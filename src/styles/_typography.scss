@@ -1,0 +1,30 @@
+:root {
+  // Font family
+  --font-family: 'SF Pro Display', 'SF Pro Text', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+
+  // Type scale
+  --text-xs: 11px;
+  --text-xs-line-height: 1.45;
+  --text-sm: 13px;
+  --text-sm-line-height: 1.38;
+  --text-base: 15px;
+  --text-base-line-height: 1.47;
+  --text-lg: 17px;
+  --text-lg-line-height: 1.41;
+  --text-xl: 20px;
+  --text-xl-line-height: 1.4;
+  --text-2xl: 28px;
+  --text-2xl-line-height: 1.29;
+  --text-3xl: 40px;
+  --text-3xl-line-height: 1.2;
+
+  // Font weights
+  --font-regular: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+
+  // Letter spacing
+  --tracking-tight: -0.022em;
+  --tracking-normal: -0.01em;
+}

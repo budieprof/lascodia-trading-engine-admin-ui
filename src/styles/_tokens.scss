@@ -1,0 +1,86 @@
+:root {
+  // Background
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #F5F5F7;
+  --bg-tertiary: #E8E8ED;
+  --bg-glass: rgba(255, 255, 255, 0.72);
+
+  // Text
+  --text-primary: #1D1D1F;
+  --text-secondary: #6E6E73;
+  --text-tertiary: #86868B;
+
+  // Accent
+  --accent: #0071E3;
+  --accent-hover: #0077ED;
+
+  // Semantic
+  --profit: #34C759;
+  --loss: #FF3B30;
+  --warning: #FF9500;
+
+  // Border
+  --border: rgba(0, 0, 0, 0.06);
+
+  // Shadows
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.12);
+
+  // Spacing (4px grid)
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-9: 36px;
+  --space-10: 40px;
+  --space-11: 44px;
+  --space-12: 48px;
+  --space-13: 52px;
+  --space-14: 56px;
+  --space-15: 60px;
+  --space-16: 64px;
+
+  // Radii
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  // Layout
+  --content-max-width: 1440px;
+  --card-padding: 20px;
+  --card-padding-lg: 24px;
+  --sidebar-width: 260px;
+  --sidebar-collapsed: 72px;
+}
+
+[data-theme="dark"] {
+  // Background
+  --bg-primary: #000000;
+  --bg-secondary: #1C1C1E;
+  --bg-tertiary: #2C2C2E;
+  --bg-glass: rgba(28, 28, 30, 0.72);
+
+  // Text
+  --text-primary: #F5F5F7;
+  --text-secondary: #A1A1A6;
+  --text-tertiary: #636366;
+
+  // Accent
+  --accent: #0A84FF;
+  --accent-hover: #409CFF;
+
+  // Border
+  --border: rgba(255, 255, 255, 0.08);
+
+  // Shadows (softer for dark mode)
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
