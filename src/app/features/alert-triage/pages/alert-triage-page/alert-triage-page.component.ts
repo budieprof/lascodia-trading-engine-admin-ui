@@ -5,6 +5,7 @@ import { catchError, of } from 'rxjs';
 
 import { AlertsService } from '@core/services/alerts.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { FeatureFlagsService } from '@core/feature-flags/feature-flags.service';
 import type { AlertDto } from '@core/api/api.types';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -194,6 +195,7 @@ type TriageFilter = 'all' | 'active' | 'unack';
 export class AlertTriagePageComponent {
   private readonly service = inject(AlertsService);
   private readonly notify = inject(NotificationService);
+  private readonly flags = inject(FeatureFlagsService);
 
   filter: TriageFilter = 'unack';
   readonly alerts = signal<AlertDto[]>([]);
@@ -216,6 +218,15 @@ export class AlertTriagePageComponent {
   }
 
   reload(): void {
+    // Engine ships no generic `/alert/list` controller yet — only the drift-
+    // report exposes alerts. Skip the request entirely until `alerts-surface`
+    // is flagged on so we don't flood the console with 404s every visit.
+    if (!this.flags.isOn('alerts-surface')) {
+      this.alerts.set([]);
+      this.loading.set(false);
+      return;
+    }
+
     this.loading.set(true);
     this.service
       .list({ currentPage: 1, itemCountPerPage: 100, filter: { isActive: true } })

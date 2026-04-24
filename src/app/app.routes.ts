@@ -2,6 +2,7 @@ import { Routes } from '@angular/router';
 import { LayoutComponent } from './layout/layout.component';
 import { LoginComponent } from '@core/auth/login/login.component';
 import { authGuard } from '@core/auth/auth.guard';
+import { requireRoles } from '@core/auth/role.guard';
 
 export const routes: Routes = [
   { path: 'login', component: LoginComponent },
@@ -146,6 +147,7 @@ export const routes: Routes = [
       {
         path: 'operator-roles',
         data: { breadcrumb: 'Operator Roles' },
+        canActivate: [requireRoles('Admin')],
         loadChildren: () =>
           import('@features/operator-roles/operator-roles.routes').then(
             (m) => m.OPERATOR_ROLES_ROUTES,
@@ -192,6 +194,7 @@ export const routes: Routes = [
       {
         path: 'kill-switches',
         data: { breadcrumb: 'Kill Switches' },
+        canActivate: [requireRoles('Operator', 'Admin')],
         loadChildren: () =>
           import('@features/kill-switches/kill-switches.routes').then(
             (m) => m.KILL_SWITCHES_ROUTES,

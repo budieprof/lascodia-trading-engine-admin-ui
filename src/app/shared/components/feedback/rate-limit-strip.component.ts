@@ -10,6 +10,7 @@ import { catchError, forkJoin, map, of } from 'rxjs';
 
 import { BrokersService } from '@core/services/brokers.service';
 import { RateLimitService } from '@core/services/rate-limit.service';
+import { FeatureFlagsService } from '@core/feature-flags/feature-flags.service';
 import type { ApiQuotaStatusDto } from '@core/api/api.types';
 
 interface QuotaRow extends ApiQuotaStatusDto {
@@ -100,11 +101,17 @@ export class RateLimitStripComponent implements OnInit {
   private readonly brokers = inject(BrokersService);
   private readonly rateLimit = inject(RateLimitService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly flags = inject(FeatureFlagsService);
 
   readonly rows = signal<QuotaRow[]>([]);
   private intervalId: ReturnType<typeof setInterval> | null = null;
 
   ngOnInit(): void {
+    // The engine doesn't yet ship a Broker resource — `/broker/list` returns
+    // 404 and the downstream quota call can't run without broker names. Gate
+    // behind `broker-rate-limit-strip` so the strip is a no-op until the
+    // endpoint lands, instead of flooding every route with a 404.
+    if (!this.flags.isOn('broker-rate-limit-strip')) return;
     this.load();
     this.intervalId = setInterval(() => this.load(), 60_000);
     this.destroyRef.onDestroy(() => {

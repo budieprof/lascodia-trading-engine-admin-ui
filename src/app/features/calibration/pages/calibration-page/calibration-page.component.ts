@@ -44,9 +44,9 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                 <header class="card-head">
                   <h3>Anomalies vs {{ t.baselineMonths }}-month baseline</h3>
                 </header>
-                @if (t.anomalies.length > 0) {
+                @if ((t.anomalies?.length ?? 0) > 0) {
                   <ul class="anomaly-list">
-                    @for (a of t.anomalies; track a.metric) {
+                    @for (a of t.anomalies ?? []; track a.metric) {
                       <li class="anomaly" [attr.data-sev]="a.severity ?? 'Info'">
                         <span class="metric">{{ a.metric }}</span>
                         <span class="delta" [class.up]="a.delta > 0" [class.down]="a.delta < 0"
@@ -115,11 +115,11 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                     </tr>
                   </thead>
                   <tbody>
-                    @for (row of g.gates; track row.gate) {
+                    @for (row of g.gates ?? []; track row.gate) {
                       <tr>
                         <td>{{ row.gate }}</td>
                         <td class="num">{{ row.rejectionCount }}</td>
-                        <td class="num">{{ row.sharePct.toFixed(1) }}%</td>
+                        <td class="num">{{ (row.sharePct ?? 0).toFixed(1) }}%</td>
                         <td class="muted">{{ row.notes ?? '—' }}</td>
                       </tr>
                     }
@@ -151,7 +151,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
             @if (defaults(); as d) {
               <section class="card">
                 <header class="card-head"><h3>Recommended Default Floors</h3></header>
-                @if (d.recommendations.length > 0) {
+                @if ((d.recommendations?.length ?? 0) > 0) {
                   <table class="table">
                     <thead>
                       <tr>
@@ -162,7 +162,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                       </tr>
                     </thead>
                     <tbody>
-                      @for (r of d.recommendations; track r.key) {
+                      @for (r of d.recommendations ?? []; track r.key) {
                         <tr>
                           <td class="mono">{{ r.key }}</td>
                           <td class="mono">{{ r.current ?? '—' }}</td>
@@ -421,7 +421,10 @@ export class CalibrationPageComponent {
       });
   }
 
-  kv(record: Record<string, number | string | null>): Array<{ key: string; value: string }> {
+  kv(
+    record: Record<string, number | string | null> | null | undefined,
+  ): Array<{ key: string; value: string }> {
+    if (!record) return [];
     return Object.entries(record).map(([key, value]) => ({
       key,
       value: value == null ? '—' : typeof value === 'number' ? String(value) : value,

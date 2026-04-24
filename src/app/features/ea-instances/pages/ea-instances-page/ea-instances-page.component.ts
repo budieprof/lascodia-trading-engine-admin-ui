@@ -78,11 +78,11 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                   <dd>{{ i.registeredAt ? (i.registeredAt | date: 'MMM d, HH:mm') : '—' }}</dd>
                 </div>
                 <div class="full">
-                  <dt>Owned Symbols ({{ i.ownedSymbols.length }})</dt>
+                  <dt>Owned Symbols ({{ i.ownedSymbols?.length ?? 0 }})</dt>
                   <dd>
-                    @if (i.ownedSymbols.length > 0) {
+                    @if ((i.ownedSymbols?.length ?? 0) > 0) {
                       <div class="chips">
-                        @for (s of i.ownedSymbols; track s) {
+                        @for (s of i.ownedSymbols ?? []; track s) {
                           <span class="chip">{{ s }}</span>
                         }
                       </div>

@@ -1,9 +1,10 @@
 import { Component, ChangeDetectionStrategy, inject, signal, viewChild } from '@angular/core';
 import type { ColDef } from 'ag-grid-community';
-import { map } from 'rxjs';
+import { map, of } from 'rxjs';
 
 import { AlertsService } from '@core/services/alerts.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { FeatureFlagsService } from '@core/feature-flags/feature-flags.service';
 import type { AlertDto, PagedData, PagerRequest } from '@core/api/api.types';
 
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
@@ -74,6 +75,19 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 export class AlertsPageComponent {
   private readonly alertsService = inject(AlertsService);
   private readonly notifications = inject(NotificationService);
+  private readonly flags = inject(FeatureFlagsService);
+
+  private readonly emptyPage: PagedData<AlertDto> = {
+    data: [],
+    pager: {
+      totalItemCount: 0,
+      filter: null,
+      currentPage: 1,
+      itemCountPerPage: 25,
+      pageNo: 0,
+      pageSize: 25,
+    },
+  } as PagedData<AlertDto>;
   private readonly enumLabelPipe = new EnumLabelPipe();
   private readonly relativeTimePipe = new RelativeTimePipe();
   private readonly dataTable = viewChild(DataTableComponent);
@@ -141,22 +155,11 @@ export class AlertsPageComponent {
   ];
 
   fetchData = (params: PagerRequest) => {
-    return this.alertsService.list(params).pipe(
-      map((response) => {
-        if (response.data) return response.data;
-        return {
-          data: [],
-          pager: {
-            totalItemCount: 0,
-            filter: null,
-            currentPage: 1,
-            itemCountPerPage: 25,
-            pageNo: 0,
-            pageSize: 25,
-          },
-        } as PagedData<AlertDto>;
-      }),
-    );
+    // Engine has no generic `/alert/list` today — skip the call until
+    // `alerts-surface` is flagged on (same pattern as alert-triage page).
+    if (!this.flags.isOn('alerts-surface')) return of(this.emptyPage);
+
+    return this.alertsService.list(params).pipe(map((response) => response.data ?? this.emptyPage));
   };
 
   onCreateAlert(): void {

@@ -1,9 +1,10 @@
 import { Component, ChangeDetectionStrategy, inject, signal, viewChild } from '@angular/core';
 import type { ColDef } from 'ag-grid-community';
-import { map } from 'rxjs';
+import { map, of } from 'rxjs';
 
 import { BrokersService } from '@core/services/brokers.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { FeatureFlagsService } from '@core/feature-flags/feature-flags.service';
 import type { BrokerDto, PagedData, PagerRequest } from '@core/api/api.types';
 
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
@@ -72,6 +73,7 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
 export class BrokersPageComponent {
   private readonly brokersService = inject(BrokersService);
   private readonly notifications = inject(NotificationService);
+  private readonly flags = inject(FeatureFlagsService);
   private readonly dataTable = viewChild(DataTableComponent);
 
   processing = signal(false);
@@ -140,23 +142,28 @@ export class BrokersPageComponent {
     },
   ];
 
+  private readonly emptyPage: PagedData<BrokerDto> = {
+    data: [],
+    pager: {
+      totalItemCount: 0,
+      filter: null,
+      currentPage: 1,
+      itemCountPerPage: 25,
+      pageNo: 0,
+      pageSize: 25,
+    },
+  } as PagedData<BrokerDto>;
+
   fetchData = (params: PagerRequest) => {
-    return this.brokersService.list(params).pipe(
-      map((response) => {
-        if (response.data) return response.data;
-        return {
-          data: [],
-          pager: {
-            totalItemCount: 0,
-            filter: null,
-            currentPage: 1,
-            itemCountPerPage: 25,
-            pageNo: 0,
-            pageSize: 25,
-          },
-        } as PagedData<BrokerDto>;
-      }),
-    );
+    // Engine ships no Broker resource today — `/broker/list` returns 404.
+    // Short-circuit to an empty page so the DataTable renders the empty
+    // state without a network round-trip (and without a 404 in the console).
+    // Flip `broker-resource` in runtime-config once the endpoint lands.
+    if (!this.flags.isOn('broker-resource')) return of(this.emptyPage);
+
+    return this.brokersService
+      .list(params)
+      .pipe(map((response) => response.data ?? this.emptyPage));
   };
 
   onAddBroker(): void {

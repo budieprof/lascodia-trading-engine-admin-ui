@@ -496,7 +496,16 @@ export class DataTableComponent<T> implements OnInit, OnDestroy {
 
   onGridReady(event: GridReadyEvent) {
     this.gridApi = event.api;
-    event.api.sizeColumnsToFit();
+    // Defer auto-sizing until the grid container actually has a width.
+    // When the DataTable is mounted inside a hidden tab or a conditional
+    // `@if` branch that hasn't painted yet, `sizeColumnsToFit()` runs
+    // against a 0-width container and AG Grid logs warning #29. The
+    // microtask lets Angular finish its initial paint before we size.
+    queueMicrotask(() => {
+      if (!this.gridApi) return;
+      const range = this.gridApi.getHorizontalPixelRange();
+      if (range.right - range.left > 0) this.gridApi.sizeColumnsToFit();
+    });
     // Re-apply a restored sort model, if any.
     if (this.sortBy()) {
       event.api.applyColumnState({
