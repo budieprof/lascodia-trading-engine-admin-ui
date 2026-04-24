@@ -1,14 +1,5 @@
 export const lascodiaTheme = {
-  color: [
-    '#0071E3',
-    '#34C759',
-    '#FF3B30',
-    '#FF9500',
-    '#AF52DE',
-    '#5AC8FA',
-    '#FF2D55',
-    '#64D2FF',
-  ],
+  color: ['#0071E3', '#34C759', '#FF3B30', '#FF9500', '#AF52DE', '#5AC8FA', '#FF2D55', '#64D2FF'],
   backgroundColor: 'transparent',
   textStyle: {
     fontFamily:

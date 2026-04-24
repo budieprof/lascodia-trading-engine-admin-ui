@@ -7,6 +7,10 @@ import {
   PagerRequest,
   StrategyPerformanceSnapshotDto,
   OptimizationRunDto,
+  OptimizationDryRunDto,
+  OptimizationValidationDto,
+  TriggerOptimizationRequest,
+  ValidateOptimizationRequest,
 } from '@core/api/api.types';
 
 @Injectable({ providedIn: 'root' })
@@ -17,8 +21,20 @@ export class StrategyFeedbackService {
     return this.api.get(`/strategy-feedback/${strategyId}/performance`);
   }
 
-  triggerOptimization(data: any): Observable<ResponseData<OptimizationRunDto>> {
+  triggerOptimization(
+    data: TriggerOptimizationRequest,
+  ): Observable<ResponseData<OptimizationRunDto>> {
     return this.api.post(`/strategy-feedback/optimization/trigger`, data);
+  }
+
+  validateOptimizationConfig(
+    data: ValidateOptimizationRequest,
+  ): Observable<ResponseData<OptimizationValidationDto>> {
+    return this.api.post(`/strategy-feedback/optimization/config/validate`, data);
+  }
+
+  getOptimizationDryRun(strategyId: number): Observable<ResponseData<OptimizationDryRunDto>> {
+    return this.api.get(`/strategy-feedback/optimization/${strategyId}/dry-run`);
   }
 
   approveOptimization(id: number): Observable<ResponseData<OptimizationRunDto>> {
@@ -33,7 +49,9 @@ export class StrategyFeedbackService {
     return this.api.get(`/strategy-feedback/optimization/${id}`);
   }
 
-  listOptimizationRuns(params: PagerRequest): Observable<ResponseData<PagedData<OptimizationRunDto>>> {
+  listOptimizationRuns(
+    params: PagerRequest,
+  ): Observable<ResponseData<PagedData<OptimizationRunDto>>> {
     return this.api.post(`/strategy-feedback/optimization/list`, params);
   }
 }

@@ -12,27 +12,29 @@ import { Component, ChangeDetectionStrategy, input, computed } from '@angular/co
       [style.border-radius]="computedBorderRadius()"
     ></div>
   `,
-  styles: [`
-    .skeleton {
-      background: linear-gradient(
-        90deg,
-        var(--bg-tertiary) 25%,
-        rgba(255, 255, 255, 0.08) 50%,
-        var(--bg-tertiary) 75%
-      );
-      background-size: 200% 100%;
-      animation: shimmer 1.5s infinite ease-in-out;
-    }
+  styles: [
+    `
+      .skeleton {
+        background: linear-gradient(
+          90deg,
+          var(--bg-tertiary) 25%,
+          rgba(255, 255, 255, 0.08) 50%,
+          var(--bg-tertiary) 75%
+        );
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite ease-in-out;
+      }
 
-    @keyframes shimmer {
-      0% {
-        background-position: -200% 0;
+      @keyframes shimmer {
+        0% {
+          background-position: -200% 0;
+        }
+        100% {
+          background-position: 200% 0;
+        }
       }
-      100% {
-        background-position: 200% 0;
-      }
-    }
-  `],
+    `,
+  ],
 })
 export class SkeletonComponent {
   readonly width = input('100%');
@@ -40,7 +42,7 @@ export class SkeletonComponent {
   readonly borderRadius = input('8px');
   readonly circle = input(false);
 
-  readonly computedWidth = computed(() => this.circle() ? this.height() : this.width());
+  readonly computedWidth = computed(() => (this.circle() ? this.height() : this.width()));
   readonly computedHeight = computed(() => this.height());
-  readonly computedBorderRadius = computed(() => this.circle() ? '50%' : this.borderRadius());
+  readonly computedBorderRadius = computed(() => (this.circle() ? '50%' : this.borderRadius()));
 }

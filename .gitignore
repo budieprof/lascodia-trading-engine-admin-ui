@@ -20,6 +20,11 @@
 .DS_Store
 Thumbs.db
 
+# Test output
+/coverage
+/playwright-report
+/test-results
+
 # Environment
 *.env
 .env.*

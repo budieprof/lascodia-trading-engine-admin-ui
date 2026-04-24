@@ -16,21 +16,13 @@ import { CurrencyFormatPipe } from '@shared/pipes/currency-format.pipe';
 @Component({
   selector: 'app-signals-page',
   standalone: true,
-  imports: [
-    DataTableComponent,
-    PageHeaderComponent,
-    ConfirmDialogComponent,
-  ],
+  imports: [DataTableComponent, PageHeaderComponent, ConfirmDialogComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <app-page-header title="Trade Signals" subtitle="Review and manage trade signals" />
 
-      <app-data-table
-        [columnDefs]="columns"
-        [fetchData]="fetchData"
-        [selectable]="true"
-      >
+      <app-data-table [columnDefs]="columns" [fetchData]="fetchData" [selectable]="true">
         <div toolbar class="toolbar-buttons">
           <button class="btn btn-success" (click)="bulkApprove()" [disabled]="processing()">
             Bulk Approve
@@ -49,59 +41,78 @@ import { CurrencyFormatPipe } from '@shared/pipes/currency-format.pipe';
         confirmVariant="destructive"
         [loading]="processing()"
         (confirm)="confirmReject()"
-        (cancel)="showRejectDialog.set(false)"
+        (cancelled)="showRejectDialog.set(false)"
       />
     </div>
   `,
-  styles: [`
-    .page { padding: var(--space-2) 0; }
+  styles: [
+    `
+      .page {
+        padding: var(--space-2) 0;
+      }
 
-    .toolbar-buttons {
-      display: flex;
-      gap: var(--space-2);
-    }
+      .toolbar-buttons {
+        display: flex;
+        gap: var(--space-2);
+      }
 
-    .btn {
-      height: 32px;
-      padding: 0 var(--space-4);
-      border: none;
-      border-radius: var(--radius-full);
-      font-size: var(--text-xs);
-      font-weight: var(--font-semibold);
-      font-family: inherit;
-      cursor: pointer;
-      transition: all 0.15s ease;
-      display: inline-flex;
-      align-items: center;
-      gap: var(--space-1);
-    }
-    .btn:active:not(:disabled) { transform: scale(0.97); }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+      .btn {
+        height: 32px;
+        padding: 0 var(--space-4);
+        border: none;
+        border-radius: var(--radius-full);
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        font-family: inherit;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-1);
+      }
+      .btn:active:not(:disabled) {
+        transform: scale(0.97);
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
 
-    .btn-success { background: rgba(52,199,89,0.15); color: #248A3D; }
-    .btn-success:hover:not(:disabled) { background: rgba(52,199,89,0.25); }
+      .btn-success {
+        background: rgba(52, 199, 89, 0.15);
+        color: #248a3d;
+      }
+      .btn-success:hover:not(:disabled) {
+        background: rgba(52, 199, 89, 0.25);
+      }
 
-    .btn-danger { background: rgba(255,59,48,0.15); color: #D70015; }
-    .btn-danger:hover:not(:disabled) { background: rgba(255,59,48,0.25); }
+      .btn-danger {
+        background: rgba(255, 59, 48, 0.15);
+        color: #d70015;
+      }
+      .btn-danger:hover:not(:disabled) {
+        background: rgba(255, 59, 48, 0.25);
+      }
 
-    .btn-sm {
-      height: 26px;
-      padding: 0 var(--space-3);
-      font-size: 11px;
-      border-radius: var(--radius-full);
-    }
+      .btn-sm {
+        height: 26px;
+        padding: 0 var(--space-3);
+        font-size: 11px;
+        border-radius: var(--radius-full);
+      }
 
-    .action-cell {
-      display: flex;
-      gap: 4px;
-      align-items: center;
-      height: 100%;
-    }
+      .action-cell {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        height: 100%;
+      }
 
-    :host ::ng-deep .pending-row {
-      background: rgba(255, 149, 0, 0.04) !important;
-    }
-  `],
+      :host ::ng-deep .pending-row {
+        background: rgba(255, 149, 0, 0.04) !important;
+      }
+    `,
+  ],
 })
 export class SignalsPageComponent {
   private readonly signalsService = inject(TradeSignalsService);
@@ -131,7 +142,8 @@ export class SignalsPageComponent {
       headerName: 'Confidence',
       field: 'confidence',
       width: 110,
-      valueFormatter: (params) => params.value != null ? `${(params.value * 100).toFixed(1)}%` : '-',
+      valueFormatter: (params) =>
+        params.value != null ? `${(params.value * 100).toFixed(1)}%` : '-',
     },
     { headerName: 'Strategy', field: 'strategyId', width: 90 },
     {
@@ -154,7 +166,8 @@ export class SignalsPageComponent {
       headerName: 'ML Score',
       field: 'mlConfidenceScore',
       width: 100,
-      valueFormatter: (params) => params.value != null ? `${(params.value * 100).toFixed(1)}%` : '-',
+      valueFormatter: (params) =>
+        params.value != null ? `${(params.value * 100).toFixed(1)}%` : '-',
     },
     {
       headerName: 'Generated',
@@ -200,7 +213,17 @@ export class SignalsPageComponent {
           });
           return { ...response.data, data: sorted };
         }
-        return { data: [], pager: { totalItemCount: 0, filter: null, currentPage: 1, itemCountPerPage: 25, pageNo: 0, pageSize: 25 } } as PagedData<TradeSignalDto>;
+        return {
+          data: [],
+          pager: {
+            totalItemCount: 0,
+            filter: null,
+            currentPage: 1,
+            itemCountPerPage: 25,
+            pageNo: 0,
+            pageSize: 25,
+          },
+        } as PagedData<TradeSignalDto>;
       }),
     );
   };

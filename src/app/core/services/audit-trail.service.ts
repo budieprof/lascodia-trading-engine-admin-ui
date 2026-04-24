@@ -1,12 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from '@core/api/api.service';
-import {
-  ResponseData,
-  PagedData,
-  PagerRequest,
-  DecisionLogDto,
-} from '@core/api/api.types';
+import { ResponseData, PagedData, PagerRequest, DecisionLogDto } from '@core/api/api.types';
 
 @Injectable({ providedIn: 'root' })
 export class AuditTrailService {

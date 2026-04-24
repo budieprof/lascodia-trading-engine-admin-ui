@@ -17,36 +17,38 @@ import { Component, input, ChangeDetectionStrategy } from '@angular/core';
       </div>
     </div>
   `,
-  styles: [`
-    .page-header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: var(--space-4);
-      margin-bottom: var(--space-6);
-    }
+  styles: [
+    `
+      .page-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: var(--space-4);
+        margin-bottom: var(--space-6);
+      }
 
-    .title {
-      font-size: var(--text-xl);
-      font-weight: var(--font-semibold);
-      color: var(--text-primary);
-      margin: 0;
-      letter-spacing: var(--tracking-tight);
-    }
+      .title {
+        font-size: var(--text-xl);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        margin: 0;
+        letter-spacing: var(--tracking-tight);
+      }
 
-    .subtitle {
-      font-size: var(--text-sm);
-      color: var(--text-secondary);
-      margin: var(--space-1) 0 0;
-    }
+      .subtitle {
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        margin: var(--space-1) 0 0;
+      }
 
-    .header-actions {
-      display: flex;
-      align-items: center;
-      gap: var(--space-3);
-      flex-shrink: 0;
-    }
-  `],
+      .header-actions {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        flex-shrink: 0;
+      }
+    `,
+  ],
 })
 export class PageHeaderComponent {
   title = input.required<string>();

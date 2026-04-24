@@ -1,307 +1,362 @@
-import { Component, ChangeDetectionStrategy, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
+import { forkJoin, of } from 'rxjs';
+import { catchError, map } from 'rxjs/operators';
+
+import type { EChartsOption } from 'echarts';
+
+import { SentimentService } from '@core/services/sentiment.service';
+import { MarketRegimeService } from '@core/services/market-regime.service';
+import { CurrencyPairsService } from '@core/services/currency-pairs.service';
+import type {
+  MarketRegime,
+  MarketRegimeSnapshotDto,
+  SentimentSnapshotDto,
+  Timeframe,
+} from '@core/api/api.types';
+
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { StatusBadgeComponent } from '@shared/components/status-badge/status-badge.component';
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
-import type { EChartsOption } from 'echarts';
+import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { createPolledResource } from '@core/polling/polled-resource';
 
 interface SymbolSentiment {
   symbol: string;
-  regime: string;
-  regimeType: 'strategy' | 'default';
+  regime: MarketRegime | 'Unknown';
+  regimeConfidence: number;
   direction: 'Bullish' | 'Bearish' | 'Neutral';
   score: number;
 }
+
+const DEFAULT_SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD'];
+const DEFAULT_TIMEFRAME: Timeframe = 'H1';
 
 @Component({
   selector: 'app-sentiment-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ChartCardComponent, PageHeaderComponent, StatusBadgeComponent, TabsComponent],
+  imports: [
+    ChartCardComponent,
+    PageHeaderComponent,
+    StatusBadgeComponent,
+    TabsComponent,
+    EmptyStateComponent,
+    DecimalPipe,
+  ],
   template: `
     <div class="page">
-      <app-page-header title="Sentiment" subtitle="Market regime detection and sentiment analysis" />
+      <app-page-header
+        title="Sentiment &amp; Regime"
+        subtitle="Live market regime detection and sentiment readings"
+      />
 
       <ui-tabs [tabs]="tabs" [(activeTab)]="activeTab">
         @if (activeTab() === 'overview') {
-          <div class="symbol-grid">
-            @for (item of symbols; track item.symbol) {
-              <div class="symbol-card">
-                <div class="symbol-header">
-                  <span class="symbol-name">{{ item.symbol }}</span>
-                  <app-status-badge [status]="item.regime" [type]="item.regimeType" />
+          @if (sentimentCards().length > 0) {
+            <div class="symbol-grid">
+              @for (item of sentimentCards(); track item.symbol) {
+                <div class="symbol-card">
+                  <div class="symbol-header">
+                    <span class="symbol-name">{{ item.symbol }}</span>
+                    <app-status-badge [status]="item.regime" type="default" />
+                  </div>
+                  <div class="sentiment-row">
+                    <span
+                      class="direction-arrow"
+                      [class.bullish]="item.direction === 'Bullish'"
+                      [class.bearish]="item.direction === 'Bearish'"
+                    >
+                      {{
+                        item.direction === 'Bullish'
+                          ? '↑'
+                          : item.direction === 'Bearish'
+                            ? '↓'
+                            : '↔'
+                      }}
+                    </span>
+                    <span class="direction-label">{{ item.direction }}</span>
+                    <span class="score">{{ item.score }}/100</span>
+                  </div>
+                  <div class="confidence-row">
+                    <span class="muted">Regime confidence:</span>
+                    <span class="mono">{{ item.regimeConfidence * 100 | number: '1.0-1' }}%</span>
+                  </div>
                 </div>
-                <div class="sentiment-row">
-                  <span class="direction-arrow" [class.bullish]="item.direction === 'Bullish'" [class.bearish]="item.direction === 'Bearish'">
-                    {{ item.direction === 'Bullish' ? '\u2191' : item.direction === 'Bearish' ? '\u2193' : '\u2194' }}
-                  </span>
-                  <span class="direction-label">{{ item.direction }}</span>
-                  <span class="score">{{ item.score }}/100</span>
-                </div>
-              </div>
-            }
-          </div>
-
-          <div class="charts-grid single">
-            <app-chart-card
-              title="Global Sentiment Radar"
-              subtitle="Multi-factor sentiment scores"
-              [options]="radarOptions"
-              height="400px"
+              }
+            </div>
+          } @else {
+            <app-empty-state
+              title="No sentiment data yet"
+              description="The engine has not yet recorded sentiment or regime snapshots for monitored symbols."
             />
-          </div>
+          }
         }
 
         @if (activeTab() === 'regime') {
           <div class="charts-grid">
             <app-chart-card
               title="ADX + Volatility Time Series"
-              subtitle="Trend strength and volatility over time"
-              [options]="adxVolOptions"
+              [subtitle]="
+                'Trend strength (ADX) and volatility (ATR) on ' +
+                primarySymbol() +
+                ' ' +
+                DEFAULT_TIMEFRAME
+              "
+              [options]="adxVolOptions()"
               height="360px"
             />
             <app-chart-card
               title="Regime Distribution"
-              subtitle="Time spent in each market regime"
-              [options]="regimeDonutOptions"
+              [subtitle]="'Time spent in each regime across ' + DEFAULT_SYMBOLS.length + ' symbols'"
+              [options]="regimeDonutOptions()"
               height="360px"
-            />
-          </div>
-          <div class="charts-grid single">
-            <app-chart-card
-              title="Regime History Timeline"
-              subtitle="Detected regime transitions over time"
-              [options]="regimeTimelineOptions"
-              height="180px"
             />
           </div>
         }
       </ui-tabs>
     </div>
   `,
-  styles: [`
-    .page { padding: var(--space-2) 0; }
-    .symbol-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: var(--space-4);
-      margin-bottom: var(--space-6);
-    }
-    .symbol-card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      padding: var(--card-padding);
-      box-shadow: var(--shadow-sm);
-    }
-    .symbol-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: var(--space-3);
-    }
-    .symbol-name {
-      font-size: var(--text-base);
-      font-weight: var(--font-semibold);
-      color: var(--text-primary);
-    }
-    .sentiment-row {
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-    }
-    .direction-arrow {
-      font-size: 20px;
-      font-weight: var(--font-semibold);
-      color: var(--text-secondary);
-    }
-    .direction-arrow.bullish { color: #34C759; }
-    .direction-arrow.bearish { color: #FF3B30; }
-    .direction-label {
-      font-size: var(--text-sm);
-      color: var(--text-secondary);
-      font-weight: var(--font-medium);
-    }
-    .score {
-      margin-left: auto;
-      font-size: var(--text-sm);
-      color: var(--text-tertiary);
-      font-variant-numeric: tabular-nums;
-    }
-    .charts-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: var(--space-4);
-      margin-bottom: var(--space-4);
-    }
-    .charts-grid.single {
-      grid-template-columns: 1fr;
-    }
-  `],
+  styles: [
+    `
+      .page {
+        padding: var(--space-2) 0;
+      }
+      .symbol-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: var(--space-4);
+        margin-bottom: var(--space-6);
+      }
+      .symbol-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+        box-shadow: var(--shadow-sm);
+      }
+      .symbol-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: var(--space-3);
+      }
+      .symbol-name {
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+      }
+      .sentiment-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .direction-arrow {
+        font-size: 20px;
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+      }
+      .direction-arrow.bullish {
+        color: var(--profit);
+      }
+      .direction-arrow.bearish {
+        color: var(--loss);
+      }
+      .direction-label {
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        font-weight: var(--font-medium);
+      }
+      .score {
+        margin-left: auto;
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
+        font-variant-numeric: tabular-nums;
+      }
+      .confidence-row {
+        margin-top: var(--space-2);
+        font-size: var(--text-xs);
+        display: flex;
+        justify-content: space-between;
+      }
+      .muted {
+        color: var(--text-tertiary);
+      }
+      .mono {
+        font-variant-numeric: tabular-nums;
+        color: var(--text-secondary);
+      }
+      .charts-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--space-4);
+        margin-bottom: var(--space-4);
+      }
+      @media (max-width: 1024px) {
+        .charts-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    `,
+  ],
 })
 export class SentimentPageComponent {
-  tabs: TabItem[] = [
+  private readonly sentimentService = inject(SentimentService);
+  private readonly regimeService = inject(MarketRegimeService);
+  private readonly currencyPairsService = inject(CurrencyPairsService);
+
+  readonly DEFAULT_TIMEFRAME = DEFAULT_TIMEFRAME;
+  readonly DEFAULT_SYMBOLS = DEFAULT_SYMBOLS;
+
+  readonly tabs: TabItem[] = [
     { label: 'Market Overview', value: 'overview' },
     { label: 'Regime Analysis', value: 'regime' },
   ];
-  activeTab = signal('overview');
+  readonly activeTab = signal('overview');
+  readonly primarySymbol = signal(DEFAULT_SYMBOLS[0]);
 
-  symbols: SymbolSentiment[] = [
-    { symbol: 'EUR/USD', regime: 'Active', regimeType: 'strategy', direction: 'Bullish', score: 72 },
-    { symbol: 'GBP/USD', regime: 'Active', regimeType: 'strategy', direction: 'Bearish', score: 38 },
-    { symbol: 'USD/JPY', regime: 'Paused', regimeType: 'strategy', direction: 'Bullish', score: 65 },
-    { symbol: 'AUD/USD', regime: 'Active', regimeType: 'strategy', direction: 'Neutral', score: 51 },
-  ];
+  // Live sentiment + regime per symbol (poll every 60s).
+  private readonly cardResource = createPolledResource(
+    () =>
+      forkJoin(
+        DEFAULT_SYMBOLS.map((symbol) =>
+          forkJoin({
+            sentiment: this.sentimentService.getLatest(symbol).pipe(
+              map((r) => r.data),
+              catchError(() => of(null as SentimentSnapshotDto | null)),
+            ),
+            regime: this.regimeService.getLatest(symbol, DEFAULT_TIMEFRAME).pipe(
+              map((r) => r.data),
+              catchError(() => of(null as MarketRegimeSnapshotDto | null)),
+            ),
+          }).pipe(map(({ sentiment, regime }) => buildCard(symbol, sentiment, regime))),
+        ),
+      ),
+    { intervalMs: 60_000 },
+  );
 
-  radarOptions: EChartsOption = {
-    tooltip: {},
-    radar: {
-      indicator: [
-        { name: 'Trend Strength', max: 100 },
-        { name: 'Momentum', max: 100 },
-        { name: 'Volume', max: 100 },
-        { name: 'Volatility', max: 100 },
-        { name: 'Order Flow', max: 100 },
-        { name: 'Correlation', max: 100 },
+  readonly sentimentCards = computed(() => this.cardResource.value() ?? []);
+
+  // Recent regime snapshots for the primary symbol (poll every 60s).
+  private readonly regimeResource = createPolledResource(
+    () =>
+      this.regimeService
+        .list({
+          currentPage: 1,
+          itemCountPerPage: 60,
+          filter: { symbol: this.primarySymbol(), timeframe: DEFAULT_TIMEFRAME },
+        })
+        .pipe(
+          map((r) => r.data?.data ?? []),
+          catchError(() => of([] as MarketRegimeSnapshotDto[])),
+        ),
+    { intervalMs: 60_000 },
+  );
+
+  readonly adxVolOptions = computed<EChartsOption>(() => {
+    const snaps = [...(this.regimeResource.value() ?? [])].sort(
+      (a, b) => new Date(a.detectedAt).getTime() - new Date(b.detectedAt).getTime(),
+    );
+    if (snaps.length === 0) return emptyChart('No regime snapshots yet');
+    const labels = snaps.map((s) =>
+      new Date(s.detectedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    );
+    return {
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['ADX', 'ATR'], bottom: 0 },
+      grid: { left: 50, right: 50, top: 20, bottom: 40 },
+      xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 10 } },
+      yAxis: [
+        { type: 'value', name: 'ADX', position: 'left' },
+        { type: 'value', name: 'ATR', position: 'right', splitLine: { show: false } },
       ],
-      shape: 'polygon',
-      splitArea: { areaStyle: { color: ['rgba(0,113,227,0.02)', 'rgba(0,113,227,0.04)'] } },
-      axisLine: { lineStyle: { color: '#E5E5EA' } },
-      splitLine: { lineStyle: { color: '#E5E5EA' } },
-    },
-    series: [{
-      type: 'radar',
-      data: [
+      series: [
         {
-          value: [78, 64, 55, 42, 71, 60],
-          name: 'Current',
-          areaStyle: { color: 'rgba(0, 113, 227, 0.15)' },
+          name: 'ADX',
+          type: 'line',
+          yAxisIndex: 0,
+          smooth: true,
+          data: snaps.map((s) => s.adx),
           lineStyle: { color: '#0071E3', width: 2 },
           itemStyle: { color: '#0071E3' },
         },
         {
-          value: [65, 72, 48, 58, 54, 68],
-          name: 'Previous Week',
-          areaStyle: { color: 'rgba(142, 142, 147, 0.1)' },
-          lineStyle: { color: '#8E8E93', type: 'dashed', width: 1 },
-          itemStyle: { color: '#8E8E93' },
+          name: 'ATR',
+          type: 'line',
+          yAxisIndex: 1,
+          smooth: true,
+          data: snaps.map((s) => s.atr),
+          lineStyle: { color: '#FF9500', width: 2 },
+          itemStyle: { color: '#FF9500' },
         },
       ],
-    }],
-    legend: { data: ['Current', 'Previous Week'], bottom: 0 },
-  };
+    };
+  });
 
-  adxVolOptions: EChartsOption = {
-    tooltip: { trigger: 'axis' },
-    legend: { data: ['ADX', 'Volatility (ATR)'], bottom: 0 },
-    grid: { left: 50, right: 50, top: 20, bottom: 40 },
-    xAxis: {
-      type: 'category',
-      data: Array.from({ length: 30 }, (_, i) => {
-        const d = new Date(2026, 2, 21);
-        d.setDate(d.getDate() - 29 + i);
-        return `${d.getMonth() + 1}/${d.getDate()}`;
-      }),
-      axisLine: { lineStyle: { color: '#E5E5EA' } },
-      axisLabel: { color: '#8E8E93', fontSize: 10 },
-    },
-    yAxis: [
-      {
-        type: 'value', name: 'ADX', position: 'left',
-        axisLabel: { color: '#0071E3' },
-        splitLine: { lineStyle: { color: '#F2F2F7' } },
-      },
-      {
-        type: 'value', name: 'ATR', position: 'right',
-        axisLabel: { color: '#FF9500' },
-        splitLine: { show: false },
-      },
-    ],
-    series: [
-      {
-        name: 'ADX', type: 'line', yAxisIndex: 0, smooth: true,
-        data: [22, 25, 28, 32, 35, 38, 42, 40, 36, 33, 30, 27, 24, 22, 20, 18, 21, 26, 31, 36, 40, 44, 48, 45, 41, 38, 34, 30, 28, 32],
-        lineStyle: { width: 2, color: '#0071E3' },
-        itemStyle: { color: '#0071E3' },
-      },
-      {
-        name: 'Volatility (ATR)', type: 'line', yAxisIndex: 1, smooth: true,
-        data: [0.0062, 0.0058, 0.0065, 0.0072, 0.0078, 0.0085, 0.0092, 0.0088, 0.0081, 0.0074, 0.0068, 0.0061, 0.0055, 0.0052, 0.0048, 0.0045, 0.0051, 0.0059, 0.0068, 0.0076, 0.0084, 0.0091, 0.0098, 0.0094, 0.0087, 0.0080, 0.0073, 0.0066, 0.0060, 0.0068],
-        lineStyle: { width: 2, color: '#FF9500' },
-        itemStyle: { color: '#FF9500' },
-      },
-    ],
-  };
-
-  regimeDonutOptions: EChartsOption = {
-    tooltip: { trigger: 'item', formatter: '{b}: {d}%' },
-    legend: { bottom: 0, data: ['Trending', 'Ranging', 'High Volatility'] },
-    series: [{
-      type: 'pie',
-      radius: ['45%', '70%'],
-      center: ['50%', '45%'],
-      avoidLabelOverlap: true,
-      itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
-      label: { show: true, formatter: '{b}\n{d}%', fontSize: 12 },
-      data: [
-        { value: 42, name: 'Trending', itemStyle: { color: '#0071E3' } },
-        { value: 35, name: 'Ranging', itemStyle: { color: '#34C759' } },
-        { value: 23, name: 'High Volatility', itemStyle: { color: '#FF9500' } },
+  readonly regimeDonutOptions = computed<EChartsOption>(() => {
+    // Aggregate across the primary symbol's recent snapshots.
+    const snaps = this.regimeResource.value() ?? [];
+    if (snaps.length === 0) return emptyChart('No regime snapshots yet');
+    const counts = new Map<string, number>();
+    for (const s of snaps) {
+      counts.set(s.regime, (counts.get(s.regime) ?? 0) + 1);
+    }
+    const palette: Record<string, string> = {
+      Trending: '#0071E3',
+      Ranging: '#34C759',
+      HighVolatility: '#FF9500',
+      LowVolatility: '#5AC8FA',
+      Crisis: '#FF3B30',
+      Breakout: '#AF52DE',
+    };
+    const data = Array.from(counts.entries()).map(([name, value]) => ({
+      name,
+      value,
+      itemStyle: { color: palette[name] ?? '#8E8E93' },
+    }));
+    return {
+      tooltip: { trigger: 'item', formatter: '{b}: {d}%' },
+      legend: { bottom: 0 },
+      series: [
+        {
+          type: 'pie',
+          radius: ['45%', '70%'],
+          center: ['50%', '45%'],
+          avoidLabelOverlap: true,
+          itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+          label: { show: true, formatter: '{b}\n{d}%', fontSize: 12 },
+          data,
+        },
       ],
-    }],
-  };
+    };
+  });
+}
 
-  regimeTimelineOptions: EChartsOption = {
-    tooltip: {
-      formatter: (params: any) => `${params.name}: ${params.value[1]} - ${params.value[2]}`,
+function buildCard(
+  symbol: string,
+  sentiment: SentimentSnapshotDto | null,
+  regime: MarketRegimeSnapshotDto | null,
+): SymbolSentiment {
+  const score = sentiment?.sentimentScore ?? 0; // typically -1..1
+  const score100 = Math.round(((score + 1) / 2) * 100); // map to 0..100
+  const direction: 'Bullish' | 'Bearish' | 'Neutral' =
+    score > 0.1 ? 'Bullish' : score < -0.1 ? 'Bearish' : 'Neutral';
+  return {
+    symbol,
+    regime: regime?.regime ?? 'Unknown',
+    regimeConfidence: regime?.confidence ?? 0,
+    direction,
+    score: Number.isFinite(score100) ? score100 : 50,
+  };
+}
+
+function emptyChart(text: string): EChartsOption {
+  return {
+    title: {
+      text,
+      left: 'center',
+      top: 'center',
+      textStyle: { color: '#8E8E93', fontSize: 14, fontWeight: 'normal' as const },
     },
-    grid: { left: 80, right: 20, top: 10, bottom: 30 },
-    xAxis: {
-      type: 'category',
-      data: ['Feb 20', 'Feb 24', 'Feb 28', 'Mar 4', 'Mar 8', 'Mar 12', 'Mar 16', 'Mar 20'],
-      axisLine: { lineStyle: { color: '#E5E5EA' } },
-      axisLabel: { color: '#8E8E93' },
-    },
-    yAxis: {
-      type: 'category',
-      data: ['EUR/USD'],
-      axisLine: { lineStyle: { color: '#E5E5EA' } },
-      axisLabel: { color: '#8E8E93' },
-    },
-    series: [
-      {
-        type: 'bar',
-        stack: 'timeline',
-        data: [3, 0, 0, 0, 0, 0, 0, 0],
-        itemStyle: { color: '#0071E3' },
-        name: 'Trending',
-        barWidth: '80%',
-      },
-      {
-        type: 'bar',
-        stack: 'timeline',
-        data: [0, 2, 2, 0, 0, 0, 0, 0],
-        itemStyle: { color: '#34C759' },
-        name: 'Ranging',
-        barWidth: '80%',
-      },
-      {
-        type: 'bar',
-        stack: 'timeline',
-        data: [0, 0, 0, 1, 2, 0, 0, 0],
-        itemStyle: { color: '#FF9500' },
-        name: 'High Volatility',
-        barWidth: '80%',
-      },
-      {
-        type: 'bar',
-        stack: 'timeline',
-        data: [0, 0, 0, 0, 0, 3, 2, 1],
-        itemStyle: { color: '#0071E3' },
-        name: 'Trending',
-        barWidth: '80%',
-      },
-    ],
-    legend: { data: ['Trending', 'Ranging', 'High Volatility'], bottom: 0 },
   };
 }

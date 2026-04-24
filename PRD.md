@@ -1,4 +1,5 @@
 # Product Requirements Document
+
 # Lascodia Trading Engine — Admin UI
 
 **Version:** 1.0
@@ -93,27 +94,27 @@ The backend exposes 30+ REST API controllers with 100+ endpoints covering core t
 
 ## 3. Tech Stack
 
-| Layer | Technology | Rationale |
-|-------|-----------|-----------|
-| Framework | **Angular 19** | Enterprise-grade framework with batteries-included DI, routing, forms, and HTTP client |
-| Language | **TypeScript 5** | Type safety across API contracts (first-class in Angular) |
-| Build Tool | **Angular CLI / esbuild** | Official toolchain with fast builds and HMR via `ng serve` |
-| Routing | **Angular Router** | Built-in lazy-loaded routing with guards and resolvers |
-| State Management | **Angular Signals + RxJS** | Fine-grained reactivity with signals; RxJS for async streams and polling |
-| UI Components | **Custom component library** | Bespoke Apple-inspired design system — no off-the-shelf Material/Bootstrap |
-| Styling | **Tailwind CSS 4 + SCSS** | Utility-first with SCSS for complex animations, glassmorphism, and design tokens |
-| Forms | **Angular Reactive Forms** | Built-in typed reactive forms with validators |
-| Tables | **AG Grid Community** | Enterprise-grade data grid with virtual scrolling, server-side row model, and column pinning |
-| Charts | **Apache ECharts (ngx-echarts)** | Premium-quality, GPU-accelerated charts with rich animations and interactions |
-| HTTP Client | **Angular HttpClient** | Built-in with interceptors for auth, error handling, and response transformation |
-| Date Handling | **date-fns** | Lightweight, tree-shakeable date utilities |
-| Icons | **Lucide Icons (lucide-angular)** | Clean, minimal stroke icons matching Apple aesthetic |
-| Animations | **Angular Animations + CSS** | Fluid micro-interactions, page transitions, and state changes |
-| Notifications | **Custom toast component** | Slide-in notification toasts with blur backdrop, matching Apple HIG |
-| Fonts | **SF Pro Display / Inter** | SF Pro for macOS users, Inter as cross-platform fallback |
-| Testing | **Vitest + Angular Testing Library** | Fast unit and component tests |
-| E2E Testing | **Playwright** | Cross-browser end-to-end tests |
-| Linting | **ESLint (angular-eslint) + Prettier** | Code quality and formatting with Angular-specific rules |
+| Layer            | Technology                             | Rationale                                                                                    |
+| ---------------- | -------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Framework        | **Angular 19**                         | Enterprise-grade framework with batteries-included DI, routing, forms, and HTTP client       |
+| Language         | **TypeScript 5**                       | Type safety across API contracts (first-class in Angular)                                    |
+| Build Tool       | **Angular CLI / esbuild**              | Official toolchain with fast builds and HMR via `ng serve`                                   |
+| Routing          | **Angular Router**                     | Built-in lazy-loaded routing with guards and resolvers                                       |
+| State Management | **Angular Signals + RxJS**             | Fine-grained reactivity with signals; RxJS for async streams and polling                     |
+| UI Components    | **Custom component library**           | Bespoke Apple-inspired design system — no off-the-shelf Material/Bootstrap                   |
+| Styling          | **Tailwind CSS 4 + SCSS**              | Utility-first with SCSS for complex animations, glassmorphism, and design tokens             |
+| Forms            | **Angular Reactive Forms**             | Built-in typed reactive forms with validators                                                |
+| Tables           | **AG Grid Community**                  | Enterprise-grade data grid with virtual scrolling, server-side row model, and column pinning |
+| Charts           | **Apache ECharts (ngx-echarts)**       | Premium-quality, GPU-accelerated charts with rich animations and interactions                |
+| HTTP Client      | **Angular HttpClient**                 | Built-in with interceptors for auth, error handling, and response transformation             |
+| Date Handling    | **date-fns**                           | Lightweight, tree-shakeable date utilities                                                   |
+| Icons            | **Lucide Icons (lucide-angular)**      | Clean, minimal stroke icons matching Apple aesthetic                                         |
+| Animations       | **Angular Animations + CSS**           | Fluid micro-interactions, page transitions, and state changes                                |
+| Notifications    | **Custom toast component**             | Slide-in notification toasts with blur backdrop, matching Apple HIG                          |
+| Fonts            | **SF Pro Display / Inter**             | SF Pro for macOS users, Inter as cross-platform fallback                                     |
+| Testing          | **Vitest + Angular Testing Library**   | Fast unit and component tests                                                                |
+| E2E Testing      | **Playwright**                         | Cross-browser end-to-end tests                                                               |
+| Linting          | **ESLint (angular-eslint) + Prettier** | Code quality and formatting with Angular-specific rules                                      |
 
 ---
 
@@ -123,90 +124,91 @@ The admin UI adopts a **luxurious, Apple Human Interface Guidelines (HIG)-inspir
 
 ### Design Principles
 
-| Principle | Description |
-|-----------|-------------|
-| **Clarity** | Content is king. Generous whitespace, typographic hierarchy, and restrained color usage let data breathe |
-| **Deference** | The UI recedes so the trading data is the hero. No decorative noise — every pixel earns its place |
-| **Depth** | Layered surfaces with subtle shadows, translucency, and blur create spatial hierarchy |
-| **Fluidity** | Every state change is animated. Nothing snaps — everything eases, slides, or fades |
-| **Precision** | Pixel-perfect alignment, consistent spacing scale, and optical balance across all views |
+| Principle     | Description                                                                                              |
+| ------------- | -------------------------------------------------------------------------------------------------------- |
+| **Clarity**   | Content is king. Generous whitespace, typographic hierarchy, and restrained color usage let data breathe |
+| **Deference** | The UI recedes so the trading data is the hero. No decorative noise — every pixel earns its place        |
+| **Depth**     | Layered surfaces with subtle shadows, translucency, and blur create spatial hierarchy                    |
+| **Fluidity**  | Every state change is animated. Nothing snaps — everything eases, slides, or fades                       |
+| **Precision** | Pixel-perfect alignment, consistent spacing scale, and optical balance across all views                  |
 
 ### Color System
 
 #### Light Mode (Default)
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| `--bg-primary` | `#FFFFFF` | Page background |
-| `--bg-secondary` | `#F5F5F7` | Card backgrounds, sidebar |
-| `--bg-tertiary` | `#E8E8ED` | Hover states, dividers |
-| `--bg-glass` | `rgba(255, 255, 255, 0.72)` | Glassmorphism panels (with `backdrop-filter: blur(20px)`) |
-| `--text-primary` | `#1D1D1F` | Headings, primary text |
-| `--text-secondary` | `#6E6E73` | Captions, labels, secondary info |
-| `--text-tertiary` | `#86868B` | Placeholders, disabled text |
-| `--accent` | `#0071E3` | Primary actions, links, active states |
-| `--accent-hover` | `#0077ED` | Hover on primary actions |
-| `--profit` | `#34C759` | Positive P&L, success states |
-| `--loss` | `#FF3B30` | Negative P&L, error states |
-| `--warning` | `#FF9500` | Warnings, paper trading indicator |
-| `--border` | `rgba(0, 0, 0, 0.06)` | Card borders, dividers |
-| `--shadow-sm` | `0 1px 3px rgba(0, 0, 0, 0.04)` | Cards, inputs |
-| `--shadow-md` | `0 4px 12px rgba(0, 0, 0, 0.08)` | Dropdowns, modals |
-| `--shadow-lg` | `0 12px 40px rgba(0, 0, 0, 0.12)` | Elevated panels, dialog overlays |
+| Token              | Value                             | Usage                                                     |
+| ------------------ | --------------------------------- | --------------------------------------------------------- |
+| `--bg-primary`     | `#FFFFFF`                         | Page background                                           |
+| `--bg-secondary`   | `#F5F5F7`                         | Card backgrounds, sidebar                                 |
+| `--bg-tertiary`    | `#E8E8ED`                         | Hover states, dividers                                    |
+| `--bg-glass`       | `rgba(255, 255, 255, 0.72)`       | Glassmorphism panels (with `backdrop-filter: blur(20px)`) |
+| `--text-primary`   | `#1D1D1F`                         | Headings, primary text                                    |
+| `--text-secondary` | `#6E6E73`                         | Captions, labels, secondary info                          |
+| `--text-tertiary`  | `#86868B`                         | Placeholders, disabled text                               |
+| `--accent`         | `#0071E3`                         | Primary actions, links, active states                     |
+| `--accent-hover`   | `#0077ED`                         | Hover on primary actions                                  |
+| `--profit`         | `#34C759`                         | Positive P&L, success states                              |
+| `--loss`           | `#FF3B30`                         | Negative P&L, error states                                |
+| `--warning`        | `#FF9500`                         | Warnings, paper trading indicator                         |
+| `--border`         | `rgba(0, 0, 0, 0.06)`             | Card borders, dividers                                    |
+| `--shadow-sm`      | `0 1px 3px rgba(0, 0, 0, 0.04)`   | Cards, inputs                                             |
+| `--shadow-md`      | `0 4px 12px rgba(0, 0, 0, 0.08)`  | Dropdowns, modals                                         |
+| `--shadow-lg`      | `0 12px 40px rgba(0, 0, 0, 0.12)` | Elevated panels, dialog overlays                          |
 
 #### Dark Mode
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| `--bg-primary` | `#000000` | Page background |
-| `--bg-secondary` | `#1C1C1E` | Card backgrounds, sidebar |
-| `--bg-tertiary` | `#2C2C2E` | Hover states, dividers |
-| `--bg-glass` | `rgba(28, 28, 30, 0.72)` | Glassmorphism panels |
-| `--text-primary` | `#F5F5F7` | Headings, primary text |
-| `--text-secondary` | `#A1A1A6` | Captions, labels |
-| `--text-tertiary` | `#636366` | Placeholders, disabled |
-| `--accent` | `#0A84FF` | Primary actions |
-| `--border` | `rgba(255, 255, 255, 0.08)` | Card borders |
-| `--shadow-sm` | `0 1px 3px rgba(0, 0, 0, 0.3)` | Cards |
-| `--shadow-md` | `0 4px 12px rgba(0, 0, 0, 0.4)` | Dropdowns |
+| Token              | Value                           | Usage                     |
+| ------------------ | ------------------------------- | ------------------------- |
+| `--bg-primary`     | `#000000`                       | Page background           |
+| `--bg-secondary`   | `#1C1C1E`                       | Card backgrounds, sidebar |
+| `--bg-tertiary`    | `#2C2C2E`                       | Hover states, dividers    |
+| `--bg-glass`       | `rgba(28, 28, 30, 0.72)`        | Glassmorphism panels      |
+| `--text-primary`   | `#F5F5F7`                       | Headings, primary text    |
+| `--text-secondary` | `#A1A1A6`                       | Captions, labels          |
+| `--text-tertiary`  | `#636366`                       | Placeholders, disabled    |
+| `--accent`         | `#0A84FF`                       | Primary actions           |
+| `--border`         | `rgba(255, 255, 255, 0.08)`     | Card borders              |
+| `--shadow-sm`      | `0 1px 3px rgba(0, 0, 0, 0.3)`  | Cards                     |
+| `--shadow-md`      | `0 4px 12px rgba(0, 0, 0, 0.4)` | Dropdowns                 |
 
 ### Typography
 
 ```scss
 // Font stack — SF Pro for Apple devices, Inter as universal fallback
---font-family: 'SF Pro Display', 'SF Pro Text', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+--font-family:
+  'SF Pro Display', 'SF Pro Text', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 
 // Type scale (rem-based, 1rem = 16px)
---text-xs:      0.6875rem / 1rem;      // 11px — micro labels, badges
---text-sm:      0.8125rem / 1.25rem;   // 13px — table cells, captions
---text-base:    0.9375rem / 1.5rem;    // 15px — body text, form inputs
---text-lg:      1.0625rem / 1.5rem;    // 17px — card titles, section headers
---text-xl:      1.375rem / 1.75rem;    // 22px — page titles
---text-2xl:     1.75rem / 2.125rem;    // 28px — dashboard hero numbers
---text-3xl:     2.5rem / 2.75rem;      // 40px — large metric displays
+--text-xs: 0.6875rem / 1rem; // 11px — micro labels, badges
+--text-sm: 0.8125rem / 1.25rem; // 13px — table cells, captions
+--text-base: 0.9375rem / 1.5rem; // 15px — body text, form inputs
+--text-lg: 1.0625rem / 1.5rem; // 17px — card titles, section headers
+--text-xl: 1.375rem / 1.75rem; // 22px — page titles
+--text-2xl: 1.75rem / 2.125rem; // 28px — dashboard hero numbers
+--text-3xl: 2.5rem / 2.75rem; // 40px — large metric displays
 
 // Weights
---font-regular:   400;
---font-medium:    500;
---font-semibold:  600;
---font-bold:      700;
+--font-regular: 400;
+--font-medium: 500;
+--font-semibold: 600;
+--font-bold: 700;
 
 // Letter spacing — tighter for large text, normal for body
---tracking-tight: -0.022em;   // headings
---tracking-normal: -0.01em;   // body
+--tracking-tight: -0.022em; // headings
+--tracking-normal: -0.01em; // body
 ```
 
 ### Spacing & Layout
 
 ```scss
 // 4px base grid — all spacing is a multiple of 4px
---space-1:  4px;
---space-2:  8px;
---space-3:  12px;
---space-4:  16px;
---space-5:  20px;
---space-6:  24px;
---space-8:  32px;
+--space-1: 4px;
+--space-2: 8px;
+--space-3: 12px;
+--space-4: 16px;
+--space-5: 20px;
+--space-6: 24px;
+--space-8: 32px;
 --space-10: 40px;
 --space-12: 48px;
 --space-16: 64px;
@@ -215,15 +217,15 @@ The admin UI adopts a **luxurious, Apple Human Interface Guidelines (HIG)-inspir
 --content-max-width: 1440px;
 
 // Card padding
---card-padding: 20px;      // standard card
---card-padding-lg: 24px;   // featured/hero cards
+--card-padding: 20px; // standard card
+--card-padding-lg: 24px; // featured/hero cards
 
 // Border radius — generous, Apple-style
---radius-sm: 8px;          // buttons, inputs, badges
---radius-md: 12px;         // cards, dropdowns
---radius-lg: 16px;         // modals, panels
---radius-xl: 20px;         // hero cards, featured sections
---radius-full: 9999px;     // pills, avatars, toggles
+--radius-sm: 8px; // buttons, inputs, badges
+--radius-md: 12px; // cards, dropdowns
+--radius-lg: 16px; // modals, panels
+--radius-xl: 20px; // hero cards, featured sections
+--radius-full: 9999px; // pills, avatars, toggles
 ```
 
 ### Component Design Specs
@@ -263,15 +265,16 @@ The admin UI adopts a **luxurious, Apple Human Interface Guidelines (HIG)-inspir
 
 #### Buttons
 
-| Variant | Style |
-|---------|-------|
-| **Primary** | `background: var(--accent)`, white text, `border-radius: var(--radius-full)`, padding `10px 20px`, subtle gradient overlay |
-| **Secondary** | `background: var(--bg-tertiary)`, dark text, same radius |
-| **Ghost** | Transparent, text color only, hover shows `var(--bg-tertiary)` |
-| **Destructive** | `background: var(--loss)`, white text |
-| **Icon** | 36x36px circle, ghost style, icon centered |
+| Variant         | Style                                                                                                                      |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **Primary**     | `background: var(--accent)`, white text, `border-radius: var(--radius-full)`, padding `10px 20px`, subtle gradient overlay |
+| **Secondary**   | `background: var(--bg-tertiary)`, dark text, same radius                                                                   |
+| **Ghost**       | Transparent, text color only, hover shows `var(--bg-tertiary)`                                                             |
+| **Destructive** | `background: var(--loss)`, white text                                                                                      |
+| **Icon**        | 36x36px circle, ghost style, icon centered                                                                                 |
 
 All buttons:
+
 - `font-weight: 500`, `font-size: var(--text-sm)`
 - Transition: `all 0.15s ease`
 - Active state: `transform: scale(0.97)` — the Apple "press" feel
@@ -342,24 +345,25 @@ All buttons:
 
 ### Animations & Transitions
 
-| Interaction | Animation |
-|------------|-----------|
-| Page navigation | Fade + slide-up content (0.25s ease-out) |
-| Card hover | Shadow elevation + translateY(-1px), 0.2s ease |
-| Button press | Scale to 0.97, 0.1s ease |
-| Modal open | Backdrop fade + content scale from 0.96, 0.25s ease-out |
-| Modal close | Reverse of open, 0.15s ease-in |
-| Sidebar expand/collapse | Width animation, 0.3s cubic-bezier(0.4, 0, 0.2, 1) |
-| Tab switch | Content cross-fade, 0.2s ease |
-| Data loading | Skeleton shimmer (gradient sweep), 1.5s infinite |
-| Status change | Color cross-fade, 0.3s ease |
-| Toast enter | SlideInRight + fadeIn, 0.3s ease-out |
-| Dropdown open | Scale from 0.95 + fadeIn at origin point, 0.15s ease-out |
-| Number change | CountUp animation for metric cards, 0.6s ease-out |
+| Interaction             | Animation                                                |
+| ----------------------- | -------------------------------------------------------- |
+| Page navigation         | Fade + slide-up content (0.25s ease-out)                 |
+| Card hover              | Shadow elevation + translateY(-1px), 0.2s ease           |
+| Button press            | Scale to 0.97, 0.1s ease                                 |
+| Modal open              | Backdrop fade + content scale from 0.96, 0.25s ease-out  |
+| Modal close             | Reverse of open, 0.15s ease-in                           |
+| Sidebar expand/collapse | Width animation, 0.3s cubic-bezier(0.4, 0, 0.2, 1)       |
+| Tab switch              | Content cross-fade, 0.2s ease                            |
+| Data loading            | Skeleton shimmer (gradient sweep), 1.5s infinite         |
+| Status change           | Color cross-fade, 0.3s ease                              |
+| Toast enter             | SlideInRight + fadeIn, 0.3s ease-out                     |
+| Dropdown open           | Scale from 0.95 + fadeIn at origin point, 0.15s ease-out |
+| Number change           | CountUp animation for metric cards, 0.6s ease-out        |
 
 ### Skeleton Loading
 
 Skeleton screens match the exact layout of the content they replace:
+
 - Soft rounded rectangles in `var(--bg-tertiary)`
 - Shimmer gradient sweep animation: `linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)` moving left-to-right over 1.5s
 - No spinners — only skeleton placeholders for content areas
@@ -367,12 +371,12 @@ Skeleton screens match the exact layout of the content they replace:
 
 ### Responsive Breakpoints
 
-| Breakpoint | Width | Behavior |
-|-----------|-------|----------|
-| Desktop XL | >= 1440px | Full sidebar + wide content area |
-| Desktop | >= 1024px | Full sidebar + content |
-| Tablet | >= 768px | Collapsed icon sidebar + content |
-| Mobile | < 768px | Hidden sidebar (hamburger toggle) + full-width content |
+| Breakpoint | Width     | Behavior                                               |
+| ---------- | --------- | ------------------------------------------------------ |
+| Desktop XL | >= 1440px | Full sidebar + wide content area                       |
+| Desktop    | >= 1024px | Full sidebar + content                                 |
+| Tablet     | >= 768px  | Collapsed icon sidebar + content                       |
+| Mobile     | < 768px   | Hidden sidebar (hamburger toggle) + full-width content |
 
 ### Dark Mode
 
@@ -591,7 +595,7 @@ All backend responses follow this shape:
 
 ```typescript
 interface ResponseData<T> {
-  responseCode: string;    // "00" = success, "-11" = validation, "-14" = not found
+  responseCode: string; // "00" = success, "-11" = validation, "-14" = not found
   responseMessage: string;
   data: T;
 }
@@ -662,30 +666,30 @@ The main landing page — a comprehensive command center providing real-time vis
 
 #### Hero Metric Cards (Top Row — 5 cards, equal width)
 
-| Card | Data Source | Refresh | Visual |
-|------|-----------|---------|--------|
-| Account Equity | `GET /trading-account/active/{brokerId}` | 15s | Large number + delta % + 7-day sparkline |
-| Today's P&L | Computed from positions | 15s | Large number (green/red) + cumulative intraday area chart |
-| Open Positions | `POST /position/list` (filtered) | 15s | Count + mini horizontal bar by symbol |
-| Drawdown | `GET /drawdown-recovery/latest` | 15s | Gauge arc (0-100%) with threshold markers at warning/recovery/pause levels |
-| System Health | `GET /health/status` | 15s | Radial status indicator (green/yellow/red) + subsystem count |
+| Card           | Data Source                              | Refresh | Visual                                                                     |
+| -------------- | ---------------------------------------- | ------- | -------------------------------------------------------------------------- |
+| Account Equity | `GET /trading-account/active/{brokerId}` | 15s     | Large number + delta % + 7-day sparkline                                   |
+| Today's P&L    | Computed from positions                  | 15s     | Large number (green/red) + cumulative intraday area chart                  |
+| Open Positions | `POST /position/list` (filtered)         | 15s     | Count + mini horizontal bar by symbol                                      |
+| Drawdown       | `GET /drawdown-recovery/latest`          | 15s     | Gauge arc (0-100%) with threshold markers at warning/recovery/pause levels |
+| System Health  | `GET /health/status`                     | 15s     | Radial status indicator (green/yellow/red) + subsystem count               |
 
 #### Charts Grid (2x2 layout, each in a card)
 
-| Chart | Type | Description |
-|-------|------|-------------|
-| **Equity Curve** | Gradient area chart | Account balance over time (30d/90d/1y/all toggle). Gradient fill from accent blue to transparent. Crosshair + tooltip on hover showing exact balance + date. Overlaid dotted line for peak equity |
-| **Daily P&L Waterfall** | Bar chart with running total line | Vertical bars per day (green profit / red loss) for last 30 days. Thin overlay line showing cumulative P&L. Hover tooltip with day, P&L, cumulative, trade count |
-| **Strategy Allocation & Performance** | Donut chart + ranked list | Inner donut showing capital allocation weights. Right side: ranked list of strategies with sparkline P&L, win rate, Sharpe — each row clickable to navigate to strategy detail |
-| **Position Exposure Heatmap** | Treemap | Rectangles sized by position notional value, colored by unrealized P&L (green gradient → red gradient). Hover shows symbol, lots, entry, current price, P&L |
+| Chart                                 | Type                              | Description                                                                                                                                                                                       |
+| ------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Equity Curve**                      | Gradient area chart               | Account balance over time (30d/90d/1y/all toggle). Gradient fill from accent blue to transparent. Crosshair + tooltip on hover showing exact balance + date. Overlaid dotted line for peak equity |
+| **Daily P&L Waterfall**               | Bar chart with running total line | Vertical bars per day (green profit / red loss) for last 30 days. Thin overlay line showing cumulative P&L. Hover tooltip with day, P&L, cumulative, trade count                                  |
+| **Strategy Allocation & Performance** | Donut chart + ranked list         | Inner donut showing capital allocation weights. Right side: ranked list of strategies with sparkline P&L, win rate, Sharpe — each row clickable to navigate to strategy detail                    |
+| **Position Exposure Heatmap**         | Treemap                           | Rectangles sized by position notional value, colored by unrealized P&L (green gradient → red gradient). Hover shows symbol, lots, entry, current price, P&L                                       |
 
 #### Live Activity & Status Row (Below charts)
 
-| Panel | Content |
-|-------|---------|
-| **Pending Signals Queue** | Scrollable list of pending signals with symbol, direction arrow, confidence bar, strategy name, time ago. Inline Approve/Reject buttons. Badge count in header. 15s poll |
-| **Recent Orders Feed** | Live-scrolling feed of latest 20 orders — each row: status icon + symbol + side + lot + time ago. New entries animate in with slide-down |
-| **Engine Status Strip** | Horizontal row of pill badges: Active Broker (name + health dot), Paper Trading (on/off toggle), Market Regime (latest), Active Models count, Worker Groups status (6 dots) |
+| Panel                     | Content                                                                                                                                                                     |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Pending Signals Queue** | Scrollable list of pending signals with symbol, direction arrow, confidence bar, strategy name, time ago. Inline Approve/Reject buttons. Badge count in header. 15s poll    |
+| **Recent Orders Feed**    | Live-scrolling feed of latest 20 orders — each row: status icon + symbol + side + lot + time ago. New entries animate in with slide-down                                    |
+| **Engine Status Strip**   | Horizontal row of pill badges: Active Broker (name + health dot), Paper Trading (on/off toggle), Market Regime (latest), Active Models count, Worker Groups status (6 dots) |
 
 #### Quick Actions Bar (Sticky bottom or floating)
 
@@ -701,18 +705,21 @@ The main landing page — a comprehensive command center providing real-time vis
 Full lifecycle management of trading orders.
 
 **List View:**
+
 - Paginated table with columns: ID, Symbol, Side (Buy/Sell), Type (Market/Limit/Stop), Lot Size, Price, Status, Strategy, Created At
 - Filters: Status (Pending, Submitted, Filled, Cancelled, Rejected, Failed), Side, Symbol, Date Range
 - Sort by any column
 - Color-coded status badges
 
 **Detail View:**
+
 - Order metadata (all fields)
 - Related position (if filled)
 - Related strategy and signal
 - Timeline of status changes
 
 **Actions:**
+
 - Create manual order (form with symbol, side, type, lot size, price, SL, TP)
 - Submit pending order to broker
 - Cancel pending/submitted order
@@ -720,6 +727,7 @@ Full lifecycle management of trading orders.
 - Delete (soft-delete) order
 
 **API Endpoints Used:**
+
 - `POST /order` — create
 - `PUT /order/{id}` — update
 - `POST /order/{id}/submit` — submit to broker
@@ -740,10 +748,12 @@ View and manage open and closed trading positions with comprehensive P&L monitor
 #### Open Positions Tab
 
 **Summary Strip (top):**
+
 - Total Unrealized P&L (large, green/red) + total lots + position count
 - Exposure by currency donut (mini, inline)
 
 **Live Table:**
+
 - Columns: Symbol, Side (arrow icon), Entry Price, Current Price (live-updating with flash animation on change), Lot Size, Unrealized P&L (pips + currency, color-coded), SL/TP levels, Duration (relative time), Strategy
 - Row background subtly tinted green/red based on P&L direction
 - 10s poll for live price updates
@@ -756,22 +766,24 @@ View and manage open and closed trading positions with comprehensive P&L monitor
 
 #### Position Analytics Panel (charts below table)
 
-| Chart | Type | Description |
-|-------|------|-------------|
-| **P&L Distribution** | Histogram | Distribution of realized P&L across all closed trades. Bell curve overlay. Bin width configurable |
-| **Win/Loss by Symbol** | Grouped horizontal bar | Green bar (wins) vs red bar (losses) per symbol. Shows which pairs are most profitable |
-| **Hold Duration vs P&L** | Scatter plot | Each closed trade as a dot: x-axis = duration, y-axis = P&L. Reveals optimal hold times |
-| **Cumulative P&L** | Gradient area chart | Running total of realized P&L over time. Drawdown periods shaded in red tint |
-| **P&L by Session** | Stacked bar | London / New York / Tokyo / Sydney — which sessions generate the most profit |
-| **R-Multiple Distribution** | Histogram | Distribution of R-multiples (reward relative to risk). Vertical line at R=1 |
+| Chart                       | Type                   | Description                                                                                       |
+| --------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------- |
+| **P&L Distribution**        | Histogram              | Distribution of realized P&L across all closed trades. Bell curve overlay. Bin width configurable |
+| **Win/Loss by Symbol**      | Grouped horizontal bar | Green bar (wins) vs red bar (losses) per symbol. Shows which pairs are most profitable            |
+| **Hold Duration vs P&L**    | Scatter plot           | Each closed trade as a dot: x-axis = duration, y-axis = P&L. Reveals optimal hold times           |
+| **Cumulative P&L**          | Gradient area chart    | Running total of realized P&L over time. Drawdown periods shaded in red tint                      |
+| **P&L by Session**          | Stacked bar            | London / New York / Tokyo / Sydney — which sessions generate the most profit                      |
+| **R-Multiple Distribution** | Histogram              | Distribution of R-multiples (reward relative to risk). Vertical line at R=1                       |
 
 **Detail View (slide-out panel):**
+
 - Position header: Symbol + side + status badge + total P&L
 - Price chart mini-view: Entry/exit markers on a simplified price line
 - Orders tab: All associated orders (entry, scale, SL/TP modifications)
 - Trailing stop configuration with type badge (Fixed / Percentage / ATR)
 
 **API Endpoints Used:**
+
 - `GET /position/{id}` — detail
 - `POST /position/list` — paginated list
 - `PUT /trailing-stop/{positionId}` — update trailing stop
@@ -796,19 +808,19 @@ Configure, control, and deeply monitor trading strategies.
 
 **Strategy Selector:** Dropdown or horizontal pill tabs to select one strategy (or "All Strategies" aggregate)
 
-| Chart / Widget | Type | Description |
-|---------------|------|-------------|
-| **Performance KPI Cards** | 6 metric cards | Win Rate (gauge), Profit Factor (number + trend arrow), Sharpe Ratio, Max Drawdown %, Total Trades, Avg Trade P&L — each with 30d sparkline |
-| **Equity Curve** | Gradient area chart | Strategy-specific cumulative P&L over time. Toggle: 7d / 30d / 90d / All. Peak equity dotted overlay. Drawdown periods shaded red |
-| **Win Rate Over Time** | Line chart | Rolling 20-trade win rate over time. Horizontal reference lines at 50% and the strategy's historical average |
-| **Profit Factor Trend** | Line chart with threshold band | Rolling profit factor. Green zone (>1.5), yellow zone (1.0-1.5), red zone (<1.0) background bands |
-| **Trade Outcome Heatmap** | Calendar heatmap | Day-of-week × hour-of-day grid, color intensity = P&L. Reveals optimal trading windows |
-| **Signal Confidence Distribution** | Histogram | Distribution of confidence scores for signals generated. Overlaid with approval rate curve |
-| **Drawdown Curve** | Inverted area chart | Peak-to-trough drawdown over time. Red gradient fill. Markers at max drawdown points |
-| **R-Multiple Scatter** | Scatter plot | Each trade: x = trade number (chronological), y = R-multiple. Trendline overlay showing if strategy is improving or degrading |
-| **Monthly Returns Grid** | Heatmap table | Rows = years, columns = months, cells colored by monthly return %. Total column on right |
-| **Regime Performance** | Grouped bar | Win rate + profit factor per market regime (Trending / Ranging / Volatile) |
-| **Risk Profile Compliance** | Gauge set | Current lot size vs max, daily drawdown vs limit, open positions vs cap — each as a gauge |
+| Chart / Widget                     | Type                           | Description                                                                                                                                 |
+| ---------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Performance KPI Cards**          | 6 metric cards                 | Win Rate (gauge), Profit Factor (number + trend arrow), Sharpe Ratio, Max Drawdown %, Total Trades, Avg Trade P&L — each with 30d sparkline |
+| **Equity Curve**                   | Gradient area chart            | Strategy-specific cumulative P&L over time. Toggle: 7d / 30d / 90d / All. Peak equity dotted overlay. Drawdown periods shaded red           |
+| **Win Rate Over Time**             | Line chart                     | Rolling 20-trade win rate over time. Horizontal reference lines at 50% and the strategy's historical average                                |
+| **Profit Factor Trend**            | Line chart with threshold band | Rolling profit factor. Green zone (>1.5), yellow zone (1.0-1.5), red zone (<1.0) background bands                                           |
+| **Trade Outcome Heatmap**          | Calendar heatmap               | Day-of-week × hour-of-day grid, color intensity = P&L. Reveals optimal trading windows                                                      |
+| **Signal Confidence Distribution** | Histogram                      | Distribution of confidence scores for signals generated. Overlaid with approval rate curve                                                  |
+| **Drawdown Curve**                 | Inverted area chart            | Peak-to-trough drawdown over time. Red gradient fill. Markers at max drawdown points                                                        |
+| **R-Multiple Scatter**             | Scatter plot                   | Each trade: x = trade number (chronological), y = R-multiple. Trendline overlay showing if strategy is improving or degrading               |
+| **Monthly Returns Grid**           | Heatmap table                  | Rows = years, columns = months, cells colored by monthly return %. Total column on right                                                    |
+| **Regime Performance**             | Grouped bar                    | Win rate + profit factor per market regime (Trending / Ranging / Volatile)                                                                  |
+| **Risk Profile Compliance**        | Gauge set                      | Current lot size vs max, daily drawdown vs limit, open positions vs cap — each as a gauge                                                   |
 
 #### Strategy Detail (full page)
 
@@ -818,12 +830,14 @@ Configure, control, and deeply monitor trading strategies.
 - **Optimization Tab:** History of optimization runs with approve/reject. Side-by-side parameter comparison (current vs proposed)
 
 **Create/Edit Form:**
+
 - Name, Symbol, Timeframe, Strategy Type (dropdown)
 - Parameters (JSON editor with syntax highlighting)
 - Risk Profile assignment (dropdown)
 - Confidence threshold, signal expiry
 
 **API Endpoints Used:**
+
 - `POST /strategy` — create
 - `PUT /strategy/{id}` — update
 - `DELETE /strategy/{id}` — delete
@@ -844,23 +858,27 @@ Configure, control, and deeply monitor trading strategies.
 Review and act on signals generated by strategy evaluators.
 
 **List View:**
+
 - Paginated table: ID, Symbol, Direction, Confidence, Strategy, Status (Pending/Approved/Rejected/Expired), ML Score, Created At, Expires At
 - Filters: Status, Symbol, Strategy, Confidence Range, Date Range
 - **Pending signals highlighted** at the top
 
 **Detail View:**
+
 - Signal metadata
 - ML prediction details (if scored)
 - Source strategy info
 - Resulting order (if approved and executed)
 
 **Actions:**
+
 - Approve signal (`PUT /trade-signal/{id}/approve`)
 - Reject signal (`PUT /trade-signal/{id}/reject`)
 - Expire signal (`PUT /trade-signal/{id}/expire`)
 - Bulk approve/reject (checkbox selection)
 
 **API Endpoints Used:**
+
 - `PUT /trade-signal/{id}/approve`
 - `PUT /trade-signal/{id}/reject`
 - `PUT /trade-signal/{id}/expire`
@@ -874,24 +892,29 @@ Review and act on signals generated by strategy evaluators.
 Manage broker trading accounts.
 
 **List View:**
+
 - Paginated table: ID, Name, Broker, Balance, Equity, Margin, Status (Active/Inactive), Environment (Live/Practice)
 - Filters: Status, Broker
 
 **Detail View:**
+
 - Account details (balance, equity, free margin, margin level)
 - Linked broker info
 - Recent orders and positions
 
 **Create/Edit Form:**
+
 - Account name, Broker (dropdown), Account Number, Environment
 - Initial balance
 
 **Actions:**
+
 - Create, Update, Delete account
 - Activate account
 - Sync balance from broker (`PUT /trading-account/{id}/sync`)
 
 **API Endpoints Used:**
+
 - `POST /trading-account`
 - `PUT /trading-account/{id}`
 - `DELETE /trading-account/{id}`
@@ -908,10 +931,12 @@ Manage broker trading accounts.
 Configure and monitor broker connections.
 
 **List View:**
+
 - Paginated table: ID, Name, Type, Status (Connected/Disconnected/Error), Environment, Is Active, Health
 - Health indicator (green/yellow/red dot)
 
 **Detail View:**
+
 - Broker configuration
 - Connection status
 - API credentials (masked)
@@ -919,10 +944,12 @@ Configure and monitor broker connections.
 - Health check history
 
 **Create/Edit Form:**
+
 - Name, Broker Type, API Key (masked), API Secret (masked), Server URL
 - Environment (Live/Practice)
 
 **Actions:**
+
 - Create, Update, Delete broker
 - Activate broker
 - Update broker status
@@ -930,6 +957,7 @@ Configure and monitor broker connections.
 - Check health (`GET /broker/health`)
 
 **API Endpoints Used:**
+
 - `POST /broker`
 - `PUT /broker/{id}`
 - `DELETE /broker/{id}`
@@ -952,10 +980,12 @@ Define, manage, and monitor risk parameter compliance in real-time.
 #### Risk Profiles Tab
 
 **List View:**
+
 - Paginated table: ID, Name, Max Lot Size, Max Drawdown %, Max Daily Trades, Max Open Positions, Linked Strategies (count badge), Created At
 - Each row expandable to show gauge summary of current compliance
 
 **Create/Edit Form:**
+
 - Name
 - Max Lot Size, Min Lot Size
 - Max Risk Per Trade (%)
@@ -967,22 +997,24 @@ Define, manage, and monitor risk parameter compliance in real-time.
 
 #### Risk Monitor Tab (comprehensive risk dashboard)
 
-| Chart / Widget | Type | Description |
-|---------------|------|-------------|
-| **Risk Compliance Gauges** | Gauge row (6 gauges) | Current utilization vs limits: Lot Size Used / Max, Daily Drawdown / Max, Total Drawdown / Max, Open Positions / Max, Daily Trades / Max, Symbol Exposure / Max. Green → yellow → red as utilization approaches limit |
-| **Risk Utilization Over Time** | Multi-line chart | Rolling utilization % for each risk metric over time. Threshold line at 100% (breach). Shows how close to limits the engine operates |
-| **Position Size Distribution** | Histogram | Distribution of lot sizes across all open and recent positions. Vertical lines at min/max limits |
-| **Symbol Exposure Heatmap** | Treemap | Rectangles sized by exposure per symbol. Color = % of max allowed exposure. Red = near limit |
-| **Daily Trades Counter** | Bar chart + countdown | Bars = trades per day (last 30 days). Horizontal line at daily limit. Today's count prominently displayed |
-| **Margin Utilization** | Area chart | Used margin vs free margin over time. Alert zone shaded when margin utilization > 80% |
-| **Risk Events Log** | Scrolling timeline | Chronological feed of risk-related events: limit breaches, drawdown warnings, position rejections due to risk. Each event color-coded by severity |
-| **Correlation Risk Matrix** | Heatmap grid | Currency pair correlation matrix. Highly correlated open positions highlighted as concentration risk |
+| Chart / Widget                 | Type                  | Description                                                                                                                                                                                                           |
+| ------------------------------ | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Risk Compliance Gauges**     | Gauge row (6 gauges)  | Current utilization vs limits: Lot Size Used / Max, Daily Drawdown / Max, Total Drawdown / Max, Open Positions / Max, Daily Trades / Max, Symbol Exposure / Max. Green → yellow → red as utilization approaches limit |
+| **Risk Utilization Over Time** | Multi-line chart      | Rolling utilization % for each risk metric over time. Threshold line at 100% (breach). Shows how close to limits the engine operates                                                                                  |
+| **Position Size Distribution** | Histogram             | Distribution of lot sizes across all open and recent positions. Vertical lines at min/max limits                                                                                                                      |
+| **Symbol Exposure Heatmap**    | Treemap               | Rectangles sized by exposure per symbol. Color = % of max allowed exposure. Red = near limit                                                                                                                          |
+| **Daily Trades Counter**       | Bar chart + countdown | Bars = trades per day (last 30 days). Horizontal line at daily limit. Today's count prominently displayed                                                                                                             |
+| **Margin Utilization**         | Area chart            | Used margin vs free margin over time. Alert zone shaded when margin utilization > 80%                                                                                                                                 |
+| **Risk Events Log**            | Scrolling timeline    | Chronological feed of risk-related events: limit breaches, drawdown warnings, position rejections due to risk. Each event color-coded by severity                                                                     |
+| **Correlation Risk Matrix**    | Heatmap grid          | Currency pair correlation matrix. Highly correlated open positions highlighted as concentration risk                                                                                                                  |
 
 **Actions:**
+
 - Create, Update, Delete risk profile
 - View linked strategies
 
 **API Endpoints Used:**
+
 - `POST /risk-profile`
 - `PUT /risk-profile/{id}`
 - `DELETE /risk-profile/{id}`
@@ -996,18 +1028,22 @@ Define, manage, and monitor risk parameter compliance in real-time.
 Manage tradeable instrument metadata.
 
 **List View:**
+
 - Paginated table: ID, Symbol, Base Currency, Quote Currency, Pip Value, Contract Size, Min/Max Lot Size
 - Search by symbol
 
 **Create/Edit Form:**
+
 - Symbol, Base Currency, Quote Currency
 - Pip Value, Pip Size, Contract Size
 - Min Lot Size, Max Lot Size, Lot Step
 
 **Actions:**
+
 - Create, Update, Delete currency pair
 
 **API Endpoints Used:**
+
 - `POST /currency-pair`
 - `PUT /currency-pair/{id}`
 - `DELETE /currency-pair/{id}`
@@ -1025,6 +1061,7 @@ Live market data monitoring and historical candle analysis.
 #### Live Prices Tab
 
 **Price Board:**
+
 - Card grid (one card per watched symbol)
 - Each card: Symbol name, Bid (left), Ask (right), Spread (center, highlighted if wide)
 - Price digits flash green on uptick, red on downtick (animation)
@@ -1034,17 +1071,18 @@ Live market data monitoring and historical candle analysis.
 - Auto-refresh every 3 seconds
 
 **Spread Monitor:**
+
 - Horizontal bar chart of current spreads across all symbols. Sorted widest to narrowest. Threshold line at acceptable spread level
 
 #### Price Analytics Tab
 
-| Chart / Widget | Type | Description |
-|---------------|------|-------------|
-| **Intraday Price Lines** | Multi-line chart | All watched symbols normalized to % change from open. Shows relative movement. Toggle symbols on/off |
-| **Volatility Comparison** | Bar chart | Current ATR (Average True Range) per symbol. Sorted by volatility. Historical average overlay |
-| **Spread Heatmap** | Heatmap (hour × symbol) | Average spread by hour-of-day per symbol. Reveals when spreads are widest (low liquidity periods) |
-| **Correlation Matrix** | Heatmap grid | Real-time price correlation between all pairs. Blue (negative) → white (none) → red (positive). Updated every 60 seconds |
-| **Price Data Freshness** | Horizontal bar | Time since last price update per symbol. Red threshold at staleness limit. Reveals data feed issues |
+| Chart / Widget            | Type                    | Description                                                                                                              |
+| ------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| **Intraday Price Lines**  | Multi-line chart        | All watched symbols normalized to % change from open. Shows relative movement. Toggle symbols on/off                     |
+| **Volatility Comparison** | Bar chart               | Current ATR (Average True Range) per symbol. Sorted by volatility. Historical average overlay                            |
+| **Spread Heatmap**        | Heatmap (hour × symbol) | Average spread by hour-of-day per symbol. Reveals when spreads are widest (low liquidity periods)                        |
+| **Correlation Matrix**    | Heatmap grid            | Real-time price correlation between all pairs. Blue (negative) → white (none) → red (positive). Updated every 60 seconds |
+| **Price Data Freshness**  | Horizontal bar          | Time since last price update per symbol. Red threshold at staleness limit. Reveals data feed issues                      |
 
 #### Candle History Tab
 
@@ -1053,6 +1091,7 @@ Live market data monitoring and historical candle analysis.
 - Each row expandable to show a mini candlestick visualization (last 20 candles in context)
 
 **API Endpoints Used:**
+
 - `GET /market-data/live-price/{symbol}`
 - `GET /market-data/candle/latest`
 - `POST /market-data/candle/list`
@@ -1077,43 +1116,45 @@ Full ML model lifecycle management with comprehensive model monitoring and evalu
 
 **Model Selector:** Dropdown to select active model (or compare two models side-by-side)
 
-| Chart / Widget | Type | Description |
-|---------------|------|-------------|
-| **Model KPI Cards** | 6 metric cards | Overall Accuracy (gauge 0-100%), Precision, Recall, F1 Score, Total Predictions, Avg Confidence — each with 30d sparkline |
-| **Accuracy Over Time** | Multi-line chart | Rolling accuracy (20-prediction window) over time. Horizontal threshold lines at 50% and target accuracy. Shaded confidence interval band |
-| **Accuracy by Market Regime** | Grouped bar chart | Accuracy + prediction count per regime (Trending / Ranging / Volatile). Reveals regime-dependent model quality |
-| **Accuracy by Trading Session** | Grouped bar chart | Accuracy per session (London / New York / Tokyo / Sydney). Each bar segmented by direction (Buy / Sell) |
-| **Accuracy by Time Horizon** | Bar chart | Accuracy for each prediction horizon (1H, 4H, 1D, 1W). Shows whether model is better at short or long-term |
-| **Accuracy by Hour of Day** | Heatmap (24 columns) | Hour-of-day accuracy heatmap. Color intensity = accuracy %. Reveals optimal prediction hours |
-| **Accuracy by Volatility Regime** | Bar chart with scatter overlay | Bars = accuracy per volatility quintile. Scatter = prediction count. Shows if model degrades in high-vol |
-| **Confidence Calibration Curve** | Line chart | X-axis = predicted confidence (bins), Y-axis = actual accuracy. Perfect calibration = diagonal line. Gap between actual and predicted = miscalibration |
-| **Prediction Confidence Distribution** | Histogram | Distribution of confidence scores. Overlaid with outcome (correct in green, incorrect in red) |
-| **Confusion Matrix** | Heatmap grid | 2x2 or 3x3 matrix (Buy/Sell/Hold predicted vs actual). Color intensity = count. Shows bias patterns |
-| **EWMA Accuracy Drift** | Line chart with drift bands | Exponentially weighted moving average of accuracy. Alert bands at ±2σ. Drift detection markers (ADWIN changepoints) |
-| **Feature Staleness Monitor** | Horizontal bar chart | Each feature as a bar showing time since last update. Red threshold line at staleness limit. Stale features highlighted |
-| **Prediction Outcome Timeline** | Scatter strip | Chronological dots: green = correct, red = incorrect, size = confidence. Clusters of red indicate degradation periods |
-| **Kelly Fraction Trend** | Area chart | Optimal Kelly fraction over time. Shows recommended position sizing based on model edge |
-| **Model Version Comparison** | Dual-axis line chart | Overlay accuracy of current vs previous model version. Shaded region where current model outperforms |
+| Chart / Widget                         | Type                           | Description                                                                                                                                            |
+| -------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Model KPI Cards**                    | 6 metric cards                 | Overall Accuracy (gauge 0-100%), Precision, Recall, F1 Score, Total Predictions, Avg Confidence — each with 30d sparkline                              |
+| **Accuracy Over Time**                 | Multi-line chart               | Rolling accuracy (20-prediction window) over time. Horizontal threshold lines at 50% and target accuracy. Shaded confidence interval band              |
+| **Accuracy by Market Regime**          | Grouped bar chart              | Accuracy + prediction count per regime (Trending / Ranging / Volatile). Reveals regime-dependent model quality                                         |
+| **Accuracy by Trading Session**        | Grouped bar chart              | Accuracy per session (London / New York / Tokyo / Sydney). Each bar segmented by direction (Buy / Sell)                                                |
+| **Accuracy by Time Horizon**           | Bar chart                      | Accuracy for each prediction horizon (1H, 4H, 1D, 1W). Shows whether model is better at short or long-term                                             |
+| **Accuracy by Hour of Day**            | Heatmap (24 columns)           | Hour-of-day accuracy heatmap. Color intensity = accuracy %. Reveals optimal prediction hours                                                           |
+| **Accuracy by Volatility Regime**      | Bar chart with scatter overlay | Bars = accuracy per volatility quintile. Scatter = prediction count. Shows if model degrades in high-vol                                               |
+| **Confidence Calibration Curve**       | Line chart                     | X-axis = predicted confidence (bins), Y-axis = actual accuracy. Perfect calibration = diagonal line. Gap between actual and predicted = miscalibration |
+| **Prediction Confidence Distribution** | Histogram                      | Distribution of confidence scores. Overlaid with outcome (correct in green, incorrect in red)                                                          |
+| **Confusion Matrix**                   | Heatmap grid                   | 2x2 or 3x3 matrix (Buy/Sell/Hold predicted vs actual). Color intensity = count. Shows bias patterns                                                    |
+| **EWMA Accuracy Drift**                | Line chart with drift bands    | Exponentially weighted moving average of accuracy. Alert bands at ±2σ. Drift detection markers (ADWIN changepoints)                                    |
+| **Feature Staleness Monitor**          | Horizontal bar chart           | Each feature as a bar showing time since last update. Red threshold line at staleness limit. Stale features highlighted                                |
+| **Prediction Outcome Timeline**        | Scatter strip                  | Chronological dots: green = correct, red = incorrect, size = confidence. Clusters of red indicate degradation periods                                  |
+| **Kelly Fraction Trend**               | Area chart                     | Optimal Kelly fraction over time. Shows recommended position sizing based on model edge                                                                |
+| **Model Version Comparison**           | Dual-axis line chart           | Overlay accuracy of current vs previous model version. Shaded region where current model outperforms                                                   |
 
 #### Training Lab Tab
 
 **Training Runs Table:**
+
 - Paginated: ID, Model Name, Status (Running with progress bar / Completed / Failed), Duration, Train Accuracy, Val Accuracy, Test Accuracy, Loss, Started At
 - Running trainings show animated progress indicator
 - Completed runs show green checkmark; failed show red X with error tooltip
 
 **Training Run Detail (expandable or slide-out):**
 
-| Chart / Widget | Type | Description |
-|---------------|------|-------------|
-| **Loss Curve** | Dual-line chart | Training loss vs validation loss over epochs. Divergence = overfitting indicator |
-| **Accuracy Curve** | Dual-line chart | Training accuracy vs validation accuracy over epochs |
-| **Learning Rate Schedule** | Step chart | Learning rate changes over training epochs |
-| **Hyperparameter Summary** | Key-value card grid | All hyperparameters used in this run, side-by-side with previous best run |
-| **Feature Importance** | Horizontal bar chart | Top 20 features ranked by importance. Color-coded by feature group (technical / sentiment / regime) |
+| Chart / Widget                    | Type                      | Description                                                                                            |
+| --------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Loss Curve**                    | Dual-line chart           | Training loss vs validation loss over epochs. Divergence = overfitting indicator                       |
+| **Accuracy Curve**                | Dual-line chart           | Training accuracy vs validation accuracy over epochs                                                   |
+| **Learning Rate Schedule**        | Step chart                | Learning rate changes over training epochs                                                             |
+| **Hyperparameter Summary**        | Key-value card grid       | All hyperparameters used in this run, side-by-side with previous best run                              |
+| **Feature Importance**            | Horizontal bar chart      | Top 20 features ranked by importance. Color-coded by feature group (technical / sentiment / regime)    |
 | **Hyperparameter Search Results** | Parallel coordinates plot | Each line = one trial. Axes = hyperparameters. Color = resulting accuracy. Visualizes the search space |
 
 **Actions:**
+
 - Trigger new training run (form: symbol, timeframe, parameters)
 - Trigger hyperparameter search (form: search space config)
 - Compare two training runs side-by-side
@@ -1121,25 +1162,28 @@ Full ML model lifecycle management with comprehensive model monitoring and evalu
 #### Shadow Arena Tab (Champion vs Challenger)
 
 **Active Evaluations Table:**
+
 - Challenger Model, Champion Model, Symbol, Start Date, Predictions So Far, Champion Accuracy, Challenger Accuracy, Status
 
 **Shadow Evaluation Detail:**
 
-| Chart / Widget | Type | Description |
-|---------------|------|-------------|
-| **Head-to-Head Accuracy** | Dual bar chart | Side-by-side accuracy comparison over evaluation window |
-| **Cumulative Accuracy Race** | Dual line chart | Running accuracy of champion (blue) vs challenger (green) over time. Crossover points marked |
-| **Agreement Rate** | Donut chart | Percentage of predictions where both models agree vs disagree |
-| **Disagreement Analysis** | Grouped bar | When models disagree: who was right? Bars per outcome category |
-| **Confidence Comparison** | Box plot pair | Confidence distributions of champion vs challenger. Shows if challenger is more or less confident |
-| **Regime-Specific Comparison** | Grouped bar chart | Accuracy of each model broken down by market regime. Reveals niche advantages |
+| Chart / Widget                 | Type              | Description                                                                                       |
+| ------------------------------ | ----------------- | ------------------------------------------------------------------------------------------------- |
+| **Head-to-Head Accuracy**      | Dual bar chart    | Side-by-side accuracy comparison over evaluation window                                           |
+| **Cumulative Accuracy Race**   | Dual line chart   | Running accuracy of champion (blue) vs challenger (green) over time. Crossover points marked      |
+| **Agreement Rate**             | Donut chart       | Percentage of predictions where both models agree vs disagree                                     |
+| **Disagreement Analysis**      | Grouped bar       | When models disagree: who was right? Bars per outcome category                                    |
+| **Confidence Comparison**      | Box plot pair     | Confidence distributions of champion vs challenger. Shows if challenger is more or less confident |
+| **Regime-Specific Comparison** | Grouped bar chart | Accuracy of each model broken down by market regime. Reveals niche advantages                     |
 
 **Actions:**
+
 - Start new shadow evaluation (select challenger model)
 - Promote challenger to champion (with confirmation dialog)
 - End evaluation early
 
 **API Endpoints Used:**
+
 - `GET /ml-model/{id}`
 - `POST /ml-model/list`
 - `PUT /ml-model/{id}/activate`
@@ -1176,24 +1220,26 @@ Run and review historical strategy simulations with rich result visualization.
 #### Backtest / Walk-Forward Detail View (full page)
 
 **KPI Summary Cards (top row):**
+
 - Total Trades, Win Rate (gauge), Profit Factor, Sharpe Ratio, Max Drawdown %, Avg Trade P&L, Expectancy, Recovery Factor
 
 **Charts Grid:**
 
-| Chart | Type | Description |
-|-------|------|-------------|
-| **Equity Curve** | Gradient area chart | Cumulative P&L over the backtest period. Peak equity dotted overlay. Drawdown periods shaded red. Log/linear scale toggle |
-| **Drawdown Curve** | Inverted area chart | Peak-to-trough drawdown below the equity curve. Deepest drawdown annotated |
-| **Monthly Returns Table** | Heatmap grid | Rows = years, columns = months, cells = return %. Color gradient green-to-red. Annual totals column |
-| **Trade P&L Distribution** | Histogram | Distribution of individual trade P&L. Mean + median lines. Skewness indicator |
-| **Win/Loss Streak Chart** | Bar chart | Consecutive win streaks (green bars up) and loss streaks (red bars down) chronologically |
-| **Trade Duration Distribution** | Histogram | How long trades are held. Separated by winners vs losers |
-| **P&L by Day of Week** | Grouped bar | Average P&L per day of week. Shows day-of-week effects |
-| **P&L by Hour** | Bar chart | Average P&L per hour. Shows time-of-day effects |
-| **MAE / MFE Scatter** | Scatter plot | Maximum Adverse Excursion vs Maximum Favorable Excursion per trade. Reveals stop/target optimization opportunities |
-| **Walk-Forward OOS Equity** | Multi-segment line chart | (Walk-forward only) In-sample periods in blue, out-of-sample in green. Shows whether OOS performance holds |
+| Chart                           | Type                     | Description                                                                                                               |
+| ------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| **Equity Curve**                | Gradient area chart      | Cumulative P&L over the backtest period. Peak equity dotted overlay. Drawdown periods shaded red. Log/linear scale toggle |
+| **Drawdown Curve**              | Inverted area chart      | Peak-to-trough drawdown below the equity curve. Deepest drawdown annotated                                                |
+| **Monthly Returns Table**       | Heatmap grid             | Rows = years, columns = months, cells = return %. Color gradient green-to-red. Annual totals column                       |
+| **Trade P&L Distribution**      | Histogram                | Distribution of individual trade P&L. Mean + median lines. Skewness indicator                                             |
+| **Win/Loss Streak Chart**       | Bar chart                | Consecutive win streaks (green bars up) and loss streaks (red bars down) chronologically                                  |
+| **Trade Duration Distribution** | Histogram                | How long trades are held. Separated by winners vs losers                                                                  |
+| **P&L by Day of Week**          | Grouped bar              | Average P&L per day of week. Shows day-of-week effects                                                                    |
+| **P&L by Hour**                 | Bar chart                | Average P&L per hour. Shows time-of-day effects                                                                           |
+| **MAE / MFE Scatter**           | Scatter plot             | Maximum Adverse Excursion vs Maximum Favorable Excursion per trade. Reveals stop/target optimization opportunities        |
+| **Walk-Forward OOS Equity**     | Multi-segment line chart | (Walk-forward only) In-sample periods in blue, out-of-sample in green. Shows whether OOS performance holds                |
 
 **Trade Log Table (below charts):**
+
 - Full trade-by-trade log: Entry time, Exit time, Symbol, Side, Entry Price, Exit Price, P&L (pips + currency), R-Multiple, Duration, Reason for exit
 
 #### Results Comparison Tab
@@ -1203,6 +1249,7 @@ Run and review historical strategy simulations with rich result visualization.
 - Comparison table: all KPIs in rows, runs in columns, best value highlighted
 
 **API Endpoints Used:**
+
 - `POST /backtest`
 - `GET /backtest/{id}`
 - `POST /backtest/list`
@@ -1221,14 +1268,15 @@ Comprehensive portfolio-level strategy capital allocation monitoring and managem
 #### Current Allocation Tab
 
 **Summary Cards:**
+
 - Total Portfolio Value, Allocated Capital %, Unallocated Capital, Portfolio Sharpe, Portfolio Max Drawdown
 
-| Chart / Widget | Type | Description |
-|---------------|------|-------------|
-| **Allocation Donut** | Donut chart | Inner ring: capital allocation by strategy. Center: total portfolio value. Hover shows strategy name + weight + absolute value |
-| **Strategy Leaderboard** | Ranked card list | Each strategy card: name, allocation weight (progress bar), rolling Sharpe, 30d P&L sparkline, status badge. Sorted by Sharpe descending |
-| **Allocation vs Performance Scatter** | Scatter plot | X = allocation weight, Y = rolling Sharpe. Bubble size = absolute P&L. Identifies over/under-allocated strategies |
-| **Correlation Matrix** | Heatmap grid | Strategy-to-strategy return correlation. Color scale: blue (negative correlation, good) → red (high correlation, concentration risk) |
+| Chart / Widget                        | Type             | Description                                                                                                                              |
+| ------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Allocation Donut**                  | Donut chart      | Inner ring: capital allocation by strategy. Center: total portfolio value. Hover shows strategy name + weight + absolute value           |
+| **Strategy Leaderboard**              | Ranked card list | Each strategy card: name, allocation weight (progress bar), rolling Sharpe, 30d P&L sparkline, status badge. Sorted by Sharpe descending |
+| **Allocation vs Performance Scatter** | Scatter plot     | X = allocation weight, Y = rolling Sharpe. Bubble size = absolute P&L. Identifies over/under-allocated strategies                        |
+| **Correlation Matrix**                | Heatmap grid     | Strategy-to-strategy return correlation. Color scale: blue (negative correlation, good) → red (high correlation, concentration risk)     |
 
 #### Allocation History Tab
 
@@ -1237,18 +1285,20 @@ Comprehensive portfolio-level strategy capital allocation monitoring and managem
 
 #### Portfolio Analytics
 
-| Chart | Type | Description |
-|-------|------|-------------|
-| **Portfolio Equity Curve** | Area chart | Aggregate portfolio-level equity over time |
-| **Contribution to Return** | Stacked bar | Each bar = one time period. Stack segments = contribution from each strategy. Shows which strategies drive returns |
-| **Risk Contribution** | Donut | Each strategy's contribution to portfolio variance. Reveals concentration risk |
-| **Efficient Frontier** | Scatter with curve | Current portfolio position vs optimal portfolios. X = risk, Y = return |
+| Chart                      | Type               | Description                                                                                                        |
+| -------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| **Portfolio Equity Curve** | Area chart         | Aggregate portfolio-level equity over time                                                                         |
+| **Contribution to Return** | Stacked bar        | Each bar = one time period. Stack segments = contribution from each strategy. Shows which strategies drive returns |
+| **Risk Contribution**      | Donut              | Each strategy's contribution to portfolio variance. Reveals concentration risk                                     |
+| **Efficient Frontier**     | Scatter with curve | Current portfolio position vs optimal portfolios. X = risk, Y = return                                             |
 
 **Actions:**
+
 - Trigger rebalance (`POST /strategy-ensemble/rebalance`) with preview of proposed changes
 - View allocation history
 
 **API Endpoints Used:**
+
 - `POST /strategy-ensemble/rebalance`
 - `GET /strategy-ensemble/allocations`
 - `POST /strategy-ensemble/list`
@@ -1260,19 +1310,23 @@ Comprehensive portfolio-level strategy capital allocation monitoring and managem
 Configure and manage alert rules.
 
 **List View:**
+
 - Paginated table: ID, Name, Type, Symbol, Condition, Status (Active/Triggered/Disabled), Last Triggered
 - Filters: Status, Type, Symbol
 
 **Create/Edit Form:**
+
 - Name, Type (PriceLevel, SignalGenerated, etc.)
 - Symbol, Condition parameters
 - Notification channels (Webhook, Email, SMS, Telegram)
 - Cooldown period
 
 **Actions:**
+
 - Create, Update, Delete alert
 
 **API Endpoints Used:**
+
 - `POST /alert`
 - `PUT /alert/{id}`
 - `DELETE /alert/{id}`
@@ -1296,23 +1350,25 @@ Comprehensive execution quality monitoring and analysis dashboard.
 #### Quality Analytics Tab (comprehensive dashboard)
 
 **KPI Summary Cards:**
+
 - Avg Slippage (pips), Median Fill Latency (ms), Positive Slippage % (got better price), Total Executions, Worst Slippage Event
 
-| Chart / Widget | Type | Description |
-|---------------|------|-------------|
-| **Slippage Over Time** | Line chart with band | Rolling average slippage over time. Shaded ±1σ band. Alert threshold line. Trend arrow in header |
-| **Slippage by Symbol** | Horizontal bar chart | Average slippage per currency pair. Sorted worst to best. Color gradient red → green |
-| **Slippage Distribution** | Histogram | Full distribution of slippage values. Vertical lines at mean, median, and acceptable threshold. Positive slippage (price improvement) shown in green |
-| **Fill Latency Over Time** | Line chart with band | Rolling average latency. ±1σ band. Alert threshold line |
-| **Fill Latency by Session** | Grouped bar chart | Average + P95 latency per session (London / New York / Tokyo / Sydney). Reveals session-dependent execution speed |
-| **Fill Latency Distribution** | Histogram | Full latency distribution. Vertical lines at P50, P95, P99 |
-| **Slippage by Order Size** | Scatter plot | X = lot size, Y = slippage. Reveals if larger orders get worse fills |
-| **Slippage by Time of Day** | Heatmap (24 columns) | Hour-of-day slippage heatmap. Color intensity = avg slippage. Reveals time-dependent execution quality |
-| **Slippage by Strategy** | Horizontal bar chart | Average slippage per strategy. Identifies strategies with consistently poor execution |
-| **Execution Score Trend** | Gauge + line chart | Composite execution quality score (0-100) combining slippage + latency + fill rate. Trend line showing score over time |
-| **Price Improvement Rate** | Donut chart | Percentage of trades with positive slippage (better price) vs negative slippage vs zero slippage |
+| Chart / Widget                | Type                 | Description                                                                                                                                          |
+| ----------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Slippage Over Time**        | Line chart with band | Rolling average slippage over time. Shaded ±1σ band. Alert threshold line. Trend arrow in header                                                     |
+| **Slippage by Symbol**        | Horizontal bar chart | Average slippage per currency pair. Sorted worst to best. Color gradient red → green                                                                 |
+| **Slippage Distribution**     | Histogram            | Full distribution of slippage values. Vertical lines at mean, median, and acceptable threshold. Positive slippage (price improvement) shown in green |
+| **Fill Latency Over Time**    | Line chart with band | Rolling average latency. ±1σ band. Alert threshold line                                                                                              |
+| **Fill Latency by Session**   | Grouped bar chart    | Average + P95 latency per session (London / New York / Tokyo / Sydney). Reveals session-dependent execution speed                                    |
+| **Fill Latency Distribution** | Histogram            | Full latency distribution. Vertical lines at P50, P95, P99                                                                                           |
+| **Slippage by Order Size**    | Scatter plot         | X = lot size, Y = slippage. Reveals if larger orders get worse fills                                                                                 |
+| **Slippage by Time of Day**   | Heatmap (24 columns) | Hour-of-day slippage heatmap. Color intensity = avg slippage. Reveals time-dependent execution quality                                               |
+| **Slippage by Strategy**      | Horizontal bar chart | Average slippage per strategy. Identifies strategies with consistently poor execution                                                                |
+| **Execution Score Trend**     | Gauge + line chart   | Composite execution quality score (0-100) combining slippage + latency + fill rate. Trend line showing score over time                               |
+| **Price Improvement Rate**    | Donut chart          | Percentage of trades with positive slippage (better price) vs negative slippage vs zero slippage                                                     |
 
 **API Endpoints Used:**
+
 - `POST /execution-quality`
 - `GET /execution-quality/{id}`
 - `POST /execution-quality/list`
@@ -1327,46 +1383,48 @@ Comprehensive macro market intelligence dashboard combining sentiment analysis a
 
 #### Market Overview Tab (at-a-glance view of all symbols)
 
-| Widget | Type | Description |
-|--------|------|-------------|
-| **Symbol Sentiment Grid** | Card grid | One card per watched symbol. Each card: symbol name, sentiment gauge (bullish/bearish needle), current regime badge (Trending/Ranging/Volatile), directional arrow, confidence % |
-| **Global Sentiment Radar** | Radar chart | Multi-axis radar showing sentiment scores across all major pairs. Quick visual of where the market leans |
-| **Regime Distribution** | Donut chart | Current distribution of regimes across all symbols: % trending, % ranging, % volatile |
+| Widget                     | Type        | Description                                                                                                                                                                      |
+| -------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Symbol Sentiment Grid**  | Card grid   | One card per watched symbol. Each card: symbol name, sentiment gauge (bullish/bearish needle), current regime badge (Trending/Ranging/Volatile), directional arrow, confidence % |
+| **Global Sentiment Radar** | Radar chart | Multi-axis radar showing sentiment scores across all major pairs. Quick visual of where the market leans                                                                         |
+| **Regime Distribution**    | Donut chart | Current distribution of regimes across all symbols: % trending, % ranging, % volatile                                                                                            |
 
 #### Sentiment Deep Dive Tab
 
 **Symbol Selector:** Dropdown to focus on a specific currency pair
 
-| Chart / Widget | Type | Description |
-|---------------|------|-------------|
-| **Sentiment Gauge** | Large gauge | Bullish/Bearish needle gauge (-100 to +100) for selected symbol. Color gradient red → neutral → green |
-| **Sentiment History** | Area chart | Sentiment score over time. Green fill above 0, red fill below 0. Overlaid with price line (dual axis) to show correlation |
-| **COT Positioning** | Stacked area chart | Commercial (blue), Non-Commercial (green), Retail (orange) net positions over time. Divergences highlighted |
-| **COT Net Change** | Bar chart | Week-over-week change in net positioning per category. Momentum indicator |
-| **COT Long/Short Breakdown** | Grouped bar chart | Side-by-side long vs short positions for each trader category. Current week |
-| **Sentiment vs Price Correlation** | Scatter plot | X = sentiment score, Y = subsequent price change. Shows predictive power of sentiment |
-| **News Sentiment Timeline** | Event timeline | Chronological strip of news events with sentiment impact dots (green/red/gray). Hover for headline + impact score |
-| **Economic Events Calendar** | Timeline / table | Upcoming and recent economic events. Impact level (High/Medium/Low) color-coded. Forecast vs Actual columns |
+| Chart / Widget                     | Type               | Description                                                                                                               |
+| ---------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| **Sentiment Gauge**                | Large gauge        | Bullish/Bearish needle gauge (-100 to +100) for selected symbol. Color gradient red → neutral → green                     |
+| **Sentiment History**              | Area chart         | Sentiment score over time. Green fill above 0, red fill below 0. Overlaid with price line (dual axis) to show correlation |
+| **COT Positioning**                | Stacked area chart | Commercial (blue), Non-Commercial (green), Retail (orange) net positions over time. Divergences highlighted               |
+| **COT Net Change**                 | Bar chart          | Week-over-week change in net positioning per category. Momentum indicator                                                 |
+| **COT Long/Short Breakdown**       | Grouped bar chart  | Side-by-side long vs short positions for each trader category. Current week                                               |
+| **Sentiment vs Price Correlation** | Scatter plot       | X = sentiment score, Y = subsequent price change. Shows predictive power of sentiment                                     |
+| **News Sentiment Timeline**        | Event timeline     | Chronological strip of news events with sentiment impact dots (green/red/gray). Hover for headline + impact score         |
+| **Economic Events Calendar**       | Timeline / table   | Upcoming and recent economic events. Impact level (High/Medium/Low) color-coded. Forecast vs Actual columns               |
 
 #### Regime Analysis Tab
 
 **Symbol + Timeframe Selector**
 
-| Chart / Widget | Type | Description |
-|---------------|------|-------------|
-| **Current Regime** | Large badge card | Current detected regime with ADX value, volatility reading, and confidence percentage |
-| **Regime History Timeline** | Horizontal segmented bar | Time axis with colored segments: blue = trending, yellow = ranging, red = volatile. Shows duration of each regime |
-| **Regime Transition Matrix** | Heatmap grid | 3×3 matrix showing transition probabilities between regimes. Reveals typical regime sequences |
-| **Regime Duration Distribution** | Box plot set | Three box plots (one per regime type) showing duration distribution. Median, quartiles, outliers |
-| **ADX + Volatility Time Series** | Dual-line chart | ADX line and ATR/volatility line over time. Regime-colored background bands. Threshold lines at regime boundaries |
-| **Strategy Performance by Regime** | Grouped bar chart | Each strategy's win rate + profit factor per regime. Answers: which strategies work in which regimes? |
-| **Regime-Adjusted Returns** | Line chart | Portfolio returns segmented by regime. Separate colored lines per regime period |
+| Chart / Widget                     | Type                     | Description                                                                                                       |
+| ---------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| **Current Regime**                 | Large badge card         | Current detected regime with ADX value, volatility reading, and confidence percentage                             |
+| **Regime History Timeline**        | Horizontal segmented bar | Time axis with colored segments: blue = trending, yellow = ranging, red = volatile. Shows duration of each regime |
+| **Regime Transition Matrix**       | Heatmap grid             | 3×3 matrix showing transition probabilities between regimes. Reveals typical regime sequences                     |
+| **Regime Duration Distribution**   | Box plot set             | Three box plots (one per regime type) showing duration distribution. Median, quartiles, outliers                  |
+| **ADX + Volatility Time Series**   | Dual-line chart          | ADX line and ATR/volatility line over time. Regime-colored background bands. Threshold lines at regime boundaries |
+| **Strategy Performance by Regime** | Grouped bar chart        | Each strategy's win rate + profit factor per regime. Answers: which strategies work in which regimes?             |
+| **Regime-Adjusted Returns**        | Line chart               | Portfolio returns segmented by regime. Separate colored lines per regime period                                   |
 
 **Actions:**
+
 - Record sentiment snapshot (`POST /sentiment/snapshot`)
 - Ingest COT report (`POST /sentiment/cot`)
 
 **API Endpoints Used:**
+
 - `POST /sentiment/snapshot`
 - `POST /sentiment/cot`
 - `GET /sentiment/latest/{symbol}`
@@ -1385,58 +1443,60 @@ Comprehensive multi-dimensional performance analysis dashboard — the analytica
 #### Overview Tab
 
 **KPI Summary Cards:**
+
 - Total P&L, Total Trades, Win Rate, Profit Factor, Sharpe Ratio, Sortino Ratio, Calmar Ratio, Max Drawdown %
 
-| Chart / Widget | Type | Description |
-|---------------|------|-------------|
-| **Strategy P&L Leaderboard** | Ranked list with sparklines | Each strategy: name, total P&L (bar), win rate (mini gauge), 30d P&L sparkline, Sharpe. Sorted by P&L descending. Click to drill into strategy |
-| **Cumulative P&L by Strategy** | Multi-line chart | Each strategy as a separate colored line over time. Toggle individual strategies on/off. Aggregate line bold |
-| **P&L Contribution Waterfall** | Waterfall chart | Sequential bars showing each strategy's contribution to total P&L. Positive bars up (green), negative down (red). Running total line |
-| **Monthly Returns Heatmap** | Grid heatmap | Rows = strategies, columns = months. Cell color = monthly return %. Sortable. Total row at bottom. Total column at right |
-| **Risk-Adjusted Returns** | Scatter plot | X = max drawdown, Y = annualized return. Bubble size = trade count. Ideal strategies in top-left quadrant |
-| **Win Rate vs Profit Factor** | Scatter plot | Each strategy as a point. Quadrant lines at 50% win rate and 1.0 profit factor. Top-right = best performing |
+| Chart / Widget                 | Type                        | Description                                                                                                                                    |
+| ------------------------------ | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Strategy P&L Leaderboard**   | Ranked list with sparklines | Each strategy: name, total P&L (bar), win rate (mini gauge), 30d P&L sparkline, Sharpe. Sorted by P&L descending. Click to drill into strategy |
+| **Cumulative P&L by Strategy** | Multi-line chart            | Each strategy as a separate colored line over time. Toggle individual strategies on/off. Aggregate line bold                                   |
+| **P&L Contribution Waterfall** | Waterfall chart             | Sequential bars showing each strategy's contribution to total P&L. Positive bars up (green), negative down (red). Running total line           |
+| **Monthly Returns Heatmap**    | Grid heatmap                | Rows = strategies, columns = months. Cell color = monthly return %. Sortable. Total row at bottom. Total column at right                       |
+| **Risk-Adjusted Returns**      | Scatter plot                | X = max drawdown, Y = annualized return. Bubble size = trade count. Ideal strategies in top-left quadrant                                      |
+| **Win Rate vs Profit Factor**  | Scatter plot                | Each strategy as a point. Quadrant lines at 50% win rate and 1.0 profit factor. Top-right = best performing                                    |
 
 #### Session Analysis Tab
 
-| Chart / Widget | Type | Description |
-|---------------|------|-------------|
-| **P&L by Session** | Grouped bar chart | Total P&L per session (London / New York / Tokyo / Sydney / Overlap). Each bar split by strategy (stacked option toggle) |
-| **Win Rate by Session** | Horizontal bar chart | Win rate per session. Confidence interval whiskers. Trade count label on each bar |
-| **Session Performance Heatmap** | Heatmap grid | Rows = strategies, columns = sessions. Cell color = P&L. Reveals which strategies work in which sessions |
-| **Hourly P&L Profile** | Bar chart (24 bars) | Average P&L per hour of day. Color gradient green → red. Trade count overlay |
-| **Day-of-Week Performance** | Grouped bar | P&L per day of week. Separated by long vs short trades |
-| **Session Overlap Analysis** | Venn-style or grouped bar | P&L during session overlaps (London-NY, Tokyo-London) vs pure sessions |
+| Chart / Widget                  | Type                      | Description                                                                                                              |
+| ------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| **P&L by Session**              | Grouped bar chart         | Total P&L per session (London / New York / Tokyo / Sydney / Overlap). Each bar split by strategy (stacked option toggle) |
+| **Win Rate by Session**         | Horizontal bar chart      | Win rate per session. Confidence interval whiskers. Trade count label on each bar                                        |
+| **Session Performance Heatmap** | Heatmap grid              | Rows = strategies, columns = sessions. Cell color = P&L. Reveals which strategies work in which sessions                 |
+| **Hourly P&L Profile**          | Bar chart (24 bars)       | Average P&L per hour of day. Color gradient green → red. Trade count overlay                                             |
+| **Day-of-Week Performance**     | Grouped bar               | P&L per day of week. Separated by long vs short trades                                                                   |
+| **Session Overlap Analysis**    | Venn-style or grouped bar | P&L during session overlaps (London-NY, Tokyo-London) vs pure sessions                                                   |
 
 #### Regime Analysis Tab
 
-| Chart / Widget | Type | Description |
-|---------------|------|-------------|
-| **P&L by Regime** | Stacked bar chart | P&L per regime (Trending / Ranging / Volatile). Stacked by strategy |
-| **Win Rate by Regime** | Grouped bar | Win rate per regime per strategy |
-| **Regime Duration vs P&L** | Scatter plot | X = regime duration, Y = P&L earned during that regime period |
-| **Optimal Strategy per Regime** | Table with icons | Matrix: regimes vs strategies, cells show a star rating (1-5) based on historical performance |
-| **Regime P&L Timeline** | Segmented area chart | P&L line with background colored by active regime. Shows performance in context |
+| Chart / Widget                  | Type                 | Description                                                                                   |
+| ------------------------------- | -------------------- | --------------------------------------------------------------------------------------------- |
+| **P&L by Regime**               | Stacked bar chart    | P&L per regime (Trending / Ranging / Volatile). Stacked by strategy                           |
+| **Win Rate by Regime**          | Grouped bar          | Win rate per regime per strategy                                                              |
+| **Regime Duration vs P&L**      | Scatter plot         | X = regime duration, Y = P&L earned during that regime period                                 |
+| **Optimal Strategy per Regime** | Table with icons     | Matrix: regimes vs strategies, cells show a star rating (1-5) based on historical performance |
+| **Regime P&L Timeline**         | Segmented area chart | P&L line with background colored by active regime. Shows performance in context               |
 
 #### ML Analysis Tab
 
-| Chart / Widget | Type | Description |
-|---------------|------|-------------|
-| **P&L by ML Confidence Tier** | Bar chart | Bins: 0-20%, 20-40%, 40-60%, 60-80%, 80-100% confidence. P&L and win rate per bin. Reveals if higher confidence = better outcomes |
-| **ML Score vs Trade P&L** | Scatter plot | Each trade: X = ML confidence, Y = realized P&L. Trendline overlay. R² annotation |
-| **ML-Filtered vs Unfiltered** | Dual line chart | Hypothetical equity curve with ML filter ON vs OFF. Shows ML model's value-add |
-| **False Positive Cost Analysis** | Bar chart | Cost (negative P&L) from ML false positives vs gains from true positives. Net value calculation |
-| **Confidence Threshold Sensitivity** | Line chart | X = confidence threshold, Y = resulting P&L if only trades above threshold were taken. Optimal threshold marked |
+| Chart / Widget                       | Type            | Description                                                                                                                       |
+| ------------------------------------ | --------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **P&L by ML Confidence Tier**        | Bar chart       | Bins: 0-20%, 20-40%, 40-60%, 60-80%, 80-100% confidence. P&L and win rate per bin. Reveals if higher confidence = better outcomes |
+| **ML Score vs Trade P&L**            | Scatter plot    | Each trade: X = ML confidence, Y = realized P&L. Trendline overlay. R² annotation                                                 |
+| **ML-Filtered vs Unfiltered**        | Dual line chart | Hypothetical equity curve with ML filter ON vs OFF. Shows ML model's value-add                                                    |
+| **False Positive Cost Analysis**     | Bar chart       | Cost (negative P&L) from ML false positives vs gains from true positives. Net value calculation                                   |
+| **Confidence Threshold Sensitivity** | Line chart      | X = confidence threshold, Y = resulting P&L if only trades above threshold were taken. Optimal threshold marked                   |
 
 #### Factor Decomposition Tab
 
-| Chart / Widget | Type | Description |
-|---------------|------|-------------|
-| **Attribution by Factor** | Horizontal waterfall | P&L decomposed into factors: strategy alpha, market regime, session timing, ML signal quality, execution slippage, news proximity, MTF confluence. Each bar shows contribution |
-| **News Proximity Impact** | Bar chart | P&L for trades taken near high-impact news vs far from news. Split by before/after event |
-| **MTF Confluence Impact** | Bar chart | P&L for trades with multi-timeframe confluence vs without. Shows confluence filter value |
-| **Correlation Risk Impact** | Scatter plot | P&L vs portfolio correlation at time of trade. Shows if correlated exposure hurts |
+| Chart / Widget              | Type                 | Description                                                                                                                                                                    |
+| --------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Attribution by Factor**   | Horizontal waterfall | P&L decomposed into factors: strategy alpha, market regime, session timing, ML signal quality, execution slippage, news proximity, MTF confluence. Each bar shows contribution |
+| **News Proximity Impact**   | Bar chart            | P&L for trades taken near high-impact news vs far from news. Split by before/after event                                                                                       |
+| **MTF Confluence Impact**   | Bar chart            | P&L for trades with multi-timeframe confluence vs without. Shows confluence filter value                                                                                       |
+| **Correlation Risk Impact** | Scatter plot         | P&L vs portfolio correlation at time of trade. Shows if correlated exposure hurts                                                                                              |
 
 **API Endpoints Used:**
+
 - `GET /performance/{strategyId}`
 - `GET /performance/all`
 
@@ -1450,30 +1510,32 @@ Comprehensive drawdown monitoring and risk state management dashboard.
 
 #### Status Hero Section
 
-| Widget | Type | Description |
-|--------|------|-------------|
-| **Drawdown Gauge** | Large gauge (center) | Current drawdown % with threshold markers: Warning (yellow arc), Recovery (orange arc), Pause (red arc). Animated needle. Pulsing glow when in recovery/pause mode |
-| **Recovery Mode Badge** | Status card | Large badge: Normal (green) / Warning (yellow, pulsing) / Recovery (orange, pulsing) / Paused (red, pulsing). Shows time in current mode |
-| **Peak vs Current Equity** | Dual number comparison | Peak equity (with date) on left, current equity on right. Delta shown between them. Connecting line shows the gap |
-| **Lot Size Reduction** | Progress bar card | Current lot size multiplier (e.g., 0.5x) with progress bar showing normal → reduced → minimum range |
+| Widget                     | Type                   | Description                                                                                                                                                        |
+| -------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Drawdown Gauge**         | Large gauge (center)   | Current drawdown % with threshold markers: Warning (yellow arc), Recovery (orange arc), Pause (red arc). Animated needle. Pulsing glow when in recovery/pause mode |
+| **Recovery Mode Badge**    | Status card            | Large badge: Normal (green) / Warning (yellow, pulsing) / Recovery (orange, pulsing) / Paused (red, pulsing). Shows time in current mode                           |
+| **Peak vs Current Equity** | Dual number comparison | Peak equity (with date) on left, current equity on right. Delta shown between them. Connecting line shows the gap                                                  |
+| **Lot Size Reduction**     | Progress bar card      | Current lot size multiplier (e.g., 0.5x) with progress bar showing normal → reduced → minimum range                                                                |
 
 #### Charts Grid
 
-| Chart | Type | Description |
-|-------|------|-------------|
-| **Drawdown History** | Inverted area chart | Peak-to-trough drawdown over time. Color gradient intensifies as drawdown deepens. Threshold lines for Warning / Recovery / Pause levels. Recovery mode periods shaded in orange background |
-| **Equity vs Peak Equity** | Dual line chart | Actual equity (blue) vs peak equity (dotted gray). Gap between them = drawdown. Shaded region = drawdown area |
-| **Drawdown Duration** | Bar chart | Duration of each drawdown event. Color intensity = depth. Horizontal line at average recovery time |
-| **Recovery Time Analysis** | Scatter plot | X = drawdown depth %, Y = recovery time (days). Trendline shows expected recovery time for given depth |
-| **Drawdown Frequency** | Histogram | Distribution of drawdown depths. Bins colored by severity. VaR (Value at Risk) line annotated |
-| **Underwater Equity Curve** | Area chart | Same as equity curve but zeroed at peak — shows only underwater periods. Green when at or above peak, red when below |
-| **Mode Transition Timeline** | Horizontal segmented bar | Time axis with colored segments: green = Normal, yellow = Warning, orange = Recovery, red = Paused. Duration labels |
+| Chart                        | Type                     | Description                                                                                                                                                                                 |
+| ---------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Drawdown History**         | Inverted area chart      | Peak-to-trough drawdown over time. Color gradient intensifies as drawdown deepens. Threshold lines for Warning / Recovery / Pause levels. Recovery mode periods shaded in orange background |
+| **Equity vs Peak Equity**    | Dual line chart          | Actual equity (blue) vs peak equity (dotted gray). Gap between them = drawdown. Shaded region = drawdown area                                                                               |
+| **Drawdown Duration**        | Bar chart                | Duration of each drawdown event. Color intensity = depth. Horizontal line at average recovery time                                                                                          |
+| **Recovery Time Analysis**   | Scatter plot             | X = drawdown depth %, Y = recovery time (days). Trendline shows expected recovery time for given depth                                                                                      |
+| **Drawdown Frequency**       | Histogram                | Distribution of drawdown depths. Bins colored by severity. VaR (Value at Risk) line annotated                                                                                               |
+| **Underwater Equity Curve**  | Area chart               | Same as equity curve but zeroed at peak — shows only underwater periods. Green when at or above peak, red when below                                                                        |
+| **Mode Transition Timeline** | Horizontal segmented bar | Time axis with colored segments: green = Normal, yellow = Warning, orange = Recovery, red = Paused. Duration labels                                                                         |
 
 **Actions:**
+
 - Record drawdown snapshot (`POST /drawdown-recovery`)
 - Manual override: Force recovery mode / Force normal mode (with confirmation dialog)
 
 **API Endpoints Used:**
+
 - `POST /drawdown-recovery`
 - `GET /drawdown-recovery/latest`
 
@@ -1484,15 +1546,18 @@ Comprehensive drawdown monitoring and risk state management dashboard.
 Toggle and monitor simulated trading mode.
 
 **Paper Trading Panel:**
+
 - Status badge: Enabled / Disabled
 - Toggle switch to enable/disable
 - Simulated vs. live indicator in header (persistent warning banner when paper trading is active)
 - Simulated balance, slippage, fill delay settings (read from engine config)
 
 **Actions:**
+
 - Enable/Disable paper trading (`PUT /paper-trading/mode`)
 
 **API Endpoints Used:**
+
 - `PUT /paper-trading/mode`
 - `GET /paper-trading/status`
 
@@ -1503,17 +1568,20 @@ Toggle and monitor simulated trading mode.
 Hot-reload engine parameters without restart.
 
 **Config Editor:**
+
 - Table of all configuration keys with current values
 - Inline editing with save button
 - JSON value editor for complex configs
 - Grouped by category (Trading, Risk, ML, Workers, Market Data, etc.)
 
 **Actions:**
+
 - Upsert config (`PUT /config`)
 - View config by key (`GET /config/{key}`)
 - View all configs (`GET /config/all`)
 
 **API Endpoints Used:**
+
 - `PUT /config`
 - `GET /config/{key}`
 - `GET /config/all`
@@ -1525,12 +1593,14 @@ Hot-reload engine parameters without restart.
 Searchable, immutable log of all engine decisions.
 
 **List View:**
+
 - Paginated table: Timestamp, Decision Type, Entity, Action, Reason, Context (JSON)
 - Filters: Decision Type, Entity, Date Range
 - Full-text search across reason and context fields
 - Expandable rows showing full JSON context
 
 **API Endpoints Used:**
+
 - `POST /audit-trail`
 - `POST /audit-trail/list`
 
@@ -1547,47 +1617,49 @@ Comprehensive real-time engine health monitoring and infrastructure dashboard.
 #### System Overview Tab
 
 **Hero Status:**
+
 - Large overall engine status: Healthy (green glow) / Degraded (yellow pulse) / Unhealthy (red pulse)
 - Uptime counter (days, hours, minutes)
 - Last restart timestamp
 
-| Widget | Type | Description |
-|--------|------|-------------|
-| **Subsystem Status Grid** | Card grid (7 cards) | One card per worker group: Core Trading, Market Data, Risk Monitoring, ML Training, ML Monitoring, Backtesting, Alerts. Each card: name, status indicator (green/yellow/red dot with glow), worker count, last heartbeat relative time. Click to expand details |
-| **Health Timeline** | Horizontal segmented bar | Last 24 hours as a timeline bar. Green = healthy, yellow = degraded, red = unhealthy. Hover for timestamp + details of status changes |
-| **Active Workers** | Donut chart | Workers by status: Running (green), Idle (blue), Error (red), Stopped (gray). Center shows total count |
-| **Error Rate** | Line chart | Errors per minute over last hour. Spike detection with annotations |
+| Widget                    | Type                     | Description                                                                                                                                                                                                                                                     |
+| ------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Subsystem Status Grid** | Card grid (7 cards)      | One card per worker group: Core Trading, Market Data, Risk Monitoring, ML Training, ML Monitoring, Backtesting, Alerts. Each card: name, status indicator (green/yellow/red dot with glow), worker count, last heartbeat relative time. Click to expand details |
+| **Health Timeline**       | Horizontal segmented bar | Last 24 hours as a timeline bar. Green = healthy, yellow = degraded, red = unhealthy. Hover for timestamp + details of status changes                                                                                                                           |
+| **Active Workers**        | Donut chart              | Workers by status: Running (green), Idle (blue), Error (red), Stopped (gray). Center shows total count                                                                                                                                                          |
+| **Error Rate**            | Line chart               | Errors per minute over last hour. Spike detection with annotations                                                                                                                                                                                              |
 
 #### Worker Monitor Tab
 
-| Chart / Widget | Type | Description |
-|---------------|------|-------------|
-| **Worker Table** | Full-width table | All 85+ background workers: Name, Group, Status (badge), Interval, Last Execution, Duration (ms), Error Count, CPU %. Sortable, filterable by group. Error rows highlighted red |
-| **Worker Execution Timeline** | Gantt-style chart | Horizontal bars showing when each worker executed over the last hour. Overlapping executions visible. Red markers for failures |
-| **Worker Duration Trend** | Multi-line chart | Average execution duration per worker group over time. Spike detection for performance degradation |
-| **Error Heatmap** | Heatmap grid | Rows = workers, columns = time buckets (last 24h). Color intensity = error count. Quickly identifies problematic workers |
+| Chart / Widget                | Type              | Description                                                                                                                                                                     |
+| ----------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Worker Table**              | Full-width table  | All 85+ background workers: Name, Group, Status (badge), Interval, Last Execution, Duration (ms), Error Count, CPU %. Sortable, filterable by group. Error rows highlighted red |
+| **Worker Execution Timeline** | Gantt-style chart | Horizontal bars showing when each worker executed over the last hour. Overlapping executions visible. Red markers for failures                                                  |
+| **Worker Duration Trend**     | Multi-line chart  | Average execution duration per worker group over time. Spike detection for performance degradation                                                                              |
+| **Error Heatmap**             | Heatmap grid      | Rows = workers, columns = time buckets (last 24h). Color intensity = error count. Quickly identifies problematic workers                                                        |
 
 #### Infrastructure Tab
 
-| Widget | Type | Description |
-|--------|------|-------------|
-| **Database Status** | Card with gauge | Connection pool utilization gauge. Avg query latency. Active connections count. Status: Connected (green) / Slow (yellow) / Disconnected (red) |
-| **RabbitMQ Status** | Card with metrics | Queue depth, messages/sec in, messages/sec out, consumer count. Status indicator. Queue depth sparkline |
-| **Broker Health** | Card per broker | Broker name, connection status (badge), API latency (ms), last successful call, error rate. Health check button |
-| **Memory & CPU** | Dual gauge | Application memory usage (MB) gauge + CPU % gauge. Trend sparklines |
-| **Event Bus Throughput** | Area chart | Integration events published per minute over last hour. Colored by event type |
-| **Database Query Latency** | Line chart with percentiles | P50, P95, P99 query latency over time. Alert threshold line |
+| Widget                     | Type                        | Description                                                                                                                                    |
+| -------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Database Status**        | Card with gauge             | Connection pool utilization gauge. Avg query latency. Active connections count. Status: Connected (green) / Slow (yellow) / Disconnected (red) |
+| **RabbitMQ Status**        | Card with metrics           | Queue depth, messages/sec in, messages/sec out, consumer count. Status indicator. Queue depth sparkline                                        |
+| **Broker Health**          | Card per broker             | Broker name, connection status (badge), API latency (ms), last successful call, error rate. Health check button                                |
+| **Memory & CPU**           | Dual gauge                  | Application memory usage (MB) gauge + CPU % gauge. Trend sparklines                                                                            |
+| **Event Bus Throughput**   | Area chart                  | Integration events published per minute over last hour. Colored by event type                                                                  |
+| **Database Query Latency** | Line chart with percentiles | P50, P95, P99 query latency over time. Alert threshold line                                                                                    |
 
 #### API Quota Tab
 
-| Widget | Type | Description |
-|--------|------|-------------|
-| **Quota Usage per Broker** | Gauge set | One gauge per broker API: requests used / limit. Color transitions green → yellow → red as quota fills |
-| **Quota Usage Over Time** | Stacked area chart | API calls per endpoint over time. Total vs limit line |
-| **Rate Limit Events** | Scrolling log | Recent rate limit hits: timestamp, broker, endpoint, queue depth. Warning tint on rows |
-| **Token Bucket State** | Visual bucket diagram | Current tokens available vs bucket capacity per broker endpoint. Refill rate displayed |
+| Widget                     | Type                  | Description                                                                                            |
+| -------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Quota Usage per Broker** | Gauge set             | One gauge per broker API: requests used / limit. Color transitions green → yellow → red as quota fills |
+| **Quota Usage Over Time**  | Stacked area chart    | API calls per endpoint over time. Total vs limit line                                                  |
+| **Rate Limit Events**      | Scrolling log         | Recent rate limit hits: timestamp, broker, endpoint, queue depth. Warning tint on rows                 |
+| **Token Bucket State**     | Visual bucket diagram | Current tokens available vs bucket capacity per broker endpoint. Refill rate displayed                 |
 
 **API Endpoints Used:**
+
 - `GET /health/status`
 - `GET /broker/health`
 - `GET /rate-limit/quota/{brokerKey}`
@@ -1599,6 +1671,7 @@ Comprehensive real-time engine health monitoring and infrastructure dashboard.
 ### Data Table
 
 A reusable `DataTableComponent<T>` wrapping AG Grid with the custom Apple-inspired theme:
+
 - Server-side pagination with pill-style page controls
 - Column sorting (maps to `sortBy` / `sortDirection` in PagerRequest)
 - Search input with magnifying glass icon and blur focus ring
@@ -1612,6 +1685,7 @@ A reusable `DataTableComponent<T>` wrapping AG Grid with the custom Apple-inspir
 ### Status Badge
 
 Consistent badge component for entity statuses:
+
 - Order: Pending (yellow), Submitted (blue), Filled (green), Cancelled (gray), Rejected (red), Failed (red)
 - Position: Open (blue), Closed (gray)
 - Strategy: Active (green), Paused (yellow), Disabled (gray)
@@ -1622,6 +1696,7 @@ Consistent badge component for entity statuses:
 ### Confirmation Dialog
 
 Apple-style centered modal for destructive actions (delete, cancel order, switch broker):
+
 - Glassmorphism backdrop with blur
 - Scale-in animation on open
 - Clear description of consequence
@@ -1631,6 +1706,7 @@ Apple-style centered modal for destructive actions (delete, cancel order, switch
 ### Detail Panel
 
 Side panel or full-page detail view with:
+
 - Header (entity name, status badge, actions dropdown)
 - Tabbed content sections
 - Related entities as linked tables
@@ -1694,14 +1770,14 @@ Side panel or full-page detail view with:
 
 ### Sidebar Groups
 
-| Group | Items |
-|-------|-------|
-| — | Dashboard |
-| Trading | Orders, Positions, Trade Signals |
-| Configuration | Strategies, Trading Accounts, Brokers, Risk Profiles, Currency Pairs, Alerts |
-| ML & Optimization | ML Models, Training Runs, Backtesting, Walk-Forward |
-| Analysis | Performance, Execution Quality, Sentiment, Market Regime, Strategy Ensemble |
-| System | Health, Engine Config, Audit Trail, Drawdown Recovery, Paper Trading |
+| Group             | Items                                                                        |
+| ----------------- | ---------------------------------------------------------------------------- |
+| —                 | Dashboard                                                                    |
+| Trading           | Orders, Positions, Trade Signals                                             |
+| Configuration     | Strategies, Trading Accounts, Brokers, Risk Profiles, Currency Pairs, Alerts |
+| ML & Optimization | ML Models, Training Runs, Backtesting, Walk-Forward                          |
+| Analysis          | Performance, Execution Quality, Sentiment, Market Regime, Strategy Ensemble  |
+| System            | Health, Engine Config, Audit Trail, Drawdown Recovery, Paper Trading         |
 
 ### Header
 
@@ -1721,6 +1797,7 @@ Auto-generated from route path with chevron separators: `Dashboard › Orders �
 ### Pagination
 
 All list endpoints use POST with `PagerRequest` body. The `DataTable` component manages:
+
 - `pageNumber` (1-indexed)
 - `pageSize` (10, 25, 50, 100 selector)
 - `searchTerm` (debounced text input, 300ms)
@@ -1728,18 +1805,19 @@ All list endpoints use POST with `PagerRequest` body. The `DataTable` component 
 
 ### Polling Strategy
 
-| Data Type | Interval | Condition |
-|-----------|----------|-----------|
-| Open positions P&L | 15s | Only when positions page or dashboard is active |
-| Live prices | 5s | Only when market data page is active |
-| System health | 15s | Only when health page or dashboard is active |
-| Pending signals | 15s | Only when signals page or dashboard is active |
-| Account balance | 30s | Only when dashboard is active |
-| Everything else | On-demand | Fetched on page load, refetched on window focus |
+| Data Type          | Interval  | Condition                                       |
+| ------------------ | --------- | ----------------------------------------------- |
+| Open positions P&L | 15s       | Only when positions page or dashboard is active |
+| Live prices        | 5s        | Only when market data page is active            |
+| System health      | 15s       | Only when health page or dashboard is active    |
+| Pending signals    | 15s       | Only when signals page or dashboard is active   |
+| Account balance    | 30s       | Only when dashboard is active                   |
+| Everything else    | On-demand | Fetched on page load, refetched on window focus |
 
 ### Optimistic Updates
 
 Status changes are applied optimistically via local signal updates while the API call is in flight:
+
 - Approve/Reject signal
 - Activate/Pause strategy
 - Activate broker
@@ -1751,6 +1829,7 @@ On API error, the local state is rolled back and a snackbar error is shown.
 ### Data Refresh
 
 After mutating an entity:
+
 - Re-fetch that entity's list via the service
 - Re-fetch related entity data (e.g., after creating an order, refresh positions list)
 - Re-fetch dashboard summary data
@@ -1762,30 +1841,30 @@ After mutating an entity:
 
 ### Chart Types Used
 
-| Chart | ECharts Type | Used In |
-|-------|-------------|---------|
-| Line chart | `line` with smooth curves | Equity curve, accuracy over time, win rate trends, price analytics |
-| Multi-line | `line` (multiple series) | Strategy comparison, champion vs challenger, cumulative P&L overlays |
-| Bar chart | `bar` with rounded corners | Daily P&L, slippage by symbol, attribution, session analysis |
-| Grouped bar | `bar` with grouped series | Attribution by session/regime, win rate by session, COT breakdown |
-| Stacked bar | `bar` (stacked) | P&L contribution, regime P&L, session overlap analysis |
-| Waterfall | `bar` (custom) | P&L contribution waterfall, factor attribution decomposition |
-| Horizontal bar | `bar` (horizontal) | Feature importance, strategy leaderboard, slippage by symbol |
-| Area chart | `line` with `areaStyle` gradient fill | Cumulative P&L, drawdown area, sentiment history, COT positioning |
-| Stacked area | `line` (stacked `areaStyle`) | Allocation weights over time, contribution to return, quota usage |
-| Donut chart | `pie` (ring variant) | Strategy allocation, regime distribution, agreement rate, risk contribution |
-| Gauge | `gauge` with arc style | Drawdown %, risk compliance, sentiment, execution quality score, model accuracy |
-| Sparkline | `line` (mini, no axis) | Metric cards, table row inline trends, price movement |
-| Heatmap | `heatmap` | Correlation matrix, monthly returns, trade outcome by hour/day, spread by hour, worker errors |
-| Calendar heatmap | `heatmap` (calendar layout) | Trade outcome by day-of-week × hour, daily P&L calendar |
-| Treemap | `treemap` | Position exposure, symbol exposure, portfolio allocation |
-| Scatter plot | `scatter` | Hold duration vs P&L, MAE/MFE, R-multiple over time, risk-adjusted returns, slippage vs size |
-| Histogram | `bar` (custom bins) | P&L distribution, slippage distribution, R-multiple distribution, confidence distribution |
-| Box plot | `boxplot` | Regime duration, confidence comparison, latency percentiles |
-| Radar chart | `radar` | Global sentiment, multi-metric strategy comparison |
-| Parallel coordinates | `parallel` | Hyperparameter search visualization |
-| Gantt / Timeline | `custom` (rect series) | Worker execution timeline, regime history, mode transition timeline |
-| Segmented bar | `custom` | Health timeline, regime timeline, drawdown recovery modes |
+| Chart                | ECharts Type                          | Used In                                                                                       |
+| -------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Line chart           | `line` with smooth curves             | Equity curve, accuracy over time, win rate trends, price analytics                            |
+| Multi-line           | `line` (multiple series)              | Strategy comparison, champion vs challenger, cumulative P&L overlays                          |
+| Bar chart            | `bar` with rounded corners            | Daily P&L, slippage by symbol, attribution, session analysis                                  |
+| Grouped bar          | `bar` with grouped series             | Attribution by session/regime, win rate by session, COT breakdown                             |
+| Stacked bar          | `bar` (stacked)                       | P&L contribution, regime P&L, session overlap analysis                                        |
+| Waterfall            | `bar` (custom)                        | P&L contribution waterfall, factor attribution decomposition                                  |
+| Horizontal bar       | `bar` (horizontal)                    | Feature importance, strategy leaderboard, slippage by symbol                                  |
+| Area chart           | `line` with `areaStyle` gradient fill | Cumulative P&L, drawdown area, sentiment history, COT positioning                             |
+| Stacked area         | `line` (stacked `areaStyle`)          | Allocation weights over time, contribution to return, quota usage                             |
+| Donut chart          | `pie` (ring variant)                  | Strategy allocation, regime distribution, agreement rate, risk contribution                   |
+| Gauge                | `gauge` with arc style                | Drawdown %, risk compliance, sentiment, execution quality score, model accuracy               |
+| Sparkline            | `line` (mini, no axis)                | Metric cards, table row inline trends, price movement                                         |
+| Heatmap              | `heatmap`                             | Correlation matrix, monthly returns, trade outcome by hour/day, spread by hour, worker errors |
+| Calendar heatmap     | `heatmap` (calendar layout)           | Trade outcome by day-of-week × hour, daily P&L calendar                                       |
+| Treemap              | `treemap`                             | Position exposure, symbol exposure, portfolio allocation                                      |
+| Scatter plot         | `scatter`                             | Hold duration vs P&L, MAE/MFE, R-multiple over time, risk-adjusted returns, slippage vs size  |
+| Histogram            | `bar` (custom bins)                   | P&L distribution, slippage distribution, R-multiple distribution, confidence distribution     |
+| Box plot             | `boxplot`                             | Regime duration, confidence comparison, latency percentiles                                   |
+| Radar chart          | `radar`                               | Global sentiment, multi-metric strategy comparison                                            |
+| Parallel coordinates | `parallel`                            | Hyperparameter search visualization                                                           |
+| Gantt / Timeline     | `custom` (rect series)                | Worker execution timeline, regime history, mode transition timeline                           |
+| Segmented bar        | `custom`                              | Health timeline, regime timeline, drawdown recovery modes                                     |
 
 ### Chart Styling
 
@@ -1821,13 +1900,14 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) =>
           // Show snackbar with responseMessage
         }
       }
-    })
+    }),
   );
 ```
 
 ### Toast Notifications
 
 Using the custom glassmorphism toast component (see Section 3.1):
+
 - **Success** (green): Entity created/updated/deleted, action completed
 - **Error** (red): API error, validation failure, network error
 - **Warning** (yellow): Paper trading mode active, drawdown warning
@@ -1939,13 +2019,13 @@ Banner at the top of the page when network connectivity is lost. Queries paused 
 
 ### Performance
 
-| Metric | Target |
-|--------|--------|
-| Initial page load (LCP) | < 2 seconds |
-| Route navigation | < 500ms |
-| Table re-render (100 rows) | < 100ms |
-| Bundle size (gzipped) | < 500 KB initial, < 1.5 MB total |
-| API response handling | < 50ms client-side processing |
+| Metric                     | Target                           |
+| -------------------------- | -------------------------------- |
+| Initial page load (LCP)    | < 2 seconds                      |
+| Route navigation           | < 500ms                          |
+| Table re-render (100 rows) | < 100ms                          |
+| Bundle size (gzipped)      | < 500 KB initial, < 1.5 MB total |
+| API response handling      | < 50ms client-side processing    |
 
 ### Browser Support
 
@@ -1981,4 +2061,4 @@ Banner at the top of the page when network connectivity is lost. Queries paused 
 
 ---
 
-*End of document.*
+_End of document._

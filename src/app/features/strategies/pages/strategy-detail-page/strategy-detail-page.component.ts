@@ -52,12 +52,14 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
   template: `
     <div class="page">
       @if (strategy()) {
-        <app-page-header [title]="strategy()!.name ?? ''" [subtitle]="(strategy()!.symbol ?? '') + ' - ' + (strategy()!.description ?? '')">
+        <app-page-header
+          [title]="strategy()!.name ?? ''"
+          [subtitle]="(strategy()!.symbol ?? '') + ' - ' + (strategy()!.description ?? '')"
+        >
           <button class="btn btn-ghost" (click)="goBack()">Back</button>
         </app-page-header>
 
         <ui-tabs [tabs]="detailTabs" [(activeTab)]="activeTab">
-
           <!-- Config Tab -->
           @if (activeTab() === 'config') {
             <div class="detail-layout">
@@ -74,7 +76,9 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Timeframe</span>
-                    <span class="detail-value">{{ strategy()!.timeframe | enumLabel:'timeframe' }}</span>
+                    <span class="detail-value">{{
+                      strategy()!.timeframe | enumLabel: 'timeframe'
+                    }}</span>
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Type</span>
@@ -82,11 +86,15 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Status</span>
-                    <span class="detail-value"><app-status-badge [status]="strategy()!.status" type="strategy" /></span>
+                    <span class="detail-value"
+                      ><app-status-badge [status]="strategy()!.status" type="strategy"
+                    /></span>
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Risk Profile</span>
-                    <span class="detail-value">{{ strategy()!.riskProfileId ? '#' + strategy()!.riskProfileId : 'None' }}</span>
+                    <span class="detail-value">{{
+                      strategy()!.riskProfileId ? '#' + strategy()!.riskProfileId : 'None'
+                    }}</span>
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Created</span>
@@ -104,31 +112,35 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
 
               <div class="action-bar">
                 @if (strategy()!.status === 'Paused' || strategy()!.status === 'Stopped') {
-                  <button class="btn btn-success" (click)="onActivate()" [disabled]="actionLoading()">Activate</button>
+                  <button
+                    class="btn btn-success"
+                    (click)="onActivate()"
+                    [disabled]="actionLoading()"
+                  >
+                    Activate
+                  </button>
                 }
                 @if (strategy()!.status === 'Active') {
-                  <button class="btn btn-warning" (click)="onPause()" [disabled]="actionLoading()">Pause</button>
+                  <button class="btn btn-warning" (click)="onPause()" [disabled]="actionLoading()">
+                    Pause
+                  </button>
                 }
                 <button class="btn btn-outline" (click)="showEditForm.set(true)">Edit</button>
-                <button class="btn btn-destructive" (click)="showDeleteConfirm.set(true)">Delete</button>
+                <button class="btn btn-destructive" (click)="showDeleteConfirm.set(true)">
+                  Delete
+                </button>
               </div>
             </div>
           }
 
           <!-- Signals Tab -->
           @if (activeTab() === 'signals') {
-            <app-data-table
-              [columnDefs]="signalColumns"
-              [fetchData]="fetchSignals"
-            />
+            <app-data-table [columnDefs]="signalColumns" [fetchData]="fetchSignals" />
           }
 
           <!-- Orders Tab -->
           @if (activeTab() === 'orders') {
-            <app-data-table
-              [columnDefs]="orderColumns"
-              [fetchData]="fetchOrders"
-            />
+            <app-data-table [columnDefs]="orderColumns" [fetchData]="fetchOrders" />
           }
 
           <!-- Optimization Tab -->
@@ -170,12 +182,16 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
       <app-confirm-dialog
         [open]="showDeleteConfirm()"
         title="Delete Strategy"
-        [message]="'Are you sure you want to delete ' + (strategy()?.name ?? 'this strategy') + '? This action cannot be undone.'"
+        [message]="
+          'Are you sure you want to delete ' +
+          (strategy()?.name ?? 'this strategy') +
+          '? This action cannot be undone.'
+        "
         confirmLabel="Delete"
         confirmVariant="destructive"
         [loading]="deleteLoading()"
         (confirm)="onDelete()"
-        (cancel)="showDeleteConfirm.set(false)"
+        (cancelled)="showDeleteConfirm.set(false)"
       />
 
       <app-strategy-form
@@ -186,182 +202,228 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
       />
     </div>
   `,
-  styles: [`
-    .page { padding: var(--space-2) 0; }
+  styles: [
+    `
+      .page {
+        padding: var(--space-2) 0;
+      }
 
-    .btn {
-      height: 36px;
-      padding: 0 var(--space-5);
-      border: none;
-      border-radius: var(--radius-full);
-      font-size: var(--text-sm);
-      font-weight: var(--font-medium);
-      font-family: inherit;
-      cursor: pointer;
-      transition: all 0.15s ease;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: var(--space-1);
-      min-width: 80px;
-    }
-    .btn:active:not(:disabled) { transform: scale(0.97); }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+      .btn {
+        height: 36px;
+        padding: 0 var(--space-5);
+        border: none;
+        border-radius: var(--radius-full);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        font-family: inherit;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-1);
+        min-width: 80px;
+      }
+      .btn:active:not(:disabled) {
+        transform: scale(0.97);
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
 
-    .btn-primary { background: var(--accent); color: white; }
-    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+      .btn-primary {
+        background: var(--accent);
+        color: white;
+      }
+      .btn-primary:hover:not(:disabled) {
+        background: var(--accent-hover);
+      }
 
-    .btn-success { background: #34C759; color: white; }
-    .btn-success:hover:not(:disabled) { background: #2DB84E; }
+      .btn-success {
+        background: #34c759;
+        color: white;
+      }
+      .btn-success:hover:not(:disabled) {
+        background: #2db84e;
+      }
 
-    .btn-warning { background: #FF9500; color: white; }
-    .btn-warning:hover:not(:disabled) { background: #E68600; }
+      .btn-warning {
+        background: #ff9500;
+        color: white;
+      }
+      .btn-warning:hover:not(:disabled) {
+        background: #e68600;
+      }
 
-    .btn-destructive { background: var(--loss); color: white; }
-    .btn-destructive:hover:not(:disabled) { opacity: 0.9; }
+      .btn-destructive {
+        background: var(--loss);
+        color: white;
+      }
+      .btn-destructive:hover:not(:disabled) {
+        opacity: 0.9;
+      }
 
-    .btn-outline {
-      background: transparent;
-      color: var(--text-primary);
-      border: 1px solid var(--border);
-    }
-    .btn-outline:hover:not(:disabled) { background: var(--bg-tertiary); }
+      .btn-outline {
+        background: transparent;
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+      }
+      .btn-outline:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+      }
 
-    .btn-ghost {
-      background: transparent;
-      color: var(--text-secondary);
-    }
-    .btn-ghost:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+      .btn-ghost {
+        background: transparent;
+        color: var(--text-secondary);
+      }
+      .btn-ghost:hover {
+        color: var(--text-primary);
+        background: var(--bg-tertiary);
+      }
 
-    .btn-sm {
-      height: 28px;
-      padding: 0 var(--space-3);
-      font-size: var(--text-xs);
-      min-width: auto;
-    }
+      .btn-sm {
+        height: 28px;
+        padding: 0 var(--space-3);
+        font-size: var(--text-xs);
+        min-width: auto;
+      }
 
-    .detail-layout {
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-4);
-    }
+      .detail-layout {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+      }
 
-    .detail-card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      padding: var(--card-padding);
-    }
+      .detail-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+      }
 
-    .card-title {
-      font-size: var(--text-base);
-      font-weight: var(--font-semibold);
-      color: var(--text-primary);
-      margin: 0 0 var(--space-4);
-    }
+      .card-title {
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        margin: 0 0 var(--space-4);
+      }
 
-    .detail-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: var(--space-4);
-    }
+      .detail-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: var(--space-4);
+      }
 
-    .detail-item {
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-1);
-    }
+      .detail-item {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+      }
 
-    .detail-label {
-      font-size: var(--text-xs);
-      color: var(--text-tertiary);
-      font-weight: var(--font-medium);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
+      .detail-label {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        font-weight: var(--font-medium);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
 
-    .detail-value {
-      font-size: var(--text-sm);
-      color: var(--text-primary);
-      font-weight: var(--font-medium);
-    }
+      .detail-value {
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+        font-weight: var(--font-medium);
+      }
 
-    .code-block {
-      background: var(--bg-primary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: var(--space-4);
-      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-      font-size: 12px;
-      color: var(--text-primary);
-      overflow-x: auto;
-      line-height: 1.6;
-      margin: 0;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-    }
+      .code-block {
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: var(--space-4);
+        font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+        font-size: 12px;
+        color: var(--text-primary);
+        overflow-x: auto;
+        line-height: 1.6;
+        margin: 0;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+      }
 
-    .action-bar {
-      display: flex;
-      gap: var(--space-3);
-      padding: var(--space-4);
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-    }
+      .action-bar {
+        display: flex;
+        gap: var(--space-3);
+        padding: var(--space-4);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+      }
 
-    .optimization-header {
-      display: flex;
-      justify-content: flex-end;
-      margin-bottom: var(--space-4);
-    }
+      .optimization-header {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: var(--space-4);
+      }
 
-    .error-state {
-      text-align: center;
-      padding: var(--space-16);
-    }
-    .error-state h2 {
-      font-size: var(--text-lg);
-      color: var(--text-primary);
-      margin: 0 0 var(--space-2);
-    }
-    .error-state p {
-      font-size: var(--text-sm);
-      color: var(--text-secondary);
-      margin: 0 0 var(--space-6);
-    }
+      .error-state {
+        text-align: center;
+        padding: var(--space-16);
+      }
+      .error-state h2 {
+        font-size: var(--text-lg);
+        color: var(--text-primary);
+        margin: 0 0 var(--space-2);
+      }
+      .error-state p {
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        margin: 0 0 var(--space-6);
+      }
 
-    .loading-state {
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-4);
-      padding: var(--space-8) 0;
-    }
+      .loading-state {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+        padding: var(--space-8) 0;
+      }
 
-    .loading-shimmer {
-      height: 20px;
-      width: 60%;
-      background: var(--bg-tertiary);
-      border-radius: var(--radius-sm);
-      animation: shimmer 1.5s infinite;
-    }
-    .loading-shimmer.short { width: 30%; height: 14px; }
+      .loading-shimmer {
+        height: 20px;
+        width: 60%;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-sm);
+        animation: shimmer 1.5s infinite;
+      }
+      .loading-shimmer.short {
+        width: 30%;
+        height: 14px;
+      }
 
-    @keyframes shimmer {
-      0%, 100% { opacity: 0.5; }
-      50% { opacity: 1; }
-    }
+      @keyframes shimmer {
+        0%,
+        100% {
+          opacity: 0.5;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
 
-    .spinner {
-      width: 16px;
-      height: 16px;
-      border: 2px solid rgba(255, 255, 255, 0.3);
-      border-top-color: white;
-      border-radius: 50%;
-      animation: spin 0.6s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-  `],
+      .spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-top-color: white;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    `,
+  ],
 })
 export class StrategyDetailPageComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
@@ -398,10 +460,30 @@ export class StrategyDetailPageComponent implements OnInit {
     { field: 'id', headerName: 'ID', width: 70 },
     { field: 'symbol', headerName: 'Symbol', flex: 1 },
     { field: 'direction', headerName: 'Direction', width: 100 },
-    { field: 'entryPrice', headerName: 'Entry Price', flex: 1, valueFormatter: (p: any) => p.value?.toFixed(5) },
-    { field: 'stopLoss', headerName: 'SL', flex: 1, valueFormatter: (p: any) => p.value?.toFixed(5) ?? '-' },
-    { field: 'takeProfit', headerName: 'TP', flex: 1, valueFormatter: (p: any) => p.value?.toFixed(5) ?? '-' },
-    { field: 'confidence', headerName: 'Confidence', width: 100, valueFormatter: (p: any) => `${(p.value * 100).toFixed(1)}%` },
+    {
+      field: 'entryPrice',
+      headerName: 'Entry Price',
+      flex: 1,
+      valueFormatter: (p: any) => p.value?.toFixed(5),
+    },
+    {
+      field: 'stopLoss',
+      headerName: 'SL',
+      flex: 1,
+      valueFormatter: (p: any) => p.value?.toFixed(5) ?? '-',
+    },
+    {
+      field: 'takeProfit',
+      headerName: 'TP',
+      flex: 1,
+      valueFormatter: (p: any) => p.value?.toFixed(5) ?? '-',
+    },
+    {
+      field: 'confidence',
+      headerName: 'Confidence',
+      width: 100,
+      valueFormatter: (p: any) => `${(p.value * 100).toFixed(1)}%`,
+    },
     {
       field: 'status',
       headerName: 'Status',
@@ -425,8 +507,18 @@ export class StrategyDetailPageComponent implements OnInit {
     { field: 'orderType', headerName: 'Side', width: 80 },
     { field: 'executionType', headerName: 'Exec Type', width: 100 },
     { field: 'quantity', headerName: 'Qty', width: 80 },
-    { field: 'price', headerName: 'Price', flex: 1, valueFormatter: (p: any) => p.value?.toFixed(5) },
-    { field: 'filledPrice', headerName: 'Filled', flex: 1, valueFormatter: (p: any) => p.value?.toFixed(5) ?? '-' },
+    {
+      field: 'price',
+      headerName: 'Price',
+      flex: 1,
+      valueFormatter: (p: any) => p.value?.toFixed(5),
+    },
+    {
+      field: 'filledPrice',
+      headerName: 'Filled',
+      flex: 1,
+      valueFormatter: (p: any) => p.value?.toFixed(5) ?? '-',
+    },
     {
       field: 'status',
       headerName: 'Status',
@@ -446,7 +538,12 @@ export class StrategyDetailPageComponent implements OnInit {
 
   readonly optimizationColumns: ColDef[] = [
     { field: 'id', headerName: 'ID', width: 70 },
-    { field: 'triggerType', headerName: 'Trigger', flex: 1, valueFormatter: (p: any) => this.enumLabel.transform(p.value) },
+    {
+      field: 'triggerType',
+      headerName: 'Trigger',
+      flex: 1,
+      valueFormatter: (p: any) => this.enumLabel.transform(p.value),
+    },
     {
       field: 'status',
       headerName: 'Status',
@@ -457,8 +554,18 @@ export class StrategyDetailPageComponent implements OnInit {
       },
     },
     { field: 'iterations', headerName: 'Iterations', width: 100 },
-    { field: 'bestHealthScore', headerName: 'Best Score', width: 110, valueFormatter: (p: any) => p.value?.toFixed(4) ?? '-' },
-    { field: 'baselineHealthScore', headerName: 'Baseline', width: 110, valueFormatter: (p: any) => p.value?.toFixed(4) ?? '-' },
+    {
+      field: 'bestHealthScore',
+      headerName: 'Best Score',
+      width: 110,
+      valueFormatter: (p: any) => p.value?.toFixed(4) ?? '-',
+    },
+    {
+      field: 'baselineHealthScore',
+      headerName: 'Baseline',
+      width: 110,
+      valueFormatter: (p: any) => p.value?.toFixed(4) ?? '-',
+    },
     {
       field: 'startedAt',
       headerName: 'Started',
@@ -469,7 +576,7 @@ export class StrategyDetailPageComponent implements OnInit {
       field: 'completedAt',
       headerName: 'Completed',
       flex: 1,
-      valueFormatter: (p: any) => p.value ? this.relativeTime.transform(p.value) : '-',
+      valueFormatter: (p: any) => (p.value ? this.relativeTime.transform(p.value) : '-'),
     },
     {
       headerName: 'Actions',
@@ -497,19 +604,19 @@ export class StrategyDetailPageComponent implements OnInit {
   ];
 
   readonly fetchSignals = (params: PagerRequest) =>
-    this.signalsService.list({ ...params, filter: `strategyId:${this.strategyId}` }).pipe(
-      map((res) => res.data!),
-    );
+    this.signalsService
+      .list({ ...params, filter: `strategyId:${this.strategyId}` })
+      .pipe(map((res) => res.data!));
 
   readonly fetchOrders = (params: PagerRequest) =>
-    this.ordersService.list({ ...params, filter: `strategyId:${this.strategyId}` }).pipe(
-      map((res) => res.data!),
-    );
+    this.ordersService
+      .list({ ...params, filter: `strategyId:${this.strategyId}` })
+      .pipe(map((res) => res.data!));
 
   readonly fetchOptimizations = (params: PagerRequest) =>
-    this.feedbackService.listOptimizationRuns({ ...params, filter: `strategyId:${this.strategyId}` }).pipe(
-      map((res) => res.data!),
-    );
+    this.feedbackService
+      .listOptimizationRuns({ ...params, filter: `strategyId:${this.strategyId}` })
+      .pipe(map((res) => res.data!));
 
   ngOnInit(): void {
     this.strategyId = +this.route.snapshot.paramMap.get('id')!;

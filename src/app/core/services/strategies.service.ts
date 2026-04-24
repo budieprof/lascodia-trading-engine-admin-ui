@@ -43,7 +43,10 @@ export class StrategiesService {
     return this.api.put(`/strategy/${id}/pause`);
   }
 
-  assignRiskProfile(id: number, data: AssignRiskProfileRequest): Observable<ResponseData<StrategyDto>> {
+  assignRiskProfile(
+    id: number,
+    data: AssignRiskProfileRequest,
+  ): Observable<ResponseData<StrategyDto>> {
     return this.api.put(`/strategy/${id}/risk-profile`, data);
   }
 }

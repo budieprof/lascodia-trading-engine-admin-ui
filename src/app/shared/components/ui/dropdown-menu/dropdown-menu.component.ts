@@ -42,11 +42,7 @@ export interface DropdownMenuItem {
               (mouseenter)="focusedIndex.set(i)"
             >
               @if (item.icon) {
-                <lucide-icon
-                  [name]="item.icon"
-                  [size]="16"
-                  [strokeWidth]="1.5"
-                ></lucide-icon>
+                <lucide-icon [name]="item.icon" [size]="16" [strokeWidth]="1.5"></lucide-icon>
               }
               <span>{{ item.label }}</span>
             </button>
@@ -55,75 +51,77 @@ export interface DropdownMenuItem {
       }
     </div>
   `,
-  styles: [`
-    .dropdown {
-      position: relative;
-      display: inline-block;
-    }
-
-    .dropdown__trigger {
-      cursor: pointer;
-    }
-
-    .dropdown__menu {
-      position: absolute;
-      top: calc(100% + var(--space-1));
-      right: 0;
-      min-width: 180px;
-      background: var(--bg-primary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      box-shadow: var(--shadow-md);
-      padding: var(--space-1);
-      z-index: 1000;
-      transform-origin: top right;
-      animation: dropdown-scale-in 0.15s ease-out;
-    }
-
-    .dropdown__item {
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-      width: 100%;
-      height: 36px;
-      padding: 0 var(--space-3);
-      border: none;
-      border-radius: var(--radius-sm);
-      background: transparent;
-      color: var(--text-primary);
-      font-family: inherit;
-      font-size: 13px;
-      font-weight: 400;
-      cursor: pointer;
-      transition: background-color 0.1s ease;
-      text-align: left;
-    }
-
-    .dropdown__item:hover,
-    .dropdown__item--focused {
-      background: var(--bg-tertiary);
-    }
-
-    .dropdown__item--destructive {
-      color: #FF3B30;
-    }
-
-    .dropdown__item--destructive:hover,
-    .dropdown__item--destructive.dropdown__item--focused {
-      background: rgba(255, 59, 48, 0.1);
-    }
-
-    @keyframes dropdown-scale-in {
-      0% {
-        opacity: 0;
-        transform: scale(0.95);
+  styles: [
+    `
+      .dropdown {
+        position: relative;
+        display: inline-block;
       }
-      100% {
-        opacity: 1;
-        transform: scale(1);
+
+      .dropdown__trigger {
+        cursor: pointer;
       }
-    }
-  `],
+
+      .dropdown__menu {
+        position: absolute;
+        top: calc(100% + var(--space-1));
+        right: 0;
+        min-width: 180px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-md);
+        padding: var(--space-1);
+        z-index: 1000;
+        transform-origin: top right;
+        animation: dropdown-scale-in 0.15s ease-out;
+      }
+
+      .dropdown__item {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        width: 100%;
+        height: 36px;
+        padding: 0 var(--space-3);
+        border: none;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--text-primary);
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 400;
+        cursor: pointer;
+        transition: background-color 0.1s ease;
+        text-align: left;
+      }
+
+      .dropdown__item:hover,
+      .dropdown__item--focused {
+        background: var(--bg-tertiary);
+      }
+
+      .dropdown__item--destructive {
+        color: #ff3b30;
+      }
+
+      .dropdown__item--destructive:hover,
+      .dropdown__item--destructive.dropdown__item--focused {
+        background: rgba(255, 59, 48, 0.1);
+      }
+
+      @keyframes dropdown-scale-in {
+        0% {
+          opacity: 0;
+          transform: scale(0.95);
+        }
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+    `,
+  ],
 })
 export class DropdownMenuComponent {
   readonly items = input.required<DropdownMenuItem[]>();
@@ -186,13 +184,14 @@ export class DropdownMenuComponent {
         this.focusedIndex.update((i) => (i - 1 + count) % count);
         break;
       case 'Enter':
-      case ' ':
+      case ' ': {
         event.preventDefault();
         const idx = this.focusedIndex();
         if (idx >= 0 && idx < count) {
           this.onItemClick(this.items()[idx]);
         }
         break;
+      }
       case 'Escape':
         event.preventDefault();
         this.close();

@@ -14,12 +14,10 @@ import type { EChartsOption } from 'echarts';
 
 import { OrdersService } from '@core/services/orders.service';
 import { NotificationService } from '@core/notifications/notification.service';
-import type {
-  OrderDto,
-  PagedData,
-  PagerRequest,
-  CreateOrderRequest,
-} from '@core/api/api.types';
+import { RealtimeService } from '@core/realtime/realtime.service';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { merge, throttleTime } from 'rxjs';
+import type { OrderDto, PagedData, PagerRequest, CreateOrderRequest } from '@core/api/api.types';
 
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -43,7 +41,12 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
   template: `
     <div class="page">
       <app-page-header title="Orders" subtitle="Manage and monitor trading orders">
-        <button class="btn btn-primary" (click)="toggleCreateForm()">
+        <button
+          type="button"
+          class="btn btn-primary"
+          (click)="toggleCreateForm()"
+          [attr.aria-expanded]="showCreateForm()"
+        >
           @if (showCreateForm()) {
             Close Form
           } @else {
@@ -58,29 +61,84 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
           <div class="create-card">
             <div class="create-card-header">
               <h3 class="create-card-title">Create New Order</h3>
-              <button class="close-btn" (click)="showCreateForm.set(false)">&times;</button>
+              <button
+                type="button"
+                class="close-btn"
+                aria-label="Close create-order form"
+                (click)="showCreateForm.set(false)"
+              >
+                &times;
+              </button>
             </div>
             <form [formGroup]="createForm" (ngSubmit)="onCreateSubmit()" class="create-card-body">
               <div class="form-grid-3">
                 <div class="form-field">
-                  <label class="form-label">Symbol *</label>
-                  <input class="form-input" formControlName="symbol" placeholder="e.g. EURUSD" />
-                  @if (createForm.get('symbol')?.touched && createForm.get('symbol')?.errors?.['required']) {
-                    <span class="form-error">Symbol is required</span>
+                  <label for="order-symbol" class="form-label"
+                    >Symbol <abbr title="required" aria-label="required">*</abbr></label
+                  >
+                  <input
+                    id="order-symbol"
+                    class="form-input"
+                    formControlName="symbol"
+                    placeholder="e.g. EURUSD"
+                    required
+                    autocomplete="off"
+                    aria-describedby="order-symbol-error"
+                    [attr.aria-invalid]="hasError('symbol')"
+                  />
+                  @if (
+                    createForm.get('symbol')?.touched &&
+                    createForm.get('symbol')?.errors?.['required']
+                  ) {
+                    <span id="order-symbol-error" class="form-error" role="alert"
+                      >Symbol is required</span
+                    >
                   }
                 </div>
                 <div class="form-field">
-                  <label class="form-label">Strategy ID *</label>
-                  <input class="form-input" type="number" formControlName="strategyId" placeholder="Strategy ID" />
-                  @if (createForm.get('strategyId')?.touched && createForm.get('strategyId')?.errors?.['required']) {
-                    <span class="form-error">Strategy ID is required</span>
+                  <label for="order-strategy" class="form-label"
+                    >Strategy ID <abbr title="required" aria-label="required">*</abbr></label
+                  >
+                  <input
+                    id="order-strategy"
+                    class="form-input"
+                    type="number"
+                    formControlName="strategyId"
+                    placeholder="Strategy ID"
+                    required
+                    aria-describedby="order-strategy-error"
+                    [attr.aria-invalid]="hasError('strategyId')"
+                  />
+                  @if (
+                    createForm.get('strategyId')?.touched &&
+                    createForm.get('strategyId')?.errors?.['required']
+                  ) {
+                    <span id="order-strategy-error" class="form-error" role="alert"
+                      >Strategy ID is required</span
+                    >
                   }
                 </div>
                 <div class="form-field">
-                  <label class="form-label">Trading Account ID *</label>
-                  <input class="form-input" type="number" formControlName="tradingAccountId" placeholder="Account ID" />
-                  @if (createForm.get('tradingAccountId')?.touched && createForm.get('tradingAccountId')?.errors?.['required']) {
-                    <span class="form-error">Trading Account ID is required</span>
+                  <label for="order-account" class="form-label"
+                    >Trading Account ID <abbr title="required" aria-label="required">*</abbr></label
+                  >
+                  <input
+                    id="order-account"
+                    class="form-input"
+                    type="number"
+                    formControlName="tradingAccountId"
+                    placeholder="Account ID"
+                    required
+                    aria-describedby="order-account-error"
+                    [attr.aria-invalid]="hasError('tradingAccountId')"
+                  />
+                  @if (
+                    createForm.get('tradingAccountId')?.touched &&
+                    createForm.get('tradingAccountId')?.errors?.['required']
+                  ) {
+                    <span id="order-account-error" class="form-error" role="alert"
+                      >Trading Account ID is required</span
+                    >
                   }
                 </div>
                 <div class="form-field">
@@ -90,7 +148,10 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                     <option value="Buy">Buy</option>
                     <option value="Sell">Sell</option>
                   </select>
-                  @if (createForm.get('orderType')?.touched && createForm.get('orderType')?.errors?.['required']) {
+                  @if (
+                    createForm.get('orderType')?.touched &&
+                    createForm.get('orderType')?.errors?.['required']
+                  ) {
                     <span class="form-error">Order type is required</span>
                   }
                 </div>
@@ -103,14 +164,26 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                     <option value="Stop">Stop</option>
                     <option value="StopLimit">Stop Limit</option>
                   </select>
-                  @if (createForm.get('executionType')?.touched && createForm.get('executionType')?.errors?.['required']) {
+                  @if (
+                    createForm.get('executionType')?.touched &&
+                    createForm.get('executionType')?.errors?.['required']
+                  ) {
                     <span class="form-error">Execution type is required</span>
                   }
                 </div>
                 <div class="form-field">
                   <label class="form-label">Quantity *</label>
-                  <input class="form-input" type="number" formControlName="quantity" placeholder="0.00" step="0.01" />
-                  @if (createForm.get('quantity')?.touched && createForm.get('quantity')?.errors?.['required']) {
+                  <input
+                    class="form-input"
+                    type="number"
+                    formControlName="quantity"
+                    placeholder="0.00"
+                    step="0.01"
+                  />
+                  @if (
+                    createForm.get('quantity')?.touched &&
+                    createForm.get('quantity')?.errors?.['required']
+                  ) {
                     <span class="form-error">Quantity is required</span>
                   }
                   @if (createForm.get('quantity')?.errors?.['min']) {
@@ -119,8 +192,17 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                 </div>
                 <div class="form-field">
                   <label class="form-label">Price *</label>
-                  <input class="form-input" type="number" formControlName="price" placeholder="0.00000" step="0.00001" />
-                  @if (createForm.get('price')?.touched && createForm.get('price')?.errors?.['required']) {
+                  <input
+                    class="form-input"
+                    type="number"
+                    formControlName="price"
+                    placeholder="0.00000"
+                    step="0.00001"
+                  />
+                  @if (
+                    createForm.get('price')?.touched &&
+                    createForm.get('price')?.errors?.['required']
+                  ) {
                     <span class="form-error">Price is required</span>
                   }
                   @if (createForm.get('price')?.errors?.['min']) {
@@ -129,11 +211,23 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                 </div>
                 <div class="form-field">
                   <label class="form-label">Stop Loss</label>
-                  <input class="form-input" type="number" formControlName="stopLoss" placeholder="Optional" step="0.00001" />
+                  <input
+                    class="form-input"
+                    type="number"
+                    formControlName="stopLoss"
+                    placeholder="Optional"
+                    step="0.00001"
+                  />
                 </div>
                 <div class="form-field">
                   <label class="form-label">Take Profit</label>
-                  <input class="form-input" type="number" formControlName="takeProfit" placeholder="Optional" step="0.00001" />
+                  <input
+                    class="form-input"
+                    type="number"
+                    formControlName="takeProfit"
+                    placeholder="Optional"
+                    step="0.00001"
+                  />
                 </div>
                 <div class="form-field form-field-full">
                   <label class="form-checkbox-label">
@@ -143,14 +237,28 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                 </div>
                 <div class="form-field form-field-full">
                   <label class="form-label">Notes</label>
-                  <textarea class="form-textarea" formControlName="notes" rows="2" placeholder="Optional notes..."></textarea>
+                  <textarea
+                    class="form-textarea"
+                    formControlName="notes"
+                    rows="2"
+                    placeholder="Optional notes..."
+                  ></textarea>
                 </div>
               </div>
               <div class="create-actions">
-                <button type="button" class="btn btn-secondary" (click)="showCreateForm.set(false)" [disabled]="creating()">
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  (click)="showCreateForm.set(false)"
+                  [disabled]="creating()"
+                >
                   Cancel
                 </button>
-                <button type="submit" class="btn btn-primary" [disabled]="createForm.invalid || creating()">
+                <button
+                  type="submit"
+                  class="btn btn-primary"
+                  [disabled]="createForm.invalid || creating()"
+                >
                   @if (creating()) {
                     <span class="spinner"></span>
                   } @else {
@@ -199,7 +307,11 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
             <div class="filter-bar">
               <div class="filter-group">
                 <label class="filter-label">Status</label>
-                <select class="filter-select" [ngModel]="filterStatus()" (ngModelChange)="onFilterStatusChange($event)">
+                <select
+                  class="filter-select"
+                  [ngModel]="filterStatus()"
+                  (ngModelChange)="onFilterStatusChange($event)"
+                >
                   <option value="">All Statuses</option>
                   <option value="Pending">Pending</option>
                   <option value="Submitted">Submitted</option>
@@ -211,7 +323,11 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
               </div>
               <div class="filter-group">
                 <label class="filter-label">Side</label>
-                <select class="filter-select" [ngModel]="filterSide()" (ngModelChange)="onFilterSideChange($event)">
+                <select
+                  class="filter-select"
+                  [ngModel]="filterSide()"
+                  (ngModelChange)="onFilterSideChange($event)"
+                >
                   <option value="">All Sides</option>
                   <option value="Buy">Buy</option>
                   <option value="Sell">Sell</option>
@@ -224,17 +340,23 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                     class="toggle-btn"
                     [class.active]="filterPaper() === null"
                     (click)="onFilterPaperChange(null)"
-                  >All</button>
+                  >
+                    All
+                  </button>
                   <button
                     class="toggle-btn"
                     [class.active]="filterPaper() === false"
                     (click)="onFilterPaperChange(false)"
-                  >Live</button>
+                  >
+                    Live
+                  </button>
                   <button
                     class="toggle-btn"
                     [class.active]="filterPaper() === true"
                     (click)="onFilterPaperChange(true)"
-                  >Paper</button>
+                  >
+                    Paper
+                  </button>
                 </div>
               </div>
               @if (hasActiveFilters()) {
@@ -248,8 +370,20 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
               [columnDefs]="columns"
               [fetchData]="fetchData"
               [searchable]="true"
+              [selectable]="true"
               (rowClick)="onRowClick($event)"
-            />
+            >
+              <ng-template #bulkActions let-rows let-clear="clear">
+                <button
+                  type="button"
+                  class="btn btn-danger btn-sm"
+                  [disabled]="batchCancelPending()"
+                  (click)="openBatchCancel(rows, clear)"
+                >
+                  {{ batchCancelPending() ? 'Cancelling…' : 'Cancel ' + rows.length + ' selected' }}
+                </button>
+              </ng-template>
+            </app-data-table>
           }
 
           @case ('analytics') {
@@ -284,284 +418,345 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
       </ui-tabs>
     </div>
   `,
-  styles: [`
-    .page { padding: var(--space-2) 0; }
+  styles: [
+    `
+      .page {
+        padding: var(--space-2) 0;
+      }
 
-    /* Buttons */
-    .btn {
-      height: 36px;
-      padding: 0 var(--space-5);
-      border: none;
-      border-radius: var(--radius-full);
-      font-size: var(--text-sm);
-      font-weight: var(--font-medium);
-      font-family: inherit;
-      cursor: pointer;
-      transition: all 0.15s ease;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: var(--space-1);
-      min-width: 80px;
-    }
-    .btn:active:not(:disabled) { transform: scale(0.97); }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+      /* Buttons */
+      .btn {
+        height: 36px;
+        padding: 0 var(--space-5);
+        border: none;
+        border-radius: var(--radius-full);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        font-family: inherit;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-1);
+        min-width: 80px;
+      }
+      .btn:active:not(:disabled) {
+        transform: scale(0.97);
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
 
-    .btn-primary { background: var(--accent); color: white; }
-    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+      .btn-primary {
+        background: var(--accent);
+        color: white;
+      }
+      .btn-primary:hover:not(:disabled) {
+        background: var(--accent-hover);
+      }
 
-    .btn-secondary { background: var(--bg-tertiary); color: var(--text-primary); }
-    .btn-secondary:hover:not(:disabled) { opacity: 0.8; }
+      .btn-secondary {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        opacity: 0.8;
+      }
 
-    /* Metrics Strip */
-    .metrics-strip {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: var(--space-4);
-      margin-bottom: var(--space-5);
-    }
+      /* Metrics Strip */
+      .metrics-strip {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: var(--space-4);
+        margin-bottom: var(--space-5);
+      }
 
-    /* Filter Bar */
-    .filter-bar {
-      display: flex;
-      align-items: flex-end;
-      gap: var(--space-4);
-      padding: var(--space-4);
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      margin-bottom: var(--space-4);
-      flex-wrap: wrap;
-    }
+      /* Filter Bar */
+      .filter-bar {
+        display: flex;
+        align-items: flex-end;
+        gap: var(--space-4);
+        padding: var(--space-4);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        margin-bottom: var(--space-4);
+        flex-wrap: wrap;
+      }
 
-    .filter-group {
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-1);
-    }
+      .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+      }
 
-    .filter-label {
-      font-size: var(--text-xs);
-      font-weight: var(--font-medium);
-      color: var(--text-tertiary);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
+      .filter-label {
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
 
-    .filter-select {
-      height: 34px;
-      padding: 0 var(--space-3);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      font-size: var(--text-sm);
-      font-family: inherit;
-      cursor: pointer;
-      min-width: 140px;
-    }
-    .filter-select:focus { border-color: var(--accent); outline: none; }
+      .filter-select {
+        height: 34px;
+        padding: 0 var(--space-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        font-family: inherit;
+        cursor: pointer;
+        min-width: 140px;
+      }
+      .filter-select:focus {
+        border-color: var(--accent);
+        outline: none;
+      }
 
-    .toggle-group {
-      display: flex;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      overflow: hidden;
-    }
+      .toggle-group {
+        display: flex;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+      }
 
-    .toggle-btn {
-      height: 32px;
-      padding: 0 var(--space-3);
-      border: none;
-      background: var(--bg-primary);
-      color: var(--text-secondary);
-      font-size: var(--text-sm);
-      font-family: inherit;
-      cursor: pointer;
-      transition: all 0.15s ease;
-      border-right: 1px solid var(--border);
-    }
-    .toggle-btn:last-child { border-right: none; }
-    .toggle-btn.active {
-      background: var(--accent);
-      color: white;
-    }
-    .toggle-btn:hover:not(.active) {
-      background: var(--bg-tertiary);
-    }
+      .toggle-btn {
+        height: 32px;
+        padding: 0 var(--space-3);
+        border: none;
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+        font-family: inherit;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        border-right: 1px solid var(--border);
+      }
+      .toggle-btn:last-child {
+        border-right: none;
+      }
+      .toggle-btn.active {
+        background: var(--accent);
+        color: white;
+      }
+      .toggle-btn:hover:not(.active) {
+        background: var(--bg-tertiary);
+      }
 
-    .btn-clear-filters {
-      height: 34px;
-      padding: 0 var(--space-3);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      background: transparent;
-      color: var(--text-secondary);
-      font-size: var(--text-sm);
-      font-family: inherit;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-    .btn-clear-filters:hover {
-      background: var(--bg-tertiary);
-      color: var(--text-primary);
-    }
+      .btn-clear-filters {
+        height: 34px;
+        padding: 0 var(--space-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+        font-family: inherit;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .btn-clear-filters:hover {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
 
-    /* Create Panel */
-    .create-panel {
-      margin-bottom: var(--space-5);
-      animation: slideDown 0.25s ease-out;
-    }
+      /* Create Panel */
+      .create-panel {
+        margin-bottom: var(--space-5);
+        animation: slideDown 0.25s ease-out;
+      }
 
-    .create-card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      overflow: hidden;
-      box-shadow: var(--shadow-sm);
-    }
+      .create-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+        box-shadow: var(--shadow-sm);
+      }
 
-    .create-card-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: var(--space-4) var(--space-5);
-      border-bottom: 1px solid var(--border);
-    }
+      .create-card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--space-4) var(--space-5);
+        border-bottom: 1px solid var(--border);
+      }
 
-    .create-card-title {
-      font-size: var(--text-base);
-      font-weight: var(--font-semibold);
-      color: var(--text-primary);
-      margin: 0;
-    }
+      .create-card-title {
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        margin: 0;
+      }
 
-    .close-btn {
-      width: 32px;
-      height: 32px;
-      border: none;
-      border-radius: var(--radius-full);
-      background: transparent;
-      color: var(--text-secondary);
-      font-size: 20px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: background 0.15s ease;
-    }
-    .close-btn:hover { background: var(--bg-tertiary); }
+      .close-btn {
+        width: 32px;
+        height: 32px;
+        border: none;
+        border-radius: var(--radius-full);
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: 20px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.15s ease;
+      }
+      .close-btn:hover {
+        background: var(--bg-tertiary);
+      }
 
-    .create-card-body {
-      padding: var(--space-5);
-    }
+      .create-card-body {
+        padding: var(--space-5);
+      }
 
-    .form-grid-3 {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: var(--space-4);
-    }
+      .form-grid-3 {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--space-4);
+      }
 
-    .form-field { display: flex; flex-direction: column; }
-    .form-field-full { grid-column: 1 / -1; }
+      .form-field {
+        display: flex;
+        flex-direction: column;
+      }
+      .form-field-full {
+        grid-column: 1 / -1;
+      }
 
-    .form-label {
-      display: block;
-      font-size: var(--text-xs);
-      font-weight: var(--font-medium);
-      color: var(--text-secondary);
-      margin-bottom: var(--space-1);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
+      .form-label {
+        display: block;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        color: var(--text-secondary);
+        margin-bottom: var(--space-1);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
 
-    .form-input, .form-select, .form-textarea {
-      width: 100%;
-      height: 36px;
-      padding: 0 var(--space-3);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      font-size: var(--text-sm);
-      font-family: inherit;
-      outline: none;
-      transition: border-color 0.15s ease;
-      box-sizing: border-box;
-    }
+      .form-input,
+      .form-select,
+      .form-textarea {
+        width: 100%;
+        height: 36px;
+        padding: 0 var(--space-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        font-family: inherit;
+        outline: none;
+        transition: border-color 0.15s ease;
+        box-sizing: border-box;
+      }
 
-    .form-textarea {
-      height: auto;
-      padding: var(--space-2) var(--space-3);
-      resize: vertical;
-    }
+      .form-textarea {
+        height: auto;
+        padding: var(--space-2) var(--space-3);
+        resize: vertical;
+      }
 
-    .form-input:focus, .form-select:focus, .form-textarea:focus {
-      border-color: var(--accent);
-    }
+      .form-input:focus,
+      .form-select:focus,
+      .form-textarea:focus {
+        border-color: var(--accent);
+      }
 
-    .form-error {
-      display: block;
-      font-size: var(--text-xs);
-      color: var(--loss);
-      margin-top: 2px;
-    }
+      .form-error {
+        display: block;
+        font-size: var(--text-xs);
+        color: var(--loss);
+        margin-top: 2px;
+      }
 
-    .form-checkbox-label {
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-      font-size: var(--text-sm);
-      color: var(--text-primary);
-      cursor: pointer;
-    }
-    .form-checkbox-label input[type="checkbox"] {
-      width: 16px;
-      height: 16px;
-      accent-color: var(--accent);
-      cursor: pointer;
-    }
+      .form-checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+        cursor: pointer;
+      }
+      .form-checkbox-label input[type='checkbox'] {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
 
-    .create-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: var(--space-3);
-      padding-top: var(--space-4);
-      border-top: 1px solid var(--border);
-      margin-top: var(--space-4);
-    }
+      .create-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: var(--space-3);
+        padding-top: var(--space-4);
+        border-top: 1px solid var(--border);
+        margin-top: var(--space-4);
+      }
 
-    /* Charts Grid */
-    .charts-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: var(--space-4);
-    }
+      /* Charts Grid */
+      .charts-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--space-4);
+      }
 
-    /* Spinner */
-    .spinner {
-      width: 16px;
-      height: 16px;
-      border: 2px solid rgba(255, 255, 255, 0.3);
-      border-top-color: white;
-      border-radius: 50%;
-      animation: spin 0.6s linear infinite;
-    }
+      /* Spinner */
+      .spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-top-color: white;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+      }
 
-    @keyframes spin { to { transform: rotate(360deg); } }
-    @keyframes slideDown {
-      from { opacity: 0; transform: translateY(-12px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-  `],
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @keyframes slideDown {
+        from {
+          opacity: 0;
+          transform: translateY(-12px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    `,
+  ],
 })
 export class OrdersPageComponent {
   private readonly ordersService = inject(OrdersService);
   private readonly router = inject(Router);
   private readonly notifications = inject(NotificationService);
   private readonly fb = inject(FormBuilder);
+  private readonly realtime = inject(RealtimeService);
 
   private readonly dataTable = viewChild<DataTableComponent<OrderDto>>('ordersTable');
+
+  constructor() {
+    // Refresh the orders table whenever the engine pushes an order- or
+    // position-level event. Throttled so a burst of fills doesn't hammer
+    // the fetch endpoint — 2s is faster than the old 15s polling interval
+    // and still human-scale enough to batch together rapid-fire updates.
+    merge(
+      this.realtime.on('orderCreated'),
+      this.realtime.on('orderFilled'),
+      this.realtime.on('positionOpened'),
+      this.realtime.on('positionClosed'),
+    )
+      .pipe(throttleTime(2_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
+      .subscribe(() => this.reloadTable());
+  }
 
   // Tab state
   tabItems: TabItem[] = [
@@ -582,6 +777,13 @@ export class OrdersPageComponent {
   hasActiveFilters = computed(
     () => this.filterStatus() !== '' || this.filterSide() !== '' || this.filterPaper() !== null,
   );
+
+  /** True when a given form control is invalid AND has been touched or dirtied.
+   *  Used to toggle `aria-invalid` on inputs. */
+  hasError(fieldName: string): boolean {
+    const c = this.createForm.get(fieldName);
+    return !!c && c.invalid && (c.touched || c.dirty);
+  }
 
   // Computed metrics from loaded data
   private ordersList = signal<OrderDto[]>([]);
@@ -631,7 +833,12 @@ export class OrdersPageComponent {
       field: 'executionType',
       width: 100,
       cellRenderer: (params: { value: number | string }) => {
-        const execMap: Record<number, string> = { 0: 'Market', 1: 'Limit', 2: 'Stop', 3: 'StopLimit' };
+        const execMap: Record<number, string> = {
+          0: 'Market',
+          1: 'Limit',
+          2: 'Stop',
+          3: 'StopLimit',
+        };
         const v = params.value;
         const label = typeof v === 'number' ? (execMap[v] ?? String(v)) : v;
         return `<span style="font-size:12px;font-weight:500">${label}</span>`;
@@ -641,25 +848,25 @@ export class OrdersPageComponent {
       headerName: 'Quantity',
       field: 'quantity',
       width: 100,
-      valueFormatter: (params) => params.value != null ? Number(params.value).toFixed(2) : '-',
+      valueFormatter: (params) => (params.value != null ? Number(params.value).toFixed(2) : '-'),
     },
     {
       headerName: 'Price',
       field: 'price',
       width: 110,
-      valueFormatter: (params) => params.value != null ? Number(params.value).toFixed(5) : '-',
+      valueFormatter: (params) => (params.value != null ? Number(params.value).toFixed(5) : '-'),
     },
     {
       headerName: 'SL',
       field: 'stopLoss',
       width: 100,
-      valueFormatter: (params) => params.value != null ? Number(params.value).toFixed(5) : '-',
+      valueFormatter: (params) => (params.value != null ? Number(params.value).toFixed(5) : '-'),
     },
     {
       headerName: 'TP',
       field: 'takeProfit',
       width: 100,
-      valueFormatter: (params) => params.value != null ? Number(params.value).toFixed(5) : '-',
+      valueFormatter: (params) => (params.value != null ? Number(params.value).toFixed(5) : '-'),
     },
     {
       headerName: 'Status',
@@ -667,8 +874,13 @@ export class OrdersPageComponent {
       width: 120,
       cellRenderer: (params: { value: number | string }) => {
         const statusNumMap: Record<number, string> = {
-          0: 'Pending', 1: 'Submitted', 2: 'PartialFill', 3: 'Filled',
-          4: 'Cancelled', 5: 'Rejected', 6: 'Expired',
+          0: 'Pending',
+          1: 'Submitted',
+          2: 'PartialFill',
+          3: 'Filled',
+          4: 'Cancelled',
+          5: 'Rejected',
+          6: 'Expired',
         };
         const statusStyleMap: Record<string, { bg: string; color: string }> = {
           Pending: { bg: 'rgba(255,149,0,0.12)', color: '#C93400' },
@@ -689,7 +901,7 @@ export class OrdersPageComponent {
       headerName: 'Filled Price',
       field: 'filledPrice',
       width: 110,
-      valueFormatter: (params) => params.value != null ? Number(params.value).toFixed(5) : '-',
+      valueFormatter: (params) => (params.value != null ? Number(params.value).toFixed(5) : '-'),
     },
     {
       headerName: 'Paper',
@@ -710,7 +922,10 @@ export class OrdersPageComponent {
         if (!params.value) return '-';
         try {
           return new Date(params.value).toLocaleString('en-US', {
-            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
           });
         } catch {
           return params.value;
@@ -726,7 +941,7 @@ export class OrdersPageComponent {
 
     const requestParams: PagerRequest = {
       ...params,
-      filter: Object.keys(filter).length > 0 ? filter : (params.filter || null),
+      filter: Object.keys(filter).length > 0 ? filter : params.filter || null,
     };
 
     return this.ordersService.list(requestParams).pipe(
@@ -866,7 +1081,10 @@ export class OrdersPageComponent {
           areaStyle: {
             color: {
               type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
               colorStops: [
                 { offset: 0, color: 'rgba(88,86,214,0.3)' },
                 { offset: 1, color: 'rgba(88,86,214,0.02)' },
@@ -961,6 +1179,72 @@ export class OrdersPageComponent {
 
   onRowClick(order: OrderDto): void {
     this.router.navigate(['/orders', order.id]);
+  }
+
+  // ── Bulk cancel ─────────────────────────────────────────────────────
+  //
+  // Cap mirrors the server's FluentValidation rule (`BatchCancelOrdersCommandValidator.MaxBatch`).
+  // We could collect every selected row and let the server reject, but it's nicer to tell the
+  // operator up-front — the selection is already bounded by the current page size anyway.
+  readonly BATCH_CANCEL_MAX = 50;
+  readonly batchCancelPending = signal(false);
+
+  openBatchCancel(rows: OrderDto[], clear: () => void): void {
+    if (rows.length === 0) return;
+    if (rows.length > this.BATCH_CANCEL_MAX) {
+      this.notifications.error(`Select at most ${this.BATCH_CANCEL_MAX} orders to cancel at once.`);
+      return;
+    }
+
+    // Only cancellable statuses count — the server enforces this too, but skipping here
+    // keeps the confirm copy accurate and avoids pointless Failed rows in the result.
+    const cancellable = rows.filter(
+      (r) => r.status === 'Pending' || r.status === 'Submitted' || r.status === 'PartialFill',
+    );
+    if (cancellable.length === 0) {
+      this.notifications.error('Selected orders are not cancellable in their current status.');
+      return;
+    }
+
+    const skipped = rows.length - cancellable.length;
+    const msg =
+      skipped === 0
+        ? `Cancel ${cancellable.length} selected order${cancellable.length === 1 ? '' : 's'}?`
+        : `Cancel ${cancellable.length} of ${rows.length} selected? ${skipped} will be skipped (not in a cancellable state).`;
+
+    if (!confirm(msg)) return;
+
+    this.batchCancelPending.set(true);
+    this.ordersService
+      .cancelBatch({
+        orderIds: cancellable.map((o) => o.id),
+        reason: 'Ops: bulk cancel via admin UI',
+      })
+      .subscribe({
+        next: (res) => {
+          this.batchCancelPending.set(false);
+          const r = res?.data;
+          if (res?.status && r) {
+            if (r.failed === 0) {
+              this.notifications.success(
+                `Cancelled ${r.cancelled} order${r.cancelled === 1 ? '' : 's'}.`,
+              );
+            } else {
+              this.notifications.warning(
+                `Cancelled ${r.cancelled}, ${r.failed} failed. See order list for details.`,
+              );
+            }
+            clear();
+            this.reloadTable();
+          } else {
+            this.notifications.error(res?.message ?? 'Batch cancel failed');
+          }
+        },
+        error: () => {
+          this.batchCancelPending.set(false);
+          this.notifications.error('Batch cancel failed');
+        },
+      });
   }
 
   private reloadTable(): void {

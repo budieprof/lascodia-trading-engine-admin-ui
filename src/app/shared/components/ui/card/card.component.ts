@@ -13,25 +13,29 @@ import { Component, ChangeDetectionStrategy, input } from '@angular/core';
       <ng-content />
     </div>
   `,
-  styles: [`
-    .card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      box-shadow: var(--shadow-sm);
-      padding: var(--card-padding);
-      transition: box-shadow 0.15s ease, transform 0.15s ease;
-    }
+  styles: [
+    `
+      .card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
+        padding: var(--card-padding);
+        transition:
+          box-shadow 0.15s ease,
+          transform 0.15s ease;
+      }
 
-    .card--padding-lg {
-      padding: var(--card-padding-lg);
-    }
+      .card--padding-lg {
+        padding: var(--card-padding-lg);
+      }
 
-    .card--hoverable:hover {
-      box-shadow: var(--shadow-md);
-      transform: translateY(-1px);
-    }
-  `],
+      .card--hoverable:hover {
+        box-shadow: var(--shadow-md);
+        transform: translateY(-1px);
+      }
+    `,
+  ],
 })
 export class CardComponent {
   readonly hoverable = input(true);

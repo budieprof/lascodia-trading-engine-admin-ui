@@ -14,47 +14,68 @@ interface Breadcrumb {
   imports: [RouterLink],
   template: `
     @if (breadcrumbs() && breadcrumbs()!.length > 0) {
-      <nav class="breadcrumbs">
-        @for (crumb of breadcrumbs(); track crumb.route; let last = $last) {
-          @if (last) {
-            <span class="crumb current">{{ crumb.label }}</span>
-          } @else {
-            <a [routerLink]="crumb.route" class="crumb link">{{ crumb.label }}</a>
-            <span class="separator">›</span>
+      <nav class="breadcrumbs" aria-label="Breadcrumb">
+        <ol class="crumb-list">
+          @for (crumb of breadcrumbs(); track crumb.route; let last = $last) {
+            <li class="crumb-item">
+              @if (last) {
+                <span class="crumb current" aria-current="page">{{ crumb.label }}</span>
+              } @else {
+                <a [routerLink]="crumb.route" class="crumb link">{{ crumb.label }}</a>
+                <span class="separator" aria-hidden="true">›</span>
+              }
+            </li>
           }
-        }
+        </ol>
       </nav>
     }
   `,
-  styles: [`
-    .breadcrumbs {
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-      margin-bottom: var(--space-4);
-      font-size: var(--text-sm);
-    }
+  styles: [
+    `
+      .breadcrumbs {
+        margin-bottom: var(--space-4);
+        font-size: var(--text-sm);
+      }
+      .crumb-list {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .crumb-item {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
 
-    .crumb.link {
-      color: var(--text-secondary);
-      text-decoration: none;
-      transition: color 0.15s ease;
-    }
+      .crumb.link {
+        color: var(--text-secondary);
+        text-decoration: none;
+        transition: color 0.15s ease;
+      }
 
-    .crumb.link:hover {
-      color: var(--accent);
-    }
+      .crumb.link:hover {
+        color: var(--accent);
+      }
+      .crumb.link:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+        border-radius: 2px;
+      }
 
-    .crumb.current {
-      color: var(--text-primary);
-      font-weight: var(--font-medium);
-    }
+      .crumb.current {
+        color: var(--text-primary);
+        font-weight: var(--font-medium);
+      }
 
-    .separator {
-      color: var(--text-tertiary);
-      font-size: 12px;
-    }
-  `],
+      .separator {
+        color: var(--text-tertiary);
+        font-size: 12px;
+      }
+    `,
+  ],
 })
 export class BreadcrumbsComponent {
   private router = inject(Router);
@@ -68,7 +89,11 @@ export class BreadcrumbsComponent {
     ),
   );
 
-  private buildBreadcrumbs(route: ActivatedRoute, url = '', crumbs: Breadcrumb[] = []): Breadcrumb[] {
+  private buildBreadcrumbs(
+    route: ActivatedRoute,
+    url = '',
+    crumbs: Breadcrumb[] = [],
+  ): Breadcrumb[] {
     const children = route.children;
     if (children.length === 0) return crumbs;
 

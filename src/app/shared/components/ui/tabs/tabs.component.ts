@@ -1,10 +1,4 @@
-import {
-  Component,
-  ChangeDetectionStrategy,
-  input,
-  output,
-  model,
-} from '@angular/core';
+import { Component, ChangeDetectionStrategy, input, output, model } from '@angular/core';
 
 export interface TabItem {
   label: string;
@@ -36,52 +30,54 @@ export interface TabItem {
       </div>
     </div>
   `,
-  styles: [`
-    .tabs__bar {
-      display: flex;
-      gap: var(--space-1);
-      padding: 2px;
-      overflow-x: auto;
-      scrollbar-width: none;
-    }
+  styles: [
+    `
+      .tabs__bar {
+        display: flex;
+        gap: var(--space-1);
+        padding: 2px;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
 
-    .tabs__bar::-webkit-scrollbar {
-      display: none;
-    }
+      .tabs__bar::-webkit-scrollbar {
+        display: none;
+      }
 
-    .tabs__tab {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: var(--space-2) var(--space-3);
-      border: none;
-      border-radius: var(--radius-sm);
-      background: transparent;
-      color: var(--text-secondary);
-      font-family: inherit;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: all 0.15s ease;
-      user-select: none;
-      -webkit-user-select: none;
-    }
+      .tabs__tab {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: var(--space-2) var(--space-3);
+        border: none;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--text-secondary);
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all 0.15s ease;
+        user-select: none;
+        -webkit-user-select: none;
+      }
 
-    .tabs__tab:hover:not(.tabs__tab--active) {
-      background: var(--bg-tertiary);
-      color: var(--text-primary);
-    }
+      .tabs__tab:hover:not(.tabs__tab--active) {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
 
-    .tabs__tab--active {
-      background: rgba(0, 113, 227, 0.1);
-      color: var(--accent);
-    }
+      .tabs__tab--active {
+        background: rgba(0, 113, 227, 0.1);
+        color: var(--accent);
+      }
 
-    .tabs__content {
-      margin-top: var(--space-4);
-    }
-  `],
+      .tabs__content {
+        margin-top: var(--space-4);
+      }
+    `,
+  ],
 })
 export class TabsComponent {
   readonly tabs = input.required<TabItem[]>();

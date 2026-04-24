@@ -1,244 +1,406 @@
-import { Component, ChangeDetectionStrategy, signal } from '@angular/core';
-import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
-import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
-import { StatusBadgeComponent } from '@shared/components/status-badge/status-badge.component';
-import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { DatePipe } from '@angular/common';
+import { catchError, map, of } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
-interface StrategyAllocation {
-  name: string;
-  weight: number;
-  sharpe: number;
-  status: string;
-}
+import { StrategyEnsembleService } from '@core/services/strategy-ensemble.service';
+import { NotificationService } from '@core/notifications/notification.service';
+import type { PagedData, PagerRequest, StrategyAllocationDto } from '@core/api/api.types';
+import { createPolledResource } from '@core/polling/polled-resource';
+
+import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
+import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
+import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+
+const PALETTE = [
+  '#0071E3',
+  '#34C759',
+  '#FF9500',
+  '#AF52DE',
+  '#5AC8FA',
+  '#FF3B30',
+  '#FFCC00',
+  '#30D158',
+  '#64D2FF',
+  '#BF5AF2',
+];
 
 @Component({
   selector: 'app-ensemble-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ChartCardComponent, PageHeaderComponent, StatusBadgeComponent, TabsComponent],
+  imports: [
+    ChartCardComponent,
+    PageHeaderComponent,
+    TabsComponent,
+    EmptyStateComponent,
+    CardSkeletonComponent,
+    ConfirmDialogComponent,
+    DatePipe,
+  ],
   template: `
     <div class="page">
-      <app-page-header title="Strategy Ensemble" subtitle="Portfolio allocation and multi-strategy analytics" />
+      <app-page-header
+        title="Strategy Ensemble"
+        subtitle="Sharpe-weighted allocation across active strategies"
+      >
+        <button
+          type="button"
+          class="btn btn-primary"
+          [disabled]="rebalancing()"
+          (click)="showRebalance.set(true)"
+        >
+          @if (rebalancing()) {
+            <span class="spin"></span>
+          } @else {
+            Rebalance
+          }
+        </button>
+      </app-page-header>
 
       <ui-tabs [tabs]="tabs" [(activeTab)]="activeTab">
         @if (activeTab() === 'allocation') {
-          <div class="allocation-layout">
-            <div class="donut-section">
+          @if (allocationsLoading()) {
+            <app-card-skeleton [lines]="6" />
+          } @else if (allocations().length > 0) {
+            <div class="layout">
               <app-chart-card
                 title="Current Allocation"
                 subtitle="Portfolio weight distribution"
-                [options]="allocationDonutOptions"
-                height="340px"
+                [options]="donutChart()"
+                height="360px"
               />
+              <section class="list">
+                <header class="list-head">
+                  <h3>Strategy Weights</h3>
+                  <span class="muted">Total: {{ (totalWeight() * 100).toFixed(1) }}%</span>
+                </header>
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Strategy</th>
+                      <th class="num">Weight</th>
+                      <th class="num">Sharpe</th>
+                      <th>Last Rebalanced</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (row of rankedAllocations(); track row.id; let i = $index) {
+                      <tr>
+                        <td>{{ i + 1 }}</td>
+                        <td>
+                          <span class="dot" [style.background]="colorFor(i)"></span>
+                          {{ row.strategyName ?? '#' + row.strategyId }}
+                        </td>
+                        <td class="num">{{ (row.weight * 100).toFixed(1) }}%</td>
+                        <td class="num mono">{{ row.rollingSharpRatio.toFixed(2) }}</td>
+                        <td class="muted">
+                          {{
+                            row.lastRebalancedAt
+                              ? (row.lastRebalancedAt | date: 'MMM d, HH:mm')
+                              : '—'
+                          }}
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </section>
             </div>
-            <div class="strategy-list">
-              <div class="list-header">
-                <span>Strategy</span>
-                <span>Weight</span>
-                <span>Sharpe</span>
-                <span>Status</span>
-              </div>
-              @for (s of strategies; track s.name; let i = $index) {
-                <div class="list-row">
-                  <div class="strategy-name">
-                    <span class="rank">{{ i + 1 }}</span>
-                    <span class="dot" [style.background]="strategyColors[i]"></span>
-                    {{ s.name }}
-                  </div>
-                  <span class="weight">{{ s.weight }}%</span>
-                  <span class="sharpe">{{ s.sharpe.toFixed(2) }}</span>
-                  <app-status-badge [status]="s.status" type="strategy" />
-                </div>
-              }
-            </div>
-          </div>
+          } @else {
+            <app-empty-state
+              title="No active allocations"
+              description="Activate strategies and run a rebalance to populate allocations."
+              actionLabel="Rebalance Now"
+              (actionClick)="showRebalance.set(true)"
+            />
+          }
         }
 
-        @if (activeTab() === 'analytics') {
-          <div class="charts-grid">
+        @if (activeTab() === 'history') {
+          @if (historyLoading()) {
+            <app-card-skeleton [lines]="6" />
+          } @else if (historyChart()) {
             <app-chart-card
-              title="Portfolio Equity Curve"
-              subtitle="Combined portfolio value over time"
-              [options]="equityCurveOptions"
-              height="360px"
+              title="Allocation over Time"
+              subtitle="Weight per strategy at each rebalance"
+              [options]="historyChart()!"
+              height="420px"
             />
-            <app-chart-card
-              title="Contribution to Return"
-              subtitle="Monthly return contribution by strategy"
-              [options]="contributionOptions"
-              height="360px"
+          } @else {
+            <app-empty-state
+              title="No historical allocations"
+              description="Allocation history populates as the ensemble rebalances over time."
             />
-          </div>
+          }
         }
       </ui-tabs>
+
+      <app-confirm-dialog
+        [open]="showRebalance()"
+        title="Rebalance Ensemble"
+        message="Recompute weights from rolling Sharpe ratios. Active strategies will have their positions sized to match the new weights going forward."
+        confirmLabel="Rebalance"
+        confirmVariant="primary"
+        [loading]="rebalancing()"
+        (confirm)="doRebalance()"
+        (cancelled)="showRebalance.set(false)"
+      />
     </div>
   `,
-  styles: [`
-    .page { padding: var(--space-2) 0; }
-    .allocation-layout {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: var(--space-6);
-      align-items: start;
-    }
-    .strategy-list {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      overflow: hidden;
-    }
-    .list-header {
-      display: grid;
-      grid-template-columns: 2fr 1fr 1fr 1fr;
-      gap: var(--space-2);
-      padding: var(--space-3) var(--space-4);
-      background: var(--bg-tertiary);
-      font-size: var(--text-xs);
-      font-weight: var(--font-semibold);
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-    .list-row {
-      display: grid;
-      grid-template-columns: 2fr 1fr 1fr 1fr;
-      gap: var(--space-2);
-      padding: var(--space-3) var(--space-4);
-      border-bottom: 1px solid var(--border);
-      align-items: center;
-      font-size: var(--text-sm);
-      color: var(--text-primary);
-    }
-    .list-row:last-child { border-bottom: none; }
-    .strategy-name {
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-      font-weight: var(--font-medium);
-    }
-    .rank {
-      width: 20px;
-      height: 20px;
-      border-radius: var(--radius-full);
-      background: var(--bg-tertiary);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 11px;
-      color: var(--text-secondary);
-      font-weight: var(--font-semibold);
-    }
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-    }
-    .weight {
-      font-weight: var(--font-semibold);
-      font-variant-numeric: tabular-nums;
-    }
-    .sharpe {
-      font-variant-numeric: tabular-nums;
-      color: var(--text-secondary);
-    }
-    .charts-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: var(--space-4);
-    }
-  `],
+  styles: [
+    `
+      .page {
+        padding: var(--space-2) 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-5);
+      }
+      .btn {
+        height: 36px;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-full);
+        border: none;
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-2);
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: white;
+      }
+      .btn-primary:hover:not(:disabled) {
+        background: var(--accent-hover);
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 1fr 1.5fr;
+        gap: var(--space-4);
+      }
+      .list {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+      }
+      .list-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: var(--space-4) var(--space-5);
+        border-bottom: 1px solid var(--border);
+      }
+      .list-head h3 {
+        margin: 0;
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+      }
+      .muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+      .table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .table th,
+      .table td {
+        padding: var(--space-3) var(--space-5);
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        font-size: var(--text-sm);
+        vertical-align: middle;
+      }
+      .table th {
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .table th.num,
+      .table td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .table td.mono {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: var(--text-xs);
+      }
+      .dot {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-right: var(--space-2);
+        vertical-align: middle;
+      }
+      .spin {
+        width: 14px;
+        height: 14px;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-top-color: white;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (max-width: 1024px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+    `,
+  ],
 })
 export class EnsemblePageComponent {
-  tabs: TabItem[] = [
+  private readonly service = inject(StrategyEnsembleService);
+  private readonly notifications = inject(NotificationService);
+
+  readonly tabs: TabItem[] = [
     { label: 'Current Allocation', value: 'allocation' },
-    { label: 'Portfolio Analytics', value: 'analytics' },
+    { label: 'Allocation History', value: 'history' },
   ];
-  activeTab = signal('allocation');
+  readonly activeTab = signal('allocation');
 
-  strategyColors = ['#0071E3', '#34C759', '#FF9500', '#5856D6', '#FF3B30'];
+  readonly showRebalance = signal(false);
+  readonly rebalancing = signal(false);
 
-  strategies: StrategyAllocation[] = [
-    { name: 'Momentum Alpha', weight: 35, sharpe: 1.82, status: 'Active' },
-    { name: 'Mean Reversion', weight: 25, sharpe: 1.54, status: 'Active' },
-    { name: 'Breakout Pro', weight: 20, sharpe: 1.31, status: 'Active' },
-    { name: 'Volatility Harvest', weight: 12, sharpe: 0.94, status: 'Paused' },
-    { name: 'Carry Trade', weight: 8, sharpe: 0.72, status: 'Active' },
-  ];
+  private readonly allocationsResource = createPolledResource(
+    () =>
+      this.service.getAllocations().pipe(
+        map((r) => r.data ?? []),
+        catchError(() => of([] as StrategyAllocationDto[])),
+      ),
+    { intervalMs: 60_000 },
+  );
 
-  allocationDonutOptions: EChartsOption = {
-    tooltip: { trigger: 'item', formatter: '{b}: {c}% ({d}%)' },
-    legend: { bottom: 0, data: this.strategies.map(s => s.name) },
-    series: [{
-      type: 'pie',
-      radius: ['42%', '68%'],
-      center: ['50%', '45%'],
-      avoidLabelOverlap: true,
-      itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
-      label: { show: true, formatter: '{b}\n{d}%', fontSize: 11 },
-      emphasis: { label: { fontSize: 14, fontWeight: 'bold' } },
-      data: this.strategies.map((s, i) => ({
-        value: s.weight,
-        name: s.name,
-        itemStyle: { color: this.strategyColors[i] },
-      })),
-    }],
-  };
+  readonly allocations = computed(() => this.allocationsResource.value() ?? []);
+  readonly allocationsLoading = computed(
+    () => this.allocationsResource.loading() && this.allocationsResource.value() === null,
+  );
 
-  equityCurveOptions: EChartsOption = {
-    tooltip: { trigger: 'axis' },
-    grid: { left: 60, right: 20, top: 20, bottom: 30 },
-    xAxis: {
-      type: 'category',
-      boundaryGap: false,
-      data: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
-      axisLine: { lineStyle: { color: '#E5E5EA' } },
-      axisLabel: { color: '#8E8E93' },
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: { color: '#8E8E93', formatter: '${value}' },
-      splitLine: { lineStyle: { color: '#F2F2F7' } },
-    },
-    series: [{
-      type: 'line',
-      smooth: true,
-      data: [100000, 103200, 107800, 112400, 109800, 115600, 121300, 126800, 124200, 130100, 135400, 141200],
-      areaStyle: {
-        color: {
-          type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
-          colorStops: [
-            { offset: 0, color: 'rgba(0, 113, 227, 0.25)' },
-            { offset: 1, color: 'rgba(0, 113, 227, 0.02)' },
-          ],
+  readonly rankedAllocations = computed(() =>
+    [...this.allocations()].sort((a, b) => b.weight - a.weight),
+  );
+  readonly totalWeight = computed(() => this.allocations().reduce((s, a) => s + a.weight, 0));
+
+  readonly donutChart = computed<EChartsOption>(() => {
+    const data = this.rankedAllocations().map((a, i) => ({
+      name: a.strategyName ?? `#${a.strategyId}`,
+      value: +(a.weight * 100).toFixed(2),
+      itemStyle: { color: PALETTE[i % PALETTE.length] },
+    }));
+    return {
+      tooltip: { trigger: 'item', formatter: '{b}: {d}%' },
+      legend: { bottom: 0, type: 'scroll' },
+      series: [
+        {
+          type: 'pie',
+          radius: ['45%', '72%'],
+          center: ['50%', '45%'],
+          avoidLabelOverlap: true,
+          itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+          label: { show: true, formatter: '{b}\n{d}%', fontSize: 11 },
+          data,
         },
-      },
-      lineStyle: { width: 2, color: '#0071E3' },
-      itemStyle: { color: '#0071E3' },
-    }],
-  };
+      ],
+    };
+  });
 
-  contributionOptions: EChartsOption = {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    legend: { data: this.strategies.map(s => s.name), bottom: 0 },
-    grid: { left: 60, right: 20, top: 20, bottom: 50 },
-    xAxis: {
-      type: 'category',
-      data: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
-      axisLine: { lineStyle: { color: '#E5E5EA' } },
-      axisLabel: { color: '#8E8E93' },
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: { color: '#8E8E93', formatter: '${value}' },
-      splitLine: { lineStyle: { color: '#F2F2F7' } },
-    },
-    series: [
-      { name: 'Momentum Alpha', type: 'bar', stack: 'total', data: [1200, 1800, 2400, 1600, -800, 2200, 2800, 2100, -900, 2400, 1800, 2600], itemStyle: { color: '#0071E3' } },
-      { name: 'Mean Reversion', type: 'bar', stack: 'total', data: [800, 1200, 1600, 900, -200, 1400, 1100, 1800, 600, 1200, 1600, 800], itemStyle: { color: '#34C759' } },
-      { name: 'Breakout Pro', type: 'bar', stack: 'total', data: [600, 800, 400, 1200, -1200, 1000, 1400, 600, -400, 1600, 800, 1200], itemStyle: { color: '#FF9500' } },
-      { name: 'Volatility Harvest', type: 'bar', stack: 'total', data: [400, 200, 600, 300, 100, 400, 200, 500, -100, 600, 400, 200], itemStyle: { color: '#5856D6' } },
-      { name: 'Carry Trade', type: 'bar', stack: 'total', data: [200, 600, 200, 400, -500, 200, 400, 200, -200, 400, 200, 400], itemStyle: { color: '#FF3B30' } },
-    ],
-  };
+  private readonly historyResource = createPolledResource(
+    () =>
+      this.service.list({ currentPage: 1, itemCountPerPage: 500 }).pipe(
+        map((r) => r.data?.data ?? []),
+        catchError(() => of([] as StrategyAllocationDto[])),
+      ),
+    { intervalMs: 300_000 },
+  );
+
+  readonly historyLoading = computed(
+    () => this.historyResource.loading() && this.historyResource.value() === null,
+  );
+
+  readonly historyChart = computed<EChartsOption | null>(() => {
+    const rows = this.historyResource.value() ?? [];
+    if (rows.length === 0) return null;
+
+    // Group by lastRebalancedAt (date granularity) → for each date, map strategyId → weight.
+    const buckets = new Map<string, Map<number, number>>();
+    const strategyNames = new Map<number, string>();
+    for (const row of rows) {
+      if (!row.lastRebalancedAt) continue;
+      const key = row.lastRebalancedAt.slice(0, 10); // YYYY-MM-DD
+      if (!buckets.has(key)) buckets.set(key, new Map());
+      buckets.get(key)!.set(row.strategyId, row.weight);
+      strategyNames.set(row.strategyId, row.strategyName ?? `#${row.strategyId}`);
+    }
+    if (buckets.size === 0) return null;
+
+    const dates = Array.from(buckets.keys()).sort();
+    const strategyIds = Array.from(strategyNames.keys());
+    const series = strategyIds.map((id, i) => ({
+      name: strategyNames.get(id)!,
+      type: 'line' as const,
+      stack: 'total',
+      areaStyle: { color: PALETTE[i % PALETTE.length], opacity: 0.5 },
+      lineStyle: { width: 0 },
+      itemStyle: { color: PALETTE[i % PALETTE.length] },
+      emphasis: { focus: 'series' as const },
+      data: dates.map((d) => {
+        const w = buckets.get(d)?.get(id) ?? 0;
+        return +(w * 100).toFixed(2);
+      }),
+    }));
+
+    return {
+      tooltip: { trigger: 'axis' },
+      legend: { bottom: 0, type: 'scroll' },
+      grid: { left: 60, right: 20, top: 20, bottom: 60 },
+      xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 10 } },
+      yAxis: { type: 'value', name: 'Weight %', max: 100 },
+      series,
+    };
+  });
+
+  colorFor(index: number): string {
+    return PALETTE[index % PALETTE.length];
+  }
+
+  doRebalance(): void {
+    this.rebalancing.set(true);
+    this.service.rebalance().subscribe({
+      next: (res) => {
+        this.rebalancing.set(false);
+        this.showRebalance.set(false);
+        if (res.status) {
+          this.notifications.success('Ensemble rebalanced');
+          this.allocationsResource.refresh();
+          this.historyResource.refresh();
+        } else {
+          this.notifications.error(res.message ?? 'Rebalance failed');
+        }
+      },
+      error: () => {
+        this.rebalancing.set(false);
+        this.showRebalance.set(false);
+      },
+    });
+  }
 }

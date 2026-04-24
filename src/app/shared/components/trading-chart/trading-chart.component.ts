@@ -1,6 +1,12 @@
 import {
-  Component, ChangeDetectionStrategy, input, signal, computed, inject,
-  OnInit, OnDestroy,
+  Component,
+  ChangeDetectionStrategy,
+  input,
+  signal,
+  computed,
+  inject,
+  OnInit,
+  OnDestroy,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { NgxEchartsDirective } from 'ngx-echarts';
@@ -19,7 +25,11 @@ import { CandleDto, LivePriceDto } from '@core/api/api.types';
       <!-- Toolbar -->
       <div class="chart-toolbar">
         <div class="toolbar-left">
-          <select class="toolbar-select symbol-select" [ngModel]="selectedSymbol()" (ngModelChange)="onSymbolChange($event)">
+          <select
+            class="toolbar-select symbol-select"
+            [ngModel]="selectedSymbol()"
+            (ngModelChange)="onSymbolChange($event)"
+          >
             @for (s of symbols; track s) {
               <option [value]="s">{{ s }}</option>
             }
@@ -30,7 +40,9 @@ import { CandleDto, LivePriceDto } from '@core/api/api.types';
                 class="tf-pill"
                 [class.active]="selectedTimeframe() === tf.value"
                 (click)="onTimeframeChange(tf.value)"
-              >{{ tf.label }}</button>
+              >
+                {{ tf.label }}
+              </button>
             }
           </div>
         </div>
@@ -39,7 +51,11 @@ import { CandleDto, LivePriceDto } from '@core/api/api.types';
             <div class="live-price-display">
               <span class="live-label">Live</span>
               <span class="live-dot"></span>
-              <span class="live-bid" [class.up]="priceDirection() === 'up'" [class.down]="priceDirection() === 'down'">
+              <span
+                class="live-bid"
+                [class.up]="priceDirection() === 'up'"
+                [class.down]="priceDirection() === 'down'"
+              >
                 {{ livePrice()!.bid.toFixed(pricePrecision()) }}
               </span>
               <span class="live-separator">/</span>
@@ -48,9 +64,30 @@ import { CandleDto, LivePriceDto } from '@core/api/api.types';
             </div>
           }
           <div class="chart-toggles">
-            <button class="toggle-btn" [class.active]="showMA()" (click)="toggleOverlay('ma')" title="Moving Averages">MA</button>
-            <button class="toggle-btn" [class.active]="showVolume()" (click)="toggleOverlay('vol')" title="Volume">Vol</button>
-            <button class="toggle-btn" [class.active]="showBollinger()" (click)="toggleOverlay('bb')" title="Bollinger Bands">BB</button>
+            <button
+              class="toggle-btn"
+              [class.active]="showMA()"
+              (click)="toggleOverlay('ma')"
+              title="Moving Averages"
+            >
+              MA
+            </button>
+            <button
+              class="toggle-btn"
+              [class.active]="showVolume()"
+              (click)="toggleOverlay('vol')"
+              title="Volume"
+            >
+              Vol
+            </button>
+            <button
+              class="toggle-btn"
+              [class.active]="showBollinger()"
+              (click)="toggleOverlay('bb')"
+              title="Bollinger Bands"
+            >
+              BB
+            </button>
           </div>
         </div>
       </div>
@@ -104,112 +141,273 @@ import { CandleDto, LivePriceDto } from '@core/api/api.types';
       </div>
     </div>
   `,
-  styles: [`
-    .trading-chart {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      overflow: hidden;
-    }
+  styles: [
+    `
+      .trading-chart {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+      }
 
-    .chart-toolbar {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);
-      gap: var(--space-4); flex-wrap: wrap;
-    }
-    .toolbar-left, .toolbar-right { display: flex; align-items: center; gap: var(--space-3); }
+      .chart-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+        gap: var(--space-4);
+        flex-wrap: wrap;
+      }
+      .toolbar-left,
+      .toolbar-right {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+      }
 
-    .toolbar-select {
-      height: 32px; padding: 0 var(--space-3); border: 1px solid var(--border);
-      border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary);
-      font-size: var(--text-sm); font-weight: var(--font-semibold); font-family: inherit;
-      cursor: pointer; outline: none;
-    }
-    .toolbar-select:focus { border-color: var(--accent); }
-    .symbol-select { min-width: 110px; }
+      .toolbar-select {
+        height: 32px;
+        padding: 0 var(--space-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        font-family: inherit;
+        cursor: pointer;
+        outline: none;
+      }
+      .toolbar-select:focus {
+        border-color: var(--accent);
+      }
+      .symbol-select {
+        min-width: 110px;
+      }
 
-    .timeframe-pills {
-      display: flex; gap: 2px; background: var(--bg-tertiary);
-      border-radius: var(--radius-sm); padding: 2px;
-    }
-    .tf-pill {
-      height: 28px; padding: 0 var(--space-3); border: none; border-radius: 6px;
-      background: transparent; color: var(--text-secondary); font-size: var(--text-xs);
-      font-weight: var(--font-medium); font-family: inherit; cursor: pointer;
-      transition: all 0.15s ease;
-    }
-    .tf-pill:hover { color: var(--text-primary); }
-    .tf-pill.active {
-      background: var(--bg-primary); color: var(--text-primary);
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-    }
+      .timeframe-pills {
+        display: flex;
+        gap: 2px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-sm);
+        padding: 2px;
+      }
+      .tf-pill {
+        height: 28px;
+        padding: 0 var(--space-3);
+        border: none;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        font-family: inherit;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .tf-pill:hover {
+        color: var(--text-primary);
+      }
+      .tf-pill.active {
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+      }
 
-    .live-price-display {
-      display: flex; align-items: center; gap: var(--space-2);
-      padding: 4px var(--space-3); background: var(--bg-primary);
-      border: 1px solid var(--border); border-radius: var(--radius-sm);
-      font-variant-numeric: tabular-nums;
-    }
-    .live-label { font-size: 9px; font-weight: var(--font-semibold); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-tertiary); }
-    .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--profit); animation: pulse 2s infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-    .live-bid { font-size: var(--text-sm); font-weight: var(--font-semibold); color: var(--text-primary); transition: color 0.3s ease; }
-    .live-bid.up { color: var(--profit); }
-    .live-bid.down { color: var(--loss); }
-    .live-separator { color: var(--text-tertiary); font-size: 11px; }
-    .live-ask { font-size: var(--text-sm); color: var(--text-secondary); }
-    .live-spread { font-size: 10px; color: var(--text-tertiary); padding: 1px 6px; background: var(--bg-tertiary); border-radius: 4px; }
+      .live-price-display {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: 4px var(--space-3);
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        font-variant-numeric: tabular-nums;
+      }
+      .live-label {
+        font-size: 9px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-tertiary);
+      }
+      .live-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--profit);
+        animation: pulse 2s infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+      .live-bid {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        transition: color 0.3s ease;
+      }
+      .live-bid.up {
+        color: var(--profit);
+      }
+      .live-bid.down {
+        color: var(--loss);
+      }
+      .live-separator {
+        color: var(--text-tertiary);
+        font-size: 11px;
+      }
+      .live-ask {
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+      }
+      .live-spread {
+        font-size: 10px;
+        color: var(--text-tertiary);
+        padding: 1px 6px;
+        background: var(--bg-tertiary);
+        border-radius: 4px;
+      }
 
-    .chart-toggles { display: flex; gap: 2px; }
-    .toggle-btn {
-      height: 28px; padding: 0 var(--space-2); border: 1px solid var(--border);
-      border-radius: var(--radius-sm); background: transparent; color: var(--text-tertiary);
-      font-size: 10px; font-weight: var(--font-semibold); font-family: inherit;
-      cursor: pointer; transition: all 0.15s ease;
-    }
-    .toggle-btn:hover { color: var(--text-secondary); }
-    .toggle-btn.active { background: rgba(0,113,227,0.1); color: var(--accent); border-color: var(--accent); }
+      .chart-toggles {
+        display: flex;
+        gap: 2px;
+      }
+      .toggle-btn {
+        height: 28px;
+        padding: 0 var(--space-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--text-tertiary);
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        font-family: inherit;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .toggle-btn:hover {
+        color: var(--text-secondary);
+      }
+      .toggle-btn.active {
+        background: rgba(0, 113, 227, 0.1);
+        color: var(--accent);
+        border-color: var(--accent);
+      }
 
-    .chart-container { position: relative; height: 500px; }
-    .echart-instance { width: 100%; height: 100%; }
+      .chart-container {
+        position: relative;
+        height: 500px;
+      }
+      .echart-instance {
+        width: 100%;
+        height: 100%;
+      }
 
-    .chart-skeleton {
-      width: 100%; height: 100%; background: var(--bg-tertiary);
-      position: relative; overflow: hidden;
-    }
-    .shimmer {
-      position: absolute; inset: 0;
-      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.15) 50%, transparent 100%);
-      animation: shimmer 1.5s infinite;
-    }
-    @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+      .chart-skeleton {
+        width: 100%;
+        height: 100%;
+        background: var(--bg-tertiary);
+        position: relative;
+        overflow: hidden;
+      }
+      .shimmer {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+          90deg,
+          transparent 0%,
+          rgba(255, 255, 255, 0.15) 50%,
+          transparent 100%
+        );
+        animation: shimmer 1.5s infinite;
+      }
+      @keyframes shimmer {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(100%);
+        }
+      }
 
-    .chart-info-bar {
-      display: flex; align-items: center; gap: var(--space-5);
-      padding: var(--space-2) var(--space-4); border-top: 1px solid var(--border);
-      font-variant-numeric: tabular-nums;
-    }
-    .info-item { display: flex; align-items: center; gap: var(--space-1); }
-    .info-label { font-size: 10px; font-weight: var(--font-semibold); color: var(--text-tertiary); text-transform: uppercase; }
-    .info-value { font-size: var(--text-sm); color: var(--text-primary); font-weight: var(--font-medium); }
-    .info-value.high { color: var(--profit); }
-    .info-value.low { color: var(--loss); }
-    .info-value.up { color: var(--profit); }
-    .info-value.down { color: var(--loss); }
-    .info-value.muted { color: var(--text-tertiary); font-size: var(--text-xs); }
-    .candle-count { margin-left: auto; }
+      .chart-info-bar {
+        display: flex;
+        align-items: center;
+        gap: var(--space-5);
+        padding: var(--space-2) var(--space-4);
+        border-top: 1px solid var(--border);
+        font-variant-numeric: tabular-nums;
+      }
+      .info-item {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+      }
+      .info-label {
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+      }
+      .info-value {
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+        font-weight: var(--font-medium);
+      }
+      .info-value.high {
+        color: var(--profit);
+      }
+      .info-value.low {
+        color: var(--loss);
+      }
+      .info-value.up {
+        color: var(--profit);
+      }
+      .info-value.down {
+        color: var(--loss);
+      }
+      .info-value.muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+      .candle-count {
+        margin-left: auto;
+      }
 
-    @media (max-width: 768px) {
-      .chart-toolbar { flex-direction: column; align-items: stretch; }
-      .chart-container { height: 400px; }
-    }
-  `],
+      @media (max-width: 768px) {
+        .chart-toolbar {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .chart-container {
+          height: 400px;
+        }
+      }
+    `,
+  ],
 })
 export class TradingChartComponent implements OnInit, OnDestroy {
   private marketData = inject(MarketDataService);
   private destroy$ = new Subject<void>();
 
-  symbols = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'EUR/GBP', 'USD/CHF', 'NZD/USD', 'USD/CAD'];
+  symbols = [
+    'EUR/USD',
+    'GBP/USD',
+    'USD/JPY',
+    'AUD/USD',
+    'EUR/GBP',
+    'USD/CHF',
+    'NZD/USD',
+    'USD/CAD',
+  ];
   timeframes = [
     { label: '1m', value: 'M1' },
     { label: '5m', value: 'M5' },
@@ -237,7 +435,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     return 'none';
   });
 
-  pricePrecision = computed(() => this.selectedSymbol().includes('JPY') ? 3 : 5);
+  pricePrecision = computed(() => (this.selectedSymbol().includes('JPY') ? 3 : 5));
 
   latestCandle = computed(() => {
     const c = this.candles();
@@ -268,23 +466,111 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     ],
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
     xAxis: [
-      { type: 'category', data: [], gridIndex: 0, axisLine: { lineStyle: { color: 'rgba(0,0,0,0.06)' } }, axisLabel: { fontSize: 10, color: '#6E6E73' }, axisTick: { show: false }, boundaryGap: true },
-      { type: 'category', data: [], gridIndex: 1, axisLine: { lineStyle: { color: 'rgba(0,0,0,0.06)' } }, axisLabel: { show: false }, axisTick: { show: false } },
+      {
+        type: 'category',
+        data: [],
+        gridIndex: 0,
+        axisLine: { lineStyle: { color: 'rgba(0,0,0,0.06)' } },
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        axisTick: { show: false },
+        boundaryGap: true,
+      },
+      {
+        type: 'category',
+        data: [],
+        gridIndex: 1,
+        axisLine: { lineStyle: { color: 'rgba(0,0,0,0.06)' } },
+        axisLabel: { show: false },
+        axisTick: { show: false },
+      },
     ],
     yAxis: [
-      { type: 'value', scale: true, gridIndex: 0, splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } }, axisLabel: { fontSize: 10, color: '#6E6E73' }, position: 'right' },
-      { type: 'value', gridIndex: 1, splitLine: { show: false }, axisLabel: { show: false }, axisLine: { show: false } },
+      {
+        type: 'value',
+        scale: true,
+        gridIndex: 0,
+        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        position: 'right',
+      },
+      {
+        type: 'value',
+        gridIndex: 1,
+        splitLine: { show: false },
+        axisLabel: { show: false },
+        axisLine: { show: false },
+      },
     ],
     dataZoom: [
       { type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 },
-      { type: 'slider', xAxisIndex: [0, 1], bottom: 5, height: 16, borderColor: 'rgba(0,0,0,0.06)', backgroundColor: 'rgba(0,0,0,0.02)', fillerColor: 'rgba(0,113,227,0.08)', handleStyle: { color: '#0071E3' }, textStyle: { fontSize: 9, color: '#6E6E73' } },
+      {
+        type: 'slider',
+        xAxisIndex: [0, 1],
+        bottom: 5,
+        height: 16,
+        borderColor: 'rgba(0,0,0,0.06)',
+        backgroundColor: 'rgba(0,0,0,0.02)',
+        fillerColor: 'rgba(0,113,227,0.08)',
+        handleStyle: { color: '#0071E3' },
+        textStyle: { fontSize: 9, color: '#6E6E73' },
+      },
     ],
     series: [
-      { name: 'Price', type: 'candlestick', data: [], xAxisIndex: 0, yAxisIndex: 0, itemStyle: { color: '#34C759', color0: '#FF3B30', borderColor: '#34C759', borderColor0: '#FF3B30', borderWidth: 1 } },
-      { name: 'MA20', type: 'line', data: [], smooth: true, symbol: 'none', lineStyle: { color: '#FF9500', width: 1.2 }, xAxisIndex: 0, yAxisIndex: 0 },
-      { name: 'MA50', type: 'line', data: [], smooth: true, symbol: 'none', lineStyle: { color: '#AF52DE', width: 1.2 }, xAxisIndex: 0, yAxisIndex: 0 },
-      { name: 'BB Upper', type: 'line', data: [], smooth: true, symbol: 'none', lineStyle: { color: '#5AC8FA', width: 0.8, opacity: 0.5 }, xAxisIndex: 0, yAxisIndex: 0 },
-      { name: 'BB Lower', type: 'line', data: [], smooth: true, symbol: 'none', lineStyle: { color: '#5AC8FA', width: 0.8, opacity: 0.5 }, areaStyle: { color: 'rgba(90,200,250,0.04)' }, xAxisIndex: 0, yAxisIndex: 0 },
+      {
+        name: 'Price',
+        type: 'candlestick',
+        data: [],
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        itemStyle: {
+          color: '#34C759',
+          color0: '#FF3B30',
+          borderColor: '#34C759',
+          borderColor0: '#FF3B30',
+          borderWidth: 1,
+        },
+      },
+      {
+        name: 'MA20',
+        type: 'line',
+        data: [],
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { color: '#FF9500', width: 1.2 },
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+      },
+      {
+        name: 'MA50',
+        type: 'line',
+        data: [],
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { color: '#AF52DE', width: 1.2 },
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+      },
+      {
+        name: 'BB Upper',
+        type: 'line',
+        data: [],
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { color: '#5AC8FA', width: 0.8, opacity: 0.5 },
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+      },
+      {
+        name: 'BB Lower',
+        type: 'line',
+        data: [],
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { color: '#5AC8FA', width: 0.8, opacity: 0.5 },
+        areaStyle: { color: 'rgba(90,200,250,0.04)' },
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+      },
       { name: 'Volume', type: 'bar', data: [], xAxisIndex: 1, yAxisIndex: 1, barWidth: '60%' },
     ],
   };
@@ -325,7 +611,11 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     const tf = this.selectedTimeframe();
 
     this.marketData
-      .listCandles({ currentPage: 1, itemCountPerPage: 200, filter: { symbol: sym, timeframe: tf } })
+      .listCandles({
+        currentPage: 1,
+        itemCountPerPage: 200,
+        filter: { symbol: sym, timeframe: tf },
+      })
       .pipe(
         catchError(() => of(null)),
         takeUntil(this.destroy$),
@@ -365,10 +655,10 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     const data = this.candles();
     if (data.length === 0) return;
 
-    const dates = data.map(c => this.formatDate(c.timestamp));
-    const ohlc = data.map(c => [c.open, c.close, c.low, c.high]);
-    const closes = data.map(c => c.close);
-    const volumes = data.map(c => ({
+    const dates = data.map((c) => this.formatDate(c.timestamp));
+    const ohlc = data.map((c) => [c.open, c.close, c.low, c.high]);
+    const closes = data.map((c) => c.close);
+    const volumes = data.map((c) => ({
       value: c.volume,
       itemStyle: { color: c.close >= c.open ? 'rgba(52,199,89,0.35)' : 'rgba(255,59,48,0.35)' },
     }));
@@ -385,7 +675,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     }
 
     // Calculate Y-axis range
-    const allPrices = data.flatMap(c => [c.open, c.high, c.low, c.close]);
+    const allPrices = data.flatMap((c) => [c.open, c.high, c.low, c.close]);
     const minPrice = Math.min(...allPrices);
     const maxPrice = Math.max(...allPrices);
     const range = maxPrice - minPrice;
@@ -395,10 +685,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     const zoomStart = Math.max(0, ((data.length - 80) / data.length) * 100);
 
     this.chartMerge.set({
-      xAxis: [
-        { data: dates },
-        { data: dates },
-      ],
+      xAxis: [{ data: dates }, { data: dates }],
       yAxis: [
         {
           min: +(minPrice - padding).toFixed(this.pricePrecision()),
@@ -469,7 +756,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     const candles: CandleDto[] = [];
     const symbol = this.selectedSymbol();
     const isJPY = symbol.includes('JPY');
-    let price = isJPY ? 150.500 : 1.08500;
+    let price = isJPY ? 150.5 : 1.085;
     const volatility = isJPY ? 0.2 : 0.0008;
     const now = new Date();
     const tfMinutes: Record<string, number> = { M1: 1, M5: 5, M15: 15, H1: 60, H4: 240, D1: 1440 };

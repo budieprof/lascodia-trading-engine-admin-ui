@@ -7,21 +7,19 @@ import { LucideAngularModule } from 'lucide-angular';
   imports: [LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <lucide-icon
-      [name]="name()"
-      [size]="size()"
-      [strokeWidth]="strokeWidth()"
-    ></lucide-icon>
+    <lucide-icon [name]="name()" [size]="size()" [strokeWidth]="strokeWidth()"></lucide-icon>
   `,
-  styles: [`
-    :host {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      color: inherit;
-      line-height: 0;
-    }
-  `],
+  styles: [
+    `
+      :host {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: inherit;
+        line-height: 0;
+      }
+    `,
+  ],
 })
 export class IconComponent {
   readonly name = input.required<string>();

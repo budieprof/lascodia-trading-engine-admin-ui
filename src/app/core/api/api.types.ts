@@ -9,6 +9,34 @@ export interface ResponseData<T> {
   responseCode: string | null;
 }
 
+/** Engine response codes. `'00'` = success, `'-11'` = validation error, `'-14'` = not found. */
+export const ResponseCode = {
+  Success: '00',
+  ValidationError: '-11',
+  NotFound: '-14',
+} as const;
+
+export type ResponseCodeValue = (typeof ResponseCode)[keyof typeof ResponseCode];
+
+/** Thrown by envelope-aware ApiService methods when the server returns `status: false`. */
+export class ApiError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+    public readonly response: ResponseData<unknown>,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+
+  get isValidation(): boolean {
+    return this.code === ResponseCode.ValidationError;
+  }
+  get isNotFound(): boolean {
+    return this.code === ResponseCode.NotFound;
+  }
+}
+
 export interface Pager {
   totalItemCount: number;
   filter: any;
@@ -33,28 +61,128 @@ export interface PagerRequest {
 // Query Filter Types
 // ============================================================
 
-export interface OrderQueryFilter { search?: string; status?: string; orderType?: string; }
-export interface PositionQueryFilter { symbol?: string; status?: string; isPaper?: boolean; }
-export interface StrategyQueryFilter { search?: string; status?: string; symbol?: string; }
-export interface TradeSignalQueryFilter { search?: string; status?: string; direction?: string; strategyId?: number; from?: string; to?: string; }
-export interface TradingAccountQueryFilter { brokerId?: number; isPaper?: boolean; }
-export interface BrokerQueryFilter { brokerType?: string; }
-export interface RiskProfileQueryFilter { search?: string; }
-export interface CurrencyPairQueryFilter { search?: string; isActive?: boolean; }
-export interface AlertQueryFilter { symbol?: string; alertType?: string; isActive?: boolean; }
-export interface CandleQueryFilter { symbol?: string; timeframe?: string; from?: string; to?: string; }
-export interface MLModelQueryFilter { symbol?: string; timeframe?: string; isActive?: boolean; status?: string; }
-export interface MLTrainingRunQueryFilter { symbol?: string; timeframe?: string; status?: string; }
-export interface MLShadowEvaluationQueryFilter { symbol?: string; status?: string; }
-export interface BacktestRunQueryFilter { strategyId?: number; status?: string; }
-export interface WalkForwardRunQueryFilter { strategyId?: number; status?: string; }
-export interface StrategyAllocationQueryFilter { strategyId?: number; }
-export interface ExecutionQualityLogQueryFilter { symbol?: string; session?: string; strategyId?: number; from?: string; to?: string; }
-export interface DecisionLogQueryFilter { entityType?: string; entityId?: number; decisionType?: string; outcome?: string; from?: string; to?: string; }
-export interface COTReportQueryFilter { symbol?: string; }
-export interface RegimeSnapshotQueryFilter { symbol?: string; timeframe?: string; regime?: string; }
-export interface OptimizationRunQueryFilter { strategyId?: number; status?: string; }
-export interface EconomicEventQueryFilter { currency?: string; impact?: string; from?: string; to?: string; }
+export interface OrderQueryFilter {
+  search?: string;
+  status?: string;
+  orderType?: string;
+}
+export interface PositionQueryFilter {
+  symbol?: string;
+  status?: string;
+  isPaper?: boolean;
+}
+export interface StrategyQueryFilter {
+  search?: string;
+  status?: string;
+  symbol?: string;
+}
+export interface TradeSignalQueryFilter {
+  search?: string;
+  status?: string;
+  direction?: string;
+  strategyId?: number;
+  from?: string;
+  to?: string;
+}
+export interface TradingAccountQueryFilter {
+  brokerId?: number;
+  isPaper?: boolean;
+}
+export interface BrokerQueryFilter {
+  brokerType?: string;
+}
+export interface RiskProfileQueryFilter {
+  search?: string;
+}
+export interface CurrencyPairQueryFilter {
+  search?: string;
+  isActive?: boolean;
+}
+export interface AlertQueryFilter {
+  symbol?: string;
+  alertType?: string;
+  isActive?: boolean;
+}
+export interface CandleQueryFilter {
+  symbol?: string;
+  timeframe?: string;
+  from?: string;
+  to?: string;
+}
+export interface MLModelQueryFilter {
+  symbol?: string;
+  timeframe?: string;
+  isActive?: boolean;
+  status?: string;
+}
+export interface MLTrainingRunQueryFilter {
+  symbol?: string;
+  timeframe?: string;
+  status?: string;
+}
+export interface MLShadowEvaluationQueryFilter {
+  symbol?: string;
+  status?: string;
+}
+export interface BacktestRunQueryFilter {
+  strategyId?: number;
+  status?: string;
+}
+export interface WalkForwardRunQueryFilter {
+  strategyId?: number;
+  status?: string;
+}
+export interface StrategyAllocationQueryFilter {
+  strategyId?: number;
+}
+export interface ExecutionQualityLogQueryFilter {
+  symbol?: string;
+  session?: string;
+  strategyId?: number;
+  from?: string;
+  to?: string;
+}
+export interface DecisionLogQueryFilter {
+  entityType?: string;
+  entityId?: number;
+  decisionType?: string;
+  outcome?: string;
+  from?: string;
+  to?: string;
+}
+export interface COTReportQueryFilter {
+  symbol?: string;
+}
+export interface RegimeSnapshotQueryFilter {
+  symbol?: string;
+  timeframe?: string;
+  regime?: string;
+}
+export interface OptimizationRunQueryFilter {
+  strategyId?: number;
+  status?: string;
+}
+export interface EconomicEventQueryFilter {
+  currency?: string;
+  impact?: string;
+  from?: string;
+  to?: string;
+}
+export interface DrawdownSnapshotQueryFilter {
+  fromDate?: string;
+  toDate?: string;
+  recoveryMode?: RecoveryMode;
+  minDrawdownPct?: number;
+}
+export interface DriftReportQueryFilter {
+  symbol?: string;
+  detectorType?: string;
+  severity?: string;
+  fromDate?: string;
+  toDate?: string;
+  isActive?: boolean;
+  unresolvedOnly?: boolean;
+}
 
 // ============================================================
 // String Union Enums
@@ -79,12 +207,7 @@ export type PositionDirection = 'Long' | 'Short';
 
 export type TradeDirection = 'Buy' | 'Sell';
 
-export type TradeSignalStatus =
-  | 'Pending'
-  | 'Approved'
-  | 'Executed'
-  | 'Rejected'
-  | 'Expired';
+export type TradeSignalStatus = 'Pending' | 'Approved' | 'Executed' | 'Rejected' | 'Expired';
 
 export type StrategyType =
   | 'MovingAverageCrossover'
@@ -112,11 +235,7 @@ export type RunStatus = 'Queued' | 'Running' | 'Completed' | 'Failed';
 
 export type TriggerType = 'Scheduled' | 'Manual' | 'AutoDegrading';
 
-export type TradingSession =
-  | 'London'
-  | 'NewYork'
-  | 'Asian'
-  | 'LondonNYOverlap';
+export type TradingSession = 'London' | 'NewYork' | 'Asian' | 'LondonNYOverlap';
 
 export type MarketRegime =
   | 'Trending'
@@ -133,7 +252,16 @@ export type AlertType =
   | 'OrderFilled'
   | 'PositionClosed'
   | 'MLModelDegraded'
-  | 'DataQualityIssue';
+  | 'DataQualityIssue'
+  | 'SystemicMLDegradation'
+  | 'LatencySla'
+  | 'OptimizationLifecycleIssue'
+  | 'WorkerCrash'
+  | 'EADisconnected'
+  | 'ConfigurationDrift'
+  | 'BrokerReconciliation';
+
+export type AlertSeverity = 'Info' | 'Medium' | 'High' | 'Critical';
 
 export type AlertChannel = 'Email' | 'Webhook' | 'Telegram';
 
@@ -153,11 +281,7 @@ export type ConfigDataType = 'String' | 'Int' | 'Decimal' | 'Bool' | 'Json';
 
 export type ScaleType = 'ScaleIn' | 'ScaleOut';
 
-export type ScaleOrderStatus =
-  | 'Pending'
-  | 'Triggered'
-  | 'Filled'
-  | 'Cancelled';
+export type ScaleOrderStatus = 'Pending' | 'Triggered' | 'Filled' | 'Cancelled';
 
 export type ShadowEvaluationStatus =
   | 'Running'
@@ -365,6 +489,109 @@ export interface MLTrainingRunDto {
   errorMessage: string | null;
   startedAt: string;
   completedAt: string | null;
+}
+
+export interface MLTrainingRunDiagnosticsDto {
+  id: number;
+  symbol: string | null;
+  timeframe: Timeframe;
+  triggerType: TriggerType;
+  status: RunStatus;
+  priority: number;
+  fromDate: string;
+  toDate: string;
+  totalSamples: number;
+  mlModelId: number | null;
+  errorMessage: string | null;
+  startedAt: string;
+  pickedUpAt: string | null;
+  completedAt: string | null;
+  trainingDurationMs: number | null;
+  attemptCount: number;
+
+  // Core eval metrics
+  directionAccuracy: number | null;
+  magnitudeRMSE: number | null;
+  f1Score: number | null;
+  brierScore: number | null;
+  sharpeRatio: number | null;
+  expectedValue: number | null;
+  abstentionRate: number | null;
+  abstentionPrecision: number | null;
+
+  // Dataset / label quality
+  labelImbalanceRatio: number | null;
+  trainingDatasetStatsJson: string | null;
+  datasetHash: string | null;
+  candleIdRangeStart: number | null;
+  candleIdRangeEnd: number | null;
+
+  // Architecture / hyperparams
+  learnerArchitecture: string;
+  hyperparamConfigJson: string | null;
+  cvFoldScoresJson: string | null;
+
+  // Drift context
+  driftTriggerType: string | null;
+  driftMetadataJson: string | null;
+
+  // Training feature-flag audit trail
+  isPretrainingRun: boolean;
+  isDistillationRun: boolean;
+  isEmergencyRetrain: boolean;
+  isMamlRun: boolean;
+  mamlInnerSteps: number | null;
+  smoteApplied: boolean;
+  adversarialAugmentApplied: boolean;
+  mixupApplied: boolean;
+  curriculumApplied: boolean;
+  curriculumFinalDifficulty: number | null;
+  nceLossUsed: boolean;
+  rareEventWeightingApplied: boolean;
+  temporalDecayHalfLifeDays: number | null;
+  labelNoiseRatePercent: number | null;
+  sparsityPercent: number | null;
+  coresetSelectionRatio: number | null;
+}
+
+export interface BatchCancelOrdersItem {
+  id: number;
+  status: 'Cancelled' | 'Failed';
+  reason: string | null;
+}
+
+export interface BatchCancelOrdersResult {
+  total: number;
+  cancelled: number;
+  failed: number;
+  results: BatchCancelOrdersItem[];
+}
+
+export interface BatchCancelOrdersRequest {
+  orderIds: number[];
+  reason?: string;
+}
+
+export interface OperatorRoleDto {
+  id: number;
+  tradingAccountId: number;
+  role: string;
+  assignedAt: string;
+  assignedByAccountId: number | null;
+}
+
+export interface DriftAlertDto {
+  id: number;
+  symbol: string | null;
+  alertType: AlertType;
+  severity: AlertSeverity;
+  detectorType: string | null;
+  conditionJson: string;
+  deduplicationKey: string | null;
+  cooldownSeconds: number;
+  isActive: boolean;
+  lastTriggeredAt: string | null;
+  autoResolvedAt: string | null;
 }
 
 export interface ShadowEvaluationDto {
@@ -588,6 +815,150 @@ export interface TokenResponseDto {
   token: string;
   expiresAt: string;
   tokenType: string;
+}
+
+// ============================================================
+// Ops / Admin (Phase 2)
+// ============================================================
+
+export interface KillSwitchStatusDto {
+  enabled: boolean;
+  reason: string | null;
+  changedAt: string | null;
+  changedBy: string | null;
+}
+
+export interface ToggleKillSwitchRequest {
+  enabled: boolean;
+  reason?: string | null;
+}
+
+export type WorkerHealthStatus = 'Healthy' | 'Degraded' | 'Failed' | 'Idle';
+
+export interface WorkerHealthDto {
+  name: string;
+  category: string | null;
+  status: WorkerHealthStatus;
+  lastCycleMs: number;
+  avgCycleMs: number | null;
+  errorRate: number;
+  backlog: number | null;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastMessage: string | null;
+}
+
+export type EAInstanceStatus = 'Active' | 'Idle' | 'Disconnected';
+
+export interface EAInstanceDto {
+  instanceId: string;
+  accountId: number | null;
+  status: EAInstanceStatus;
+  lastHeartbeatAt: string | null;
+  ownedSymbols: string[];
+  registeredAt: string | null;
+}
+
+export interface DeadLetterDto {
+  id: number;
+  eventType: string | null;
+  payloadJson: string | null;
+  errorMessage: string | null;
+  attemptCount: number;
+  isResolved: boolean;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+/** Structured but permissive — calibration endpoints return whatever the backend decides today. */
+export interface CalibrationTrendReportDto {
+  baselineMonths: number;
+  latestMonthMetrics: Record<string, number | string | null>;
+  baselineMetrics: Record<string, number | string | null>;
+  anomalies: Array<{
+    metric: string;
+    delta: number;
+    severity: string | null;
+    note?: string | null;
+  }>;
+}
+
+export interface ScreeningGateBindingReportDto {
+  gates: Array<{ gate: string; rejectionCount: number; sharePct: number; notes?: string | null }>;
+}
+
+export interface SignalRejectionEntryDto {
+  tradeSignalId: number;
+  ruleId: string | null;
+  reason: string | null;
+  symbol: string | null;
+  strategyId: number | null;
+  rejectedAt: string;
+}
+
+export interface DefaultsCalibrationDto {
+  recommendations: Array<{
+    key: string;
+    current: number | string | null;
+    suggested: number | string | null;
+    rationale: string | null;
+  }>;
+}
+
+// ============================================================
+// ML Signal A/B Tests (Phase 3)
+// ============================================================
+
+export type MLSignalAbTestStatus =
+  | 'Running'
+  | 'Completed'
+  | 'ChampionWon'
+  | 'ChallengerWon'
+  | 'Inconclusive';
+
+export interface MLSignalAbTestResultDto {
+  id: number;
+  championModelId: number;
+  challengerModelId: number;
+  symbol: string | null;
+  timeframe: Timeframe;
+  status: MLSignalAbTestStatus;
+  sampleSize: number;
+  championPnl: number;
+  challengerPnl: number;
+  championWinRate: number;
+  challengerWinRate: number;
+  /** SPRT log-likelihood ratio; positive favours challenger. */
+  sprtLogLikelihoodRatio: number | null;
+  pValue: number | null;
+  decision: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+// ============================================================
+// Optimization (Phase 3)
+// ============================================================
+
+export interface ValidateOptimizationRequest {
+  strategyId: number;
+  parametersJson?: string;
+  searchBudget?: number;
+}
+
+export interface OptimizationValidationDto {
+  isValid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+export interface OptimizationDryRunDto {
+  strategyId: number;
+  estimatedGridSize: number;
+  candleCount: number;
+  estimatedDurationMinutes: number;
+  estimatedCpuCores: number;
+  notes: string | null;
 }
 
 // ============================================================

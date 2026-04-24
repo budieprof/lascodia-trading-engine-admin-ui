@@ -4,6 +4,9 @@ import { ApiService } from '@core/api/api.service';
 import {
   ResponseData,
   DrawdownSnapshotDto,
+  DrawdownSnapshotQueryFilter,
+  PagedData,
+  PagerRequest,
 } from '@core/api/api.types';
 
 @Injectable({ providedIn: 'root' })
@@ -16,5 +19,11 @@ export class DrawdownRecoveryService {
 
   getLatest(): Observable<ResponseData<DrawdownSnapshotDto>> {
     return this.api.get(`/drawdown-recovery/latest`);
+  }
+
+  listHistory(
+    query: PagerRequest & { filter?: DrawdownSnapshotQueryFilter },
+  ): Observable<ResponseData<PagedData<DrawdownSnapshotDto>>> {
+    return this.api.post(`/drawdown-recovery/history`, query);
   }
 }

@@ -23,15 +23,14 @@ interface ConfigEntry extends EngineConfigDto {
 @Component({
   selector: 'app-config-page',
   standalone: true,
-  imports: [
-    PageHeaderComponent,
-    FormsModule,
-    RelativeTimePipe,
-  ],
+  imports: [PageHeaderComponent, FormsModule, RelativeTimePipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
-      <app-page-header title="Engine Configuration" subtitle="View and edit engine configuration parameters" />
+      <app-page-header
+        title="Engine Configuration"
+        subtitle="View and edit engine configuration parameters"
+      />
 
       @if (loading()) {
         <div class="loading-state">
@@ -91,7 +90,9 @@ interface ConfigEntry extends EngineConfigDto {
                           }
                         </td>
                         <td class="col-updated">
-                          <span class="updated-text">{{ config.lastUpdatedAt | relativeTime }}</span>
+                          <span class="updated-text">{{
+                            config.lastUpdatedAt | relativeTime
+                          }}</span>
                         </td>
                         <td class="col-actions">
                           <button
@@ -117,203 +118,251 @@ interface ConfigEntry extends EngineConfigDto {
       }
     </div>
   `,
-  styles: [`
-    .page { padding: var(--space-2) 0; }
+  styles: [
+    `
+      .page {
+        padding: var(--space-2) 0;
+      }
 
-    .loading-state {
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-4);
-    }
+      .loading-state {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+      }
 
-    .skeleton-block {
-      height: 60px;
-      background: var(--bg-tertiary);
-      border-radius: var(--radius-md);
-      animation: pulse 1.5s ease infinite;
-    }
+      .skeleton-block {
+        height: 60px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-md);
+        animation: pulse 1.5s ease infinite;
+      }
 
-    @keyframes pulse {
-      0%, 100% { opacity: 0.6; }
-      50% { opacity: 1; }
-    }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 0.6;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
 
-    .config-group {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      margin-bottom: var(--space-3);
-      overflow: hidden;
-    }
+      .config-group {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        margin-bottom: var(--space-3);
+        overflow: hidden;
+      }
 
-    .group-header {
-      display: flex;
-      align-items: center;
-      gap: var(--space-3);
-      width: 100%;
-      padding: var(--space-3) var(--space-4);
-      border: none;
-      background: none;
-      cursor: pointer;
-      font-family: inherit;
-      text-align: left;
-      transition: background 0.15s ease;
-    }
+      .group-header {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        width: 100%;
+        padding: var(--space-3) var(--space-4);
+        border: none;
+        background: none;
+        cursor: pointer;
+        font-family: inherit;
+        text-align: left;
+        transition: background 0.15s ease;
+      }
 
-    .group-header:hover { background: var(--bg-tertiary); }
+      .group-header:hover {
+        background: var(--bg-tertiary);
+      }
 
-    .group-chevron {
-      font-size: 10px;
-      color: var(--text-tertiary);
-      transition: transform 0.2s ease;
-      display: inline-block;
-    }
+      .group-chevron {
+        font-size: 10px;
+        color: var(--text-tertiary);
+        transition: transform 0.2s ease;
+        display: inline-block;
+      }
 
-    .group-chevron--open { transform: rotate(90deg); }
+      .group-chevron--open {
+        transform: rotate(90deg);
+      }
 
-    .group-title {
-      font-size: var(--text-sm);
-      font-weight: var(--font-semibold);
-      color: var(--text-primary);
-    }
+      .group-title {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
 
-    .group-count {
-      font-size: var(--text-xs);
-      color: var(--text-tertiary);
-      background: var(--bg-tertiary);
-      padding: 1px 8px;
-      border-radius: var(--radius-full);
-    }
+      .group-count {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        background: var(--bg-tertiary);
+        padding: 1px 8px;
+        border-radius: var(--radius-full);
+      }
 
-    .config-table-wrapper {
-      overflow-x: auto;
-      border-top: 1px solid var(--border);
-    }
+      .config-table-wrapper {
+        overflow-x: auto;
+        border-top: 1px solid var(--border);
+      }
 
-    .config-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: var(--text-sm);
-    }
+      .config-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--text-sm);
+      }
 
-    .config-table th {
-      text-align: left;
-      padding: var(--space-2) var(--space-3);
-      font-weight: var(--font-medium);
-      color: var(--text-secondary);
-      font-size: var(--text-xs);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      background: var(--bg-tertiary);
-      border-bottom: 1px solid var(--border);
-    }
+      .config-table th {
+        text-align: left;
+        padding: var(--space-2) var(--space-3);
+        font-weight: var(--font-medium);
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        background: var(--bg-tertiary);
+        border-bottom: 1px solid var(--border);
+      }
 
-    .config-table td {
-      padding: var(--space-2) var(--space-3);
-      border-bottom: 1px solid var(--border);
-      vertical-align: middle;
-    }
+      .config-table td {
+        padding: var(--space-2) var(--space-3);
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+      }
 
-    .config-table tbody tr:last-child td { border-bottom: none; }
+      .config-table tbody tr:last-child td {
+        border-bottom: none;
+      }
 
-    .row-dirty { background: rgba(0, 113, 227, 0.04); }
+      .row-dirty {
+        background: rgba(0, 113, 227, 0.04);
+      }
 
-    .col-key { min-width: 200px; }
-    .col-value { min-width: 200px; }
-    .col-type { width: 100px; }
-    .col-reload { width: 100px; }
-    .col-updated { width: 140px; }
-    .col-actions { width: 80px; }
+      .col-key {
+        min-width: 200px;
+      }
+      .col-value {
+        min-width: 200px;
+      }
+      .col-type {
+        width: 100px;
+      }
+      .col-reload {
+        width: 100px;
+      }
+      .col-updated {
+        width: 140px;
+      }
+      .col-actions {
+        width: 80px;
+      }
 
-    .config-key {
-      font-family: 'SF Mono', 'Menlo', monospace;
-      font-size: 12px;
-      color: var(--text-primary);
-      display: block;
-    }
+      .config-key {
+        font-family: 'SF Mono', 'Menlo', monospace;
+        font-size: 12px;
+        color: var(--text-primary);
+        display: block;
+      }
 
-    .config-desc {
-      font-size: var(--text-xs);
-      color: var(--text-tertiary);
-      display: block;
-      margin-top: 2px;
-    }
+      .config-desc {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        display: block;
+        margin-top: 2px;
+      }
 
-    .config-input {
-      width: 100%;
-      height: 30px;
-      padding: 0 var(--space-2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      font-family: 'SF Mono', 'Menlo', monospace;
-      font-size: 12px;
-      outline: none;
-      transition: border-color 0.15s ease;
-    }
+      .config-input {
+        width: 100%;
+        height: 30px;
+        padding: 0 var(--space-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-family: 'SF Mono', 'Menlo', monospace;
+        font-size: 12px;
+        outline: none;
+        transition: border-color 0.15s ease;
+      }
 
-    .config-input:focus { border-color: var(--accent); }
+      .config-input:focus {
+        border-color: var(--accent);
+      }
 
-    .type-badge {
-      display: inline-flex;
-      padding: 2px 8px;
-      border-radius: var(--radius-full);
-      font-size: 11px;
-      font-weight: 600;
-      background: rgba(0,113,227,0.12);
-      color: #0040DD;
-    }
+      .type-badge {
+        display: inline-flex;
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        font-size: 11px;
+        font-weight: 600;
+        background: rgba(0, 113, 227, 0.12);
+        color: #0040dd;
+      }
 
-    .badge {
-      display: inline-flex;
-      padding: 2px 8px;
-      border-radius: var(--radius-full);
-      font-size: 11px;
-      font-weight: 600;
-    }
+      .badge {
+        display: inline-flex;
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        font-size: 11px;
+        font-weight: 600;
+      }
 
-    .badge--success { background: rgba(52,199,89,0.12); color: #248A3D; }
-    .badge--neutral { background: rgba(142,142,147,0.12); color: #636366; }
+      .badge--success {
+        background: rgba(52, 199, 89, 0.12);
+        color: #248a3d;
+      }
+      .badge--neutral {
+        background: rgba(142, 142, 147, 0.12);
+        color: #636366;
+      }
 
-    .updated-text {
-      font-size: var(--text-xs);
-      color: var(--text-secondary);
-    }
+      .updated-text {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
 
-    .save-btn {
-      height: 28px;
-      padding: 0 var(--space-3);
-      border: none;
-      border-radius: var(--radius-full);
-      background: var(--accent);
-      color: white;
-      font-size: 12px;
-      font-weight: 600;
-      font-family: inherit;
-      cursor: pointer;
-      transition: all 0.15s ease;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 56px;
-    }
+      .save-btn {
+        height: 28px;
+        padding: 0 var(--space-3);
+        border: none;
+        border-radius: var(--radius-full);
+        background: var(--accent);
+        color: white;
+        font-size: 12px;
+        font-weight: 600;
+        font-family: inherit;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 56px;
+      }
 
-    .save-btn:hover:not(:disabled) { background: var(--accent-hover); }
-    .save-btn:active:not(:disabled) { transform: scale(0.97); }
-    .save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+      .save-btn:hover:not(:disabled) {
+        background: var(--accent-hover);
+      }
+      .save-btn:active:not(:disabled) {
+        transform: scale(0.97);
+      }
+      .save-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
 
-    .spinner {
-      width: 14px;
-      height: 14px;
-      border: 2px solid rgba(255,255,255,0.3);
-      border-top-color: white;
-      border-radius: 50%;
-      animation: spin 0.6s linear infinite;
-    }
+      .spinner {
+        width: 14px;
+        height: 14px;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-top-color: white;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+      }
 
-    @keyframes spin { to { transform: rotate(360deg); } }
-  `],
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    `,
+  ],
 })
 export class ConfigPageComponent implements OnInit {
   private readonly configService = inject(ConfigService);

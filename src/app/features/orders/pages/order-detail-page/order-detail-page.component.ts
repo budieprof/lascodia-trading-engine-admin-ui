@@ -1,4 +1,11 @@
-import { Component, ChangeDetectionStrategy, inject, signal, computed, OnInit } from '@angular/core';
+import {
+  Component,
+  ChangeDetectionStrategy,
+  inject,
+  signal,
+  computed,
+  OnInit,
+} from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ReactiveFormsModule, FormBuilder } from '@angular/forms';
 import { DatePipe, DecimalPipe } from '@angular/common';
@@ -47,22 +54,63 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
               <span class="back-arrow">&larr;</span>
             </button>
             <h1 class="page-title">Order #{{ order()!.id }}</h1>
-            <span class="status-badge" [style.background]="statusStyle().bg" [style.color]="statusStyle().color">
+            <span
+              class="status-badge"
+              [style.background]="statusStyle().bg"
+              [style.color]="statusStyle().color"
+            >
               {{ statusLabel() }}
             </span>
           </div>
           <div class="title-actions">
             @if (order()!.status === 'Pending' || statusNumeric() === 0) {
-              <button class="btn btn-primary" (click)="onSubmit()" [disabled]="actionLoading()">Submit to Broker</button>
-              <button class="btn btn-secondary" (click)="openModifyPanel()" [disabled]="actionLoading()">Modify SL/TP</button>
-              <button class="btn btn-warning" (click)="showCancelDialog.set(true)" [disabled]="actionLoading()">Cancel</button>
-              <button class="btn btn-destructive" (click)="showDeleteDialog.set(true)" [disabled]="actionLoading()">Delete</button>
+              <button class="btn btn-primary" (click)="onSubmit()" [disabled]="actionLoading()">
+                Submit to Broker
+              </button>
+              <button
+                class="btn btn-secondary"
+                (click)="openModifyPanel()"
+                [disabled]="actionLoading()"
+              >
+                Modify SL/TP
+              </button>
+              <button
+                class="btn btn-warning"
+                (click)="showCancelDialog.set(true)"
+                [disabled]="actionLoading()"
+              >
+                Cancel
+              </button>
+              <button
+                class="btn btn-destructive"
+                (click)="showDeleteDialog.set(true)"
+                [disabled]="actionLoading()"
+              >
+                Delete
+              </button>
             }
             @if (order()!.status === 'Submitted' || statusNumeric() === 1) {
-              <button class="btn btn-warning" (click)="showCancelDialog.set(true)" [disabled]="actionLoading()">Cancel</button>
+              <button
+                class="btn btn-warning"
+                (click)="showCancelDialog.set(true)"
+                [disabled]="actionLoading()"
+              >
+                Cancel
+              </button>
             }
-            @if (order()!.status === 'Filled' || order()!.status === 'PartialFill' || statusNumeric() === 3 || statusNumeric() === 2) {
-              <button class="btn btn-secondary" (click)="openModifyPanel()" [disabled]="actionLoading()">Modify SL/TP</button>
+            @if (
+              order()!.status === 'Filled' ||
+              order()!.status === 'PartialFill' ||
+              statusNumeric() === 3 ||
+              statusNumeric() === 2
+            ) {
+              <button
+                class="btn btn-secondary"
+                (click)="openModifyPanel()"
+                [disabled]="actionLoading()"
+              >
+                Modify SL/TP
+              </button>
             }
           </div>
         </div>
@@ -72,20 +120,46 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
           <div class="modify-panel">
             <div class="modify-panel-header">
               <h3 class="modify-panel-title">Modify Stop Loss / Take Profit</h3>
-              <button class="close-btn" (click)="showModifyPanel.set(false)">&times;</button>
+              <button
+                type="button"
+                class="close-btn"
+                aria-label="Close modify panel"
+                (click)="showModifyPanel.set(false)"
+              >
+                &times;
+              </button>
             </div>
             <form [formGroup]="modifyForm" (ngSubmit)="onModify()" class="modify-panel-body">
               <div class="modify-form-grid">
                 <div class="form-field">
                   <label class="form-label">Stop Loss</label>
-                  <input class="form-input" type="number" formControlName="stopLoss" step="0.00001" placeholder="Stop Loss price" />
+                  <input
+                    class="form-input"
+                    type="number"
+                    formControlName="stopLoss"
+                    step="0.00001"
+                    placeholder="Stop Loss price"
+                  />
                 </div>
                 <div class="form-field">
                   <label class="form-label">Take Profit</label>
-                  <input class="form-input" type="number" formControlName="takeProfit" step="0.00001" placeholder="Take Profit price" />
+                  <input
+                    class="form-input"
+                    type="number"
+                    formControlName="takeProfit"
+                    step="0.00001"
+                    placeholder="Take Profit price"
+                  />
                 </div>
                 <div class="modify-actions">
-                  <button type="button" class="btn btn-secondary" (click)="showModifyPanel.set(false)" [disabled]="actionLoading()">Cancel</button>
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    (click)="showModifyPanel.set(false)"
+                    [disabled]="actionLoading()"
+                  >
+                    Cancel
+                  </button>
                   <button type="submit" class="btn btn-primary" [disabled]="actionLoading()">
                     @if (actionLoading()) {
                       <span class="spinner"></span>
@@ -127,32 +201,48 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Quantity</span>
-                    <span class="detail-value mono">{{ order()!.quantity | number:'1.2-2' }}</span>
+                    <span class="detail-value mono">{{ order()!.quantity | number: '1.2-2' }}</span>
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Price</span>
-                    <span class="detail-value mono">{{ order()!.price | number:'1.5-5' }}</span>
+                    <span class="detail-value mono">{{ order()!.price | number: '1.5-5' }}</span>
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Filled Price</span>
-                    <span class="detail-value mono">{{ order()!.filledPrice != null ? (order()!.filledPrice! | number:'1.5-5') : '-' }}</span>
+                    <span class="detail-value mono">{{
+                      order()!.filledPrice !== null
+                        ? (order()!.filledPrice! | number: '1.5-5')
+                        : '-'
+                    }}</span>
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Stop Loss</span>
-                    <span class="detail-value mono">{{ order()!.stopLoss != null ? (order()!.stopLoss! | number:'1.5-5') : '-' }}</span>
+                    <span class="detail-value mono">{{
+                      order()!.stopLoss !== null ? (order()!.stopLoss! | number: '1.5-5') : '-'
+                    }}</span>
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Take Profit</span>
-                    <span class="detail-value mono">{{ order()!.takeProfit != null ? (order()!.takeProfit! | number:'1.5-5') : '-' }}</span>
+                    <span class="detail-value mono">{{
+                      order()!.takeProfit !== null ? (order()!.takeProfit! | number: '1.5-5') : '-'
+                    }}</span>
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Filled Quantity</span>
-                    <span class="detail-value mono">{{ order()!.filledQuantity != null ? (order()!.filledQuantity! | number:'1.2-2') : '-' }}</span>
+                    <span class="detail-value mono">{{
+                      order()!.filledQuantity !== null
+                        ? (order()!.filledQuantity! | number: '1.2-2')
+                        : '-'
+                    }}</span>
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Status</span>
                     <span class="detail-value">
-                      <span class="status-badge" [style.background]="statusStyle().bg" [style.color]="statusStyle().color">
+                      <span
+                        class="status-badge"
+                        [style.background]="statusStyle().bg"
+                        [style.color]="statusStyle().color"
+                      >
                         {{ statusLabel() }}
                       </span>
                     </span>
@@ -160,7 +250,11 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                   <div class="detail-item">
                     <span class="detail-label">Paper Trade</span>
                     <span class="detail-value">
-                      <span class="paper-badge" [class.paper]="order()!.isPaper" [class.live]="!order()!.isPaper">
+                      <span
+                        class="paper-badge"
+                        [class.paper]="order()!.isPaper"
+                        [class.live]="!order()!.isPaper"
+                      >
                         {{ order()!.isPaper ? 'Paper' : 'Live' }}
                       </span>
                     </span>
@@ -183,11 +277,15 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Created At</span>
-                    <span class="detail-value">{{ order()!.createdAt | date:'MMM d, yyyy HH:mm:ss' }}</span>
+                    <span class="detail-value">{{
+                      order()!.createdAt | date: 'MMM d, yyyy HH:mm:ss'
+                    }}</span>
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Filled At</span>
-                    <span class="detail-value">{{ order()!.filledAt ? (order()!.filledAt | date:'MMM d, yyyy HH:mm:ss') : '-' }}</span>
+                    <span class="detail-value">{{
+                      order()!.filledAt ? (order()!.filledAt | date: 'MMM d, yyyy HH:mm:ss') : '-'
+                    }}</span>
                   </div>
                   @if (order()!.notes) {
                     <div class="detail-item detail-item-full">
@@ -210,7 +308,7 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
               }
 
               <!-- P&L Summary (if filled) -->
-              @if (order()!.filledPrice != null && order()!.price) {
+              @if (order()!.filledPrice !== null && order()!.price) {
                 <div class="detail-card pnl-card">
                   <div class="card-header">
                     <h3 class="card-title">Execution Summary</h3>
@@ -218,16 +316,22 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                   <div class="detail-grid-3">
                     <div class="detail-item">
                       <span class="detail-label">Requested Price</span>
-                      <span class="detail-value mono">{{ order()!.price | number:'1.5-5' }}</span>
+                      <span class="detail-value mono">{{ order()!.price | number: '1.5-5' }}</span>
                     </div>
                     <div class="detail-item">
                       <span class="detail-label">Filled Price</span>
-                      <span class="detail-value mono">{{ order()!.filledPrice! | number:'1.5-5' }}</span>
+                      <span class="detail-value mono">{{
+                        order()!.filledPrice! | number: '1.5-5'
+                      }}</span>
                     </div>
                     <div class="detail-item">
                       <span class="detail-label">Slippage</span>
-                      <span class="detail-value mono" [class.loss]="slippage() > 0" [class.profit]="slippage() < 0">
-                        {{ slippage() | number:'1.5-5' }}
+                      <span
+                        class="detail-value mono"
+                        [class.loss]="slippage() > 0"
+                        [class.profit]="slippage() < 0"
+                      >
+                        {{ slippage() | number: '1.5-5' }}
                       </span>
                     </div>
                   </div>
@@ -242,7 +346,11 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                 </div>
                 <div class="timeline">
                   @for (step of timelineSteps(); track step.label) {
-                    <div class="timeline-step" [class.active]="step.active" [class.current]="step.current">
+                    <div
+                      class="timeline-step"
+                      [class.active]="step.active"
+                      [class.current]="step.current"
+                    >
                       <div class="timeline-dot-container">
                         <div class="timeline-dot">
                           @if (step.active) {
@@ -250,7 +358,10 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                           }
                         </div>
                         @if (!$last) {
-                          <div class="timeline-line" [class.filled]="step.active && !step.current"></div>
+                          <div
+                            class="timeline-line"
+                            [class.filled]="step.active && !step.current"
+                          ></div>
                         }
                       </div>
                       <div class="timeline-content">
@@ -275,7 +386,10 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                   <div class="related-item">
                     <span class="related-label">Trade Signal</span>
                     @if (order()!.tradeSignalId) {
-                      <a class="related-link" [routerLink]="['/trade-signals', order()!.tradeSignalId]">
+                      <a
+                        class="related-link"
+                        [routerLink]="['/trade-signals', order()!.tradeSignalId]"
+                      >
                         Trade Signal #{{ order()!.tradeSignalId }}
                         <span class="link-arrow">&rarr;</span>
                       </a>
@@ -312,24 +426,32 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
         <app-confirm-dialog
           [open]="showCancelDialog()"
           title="Cancel Order"
-          [message]="'Are you sure you want to cancel order #' + order()!.id + '? This action cannot be undone.'"
+          [message]="
+            'Are you sure you want to cancel order #' +
+            order()!.id +
+            '? This action cannot be undone.'
+          "
           confirmLabel="Cancel Order"
           confirmVariant="destructive"
           [loading]="actionLoading()"
           (confirm)="onCancel()"
-          (cancel)="showCancelDialog.set(false)"
+          (cancelled)="showCancelDialog.set(false)"
         />
 
         <!-- Delete Confirm Dialog -->
         <app-confirm-dialog
           [open]="showDeleteDialog()"
           title="Delete Order"
-          [message]="'Are you sure you want to permanently delete order #' + order()!.id + '? This action cannot be undone.'"
+          [message]="
+            'Are you sure you want to permanently delete order #' +
+            order()!.id +
+            '? This action cannot be undone.'
+          "
           confirmLabel="Delete"
           confirmVariant="destructive"
           [loading]="actionLoading()"
           (confirm)="onDelete()"
-          (cancel)="showDeleteDialog.set(false)"
+          (cancelled)="showDeleteDialog.set(false)"
         />
       } @else {
         <div class="error-state">
@@ -341,535 +463,7 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
       }
     </div>
   `,
-  styles: [`
-    .page { padding: var(--space-2) 0; }
-
-    /* Page Title Row */
-    .page-title-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: var(--space-4);
-      margin-bottom: var(--space-5);
-      flex-wrap: wrap;
-    }
-
-    .title-left {
-      display: flex;
-      align-items: center;
-      gap: var(--space-3);
-    }
-
-    .btn-back {
-      width: 36px;
-      height: 36px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      background: var(--bg-secondary);
-      color: var(--text-secondary);
-      font-size: 16px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.15s ease;
-    }
-    .btn-back:hover { background: var(--bg-tertiary); color: var(--text-primary); }
-
-    .back-arrow { line-height: 1; }
-
-    .page-title {
-      font-size: var(--text-xl);
-      font-weight: var(--font-semibold);
-      color: var(--text-primary);
-      margin: 0;
-      letter-spacing: var(--tracking-tight);
-    }
-
-    .title-actions {
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-      flex-wrap: wrap;
-    }
-
-    /* Status Badge */
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      padding: 2px 10px;
-      border-radius: var(--radius-full);
-      font-size: var(--text-xs);
-      font-weight: var(--font-semibold);
-      white-space: nowrap;
-    }
-
-    /* Buttons */
-    .btn {
-      height: 36px;
-      padding: 0 var(--space-4);
-      border: none;
-      border-radius: var(--radius-full);
-      font-size: var(--text-sm);
-      font-weight: var(--font-medium);
-      font-family: inherit;
-      cursor: pointer;
-      transition: all 0.15s ease;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 80px;
-      gap: var(--space-1);
-    }
-    .btn:active:not(:disabled) { transform: scale(0.97); }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    .btn-primary { background: var(--accent); color: white; }
-    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
-
-    .btn-secondary { background: var(--bg-tertiary); color: var(--text-primary); }
-    .btn-secondary:hover:not(:disabled) { opacity: 0.8; }
-
-    .btn-warning { background: rgba(255,149,0,0.15); color: #C93400; }
-    .btn-warning:hover:not(:disabled) { background: rgba(255,149,0,0.25); }
-
-    .btn-destructive { background: var(--loss); color: white; }
-    .btn-destructive:hover:not(:disabled) { opacity: 0.9; }
-
-    /* Modify Panel */
-    .modify-panel {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      margin-bottom: var(--space-5);
-      overflow: hidden;
-      animation: slideDown 0.25s ease-out;
-      box-shadow: var(--shadow-sm);
-    }
-
-    .modify-panel-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: var(--space-4) var(--space-5);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .modify-panel-title {
-      font-size: var(--text-base);
-      font-weight: var(--font-semibold);
-      color: var(--text-primary);
-      margin: 0;
-    }
-
-    .close-btn {
-      width: 32px;
-      height: 32px;
-      border: none;
-      border-radius: var(--radius-full);
-      background: transparent;
-      color: var(--text-secondary);
-      font-size: 20px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: background 0.15s ease;
-    }
-    .close-btn:hover { background: var(--bg-tertiary); }
-
-    .modify-panel-body { padding: var(--space-5); }
-
-    .modify-form-grid {
-      display: flex;
-      align-items: flex-end;
-      gap: var(--space-4);
-      flex-wrap: wrap;
-    }
-
-    .modify-actions {
-      display: flex;
-      gap: var(--space-2);
-      margin-left: auto;
-    }
-
-    /* Form Fields */
-    .form-field { display: flex; flex-direction: column; min-width: 180px; }
-
-    .form-label {
-      display: block;
-      font-size: var(--text-xs);
-      font-weight: var(--font-medium);
-      color: var(--text-secondary);
-      margin-bottom: var(--space-1);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .form-input {
-      height: 36px;
-      padding: 0 var(--space-3);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      font-size: var(--text-sm);
-      font-family: inherit;
-      outline: none;
-      width: 100%;
-      box-sizing: border-box;
-    }
-    .form-input:focus { border-color: var(--accent); }
-
-    /* Detail Card */
-    .detail-card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      overflow: hidden;
-      margin-bottom: var(--space-4);
-    }
-
-    .pnl-card { margin-top: var(--space-4); }
-
-    .card-header {
-      padding: var(--space-4) var(--space-5);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .card-title {
-      font-size: var(--text-base);
-      font-weight: var(--font-semibold);
-      color: var(--text-primary);
-      margin: 0;
-    }
-
-    .detail-grid-3 {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 0;
-    }
-
-    .detail-item {
-      padding: var(--space-3) var(--space-5);
-      border-bottom: 1px solid var(--border);
-      border-right: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-1);
-    }
-    .detail-item:nth-child(3n) { border-right: none; }
-    .detail-item:last-child { border-bottom: none; }
-
-    .detail-item-full {
-      grid-column: 1 / -1;
-      border-right: none;
-    }
-
-    .detail-label {
-      font-size: var(--text-xs);
-      font-weight: var(--font-medium);
-      color: var(--text-tertiary);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .detail-value {
-      font-size: var(--text-sm);
-      color: var(--text-primary);
-      font-weight: var(--font-medium);
-    }
-    .detail-value.mono {
-      font-family: 'SF Mono', 'Fira Code', monospace;
-      font-size: var(--text-xs);
-    }
-
-    .profit { color: var(--profit) !important; }
-    .loss { color: var(--loss) !important; }
-
-    .side-badge {
-      display: inline-flex;
-      padding: 2px 10px;
-      border-radius: var(--radius-full);
-      font-size: var(--text-xs);
-      font-weight: var(--font-semibold);
-    }
-    .side-badge.buy { background: rgba(52,199,89,0.12); color: #248A3D; }
-    .side-badge.sell { background: rgba(255,59,48,0.12); color: #D70015; }
-
-    .paper-badge {
-      display: inline-flex;
-      padding: 2px 10px;
-      border-radius: var(--radius-full);
-      font-size: var(--text-xs);
-      font-weight: var(--font-semibold);
-    }
-    .paper-badge.paper { background: rgba(0,113,227,0.12); color: #0040DD; }
-    .paper-badge.live { background: rgba(52,199,89,0.12); color: #248A3D; }
-
-    .link {
-      color: var(--accent);
-      text-decoration: none;
-      font-weight: var(--font-medium);
-    }
-    .link:hover { text-decoration: underline; }
-
-    /* Rejection Card */
-    .rejection-card {
-      display: flex;
-      align-items: flex-start;
-      gap: var(--space-3);
-      padding: var(--space-4) var(--space-5);
-      background: rgba(255,59,48,0.06);
-      border: 1px solid rgba(255,59,48,0.2);
-      border-radius: var(--radius-md);
-      margin-top: var(--space-4);
-    }
-
-    .rejection-icon {
-      width: 24px;
-      height: 24px;
-      border-radius: var(--radius-full);
-      background: rgba(255,59,48,0.15);
-      color: #D70015;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: bold;
-      font-size: 14px;
-      flex-shrink: 0;
-    }
-
-    .rejection-content { display: flex; flex-direction: column; gap: 2px; }
-
-    .rejection-title {
-      font-size: var(--text-sm);
-      font-weight: var(--font-semibold);
-      color: #D70015;
-    }
-
-    .rejection-text {
-      font-size: var(--text-sm);
-      color: var(--text-primary);
-    }
-
-    /* Timeline */
-    .timeline-card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      overflow: hidden;
-    }
-
-    .timeline {
-      padding: var(--space-6) var(--space-5);
-    }
-
-    .timeline-step {
-      display: flex;
-      gap: var(--space-4);
-      min-height: 72px;
-    }
-    .timeline-step:last-child { min-height: auto; }
-
-    .timeline-dot-container {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      flex-shrink: 0;
-      width: 28px;
-    }
-
-    .timeline-dot {
-      width: 28px;
-      height: 28px;
-      border-radius: var(--radius-full);
-      border: 2px solid var(--border);
-      background: var(--bg-primary);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      transition: all 0.2s ease;
-    }
-
-    .timeline-step.active .timeline-dot {
-      border-color: var(--accent);
-      background: var(--accent);
-      color: white;
-    }
-
-    .timeline-step.current .timeline-dot {
-      border-color: var(--accent);
-      background: rgba(0,113,227,0.15);
-      color: var(--accent);
-      box-shadow: 0 0 0 4px rgba(0,113,227,0.1);
-    }
-
-    .dot-check {
-      font-size: 12px;
-      font-weight: bold;
-      line-height: 1;
-    }
-
-    .timeline-line {
-      width: 2px;
-      flex: 1;
-      background: var(--border);
-      margin: 4px 0;
-    }
-    .timeline-line.filled { background: var(--accent); }
-
-    .timeline-content {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      padding-bottom: var(--space-4);
-    }
-
-    .timeline-label {
-      font-size: var(--text-sm);
-      font-weight: var(--font-semibold);
-      color: var(--text-primary);
-    }
-
-    .timeline-time {
-      font-size: var(--text-xs);
-      color: var(--text-secondary);
-    }
-
-    .timeline-desc {
-      font-size: var(--text-xs);
-      color: var(--text-tertiary);
-      margin-top: 2px;
-    }
-
-    /* Related */
-    .related-card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      overflow: hidden;
-    }
-
-    .related-list {
-      padding: 0;
-    }
-
-    .related-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: var(--space-4) var(--space-5);
-      border-bottom: 1px solid var(--border);
-    }
-    .related-item:last-child { border-bottom: none; }
-
-    .related-label {
-      font-size: var(--text-sm);
-      font-weight: var(--font-medium);
-      color: var(--text-secondary);
-    }
-
-    .related-link {
-      display: inline-flex;
-      align-items: center;
-      gap: var(--space-1);
-      color: var(--accent);
-      text-decoration: none;
-      font-size: var(--text-sm);
-      font-weight: var(--font-medium);
-    }
-    .related-link:hover { text-decoration: underline; }
-
-    .link-arrow {
-      font-size: 12px;
-      transition: transform 0.15s ease;
-    }
-    .related-link:hover .link-arrow { transform: translateX(2px); }
-
-    .related-empty {
-      font-size: var(--text-sm);
-      color: var(--text-tertiary);
-    }
-
-    .related-value {
-      font-size: var(--text-sm);
-      color: var(--text-primary);
-    }
-
-    /* Skeleton */
-    .skeleton-header {
-      display: flex;
-      align-items: center;
-      gap: var(--space-4);
-      margin-bottom: var(--space-6);
-    }
-    .skeleton-title { width: 200px; height: 28px; border-radius: var(--radius-sm); }
-    .skeleton-badge { width: 80px; height: 24px; border-radius: var(--radius-full); }
-    .skeleton-label { width: 80px; height: 12px; border-radius: 4px; margin-bottom: var(--space-1); }
-    .skeleton-value { width: 120px; height: 16px; border-radius: 4px; }
-
-    .shimmer-box {
-      background: var(--bg-tertiary);
-      position: relative;
-      overflow: hidden;
-    }
-    .shimmer-box::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
-      animation: shimmer 1.5s infinite;
-    }
-
-    /* Error State */
-    .error-state {
-      text-align: center;
-      padding: var(--space-16) var(--space-8);
-    }
-    .error-icon {
-      width: 56px;
-      height: 56px;
-      border-radius: var(--radius-full);
-      background: var(--bg-tertiary);
-      color: var(--text-tertiary);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 24px;
-      font-weight: bold;
-      margin: 0 auto var(--space-4);
-    }
-    .error-state h2 {
-      font-size: var(--text-lg);
-      color: var(--text-primary);
-      margin: 0 0 var(--space-2);
-    }
-    .error-state p {
-      color: var(--text-secondary);
-      margin: 0 0 var(--space-5);
-    }
-
-    .spinner {
-      width: 16px;
-      height: 16px;
-      border: 2px solid rgba(255, 255, 255, 0.3);
-      border-top-color: white;
-      border-radius: 50%;
-      animation: spin 0.6s linear infinite;
-    }
-
-    @keyframes spin { to { transform: rotate(360deg); } }
-    @keyframes shimmer {
-      0% { transform: translateX(-100%); }
-      100% { transform: translateX(100%); }
-    }
-    @keyframes slideDown {
-      from { opacity: 0; transform: translateY(-12px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-  `],
+  styleUrl: './order-detail-page.component.scss',
 })
 export class OrderDetailPageComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
@@ -914,8 +508,13 @@ export class OrderDetailPageComponent implements OnInit {
     const v = o.status as unknown;
     if (typeof v === 'number') {
       const map: Record<number, string> = {
-        0: 'Pending', 1: 'Submitted', 2: 'PartialFill', 3: 'Filled',
-        4: 'Cancelled', 5: 'Rejected', 6: 'Expired',
+        0: 'Pending',
+        1: 'Submitted',
+        2: 'PartialFill',
+        3: 'Filled',
+        4: 'Cancelled',
+        5: 'Rejected',
+        6: 'Expired',
       };
       return map[v] ?? String(v);
     }
@@ -943,7 +542,7 @@ export class OrderDetailPageComponent implements OnInit {
     return v === 0 || v === 'Buy';
   });
 
-  sideLabel = computed(() => this.isBuy() ? 'BUY' : 'SELL');
+  sideLabel = computed(() => (this.isBuy() ? 'BUY' : 'SELL'));
 
   executionLabel = computed(() => {
     const o = this.order();
@@ -967,7 +566,16 @@ export class OrderDetailPageComponent implements OnInit {
     if (!o) return [];
     const status = this.statusLabel();
     const fmt = (d: string | null) =>
-      d ? new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : null;
+      d
+        ? new Date(d).toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          })
+        : null;
 
     const created = {
       label: 'Created',
@@ -1017,7 +625,13 @@ export class OrderDetailPageComponent implements OnInit {
     status: string,
     o: OrderDto,
     fmt: (d: string | null) => string | null,
-  ): { label: string; timestamp: string | null; description: string; active: boolean; current: boolean } {
+  ): {
+    label: string;
+    timestamp: string | null;
+    description: string;
+    active: boolean;
+    current: boolean;
+  } {
     switch (status) {
       case 'Filled':
         return {

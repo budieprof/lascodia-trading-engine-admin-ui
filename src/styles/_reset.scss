@@ -17,7 +17,9 @@ body {
   background: var(--bg-primary);
   font-size: 15px;
   line-height: 1.5;
-  transition: background-color 0.3s ease, color 0.3s ease;
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease;
 }
 
 img,
@@ -88,7 +90,7 @@ textarea {
   }
 }
 
-input[type="number"] {
+input[type='number'] {
   -moz-appearance: textfield;
 
   &::-webkit-inner-spin-button,

@@ -50,7 +50,9 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
         <!-- Strategy List Tab -->
         @if (activeTab() === 'list') {
           <app-page-header title="Strategies" subtitle="Manage trading strategies">
-            <button class="btn btn-primary" (click)="showCreateForm.set(true)">+ Create Strategy</button>
+            <button class="btn btn-primary" (click)="showCreateForm.set(true)">
+              + Create Strategy
+            </button>
           </app-page-header>
 
           <app-data-table
@@ -66,7 +68,11 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
 
           <div class="selector-bar">
             <label class="selector-label">Strategy</label>
-            <select class="selector-input" [value]="selectedStrategyId()" (change)="onStrategySelect($event)">
+            <select
+              class="selector-input"
+              [value]="selectedStrategyId()"
+              (change)="onStrategySelect($event)"
+            >
               <option value="">-- Select a strategy --</option>
               @for (s of strategiesList(); track s.id) {
                 <option [value]="s.id">{{ s.name }} ({{ s.symbol }})</option>
@@ -76,19 +82,71 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
 
           @if (performance()) {
             <div class="kpi-grid">
-              <app-metric-card label="Win Rate" [value]="performance()!.winRate" format="percent" dotColor="#34C759" />
-              <app-metric-card label="Profit Factor" [value]="performance()!.profitFactor" format="number" dotColor="#0071E3" />
-              <app-metric-card label="Sharpe Ratio" [value]="performance()!.sharpeRatio" format="number" dotColor="#AF52DE" />
-              <app-metric-card label="Max Drawdown" [value]="performance()!.maxDrawdownPct" format="percent" dotColor="#FF3B30" [colorByValue]="true" />
-              <app-metric-card label="Total Trades" [value]="performance()!.windowTrades" format="number" dotColor="#FF9500" />
-              <app-metric-card label="Total P&L" [value]="performance()!.totalPnL" format="currency" [colorByValue]="true" dotColor="#30D158" />
+              <app-metric-card
+                label="Win Rate"
+                [value]="performance()!.winRate"
+                format="percent"
+                dotColor="#34C759"
+              />
+              <app-metric-card
+                label="Profit Factor"
+                [value]="performance()!.profitFactor"
+                format="number"
+                dotColor="#0071E3"
+              />
+              <app-metric-card
+                label="Sharpe Ratio"
+                [value]="performance()!.sharpeRatio"
+                format="number"
+                dotColor="#AF52DE"
+              />
+              <app-metric-card
+                label="Max Drawdown"
+                [value]="performance()!.maxDrawdownPct"
+                format="percent"
+                dotColor="#FF3B30"
+                [colorByValue]="true"
+              />
+              <app-metric-card
+                label="Total Trades"
+                [value]="performance()!.windowTrades"
+                format="number"
+                dotColor="#FF9500"
+              />
+              <app-metric-card
+                label="Total P&L"
+                [value]="performance()!.totalPnL"
+                format="currency"
+                [colorByValue]="true"
+                dotColor="#30D158"
+              />
             </div>
 
             <div class="chart-grid">
-              <app-chart-card title="Equity Curve" subtitle="Cumulative P&L over time" [options]="equityCurveOptions" height="320px" />
-              <app-chart-card title="Win Rate Over Time" subtitle="Rolling 20-trade win rate" [options]="winRateOptions" height="320px" />
-              <app-chart-card title="Profit Factor Trend" subtitle="Rolling profit factor with quality bands" [options]="profitFactorOptions" height="320px" />
-              <app-chart-card title="Monthly Returns" subtitle="Return distribution by month" [options]="monthlyReturnsOptions" height="320px" />
+              <app-chart-card
+                title="Equity Curve"
+                subtitle="Cumulative P&L over time"
+                [options]="equityCurveOptions"
+                height="320px"
+              />
+              <app-chart-card
+                title="Win Rate Over Time"
+                subtitle="Rolling 20-trade win rate"
+                [options]="winRateOptions"
+                height="320px"
+              />
+              <app-chart-card
+                title="Profit Factor Trend"
+                subtitle="Rolling profit factor with quality bands"
+                [options]="profitFactorOptions"
+                height="320px"
+              />
+              <app-chart-card
+                title="Monthly Returns"
+                subtitle="Return distribution by month"
+                [options]="monthlyReturnsOptions"
+                height="320px"
+              />
             </div>
           } @else if (selectedStrategyId()) {
             <div class="empty-monitor">
@@ -110,84 +168,99 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
       />
     </div>
   `,
-  styles: [`
-    .page { padding: var(--space-2) 0; }
+  styles: [
+    `
+      .page {
+        padding: var(--space-2) 0;
+      }
 
-    .btn {
-      height: 36px;
-      padding: 0 var(--space-5);
-      border: none;
-      border-radius: var(--radius-full);
-      font-size: var(--text-sm);
-      font-weight: var(--font-medium);
-      font-family: inherit;
-      cursor: pointer;
-      transition: all 0.15s ease;
-      display: inline-flex;
-      align-items: center;
-      gap: var(--space-1);
-    }
-    .btn:active { transform: scale(0.97); }
-    .btn-primary { background: var(--accent); color: white; }
-    .btn-primary:hover { background: var(--accent-hover); }
+      .btn {
+        height: 36px;
+        padding: 0 var(--space-5);
+        border: none;
+        border-radius: var(--radius-full);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        font-family: inherit;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-1);
+      }
+      .btn:active {
+        transform: scale(0.97);
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: white;
+      }
+      .btn-primary:hover {
+        background: var(--accent-hover);
+      }
 
-    .selector-bar {
-      display: flex;
-      align-items: center;
-      gap: var(--space-3);
-      margin-bottom: var(--space-6);
-      padding: var(--space-4);
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-    }
+      .selector-bar {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        margin-bottom: var(--space-6);
+        padding: var(--space-4);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+      }
 
-    .selector-label {
-      font-size: var(--text-sm);
-      font-weight: var(--font-medium);
-      color: var(--text-secondary);
-      white-space: nowrap;
-    }
+      .selector-label {
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        color: var(--text-secondary);
+        white-space: nowrap;
+      }
 
-    .selector-input {
-      flex: 1;
-      max-width: 400px;
-      height: 36px;
-      padding: 0 var(--space-3);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      font-size: var(--text-sm);
-      font-family: inherit;
-      cursor: pointer;
-    }
+      .selector-input {
+        flex: 1;
+        max-width: 400px;
+        height: 36px;
+        padding: 0 var(--space-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        font-family: inherit;
+        cursor: pointer;
+      }
 
-    .kpi-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-      gap: var(--space-4);
-      margin-bottom: var(--space-6);
-    }
+      .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: var(--space-4);
+        margin-bottom: var(--space-6);
+      }
 
-    .chart-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: var(--space-4);
-    }
+      .chart-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-4);
+      }
 
-    .empty-monitor {
-      text-align: center;
-      padding: var(--space-16);
-      color: var(--text-secondary);
-      font-size: var(--text-sm);
-    }
+      .empty-monitor {
+        text-align: center;
+        padding: var(--space-16);
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+      }
 
-    @media (max-width: 900px) {
-      .chart-grid { grid-template-columns: 1fr; }
-      .kpi-grid { grid-template-columns: repeat(2, 1fr); }
-    }
-  `],
+      @media (max-width: 900px) {
+        .chart-grid {
+          grid-template-columns: 1fr;
+        }
+        .kpi-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+    `,
+  ],
 })
 export class StrategiesPageComponent {
   private readonly strategiesService = inject(StrategiesService);
@@ -242,7 +315,7 @@ export class StrategiesPageComponent {
       headerName: 'Risk Profile',
       flex: 1,
       minWidth: 100,
-      valueFormatter: (p: any) => p.value != null ? `#${p.value}` : '-',
+      valueFormatter: (p: any) => (p.value != null ? `#${p.value}` : '-'),
     },
     {
       field: 'createdAt',
@@ -335,7 +408,10 @@ export class StrategiesPageComponent {
           areaStyle: {
             color: {
               type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
               colorStops: [
                 { offset: 0, color: 'rgba(0, 113, 227, 0.25)' },
                 { offset: 1, color: 'rgba(0, 113, 227, 0.02)' },
@@ -371,7 +447,13 @@ export class StrategiesPageComponent {
           lineStyle: { color: '#34C759', width: 2 },
           markLine: {
             silent: true,
-            data: [{ yAxis: 50, lineStyle: { color: '#FF9500', type: 'dashed' }, label: { formatter: '50%' } }],
+            data: [
+              {
+                yAxis: 50,
+                lineStyle: { color: '#FF9500', type: 'dashed' },
+                label: { formatter: '50%' },
+              },
+            ],
           },
         },
       ],
@@ -411,8 +493,16 @@ export class StrategiesPageComponent {
           markLine: {
             silent: true,
             data: [
-              { yAxis: 1.0, lineStyle: { color: '#FF3B30', type: 'dashed' }, label: { formatter: '1.0' } },
-              { yAxis: 1.5, lineStyle: { color: '#34C759', type: 'dashed' }, label: { formatter: '1.5' } },
+              {
+                yAxis: 1.0,
+                lineStyle: { color: '#FF3B30', type: 'dashed' },
+                label: { formatter: '1.0' },
+              },
+              {
+                yAxis: 1.5,
+                lineStyle: { color: '#34C759', type: 'dashed' },
+                label: { formatter: '1.5' },
+              },
             ],
           },
           markArea: {
@@ -429,7 +519,20 @@ export class StrategiesPageComponent {
   })();
 
   readonly monthlyReturnsOptions: EChartsOption = (() => {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     const years = ['2024', '2025'];
     const data: [number, number, number][] = [];
     for (let yi = 0; yi < years.length; yi++) {

@@ -27,23 +27,28 @@ export class SparklineComponent {
     grid: { top: 0, right: 0, bottom: 0, left: 0 },
     xAxis: { type: 'category', show: false, data: this.data().map((_, i) => i) },
     yAxis: { type: 'value', show: false },
-    series: [{
-      type: 'line',
-      data: this.data(),
-      smooth: true,
-      symbol: 'none',
-      lineStyle: { width: 1.5, color: this.color() },
-      areaStyle: {
-        color: {
-          type: 'linear',
-          x: 0, y: 0, x2: 0, y2: 1,
-          colorStops: [
-            { offset: 0, color: this.color() + '30' },
-            { offset: 1, color: this.color() + '00' },
-          ],
+    series: [
+      {
+        type: 'line',
+        data: this.data(),
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { width: 1.5, color: this.color() },
+        areaStyle: {
+          color: {
+            type: 'linear',
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              { offset: 0, color: this.color() + '30' },
+              { offset: 1, color: this.color() + '00' },
+            ],
+          },
         },
       },
-    }],
+    ],
     animation: false,
   }));
 }

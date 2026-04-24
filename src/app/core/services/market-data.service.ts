@@ -18,7 +18,9 @@ export class MarketDataService {
   }
 
   getLatestCandle(symbol: string, timeframe: string): Observable<ResponseData<CandleDto>> {
-    return this.api.get(`/market-data/candle/latest?symbol=${this.formatSymbol(symbol)}&timeframe=${timeframe}`);
+    return this.api.get(
+      `/market-data/candle/latest?symbol=${this.formatSymbol(symbol)}&timeframe=${timeframe}`,
+    );
   }
 
   listCandles(params: PagerRequest): Observable<ResponseData<PagedData<CandleDto>>> {

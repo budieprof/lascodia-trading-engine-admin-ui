@@ -10,6 +10,8 @@ import {
   UpdateOrderRequest,
   ModifyOrderRequest,
   SubmitOrderResult,
+  BatchCancelOrdersRequest,
+  BatchCancelOrdersResult,
 } from '@core/api/api.types';
 
 @Injectable({ providedIn: 'root' })
@@ -38,6 +40,12 @@ export class OrdersService {
 
   cancel(id: number): Observable<ResponseData<OrderDto>> {
     return this.api.post(`/order/${id}/cancel`);
+  }
+
+  cancelBatch(
+    request: BatchCancelOrdersRequest,
+  ): Observable<ResponseData<BatchCancelOrdersResult>> {
+    return this.api.post(`/order/cancel/batch`, request);
   }
 
   modify(id: number, data: ModifyOrderRequest): Observable<ResponseData<OrderDto>> {

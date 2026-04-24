@@ -13,24 +13,15 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
 @Component({
   selector: 'app-brokers-page',
   standalone: true,
-  imports: [
-    DataTableComponent,
-    PageHeaderComponent,
-    ConfirmDialogComponent,
-  ],
+  imports: [DataTableComponent, PageHeaderComponent, ConfirmDialogComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <app-page-header title="Brokers" subtitle="Manage broker connections">
-        <button class="btn btn-primary" (click)="onAddBroker()">
-          + Add Broker
-        </button>
+        <button class="btn btn-primary" (click)="onAddBroker()">+ Add Broker</button>
       </app-page-header>
 
-      <app-data-table
-        [columnDefs]="columns"
-        [fetchData]="fetchData"
-      />
+      <app-data-table [columnDefs]="columns" [fetchData]="fetchData" />
 
       <app-confirm-dialog
         [open]="showDeleteDialog()"
@@ -40,32 +31,43 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
         confirmVariant="destructive"
         [loading]="processing()"
         (confirm)="confirmDelete()"
-        (cancel)="showDeleteDialog.set(false)"
+        (cancelled)="showDeleteDialog.set(false)"
       />
     </div>
   `,
-  styles: [`
-    .page { padding: var(--space-2) 0; }
+  styles: [
+    `
+      .page {
+        padding: var(--space-2) 0;
+      }
 
-    .btn {
-      height: 36px;
-      padding: 0 var(--space-5);
-      border: none;
-      border-radius: var(--radius-full);
-      font-size: var(--text-sm);
-      font-weight: var(--font-medium);
-      font-family: inherit;
-      cursor: pointer;
-      transition: all 0.15s ease;
-      display: inline-flex;
-      align-items: center;
-      gap: var(--space-1);
-    }
-    .btn:active { transform: scale(0.97); }
+      .btn {
+        height: 36px;
+        padding: 0 var(--space-5);
+        border: none;
+        border-radius: var(--radius-full);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        font-family: inherit;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-1);
+      }
+      .btn:active {
+        transform: scale(0.97);
+      }
 
-    .btn-primary { background: var(--accent); color: white; }
-    .btn-primary:hover { background: var(--accent-hover); }
-  `],
+      .btn-primary {
+        background: var(--accent);
+        color: white;
+      }
+      .btn-primary:hover {
+        background: var(--accent-hover);
+      }
+    `,
+  ],
 })
 export class BrokersPageComponent {
   private readonly brokersService = inject(BrokersService);
@@ -142,7 +144,17 @@ export class BrokersPageComponent {
     return this.brokersService.list(params).pipe(
       map((response) => {
         if (response.data) return response.data;
-        return { data: [], pager: { totalItemCount: 0, filter: null, currentPage: 1, itemCountPerPage: 25, pageNo: 0, pageSize: 25 } } as PagedData<BrokerDto>;
+        return {
+          data: [],
+          pager: {
+            totalItemCount: 0,
+            filter: null,
+            currentPage: 1,
+            itemCountPerPage: 25,
+            pageNo: 0,
+            pageSize: 25,
+          },
+        } as PagedData<BrokerDto>;
       }),
     );
   };

@@ -1,12 +1,37 @@
+// Sass partials — must come before @import
+@use 'styles/tokens';
+@use 'styles/typography';
+@use 'styles/animations';
+@use 'styles/reset';
+@use 'styles/ag-grid-apple';
+
+// Plain-CSS imports (Sass preserves these verbatim)
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import 'tailwindcss/index.css';
+@import 'ag-grid-community/styles/ag-grid.css';
+@import 'ag-grid-community/styles/ag-theme-alpine.css';
 
-@import "tailwindcss";
+// ── PRD §3.1 glass + motion: applied globally to the common modal/overlay
+// class names that feature pages use. Local component styles still win via
+// cascade, so pages that want a different look can override freely.
+.modal-overlay {
+  backdrop-filter: var(--blur-sm);
+  -webkit-backdrop-filter: var(--blur-sm);
+  animation: fadeIn var(--dur-base) var(--ease-out-soft);
+}
 
-@import "ag-grid-community/styles/ag-grid.css";
-@import "ag-grid-community/styles/ag-theme-alpine.css";
+.modal-overlay .modal {
+  animation: scaleIn 0.25s var(--ease-out-soft);
+}
 
-@import "styles/tokens";
-@import "styles/typography";
-@import "styles/animations";
-@import "styles/reset";
-@import "styles/ag-grid-apple";
+// Buttons: Apple "press" feel across the whole app.
+.btn {
+  transition:
+    transform var(--dur-fast) var(--ease-press),
+    background-color var(--dur-fast) var(--ease-out-soft),
+    box-shadow var(--dur-fast) var(--ease-out-soft);
+
+  &:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+}

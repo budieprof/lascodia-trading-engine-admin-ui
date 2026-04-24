@@ -14,59 +14,63 @@ import { CurrencyFormatPipe } from '@shared/pipes/currency-format.pipe';
 @Component({
   selector: 'app-accounts-page',
   standalone: true,
-  imports: [
-    DataTableComponent,
-    PageHeaderComponent,
-    ConfirmDialogComponent,
-  ],
+  imports: [DataTableComponent, PageHeaderComponent, ConfirmDialogComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <app-page-header title="Trading Accounts" subtitle="Manage broker trading accounts">
-        <button class="btn btn-primary" (click)="onAddAccount()">
-          + Add Account
-        </button>
+        <button class="btn btn-primary" (click)="onAddAccount()">+ Add Account</button>
       </app-page-header>
 
-      <app-data-table
-        [columnDefs]="columns"
-        [fetchData]="fetchData"
-      />
+      <app-data-table [columnDefs]="columns" [fetchData]="fetchData" />
 
       <app-confirm-dialog
         [open]="showDeleteDialog()"
         title="Delete Account"
-        [message]="'Are you sure you want to delete account ' + (selectedAccount()?.accountName ?? '') + '?'"
+        [message]="
+          'Are you sure you want to delete account ' + (selectedAccount()?.accountName ?? '') + '?'
+        "
         confirmLabel="Delete"
         confirmVariant="destructive"
         [loading]="processing()"
         (confirm)="confirmDelete()"
-        (cancel)="showDeleteDialog.set(false)"
+        (cancelled)="showDeleteDialog.set(false)"
       />
     </div>
   `,
-  styles: [`
-    .page { padding: var(--space-2) 0; }
+  styles: [
+    `
+      .page {
+        padding: var(--space-2) 0;
+      }
 
-    .btn {
-      height: 36px;
-      padding: 0 var(--space-5);
-      border: none;
-      border-radius: var(--radius-full);
-      font-size: var(--text-sm);
-      font-weight: var(--font-medium);
-      font-family: inherit;
-      cursor: pointer;
-      transition: all 0.15s ease;
-      display: inline-flex;
-      align-items: center;
-      gap: var(--space-1);
-    }
-    .btn:active { transform: scale(0.97); }
+      .btn {
+        height: 36px;
+        padding: 0 var(--space-5);
+        border: none;
+        border-radius: var(--radius-full);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        font-family: inherit;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-1);
+      }
+      .btn:active {
+        transform: scale(0.97);
+      }
 
-    .btn-primary { background: var(--accent); color: white; }
-    .btn-primary:hover { background: var(--accent-hover); }
-  `],
+      .btn-primary {
+        background: var(--accent);
+        color: white;
+      }
+      .btn-primary:hover {
+        background: var(--accent-hover);
+      }
+    `,
+  ],
 })
 export class AccountsPageComponent {
   private readonly accountsService = inject(TradingAccountsService);
@@ -86,19 +90,22 @@ export class AccountsPageComponent {
       headerName: 'Balance',
       field: 'balance',
       width: 130,
-      valueFormatter: (params) => this.currencyPipe.transform(params.value, params.data?.currency ?? 'USD'),
+      valueFormatter: (params) =>
+        this.currencyPipe.transform(params.value, params.data?.currency ?? 'USD'),
     },
     {
       headerName: 'Equity',
       field: 'equity',
       width: 130,
-      valueFormatter: (params) => this.currencyPipe.transform(params.value, params.data?.currency ?? 'USD'),
+      valueFormatter: (params) =>
+        this.currencyPipe.transform(params.value, params.data?.currency ?? 'USD'),
     },
     {
       headerName: 'Margin Used',
       field: 'marginUsed',
       width: 120,
-      valueFormatter: (params) => this.currencyPipe.transform(params.value, params.data?.currency ?? 'USD'),
+      valueFormatter: (params) =>
+        this.currencyPipe.transform(params.value, params.data?.currency ?? 'USD'),
     },
     {
       headerName: 'Status',
@@ -159,7 +166,17 @@ export class AccountsPageComponent {
     return this.accountsService.list(params).pipe(
       map((response) => {
         if (response.data) return response.data;
-        return { data: [], pager: { totalItemCount: 0, filter: null, currentPage: 1, itemCountPerPage: 25, pageNo: 0, pageSize: 25 } } as PagedData<TradingAccountDto>;
+        return {
+          data: [],
+          pager: {
+            totalItemCount: 0,
+            filter: null,
+            currentPage: 1,
+            itemCountPerPage: 25,
+            pageNo: 0,
+            pageSize: 25,
+          },
+        } as PagedData<TradingAccountDto>;
       }),
     );
   };

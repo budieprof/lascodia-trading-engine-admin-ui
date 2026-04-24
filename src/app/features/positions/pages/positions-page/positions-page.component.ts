@@ -8,6 +8,7 @@ import {
   OnDestroy,
   ViewChild,
 } from '@angular/core';
+import { Router } from '@angular/router';
 import { map, Observable } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
@@ -21,6 +22,8 @@ import { DataTableComponent } from '@shared/components/data-table/data-table.com
 import { StatusBadgeComponent } from '@shared/components/status-badge/status-badge.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
+import { StatusPillCellComponent } from '@shared/components/data-table/cell-renderers/status-pill-cell.component';
+import { DirectionCellComponent } from '@shared/components/data-table/cell-renderers/direction-cell.component';
 import { CurrencyFormatPipe } from '@shared/pipes/currency-format.pipe';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
@@ -37,10 +40,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
-      <app-page-header
-        title="Positions"
-        subtitle="Monitor open and closed trading positions"
-      />
+      <app-page-header title="Positions" subtitle="Monitor open and closed trading positions" />
 
       <!-- Summary Strip -->
       <div class="metrics-strip">
@@ -55,11 +55,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           [value]="openPositionCount()"
           format="number"
         />
-        <app-metric-card
-          label="Total Lots"
-          [value]="totalLots()"
-          format="number"
-        />
+        <app-metric-card label="Total Lots" [value]="totalLots()" format="number" />
       </div>
 
       <!-- Tabs -->
@@ -71,6 +67,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
               [columnDefs]="openColumnDefs"
               [fetchData]="fetchOpenPositions"
               [searchable]="true"
+              (rowClick)="goToDetail($event)"
             />
           }
           @case ('closed') {
@@ -78,6 +75,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
               [columnDefs]="closedColumnDefs"
               [fetchData]="fetchClosedPositions"
               [searchable]="true"
+              (rowClick)="goToDetail($event)"
             />
           }
           @case ('analytics') {
@@ -130,39 +128,46 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       </ui-tabs>
     </div>
   `,
-  styles: [`
-    .page {
-      padding: var(--space-2) 0;
-    }
+  styles: [
+    `
+      .page {
+        padding: var(--space-2) 0;
+      }
 
-    .metrics-strip {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: var(--space-4);
-      margin-bottom: var(--space-6);
-    }
-
-    .charts-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: var(--space-4);
-    }
-
-    @media (max-width: 1024px) {
       .metrics-strip {
-        grid-template-columns: 1fr;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--space-4);
+        margin-bottom: var(--space-6);
       }
+
       .charts-grid {
-        grid-template-columns: 1fr;
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--space-4);
       }
-    }
-  `],
+
+      @media (max-width: 1024px) {
+        .metrics-strip {
+          grid-template-columns: 1fr;
+        }
+        .charts-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    `,
+  ],
 })
 export class PositionsPageComponent implements OnInit, OnDestroy {
   private readonly positionsService = inject(PositionsService);
+  private readonly router = inject(Router);
   private readonly currencyPipe = new CurrencyFormatPipe();
   private readonly relativeTimePipe = new RelativeTimePipe();
   private pollingInterval: ReturnType<typeof setInterval> | null = null;
+
+  goToDetail(row: PositionDto): void {
+    if (row?.id != null) this.router.navigate(['/positions', row.id]);
+  }
 
   @ViewChild('openTable') openTable?: DataTableComponent<PositionDto>;
 
@@ -181,14 +186,12 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
 
   // ── Computed Metrics ──
   readonly totalUnrealizedPnL = computed(() =>
-    this.openPositions().reduce((sum, p) => sum + p.unrealizedPnL, 0)
+    this.openPositions().reduce((sum, p) => sum + p.unrealizedPnL, 0),
   );
 
   readonly openPositionCount = computed(() => this.openPositions().length);
 
-  readonly totalLots = computed(() =>
-    this.openPositions().reduce((sum, p) => sum + p.openLots, 0)
-  );
+  readonly totalLots = computed(() => this.openPositions().reduce((sum, p) => sum + p.openLots, 0));
 
   // ── Column Definitions ──
   readonly openColumnDefs: ColDef<PositionDto>[] = [
@@ -197,13 +200,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       field: 'direction',
       headerName: 'Direction',
       minWidth: 110,
-      cellRenderer: (params: any) => {
-        if (!params.value) return '';
-        const isLong = params.value === 'Long';
-        const color = isLong ? '#34C759' : '#FF3B30';
-        const arrow = isLong ? '&#9650;' : '&#9660;';
-        return `<span style="color:${color};font-weight:600">${arrow} ${params.value}</span>`;
-      },
+      cellRenderer: DirectionCellComponent,
     },
     {
       field: 'averageEntryPrice',
@@ -233,13 +230,13 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       field: 'stopLoss',
       headerName: 'SL',
       minWidth: 100,
-      valueFormatter: (p: any) => p.value != null ? p.value.toFixed(5) : '-',
+      valueFormatter: (p: any) => (p.value != null ? p.value.toFixed(5) : '-'),
     },
     {
       field: 'takeProfit',
       headerName: 'TP',
       minWidth: 100,
-      valueFormatter: (p: any) => p.value != null ? p.value.toFixed(5) : '-',
+      valueFormatter: (p: any) => (p.value != null ? p.value.toFixed(5) : '-'),
     },
     {
       field: 'openedAt',
@@ -251,17 +248,8 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       field: 'status',
       headerName: 'Status',
       minWidth: 100,
-      cellRenderer: (params: any) => {
-        if (!params.value) return '';
-        const variant = params.value === 'Open' ? 'info' : params.value === 'Closing' ? 'warning' : 'neutral';
-        const colors: Record<string, { bg: string; color: string }> = {
-          info: { bg: 'rgba(0,113,227,0.12)', color: '#0040DD' },
-          warning: { bg: 'rgba(255,149,0,0.12)', color: '#C93400' },
-          neutral: { bg: 'rgba(142,142,147,0.12)', color: '#636366' },
-        };
-        const s = colors[variant];
-        return `<span style="display:inline-flex;align-items:center;padding:2px 10px;border-radius:9999px;font-size:12px;font-weight:600;background:${s.bg};color:${s.color}">${params.value}</span>`;
-      },
+      cellRenderer: StatusPillCellComponent,
+      cellRendererParams: { label: 'Position status' },
     },
   ];
 
@@ -271,13 +259,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       field: 'direction',
       headerName: 'Direction',
       minWidth: 110,
-      cellRenderer: (params: any) => {
-        if (!params.value) return '';
-        const isLong = params.value === 'Long';
-        const color = isLong ? '#34C759' : '#FF3B30';
-        const arrow = isLong ? '&#9650;' : '&#9660;';
-        return `<span style="color:${color};font-weight:600">${arrow} ${params.value}</span>`;
-      },
+      cellRenderer: DirectionCellComponent,
     },
     {
       field: 'averageEntryPrice',
@@ -323,11 +305,8 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       field: 'status',
       headerName: 'Status',
       minWidth: 100,
-      cellRenderer: (params: any) => {
-        if (!params.value) return '';
-        const colors = { bg: 'rgba(142,142,147,0.12)', color: '#636366' };
-        return `<span style="display:inline-flex;align-items:center;padding:2px 10px;border-radius:9999px;font-size:12px;font-weight:600;background:${colors.bg};color:${colors.color}">${params.value}</span>`;
-      },
+      cellRenderer: StatusPillCellComponent,
+      cellRendererParams: { label: 'Position status' },
     },
   ];
 
@@ -336,10 +315,12 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
     return this.positionsService.list(params).pipe(
       map((response) => {
         const pagedData = response.data!;
-        const openOnly = pagedData.data.filter((p) => p.status === 'Open' || p.status === 'Closing');
+        const openOnly = pagedData.data.filter(
+          (p) => p.status === 'Open' || p.status === 'Closing',
+        );
         this.openPositions.set(openOnly);
         return { ...pagedData, data: openOnly };
-      })
+      }),
     );
   };
 
@@ -350,7 +331,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
         const closedOnly = pagedData.data.filter((p) => p.status === 'Closed');
         this.closedPositions.set(closedOnly);
         return { ...pagedData, data: closedOnly };
-      })
+      }),
     );
   };
 
@@ -389,11 +370,13 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: binLabels, axisLabel: { fontSize: 10 } },
       yAxis: { type: 'value', name: 'Count' },
-      series: [{
-        type: 'bar',
-        data: bins.map((val, i) => ({ value: val, itemStyle: { color: colors[i] } })),
-        barWidth: '80%',
-      }],
+      series: [
+        {
+          type: 'bar',
+          data: bins.map((val, i) => ({ value: val, itemStyle: { color: colors[i] } })),
+          barWidth: '80%',
+        },
+      ],
       grid: { left: 50, right: 20, bottom: 40, top: 20 },
     };
   });
@@ -421,7 +404,13 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       yAxis: { type: 'category', data: symbols },
       series: [
         { name: 'Wins', type: 'bar', stack: 'total', data: wins, itemStyle: { color: '#34C759' } },
-        { name: 'Losses', type: 'bar', stack: 'total', data: losses, itemStyle: { color: '#FF3B30' } },
+        {
+          name: 'Losses',
+          type: 'bar',
+          stack: 'total',
+          data: losses,
+          itemStyle: { color: '#FF3B30' },
+        },
       ],
       grid: { left: 80, right: 20, bottom: 20, top: 20 },
     };
@@ -445,14 +434,16 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       },
       xAxis: { type: 'value', name: 'Duration (hours)', nameLocation: 'middle', nameGap: 30 },
       yAxis: { type: 'value', name: 'P&L ($)' },
-      series: [{
-        type: 'scatter',
-        data,
-        symbolSize: 8,
-        itemStyle: {
-          color: (params: any) => params.value[1] >= 0 ? '#34C759' : '#FF3B30',
+      series: [
+        {
+          type: 'scatter',
+          data,
+          symbolSize: 8,
+          itemStyle: {
+            color: (params: any) => (params.value[1] >= 0 ? '#34C759' : '#FF3B30'),
+          },
         },
-      }],
+      ],
       grid: { left: 60, right: 20, bottom: 50, top: 20 },
     };
   });
@@ -471,7 +462,9 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
 
     sorted.forEach((p) => {
       cumulative += p.realizedPnL;
-      dates.push(new Date(p.closedAt!).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+      dates.push(
+        new Date(p.closedAt!).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      );
       values.push(parseFloat(cumulative.toFixed(2)));
     });
 
@@ -482,23 +475,28 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 10, rotate: 30 } },
       yAxis: { type: 'value', name: 'Cumulative P&L ($)' },
-      series: [{
-        type: 'line',
-        data: values,
-        smooth: true,
-        lineStyle: { color: lineColor, width: 2 },
-        itemStyle: { color: lineColor },
-        areaStyle: {
-          color: {
-            type: 'linear',
-            x: 0, y: 0, x2: 0, y2: 1,
-            colorStops: [
-              { offset: 0, color: lastVal >= 0 ? 'rgba(52,199,89,0.3)' : 'rgba(255,59,48,0.3)' },
-              { offset: 1, color: 'rgba(0,0,0,0)' },
-            ],
-          } as any,
+      series: [
+        {
+          type: 'line',
+          data: values,
+          smooth: true,
+          lineStyle: { color: lineColor, width: 2 },
+          itemStyle: { color: lineColor },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: lastVal >= 0 ? 'rgba(52,199,89,0.3)' : 'rgba(255,59,48,0.3)' },
+                { offset: 1, color: 'rgba(0,0,0,0)' },
+              ],
+            } as any,
+          },
         },
-      }],
+      ],
       grid: { left: 60, right: 20, bottom: 50, top: 20 },
     };
   });
@@ -535,14 +533,16 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       },
       xAxis: { type: 'category', data: sessions },
       yAxis: { type: 'value', name: 'P&L ($)' },
-      series: [{
-        type: 'bar',
-        data: totals.map((v) => ({
-          value: v,
-          itemStyle: { color: v >= 0 ? '#34C759' : '#FF3B30' },
-        })),
-        barWidth: '50%',
-      }],
+      series: [
+        {
+          type: 'bar',
+          data: totals.map((v) => ({
+            value: v,
+            itemStyle: { color: v >= 0 ? '#34C759' : '#FF3B30' },
+          })),
+          barWidth: '50%',
+        },
+      ],
       grid: { left: 60, right: 20, bottom: 40, top: 20 },
     };
   });
@@ -585,14 +585,16 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 10 } },
       yAxis: { type: 'value', name: 'Count' },
-      series: [{
-        type: 'bar',
-        data: bins.map((val, i) => {
-          const midVal = min + (i + 0.5) * binSize;
-          return { value: val, itemStyle: { color: midVal >= 0 ? '#34C759' : '#FF3B30' } };
-        }),
-        barWidth: '80%',
-      }],
+      series: [
+        {
+          type: 'bar',
+          data: bins.map((val, i) => {
+            const midVal = min + (i + 0.5) * binSize;
+            return { value: val, itemStyle: { color: midVal >= 0 ? '#34C759' : '#FF3B30' } };
+          }),
+          barWidth: '80%',
+        },
+      ],
       grid: { left: 50, right: 20, bottom: 40, top: 20 },
     };
   });
@@ -623,9 +625,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   private loadSummaryData(): void {
     this.positionsService
       .list({ currentPage: 1, itemCountPerPage: 500 })
-      .pipe(
-        map((r) => r.data?.data ?? [])
-      )
+      .pipe(map((r) => r.data?.data ?? []))
       .subscribe((positions) => {
         const open = positions.filter((p) => p.status === 'Open' || p.status === 'Closing');
         const closed = positions.filter((p) => p.status === 'Closed');

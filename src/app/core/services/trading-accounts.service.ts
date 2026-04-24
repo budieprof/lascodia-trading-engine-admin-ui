@@ -26,7 +26,10 @@ export class TradingAccountsService {
     return this.api.post(`/trading-account`, data);
   }
 
-  update(id: number, data: UpdateTradingAccountRequest): Observable<ResponseData<TradingAccountDto>> {
+  update(
+    id: number,
+    data: UpdateTradingAccountRequest,
+  ): Observable<ResponseData<TradingAccountDto>> {
     return this.api.put(`/trading-account/${id}`, data);
   }
 
@@ -44,5 +47,10 @@ export class TradingAccountsService {
 
   getActive(brokerId: number): Observable<ResponseData<TradingAccountDto[]>> {
     return this.api.get(`/trading-account/active/${brokerId}`);
+  }
+
+  /** Returns the trading account attached to the current JWT (no broker parameter). */
+  getCurrentActive(): Observable<ResponseData<TradingAccountDto>> {
+    return this.api.get(`/trading-account/active`);
   }
 }

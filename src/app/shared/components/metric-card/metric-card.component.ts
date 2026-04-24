@@ -16,69 +16,83 @@ import { Component, input, computed, ChangeDetectionStrategy } from '@angular/co
         {{ formattedValue() }}
       </div>
       @if (delta() !== undefined) {
-        <div class="metric-delta" [class.profit]="(delta() ?? 0) >= 0" [class.loss]="(delta() ?? 0) < 0">
+        <div
+          class="metric-delta"
+          [class.profit]="(delta() ?? 0) >= 0"
+          [class.loss]="(delta() ?? 0) < 0"
+        >
           {{ (delta() ?? 0) >= 0 ? '↑' : '↓' }} {{ formatDelta() }}
         </div>
       }
     </div>
   `,
-  styles: [`
-    .metric-card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      padding: var(--card-padding);
-      box-shadow: var(--shadow-sm);
-      transition: all 0.2s ease;
-    }
+  styles: [
+    `
+      .metric-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+        box-shadow: var(--shadow-sm);
+        transition: all 0.2s ease;
+      }
 
-    .metric-card:hover {
-      box-shadow: var(--shadow-md);
-      transform: translateY(-1px);
-    }
+      .metric-card:hover {
+        box-shadow: var(--shadow-md);
+        transform: translateY(-1px);
+      }
 
-    .metric-header {
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-      margin-bottom: var(--space-3);
-    }
+      .metric-header {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        margin-bottom: var(--space-3);
+      }
 
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
 
-    .metric-label {
-      font-size: var(--text-sm);
-      color: var(--text-secondary);
-      font-weight: var(--font-medium);
-    }
+      .metric-label {
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        font-weight: var(--font-medium);
+      }
 
-    .metric-value {
-      font-size: var(--text-2xl);
-      font-weight: var(--font-semibold);
-      color: var(--text-primary);
-      letter-spacing: var(--tracking-tight);
-      font-variant-numeric: tabular-nums;
-      line-height: 1.2;
-    }
+      .metric-value {
+        font-size: var(--text-2xl);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        letter-spacing: var(--tracking-tight);
+        font-variant-numeric: tabular-nums;
+        line-height: 1.2;
+      }
 
-    .metric-value.profit { color: var(--profit); }
-    .metric-value.loss { color: var(--loss); }
+      .metric-value.profit {
+        color: var(--profit);
+      }
+      .metric-value.loss {
+        color: var(--loss);
+      }
 
-    .metric-delta {
-      font-size: var(--text-sm);
-      font-weight: var(--font-medium);
-      margin-top: var(--space-1);
-      font-variant-numeric: tabular-nums;
-    }
+      .metric-delta {
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        margin-top: var(--space-1);
+        font-variant-numeric: tabular-nums;
+      }
 
-    .metric-delta.profit { color: var(--profit); }
-    .metric-delta.loss { color: var(--loss); }
-  `],
+      .metric-delta.profit {
+        color: var(--profit);
+      }
+      .metric-delta.loss {
+        color: var(--loss);
+      }
+    `,
+  ],
 })
 export class MetricCardComponent {
   label = input.required<string>();

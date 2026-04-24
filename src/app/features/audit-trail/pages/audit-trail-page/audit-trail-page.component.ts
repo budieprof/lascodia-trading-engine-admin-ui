@@ -13,11 +13,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 @Component({
   selector: 'app-audit-trail-page',
   standalone: true,
-  imports: [
-    DataTableComponent,
-    PageHeaderComponent,
-    FormsModule,
-  ],
+  imports: [DataTableComponent, PageHeaderComponent, FormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -35,7 +31,14 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           <div class="detail-panel" (click)="$event.stopPropagation()">
             <div class="detail-header">
               <h3 class="detail-title">Decision Log #{{ expandedEntry()!.id }}</h3>
-              <button class="close-btn" (click)="expandedEntry.set(null)">&times;</button>
+              <button
+                type="button"
+                class="close-btn"
+                aria-label="Close detail"
+                (click)="expandedEntry.set(null)"
+              >
+                &times;
+              </button>
             </div>
             <div class="detail-body">
               <div class="detail-section">
@@ -53,7 +56,9 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 </div>
                 <div class="meta-item">
                   <span class="meta-label">Entity</span>
-                  <span class="meta-value">{{ expandedEntry()!.entityType }} #{{ expandedEntry()!.entityId }}</span>
+                  <span class="meta-value"
+                    >{{ expandedEntry()!.entityType }} #{{ expandedEntry()!.entityId }}</span
+                  >
                 </div>
                 <div class="meta-item">
                   <span class="meta-label">Outcome</span>
@@ -70,141 +75,160 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       }
     </div>
   `,
-  styles: [`
-    .page { padding: var(--space-2) 0; }
+  styles: [
+    `
+      .page {
+        padding: var(--space-2) 0;
+      }
 
-    .detail-overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.4);
-      backdrop-filter: blur(8px);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-      animation: fadeIn 0.15s ease;
-    }
+      .detail-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(8px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        animation: fadeIn 0.15s ease;
+      }
 
-    .detail-panel {
-      background: var(--bg-primary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      box-shadow: var(--shadow-lg);
-      width: 100%;
-      max-width: 640px;
-      max-height: 80vh;
-      overflow-y: auto;
-      animation: scaleIn 0.2s ease-out;
-    }
+      .detail-panel {
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-lg);
+        width: 100%;
+        max-width: 640px;
+        max-height: 80vh;
+        overflow-y: auto;
+        animation: scaleIn 0.2s ease-out;
+      }
 
-    .detail-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: var(--space-4) var(--space-5);
-      border-bottom: 1px solid var(--border);
-    }
+      .detail-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--space-4) var(--space-5);
+        border-bottom: 1px solid var(--border);
+      }
 
-    .detail-title {
-      font-size: var(--text-lg);
-      font-weight: var(--font-semibold);
-      color: var(--text-primary);
-      margin: 0;
-    }
+      .detail-title {
+        font-size: var(--text-lg);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        margin: 0;
+      }
 
-    .close-btn {
-      width: 32px;
-      height: 32px;
-      border: none;
-      border-radius: var(--radius-full);
-      background: var(--bg-tertiary);
-      color: var(--text-secondary);
-      font-size: 18px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: background 0.15s ease;
-    }
+      .close-btn {
+        width: 32px;
+        height: 32px;
+        border: none;
+        border-radius: var(--radius-full);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-size: 18px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.15s ease;
+      }
 
-    .close-btn:hover { background: var(--border); }
+      .close-btn:hover {
+        background: var(--border);
+      }
 
-    .detail-body {
-      padding: var(--space-5);
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-4);
-    }
+      .detail-body {
+        padding: var(--space-5);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+      }
 
-    .detail-section {
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-2);
-    }
+      .detail-section {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
 
-    .detail-label {
-      font-size: var(--text-xs);
-      font-weight: var(--font-semibold);
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin: 0;
-    }
+      .detail-label {
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin: 0;
+      }
 
-    .detail-value {
-      font-size: var(--text-sm);
-      color: var(--text-primary);
-      margin: 0;
-      line-height: 1.5;
-    }
+      .detail-value {
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+        margin: 0;
+        line-height: 1.5;
+      }
 
-    .detail-json {
-      font-family: 'SF Mono', 'Menlo', monospace;
-      font-size: 12px;
-      color: var(--text-primary);
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: var(--space-3);
-      margin: 0;
-      overflow-x: auto;
-      white-space: pre-wrap;
-      word-break: break-word;
-      max-height: 300px;
-      overflow-y: auto;
-    }
+      .detail-json {
+        font-family: 'SF Mono', 'Menlo', monospace;
+        font-size: 12px;
+        color: var(--text-primary);
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: var(--space-3);
+        margin: 0;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 300px;
+        overflow-y: auto;
+      }
 
-    .detail-meta {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: var(--space-3);
-      padding-top: var(--space-3);
-      border-top: 1px solid var(--border);
-    }
+      .detail-meta {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-3);
+        padding-top: var(--space-3);
+        border-top: 1px solid var(--border);
+      }
 
-    .meta-item {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
+      .meta-item {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
 
-    .meta-label {
-      font-size: var(--text-xs);
-      color: var(--text-tertiary);
-    }
+      .meta-label {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
 
-    .meta-value {
-      font-size: var(--text-sm);
-      font-weight: var(--font-medium);
-      color: var(--text-primary);
-    }
+      .meta-value {
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        color: var(--text-primary);
+      }
 
-    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-    @keyframes scaleIn {
-      from { transform: scale(0.96); opacity: 0; }
-      to { transform: scale(1); opacity: 1; }
-    }
-  `],
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+      @keyframes scaleIn {
+        from {
+          transform: scale(0.96);
+          opacity: 0;
+        }
+        to {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+    `,
+  ],
 })
 export class AuditTrailPageComponent {
   private readonly auditTrailService = inject(AuditTrailService);
@@ -260,7 +284,17 @@ export class AuditTrailPageComponent {
     return this.auditTrailService.list(params).pipe(
       map((response) => {
         if (response.data) return response.data;
-        return { data: [], pager: { totalItemCount: 0, filter: null, currentPage: 1, itemCountPerPage: 25, pageNo: 0, pageSize: 25 } } as PagedData<DecisionLogDto>;
+        return {
+          data: [],
+          pager: {
+            totalItemCount: 0,
+            filter: null,
+            currentPage: 1,
+            itemCountPerPage: 25,
+            pageNo: 0,
+            pageSize: 25,
+          },
+        } as PagedData<DecisionLogDto>;
       }),
     );
   };

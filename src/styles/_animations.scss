@@ -134,3 +134,64 @@
 .animate-pulse {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+// ── Glassmorphism primitives (PRD §3.1) ─────────────────────────────────────
+//
+// Translucent panel with backdrop blur. Pair with `glass-scrim` when used as a
+// modal body over a dimmed backdrop.
+.glass-panel {
+  background: var(--bg-glass);
+  backdrop-filter: var(--blur-lg);
+  -webkit-backdrop-filter: var(--blur-lg);
+  border: 1px solid var(--border);
+}
+
+// Modal / dialog scrim — dim + blur whatever sits behind.
+.glass-scrim {
+  background: var(--backdrop-scrim);
+  backdrop-filter: var(--blur-sm);
+  -webkit-backdrop-filter: var(--blur-sm);
+}
+
+// Graceful degradation for browsers (or render contexts) without backdrop-filter
+// support — keep the solid fallback readable rather than washed out.
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-panel {
+    background: var(--bg-secondary);
+  }
+  .glass-scrim {
+    background: rgba(0, 0, 0, 0.55);
+  }
+}
+
+// ── Micro-interactions (PRD §3.1) ───────────────────────────────────────────
+//
+// Cards get a gentle lift on hover: shadow elevates, surface shifts up 1px.
+.card-lift {
+  transition:
+    box-shadow var(--dur-base) var(--ease-out-soft),
+    transform var(--dur-base) var(--ease-out-soft);
+
+  &:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+  }
+}
+
+// Apple-style button press — scale 0.97 on active.
+.press {
+  transition: transform var(--dur-fast) var(--ease-press);
+
+  &:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+}
+
+// Scoped entry animations so feature pages don't re-declare keyframes.
+.modal-enter {
+  animation: scaleIn 0.25s var(--ease-out-soft) forwards;
+}
+
+.scrim-enter {
+  animation: fadeIn var(--dur-base) var(--ease-out-soft) forwards;
+}

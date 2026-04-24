@@ -30,38 +30,42 @@ export class GaugeComponent {
   ]);
 
   chartOptions = computed<EChartsOption>(() => ({
-    series: [{
-      type: 'gauge',
-      min: this.min(),
-      max: this.max(),
-      progress: { show: true, width: 10 },
-      axisLine: {
-        lineStyle: {
-          width: 10,
-          color: this.thresholds().map(t => [t.value / this.max(), t.color] as [number, string]),
+    series: [
+      {
+        type: 'gauge',
+        min: this.min(),
+        max: this.max(),
+        progress: { show: true, width: 10 },
+        axisLine: {
+          lineStyle: {
+            width: 10,
+            color: this.thresholds().map(
+              (t) => [t.value / this.max(), t.color] as [number, string],
+            ),
+          },
         },
+        axisTick: { show: false },
+        splitLine: { show: false },
+        axisLabel: { show: false },
+        pointer: { show: false },
+        anchor: { show: false },
+        title: {
+          show: !!this.label(),
+          offsetCenter: [0, '70%'],
+          fontSize: 11,
+          color: '#6E6E73',
+        },
+        detail: {
+          valueAnimation: true,
+          fontSize: 20,
+          fontWeight: 600,
+          offsetCenter: [0, '0%'],
+          formatter: `{value}%`,
+          color: '#1D1D1F',
+        },
+        data: [{ value: this.value(), name: this.label() }],
       },
-      axisTick: { show: false },
-      splitLine: { show: false },
-      axisLabel: { show: false },
-      pointer: { show: false },
-      anchor: { show: false },
-      title: {
-        show: !!this.label(),
-        offsetCenter: [0, '70%'],
-        fontSize: 11,
-        color: '#6E6E73',
-      },
-      detail: {
-        valueAnimation: true,
-        fontSize: 20,
-        fontWeight: 600,
-        offsetCenter: [0, '0%'],
-        formatter: `{value}%`,
-        color: '#1D1D1F',
-      },
-      data: [{ value: this.value(), name: this.label() }],
-    }],
+    ],
     animation: true,
   }));
 }
