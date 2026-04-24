@@ -7,7 +7,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { catchError, map, merge, Observable, of, throttleTime } from 'rxjs';
+import { catchError, map, Observable, of, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
 

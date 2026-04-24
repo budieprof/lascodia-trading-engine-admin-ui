@@ -6,6 +6,7 @@ import { NotificationService } from '@core/notifications/notification.service';
 import type { EngineConfigDto, UpsertConfigRequest } from '@core/api/api.types';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { PresenceBadgeComponent } from '@shared/components/presence-badge/presence-badge.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 interface ConfigGroup {
@@ -23,14 +24,16 @@ interface ConfigEntry extends EngineConfigDto {
 @Component({
   selector: 'app-config-page',
   standalone: true,
-  imports: [PageHeaderComponent, FormsModule, RelativeTimePipe],
+  imports: [PageHeaderComponent, PresenceBadgeComponent, FormsModule, RelativeTimePipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <app-page-header
         title="Engine Configuration"
         subtitle="View and edit engine configuration parameters"
-      />
+      >
+        <app-presence-badge routeKey="engine-config" />
+      </app-page-header>
 
       @if (loading()) {
         <div class="loading-state">

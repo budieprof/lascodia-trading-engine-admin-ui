@@ -1,3 +1,9 @@
 {
-  "apiBaseUrl": "http://localhost:5081"
+  "apiBaseUrl": "http://localhost:5081",
+  "featureFlags": {
+    "chart-annotations": {
+      "enabled": true,
+      "roles": ["Admin", "Operator", "Trader"]
+    }
+  }
 }

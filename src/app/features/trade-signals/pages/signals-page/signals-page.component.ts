@@ -10,10 +10,8 @@ import type { TradeSignalDto, PagedData, PagerRequest } from '@core/api/api.type
 
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
-import { StatusBadgeComponent } from '@shared/components/status-badge/status-badge.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
-import { CurrencyFormatPipe } from '@shared/pipes/currency-format.pipe';
 
 @Component({
   selector: 'app-signals-page',

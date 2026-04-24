@@ -17,15 +17,13 @@ import { OrdersService } from '@core/services/orders.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import {
   StrategyDto,
-  TradeSignalDto,
-  OrderDto,
   OptimizationRunDto,
-  PagedData,
   PagerRequest,
   UpdateStrategyRequest,
 } from '@core/api/api.types';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { PresenceBadgeComponent } from '@shared/components/presence-badge/presence-badge.component';
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { StatusBadgeComponent } from '@shared/components/status-badge/status-badge.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
@@ -40,6 +38,7 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
   standalone: true,
   imports: [
     PageHeaderComponent,
+    PresenceBadgeComponent,
     DataTableComponent,
     StatusBadgeComponent,
     ConfirmDialogComponent,
@@ -56,6 +55,7 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
           [title]="strategy()!.name ?? ''"
           [subtitle]="(strategy()!.symbol ?? '') + ' - ' + (strategy()!.description ?? '')"
         >
+          <app-presence-badge [routeKey]="'strategy:' + strategyId" />
           <button class="btn btn-ghost" (click)="goBack()">Back</button>
         </app-page-header>
 
@@ -447,7 +447,7 @@ export class StrategyDetailPageComponent implements OnInit {
   showEditForm = signal(false);
   optimizationLoading = signal(false);
 
-  private strategyId!: number;
+  protected strategyId!: number;
 
   readonly detailTabs: TabItem[] = [
     { label: 'Config', value: 'config' },

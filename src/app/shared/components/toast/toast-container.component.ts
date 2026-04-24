@@ -1,5 +1,5 @@
 import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
-import { NotificationService, Toast } from '@core/notifications/notification.service';
+import { NotificationService } from '@core/notifications/notification.service';
 
 @Component({
   selector: 'app-toast-container',

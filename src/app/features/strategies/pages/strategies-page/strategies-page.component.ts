@@ -1,11 +1,4 @@
-import {
-  Component,
-  ChangeDetectionStrategy,
-  inject,
-  signal,
-  computed,
-  ViewChild,
-} from '@angular/core';
+import { Component, ChangeDetectionStrategy, inject, signal, ViewChild } from '@angular/core';
 import { Router } from '@angular/router';
 import { map } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
@@ -17,7 +10,6 @@ import { NotificationService } from '@core/notifications/notification.service';
 import {
   StrategyDto,
   StrategyPerformanceSnapshotDto,
-  PagedData,
   PagerRequest,
   CreateStrategyRequest,
 } from '@core/api/api.types';

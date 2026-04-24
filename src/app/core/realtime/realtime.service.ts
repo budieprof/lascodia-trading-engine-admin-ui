@@ -24,6 +24,8 @@ export const REALTIME_EVENTS = [
   'emergencyFlatten',
   'optimizationCompleted',
   'backtestCompleted',
+  'sentimentSnapshotCreated',
+  'auditDecisionLogged',
   // ── Presence (hub-invoked, not bus-relayed) ──
   'presenceJoined',
   'presenceLeft',

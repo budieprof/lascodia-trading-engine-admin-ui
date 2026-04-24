@@ -67,7 +67,7 @@ export class FeatureFlagsService {
       if (!inRolloutBucket(key, rule.percent)) return false;
     }
 
-    return rule.enabled !== false; // Defaults to true if `enabled` is omitted.
+    return true; // `enabled === false` was caught above; omitted/true both mean on.
   }
 
   /** Reactive variant — signals recompute when the underlying flags change. */

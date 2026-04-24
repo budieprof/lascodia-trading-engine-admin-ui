@@ -1,11 +1,4 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  ViewChild,
-  computed,
-  inject,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, ViewChild, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { catchError, map, of, Observable } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';

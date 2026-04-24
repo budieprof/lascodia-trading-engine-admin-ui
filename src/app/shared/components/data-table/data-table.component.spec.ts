@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it } from 'vitest';
 
 // The DataTable is our most input-heavy component (required fetch callback,
 // column defs, optional bulk-actions template, row-click output). Every

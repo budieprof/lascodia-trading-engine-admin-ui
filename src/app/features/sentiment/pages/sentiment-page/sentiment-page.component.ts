@@ -21,6 +21,9 @@ import { StatusBadgeComponent } from '@shared/components/status-badge/status-bad
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { createPolledResource } from '@core/polling/polled-resource';
+import { RealtimeService } from '@core/realtime/realtime.service';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { throttleTime } from 'rxjs/operators';
 
 interface SymbolSentiment {
   symbol: string;
@@ -204,6 +207,16 @@ export class SentimentPageComponent {
   private readonly sentimentService = inject(SentimentService);
   private readonly regimeService = inject(MarketRegimeService);
   private readonly currencyPairsService = inject(CurrencyPairsService);
+  private readonly realtime = inject(RealtimeService);
+
+  constructor() {
+    // Push-refresh sentiment cards when new snapshots land. 3s throttle so a
+    // burst of ingestion on startup doesn't thrash the per-symbol forkJoin.
+    this.realtime
+      .on('sentimentSnapshotCreated')
+      .pipe(throttleTime(3_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
+      .subscribe(() => this.cardResource.refresh());
+  }
 
   readonly DEFAULT_TIMEFRAME = DEFAULT_TIMEFRAME;
   readonly DEFAULT_SYMBOLS = DEFAULT_SYMBOLS;
@@ -215,15 +228,9 @@ export class SentimentPageComponent {
   readonly activeTab = signal('overview');
   readonly primarySymbol = signal(DEFAULT_SYMBOLS[0]);
 
-  // Live sentiment + regime per symbol (poll every 60s).
-  //
-  // ──────────────────────────────────────────────────────────────────────
-  // SignalR migration: deferred.
-  // Awaiting a `SentimentSnapshotCreated` integration event before SignalR
-  // migration. Once the engine publishes per-symbol sentiment/regime events
-  // on the /api/hubs/trading hub, replace this 60s poll with a RealtimeService
-  // subscription (see orders-page.component.ts for the canonical pattern).
-  // ──────────────────────────────────────────────────────────────────────
+  // Live sentiment + regime per symbol (poll every 60s, plus SignalR push).
+  // The engine now fires `sentimentSnapshotCreated` when a snapshot lands;
+  // we throttle to 3 s to dedup bursts and still refresh in near-real-time.
   private readonly cardResource = createPolledResource(
     () =>
       forkJoin(

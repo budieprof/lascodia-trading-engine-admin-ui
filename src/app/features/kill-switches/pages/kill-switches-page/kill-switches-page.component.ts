@@ -21,6 +21,7 @@ import type {
 } from '@core/api/api.types';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { PresenceBadgeComponent } from '@shared/components/presence-badge/presence-badge.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
@@ -36,6 +37,7 @@ interface StrategySwitch {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     PageHeaderComponent,
+    PresenceBadgeComponent,
     ConfirmDialogComponent,
     CardSkeletonComponent,
     EmptyStateComponent,
@@ -44,7 +46,9 @@ interface StrategySwitch {
   ],
   template: `
     <div class="page">
-      <app-page-header title="Kill Switches" subtitle="Global and per-strategy circuit breakers" />
+      <app-page-header title="Kill Switches" subtitle="Global and per-strategy circuit breakers">
+        <app-presence-badge routeKey="kill-switches" />
+      </app-page-header>
 
       <section class="global-card" [class.engaged]="service.isGlobalEngaged()">
         <div class="global-head">

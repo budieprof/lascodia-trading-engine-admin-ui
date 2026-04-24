@@ -1,10 +1,12 @@
-import { Component, ChangeDetectionStrategy, inject, signal } from '@angular/core';
+import { Component, ChangeDetectionStrategy, inject, signal, viewChild } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import type { ColDef } from 'ag-grid-community';
-import { map } from 'rxjs';
+import { map, throttleTime } from 'rxjs';
 
 import { AuditTrailService } from '@core/services/audit-trail.service';
 import type { DecisionLogDto, PagedData, PagerRequest } from '@core/api/api.types';
+import { RealtimeService } from '@core/realtime/realtime.service';
 
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -20,6 +22,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       <app-page-header title="Audit Trail" subtitle="Decision logs and system audit records" />
 
       <app-data-table
+        #auditTable
         [columnDefs]="columns"
         [fetchData]="fetchData"
         [searchable]="true"
@@ -245,9 +248,19 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 })
 export class AuditTrailPageComponent {
   private readonly auditTrailService = inject(AuditTrailService);
+  private readonly realtime = inject(RealtimeService);
   private readonly relativeTimePipe = new RelativeTimePipe();
 
+  private readonly auditTable = viewChild<DataTableComponent<DecisionLogDto>>('auditTable');
+
   expandedEntry = signal<DecisionLogDto | null>(null);
+
+  constructor() {
+    this.realtime
+      .on('auditDecisionLogged')
+      .pipe(throttleTime(3_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
+      .subscribe(() => this.auditTable()?.loadData());
+  }
 
   columns: ColDef<DecisionLogDto>[] = [
     {
@@ -293,16 +306,6 @@ export class AuditTrailPageComponent {
     },
   ];
 
-  // ──────────────────────────────────────────────────────────────────────
-  // SignalR migration: deferred.
-  // Awaiting an `AuditDecisionLogged` integration event. The server writes
-  // decision-log rows synchronously inside risk/order paths but does not
-  // currently publish a realtime notification, so this table relies on the
-  // user-initiated fetch (ag-grid pagination) until that event lands. Once
-  // available, add a RealtimeService subscription next to this method and
-  // invoke the data-table's `loadData()` with a throttle (see
-  // orders-page.component.ts for the canonical pattern).
-  // ──────────────────────────────────────────────────────────────────────
   fetchData = (params: PagerRequest) => {
     return this.auditTrailService.list(params).pipe(
       map((response) => {

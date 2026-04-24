@@ -1,8 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { AbstractControl, FormsModule, ValidationErrors } from '@angular/forms';
 
-import { FormFieldControlDirective } from './form-field-control.directive';
-
 export { FormFieldControlDirective } from './form-field-control.directive';
 
 /**

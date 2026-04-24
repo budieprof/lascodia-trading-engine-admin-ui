@@ -33,7 +33,6 @@ import type {
 
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
-import { StatusBadgeComponent } from '@shared/components/status-badge/status-badge.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { TabsComponent, type TabItem } from '@shared/components/ui/tabs/tabs.component';

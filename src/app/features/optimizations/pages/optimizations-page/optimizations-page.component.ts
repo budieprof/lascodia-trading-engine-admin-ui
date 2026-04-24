@@ -10,7 +10,6 @@ import { NotificationService } from '@core/notifications/notification.service';
 import type {
   OptimizationDryRunDto,
   OptimizationRunDto,
-  OptimizationValidationDto,
   PagedData,
   PagerRequest,
   StrategyDto,

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { catchError, map, of } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 import type { ColDef } from 'ag-grid-community';
@@ -11,6 +12,7 @@ import {
   ChartAnnotationsService,
   type ChartAnnotationDto,
 } from '@core/annotations/chart-annotations.service';
+import { FeatureFlagsService } from '@core/feature-flags/feature-flags.service';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { GaugeComponent } from '@shared/components/gauge/gauge.component';
@@ -37,6 +39,7 @@ const MODE_COLOR: Record<RecoveryMode, string> = {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    FormsModule,
     PageHeaderComponent,
     GaugeComponent,
     CardSkeletonComponent,
@@ -108,6 +111,20 @@ const MODE_COLOR: Record<RecoveryMode, string> = {
           />
         }
       } @else {
+        <div class="history-toolbar">
+          <h3 class="muted small">Drawdown history with operator notes</h3>
+          @if (annotationsEnabled()) {
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm"
+              (click)="openCreateAnnotation()"
+              [disabled]="creatingAnnotation()"
+            >
+              + Add note
+            </button>
+          }
+        </div>
+
         <app-chart-card
           title="Drawdown over time"
           subtitle="Most recent {{ historyChartCount() }} snapshots, oldest first"
@@ -120,6 +137,56 @@ const MODE_COLOR: Record<RecoveryMode, string> = {
           [fetchData]="fetchHistoryPage"
           stateKey="drawdown-history"
         />
+
+        @if (annotationDrawerOpen()) {
+          <div
+            class="annot-overlay"
+            role="presentation"
+            tabindex="-1"
+            (click)="closeAnnotationDrawer()"
+            (keydown.escape)="closeAnnotationDrawer()"
+          >
+            <form
+              class="annot-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Add drawdown note"
+              tabindex="-1"
+              (click)="$event.stopPropagation()"
+              (keydown)="$event.stopPropagation()"
+              (ngSubmit)="submitAnnotation()"
+            >
+              <h4>Add note</h4>
+              <label class="field">
+                <span class="lbl">When (UTC)</span>
+                <input type="datetime-local" [(ngModel)]="annotWhen" name="when" required />
+              </label>
+              <label class="field">
+                <span class="lbl">Note</span>
+                <textarea
+                  [(ngModel)]="annotBody"
+                  name="body"
+                  rows="4"
+                  maxlength="500"
+                  placeholder="What happened here?"
+                  required
+                ></textarea>
+              </label>
+              <div class="annot-actions">
+                <button type="button" class="btn btn-ghost" (click)="closeAnnotationDrawer()">
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  class="btn btn-primary"
+                  [disabled]="creatingAnnotation() || !annotBody.trim()"
+                >
+                  {{ creatingAnnotation() ? 'Saving…' : 'Save' }}
+                </button>
+              </div>
+            </form>
+          </div>
+        }
       }
     </div>
   `,
@@ -237,12 +304,114 @@ const MODE_COLOR: Record<RecoveryMode, string> = {
           grid-template-columns: 1fr;
         }
       }
+
+      /* ── History-tab toolbar + annotation dialog ───────────────────── */
+      .history-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: var(--space-3);
+      }
+      .small {
+        font-size: var(--text-xs);
+      }
+      .btn {
+        padding: 6px 14px;
+        border-radius: var(--radius-full);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        border: 1px solid transparent;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .btn-sm {
+        padding: 4px 12px;
+        font-size: var(--text-xs);
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: white;
+      }
+      .btn-primary:disabled {
+        opacity: 0.5;
+      }
+      .btn-secondary {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+      .btn-ghost {
+        background: transparent;
+        color: var(--text-secondary);
+        border-color: var(--border);
+      }
+      .annot-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+      }
+      .annot-dialog {
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-lg);
+        padding: var(--space-5) var(--space-6);
+        width: 100%;
+        max-width: 440px;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+      }
+      .annot-dialog h4 {
+        margin: 0;
+        font-size: var(--text-lg);
+        font-weight: var(--font-semibold);
+      }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+      }
+      .lbl {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .field input,
+      .field textarea {
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        font-family: inherit;
+        resize: vertical;
+      }
+      .annot-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: var(--space-2);
+      }
     `,
   ],
 })
 export class DrawdownPageComponent {
   private readonly service = inject(DrawdownRecoveryService);
   private readonly annotationsService = inject(ChartAnnotationsService);
+  private readonly flags = inject(FeatureFlagsService);
+
+  /**
+   * Chart annotations are gated behind `chart-annotations` so ops can stage
+   * rollout per-role or per-percentage via `runtime-config.json`. When off,
+   * existing notes still render in the chart (read path) but the authoring
+   * affordance is hidden.
+   */
+  readonly annotationsEnabled = this.flags.watch('chart-annotations');
 
   readonly tabs: TabItem[] = [
     { label: 'Live', value: 'live' },
@@ -278,6 +447,13 @@ export class DrawdownPageComponent {
   readonly historyLoading = signal(false);
   readonly historyChartCount = computed(() => this.historySeries().length);
   readonly annotations = signal<ChartAnnotationDto[]>([]);
+
+  // ── Annotation editor state ───────────────────────────────────────────
+  readonly annotationDrawerOpen = signal(false);
+  readonly creatingAnnotation = signal(false);
+  /** ngModel-bound. `datetime-local` yields `YYYY-MM-DDTHH:mm` (no TZ). */
+  annotWhen = '';
+  annotBody = '';
 
   readonly historyChart = computed<EChartsOption>(() => {
     const series = this.historySeries();
@@ -451,6 +627,41 @@ export class DrawdownPageComponent {
 
   modeLabel(mode: RecoveryMode): string {
     return MODE_LABEL[mode] ?? String(mode);
+  }
+
+  // ── Annotation editor ────────────────────────────────────────────────
+
+  openCreateAnnotation(): void {
+    // Default to "now" so the common case (just happened) is a single click.
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    this.annotWhen = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    this.annotBody = '';
+    this.annotationDrawerOpen.set(true);
+  }
+
+  closeAnnotationDrawer(): void {
+    if (this.creatingAnnotation()) return; // don't close mid-save
+    this.annotationDrawerOpen.set(false);
+  }
+
+  submitAnnotation(): void {
+    const body = this.annotBody.trim();
+    if (!body || !this.annotWhen) return;
+    // `datetime-local` value is local time; convert to UTC ISO before posting.
+    const annotatedAt = new Date(this.annotWhen).toISOString();
+    this.creatingAnnotation.set(true);
+    this.annotationsService
+      .create({ target: 'drawdown', annotatedAt, body })
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        this.creatingAnnotation.set(false);
+        if (res?.status) {
+          // Refresh against the current window so the new note shows up.
+          this.loadAnnotationsForSeries(this.historySeries());
+          this.annotationDrawerOpen.set(false);
+        }
+      });
   }
 
   /**

@@ -3,10 +3,8 @@ import { Router } from '@angular/router';
 import { Observable, map } from 'rxjs';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
-import { StatusBadgeComponent } from '@shared/components/status-badge/status-badge.component';
 import { TabsComponent } from '@shared/components/ui/tabs/tabs.component';
 import { StatusPillCellComponent } from '@shared/components/data-table/cell-renderers/status-pill-cell.component';
-import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { BacktestsService } from '@core/services/backtests.service';
 import { WalkForwardService } from '@core/services/walk-forward.service';
 import { NotificationService } from '@core/notifications/notification.service';
@@ -18,7 +16,7 @@ import {
   WalkForwardRunDto,
   ResponseData,
 } from '@core/api/api.types';
-import { FormsModule, ReactiveFormsModule } from '@angular/forms';
+import { FormsModule } from '@angular/forms';
 
 @Component({
   selector: 'app-backtests-page',
@@ -264,45 +262,41 @@ export class BacktestsPageComponent {
   ];
 
   fetchBacktests = (params: PagerRequest): Observable<PagedData<BacktestRunDto>> => {
-    return this.backtestsService
-      .list(params)
-      .pipe(
-        map(
-          (res: ResponseData<PagedData<BacktestRunDto>>) =>
-            res.data ?? {
-              pager: {
-                totalItemCount: 0,
-                currentPage: 1,
-                itemCountPerPage: 25,
-                pageNo: 0,
-                pageSize: 25,
-                filter: null,
-              },
-              data: [],
+    return this.backtestsService.list(params).pipe(
+      map(
+        (res: ResponseData<PagedData<BacktestRunDto>>) =>
+          res.data ?? {
+            pager: {
+              totalItemCount: 0,
+              currentPage: 1,
+              itemCountPerPage: 25,
+              pageNo: 0,
+              pageSize: 25,
+              filter: null,
             },
-        ),
-      );
+            data: [],
+          },
+      ),
+    );
   };
 
   fetchWalkForward = (params: PagerRequest): Observable<PagedData<WalkForwardRunDto>> => {
-    return this.walkForwardService
-      .list(params)
-      .pipe(
-        map(
-          (res: ResponseData<PagedData<WalkForwardRunDto>>) =>
-            res.data ?? {
-              pager: {
-                totalItemCount: 0,
-                currentPage: 1,
-                itemCountPerPage: 25,
-                pageNo: 0,
-                pageSize: 25,
-                filter: null,
-              },
-              data: [],
+    return this.walkForwardService.list(params).pipe(
+      map(
+        (res: ResponseData<PagedData<WalkForwardRunDto>>) =>
+          res.data ?? {
+            pager: {
+              totalItemCount: 0,
+              currentPage: 1,
+              itemCountPerPage: 25,
+              pageNo: 0,
+              pageSize: 25,
+              filter: null,
             },
-        ),
-      );
+            data: [],
+          },
+      ),
+    );
   };
 
   onBacktestClick(row: BacktestRunDto) {

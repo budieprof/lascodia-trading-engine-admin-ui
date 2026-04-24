@@ -1,4 +1,4 @@
-import { Component, ChangeDetectionStrategy, output, signal, input } from '@angular/core';
+import { Component, ChangeDetectionStrategy, output, input } from '@angular/core';
 import { ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import type { CreateOrderRequest } from '@core/api/api.types';
 

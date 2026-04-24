@@ -5,7 +5,7 @@ import type { EChartsOption } from 'echarts';
 
 import { StrategyEnsembleService } from '@core/services/strategy-ensemble.service';
 import { NotificationService } from '@core/notifications/notification.service';
-import type { PagedData, PagerRequest, StrategyAllocationDto } from '@core/api/api.types';
+import type { StrategyAllocationDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';

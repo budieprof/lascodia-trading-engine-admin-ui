@@ -1,4 +1,4 @@
-import { Component, input, output, ChangeDetectionStrategy, signal } from '@angular/core';
+import { Component, input, output, ChangeDetectionStrategy } from '@angular/core';
 
 @Component({
   selector: 'app-confirm-dialog',
