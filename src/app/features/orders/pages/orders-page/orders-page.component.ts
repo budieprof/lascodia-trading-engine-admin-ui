@@ -24,6 +24,14 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+import { SavedViewsService, SavedView } from '@core/views/saved-views.service';
+
+interface OrdersViewState {
+  status: string;
+  orderType: string;
+  symbol: string;
+}
 
 @Component({
   selector: 'app-orders-page',
@@ -36,6 +44,7 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
     MetricCardComponent,
     ChartCardComponent,
     TabsComponent,
+    ConfirmDialogComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -271,6 +280,30 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
         </div>
       }
 
+      <!-- Saved views -->
+      <div class="saved-views">
+        @for (v of pinnedSavedViews(); track v.id) {
+          <button
+            type="button"
+            class="view-pill"
+            (click)="applySavedView(v)"
+            [attr.aria-label]="'Restore saved view ' + v.label"
+          >
+            <span class="view-label">{{ v.label }}</span>
+            <span
+              class="view-remove"
+              role="button"
+              tabindex="0"
+              aria-label="Remove saved view"
+              (click)="removeSavedView(v.id, $event)"
+              (keydown.enter)="removeSavedView(v.id, $event)"
+              >×</span
+            >
+          </button>
+        }
+        <button type="button" class="view-save" (click)="saveCurrentView()">+ Save view</button>
+      </div>
+
       <!-- Tabs -->
       <ui-tabs [tabs]="tabItems" [(activeTab)]="activeTab">
         @switch (activeTab()) {
@@ -416,12 +449,76 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
           }
         }
       </ui-tabs>
+
+      <app-confirm-dialog
+        [open]="batchCancelOpen()"
+        title="Cancel selected orders"
+        [message]="batchCancelMessage()"
+        confirmLabel="Cancel orders"
+        confirmVariant="destructive"
+        [loading]="batchCancelPending()"
+        (confirm)="confirmBatchCancel()"
+        (cancelled)="cancelBatchCancelDialog()"
+      />
     </div>
   `,
   styles: [
     `
       .page {
         padding: var(--space-2) 0;
+      }
+
+      /* Saved views */
+      .saved-views {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-2);
+        margin-bottom: var(--space-4);
+      }
+      .view-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        height: 28px;
+        padding: 0 var(--space-3);
+        border-radius: var(--radius-full);
+        border: 1px solid var(--border);
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        font-size: var(--text-xs);
+        font-family: inherit;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .view-pill:hover {
+        background: var(--bg-secondary);
+      }
+      .view-remove {
+        color: var(--text-tertiary);
+        font-size: 14px;
+        line-height: 1;
+        padding: 0 2px;
+        cursor: pointer;
+      }
+      .view-remove:hover {
+        color: var(--text-primary);
+      }
+      .view-save {
+        height: 28px;
+        padding: 0 var(--space-3);
+        border-radius: var(--radius-full);
+        border: 1px dashed var(--border);
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        font-family: inherit;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .view-save:hover {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
       }
 
       /* Buttons */
@@ -740,6 +837,10 @@ export class OrdersPageComponent {
   private readonly notifications = inject(NotificationService);
   private readonly fb = inject(FormBuilder);
   private readonly realtime = inject(RealtimeService);
+  private readonly savedViewsService = inject(SavedViewsService);
+
+  readonly savedViews = this.savedViewsService.forRoute<OrdersViewState>('/orders');
+  readonly pinnedSavedViews = computed(() => this.savedViews().filter((v) => v.pinned));
 
   private readonly dataTable = viewChild<DataTableComponent<OrderDto>>('ordersTable');
 
@@ -1177,6 +1278,40 @@ export class OrdersPageComponent {
     this.reloadTable();
   }
 
+  // ── Saved views ─────────────────────────────────────────────────────
+  // Minimal UX — a label prompt, pinned by default so it shows immediately
+  // in the pill row. Rename / re-pin live in the service for later if we
+  // add a management drawer.
+  saveCurrentView(): void {
+    const label = (typeof window !== 'undefined' ? window.prompt('Name this view') : '')?.trim();
+    if (!label) return;
+    // The service signature keeps `id` nominally required even though
+    // it's really optional at runtime — mint a fresh uuid up-front so the
+    // types line up without forcing a service change.
+    this.savedViewsService.save<OrdersViewState>({
+      id: crypto.randomUUID(),
+      label,
+      pinned: true,
+      route: '/orders',
+      state: {
+        status: this.filterStatus(),
+        orderType: this.filterSide(),
+        symbol: '',
+      },
+    });
+  }
+
+  applySavedView(view: SavedView<OrdersViewState>): void {
+    this.filterStatus.set(view.state.status ?? '');
+    this.filterSide.set(view.state.orderType ?? '');
+    this.reloadTable();
+  }
+
+  removeSavedView(id: string, event: Event): void {
+    event.stopPropagation();
+    this.savedViewsService.remove(id);
+  }
+
   onRowClick(order: OrderDto): void {
     this.router.navigate(['/orders', order.id]);
   }
@@ -1188,6 +1323,9 @@ export class OrdersPageComponent {
   // operator up-front — the selection is already bounded by the current page size anyway.
   readonly BATCH_CANCEL_MAX = 50;
   readonly batchCancelPending = signal(false);
+  readonly batchCancelOpen = signal(false);
+  readonly batchCancelMessage = signal('');
+  private pendingBatchCancel: { ids: number[]; clear: () => void } | null = null;
 
   openBatchCancel(rows: OrderDto[], clear: () => void): void {
     if (rows.length === 0) return;
@@ -1212,12 +1350,24 @@ export class OrdersPageComponent {
         ? `Cancel ${cancellable.length} selected order${cancellable.length === 1 ? '' : 's'}?`
         : `Cancel ${cancellable.length} of ${rows.length} selected? ${skipped} will be skipped (not in a cancellable state).`;
 
-    if (!confirm(msg)) return;
+    this.batchCancelMessage.set(msg);
+    this.pendingBatchCancel = { ids: cancellable.map((o) => o.id), clear };
+    this.batchCancelOpen.set(true);
+  }
 
+  cancelBatchCancelDialog(): void {
+    this.batchCancelOpen.set(false);
+    this.pendingBatchCancel = null;
+  }
+
+  confirmBatchCancel(): void {
+    const pending = this.pendingBatchCancel;
+    if (!pending) return;
+    this.batchCancelOpen.set(false);
     this.batchCancelPending.set(true);
     this.ordersService
       .cancelBatch({
-        orderIds: cancellable.map((o) => o.id),
+        orderIds: pending.ids,
         reason: 'Ops: bulk cancel via admin UI',
       })
       .subscribe({
@@ -1234,14 +1384,17 @@ export class OrdersPageComponent {
                 `Cancelled ${r.cancelled}, ${r.failed} failed. See order list for details.`,
               );
             }
-            clear();
+            pending.clear();
+            this.pendingBatchCancel = null;
             this.reloadTable();
           } else {
             this.notifications.error(res?.message ?? 'Batch cancel failed');
+            this.pendingBatchCancel = null;
           }
         },
         error: () => {
           this.batchCancelPending.set(false);
+          this.pendingBatchCancel = null;
           this.notifications.error('Batch cancel failed');
         },
       });

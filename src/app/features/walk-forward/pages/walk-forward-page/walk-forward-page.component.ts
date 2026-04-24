@@ -1,14 +1,16 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, signal, viewChild } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { DatePipe, DecimalPipe } from '@angular/common';
 // DatePipe + DecimalPipe instantiated directly in the class for column valueFormatters; no template pipes used.
-import { Observable, map } from 'rxjs';
+import { Observable, map, merge, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 
 import { WalkForwardService } from '@core/services/walk-forward.service';
 import { StrategiesService } from '@core/services/strategies.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { RealtimeService } from '@core/realtime/realtime.service';
 import type {
   CreateWalkForwardRequest,
   PagedData,
@@ -130,6 +132,7 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
       }
 
       <app-data-table
+        #runsTable
         [columnDefs]="columnDefs"
         [fetchData]="fetch"
         [searchable]="true"
@@ -264,8 +267,11 @@ export class WalkForwardPageComponent {
   private readonly notifications = inject(NotificationService);
   private readonly router = inject(Router);
   private readonly fb = inject(FormBuilder);
+  private readonly realtime = inject(RealtimeService);
   private readonly decimalPipe = new DecimalPipe('en-US');
   private readonly datePipe = new DatePipe('en-US');
+
+  private readonly runsTable = viewChild<DataTableComponent<WalkForwardRunDto>>('runsTable');
 
   readonly busy = signal(false);
   readonly showCreatePanel = signal(false);
@@ -333,6 +339,15 @@ export class WalkForwardPageComponent {
     this.strategiesService.list({ currentPage: 1, itemCountPerPage: 200 }).subscribe((res) => {
       this.strategies.set(res.data?.data ?? []);
     });
+
+    // Walk-forward runs are fulfilled by a sequence of backtest windows under
+    // the hood, so both `backtestCompleted` and `optimizationCompleted` events
+    // indicate list-affecting progress (status flips, avg OOS score, etc.).
+    // Throttle at 5s — a completed walk-forward fires many backtest events in
+    // quick succession as each window finishes, and we only need one reload.
+    merge(this.realtime.on('backtestCompleted'), this.realtime.on('optimizationCompleted'))
+      .pipe(throttleTime(5_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
+      .subscribe(() => this.runsTable()?.loadData());
   }
 
   togglePanel(): void {

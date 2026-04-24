@@ -1,6 +1,6 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { Observable, catchError, of, tap } from 'rxjs';
+import { Observable, catchError, map, of, tap } from 'rxjs';
 import { ApiService } from '../api/api.service';
 import { TokenResponseDto } from '../api/api.types';
 import { decodeJwt, rolesFromPayload } from './jwt';
@@ -100,13 +100,25 @@ export class AuthService {
   readonly isAuthenticated = computed(() => this._token() !== null);
 
   /**
-   * Decoded role claims from the JWT. Empty list when the token carries no
-   * role claim — legacy dev tokens from the shared library's `/auth/token`
-   * don't issue roles, so `hasRole` treats the empty-list case as "full
-   * access" (see below). Engine-issued tokens via `POST /auth/login` DO carry
-   * roles and are enforced strictly.
+   * When the session is backed by an HttpOnly cookie, the JWT is unreadable
+   * from JS — so `probeCookieSession()` populates this signal with the roles
+   * the engine reported via `GET /auth/whoami`.
    */
-  readonly roles = computed<readonly string[]>(() => rolesFromPayload(decodeJwt(this._token())));
+  private readonly _cookieRoles = signal<string[]>([]);
+
+  /**
+   * Decoded role claims from the JWT, or the server-reported roles for
+   * cookie-authenticated sessions. Empty list when the token carries no role
+   * claim — legacy dev tokens from the shared library's `/auth/token` don't
+   * issue roles, so `hasRole` treats the empty-list case as "full access"
+   * (see below). Engine-issued tokens via `POST /auth/login` DO carry roles
+   * and are enforced strictly.
+   */
+  readonly roles = computed<readonly string[]>(() => {
+    const fromToken = rolesFromPayload(decodeJwt(this._token()));
+    if (fromToken.length > 0) return fromToken;
+    return this._cookieRoles();
+  });
 
   private lastActivity = Number(this.readSessionString(LAST_ACTIVITY_KEY) ?? Date.now());
   private activityListenersBound = false;
@@ -162,6 +174,55 @@ export class AuthService {
             this.startIdleWatch();
           }
         }),
+      );
+  }
+
+  /**
+   * Boot-time probe for a cookie-backed session. The browser can't read the
+   * HttpOnly cookie, so we ask the engine who we are; if it responds with a
+   * tradingAccountId, we flip `isAuthenticated` true and stash the reported
+   * roles. Safe to call on every boot — no-ops when no cookie is present.
+   */
+  probeCookieSession(): Observable<{ tradingAccountId: number; roles: string[] } | null> {
+    return this.api
+      .get<{
+        data: { tradingAccountId: number; roles: string[] } | null;
+        status: boolean;
+      }>('/auth/whoami')
+      .pipe(
+        tap((res) => {
+          if (res?.status && res.data && res.data.tradingAccountId > 0) {
+            // Sentinel token — the real JWT lives in the HttpOnly cookie,
+            // unreadable from JS. `isAuthenticated` flips true; HTTP calls
+            // ride the cookie via `withCredentials`.
+            if (!this._token()) this._token.set('cookie-session');
+            this._cookieRoles.set(res.data.roles);
+            this._user.set({
+              passportId: String(res.data.tradingAccountId),
+              firstName: '',
+              lastName: '',
+              email: '',
+            });
+            this.touchActivity();
+            this.startIdleWatch();
+          }
+        }),
+        map((res) => res?.data ?? null),
+        catchError(() => of(null)),
+      );
+  }
+
+  /**
+   * Short-lived bearer token for the SignalR handshake. Returned by the
+   * engine's `GET /auth/ws-ticket` which reads the HttpOnly cookie. Used by
+   * `RealtimeService.connect()` when `getToken()` returns the cookie sentinel.
+   */
+  fetchWsTicket(): Observable<string | null> {
+    return this.api
+      .get<{ data: { token: string } | null; status: boolean }>('/auth/ws-ticket')
+      .pipe(
+        map((res) => (res?.status ? (res.data?.token ?? null) : null)),
+        catchError(() => of(null)),
       );
   }
 

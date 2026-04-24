@@ -1,6 +1,7 @@
 import { ErrorHandler, Injectable, inject } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { NotificationService } from '@core/notifications/notification.service';
+import { reportError } from '@core/observability/sentry';
 import { ApiError } from '@core/api/api.types';
 
 /**
@@ -11,8 +12,7 @@ import { ApiError } from '@core/api/api.types';
  *     expected to be caught by the caller).
  *   - Shows an operator-visible toast for everything else so silent failures stop.
  *   - Still logs to console so the devtools stack is preserved.
- *
- * If we later add Sentry / OpenTelemetry, this is the single hook to wire it in.
+ *   - Ships the exception to Sentry when a DSN is configured; a noop otherwise.
  */
 @Injectable({ providedIn: 'root' })
 export class GlobalErrorHandler implements ErrorHandler {
@@ -22,6 +22,10 @@ export class GlobalErrorHandler implements ErrorHandler {
     // Preserve the stack for devtools.
 
     console.error('[GlobalErrorHandler]', error);
+
+    // Always ship to Sentry — even errors we mark "already handled" may be
+    // worth investigating (e.g. repeated 500s from a specific endpoint).
+    reportError(error);
 
     if (this.isAlreadyHandled(error)) return;
 

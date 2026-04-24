@@ -293,6 +293,16 @@ export class AuditTrailPageComponent {
     },
   ];
 
+  // ──────────────────────────────────────────────────────────────────────
+  // SignalR migration: deferred.
+  // Awaiting an `AuditDecisionLogged` integration event. The server writes
+  // decision-log rows synchronously inside risk/order paths but does not
+  // currently publish a realtime notification, so this table relies on the
+  // user-initiated fetch (ag-grid pagination) until that event lands. Once
+  // available, add a RealtimeService subscription next to this method and
+  // invoke the data-table's `loadData()` with a throttle (see
+  // orders-page.component.ts for the canonical pattern).
+  // ──────────────────────────────────────────────────────────────────────
   fetchData = (params: PagerRequest) => {
     return this.auditTrailService.list(params).pipe(
       map((response) => {

@@ -7,6 +7,10 @@ import type { ColDef } from 'ag-grid-community';
 import { DrawdownRecoveryService } from '@core/services/drawdown-recovery.service';
 import type { DrawdownSnapshotDto, RecoveryMode } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
+import {
+  ChartAnnotationsService,
+  type ChartAnnotationDto,
+} from '@core/annotations/chart-annotations.service';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { GaugeComponent } from '@shared/components/gauge/gauge.component';
@@ -238,6 +242,7 @@ const MODE_COLOR: Record<RecoveryMode, string> = {
 })
 export class DrawdownPageComponent {
   private readonly service = inject(DrawdownRecoveryService);
+  private readonly annotationsService = inject(ChartAnnotationsService);
 
   readonly tabs: TabItem[] = [
     { label: 'Live', value: 'live' },
@@ -272,6 +277,7 @@ export class DrawdownPageComponent {
   readonly historySeries = signal<DrawdownSnapshotDto[]>([]);
   readonly historyLoading = signal(false);
   readonly historyChartCount = computed(() => this.historySeries().length);
+  readonly annotations = signal<ChartAnnotationDto[]>([]);
 
   readonly historyChart = computed<EChartsOption>(() => {
     const series = this.historySeries();
@@ -320,6 +326,25 @@ export class DrawdownPageComponent {
           showSymbol: false,
           data: series.map((s) => [s.recordedAt, s.currentEquity]),
           lineStyle: { width: 2, color: '#0A84FF' },
+        },
+        // Operator-authored annotations overlaid as a scatter series, pinned
+        // to a fixed y-height (0) on the drawdown axis so they read as
+        // "things that happened at this timestamp." Tooltip formatter shows
+        // the body; escaping keeps malicious bodies out of the DOM.
+        {
+          name: 'Notes',
+          type: 'scatter',
+          yAxisIndex: 0,
+          symbol: 'pin',
+          symbolSize: 22,
+          itemStyle: { color: '#0A84FF' },
+          data: this.annotations().map((a) => ({
+            name: 'Note',
+            value: [a.annotatedAt, 0],
+            // ECharts passes a value param; we render only the body (escaped).
+            tooltip: { formatter: `<strong>Note</strong><br/>${escapeHtml(a.body)}` },
+          })),
+          emphasis: { scale: true },
         },
       ],
     };
@@ -401,6 +426,9 @@ export class DrawdownPageComponent {
           // Chart wants oldest-first; engine returns newest-first.
           this.historySeries.set([...page.data].reverse());
           this.historyLoading.set(false);
+          // Fire-and-forget — the chart re-renders on annotation arrival,
+          // and a failed annotation load shouldn't break the table page.
+          this.loadAnnotationsForSeries(page.data);
           return page;
         }),
         catchError(() => {
@@ -424,4 +452,45 @@ export class DrawdownPageComponent {
   modeLabel(mode: RecoveryMode): string {
     return MODE_LABEL[mode] ?? String(mode);
   }
+
+  /**
+   * Fetches chart annotations covering the loaded series's time range and
+   * stashes them on `this.annotations`. Network + parse errors leave the
+   * annotation layer empty rather than bubble up.
+   */
+  private loadAnnotationsForSeries(series: DrawdownSnapshotDto[]): void {
+    if (series.length === 0) {
+      this.annotations.set([]);
+      return;
+    }
+    const earliest = series.reduce(
+      (min, s) => (new Date(s.recordedAt) < new Date(min) ? s.recordedAt : min),
+      series[0].recordedAt,
+    );
+    const latest = series.reduce(
+      (max, s) => (new Date(s.recordedAt) > new Date(max) ? s.recordedAt : max),
+      series[0].recordedAt,
+    );
+
+    this.annotationsService
+      .list('drawdown', {
+        currentPage: 1,
+        itemCountPerPage: 100,
+        filter: { from: earliest, to: latest },
+      })
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        this.annotations.set(res?.data?.data ?? []);
+      });
+  }
+}
+
+/** Minimal HTML escape — ECharts renders tooltip strings as raw HTML. */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }

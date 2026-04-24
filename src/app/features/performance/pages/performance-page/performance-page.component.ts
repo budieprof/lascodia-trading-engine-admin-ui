@@ -1,10 +1,12 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { catchError, map, of } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { catchError, map, merge, of, throttleTime } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
 import { PerformanceService } from '@core/services/performance.service';
 import type { StrategyPerformanceSnapshotDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
+import { RealtimeService } from '@core/realtime/realtime.service';
 
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
@@ -253,6 +255,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 })
 export class PerformancePageComponent {
   private readonly service = inject(PerformanceService);
+  private readonly realtime = inject(RealtimeService);
 
   readonly tabs: TabItem[] = [
     { label: 'Overview', value: 'overview' },
@@ -268,6 +271,16 @@ export class PerformancePageComponent {
       ),
     { intervalMs: 60_000 },
   );
+
+  constructor() {
+    // Push-refresh the leaderboard when the engine reports a closed position
+    // or a new fill — both nudge the per-strategy P&L, Sharpe, win-rate, etc.
+    // Throttled at 5s so a burst of rapid fills during a close-out doesn't
+    // hammer `/performance/all` while still beating the 60s poll interval.
+    merge(this.realtime.on('positionClosed'), this.realtime.on('orderFilled'))
+      .pipe(throttleTime(5_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
+      .subscribe(() => this.resource.refresh());
+  }
 
   readonly snapshots = computed(() => this.resource.value() ?? []);
   readonly loading = computed(() => this.resource.loading() && this.resource.value() === null);

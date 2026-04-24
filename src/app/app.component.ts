@@ -19,6 +19,14 @@ export class AppComponent {
   private readonly realtime = inject(RealtimeService);
 
   constructor() {
+    // If a cookie-backed session is already established, ask the engine who
+    // we are so `isAuthenticated` flips without a user action. No-op for
+    // legacy bearer-token sessions (they restore from sessionStorage in the
+    // AuthService constructor).
+    if (!this.auth.isAuthenticated()) {
+      this.auth.probeCookieSession().subscribe();
+    }
+
     // Start/stop the SignalR hub connection in lockstep with the auth state.
     // Starts on initial boot if a session was restored from sessionStorage,
     // and on login; tears down on logout / idle-timeout.

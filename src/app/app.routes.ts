@@ -218,6 +218,12 @@ export const routes: Routes = [
           import('@features/dead-letter/dead-letter.routes').then((m) => m.DEAD_LETTER_ROUTES),
       },
       {
+        path: 'alert-triage',
+        data: { breadcrumb: 'Alert Triage' },
+        loadChildren: () =>
+          import('@features/alert-triage/alert-triage.routes').then((m) => m.ALERT_TRIAGE_ROUTES),
+      },
+      {
         path: 'calibration',
         data: { breadcrumb: 'Tuning' },
         loadChildren: () =>

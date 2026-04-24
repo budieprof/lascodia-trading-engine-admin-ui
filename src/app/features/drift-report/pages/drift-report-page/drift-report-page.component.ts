@@ -16,6 +16,10 @@ import type {
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import {
+  TimeRangePickerComponent,
+  TimeRange,
+} from '@shared/components/time-range-picker/time-range-picker.component';
 
 const SEVERITY_COLOR: Record<AlertSeverity, string> = {
   Info: '#0A84FF',
@@ -28,7 +32,14 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
   selector: 'app-drift-report-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, DataTableComponent, EmptyStateComponent, DatePipe],
+  imports: [
+    FormsModule,
+    PageHeaderComponent,
+    DataTableComponent,
+    EmptyStateComponent,
+    DatePipe,
+    TimeRangePickerComponent,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -71,6 +82,14 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
           <input type="checkbox" [(ngModel)]="unresolvedOnly" (change)="reload()" />
           <span>Unresolved only</span>
         </label>
+        <div class="filter">
+          <span class="filter-label">Range</span>
+          <app-time-range-picker
+            [(value)]="range"
+            defaultPreset="7d"
+            (valueChange)="onRangeChange($event)"
+          />
+        </div>
       </section>
 
       <app-data-table
@@ -271,6 +290,10 @@ export class DriftReportPageComponent {
   filterSeverity = '';
   unresolvedOnly = false;
 
+  // Default 7d is computed lazily by the picker itself when left null, but
+  // we seed a signal so the picker can emit into it via [(value)].
+  readonly range = signal<TimeRange | null>(null);
+
   readonly selected = signal<DriftAlertDto | null>(null);
   private reloadTick = signal(0);
 
@@ -315,11 +338,14 @@ export class DriftReportPageComponent {
   readonly fetchPage = (params: PagerRequest) => {
     // Touch reloadTick so changing filters re-runs the fetcher.
     this.reloadTick();
+    const r = this.range();
     const filter: DriftReportQueryFilter = {
       symbol: this.filterSymbol || undefined,
       detectorType: this.filterDetector || undefined,
       severity: this.filterSeverity || undefined,
       unresolvedOnly: this.unresolvedOnly || undefined,
+      fromDate: r?.from ?? undefined,
+      toDate: r?.to ?? undefined,
     };
     return this.mlService
       .listDriftReport({
@@ -337,6 +363,12 @@ export class DriftReportPageComponent {
     // Force the table to refetch by bumping the tick and clearing selection.
     this.selected.set(null);
     this.reloadTick.update((n) => n + 1);
+  }
+
+  onRangeChange(_range: TimeRange | null): void {
+    // Value is already written into `range` via the two-way model binding;
+    // just nudge the table to refetch.
+    this.reload();
   }
 
   selectRow(row: DriftAlertDto): void {

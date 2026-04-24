@@ -1,0 +1,17 @@
+{
+  "name": "Lascodia Trading Engine",
+  "short_name": "Lascodia",
+  "description": "Admin console for the Lascodia Trading Engine.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#0A84FF",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "favicon.ico",
+      "sizes": "48x48 32x32 16x16",
+      "type": "image/x-icon"
+    }
+  ]
+}

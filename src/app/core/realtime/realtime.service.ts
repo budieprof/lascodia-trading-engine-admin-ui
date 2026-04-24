@@ -5,7 +5,7 @@ import {
   HubConnectionState,
   LogLevel,
 } from '@microsoft/signalr';
-import { Observable, Subject, filter, map, share, takeUntil } from 'rxjs';
+import { Observable, Subject, filter, firstValueFrom, map, share, takeUntil } from 'rxjs';
 
 import { AuthService } from '@core/auth/auth.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
@@ -24,6 +24,9 @@ export const REALTIME_EVENTS = [
   'emergencyFlatten',
   'optimizationCompleted',
   'backtestCompleted',
+  // ── Presence (hub-invoked, not bus-relayed) ──
+  'presenceJoined',
+  'presenceLeft',
 ] as const;
 export type RealtimeEventName = (typeof REALTIME_EVENTS)[number];
 
@@ -77,14 +80,22 @@ export class RealtimeService {
     if (!this.auth.isAuthenticated()) return;
     if (this.connection && this.connection.state !== HubConnectionState.Disconnected) return;
 
-    const token = this.auth.getToken();
+    // Cookie-backed sessions store a sentinel in `_token` — we have no real
+    // JWT here, so swap the cookie for a short-lived ticket on each
+    // (re)connect. Legacy bearer-token sessions return the real token and
+    // skip the round trip.
+    let token = this.auth.getToken();
     if (!token) return;
+    if (token === 'cookie-session') {
+      token = (await firstValueFrom(this.auth.fetchWsTicket())) ?? '';
+      if (!token) return;
+    }
 
     const base = this.runtime.apiBaseUrl.replace(/\/$/, '');
     const url = `${base}/api/hubs/trading`;
 
     const connection = new HubConnectionBuilder()
-      .withUrl(url, { accessTokenFactory: () => token })
+      .withUrl(url, { accessTokenFactory: () => token! })
       .withAutomaticReconnect()
       .configureLogging(LogLevel.Warning)
       .build();
@@ -136,5 +147,26 @@ export class RealtimeService {
       filter((m): m is RealtimeMessage<T> => m.name === name),
       map((m) => m.payload),
     );
+  }
+
+  /**
+   * Invoke a hub method by name. Used by `PresenceService` for
+   * `EnterRoom` / `LeaveRoom`; quietly resolves to `undefined` when the
+   * connection is down so callers don't have to guard state externally.
+   */
+  async invoke<TResult = void>(
+    methodName: string,
+    ...args: unknown[]
+  ): Promise<TResult | undefined> {
+    if (!this.connection || this.connection.state !== HubConnectionState.Connected) {
+      return undefined;
+    }
+    try {
+      return (await this.connection.invoke(methodName, ...args)) as TResult;
+    } catch {
+      // Swallow — presence failures must not crash the page. The caller
+      // treats these as soft no-ops.
+      return undefined;
+    }
   }
 }

@@ -216,6 +216,14 @@ export class SentimentPageComponent {
   readonly primarySymbol = signal(DEFAULT_SYMBOLS[0]);
 
   // Live sentiment + regime per symbol (poll every 60s).
+  //
+  // ──────────────────────────────────────────────────────────────────────
+  // SignalR migration: deferred.
+  // Awaiting a `SentimentSnapshotCreated` integration event before SignalR
+  // migration. Once the engine publishes per-symbol sentiment/regime events
+  // on the /api/hubs/trading hub, replace this 60s poll with a RealtimeService
+  // subscription (see orders-page.component.ts for the canonical pattern).
+  // ──────────────────────────────────────────────────────────────────────
   private readonly cardResource = createPolledResource(
     () =>
       forkJoin(

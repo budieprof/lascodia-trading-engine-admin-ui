@@ -9,8 +9,18 @@ import {
 } from '@angular/core';
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { fromEvent } from 'rxjs';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import {
+  EMPTY,
+  catchError,
+  debounceTime,
+  distinctUntilChanged,
+  fromEvent,
+  of,
+  switchMap,
+} from 'rxjs';
+
+import { GlobalSearchService } from '@core/search/global-search.service';
 
 interface Command {
   label: string;
@@ -213,10 +223,12 @@ interface Command {
 export class CommandPaletteComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly globalSearch = inject(GlobalSearchService);
 
   readonly open = signal(false);
   readonly query = signal('');
   readonly activeIndex = signal(0);
+  readonly remoteResults = signal<Command[]>([]);
 
   readonly commands: Command[] = [
     { group: 'Trading', label: 'Dashboard', route: '/dashboard' },
@@ -303,14 +315,16 @@ export class CommandPaletteComponent implements OnInit {
 
   readonly filtered = computed<Command[]>(() => {
     const q = this.query().trim().toLowerCase();
-    if (!q) return this.commands.slice(0, 20);
-    return this.commands
-      .filter((c) => {
-        const hay = `${c.group} ${c.label} ${c.route} ${c.keywords ?? ''}`.toLowerCase();
-        // Simple space-separated all-match
-        return q.split(/\s+/).every((token) => hay.includes(token));
-      })
-      .slice(0, 40);
+    const nav = !q
+      ? this.commands.slice(0, 20)
+      : this.commands
+          .filter((c) => {
+            const hay = `${c.group} ${c.label} ${c.route} ${c.keywords ?? ''}`.toLowerCase();
+            // Simple space-separated all-match
+            return q.split(/\s+/).every((token) => hay.includes(token));
+          })
+          .slice(0, 40);
+    return [...nav, ...this.remoteResults()];
   });
 
   ngOnInit(): void {
@@ -323,6 +337,33 @@ export class CommandPaletteComponent implements OnInit {
           this.toggle();
         }
       });
+
+    // Fan-out global entity search for queries ≥ 2 chars. Debounced +
+    // switch-mapped so bursts of keystrokes collapse to one in-flight request,
+    // and errors are swallowed so a backend hiccup can never blow up the palette.
+    toObservable(this.query)
+      .pipe(
+        debounceTime(250),
+        distinctUntilChanged(),
+        switchMap((q) => {
+          const trimmed = q.trim();
+          if (trimmed.length < 2) return of([] as Command[]);
+          return this.globalSearch.search(trimmed).pipe(
+            catchError(() => EMPTY),
+            switchMap((results) =>
+              of(
+                results.map<Command>((r) => ({
+                  group: 'Results',
+                  label: r.sublabel ? `${r.label} · ${r.sublabel}` : r.label,
+                  route: r.route,
+                })),
+              ),
+            ),
+          );
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((results) => this.remoteResults.set(results));
   }
 
   toggle(): void {
@@ -336,6 +377,7 @@ export class CommandPaletteComponent implements OnInit {
   openPalette(): void {
     this.query.set('');
     this.activeIndex.set(0);
+    this.remoteResults.set([]);
     this.open.set(true);
     queueMicrotask(() => {
       const el = document.querySelector<HTMLInputElement>('app-command-palette input');

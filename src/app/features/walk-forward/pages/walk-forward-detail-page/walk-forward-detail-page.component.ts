@@ -6,13 +6,15 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { catchError, map, of } from 'rxjs';
+import { catchError, map, merge, of, throttleTime } from 'rxjs';
 
 import { WalkForwardService } from '@core/services/walk-forward.service';
 import type { WalkForwardRunDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
+import { RealtimeService } from '@core/realtime/realtime.service';
 
 import { StatusBadgeComponent } from '@shared/components/status-badge/status-badge.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
@@ -322,6 +324,7 @@ export class WalkForwardDetailPageComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly service = inject(WalkForwardService);
+  private readonly realtime = inject(RealtimeService);
 
   readonly errorMessage = signal<string | null>(null);
   private readonly id = signal<number | null>(null);
@@ -337,6 +340,16 @@ export class WalkForwardDetailPageComponent implements OnInit {
     },
     { intervalMs: 30_000 },
   );
+
+  constructor() {
+    // Each finished window inside this run emits `backtestCompleted`; the
+    // whole run completion emits `optimizationCompleted`. Push-refresh the
+    // detail payload so the status pill, window table, and chart tick live.
+    // Throttle at 5s — window completions can land in rapid bursts.
+    merge(this.realtime.on('backtestCompleted'), this.realtime.on('optimizationCompleted'))
+      .pipe(throttleTime(5_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
+      .subscribe(() => this.resource.refresh());
+  }
 
   readonly run = computed(() => this.resource.value());
   readonly loading = computed(() => this.resource.loading() && this.resource.value() === null);

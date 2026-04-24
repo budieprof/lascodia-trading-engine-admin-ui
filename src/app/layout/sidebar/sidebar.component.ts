@@ -3,6 +3,7 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
 import { ThemeService } from '@core/theme/theme.service';
 import { AuthService, type Role } from '@core/auth/auth.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
+import { HoverPreloadingStrategy } from '@core/routing/hover-preloading.strategy';
 
 interface NavItem {
   label: string;
@@ -65,6 +66,8 @@ interface NavGroup {
               class="nav-item"
               [attr.title]="collapsed() ? item.label : null"
               [attr.aria-label]="collapsed() ? item.label : null"
+              (mouseenter)="preload(item.route)"
+              (focus)="preload(item.route)"
             >
               <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
               @if (!collapsed()) {
@@ -295,6 +298,11 @@ export class SidebarComponent {
   toggleCollapse = output();
   themeService = inject(ThemeService);
   private auth = inject(AuthService);
+  private preloader = inject(HoverPreloadingStrategy);
+
+  preload(route: string): void {
+    this.preloader.prime(route);
+  }
 
   navGroups: NavGroup[] = [
     {
@@ -352,6 +360,7 @@ export class SidebarComponent {
     {
       label: 'Ops',
       items: [
+        { label: 'Alert Triage', route: '/alert-triage', icon: '🚨' },
         { label: 'Kill Switches', route: '/kill-switches', icon: '⛔', policy: 'Operator' },
         { label: 'Dead Letters', route: '/dead-letter', icon: '✉', policy: 'Operator' },
         { label: 'Tuning', route: '/calibration', icon: '🎚' },

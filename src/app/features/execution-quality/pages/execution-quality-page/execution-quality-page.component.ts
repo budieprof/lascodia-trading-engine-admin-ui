@@ -1,11 +1,20 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { catchError, map, Observable, of } from 'rxjs';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  signal,
+  viewChild,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { catchError, map, merge, Observable, of, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
 
 import { ExecutionQualityService } from '@core/services/execution-quality.service';
 import type { ExecutionQualityLogDto, PagedData, PagerRequest } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
+import { RealtimeService } from '@core/realtime/realtime.service';
 
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
@@ -36,6 +45,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       <ui-tabs [tabs]="tabs" [(activeTab)]="activeTab">
         @if (activeTab() === 'log') {
           <app-data-table
+            #executionsTable
             [columnDefs]="columnDefs"
             [fetchData]="fetchExecutions"
             [searchable]="true"
@@ -128,12 +138,31 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 })
 export class ExecutionQualityPageComponent {
   private readonly service = inject(ExecutionQualityService);
+  private readonly realtime = inject(RealtimeService);
+
+  private readonly executionsTable =
+    viewChild<DataTableComponent<ExecutionQualityLogDto>>('executionsTable');
 
   readonly tabs: TabItem[] = [
     { label: 'Execution Log', value: 'log' },
     { label: 'Analytics', value: 'analytics' },
   ];
   readonly activeTab = signal('log');
+
+  constructor() {
+    // Each `orderFilled` push produces a new execution-quality log row on the
+    // backend, so refresh both the paginated log table and the analytics
+    // aggregate. Throttled at 3s — faster than the other pages because fills
+    // are the primary signal here and operators will be watching for tail
+    // latency / slippage spikes in near-real-time.
+    this.realtime
+      .on('orderFilled')
+      .pipe(throttleTime(3_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
+      .subscribe(() => {
+        this.executionsTable()?.loadData();
+        this.analyticsResource.refresh();
+      });
+  }
 
   readonly columnDefs: ColDef<ExecutionQualityLogDto>[] = [
     { headerName: 'Order', field: 'orderId', width: 110 },
