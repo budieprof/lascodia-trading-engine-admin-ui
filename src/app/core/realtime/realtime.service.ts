@@ -26,6 +26,7 @@ export const REALTIME_EVENTS = [
   'backtestCompleted',
   'sentimentSnapshotCreated',
   'auditDecisionLogged',
+  'strategyActivated',
   // ── Presence (hub-invoked, not bus-relayed) ──
   'presenceJoined',
   'presenceLeft',

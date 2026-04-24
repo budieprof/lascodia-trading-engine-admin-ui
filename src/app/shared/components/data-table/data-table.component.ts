@@ -91,14 +91,14 @@ type SortDir = 'asc' | 'desc';
       <div class="grid-wrapper" [class.hidden]="!loading() && totalItems() === 0">
         <ag-grid-angular
           class="ag-theme-alpine"
+          [theme]="'legacy'"
           [rowData]="rowData()"
           [columnDefs]="columnDefs()"
           [defaultColDef]="defaultColDef"
           [suppressMovableColumns]="true"
           [animateRows]="true"
           [loading]="loading()"
-          [rowSelection]="selectable() ? 'multiple' : undefined"
-          [suppressRowClickSelection]="true"
+          [rowSelection]="rowSelectionOptions()"
           (gridReady)="onGridReady($event)"
           (sortChanged)="onSortChanged($event)"
           (rowClicked)="rowClick.emit($event.data)"
@@ -391,6 +391,16 @@ export class DataTableComponent<T> implements OnInit, OnDestroy {
   fetchData = input.required<(params: PagerRequest) => Observable<PagedData<T>>>();
   searchable = input(true);
   selectable = input(false);
+
+  // AG Grid v33 replaced the string `rowSelection` + `suppressRowClickSelection`
+  // pair with an options object. Clicks never toggle selection in this app —
+  // row-click is reserved for navigating to the detail page — so `enableClickSelection`
+  // stays false and the checkbox column handles multi-select explicitly.
+  readonly rowSelectionOptions = computed(() =>
+    this.selectable()
+      ? { mode: 'multiRow' as const, enableClickSelection: false, checkboxes: true }
+      : undefined,
+  );
   /**
    * Persist filter/pagination/sort to sessionStorage under this key. Set empty
    * to opt out. Defaults to the current pathname (one state slot per route).

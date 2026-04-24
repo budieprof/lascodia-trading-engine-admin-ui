@@ -230,6 +230,11 @@ export class CommandPaletteComponent implements OnInit {
   readonly activeIndex = signal(0);
   readonly remoteResults = signal<Command[]>([]);
 
+  // Built during field initialization so `toObservable` runs inside the
+  // injection context. Angular 20 rejects calls made from lifecycle hooks
+  // (NG0203) unless an explicit `Injector` is forwarded.
+  private readonly query$ = toObservable(this.query);
+
   readonly commands: Command[] = [
     { group: 'Trading', label: 'Dashboard', route: '/dashboard' },
     { group: 'Trading', label: 'Orders', route: '/orders', keywords: 'order list trade' },
@@ -341,7 +346,7 @@ export class CommandPaletteComponent implements OnInit {
     // Fan-out global entity search for queries ≥ 2 chars. Debounced +
     // switch-mapped so bursts of keystrokes collapse to one in-flight request,
     // and errors are swallowed so a backend hiccup can never blow up the palette.
-    toObservable(this.query)
+    this.query$
       .pipe(
         debounceTime(250),
         distinctUntilChanged(),

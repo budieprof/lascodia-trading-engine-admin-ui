@@ -16,7 +16,7 @@ interface Breadcrumb {
     @if (breadcrumbs() && breadcrumbs()!.length > 0) {
       <nav class="breadcrumbs" aria-label="Breadcrumb">
         <ol class="crumb-list">
-          @for (crumb of breadcrumbs(); track crumb.route; let last = $last) {
+          @for (crumb of breadcrumbs(); track $index; let last = $last) {
             <li class="crumb-item">
               @if (last) {
                 <span class="crumb current" aria-current="page">{{ crumb.label }}</span>
@@ -98,13 +98,24 @@ export class BreadcrumbsComponent {
     if (children.length === 0) return crumbs;
 
     for (const child of children) {
-      const routeUrl = child.snapshot.url.map((s) => s.path).join('/');
+      const snapshot = child.snapshot;
+      if (!snapshot) return crumbs;
+
+      const routeUrl = (snapshot.url ?? []).map((s) => s.path).join('/');
       if (routeUrl) {
         url += `/${routeUrl}`;
       }
-      const label = child.snapshot.data['breadcrumb'];
+      const label = snapshot.data?.['breadcrumb'];
       if (label) {
-        crumbs.push({ label, route: url });
+        // Skip duplicate crumbs — parent route + empty-path child can both
+        // carry the same breadcrumb label for the same URL (e.g. app.routes
+        // declares `breadcrumb: 'Orders'` on the lazy feature, and the
+        // feature's `path: ''` does the same). Without this the user sees
+        // "Orders › Orders" and Angular logs NG0955 on the track expression.
+        const previous = crumbs[crumbs.length - 1];
+        if (!previous || previous.route !== url || previous.label !== label) {
+          crumbs.push({ label, route: url });
+        }
       }
       return this.buildBreadcrumbs(child, url, crumbs);
     }

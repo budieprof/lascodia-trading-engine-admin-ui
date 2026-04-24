@@ -1,12 +1,14 @@
 import { Component, ChangeDetectionStrategy, inject, signal, ViewChild } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
-import { map } from 'rxjs';
+import { map, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
 
 import { StrategiesService } from '@core/services/strategies.service';
 import { StrategyFeedbackService } from '@core/services/strategy-feedback.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { RealtimeService } from '@core/realtime/realtime.service';
 import {
   StrategyDto,
   StrategyPerformanceSnapshotDto,
@@ -258,11 +260,19 @@ export class StrategiesPageComponent {
   private readonly strategiesService = inject(StrategiesService);
   private readonly feedbackService = inject(StrategyFeedbackService);
   private readonly notifications = inject(NotificationService);
+  private readonly realtime = inject(RealtimeService);
   private readonly router = inject(Router);
   private readonly enumLabel = new EnumLabelPipe();
   private readonly relativeTime = new RelativeTimePipe();
 
   @ViewChild(DataTableComponent) dataTable?: DataTableComponent<StrategyDto>;
+
+  constructor() {
+    this.realtime
+      .on('strategyActivated')
+      .pipe(throttleTime(2_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
+      .subscribe(() => this.dataTable?.loadData());
+  }
 
   activeTab = signal('list');
   showCreateForm = signal(false);
