@@ -9,13 +9,15 @@ import {
 import { Router } from '@angular/router';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { ColDef } from 'ag-grid-community';
-import { map } from 'rxjs';
+import { map, throttleTime } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
 import { MLModelsService } from '@core/services/ml-models.service';
 import { MLEvaluationService } from '@core/services/ml-evaluation.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { RealtimeService } from '@core/realtime/realtime.service';
 import type {
   MLModelDto,
   MLTrainingRunDto,
@@ -447,15 +449,23 @@ import {
 
             <!-- Training Form Modal -->
             @if (showTrainingModal()) {
-              <div class="modal-overlay" (click)="showTrainingModal.set(false)">
+              <div
+                class="modal-overlay"
+                role="presentation"
+                tabindex="-1"
+                (click)="showTrainingModal.set(false)"
+                (keydown.escape)="showTrainingModal.set(false)"
+              >
                 <form
                   class="modal"
                   role="dialog"
                   aria-modal="true"
                   aria-label="Trigger training run"
+                  tabindex="-1"
                   [formGroup]="trainingForm"
                   (ngSubmit)="submitTraining()"
                   (click)="$event.stopPropagation()"
+                  (keydown)="$event.stopPropagation()"
                 >
                   <div class="modal-header">
                     <h3>Trigger Training Run</h3>
@@ -568,15 +578,23 @@ import {
 
             <!-- Shadow Evaluation Modal --><!-- A -->
             @if (showShadowModal()) {
-              <div class="modal-overlay" (click)="showShadowModal.set(false)">
+              <div
+                class="modal-overlay"
+                role="presentation"
+                tabindex="-1"
+                (click)="showShadowModal.set(false)"
+                (keydown.escape)="showShadowModal.set(false)"
+              >
                 <form
                   class="modal"
                   role="dialog"
                   aria-modal="true"
                   aria-label="Start shadow evaluation"
+                  tabindex="-1"
                   [formGroup]="shadowForm"
                   (ngSubmit)="submitShadow()"
                   (click)="$event.stopPropagation()"
+                  (keydown)="$event.stopPropagation()"
                 >
                   <div class="modal-header">
                     <h3>Start Shadow Evaluation</h3>
@@ -1309,11 +1327,23 @@ export class MlModelsPageComponent implements OnInit {
   private readonly mlEvaluationService = inject(MLEvaluationService);
   private readonly notifications = inject(NotificationService);
   private readonly router = inject(Router);
+  private readonly realtime = inject(RealtimeService);
   private readonly relativeTimePipe = new RelativeTimePipe();
 
   private readonly registryTable = viewChild<DataTableComponent<MLModelDto>>('registryTable');
   private readonly trainingTable = viewChild<DataTableComponent<MLTrainingRunDto>>('trainingTable');
   private readonly shadowTable = viewChild<DataTableComponent<ShadowEvaluationDto>>('shadowTable');
+
+  constructor() {
+    // Model activation is a relatively rare event but it flips which model
+    // scores live signals — refresh the registry grid so the operator sees
+    // the new Active badge without manual F5. Throttle 2s in case the server
+    // emits multiple activation events in quick succession (shadow promotion).
+    this.realtime
+      .on('mlModelActivated')
+      .pipe(throttleTime(2_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
+      .subscribe(() => this.reloadRegistry());
+  }
 
   reloadRegistry() {
     this.registryTable()?.loadData();

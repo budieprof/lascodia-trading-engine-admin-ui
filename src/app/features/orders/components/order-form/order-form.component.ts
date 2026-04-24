@@ -9,8 +9,21 @@ import type { CreateOrderRequest } from '@core/api/api.types';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (open()) {
-      <div class="overlay" (click)="onCancel()">
-        <div class="dialog" (click)="$event.stopPropagation()">
+      <div
+        class="overlay"
+        role="presentation"
+        tabindex="-1"
+        (click)="onCancel()"
+        (keydown.escape)="onCancel()"
+      >
+        <div
+          class="dialog"
+          role="dialog"
+          aria-modal="true"
+          tabindex="-1"
+          (click)="$event.stopPropagation()"
+          (keydown)="$event.stopPropagation()"
+        >
           <div class="dialog-header">
             <h3 class="dialog-title">Create Order</h3>
             <button type="button" class="close-btn" aria-label="Close" (click)="onCancel()">

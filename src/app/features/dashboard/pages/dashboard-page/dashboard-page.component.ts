@@ -7,7 +7,8 @@ import {
   signal,
 } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
-import { catchError, map, of } from 'rxjs';
+import { catchError, map, merge, of, throttleTime } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { EChartsOption } from 'echarts';
 
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
@@ -21,6 +22,7 @@ import { DrawdownRecoveryService } from '@core/services/drawdown-recovery.servic
 import { TradingAccountsService } from '@core/services/trading-accounts.service';
 import { StrategyEnsembleService } from '@core/services/strategy-ensemble.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { RealtimeService } from '@core/realtime/realtime.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import type {
@@ -50,40 +52,47 @@ const PALETTE = [
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [RouterLink, MetricCardComponent, ChartCardComponent, PageHeaderComponent],
   template: `
-    <div class="dashboard">
+    <div class="dashboard page">
       <app-page-header title="Dashboard" subtitle="Live engine overview" />
 
-      <div class="metrics-row">
-        <app-metric-card
-          label="Account Equity"
-          [value]="equity()"
-          format="currency"
-          dotColor="#0071E3"
-        />
-        <app-metric-card
-          label="Unrealized P&L"
-          [value]="unrealizedPnl()"
-          format="currency"
-          [colorByValue]="true"
-        />
-        <app-metric-card
-          label="Open Positions"
-          [value]="openPositionCount()"
-          format="number"
-          dotColor="#5AC8FA"
-        />
-        <app-metric-card
-          label="Active Strategies"
-          [value]="activeStrategyCount()"
-          format="number"
-          dotColor="#34C759"
-        />
-        <app-metric-card
-          label="Pending Signals"
-          [value]="pendingSignalCount()"
-          format="number"
-          dotColor="#FF9500"
-        />
+      <!--
+        Hero strip sits behind the metric cards. Glass + a whisper of gradient
+        so the eye's first target on load is the overall P&L posture rather
+        than a flat grid of numbers.
+      -->
+      <div class="hero-strip">
+        <div class="metrics-row">
+          <app-metric-card
+            label="Account Equity"
+            [value]="equity()"
+            format="currency"
+            dotColor="#0071E3"
+          />
+          <app-metric-card
+            label="Unrealized P&L"
+            [value]="unrealizedPnl()"
+            format="currency"
+            [colorByValue]="true"
+          />
+          <app-metric-card
+            label="Open Positions"
+            [value]="openPositionCount()"
+            format="number"
+            dotColor="#5AC8FA"
+          />
+          <app-metric-card
+            label="Active Strategies"
+            [value]="activeStrategyCount()"
+            format="number"
+            dotColor="#34C759"
+          />
+          <app-metric-card
+            label="Pending Signals"
+            [value]="pendingSignalCount()"
+            format="number"
+            dotColor="#FF9500"
+          />
+        </div>
       </div>
 
       <div class="charts-grid">
@@ -200,10 +209,37 @@ const PALETTE = [
         flex-direction: column;
         gap: var(--space-5);
       }
+      .hero-strip {
+        position: relative;
+        padding: var(--space-5);
+        background: var(--bg-glass);
+        backdrop-filter: var(--blur-md);
+        -webkit-backdrop-filter: var(--blur-md);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+        box-shadow: var(--shadow-sm);
+      }
+      .hero-strip::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(circle at 0% 0%, rgba(10, 132, 255, 0.08), transparent 40%),
+          radial-gradient(circle at 100% 100%, rgba(52, 199, 89, 0.06), transparent 40%);
+        pointer-events: none;
+      }
+      @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+        .hero-strip {
+          background: var(--bg-secondary);
+        }
+      }
       .metrics-row {
         display: grid;
         grid-template-columns: repeat(5, 1fr);
         gap: var(--space-4);
+        position: relative;
+        z-index: 1;
       }
       .charts-grid {
         display: grid;
@@ -392,6 +428,23 @@ export class DashboardPageComponent implements OnInit {
   private readonly ensembleService = inject(StrategyEnsembleService);
   private readonly notifications = inject(NotificationService);
   private readonly router = inject(Router);
+  private readonly realtime = inject(RealtimeService);
+
+  constructor() {
+    // The dashboard aggregates six different resources — throttle aggressively
+    // (3s) so a flurry of fills + position flips doesn't trigger six refreshes
+    // in two seconds. VaR breaches and emergency-flatten are rare but deserve
+    // an immediate pull because they change every tile on the page at once.
+    merge(
+      this.realtime.on('orderFilled'),
+      this.realtime.on('positionOpened'),
+      this.realtime.on('positionClosed'),
+      this.realtime.on('vaRBreach'),
+      this.realtime.on('emergencyFlatten'),
+    )
+      .pipe(throttleTime(3_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
+      .subscribe(() => this.refresh());
+  }
 
   readonly loading = signal(true);
   readonly equity = signal<number | null>(null);

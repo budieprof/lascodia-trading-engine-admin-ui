@@ -27,8 +27,21 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       />
 
       @if (expandedEntry()) {
-        <div class="detail-overlay" (click)="expandedEntry.set(null)">
-          <div class="detail-panel" (click)="$event.stopPropagation()">
+        <div
+          class="detail-overlay"
+          role="presentation"
+          tabindex="-1"
+          (click)="expandedEntry.set(null)"
+          (keydown.escape)="expandedEntry.set(null)"
+        >
+          <div
+            class="detail-panel"
+            role="dialog"
+            aria-modal="true"
+            tabindex="-1"
+            (click)="$event.stopPropagation()"
+            (keydown)="$event.stopPropagation()"
+          >
             <div class="detail-header">
               <h3 class="detail-title">Decision Log #{{ expandedEntry()!.id }}</h3>
               <button

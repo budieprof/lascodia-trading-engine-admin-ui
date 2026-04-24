@@ -9,11 +9,13 @@ import {
   ViewChild,
 } from '@angular/core';
 import { Router } from '@angular/router';
-import { map, Observable } from 'rxjs';
+import { map, merge, Observable, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
 
 import { PositionsService } from '@core/services/positions.service';
+import { RealtimeService } from '@core/realtime/realtime.service';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { PositionDto, PagedData, PagerRequest } from '@core/api/api.types';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -161,9 +163,22 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 export class PositionsPageComponent implements OnInit, OnDestroy {
   private readonly positionsService = inject(PositionsService);
   private readonly router = inject(Router);
+  private readonly realtime = inject(RealtimeService);
   private readonly currencyPipe = new CurrencyFormatPipe();
   private readonly relativeTimePipe = new RelativeTimePipe();
   private pollingInterval: ReturnType<typeof setInterval> | null = null;
+
+  constructor() {
+    // Refresh positions whenever the engine pushes open/close events so the
+    // UI reflects broker-confirmed state without waiting on the 15s poll.
+    // Throttle 2s — bursts of fills on a single position get batched.
+    merge(this.realtime.on('positionOpened'), this.realtime.on('positionClosed'))
+      .pipe(throttleTime(2_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
+      .subscribe(() => {
+        this.openTable?.loadData();
+        this.loadSummaryData();
+      });
+  }
 
   goToDetail(row: PositionDto): void {
     if (row?.id != null) this.router.navigate(['/positions', row.id]);

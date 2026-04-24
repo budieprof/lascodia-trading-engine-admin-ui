@@ -16,67 +16,145 @@ import { AuthService } from '../auth.service';
           <p>Admin Console</p>
         </div>
 
-        <form (ngSubmit)="onLogin()" class="login-form">
-          <div class="field">
-            <label for="userId">User ID</label>
-            <input
-              id="userId"
-              type="text"
-              [(ngModel)]="userId"
-              name="userId"
-              placeholder="dev-user-1"
-              autocomplete="username"
-            />
-          </div>
-
-          <div class="field">
-            <label for="firstName">First Name</label>
-            <input
-              id="firstName"
-              type="text"
-              [(ngModel)]="firstName"
-              name="firstName"
-              placeholder="Dev"
-            />
-          </div>
-
-          <div class="field">
-            <label for="lastName">Last Name</label>
-            <input
-              id="lastName"
-              type="text"
-              [(ngModel)]="lastName"
-              name="lastName"
-              placeholder="User"
-            />
-          </div>
-
-          <div class="field">
-            <label for="email">Email</label>
-            <input
-              id="email"
-              type="email"
-              [(ngModel)]="email"
-              name="email"
-              placeholder="dev@lascodia.com"
-              autocomplete="email"
-            />
-          </div>
-
-          @if (error()) {
-            <div class="error-message">{{ error() }}</div>
-          }
-
-          <button type="submit" [disabled]="loading()" class="login-btn">
-            @if (loading()) {
-              <span class="spinner"></span>
-            } @else {
-              Sign In
-            }
+        <div class="mode-toggle" role="tablist" aria-label="Login mode">
+          <button
+            type="button"
+            role="tab"
+            class="mode-btn"
+            [class.active]="mode() === 'operator'"
+            [attr.aria-selected]="mode() === 'operator'"
+            (click)="mode.set('operator')"
+          >
+            Operator
           </button>
-        </form>
+          <button
+            type="button"
+            role="tab"
+            class="mode-btn"
+            [class.active]="mode() === 'dev'"
+            [attr.aria-selected]="mode() === 'dev'"
+            (click)="mode.set('dev')"
+          >
+            Developer
+          </button>
+        </div>
 
-        <p class="dev-note">Development token generator</p>
+        @if (mode() === 'operator') {
+          <form (ngSubmit)="onOperatorLogin()" class="login-form">
+            <div class="field">
+              <label for="accountId">Account ID</label>
+              <input
+                id="accountId"
+                type="text"
+                [(ngModel)]="accountId"
+                name="accountId"
+                placeholder="12345678"
+                autocomplete="username"
+                required
+              />
+            </div>
+
+            <div class="field">
+              <label for="brokerServer">Broker Server</label>
+              <input
+                id="brokerServer"
+                type="text"
+                [(ngModel)]="brokerServer"
+                name="brokerServer"
+                placeholder="MetaQuotes-Demo"
+                required
+              />
+            </div>
+
+            <div class="field">
+              <label for="password">Password</label>
+              <input
+                id="password"
+                type="password"
+                [(ngModel)]="password"
+                name="password"
+                autocomplete="current-password"
+                required
+              />
+            </div>
+
+            @if (error()) {
+              <div class="error-message">{{ error() }}</div>
+            }
+
+            <button type="submit" [disabled]="loading()" class="login-btn">
+              @if (loading()) {
+                <span class="spinner"></span>
+              } @else {
+                Sign In
+              }
+            </button>
+          </form>
+
+          <p class="dev-note">Engine auth — JWT carries role claims.</p>
+        } @else {
+          <form (ngSubmit)="onDevLogin()" class="login-form">
+            <div class="field">
+              <label for="userId">User ID</label>
+              <input
+                id="userId"
+                type="text"
+                [(ngModel)]="userId"
+                name="userId"
+                placeholder="dev-user-1"
+                autocomplete="username"
+              />
+            </div>
+
+            <div class="field">
+              <label for="firstName">First Name</label>
+              <input
+                id="firstName"
+                type="text"
+                [(ngModel)]="firstName"
+                name="firstName"
+                placeholder="Dev"
+              />
+            </div>
+
+            <div class="field">
+              <label for="lastName">Last Name</label>
+              <input
+                id="lastName"
+                type="text"
+                [(ngModel)]="lastName"
+                name="lastName"
+                placeholder="User"
+              />
+            </div>
+
+            <div class="field">
+              <label for="email">Email</label>
+              <input
+                id="email"
+                type="email"
+                [(ngModel)]="email"
+                name="email"
+                placeholder="dev@lascodia.com"
+                autocomplete="email"
+              />
+            </div>
+
+            @if (error()) {
+              <div class="error-message">{{ error() }}</div>
+            }
+
+            <button type="submit" [disabled]="loading()" class="login-btn">
+              @if (loading()) {
+                <span class="spinner"></span>
+              } @else {
+                Sign In
+              }
+            </button>
+          </form>
+
+          <p class="dev-note">Development token generator — no role claims.</p>
+        }
       </div>
     </div>
   `,
@@ -233,6 +311,35 @@ import { AuthService } from '../auth.service';
         color: var(--text-tertiary);
         margin: var(--space-4) 0 0;
       }
+
+      .mode-toggle {
+        display: flex;
+        gap: 4px;
+        padding: 4px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        margin-bottom: var(--space-5);
+      }
+
+      .mode-btn {
+        flex: 1;
+        padding: 8px 16px;
+        border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        font-family: inherit;
+        border-radius: var(--radius-full);
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+
+      .mode-btn.active {
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        box-shadow: var(--shadow-sm);
+      }
     `,
   ],
 })
@@ -240,6 +347,14 @@ export class LoginComponent {
   private auth = inject(AuthService);
   private router = inject(Router);
 
+  readonly mode = signal<'operator' | 'dev'>('operator');
+
+  // Operator-mode fields
+  accountId = '';
+  brokerServer = '';
+  password = '';
+
+  // Developer-mode fields (shared-library dev token)
   userId = 'dev-user-1';
   firstName = 'Dev';
   lastName = 'User';
@@ -248,10 +363,38 @@ export class LoginComponent {
   loading = signal(false);
   error = signal<string | null>(null);
 
-  async onLogin() {
+  onOperatorLogin() {
+    if (!this.accountId || !this.brokerServer || !this.password) {
+      this.error.set('Account ID, Broker Server, and Password are required.');
+      return;
+    }
     this.loading.set(true);
     this.error.set(null);
+    this.auth
+      .loginOperator({
+        accountId: this.accountId,
+        brokerServer: this.brokerServer,
+        password: this.password,
+      })
+      .subscribe({
+        next: (res) => {
+          if (res?.status) {
+            this.router.navigate(['/dashboard']);
+          } else {
+            this.error.set(res?.message || 'Login failed.');
+            this.loading.set(false);
+          }
+        },
+        error: (err) => {
+          this.error.set(err?.message || 'Login failed. Is the engine reachable?');
+          this.loading.set(false);
+        },
+      });
+  }
 
+  onDevLogin() {
+    this.loading.set(true);
+    this.error.set(null);
     this.auth
       .login({
         userId: this.userId,

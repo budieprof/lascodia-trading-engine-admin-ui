@@ -34,4 +34,133 @@
   &:active:not(:disabled) {
     transform: scale(0.97);
   }
+
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+// Primary button gains a whisper-thin gradient + hover-elevation — the
+// PRD §3.1 "subtle gradient overlay" without crossing into skeuomorphism.
+.btn-primary {
+  background-image: linear-gradient(180deg, var(--accent) 0%, var(--accent-hover) 100%);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+
+  &:hover:not(:disabled) {
+    box-shadow:
+      0 2px 8px rgba(0, 113, 227, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  }
+}
+
+// ── Page-entry choreography ──────────────────────────────────────────────────
+// Every feature page uses a top-level `.page` wrapper; its direct children
+// (the sections / heroes / tables) slide up + fade in with a small stagger so
+// the surface assembles rather than snapping.
+@keyframes page-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page > * {
+  animation: page-rise 0.35s var(--ease-out-soft) both;
+}
+
+// Stagger — each child lags slightly behind the one above it. Clamped at 8
+// to keep longer pages from noticeably delaying late content.
+.page > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+.page > *:nth-child(2) {
+  animation-delay: 40ms;
+}
+.page > *:nth-child(3) {
+  animation-delay: 80ms;
+}
+.page > *:nth-child(4) {
+  animation-delay: 120ms;
+}
+.page > *:nth-child(5) {
+  animation-delay: 160ms;
+}
+.page > *:nth-child(6) {
+  animation-delay: 200ms;
+}
+.page > *:nth-child(7) {
+  animation-delay: 240ms;
+}
+.page > *:nth-child(n + 8) {
+  animation-delay: 280ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page > * {
+    animation: none;
+  }
+}
+
+// ── Filter-bar polish ────────────────────────────────────────────────────────
+// Many list pages use `.filter-bar` as a strip of controls above the table.
+// Give it a glass treatment so it reads as a distinct utility surface.
+.filter-bar {
+  background: var(--bg-glass);
+  backdrop-filter: var(--blur-md);
+  -webkit-backdrop-filter: var(--blur-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .filter-bar {
+    background: var(--bg-secondary);
+  }
+}
+
+// ── Section-header typographic pass ──────────────────────────────────────────
+// Consistent section titles + a subtle action-row alignment. Tight letter-
+// spacing on titles per PRD §3.1's tracking-tight guidance.
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.section-title {
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+  margin: 0;
+}
+
+// ── Numeric cells: tabular-nums everywhere financial data is rendered ───────
+// Locks digit widths so values don't shimmy on update. Applies to AG Grid
+// numeric columns (class assigned by type: 'numericColumn') + any explicit
+// .num class we've been sprinkling across feature pages.
+.ag-theme-alpine .ag-cell.ag-right-aligned-cell,
+.ag-theme-alpine .ag-cell.ag-numeric-cell,
+.num,
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+// ── Focus-visible on shared interactive primitives ──────────────────────────
+// Sidebar, header, data-table pagination already carry their own rings; this
+// is the catch-all for anchors, form inputs, and select elements that don't.
+a:focus-visible,
+select:focus-visible,
+input:focus-visible:not([type='checkbox']):not([type='radio']),
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

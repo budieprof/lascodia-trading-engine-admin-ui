@@ -24,8 +24,17 @@ export interface DropdownMenuItem {
   imports: [LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="dropdown" (keydown)="onKeydown($event)">
-      <div class="dropdown__trigger" (click)="toggleMenu()">
+    <div class="dropdown" tabindex="-1" (keydown)="onKeydown($event)">
+      <div
+        class="dropdown__trigger"
+        role="button"
+        tabindex="0"
+        [attr.aria-expanded]="isOpen()"
+        aria-haspopup="menu"
+        (click)="toggleMenu()"
+        (keydown.enter)="toggleMenu()"
+        (keydown.space)="toggleMenu(); $event.preventDefault()"
+      >
         <ng-content />
       </div>
 

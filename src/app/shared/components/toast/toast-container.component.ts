@@ -10,8 +10,12 @@ import { NotificationService, Toast } from '@core/notifications/notification.ser
       @for (toast of notifications.toasts(); track toast.id) {
         <div
           class="toast"
+          role="alert"
+          tabindex="0"
           [class]="'toast-' + toast.type"
           (click)="notifications.dismiss(toast.id)"
+          (keydown.enter)="notifications.dismiss(toast.id)"
+          (keydown.space)="notifications.dismiss(toast.id); $event.preventDefault()"
         >
           <div class="toast-accent"></div>
           <div class="toast-content">

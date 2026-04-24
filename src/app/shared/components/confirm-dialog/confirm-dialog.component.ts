@@ -6,14 +6,22 @@ import { Component, input, output, ChangeDetectionStrategy, signal } from '@angu
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (open()) {
-      <div class="overlay" (click)="onCancel()" (keydown.escape)="onCancel()">
+      <div
+        class="overlay"
+        role="presentation"
+        tabindex="-1"
+        (click)="onCancel()"
+        (keydown.escape)="onCancel()"
+      >
         <div
           class="dialog"
           role="dialog"
           aria-modal="true"
+          tabindex="-1"
           [attr.aria-labelledby]="dialogTitleId"
           [attr.aria-describedby]="dialogBodyId"
           (click)="$event.stopPropagation()"
+          (keydown)="$event.stopPropagation()"
         >
           <div class="dialog-header">
             <h3 class="dialog-title" [id]="dialogTitleId">{{ title() }}</h3>

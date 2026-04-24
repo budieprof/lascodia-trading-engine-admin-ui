@@ -130,9 +130,9 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
           <section class="card">
             <header class="card-head"><h3>Related</h3></header>
             <div class="related">
-              <a class="related-link" (click)="goBack()"
-                >Back to model registry <span aria-hidden="true">&rarr;</span></a
-              >
+              <button type="button" class="related-link" (click)="goBack()">
+                Back to model registry <span aria-hidden="true">&rarr;</span>
+              </button>
               <div class="note">
                 <strong>Explainability (SHAP, feature importance)</strong> is not yet exposed by the
                 engine API. Training curves and confidence calibration are available via the

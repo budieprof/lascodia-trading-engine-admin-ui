@@ -73,8 +73,52 @@ export interface TabItem {
         color: var(--accent);
       }
 
+      .tabs__tab:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
       .tabs__content {
         margin-top: var(--space-4);
+      }
+
+      /*
+       * The caller owns projected content via @if guards keyed on activeTab(),
+       * so content enter-animations live on the caller. We polish the tab bar
+       * itself: an animated underline indicator on the active tab so the
+       * selection glides instead of snapping.
+       */
+      .tabs__tab--active {
+        position: relative;
+      }
+
+      .tabs__tab--active::after {
+        content: '';
+        position: absolute;
+        left: var(--space-3);
+        right: var(--space-3);
+        bottom: -2px;
+        height: 2px;
+        background: var(--accent);
+        border-radius: 2px;
+        animation: tab-underline-in 0.2s var(--ease-out-soft);
+      }
+
+      @keyframes tab-underline-in {
+        from {
+          transform: scaleX(0);
+          opacity: 0;
+        }
+        to {
+          transform: scaleX(1);
+          opacity: 1;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .tabs__tab--active::after {
+          animation: none;
+        }
       }
     `,
   ],

@@ -46,8 +46,21 @@ const TIMEFRAME_LABELS: Record<string, string> = {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (open()) {
-      <div class="overlay" (click)="onCancel()">
-        <div class="dialog" (click)="$event.stopPropagation()">
+      <div
+        class="overlay"
+        role="presentation"
+        tabindex="-1"
+        (click)="onCancel()"
+        (keydown.escape)="onCancel()"
+      >
+        <div
+          class="dialog"
+          role="dialog"
+          aria-modal="true"
+          tabindex="-1"
+          (click)="$event.stopPropagation()"
+          (keydown)="$event.stopPropagation()"
+        >
           <div class="dialog-header">
             <h3 class="dialog-title">{{ strategy() ? 'Edit Strategy' : 'Create Strategy' }}</h3>
           </div>

@@ -5,6 +5,7 @@ import { SidebarComponent } from './sidebar/sidebar.component';
 import { HeaderComponent } from './header/header.component';
 import { BreadcrumbsComponent } from './breadcrumbs/breadcrumbs.component';
 import { OfflineBannerComponent } from '@shared/components/feedback/offline-banner.component';
+import { RealtimeStatusBannerComponent } from '@shared/components/feedback/realtime-status-banner.component';
 import { PaperModeBannerComponent } from '@shared/components/feedback/paper-mode-banner.component';
 import { KillSwitchBannerComponent } from '@shared/components/feedback/kill-switch-banner.component';
 import { RateLimitStripComponent } from '@shared/components/feedback/rate-limit-strip.component';
@@ -21,6 +22,7 @@ import { KeyboardShortcutsService } from '@core/keyboard/keyboard-shortcuts.serv
     HeaderComponent,
     BreadcrumbsComponent,
     OfflineBannerComponent,
+    RealtimeStatusBannerComponent,
     PaperModeBannerComponent,
     KillSwitchBannerComponent,
     RateLimitStripComponent,
@@ -48,6 +50,7 @@ import { KeyboardShortcutsService } from '@core/keyboard/keyboard-shortcuts.serv
       />
       <div class="main-area">
         <app-offline-banner />
+        <app-realtime-status-banner />
         <app-kill-switch-banner />
         <app-paper-mode-banner />
         <app-header (openMobileNav)="mobileNavOpen.set(true)" />

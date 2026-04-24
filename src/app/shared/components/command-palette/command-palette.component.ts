@@ -35,9 +35,16 @@ interface Command {
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
+        tabindex="-1"
         (click)="close()"
+        (keydown.escape)="close()"
       >
-        <div class="palette" (click)="$event.stopPropagation()">
+        <div
+          class="palette"
+          tabindex="-1"
+          (click)="$event.stopPropagation()"
+          (keydown)="$event.stopPropagation()"
+        >
           <div class="search">
             <span class="prefix" aria-hidden="true">⌘K</span>
             <input
@@ -58,10 +65,13 @@ interface Command {
             @for (cmd of filtered(); track cmd.route; let i = $index) {
               <li
                 role="option"
+                tabindex="0"
                 [attr.aria-selected]="i === activeIndex()"
                 class="item"
                 [class.active]="i === activeIndex()"
                 (click)="run(cmd)"
+                (keydown.enter)="run(cmd)"
+                (keydown.space)="run(cmd); $event.preventDefault()"
                 (mouseenter)="activeIndex.set(i)"
               >
                 <span class="group">{{ cmd.group }}</span>

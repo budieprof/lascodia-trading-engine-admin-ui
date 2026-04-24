@@ -15,9 +15,16 @@ import {
         role="dialog"
         aria-modal="true"
         aria-label="Keyboard shortcuts"
+        tabindex="-1"
         (click)="service.closeHelp()"
+        (keydown.escape)="service.closeHelp()"
       >
-        <div class="dialog" (click)="$event.stopPropagation()">
+        <div
+          class="dialog"
+          tabindex="-1"
+          (click)="$event.stopPropagation()"
+          (keydown)="$event.stopPropagation()"
+        >
           <header class="head">
             <h2>Keyboard shortcuts</h2>
             <button type="button" class="close" (click)="service.closeHelp()" aria-label="Close">

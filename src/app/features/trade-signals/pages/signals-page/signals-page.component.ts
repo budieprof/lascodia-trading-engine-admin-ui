@@ -1,9 +1,11 @@
 import { Component, ChangeDetectionStrategy, inject, signal, viewChild } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { ColDef } from 'ag-grid-community';
-import { map } from 'rxjs';
+import { map, throttleTime } from 'rxjs';
 
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { RealtimeService } from '@core/realtime/realtime.service';
 import type { TradeSignalDto, PagedData, PagerRequest } from '@core/api/api.types';
 
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
@@ -117,8 +119,19 @@ import { CurrencyFormatPipe } from '@shared/pipes/currency-format.pipe';
 export class SignalsPageComponent {
   private readonly signalsService = inject(TradeSignalsService);
   private readonly notifications = inject(NotificationService);
+  private readonly realtime = inject(RealtimeService);
   private readonly relativeTimePipe = new RelativeTimePipe();
   private readonly dataTable = viewChild(DataTableComponent);
+
+  constructor() {
+    // Signals matter faster than orders — a new pending signal often needs
+    // human approval within seconds. Throttle 1s to coalesce back-to-back
+    // generator bursts without masking individual signals.
+    this.realtime
+      .on('tradeSignalCreated')
+      .pipe(throttleTime(1_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
+      .subscribe(() => this.dataTable()?.loadData());
+  }
 
   processing = signal(false);
   showRejectDialog = signal(false);

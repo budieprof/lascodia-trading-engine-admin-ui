@@ -1,8 +1,10 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
-import { catchError, map, of } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { catchError, map, merge, of, throttleTime } from 'rxjs';
 
 import { HealthService } from '@core/services/health.service';
+import { RealtimeService } from '@core/realtime/realtime.service';
 import type { EngineStatusDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
@@ -198,6 +200,17 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 })
 export class HealthPageComponent {
   private readonly healthService = inject(HealthService);
+  private readonly realtime = inject(RealtimeService);
+
+  constructor() {
+    // Risk events are the reason someone is staring at this page — surface
+    // them immediately so the "is the engine still okay?" question resolves
+    // before the next 15s poll. Throttle 1s to de-dupe duplicate breach
+    // notifications on the same VaR cycle but otherwise push hard.
+    merge(this.realtime.on('vaRBreach'), this.realtime.on('emergencyFlatten'))
+      .pipe(throttleTime(1_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
+      .subscribe(() => this.resource.refresh());
+  }
 
   readonly tabs: TabItem[] = [
     { label: 'Overview', value: 'overview' },

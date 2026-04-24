@@ -46,6 +46,32 @@ export interface LoginCredentials {
   phoneNumber?: string;
 }
 
+/** Engine `POST /auth/login` payload (web login — password required). */
+export interface OperatorLoginCredentials {
+  accountId: string;
+  brokerServer: string;
+  password: string;
+}
+
+/** Shape of a successful `POST /auth/login` envelope from the engine. */
+export interface OperatorAuthEnvelope {
+  data: {
+    token: string;
+    expiresAt: string;
+    tokenType: string;
+    account?: {
+      id: number;
+      accountId: string;
+      accountName: string;
+      brokerServer: string;
+      brokerName: string;
+    };
+  } | null;
+  status: boolean;
+  message: string | null;
+  responseCode: string | null;
+}
+
 /**
  * Session persistence:
  *   - Token + user are mirrored to `sessionStorage` so a page refresh doesn't
@@ -131,6 +157,40 @@ export class AuthService {
               firstName: credentials.firstName || 'Dev',
               lastName: credentials.lastName || 'User',
               email: credentials.email || 'dev@lascodia.com',
+            });
+            this.touchActivity();
+            this.startIdleWatch();
+          }
+        }),
+      );
+  }
+
+  /**
+   * Engine-backed login via `POST /auth/login`. The issued JWT carries role
+   * claims mirroring the account's `OperatorRole` grants, so `hasPolicy`
+   * becomes strict for this session (no longer falling through the
+   * empty-roles escape hatch). Use this path in production; the dev
+   * `login()` method above stays for local work.
+   */
+  loginOperator(credentials: OperatorLoginCredentials): Observable<OperatorAuthEnvelope> {
+    return this.api
+      .post<OperatorAuthEnvelope>('/auth/login', {
+        accountId: credentials.accountId,
+        brokerServer: credentials.brokerServer,
+        password: credentials.password,
+        loginSource: 'web',
+      })
+      .pipe(
+        tap((response) => {
+          if (response?.status && response.data?.token) {
+            const token = response.data.token;
+            const account = response.data.account;
+            this._token.set(token);
+            this._user.set({
+              passportId: account?.accountId ?? credentials.accountId,
+              firstName: account?.accountName ?? credentials.accountId,
+              lastName: '',
+              email: '',
             });
             this.touchActivity();
             this.startIdleWatch();
