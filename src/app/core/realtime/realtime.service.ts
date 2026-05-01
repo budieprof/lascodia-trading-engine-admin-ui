@@ -27,6 +27,11 @@ export const REALTIME_EVENTS = [
   'sentimentSnapshotCreated',
   'auditDecisionLogged',
   'strategyActivated',
+  'strategyHealthSnapshotCreated',
+  'strategyAllocationRebalanced',
+  'strategyCapacityProfileUpdated',
+  'strategyVariantPromoted',
+  'optimizationApproved',
   // ── Presence (hub-invoked, not bus-relayed) ──
   'presenceJoined',
   'presenceLeft',

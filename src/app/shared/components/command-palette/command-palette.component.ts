@@ -288,7 +288,31 @@ export class CommandPaletteComponent implements OnInit {
       route: '/strategy-ensemble',
       keywords: 'allocation rebalance',
     },
+    {
+      group: 'Analysis',
+      label: 'Strategy Portfolio',
+      route: '/strategy-portfolio',
+      keywords: 'allocations donut fwer multiple-testing throttled',
+    },
+    {
+      group: 'Analysis',
+      label: 'Compare Strategies',
+      route: '/strategies/compare',
+      keywords: 'overlay equity curves side-by-side correlation',
+    },
+    {
+      group: 'Analysis',
+      label: 'Strategy Generation',
+      route: '/strategy-generation',
+      keywords: 'cycles timeline candidates pruned trigger',
+    },
 
+    {
+      group: 'System',
+      label: 'Engine Overview',
+      route: '/engine-overview',
+      keywords: 'status workers dead-letter dlq summary',
+    },
     { group: 'System', label: 'System Health', route: '/system-health' },
     {
       group: 'System',

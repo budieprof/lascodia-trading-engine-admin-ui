@@ -6,6 +6,7 @@ import {
   PagedData,
   PagerRequest,
   MLModelDto,
+  MLModelFeatureImportanceDto,
   MLTrainingRunDto,
   MLTrainingRunDiagnosticsDto,
   MLSignalAbTestResultDto,
@@ -22,6 +23,10 @@ export class MLModelsService {
 
   getById(id: number): Observable<ResponseData<MLModelDto>> {
     return this.api.get(`/ml-model/${id}`);
+  }
+
+  getFeatureImportance(id: number): Observable<ResponseData<MLModelFeatureImportanceDto>> {
+    return this.api.get(`/ml-model/${id}/feature-importance`);
   }
 
   list(params: PagerRequest): Observable<ResponseData<PagedData<MLModelDto>>> {

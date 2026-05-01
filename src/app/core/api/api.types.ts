@@ -65,6 +65,7 @@ export interface OrderQueryFilter {
   search?: string;
   status?: string;
   orderType?: string;
+  strategyId?: number;
 }
 export interface PositionQueryFilter {
   symbol?: string;
@@ -554,6 +555,33 @@ export interface MLTrainingRunDiagnosticsDto {
   coresetSelectionRatio: number | null;
 }
 
+export interface MLFeatureImportanceItem {
+  feature: string;
+  meanImportance: number;
+  stdImportance: number;
+  agreementScore: number;
+}
+
+export interface MLMrmrFeatureItem {
+  featureName: string;
+  mrmrRank: number;
+  mrmrScore: number;
+  mutualInfoWithTarget: number;
+  redundancyScore: number;
+}
+
+export interface MLModelFeatureImportanceDto {
+  modelId: number;
+  symbol: string | null;
+  timeframe: string;
+  consensusComputedAt: string | null;
+  contributingModelCount: number;
+  meanKendallTau: number;
+  schemaKey: string | null;
+  features: MLFeatureImportanceItem[];
+  mrmrFallback: MLMrmrFeatureItem[];
+}
+
 export interface BatchCancelOrdersItem {
   id: number;
   status: 'Cancelled' | 'Failed';
@@ -628,6 +656,16 @@ export interface BacktestRunDto {
   errorMessage: string | null;
   startedAt: string;
   completedAt: string | null;
+  // Denormalized result metrics — present once the run completes successfully.
+  // Engine populates these from the result JSON during BacktestWorker so the
+  // dashboard can sort/filter without parsing JSON per row.
+  totalTrades: number | null;
+  winRate: number | null;
+  profitFactor: number | null;
+  maxDrawdownPct: number | null;
+  sharpeRatio: number | null;
+  finalBalance: number | null;
+  totalReturn: number | null;
 }
 
 export interface WalkForwardRunDto {
@@ -766,6 +804,190 @@ export interface StrategyPerformanceSnapshotDto {
   healthScore: number;
   healthStatus: string | null;
   evaluatedAt: string;
+  marketRegime?: string | null;
+}
+
+export interface StrategyVariantDto {
+  id: number;
+  baseStrategyId: number;
+  name: string;
+  parameterOverridesJson: string;
+  isActive: boolean;
+  shadowSignalCount: number;
+  requiredSignals: number;
+  shadowWinRate: number;
+  shadowExpectedValue: number;
+  shadowSharpeRatio: number;
+  baseWinRate: number;
+  baseExpectedValue: number;
+  isPromoted: boolean;
+  comparisonResultJson: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+/** Body for `POST /strategy/health/recent`. Fetches the last N snapshots for each id. */
+export interface GetRecentStrategySnapshotsRequest {
+  strategyIds: number[];
+  count?: number;
+}
+
+/**
+ * Capacity-curve point for a single AUM tier. The strategy was simulated at
+ * `aumTier` and the resulting Sharpe / PF / max-DD were recorded; `meetsFloor`
+ * is `true` when Sharpe stayed above the operator-set floor fraction of the
+ * baseline (typically 50% of `baselineSharpe`).
+ */
+export interface CapacityTierDto {
+  aumTier: number;
+  sharpeAtTier: number;
+  profitFactorAtTier: number;
+  maxDrawdownPctAtTier: number;
+  meetsFloor: boolean;
+}
+
+export interface StrategyCapacityProfileDto {
+  strategyId: number;
+  baselineAum: number;
+  baselineSharpe: number;
+  /** Largest AUM tier where Sharpe stayed above the floor; 0 when none passed. */
+  capacityFloorAum: number;
+  computedAt: string;
+  tiers: CapacityTierDto[];
+}
+
+/** One per-strategy entry in the allocator's snapshot. */
+export interface StrategyAllocationWeightEntry {
+  strategyId: number;
+  strategyName: string;
+  symbol: string;
+  weight: number;
+  recentSharpe: number;
+  observationCount: number;
+  computedAt: string;
+}
+
+/**
+ * Snapshot of the meta-allocator's current weights across the active portfolio.
+ * Operators read this to see which strategies are throttled (weight < 1.0) and
+ * the Sharpe ratio that drove the throttle.
+ */
+export interface StrategyAllocationWeightsDto {
+  coveredStrategies: number;
+  throttledStrategies: number;
+  targetSharpe: number;
+  minWeight: number;
+  latestComputedAt: string;
+  entries: StrategyAllocationWeightEntry[];
+}
+
+/** One row of the FWER report's per-hypothesis-class breakdown. */
+export interface HypothesisClassFwerEntry {
+  hypothesisClass: string;
+  activeStrategies: number;
+  trialsInWindow: number;
+  bonferroniSurvivors: number;
+}
+
+export interface StrategyRejectionReasonDto {
+  reason: string;
+  count: number;
+  firstSeen: string;
+  lastSeen: string;
+}
+
+export interface StrategyRejectionStageDto {
+  stage: string;
+  count: number;
+  reasons: StrategyRejectionReasonDto[];
+}
+
+/**
+ * Per-strategy aggregate of `SignalRejectionAudit` rows over an optional UTC
+ * window. Stages are ordered by total count desc; reasons within a stage by
+ * count desc. Powers the strategy-detail "Pipeline rejections" panel.
+ */
+export interface StrategyRejectionDistributionDto {
+  strategyId: number;
+  from: string | null;
+  to: string | null;
+  totalRejections: number;
+  stages: StrategyRejectionStageDto[];
+}
+
+/** Body for `POST /strategy/{id}/rejection-distribution`. */
+export interface GetStrategyRejectionDistributionRequest {
+  from?: string | null;
+  to?: string | null;
+}
+
+export interface EquityCurvePointDto {
+  closedAt: string;
+  realizedPnL: number;
+  cumulativePnL: number;
+}
+
+/**
+ * Per-strategy realised cumulative-PnL series powering the compare-page
+ * overlay. Server returns chronological points capped at 5,000 entries.
+ */
+export interface StrategyEquityCurveDto {
+  strategyId: number;
+  from: string | null;
+  to: string | null;
+  pointCount: number;
+  finalCumulativePnL: number;
+  points: EquityCurvePointDto[];
+}
+
+/** Body for `POST /strategy/{id}/equity-curve`. */
+export interface GetStrategyEquityCurveRequest {
+  from?: string | null;
+  to?: string | null;
+}
+
+/**
+ * One row in the strategy-generation timeline. Status values today are
+ * `Running` / `Completed` / `Failed`; `failureStage` + `failureMessage` are
+ * populated only when status is `Failed`.
+ */
+export interface StrategyGenerationCycleRunDto {
+  id: number;
+  workerName: string;
+  cycleId: string;
+  status: string;
+  fingerprint: string | null;
+  startedAtUtc: string;
+  completedAtUtc: string | null;
+  durationMs: number | null;
+  candidatesCreated: number;
+  reserveCandidatesCreated: number;
+  candidatesScreened: number;
+  symbolsProcessed: number;
+  symbolsSkipped: number;
+  strategiesPruned: number;
+  portfolioFilterRemoved: number;
+  failureStage: string | null;
+  failureMessage: string | null;
+  lastUpdatedAtUtc: string;
+}
+
+/**
+ * Portfolio-wide multiple-testing-tax report. Operator reads it to see how many
+ * of the currently-active strategies would survive Bonferroni / Benjamini-
+ * Hochberg corrections — a leading indicator that screening has approved more
+ * strategies than the trial volume statistically supports.
+ */
+export interface PortfolioFwerReportDto {
+  alpha: number;
+  lookbackDays: number;
+  totalTrialsInWindow: number;
+  totalActiveStrategies: number;
+  eligibleStrategies: number;
+  bonferroniSurvivors: number;
+  benjaminiHochbergSurvivors: number;
+  benjaminiHochbergCriticalPValue: number;
+  byHypothesisClass: HypothesisClassFwerEntry[];
 }
 
 export interface OptimizationRunDto {

@@ -19,6 +19,7 @@ import type {
   ColDef,
   GridApi,
   GridReadyEvent,
+  IRowNode,
   RowSelectedEvent,
   SelectionChangedEvent,
   SortChangedEvent,
@@ -464,12 +465,47 @@ export class DataTableComponent<T> implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
+  /**
+   * Mutate a single row in place and refresh just the affected cells. Cheaper
+   * than `loadData()` when realtime push only changes one row's columns —
+   * e.g. updating a per-strategy sparkline without re-paginating the entire
+   * grid. Caller passes a predicate that picks the row, then a mutator that
+   * edits the row data, plus the column field names that should re-render.
+   *
+   * No-op when the gridApi isn't ready or the row isn't visible (filtered out
+   * or on a different page) — push events for off-screen rows would be wasted
+   * work, the next pagination/refresh cycle will catch them.
+   */
+  updateRowInPlace(
+    predicate: (row: T) => boolean,
+    mutate: (row: T) => void,
+    refreshColumns: string[],
+  ): void {
+    if (!this.gridApi) return;
+    const matched: IRowNode<T>[] = [];
+    this.gridApi.forEachNode((node) => {
+      if (node.data && predicate(node.data)) {
+        mutate(node.data);
+        matched.push(node);
+      }
+    });
+    if (matched.length > 0) {
+      this.gridApi.refreshCells({ rowNodes: matched, columns: refreshColumns, force: true });
+    }
+  }
+
   loadData() {
     this.loading.set(true);
+    // Engine's PagerRequestWithFilterType<TFilter,...> setter typechecks the
+    // body's `filter` as a TFilter object, so a bare string fails STJ binding
+    // with a 400. Wrap as `{ search }` — every TFilter that supports search
+    // exposes that property name, and unknown properties are tolerated by the
+    // server-side Newtonsoft deserialization in `GetFilter<T>()`.
+    const term = this.searchTerm();
     const params: PagerRequest = {
       currentPage: this.currentPage(),
       itemCountPerPage: this.pageSize(),
-      filter: this.searchTerm() || null,
+      filter: term ? { search: term } : null,
     };
 
     this.fetchData()(params)

@@ -1,13 +1,15 @@
 import {
   Component,
   ChangeDetectionStrategy,
+  DestroyRef,
   inject,
   signal,
   OnInit,
   ViewChild,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
-import { map } from 'rxjs';
+import { filter, map, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 
 import { StrategiesService } from '@core/services/strategies.service';
@@ -15,8 +17,10 @@ import { StrategyFeedbackService } from '@core/services/strategy-feedback.servic
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import { OrdersService } from '@core/services/orders.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { RealtimeService } from '@core/realtime/realtime.service';
 import {
   StrategyDto,
+  StrategyPerformanceSnapshotDto,
   OptimizationRunDto,
   PagerRequest,
   UpdateStrategyRequest,
@@ -27,6 +31,7 @@ import { PresenceBadgeComponent } from '@shared/components/presence-badge/presen
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { StatusBadgeComponent } from '@shared/components/status-badge/status-badge.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+import { GaugeComponent } from '@shared/components/gauge/gauge.component';
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
 import { EnumLabelPipe } from '@shared/pipes/enum-label.pipe';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
@@ -42,6 +47,7 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
     DataTableComponent,
     StatusBadgeComponent,
     ConfirmDialogComponent,
+    GaugeComponent,
     TabsComponent,
     EnumLabelPipe,
     RelativeTimePipe,
@@ -56,8 +62,66 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
           [subtitle]="(strategy()!.symbol ?? '') + ' - ' + (strategy()!.description ?? '')"
         >
           <app-presence-badge [routeKey]="'strategy:' + strategyId" />
+          <button class="btn btn-secondary" (click)="openAnalytics()">Open analytics →</button>
           <button class="btn btn-ghost" (click)="goBack()">Back</button>
         </app-page-header>
+
+        @if (latestSnapshot(); as s) {
+          <div class="health-strip">
+            <div class="health-gauge-col">
+              <app-gauge
+                [value]="gaugePercent()"
+                [min]="0"
+                [max]="100"
+                label="Health"
+                size="120px"
+                [thresholds]="healthThresholds"
+              />
+              @if (weeklyDeltaPct() !== null) {
+                <span class="delta-chip" [attr.data-dir]="weeklyDeltaDir()">
+                  @if (weeklyDeltaDir() === 'up') {
+                    ↑
+                  } @else if (weeklyDeltaDir() === 'down') {
+                    ↓
+                  } @else {
+                    →
+                  }
+                  {{ weeklyDeltaPct()! >= 0 ? '+' : '' }}{{ weeklyDeltaPct() }} pts vs 7d ago
+                </span>
+              }
+            </div>
+            <dl class="health-meta">
+              <div>
+                <dt>Status</dt>
+                <dd>{{ s.healthStatus ?? '—' }}</dd>
+              </div>
+              <div>
+                <dt>Win rate</dt>
+                <dd>{{ (s.winRate * 100).toFixed(1) }}%</dd>
+              </div>
+              <div>
+                <dt>Profit factor</dt>
+                <dd>{{ s.profitFactor.toFixed(2) }}</dd>
+              </div>
+              <div>
+                <dt>Sharpe</dt>
+                <dd>{{ s.sharpeRatio.toFixed(2) }}</dd>
+              </div>
+              <div>
+                <dt>Max DD</dt>
+                <dd>{{ s.maxDrawdownPct.toFixed(1) }}%</dd>
+              </div>
+              <div>
+                <dt>Window</dt>
+                <dd>{{ s.windowTrades }} trades</dd>
+              </div>
+              <div>
+                <dt>Updated</dt>
+                <dd>{{ s.evaluatedAt | relativeTime }}</dd>
+              </div>
+            </dl>
+          </div>
+        }
 
         <ui-tabs [tabs]="detailTabs" [(activeTab)]="activeTab">
           <!-- Config Tab -->
@@ -206,6 +270,69 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
     `
       .page {
         padding: var(--space-2) 0;
+      }
+
+      .health-strip {
+        display: flex;
+        align-items: center;
+        gap: var(--space-6);
+        padding: var(--space-4) var(--space-5);
+        margin: var(--space-3) 0 var(--space-4);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+      }
+      .health-gauge-col {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .delta-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 10px;
+        border-radius: var(--radius-full);
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+        background: rgba(142, 142, 147, 0.12);
+        color: #636366;
+      }
+      .delta-chip[data-dir='up'] {
+        background: rgba(52, 199, 89, 0.12);
+        color: #248a3d;
+      }
+      .delta-chip[data-dir='down'] {
+        background: rgba(255, 59, 48, 0.12);
+        color: #d70015;
+      }
+      .health-meta {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+        gap: var(--space-4) var(--space-5);
+        margin: 0;
+        flex: 1;
+      }
+      .health-meta div {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .health-meta dt {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin: 0;
+      }
+      .health-meta dd {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        margin: 0;
+        font-variant-numeric: tabular-nums;
       }
 
       .btn {
@@ -433,8 +560,62 @@ export class StrategyDetailPageComponent implements OnInit {
   private readonly signalsService = inject(TradeSignalsService);
   private readonly ordersService = inject(OrdersService);
   private readonly notifications = inject(NotificationService);
+  private readonly realtime = inject(RealtimeService);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly enumLabel = new EnumLabelPipe();
   private readonly relativeTime = new RelativeTimePipe();
+
+  /**
+   * Latest health snapshot for this strategy. One initial fetch on init,
+   * then refreshed in-band when the realtime hub pushes
+   * `strategyHealthSnapshotCreated` for this strategy id. The gauge above
+   * the tabs reads from this signal.
+   */
+  readonly latestSnapshot = signal<StrategyPerformanceSnapshotDto | null>(null);
+
+  /**
+   * Snapshot from ~7 days ago — the closest historical row at-or-before that
+   * point. Powers the delta arrow next to the gauge so operators see whether
+   * the strategy is improving or decaying week-on-week. `null` until the
+   * strategy has at least 7 days of history.
+   */
+  readonly weekAgoSnapshot = signal<StrategyPerformanceSnapshotDto | null>(null);
+
+  /** 0..100 mapping of HealthScore for the gauge widget (gauge expects percent). */
+  protected gaugePercent(): number {
+    const s = this.latestSnapshot();
+    return s ? Math.round(s.healthScore * 100) : 0;
+  }
+
+  /**
+   * Week-over-week health-score delta in percentage points (e.g. +12 means
+   * the score went from 0.50 → 0.62). Returns `null` when we lack a 7-day
+   * baseline so the template can hide the chip rather than render zero.
+   */
+  protected weeklyDeltaPct(): number | null {
+    const now = this.latestSnapshot();
+    const then = this.weekAgoSnapshot();
+    if (!now || !then) return null;
+    return Math.round((now.healthScore - then.healthScore) * 100);
+  }
+
+  /** Direction class for the delta chip — drives colour + arrow glyph. */
+  protected weeklyDeltaDir(): 'up' | 'down' | 'flat' {
+    const d = this.weeklyDeltaPct();
+    if (d === null || d === 0) return 'flat';
+    return d > 0 ? 'up' : 'down';
+  }
+
+  /**
+   * Inverted threshold palette: low score = bad (red), high = good (green).
+   * The default Gauge palette assumes "low is good" (e.g. drawdown %), which
+   * would colour a healthy strategy red — wrong signal entirely.
+   */
+  protected readonly healthThresholds = [
+    { value: 30, color: '#FF3B30' },
+    { value: 60, color: '#FF9500' },
+    { value: 100, color: '#34C759' },
+  ];
 
   @ViewChild('optimizationTable') optimizationTable?: DataTableComponent<OptimizationRunDto>;
 
@@ -603,28 +784,91 @@ export class StrategyDetailPageComponent implements OnInit {
     },
   ];
 
+  // Engine `PagerRequestWithFilterType<TFilter,...>` setters reject any
+  // bare-string `filter` value with HTTP 400 (System.Text.Json can't bind a
+  // string to TFilter). Pass an object that matches the per-controller
+  // filter shape — `{ strategyId }` is a first-class field on the trade-
+  // signal, optimization, and (post-engine-update) order filters.
   readonly fetchSignals = (params: PagerRequest) =>
     this.signalsService
-      .list({ ...params, filter: `strategyId:${this.strategyId}` })
+      .list({ ...params, filter: { ...(params.filter ?? {}), strategyId: this.strategyId } })
       .pipe(map((res) => res.data!));
 
   readonly fetchOrders = (params: PagerRequest) =>
     this.ordersService
-      .list({ ...params, filter: `strategyId:${this.strategyId}` })
+      .list({ ...params, filter: { ...(params.filter ?? {}), strategyId: this.strategyId } })
       .pipe(map((res) => res.data!));
 
   readonly fetchOptimizations = (params: PagerRequest) =>
     this.feedbackService
-      .listOptimizationRuns({ ...params, filter: `strategyId:${this.strategyId}` })
+      .listOptimizationRuns({
+        ...params,
+        filter: { ...(params.filter ?? {}), strategyId: this.strategyId },
+      })
       .pipe(map((res) => res.data!));
 
   ngOnInit(): void {
     this.strategyId = +this.route.snapshot.paramMap.get('id')!;
     this.loadStrategy();
+    this.loadLatestSnapshot();
+    this.loadWeekAgoSnapshot();
+
+    // Push refresh: filter to events for this strategy id, throttle to 5s so
+    // a chatty 60s-cadence worker can't pile up if the page sits open. The
+    // payload carries the new HealthScore so we don't need a follow-up GET in
+    // most cases — but we re-fetch anyway for the trade counts the gauge view
+    // doesn't expose, keeping the snapshot source of truth one round-trip away.
+    this.realtime
+      .on<{ strategyId: number }>('strategyHealthSnapshotCreated')
+      .pipe(
+        filter((evt) => evt?.strategyId === this.strategyId),
+        throttleTime(5_000, undefined, { leading: true, trailing: true }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(() => this.loadLatestSnapshot());
+  }
+
+  private loadLatestSnapshot(): void {
+    this.feedbackService.getPerformance(this.strategyId).subscribe({
+      next: (res) => {
+        if (res?.status && res.data) this.latestSnapshot.set(res.data);
+      },
+      error: () => {
+        /* No snapshot yet is the common case for fresh strategies — silent. */
+      },
+    });
+  }
+
+  /**
+   * Pull the most recent snapshot at-or-before 7 days ago. The query orders
+   * desc and we only need one row, so a `to: 7d-ago` filter + page-size-1
+   * does the job in a single round-trip — no client-side scan.
+   */
+  private loadWeekAgoSnapshot(): void {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    this.feedbackService
+      .getSnapshotHistory(this.strategyId, {
+        currentPage: 1,
+        itemCountPerPage: 1,
+        filter: { to: sevenDaysAgo },
+      })
+      .subscribe({
+        next: (res) => {
+          const row = res?.data?.data?.[0] ?? null;
+          this.weekAgoSnapshot.set(row);
+        },
+        error: () => {
+          /* Insufficient history yet — leave the delta chip hidden. */
+        },
+      });
   }
 
   goBack(): void {
     this.router.navigate(['/strategies']);
+  }
+
+  openAnalytics(): void {
+    this.router.navigate(['/strategies', this.strategyId, 'analytics']);
   }
 
   formatJson(json: string): string {

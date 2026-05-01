@@ -21,6 +21,18 @@ export class StrategyFeedbackService {
     return this.api.get(`/strategy-feedback/${strategyId}/performance`);
   }
 
+  /**
+   * Paged history of performance snapshots for a single strategy, newest-first.
+   * Powers the strategy-detail performance-history chart. The path-bound id
+   * always wins server-side, so the body filter doesn't need to repeat it.
+   */
+  getSnapshotHistory(
+    strategyId: number,
+    params: PagerRequest,
+  ): Observable<ResponseData<PagedData<StrategyPerformanceSnapshotDto>>> {
+    return this.api.post(`/strategy-feedback/${strategyId}/snapshots`, params);
+  }
+
   triggerOptimization(
     data: TriggerOptimizationRequest,
   ): Observable<ResponseData<OptimizationRunDto>> {

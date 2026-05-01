@@ -1,7 +1,7 @@
 import { Component, ChangeDetectionStrategy, inject, signal, ViewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
-import { map, throttleTime } from 'rxjs';
+import { catchError, map, merge, of, switchMap, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
 
@@ -20,6 +20,10 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
+import {
+  SparklineCellComponent,
+  type SparklineCellRendererParams,
+} from '@shared/components/data-table/cell-renderers/sparkline-cell.component';
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
 import { EnumLabelPipe } from '@shared/pipes/enum-label.pipe';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
@@ -268,10 +272,42 @@ export class StrategiesPageComponent {
   @ViewChild(DataTableComponent) dataTable?: DataTableComponent<StrategyDto>;
 
   constructor() {
-    this.realtime
-      .on('strategyActivated')
+    // Any of these means the row set or its derived signals (badge state,
+    // allocation column) just changed server-side. Throttle so a burst of
+    // optimization completions or a chatty allocation cycle collapses to a
+    // single grid refresh.
+    merge(
+      this.realtime.on('strategyActivated'),
+      this.realtime.on('optimizationCompleted'),
+      this.realtime.on('strategyAllocationRebalanced'),
+    )
       .pipe(throttleTime(2_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
       .subscribe(() => this.dataTable?.loadData());
+
+    // Per-row sparkline refresh: append the new health-score point to the
+    // matching row's series and re-render only that cell. Cheaper than a full
+    // grid reload at 60s cadence × N strategies. Off-screen rows (filtered
+    // out, paginated past) are silently skipped — they'll catch up on the
+    // next page change.
+    this.realtime
+      .on<{ strategyId: number; healthScore: number }>('strategyHealthSnapshotCreated')
+      .pipe(throttleTime(1_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
+      .subscribe((evt) => {
+        if (!evt) return;
+        this.dataTable?.updateRowInPlace(
+          (row) => row.id === evt.strategyId,
+          (row) => {
+            const r = row as StrategyDto & { healthSeries?: number[] };
+            const series = (r.healthSeries ?? []).slice();
+            series.push(evt.healthScore);
+            // Cap matches the bulk-fetch count so the chart doesn't drift wider
+            // than what the initial load shows.
+            if (series.length > 24) series.shift();
+            r.healthSeries = series;
+          },
+          ['healthSeries'],
+        );
+      });
   }
 
   activeTab = signal('list');
@@ -313,6 +349,32 @@ export class StrategiesPageComponent {
       },
     },
     {
+      // Sparkline of the latest 24 health-snapshot scores (oldest left,
+      // newest right). Per-row series is back-filled by `fetchStrategies`
+      // via the bulk `/strategy/health/recent` endpoint, so this column
+      // costs one extra round-trip per page (not per row).
+      field: 'healthSeries',
+      headerName: 'Health (24m)',
+      width: 140,
+      sortable: false,
+      filter: false,
+      // SparklineCellComponent owns the visual; suppresses AG Grid warning
+      // #48 about object-typed cells lacking a value formatter for
+      // copy/export fallback. We expose a CSV-ish fallback so a copied
+      // cell stays meaningful.
+      cellDataType: false,
+      valueFormatter: (p) => {
+        const v = p.value as number[] | undefined;
+        return Array.isArray(v) && v.length > 0 ? v.map((n) => n.toFixed(2)).join(',') : '';
+      },
+      cellRenderer: SparklineCellComponent,
+      cellRendererParams: {
+        domain: [0, 1],
+        color: '#34C759',
+        label: 'Health score',
+      } satisfies SparklineCellRendererParams,
+    },
+    {
       field: 'riskProfileId',
       headerName: 'Risk Profile',
       flex: 1,
@@ -330,11 +392,32 @@ export class StrategiesPageComponent {
 
   readonly fetchStrategies = (params: PagerRequest) =>
     this.strategiesService.list(params).pipe(
-      map((res) => {
-        if (res.data) {
-          this.strategiesList.set(res.data.data);
-        }
-        return res.data!;
+      switchMap((res) => {
+        const page = res.data;
+        if (page?.data) this.strategiesList.set(page.data);
+
+        const ids = page?.data?.map((s) => s.id).filter((id): id is number => id != null) ?? [];
+        if (ids.length === 0) return of(page!);
+
+        // One bulk round-trip per page — not per row. Failure here just leaves
+        // the sparkline column blank; the rest of the row stays usable.
+        return this.strategiesService.getRecentSnapshots({ strategyIds: ids, count: 24 }).pipe(
+          map((snapRes) => {
+            const grouped = new Map<number, number[]>();
+            for (const s of snapRes.data ?? []) {
+              if (!grouped.has(s.strategyId)) grouped.set(s.strategyId, []);
+              grouped.get(s.strategyId)!.push(s.healthScore);
+            }
+            for (const row of page!.data) {
+              // Server returns newest-first; sparkline reads left→right
+              // chronologically, so flip the order.
+              const series = (grouped.get(row.id) ?? []).slice().reverse();
+              (row as StrategyDto & { healthSeries?: number[] }).healthSeries = series;
+            }
+            return page!;
+          }),
+          catchError(() => of(page!)),
+        );
       }),
     );
 

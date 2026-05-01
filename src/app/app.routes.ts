@@ -106,6 +106,39 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'strategy-portfolio',
+        // Page hits /strategy/allocation-weights + /strategy-generation/portfolio/fwer-report,
+        // both Operator-policy server-side. Gate the route so Viewers don't
+        // see CORS/403 storms in the console.
+        canActivate: [requireRoles('Operator', 'Admin')],
+        data: { breadcrumb: 'Strategy Portfolio' },
+        loadChildren: () =>
+          import('@features/strategy-portfolio/strategy-portfolio.routes').then(
+            (m) => m.STRATEGY_PORTFOLIO_ROUTES,
+          ),
+      },
+      {
+        path: 'strategy-generation',
+        // Same: trigger-cycle endpoint is Operator-only and the timeline
+        // refresh is reactive.
+        canActivate: [requireRoles('Operator', 'Admin')],
+        data: { breadcrumb: 'Strategy Generation' },
+        loadChildren: () =>
+          import('@features/strategy-generation/strategy-generation.routes').then(
+            (m) => m.STRATEGY_GENERATION_ROUTES,
+          ),
+      },
+      {
+        path: 'engine-overview',
+        // Calls /health/workers + /dead-letter/list which are Operator-gated.
+        canActivate: [requireRoles('Operator', 'Admin')],
+        data: { breadcrumb: 'Engine Overview' },
+        loadChildren: () =>
+          import('@features/engine-overview/engine-overview.routes').then(
+            (m) => m.ENGINE_OVERVIEW_ROUTES,
+          ),
+      },
+      {
         path: 'alerts',
         data: { breadcrumb: 'Alerts' },
         loadChildren: () => import('@features/alerts/alerts.routes').then((m) => m.ALERTS_ROUTES),

@@ -342,11 +342,15 @@ export class SidebarComponent {
         { label: 'Execution Quality', route: '/execution-quality', icon: '⏱' },
         { label: 'Sentiment', route: '/sentiment', icon: '📰' },
         { label: 'Ensemble', route: '/strategy-ensemble', icon: '⚖' },
+        { label: 'Portfolio', route: '/strategy-portfolio', icon: '🥧' },
+        { label: 'Compare', route: '/strategies/compare', icon: '🆚' },
+        { label: 'Generation', route: '/strategy-generation', icon: '🧬' },
       ],
     },
     {
       label: 'System',
       items: [
+        { label: 'Engine Overview', route: '/engine-overview', icon: '🩺' },
         { label: 'Health', route: '/system-health', icon: '💚' },
         { label: 'Worker Health', route: '/worker-health', icon: '⚡' },
         { label: 'EA Instances', route: '/ea-instances', icon: '🛰' },

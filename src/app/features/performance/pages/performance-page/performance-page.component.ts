@@ -112,13 +112,17 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
                   @for (s of snapshots(); track s.strategyId) {
                     <tr>
                       <td>#{{ s.strategyId }}</td>
-                      <td class="num">{{ s.windowTrades }}</td>
-                      <td class="num">{{ (s.winRate * 100).toFixed(1) }}%</td>
-                      <td class="num">{{ s.profitFactor.toFixed(2) }}</td>
-                      <td class="num">{{ s.sharpeRatio.toFixed(2) }}</td>
-                      <td class="num">{{ s.maxDrawdownPct.toFixed(1) }}%</td>
-                      <td class="num" [class.profit]="s.totalPnL > 0" [class.loss]="s.totalPnL < 0">
-                        {{ s.totalPnL >= 0 ? '+' : '' }}{{ s.totalPnL.toFixed(2) }}
+                      <td class="num">{{ s.windowTrades ?? 0 }}</td>
+                      <td class="num">{{ ((s.winRate ?? 0) * 100).toFixed(1) }}%</td>
+                      <td class="num">{{ (s.profitFactor ?? 0).toFixed(2) }}</td>
+                      <td class="num">{{ (s.sharpeRatio ?? 0).toFixed(2) }}</td>
+                      <td class="num">{{ (s.maxDrawdownPct ?? 0).toFixed(1) }}%</td>
+                      <td
+                        class="num"
+                        [class.profit]="(s.totalPnL ?? 0) > 0"
+                        [class.loss]="(s.totalPnL ?? 0) < 0"
+                      >
+                        {{ (s.totalPnL ?? 0) >= 0 ? '+' : '' }}{{ (s.totalPnL ?? 0).toFixed(2) }}
                       </td>
                       <td>
                         <span

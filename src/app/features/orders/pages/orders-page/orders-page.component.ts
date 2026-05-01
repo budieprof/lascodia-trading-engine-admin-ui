@@ -66,7 +66,7 @@ interface OrdersViewState {
 
       <!-- Create Order Slide-Down Panel -->
       @if (showCreateForm()) {
-        <div class="create-panel" @slideDown>
+        <div class="create-panel">
           <div class="create-card">
             <div class="create-card-header">
               <h3 class="create-card-title">Create New Order</h3>
