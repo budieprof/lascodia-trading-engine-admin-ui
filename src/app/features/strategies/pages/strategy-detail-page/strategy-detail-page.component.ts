@@ -2,13 +2,15 @@ import {
   Component,
   ChangeDetectionStrategy,
   DestroyRef,
+  effect,
   inject,
   signal,
+  computed,
   OnInit,
   ViewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { filter, map, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 
@@ -16,14 +18,20 @@ import { StrategiesService } from '@core/services/strategies.service';
 import { StrategyFeedbackService } from '@core/services/strategy-feedback.service';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import { OrdersService } from '@core/services/orders.service';
+import { BacktestsService } from '@core/services/backtests.service';
+import { WalkForwardService } from '@core/services/walk-forward.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import {
   StrategyDto,
   StrategyPerformanceSnapshotDto,
   OptimizationRunDto,
+  BacktestRunDto,
+  WalkForwardRunDto,
   PagerRequest,
   UpdateStrategyRequest,
+  StrategyLineageDto,
+  StrategyLineageNodeDto,
 } from '@core/api/api.types';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -52,6 +60,7 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
     EnumLabelPipe,
     RelativeTimePipe,
     StrategyFormComponent,
+    RouterLink,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -127,52 +136,177 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
           <!-- Config Tab -->
           @if (activeTab() === 'config') {
             <div class="detail-layout">
-              <div class="detail-card">
-                <h3 class="card-title">Strategy Details</h3>
-                <div class="detail-grid">
-                  <div class="detail-item">
-                    <span class="detail-label">Name</span>
-                    <span class="detail-value">{{ strategy()!.name }}</span>
-                  </div>
-                  <div class="detail-item">
-                    <span class="detail-label">Symbol</span>
-                    <span class="detail-value">{{ strategy()!.symbol }}</span>
-                  </div>
-                  <div class="detail-item">
-                    <span class="detail-label">Timeframe</span>
-                    <span class="detail-value">{{
-                      strategy()!.timeframe | enumLabel: 'timeframe'
-                    }}</span>
-                  </div>
-                  <div class="detail-item">
-                    <span class="detail-label">Type</span>
-                    <span class="detail-value">{{ strategy()!.strategyType | enumLabel }}</span>
-                  </div>
-                  <div class="detail-item">
-                    <span class="detail-label">Status</span>
-                    <span class="detail-value"
-                      ><app-status-badge [status]="strategy()!.status" type="strategy"
-                    /></span>
-                  </div>
-                  <div class="detail-item">
-                    <span class="detail-label">Risk Profile</span>
-                    <span class="detail-value">{{
-                      strategy()!.riskProfileId ? '#' + strategy()!.riskProfileId : 'None'
-                    }}</span>
-                  </div>
-                  <div class="detail-item">
-                    <span class="detail-label">Created</span>
-                    <span class="detail-value">{{ strategy()!.createdAt | relativeTime }}</span>
-                  </div>
+              <!-- 8-card KPI strip — quick scan of life-to-date activity.
+                   The run-count cards double as nav shortcuts to the
+                   matching tabs further down. -->
+              <div class="cfg-kpis">
+                <button class="cfg-kpi clickable" (click)="activeTab.set('signals')">
+                  <span class="cfg-kpi-label">Signals</span>
+                  <span class="cfg-kpi-value">{{ totalSignals() ?? '—' }}</span>
+                </button>
+                <button class="cfg-kpi clickable" (click)="activeTab.set('orders')">
+                  <span class="cfg-kpi-label">Orders</span>
+                  <span class="cfg-kpi-value">{{ totalOrders() ?? '—' }}</span>
+                </button>
+                <button class="cfg-kpi clickable" (click)="activeTab.set('optimization')">
+                  <span class="cfg-kpi-label">Optim. runs</span>
+                  <span class="cfg-kpi-value">{{ totalOptimizations() ?? '—' }}</span>
+                </button>
+                <button class="cfg-kpi clickable" (click)="activeTab.set('backtests')">
+                  <span class="cfg-kpi-label">Backtests</span>
+                  <span class="cfg-kpi-value">{{ totalBacktests() ?? '—' }}</span>
+                </button>
+                <button class="cfg-kpi clickable" (click)="activeTab.set('walkforward')">
+                  <span class="cfg-kpi-label">Walk-fwd runs</span>
+                  <span class="cfg-kpi-value">{{ totalWalkForwards() ?? '—' }}</span>
+                </button>
+                <div class="cfg-kpi">
+                  <span class="cfg-kpi-label">Days alive</span>
+                  <span class="cfg-kpi-value">{{ daysAlive() }}</span>
+                </div>
+                <div class="cfg-kpi">
+                  <span class="cfg-kpi-label">Status</span>
+                  <span class="cfg-kpi-value">
+                    <app-status-badge [status]="strategy()!.status" type="strategy" />
+                  </span>
+                </div>
+                <div class="cfg-kpi">
+                  <span class="cfg-kpi-label">Risk profile</span>
+                  <span class="cfg-kpi-value">
+                    {{ strategy()!.riskProfileId ? '#' + strategy()!.riskProfileId : 'None' }}
+                  </span>
                 </div>
               </div>
 
-              @if (strategy()!.parametersJson) {
+              <!-- Strategy details + Parameters side-by-side -->
+              <div class="cfg-2col">
                 <div class="detail-card">
-                  <h3 class="card-title">Parameters</h3>
-                  <pre class="code-block">{{ formatJson(strategy()!.parametersJson!) }}</pre>
+                  <h3 class="card-title">Strategy Details</h3>
+                  <div class="detail-grid">
+                    <div class="detail-item">
+                      <span class="detail-label">Name</span>
+                      <span class="detail-value">{{ strategy()!.name }}</span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="detail-label">Symbol</span>
+                      <span class="detail-value">{{ strategy()!.symbol }}</span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="detail-label">Timeframe</span>
+                      <span class="detail-value">{{
+                        strategy()!.timeframe | enumLabel: 'timeframe'
+                      }}</span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="detail-label">Type</span>
+                      <span class="detail-value">{{ strategy()!.strategyType | enumLabel }}</span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="detail-label">Status</span>
+                      <span class="detail-value"
+                        ><app-status-badge [status]="strategy()!.status" type="strategy"
+                      /></span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="detail-label">Risk Profile</span>
+                      <span class="detail-value">{{
+                        strategy()!.riskProfileId ? '#' + strategy()!.riskProfileId : 'None'
+                      }}</span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="detail-label">Created</span>
+                      <span class="detail-value">{{ strategy()!.createdAt | relativeTime }}</span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="detail-label">Strategy ID</span>
+                      <span class="detail-value mono">#{{ strategy()!.id }}</span>
+                    </div>
+                  </div>
                 </div>
-              }
+
+                @if (strategy()!.parametersJson) {
+                  <div class="detail-card">
+                    <h3 class="card-title">Parameters</h3>
+                    <pre class="code-block">{{ formatJson(strategy()!.parametersJson!) }}</pre>
+                  </div>
+                } @else {
+                  <div class="detail-card">
+                    <h3 class="card-title">Parameters</h3>
+                    <p class="muted">No tunable parameters defined.</p>
+                  </div>
+                }
+              </div>
+
+              <!-- Recent signals + Recent orders mini-feed -->
+              <div class="cfg-2col">
+                <div class="detail-card">
+                  <h3 class="card-title">Recent signals</h3>
+                  @if (recentSignals().length > 0) {
+                    <table class="mini-table">
+                      <thead>
+                        <tr>
+                          <th>Time</th>
+                          <th>Dir</th>
+                          <th class="num">Entry</th>
+                          <th class="num">Conf %</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (s of recentSignals(); track s.id) {
+                          <tr>
+                            <td class="mono">{{ s.generatedAt | relativeTime }}</td>
+                            <td
+                              class="mono"
+                              [class.profit]="String(s.direction) === 'Buy'"
+                              [class.loss]="String(s.direction) === 'Sell'"
+                            >
+                              {{ s.direction }}
+                            </td>
+                            <td class="num mono">{{ s.entryPrice.toFixed(5) }}</td>
+                            <td class="num mono">
+                              {{ (s.confidence * 100).toFixed(0) }}
+                            </td>
+                            <td>{{ s.status }}</td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  } @else {
+                    <p class="muted">No signals generated yet.</p>
+                  }
+                </div>
+
+                <div class="detail-card">
+                  <h3 class="card-title">Recent orders</h3>
+                  @if (recentOrders().length > 0) {
+                    <table class="mini-table">
+                      <thead>
+                        <tr>
+                          <th>Created</th>
+                          <th>Type</th>
+                          <th class="num">Qty</th>
+                          <th class="num">Price</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (o of recentOrders(); track o.id) {
+                          <tr>
+                            <td class="mono">{{ o.createdAt | relativeTime }}</td>
+                            <td class="mono">{{ o.orderType }}</td>
+                            <td class="num mono">{{ o.quantity.toFixed(2) }}</td>
+                            <td class="num mono">{{ o.price.toFixed(5) }}</td>
+                            <td>{{ o.status }}</td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  } @else {
+                    <p class="muted">No orders placed yet.</p>
+                  }
+                </div>
+              </div>
 
               <div class="action-bar">
                 @if (strategy()!.status === 'Paused' || strategy()!.status === 'Stopped') {
@@ -228,6 +362,87 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
               [columnDefs]="optimizationColumns"
               [fetchData]="fetchOptimizations"
             />
+          }
+
+          <!-- Backtests Tab — runs filtered to this strategy. Click-through
+               navigates to the backtest detail page (same view the global
+               Backtests page links to). -->
+          @if (activeTab() === 'backtests') {
+            <app-data-table
+              [columnDefs]="backtestColumns"
+              [fetchData]="fetchBacktests"
+              (rowClick)="onBacktestRowClick($event)"
+            />
+          }
+
+          <!-- Walk-Forward Tab — runs filtered to this strategy. -->
+          @if (activeTab() === 'walkforward') {
+            <app-data-table
+              [columnDefs]="walkForwardColumns"
+              [fetchData]="fetchWalkForward"
+              (rowClick)="onWalkForwardRowClick($event)"
+            />
+          }
+
+          <!-- Lineage Tab — parent/child tree centred on this strategy. -->
+          @if (activeTab() === 'lineage') {
+            <section class="lineage-panel">
+              @if (loadingLineage()) {
+                <p class="muted">Loading lineage…</p>
+              } @else if (lineage(); as l) {
+                @if (l.nodes.length <= 1) {
+                  <p class="muted">
+                    No ancestors or descendants — this strategy was created standalone.
+                  </p>
+                } @else {
+                  <div class="lineage-legend">
+                    <span class="muted small"
+                      >{{ ancestorCount() }} ancestor(s) · 1 focus ·
+                      {{ descendantCount() }} descendant(s)</span
+                    >
+                  </div>
+                  @if (lineageLayout(); as layout) {
+                    <div class="lineage-tree" [style.height.px]="layout.height">
+                      <svg
+                        class="lineage-svg"
+                        [attr.width]="layout.width"
+                        [attr.height]="layout.height"
+                        [attr.viewBox]="'0 0 ' + layout.width + ' ' + layout.height"
+                      >
+                        @for (e of layout.edges; track e.id) {
+                          <path
+                            [attr.d]="e.path"
+                            fill="none"
+                            [attr.stroke]="e.color"
+                            stroke-width="1.4"
+                          />
+                        }
+                      </svg>
+                      @for (n of layout.nodes; track n.id) {
+                        <a
+                          class="lineage-tree-node"
+                          [class.is-focus]="n.depthOffset === 0"
+                          [class.is-ancestor]="n.depthOffset < 0"
+                          [class.is-descendant]="n.depthOffset > 0"
+                          [routerLink]="n.depthOffset === 0 ? null : ['/strategies', n.id]"
+                          [style.left.px]="n.x - n.width / 2"
+                          [style.top.px]="n.y - 14"
+                          [style.width.px]="n.width"
+                          [title]="n.tooltip"
+                        >
+                          <span class="lineage-tree-name">{{ n.name }}</span>
+                          <span class="muted small"
+                            >#{{ n.id }} · {{ n.symbol }}/{{ n.timeframe }}</span
+                          >
+                        </a>
+                      }
+                    </div>
+                  }
+                }
+              } @else {
+                <p class="muted">Lineage unavailable.</p>
+              }
+            </section>
           }
         </ui-tabs>
       } @else if (loadError()) {
@@ -486,6 +701,116 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
         border-radius: var(--radius-md);
       }
 
+      /* Config-tab density additions */
+      .cfg-kpis {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: var(--space-2);
+      }
+      @media (max-width: 1100px) {
+        .cfg-kpis {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+      @media (max-width: 600px) {
+        .cfg-kpis {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      .cfg-kpi {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-height: 64px;
+        text-align: left;
+        font-family: inherit;
+      }
+      .cfg-kpi.clickable {
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .cfg-kpi.clickable:hover {
+        border-color: var(--accent);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-sm);
+      }
+      .cfg-kpi.clickable:active {
+        transform: translateY(0);
+      }
+      .cfg-kpi-label {
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .cfg-kpi-value {
+        font-size: var(--text-xl);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .cfg-2col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-4);
+      }
+      @media (max-width: 1100px) {
+        .cfg-2col {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .mini-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .mini-table th,
+      .mini-table td {
+        padding: 6px var(--space-2);
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        font-size: var(--text-xs);
+      }
+      .mini-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+      .mini-table th {
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .mini-table th.num,
+      .mini-table td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .mini-table .mono {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+      }
+      .mini-table .profit {
+        color: var(--profit);
+      }
+      .mini-table .loss {
+        color: var(--loss);
+      }
+      .muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+        margin: 0;
+      }
+      .detail-value.mono {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+      }
+
       .optimization-header {
         display: flex;
         justify-content: flex-end;
@@ -549,6 +874,67 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
           transform: rotate(360deg);
         }
       }
+      .lineage-panel {
+        background: var(--bg-secondary, #f7f8fa);
+        border: 1px solid var(--border, #e4e7eb);
+        border-radius: 6px;
+        padding: 12px 16px;
+      }
+      .lineage-legend {
+        margin-bottom: 8px;
+      }
+      .lineage-tree {
+        position: relative;
+        margin: 8px 0;
+        overflow-x: auto;
+      }
+      .lineage-svg {
+        position: absolute;
+        top: 0;
+        left: 0;
+        pointer-events: none;
+      }
+      .lineage-tree-node {
+        position: absolute;
+        height: 36px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding: 2px 8px;
+        background: var(--bg-primary, #fff);
+        border: 1px solid var(--border, #e4e7eb);
+        border-radius: 4px;
+        font-size: 12px;
+        line-height: 1.2;
+        text-decoration: none;
+        color: var(--text-primary, #1d1d1f);
+        box-sizing: border-box;
+        text-align: center;
+        overflow: hidden;
+      }
+      .lineage-tree-node.is-focus {
+        background: rgba(0, 113, 227, 0.08);
+        border-color: #0071e3;
+        cursor: default;
+        font-weight: 500;
+      }
+      .lineage-tree-node.is-ancestor {
+        border-color: #c5b3e6;
+      }
+      .lineage-tree-node.is-descendant {
+        border-color: #9ec5fe;
+      }
+      .lineage-tree-node:hover:not(.is-focus) {
+        background: rgba(0, 113, 227, 0.04);
+      }
+      .lineage-tree-name {
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+      }
     `,
   ],
 })
@@ -559,6 +945,8 @@ export class StrategyDetailPageComponent implements OnInit {
   private readonly feedbackService = inject(StrategyFeedbackService);
   private readonly signalsService = inject(TradeSignalsService);
   private readonly ordersService = inject(OrdersService);
+  private readonly backtestsService = inject(BacktestsService);
+  private readonly walkForwardService = inject(WalkForwardService);
   private readonly notifications = inject(NotificationService);
   private readonly realtime = inject(RealtimeService);
   private readonly destroyRef = inject(DestroyRef);
@@ -628,6 +1016,190 @@ export class StrategyDetailPageComponent implements OnInit {
   showEditForm = signal(false);
   optimizationLoading = signal(false);
 
+  // Config-tab roll-up signals: lifetime counters and last-N feeds.
+  // null while loading; numeric value once the count comes back.
+  totalSignals = signal<number | null>(null);
+  totalOrders = signal<number | null>(null);
+  totalOptimizations = signal<number | null>(null);
+  totalBacktests = signal<number | null>(null);
+  totalWalkForwards = signal<number | null>(null);
+  recentSignals = signal<any[]>([]);
+  recentOrders = signal<any[]>([]);
+
+  // Lineage tab — lazily loaded the first time the tab is opened.
+  // The effect runs at field-initializer time (an injection context), so the
+  // first read is queued for the first activeTab() change after init.
+  loadingLineage = signal(false);
+  lineage = signal<StrategyLineageDto | null>(null);
+  private readonly lineageLoader = effect(() => {
+    if (
+      this.activeTab() === 'lineage' &&
+      this.lineage() === null &&
+      !this.loadingLineage() &&
+      this.strategyId
+    ) {
+      this.fetchLineage();
+    }
+  });
+
+  ancestorCount = computed(
+    () => this.lineage()?.nodes.filter((n) => n.depthOffset < 0).length ?? 0,
+  );
+  descendantCount = computed(
+    () => this.lineage()?.nodes.filter((n) => n.depthOffset > 0).length ?? 0,
+  );
+
+  /**
+   * Layered tree layout: depth → row, siblings spread evenly along x. Edges
+   * connect each node to its `parentInTree` via a vertical-then-horizontal
+   * elbow path. Box width is fixed (180px); height is computed from row count.
+   * No external library — for shallow lineages (≤10 levels × ≤8 siblings) a
+   * simple greedy layout is plenty.
+   */
+  lineageLayout = computed<{
+    nodes: {
+      id: number;
+      x: number;
+      y: number;
+      width: number;
+      name: string;
+      symbol: string;
+      timeframe: string;
+      depthOffset: number;
+      tooltip: string;
+    }[];
+    edges: { id: string; path: string; color: string }[];
+    width: number;
+    height: number;
+  } | null>(() => {
+    const lineage = this.lineage();
+    if (!lineage || lineage.nodes.length === 0) return null;
+
+    // Defaults sized for shallow trees. We compress NODE_W when a row gets
+    // wide so 12+ siblings still fit on a typical 1200px viewport. Compression
+    // floors at 96px (just enough for "EURUSD/H1 #12345"); past that we let
+    // the container scroll horizontally.
+    const NODE_W_MAX = 180;
+    const NODE_W_MIN = 96;
+    const ROW_H = 56;
+    const X_GAP = 16;
+    const TOP_PAD = 24;
+    const VIEWPORT = 1200;
+
+    // Bucket by depthOffset row.
+    const rows = new Map<number, StrategyLineageNodeDto[]>();
+    for (const n of lineage.nodes) {
+      const arr = rows.get(n.depthOffset) ?? [];
+      arr.push(n);
+      rows.set(n.depthOffset, arr);
+    }
+    const sortedDepths = [...rows.keys()].sort((a, b) => a - b);
+
+    let maxRow = 0;
+    for (const arr of rows.values()) {
+      if (arr.length > maxRow) maxRow = arr.length;
+    }
+
+    // Anti-collision: compute the largest NODE_W that still fits the widest
+    // row inside VIEWPORT. Floor at NODE_W_MIN — past that the container
+    // gets a horizontal scroll bar instead of forcing tiny boxes.
+    const fitNodeW = Math.floor((VIEWPORT - (maxRow - 1) * X_GAP) / Math.max(maxRow, 1));
+    const NODE_W = Math.max(NODE_W_MIN, Math.min(NODE_W_MAX, fitNodeW));
+
+    const width = Math.max(NODE_W + 40, maxRow * (NODE_W + X_GAP));
+    const height = sortedDepths.length * ROW_H + TOP_PAD;
+
+    // Position each node centred within its row.
+    const positioned: {
+      id: number;
+      x: number;
+      y: number;
+      width: number;
+      name: string;
+      symbol: string;
+      timeframe: string;
+      depthOffset: number;
+      parentInTree: number | null;
+      tooltip: string;
+    }[] = [];
+    for (const depth of sortedDepths) {
+      const arr = rows.get(depth)!;
+      // Stable sort by createdAt so re-renders don't shuffle.
+      arr.sort((a, b) =>
+        a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id - b.id,
+      );
+      const rowWidth = arr.length * NODE_W + (arr.length - 1) * X_GAP;
+      const xStart = (width - rowWidth) / 2 + NODE_W / 2;
+      const y = TOP_PAD + sortedDepths.indexOf(depth) * ROW_H + 14;
+      arr.forEach((n, i) => {
+        positioned.push({
+          id: n.id,
+          x: xStart + i * (NODE_W + X_GAP),
+          y,
+          width: NODE_W,
+          name: n.name ?? '(unnamed)',
+          symbol: n.symbol ?? '?',
+          timeframe: String(n.timeframe ?? ''),
+          depthOffset: n.depthOffset,
+          parentInTree: n.parentInTree ?? null,
+          tooltip:
+            `${n.strategyType} · ${n.status}` +
+            (n.generationSource ? ` · via ${n.generationSource}` : ''),
+        });
+      });
+    }
+
+    // Build edges from parent → child via L-shape elbow at midpoint y.
+    const byId = new Map(positioned.map((p) => [p.id, p]));
+    const edges: { id: string; path: string; color: string }[] = [];
+    for (const p of positioned) {
+      if (p.parentInTree == null) continue;
+      const parent = byId.get(p.parentInTree);
+      if (!parent) continue;
+      // Going from parent (which sits ABOVE if descendant, BELOW if ancestor) to p.
+      // Top of p = p.y - 14, bottom of parent = parent.y + 14. Elbow at the
+      // halfway point between them on y, vertical at parent.x then over to p.x.
+      const px = parent.x;
+      const py = parent.y + (p.depthOffset > parent.depthOffset ? 14 : -14);
+      const cx = p.x;
+      const cy = p.y + (p.depthOffset > parent.depthOffset ? -14 : 14);
+      const my = (py + cy) / 2;
+      const path = `M ${px} ${py} L ${px} ${my} L ${cx} ${my} L ${cx} ${cy}`;
+      const color = p.depthOffset > 0 ? '#9ec5fe' : '#c5b3e6';
+      edges.push({ id: `e${p.id}`, path, color });
+    }
+
+    return {
+      nodes: positioned.map(
+        ({ id, x, y, width, name, symbol, timeframe, depthOffset, tooltip }) => ({
+          id,
+          x,
+          y,
+          width,
+          name,
+          symbol,
+          timeframe,
+          depthOffset,
+          tooltip,
+        }),
+      ),
+      edges,
+      width,
+      height,
+    };
+  });
+
+  // Exposed for template `[class.profit]="String(...)"` checks.
+  readonly String = String;
+
+  // Derived: how many days the strategy has existed.
+  daysAlive = computed(() => {
+    const s = this.strategy();
+    if (!s?.createdAt) return 0;
+    const created = new Date(s.createdAt).getTime();
+    return Math.max(0, Math.floor((Date.now() - created) / (1000 * 60 * 60 * 24)));
+  });
+
   protected strategyId!: number;
 
   readonly detailTabs: TabItem[] = [
@@ -635,6 +1207,9 @@ export class StrategyDetailPageComponent implements OnInit {
     { label: 'Signals', value: 'signals' },
     { label: 'Orders', value: 'orders' },
     { label: 'Optimization', value: 'optimization' },
+    { label: 'Backtests', value: 'backtests' },
+    { label: 'Walk-Forward', value: 'walkforward' },
+    { label: 'Lineage', value: 'lineage' },
   ];
 
   readonly signalColumns: ColDef[] = [
@@ -807,11 +1382,142 @@ export class StrategyDetailPageComponent implements OnInit {
       })
       .pipe(map((res) => res.data!));
 
+  readonly fetchBacktests = (params: PagerRequest) =>
+    this.backtestsService
+      .list({ ...params, filter: { ...(params.filter ?? {}), strategyId: this.strategyId } })
+      .pipe(map((res) => res.data!));
+
+  readonly fetchWalkForward = (params: PagerRequest) =>
+    this.walkForwardService
+      .list({ ...params, filter: { ...(params.filter ?? {}), strategyId: this.strategyId } })
+      .pipe(map((res) => res.data!));
+
+  readonly backtestColumns: ColDef[] = [
+    { field: 'id', headerName: 'ID', width: 80 },
+    { field: 'symbol', headerName: 'Symbol', width: 110 },
+    {
+      field: 'timeframe',
+      headerName: 'TF',
+      width: 80,
+      valueFormatter: (p: any) => this.enumLabel.transform(p.value, 'timeframe'),
+    },
+    {
+      field: 'fromDate',
+      headerName: 'From',
+      width: 120,
+      valueFormatter: (p: any) => (p.value ? new Date(p.value).toLocaleDateString() : '—'),
+    },
+    {
+      field: 'toDate',
+      headerName: 'To',
+      width: 120,
+      valueFormatter: (p: any) => (p.value ? new Date(p.value).toLocaleDateString() : '—'),
+    },
+    { field: 'status', headerName: 'Status', width: 110 },
+    {
+      field: 'totalTrades',
+      headerName: 'Trades',
+      width: 90,
+      valueFormatter: (p: any) => (p.value != null ? p.value : '—'),
+    },
+    {
+      field: 'winRate',
+      headerName: 'Win %',
+      width: 90,
+      valueFormatter: (p: any) => (p.value != null ? `${(p.value * 100).toFixed(1)}%` : '—'),
+    },
+    {
+      field: 'profitFactor',
+      headerName: 'PF',
+      width: 80,
+      valueFormatter: (p: any) => (p.value != null ? p.value.toFixed(2) : '—'),
+    },
+    {
+      field: 'maxDrawdownPct',
+      headerName: 'Max DD',
+      width: 100,
+      valueFormatter: (p: any) => (p.value != null ? `${p.value.toFixed(2)}%` : '—'),
+    },
+    {
+      field: 'sharpeRatio',
+      headerName: 'Sharpe',
+      width: 90,
+      valueFormatter: (p: any) => (p.value != null ? p.value.toFixed(2) : '—'),
+    },
+    {
+      field: 'totalReturn',
+      headerName: 'Return',
+      width: 100,
+      valueFormatter: (p: any) => (p.value != null ? `${(p.value * 100).toFixed(2)}%` : '—'),
+    },
+    {
+      field: 'startedAt',
+      headerName: 'Started',
+      flex: 1,
+      minWidth: 130,
+      valueFormatter: (p: any) => this.relativeTime.transform(p.value),
+    },
+  ];
+
+  readonly walkForwardColumns: ColDef[] = [
+    { field: 'id', headerName: 'ID', width: 80 },
+    { field: 'symbol', headerName: 'Symbol', width: 110 },
+    {
+      field: 'timeframe',
+      headerName: 'TF',
+      width: 80,
+      valueFormatter: (p: any) => this.enumLabel.transform(p.value, 'timeframe'),
+    },
+    {
+      field: 'fromDate',
+      headerName: 'From',
+      width: 120,
+      valueFormatter: (p: any) => (p.value ? new Date(p.value).toLocaleDateString() : '—'),
+    },
+    {
+      field: 'toDate',
+      headerName: 'To',
+      width: 120,
+      valueFormatter: (p: any) => (p.value ? new Date(p.value).toLocaleDateString() : '—'),
+    },
+    { field: 'inSampleDays', headerName: 'IS days', width: 90 },
+    { field: 'outOfSampleDays', headerName: 'OOS days', width: 100 },
+    { field: 'status', headerName: 'Status', width: 110 },
+    {
+      field: 'averageOutOfSampleScore',
+      headerName: 'Avg OOS',
+      width: 110,
+      valueFormatter: (p: any) => (p.value != null ? p.value.toFixed(3) : '—'),
+    },
+    {
+      field: 'scoreConsistency',
+      headerName: 'Consistency',
+      width: 120,
+      valueFormatter: (p: any) => (p.value != null ? p.value.toFixed(3) : '—'),
+    },
+    {
+      field: 'startedAt',
+      headerName: 'Started',
+      flex: 1,
+      minWidth: 130,
+      valueFormatter: (p: any) => this.relativeTime.transform(p.value),
+    },
+  ];
+
+  onBacktestRowClick(run: BacktestRunDto): void {
+    this.router.navigate(['/backtests', run.id]);
+  }
+
+  onWalkForwardRowClick(run: WalkForwardRunDto): void {
+    this.router.navigate(['/walk-forward', run.id]);
+  }
+
   ngOnInit(): void {
     this.strategyId = +this.route.snapshot.paramMap.get('id')!;
     this.loadStrategy();
     this.loadLatestSnapshot();
     this.loadWeekAgoSnapshot();
+    this.loadConfigRollups();
 
     // Push refresh: filter to events for this strategy id, throttle to 5s so
     // a chatty 60s-cadence worker can't pile up if the page sits open. The
@@ -826,6 +1532,21 @@ export class StrategyDetailPageComponent implements OnInit {
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(() => this.loadLatestSnapshot());
+  }
+
+  private fetchLineage(): void {
+    this.loadingLineage.set(true);
+    this.strategiesService.getLineage(this.strategyId).subscribe({
+      next: (res) => {
+        this.loadingLineage.set(false);
+        this.lineage.set(res?.data ?? null);
+      },
+      error: () => {
+        this.loadingLineage.set(false);
+        this.lineage.set(null);
+        this.notifications.error('Failed to load lineage');
+      },
+    });
   }
 
   private loadLatestSnapshot(): void {
@@ -982,6 +1703,68 @@ export class StrategyDetailPageComponent implements OnInit {
       },
       error: () => this.loadError.set(true),
     });
+  }
+
+  // Cheap parallel roll-ups for the Config-tab KPI strip + recent feeds.
+  // Each call asks for at most 8 rows so we read both the row sample for
+  // the mini-tables AND the pager total count from one round-trip per kind.
+  private loadConfigRollups(): void {
+    const baseFilter = { strategyId: this.strategyId };
+
+    this.signalsService
+      .list({ currentPage: 1, itemCountPerPage: 8, filter: baseFilter })
+      .subscribe({
+        next: (res) => {
+          this.totalSignals.set(res?.data?.pager?.totalItemCount ?? 0);
+          this.recentSignals.set(res?.data?.data ?? []);
+        },
+        error: () => {
+          this.totalSignals.set(0);
+        },
+      });
+
+    this.ordersService.list({ currentPage: 1, itemCountPerPage: 8, filter: baseFilter }).subscribe({
+      next: (res) => {
+        this.totalOrders.set(res?.data?.pager?.totalItemCount ?? 0);
+        this.recentOrders.set(res?.data?.data ?? []);
+      },
+      error: () => {
+        this.totalOrders.set(0);
+      },
+    });
+
+    this.feedbackService
+      .listOptimizationRuns({ currentPage: 1, itemCountPerPage: 1, filter: baseFilter })
+      .subscribe({
+        next: (res) => {
+          this.totalOptimizations.set(res?.data?.pager?.totalItemCount ?? 0);
+        },
+        error: () => {
+          this.totalOptimizations.set(0);
+        },
+      });
+
+    this.backtestsService
+      .list({ currentPage: 1, itemCountPerPage: 1, filter: baseFilter })
+      .subscribe({
+        next: (res) => {
+          this.totalBacktests.set(res?.data?.pager?.totalItemCount ?? 0);
+        },
+        error: () => {
+          this.totalBacktests.set(0);
+        },
+      });
+
+    this.walkForwardService
+      .list({ currentPage: 1, itemCountPerPage: 1, filter: baseFilter })
+      .subscribe({
+        next: (res) => {
+          this.totalWalkForwards.set(res?.data?.pager?.totalItemCount ?? 0);
+        },
+        error: () => {
+          this.totalWalkForwards.set(0);
+        },
+      });
   }
 
   private getSignalStatusVariant(status: string): { bg: string; color: string } {
