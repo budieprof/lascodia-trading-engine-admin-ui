@@ -55,6 +55,15 @@ export interface PagerRequest {
   currentPage?: number;
   itemCountPerPage?: number;
   filter?: any;
+  /**
+   * Server-side sort column. Should match a DTO property name (case-insensitive
+   * via the server's safelist mapping). Sent on every refetch by
+   * `DataTableComponent` so sorting consults the database, not just the
+   * in-memory page. The handler ignores values not in its safelist.
+   */
+  sortBy?: string;
+  /** `'asc'` or `'desc'`. Ignored when `sortBy` is absent. */
+  sortDirection?: 'asc' | 'desc';
 }
 
 // ============================================================
@@ -115,6 +124,12 @@ export interface MLModelQueryFilter {
   timeframe?: string;
   isActive?: boolean;
   status?: string;
+  /**
+   * Default: server treats absent / `true` as exclude meta-learners and MAML
+   * `Symbol="ALL"` initializers from the result. Set to `false` explicitly to
+   * include them — useful when inspecting cross-symbol initializers directly.
+   */
+  excludeMetaLearners?: boolean;
 }
 export interface MLTrainingRunQueryFilter {
   symbol?: string;
@@ -218,7 +233,21 @@ export type StrategyType =
   | 'BollingerBandReversion'
   | 'MACDDivergence'
   | 'SessionBreakout'
-  | 'MomentumTrend';
+  | 'MomentumTrend'
+  | 'CompositeML'
+  | 'StatisticalArbitrage'
+  | 'VwapReversion'
+  | 'CalendarEffect'
+  | 'NewsFade'
+  | 'CarryTrade'
+  | 'WeekendGapFade'
+  | 'RoundNumberFade'
+  | 'WedgeBreakout'
+  | 'CrossAssetLeadLag'
+  | 'OrderFlowImbalance'
+  | 'SubMinuteEvent'
+  | 'LlmProposal'
+  | 'RuleBased';
 
 export type StrategyStatus = 'Active' | 'Paused' | 'Backtesting' | 'Stopped';
 
@@ -234,7 +263,12 @@ export type MLModelStatus = 'Training' | 'Active' | 'Superseded' | 'Failed';
 
 export type RunStatus = 'Queued' | 'Running' | 'Completed' | 'Failed';
 
-export type TriggerType = 'Scheduled' | 'Manual' | 'AutoDegrading';
+export type TriggerType =
+  | 'Scheduled'
+  | 'Manual'
+  | 'AutoDegrading'
+  | 'AutoDeferred'
+  | 'SymbolicCatalogueShift';
 
 export type TradingSession = 'London' | 'NewYork' | 'Asian' | 'LondonNYOverlap';
 
@@ -260,7 +294,9 @@ export type AlertType =
   | 'WorkerCrash'
   | 'EADisconnected'
   | 'ConfigurationDrift'
-  | 'BrokerReconciliation';
+  | 'BrokerReconciliation'
+  | 'MLMonitoringStale'
+  | 'SymbolicFeatureLifecycle';
 
 export type AlertSeverity = 'Info' | 'Medium' | 'High' | 'Critical';
 
@@ -356,6 +392,11 @@ export interface StrategyDto {
   status: StrategyStatus;
   riskProfileId: number | null;
   createdAt: string;
+  riskOverridesJson: string | null;
+  sizingConfigJson: string | null;
+  sessionFilterJson: string | null;
+  regimeGateJson: string | null;
+  multiTimeframeGateJson: string | null;
 }
 
 export interface TradeSignalDto {
@@ -421,6 +462,11 @@ export interface RiskProfileDto {
   drawdownRecoveryThresholdPct: number;
   recoveryLotSizeMultiplier: number;
   recoveryExitThresholdPct: number;
+  requireStopLoss: boolean;
+  requireTakeProfit: boolean;
+  minStopLossDistancePips: number;
+  minTakeProfitDistancePips: number;
+  minRiskRewardRatio: number;
 }
 
 export interface CurrencyPairDto {
@@ -440,11 +486,46 @@ export interface AlertDto {
   id: number;
   alertType: AlertType;
   symbol: string | null;
-  channel: AlertChannel;
-  destination: string | null;
-  conditionJson: string | null;
+  conditionJson: string;
   isActive: boolean;
+  severity: AlertSeverity;
+  deduplicationKey: string | null;
+  cooldownSeconds: number;
   lastTriggeredAt: string | null;
+  autoResolvedAt: string | null;
+}
+
+export interface AlertChannelStatusDto {
+  channel: AlertChannel;
+  isConfigured: boolean;
+  /**
+   * Per-channel kill-switch — when `false` the engine no-ops dispatch even if
+   * the channel is fully configured. Used to silence a channel without losing
+   * its credentials (e.g. SMTP rate-limited).
+   */
+  isEnabled: boolean;
+  /** Server-masked preview (e.g. "al•••••@example.com" or "https://hooks.…"). */
+  destinationPreview: string | null;
+  timeoutSeconds: number;
+}
+
+export interface TestAlertChannelResultDto {
+  channel: AlertChannel;
+  delivered: boolean;
+  destination: string;
+  message: string;
+  attemptedAt: string;
+}
+
+export interface SetAlertChannelEnabledRequest {
+  channel: AlertChannel;
+  isEnabled: boolean;
+}
+
+export interface SetAlertChannelEnabledResultDto {
+  channel: AlertChannel;
+  isEnabled: boolean;
+  configKey: string;
 }
 
 export interface CandleDto {
@@ -460,6 +541,35 @@ export interface CandleDto {
   isClosed: boolean;
 }
 
+export interface MLModelOverfitFlagDto {
+  mlModelId: number;
+  symbol: string;
+  timeframe: Timeframe;
+  learnerArchitecture: string;
+  modelVersion: string | null;
+  firstActiveAt: string | null;
+  cvSharpe: number | null;
+  liveSharpe7d: number | null;
+  sharpeRatio: number | null;
+  resolvedSignals: number;
+  reason: string;
+}
+
+export interface CandleCoverageDto {
+  symbol: string;
+  timeframe: string;
+  totalCandles: number;
+  earliestTimestamp: string | null;
+  latestTimestamp: string | null;
+  requestedFrom: string | null;
+  requestedTo: string | null;
+  candlesInWindow: number;
+  segmentCount: number;
+  largestSegmentCandles: number;
+  largestSegmentFrom: string | null;
+  largestSegmentTo: string | null;
+}
+
 export interface MLModelDto {
   id: number;
   symbol: string | null;
@@ -467,6 +577,8 @@ export interface MLModelDto {
   modelVersion: string | null;
   filePath: string | null;
   status: MLModelStatus;
+  /** Learner architecture used to train the model (e.g. `TabNet`, `BaggedLogistic`). */
+  learnerArchitecture: string;
   isActive: boolean;
   directionAccuracy: number | null;
   magnitudeRMSE: number | null;
@@ -481,6 +593,8 @@ export interface MLTrainingRunDto {
   timeframe: Timeframe;
   triggerType: TriggerType;
   status: RunStatus;
+  /** Learner architecture used for the run (e.g. `TabNet`, `BaggedLogistic`). */
+  learnerArchitecture: string;
   fromDate: string;
   toDate: string;
   totalSamples: number;
@@ -1057,17 +1171,57 @@ export interface ToggleKillSwitchRequest {
 
 export type WorkerHealthStatus = 'Healthy' | 'Degraded' | 'Failed' | 'Idle';
 
-export interface WorkerHealthDto {
-  name: string;
-  category: string | null;
-  status: WorkerHealthStatus;
-  lastCycleMs: number;
-  avgCycleMs: number | null;
-  errorRate: number;
-  backlog: number | null;
+/**
+ * Mirrors the engine's `WorkerHealthSnapshot` entity (the raw response shape
+ * of `GET /health/workers`). Field names are camelCased copies of the C#
+ * properties — keep this aligned with `WorkerHealthSnapshot.cs` when fields
+ * are added/renamed engine-side.
+ */
+export interface WorkerHealthSnapshot {
+  workerName: string;
+  isRunning: boolean;
+  isCompleted: boolean;
   lastSuccessAt: string | null;
-  lastFailureAt: string | null;
-  lastMessage: string | null;
+  lastErrorAt: string | null;
+  lastErrorMessage: string | null;
+  lastCycleDurationMs: number;
+  cycleDurationP50Ms: number;
+  cycleDurationP95Ms: number;
+  cycleDurationP99Ms: number;
+  consecutiveFailures: number;
+  errorsLastHour: number;
+  successesLastHour: number;
+  backlogDepth: number;
+  lastQueueLatencyMs: number;
+  queueLatencyP50Ms: number;
+  queueLatencyP95Ms: number;
+  lastExecutionDurationMs: number;
+  executionDurationP50Ms: number;
+  executionDurationP95Ms: number;
+  retriesLastHour: number;
+  recoveriesLastHour: number;
+  configuredIntervalSeconds: number;
+  capturedAt: string;
+}
+
+/**
+ * Engine snapshot enriched with derived status, category, error rate, and
+ * staleness flags. Produced client-side by `WorkersService.list()` so every
+ * consumer sees the same derivation rather than re-implementing it.
+ */
+export interface WorkerHealthDto extends WorkerHealthSnapshot {
+  /** Display name (= workerName, kept for convenience). */
+  name: string;
+  /** First CamelCase segment of the worker name — e.g. "ML", "Strategy", "Risk". */
+  category: string;
+  /** Derived from isRunning + consecutiveFailures + errorRate + staleness. */
+  status: WorkerHealthStatus;
+  /** errorsLastHour / (errorsLastHour + successesLastHour); 0 when no activity. */
+  errorRate: number;
+  /** Seconds since lastSuccessAt observed at capturedAt time. */
+  staleSeconds: number | null;
+  /** True when staleSeconds exceeds 3× the configured interval (floor 5 min). */
+  isStale: boolean;
 }
 
 export type EAInstanceStatus = 'Active' | 'Idle' | 'Disconnected';
@@ -1235,6 +1389,129 @@ export interface CreateStrategyRequest {
   timeframe?: string;
   parametersJson?: string;
   riskProfileId?: number | null;
+  riskOverridesJson?: string | null;
+  sizingConfigJson?: string | null;
+  sessionFilterJson?: string | null;
+  regimeGateJson?: string | null;
+  multiTimeframeGateJson?: string | null;
+}
+
+export interface StrategyParameterFieldDto {
+  name: string;
+  label: string;
+  kind: 'int' | 'decimal' | 'bool' | 'enum' | 'string' | string;
+  description: string | null;
+  min: number | null;
+  max: number | null;
+  step: number | null;
+  default: unknown;
+  enumValues: string[] | null;
+}
+
+export interface StrategyParameterSchemaDto {
+  strategyType: string;
+  fields: StrategyParameterFieldDto[];
+}
+
+export interface RunBacktestPreviewRequest {
+  symbol: string;
+  timeframe: string;
+  strategyType: string;
+  parametersJson?: string;
+  lookbackDays?: number;
+  initialBalance?: number;
+  riskOverridesJson?: string | null;
+  sizingConfigJson?: string | null;
+  sessionFilterJson?: string | null;
+  regimeGateJson?: string | null;
+  multiTimeframeGateJson?: string | null;
+}
+
+export interface BacktestPreviewResult {
+  symbol: string;
+  timeframe: string;
+  candlesAnalyzed: number;
+  fromUtc: string;
+  toUtc: string;
+  initialBalance: number;
+  finalBalance: number;
+  totalReturn: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRate: number;
+  profitFactor: number;
+  maxDrawdownPct: number;
+  sharpeRatio: number;
+  expectancy: number;
+  exposurePct: number;
+  timedOut: boolean;
+  note: string | null;
+  equityCurve: number[];
+}
+
+export interface StrategyRejectionSummaryDto {
+  strategyId: number;
+  symbol: string;
+  stage: string;
+  reason: string;
+  count: number;
+  latestRejectedAt: string;
+}
+
+export interface ArchitectureOptionDto {
+  value: number;
+  name: string;
+}
+
+export interface AvailableArchitecturesDto {
+  torchAvailable: boolean;
+  disabledReason: string | null;
+  disabledArchitectures: string[];
+  architectures: ArchitectureOptionDto[];
+}
+
+export interface StrategyTemplateDto {
+  id: number;
+  name: string | null;
+  description: string | null;
+  strategyType: StrategyType;
+  parametersJson: string | null;
+  riskProfileId: number | null;
+  riskOverridesJson: string | null;
+  sizingConfigJson: string | null;
+  sessionFilterJson: string | null;
+  regimeGateJson: string | null;
+  multiTimeframeGateJson: string | null;
+  appliedCount: number;
+  createdAt: string;
+}
+
+export interface CreateStrategyTemplateRequest {
+  name: string;
+  description?: string | null;
+  strategyType: string;
+  parametersJson?: string;
+  riskProfileId?: number | null;
+  riskOverridesJson?: string | null;
+  sizingConfigJson?: string | null;
+  sessionFilterJson?: string | null;
+  regimeGateJson?: string | null;
+  multiTimeframeGateJson?: string | null;
+}
+
+export interface ApplyStrategyTemplateRequest {
+  templateId: number;
+  symbols: string[];
+  timeframe: string;
+  namePrefix?: string | null;
+}
+
+export interface ApplyStrategyTemplateResult {
+  createdCount: number;
+  skippedCount: number;
+  createdStrategyIds: number[];
+  skippedReasons: string[];
 }
 
 export interface UpdateStrategyRequest {
@@ -1245,6 +1522,128 @@ export interface UpdateStrategyRequest {
   timeframe?: string | null;
   parametersJson?: string | null;
   riskProfileId?: number | null;
+  /** Optional free-text reason annotating the auto-captured pre-edit snapshot. */
+  changeReason?: string | null;
+}
+
+export interface StrategyVersionDto {
+  id: number;
+  strategyId: number;
+  versionNumber: number;
+  name: string | null;
+  description: string | null;
+  parametersJson: string | null;
+  riskProfileId: number | null;
+  riskOverridesJson: string | null;
+  sizingConfigJson: string | null;
+  sessionFilterJson: string | null;
+  regimeGateJson: string | null;
+  multiTimeframeGateJson: string | null;
+  capturedAt: string;
+  changeReason: string | null;
+}
+
+export interface StrategyLineageNodeDto {
+  id: number;
+  name: string | null;
+  symbol: string | null;
+  timeframe: string;
+  strategyType: string;
+  status: string;
+  generation: number;
+  generationSource: string | null;
+  createdAt: string;
+  /** Negative = ancestor, 0 = focused strategy, positive = descendant. */
+  depthOffset: number;
+  parentInTree: number | null;
+}
+
+export interface StrategyLineageDto {
+  focusStrategyId: number;
+  nodes: StrategyLineageNodeDto[];
+}
+
+export type BulkStrategyAction = 'Activate' | 'Pause' | 'SetRiskProfile' | 'ClearRiskProfile';
+
+export interface BulkUpdateStrategiesRequest {
+  strategyIds: number[];
+  action: BulkStrategyAction;
+  riskProfileId?: number | null;
+}
+
+export interface BulkUpdateStrategiesResult {
+  updatedCount: number;
+  skippedCount: number;
+  updatedIds: number[];
+  skippedReasons: string[];
+}
+
+export interface BacktestPreviewSnapshotDto {
+  id: number;
+  /** Trading account id of the operator who saved the snapshot. Null for legacy rows. */
+  capturedByUserId: number | null;
+  label: string | null;
+  /** Free-text notes editable post-save. */
+  notes: string | null;
+  symbol: string | null;
+  timeframe: string | null;
+  strategyType: string | null;
+  lookbackDays: number;
+  initialBalance: number;
+  parametersJson: string | null;
+  riskProfileId: number | null;
+  riskOverridesJson: string | null;
+  sizingConfigJson: string | null;
+  sessionFilterJson: string | null;
+  regimeGateJson: string | null;
+  multiTimeframeGateJson: string | null;
+  candlesAnalyzed: number;
+  fromUtc: string;
+  toUtc: string;
+  finalBalance: number;
+  totalReturn: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRate: number;
+  profitFactor: number;
+  maxDrawdownPct: number;
+  sharpeRatio: number;
+  expectancy: number;
+  exposurePct: number;
+  equityCurveJson: string | null;
+  capturedAt: string;
+}
+
+export interface SaveBacktestPreviewSnapshotRequest {
+  label?: string | null;
+  symbol: string;
+  timeframe: string;
+  strategyType: string;
+  lookbackDays: number;
+  initialBalance: number;
+  parametersJson?: string | null;
+  riskProfileId?: number | null;
+  riskOverridesJson?: string | null;
+  sizingConfigJson?: string | null;
+  sessionFilterJson?: string | null;
+  regimeGateJson?: string | null;
+  multiTimeframeGateJson?: string | null;
+  candlesAnalyzed: number;
+  fromUtc: string;
+  toUtc: string;
+  finalBalance: number;
+  totalReturn: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRate: number;
+  profitFactor: number;
+  maxDrawdownPct: number;
+  sharpeRatio: number;
+  expectancy: number;
+  exposurePct: number;
+  equityCurveJson?: string | null;
 }
 
 export interface CreateBrokerRequest {
@@ -1317,6 +1716,11 @@ export interface CreateRiskProfileRequest {
   drawdownRecoveryThresholdPct: number;
   recoveryLotSizeMultiplier: number;
   recoveryExitThresholdPct: number;
+  requireStopLoss?: boolean;
+  requireTakeProfit?: boolean;
+  minStopLossDistancePips?: number;
+  minTakeProfitDistancePips?: number;
+  minRiskRewardRatio?: number;
 }
 
 export interface UpdateRiskProfileRequest {
@@ -1332,6 +1736,11 @@ export interface UpdateRiskProfileRequest {
   drawdownRecoveryThresholdPct: number;
   recoveryLotSizeMultiplier: number;
   recoveryExitThresholdPct: number;
+  requireStopLoss: boolean;
+  requireTakeProfit: boolean;
+  minStopLossDistancePips: number;
+  minTakeProfitDistancePips: number;
+  minRiskRewardRatio: number;
 }
 
 export interface CreateCurrencyPairRequest {
@@ -1358,20 +1767,28 @@ export interface UpdateCurrencyPairRequest {
 }
 
 export interface CreateAlertRequest {
-  alertType?: string;
-  symbol?: string;
-  channel?: string;
-  destination?: string;
-  conditionJson?: string;
+  alertType: AlertType;
+  symbol?: string | null;
+  conditionJson: string;
+  severity?: AlertSeverity;
+  deduplicationKey?: string | null;
+  cooldownSeconds?: number;
+  isActive?: boolean;
 }
 
 export interface UpdateAlertRequest {
-  alertType?: string | null;
+  alertType: AlertType;
   symbol?: string | null;
-  channel?: string | null;
-  destination?: string | null;
-  conditionJson?: string | null;
-  isActive?: boolean | null;
+  conditionJson: string;
+  severity: AlertSeverity;
+  deduplicationKey?: string | null;
+  cooldownSeconds: number;
+  isActive: boolean;
+}
+
+export interface TestAlertChannelRequest {
+  channel: AlertChannel;
+  message?: string | null;
 }
 
 export interface TriggerMLTrainingRequest {

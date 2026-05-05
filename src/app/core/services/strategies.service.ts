@@ -19,6 +19,20 @@ import {
   CreateStrategyRequest,
   UpdateStrategyRequest,
   AssignRiskProfileRequest,
+  StrategyTemplateDto,
+  CreateStrategyTemplateRequest,
+  ApplyStrategyTemplateRequest,
+  ApplyStrategyTemplateResult,
+  StrategyRejectionSummaryDto,
+  StrategyParameterSchemaDto,
+  RunBacktestPreviewRequest,
+  BacktestPreviewResult,
+  StrategyVersionDto,
+  StrategyLineageDto,
+  BulkUpdateStrategiesRequest,
+  BulkUpdateStrategiesResult,
+  BacktestPreviewSnapshotDto,
+  SaveBacktestPreviewSnapshotRequest,
 } from '@core/api/api.types';
 
 @Injectable({ providedIn: 'root' })
@@ -35,6 +49,44 @@ export class StrategiesService {
 
   create(data: CreateStrategyRequest): Observable<ResponseData<StrategyDto>> {
     return this.api.post(`/strategy`, data);
+  }
+
+  // ── Strategy templates (TradingView-style presets) ──
+  listTemplates(): Observable<ResponseData<StrategyTemplateDto[]>> {
+    return this.api.get(`/strategy/templates`);
+  }
+
+  createTemplate(data: CreateStrategyTemplateRequest): Observable<ResponseData<number>> {
+    return this.api.post(`/strategy/templates`, data);
+  }
+
+  applyTemplate(
+    data: ApplyStrategyTemplateRequest,
+  ): Observable<ResponseData<ApplyStrategyTemplateResult>> {
+    return this.api.post(`/strategy/templates/apply`, data);
+  }
+
+  getRejectionSummary(
+    lookbackHours = 24,
+    topN = 50,
+  ): Observable<ResponseData<StrategyRejectionSummaryDto[]>> {
+    return this.api.get(`/strategy/rejection-summary?lookbackHours=${lookbackHours}&topN=${topN}`);
+  }
+
+  getParameterSchema(
+    strategyType: string,
+  ): Observable<ResponseData<StrategyParameterSchemaDto | null>> {
+    return this.api.get(`/strategy/parameter-schema/${strategyType}`);
+  }
+
+  runBacktestPreview(
+    data: RunBacktestPreviewRequest,
+  ): Observable<ResponseData<BacktestPreviewResult>> {
+    return this.api.post(`/strategy/backtest-preview`, data);
+  }
+
+  summariseDsl(dslJson: string): Observable<ResponseData<string | null>> {
+    return this.api.post(`/strategy/dsl/summarise`, { dslJson });
   }
 
   update(id: number, data: UpdateStrategyRequest): Observable<ResponseData<StrategyDto>> {
@@ -124,5 +176,77 @@ export class StrategiesService {
     body: GetStrategyEquityCurveRequest = {},
   ): Observable<ResponseData<StrategyEquityCurveDto>> {
     return this.api.post(`/strategy/${id}/equity-curve`, body);
+  }
+
+  /** Captured pre-edit snapshots of a strategy, newest first. */
+  getVersions(id: number, limit?: number): Observable<ResponseData<StrategyVersionDto[]>> {
+    const q = limit != null ? `?limit=${limit}` : '';
+    return this.api.get(`/strategy/${id}/versions${q}`);
+  }
+
+  /**
+   * Restore a strategy to a captured version. Engine snapshots the current
+   * state first so the rollback is itself reversible.
+   */
+  rollbackVersion(strategyId: number, versionId: number): Observable<ResponseData<number>> {
+    return this.api.post(`/strategy/${strategyId}/versions/${versionId}/rollback`, {});
+  }
+
+  /** Parent/child tree centred on a strategy (depths -5..+5). */
+  getLineage(id: number, maxDepth?: number): Observable<ResponseData<StrategyLineageDto>> {
+    const q = maxDepth != null ? `?maxDepth=${maxDepth}` : '';
+    return this.api.get(`/strategy/${id}/lineage${q}`);
+  }
+
+  /** Apply Activate/Pause/SetRiskProfile/ClearRiskProfile to up to 200 ids. */
+  bulkUpdate(
+    data: BulkUpdateStrategiesRequest,
+  ): Observable<ResponseData<BulkUpdateStrategiesResult>> {
+    return this.api.post(`/strategy/bulk-update`, data);
+  }
+
+  // ── Preview snapshots (server-side persistence for cross-session compare) ──
+
+  savePreviewSnapshot(data: SaveBacktestPreviewSnapshotRequest): Observable<ResponseData<number>> {
+    return this.api.post(`/strategy/preview-snapshots`, data);
+  }
+
+  listPreviewSnapshots(
+    filter: {
+      symbol?: string | null;
+      timeframe?: string | null;
+      strategyType?: string | null;
+      limit?: number;
+      /** 'mine' (default) shows the current operator's snapshots; 'all' shows everyone's. */
+      scope?: 'mine' | 'all';
+    } = {},
+  ): Observable<ResponseData<BacktestPreviewSnapshotDto[]>> {
+    const params = new URLSearchParams();
+    if (filter.symbol) params.append('symbol', filter.symbol);
+    if (filter.timeframe) params.append('timeframe', filter.timeframe);
+    if (filter.strategyType) params.append('strategyType', filter.strategyType);
+    if (filter.limit != null) params.append('limit', String(filter.limit));
+    if (filter.scope) params.append('scope', filter.scope);
+    const q = params.toString();
+    return this.api.get(`/strategy/preview-snapshots${q ? '?' + q : ''}`);
+  }
+
+  deletePreviewSnapshot(id: number): Observable<ResponseData<boolean>> {
+    return this.api.delete(`/strategy/preview-snapshots/${id}`);
+  }
+
+  /** Update the free-text notes on a saved preview snapshot. */
+  updatePreviewSnapshotNotes(id: number, notes: string | null): Observable<ResponseData<boolean>> {
+    return this.api.patch(`/strategy/preview-snapshots/${id}/notes`, { notes });
+  }
+
+  /** Manual capture of a strategy's current state as a versioned snapshot. */
+  captureVersion(
+    strategyId: number,
+    changeReason?: string | null,
+  ): Observable<ResponseData<number>> {
+    return this.api.post(`/strategy/${strategyId}/versions/capture`, {
+      changeReason: changeReason ?? null,
+    });
   }
 }
