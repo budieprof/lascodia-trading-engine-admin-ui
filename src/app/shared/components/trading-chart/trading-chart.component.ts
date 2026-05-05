@@ -4,6 +4,7 @@ import {
   signal,
   computed,
   inject,
+  effect,
   OnInit,
   OnDestroy,
 } from '@angular/core';
@@ -521,7 +522,14 @@ export class TradingChartComponent implements OnInit, OnDestroy {
         data: [],
         xAxisIndex: 0,
         yAxisIndex: 0,
+        // Cap the body width so a sparse window (2–3 candles) still renders
+        // narrow vertical candles like MetaTrader, not chart-wide horizontal
+        // bars. ECharts otherwise auto-stretches each body to fill available
+        // x-axis space when item count is low.
+        barMaxWidth: 14,
         itemStyle: {
+          // ECharts candlestick convention: `color` = bullish (close > open),
+          // `color0` = bearish (close ≤ open). Match MetaTrader's green/red.
           color: '#34C759',
           color0: '#FF3B30',
           borderColor: '#34C759',
@@ -576,6 +584,24 @@ export class TradingChartComponent implements OnInit, OnDestroy {
 
   chartMerge = signal<EChartsOption>({});
 
+  // Tracks the candle count of the last merge that wrote dataZoom. On live
+  // price ticks we skip dataZoom so the operator's pan/zoom persists; we only
+  // re-emit the default zoom window when the candle dataset itself changes
+  // (initial load or symbol/timeframe switch).
+  private lastZoomCandleCount = -1;
+
+  constructor() {
+    // Re-run buildChartMerge whenever the live price ticks. Folding the
+    // bid/ask markLine into the same merge stream that owns the candle data
+    // keeps a later candle merge from accidentally clobbering the markLine —
+    // an issue we hit when the markLine was pushed through a separate
+    // setOption side-channel.
+    effect(() => {
+      this.livePrice();
+      this.buildChartMerge();
+    });
+  }
+
   ngOnInit() {
     this.loadCandles();
     this.startLivePricePolling();
@@ -627,10 +653,52 @@ export class TradingChartComponent implements OnInit, OnDestroy {
           data = this.generateSampleCandles();
         }
 
+        // Backend returns candles in DESCENDING timestamp order (newest first
+        // so the paged endpoint can serve "give me the latest N" cheaply).
+        // ECharts renders the data array left-to-right, so without this sort
+        // the chart ends up with newest candles on the LEFT — the inverse of
+        // every charting platform an operator has used. Sort ascending so the
+        // chart reads time-forward like MetaTrader / TradingView.
+        data = [...data].sort(
+          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+        );
+
+        // Forex markets are closed Fri 22:00 → Sun 22:00 UTC. Candles stamped
+        // inside that window are either filler (engine-generated when no
+        // ticks arrived) or stale-feed echoes; either way they shouldn't
+        // appear on the chart because they distort indicators and visually
+        // imply price activity that didn't happen. Crypto pairs (24/7) skip
+        // the filter — see `LooksLikeForexSymbol` in the engine for the same
+        // 6-alpha-char heuristic used by the worker-side weekend guards.
+        if (this.looksLikeForexSymbol(this.selectedSymbol())) {
+          data = data.filter((c) => !this.isForexWeekendClosed(new Date(c.timestamp)));
+        }
+
         this.candles.set(data);
         this.loading.set(false);
         this.buildChartMerge();
       });
+  }
+
+  /**
+   * Mirrors `ForexMarketHours.IsForexWeekendClosed` on the engine side.
+   * Window: Friday ≥ 22:00 UTC, all of Saturday, Sunday &lt; 22:00 UTC
+   * (NY close → Sydney open).
+   */
+  private isForexWeekendClosed(d: Date): boolean {
+    const day = d.getUTCDay();
+    const hour = d.getUTCHours();
+    if (day === 6) return true; // Saturday — full day
+    if (day === 0 && hour < 22) return true; // Sunday before 22:00 UTC
+    if (day === 5 && hour >= 22) return true; // Friday at/after 22:00 UTC
+    return false;
+  }
+
+  /** Heuristic: 6 alpha chars after stripping the `/` separator (EURUSD,
+   *  GBPUSD, USDJPY, …). Crypto symbols (BTCUSDT, 7+ chars) skip the filter. */
+  private looksLikeForexSymbol(symbol: string): boolean {
+    const stripped = symbol.replace(/\//g, '');
+    return /^[A-Za-z]{6}$/.test(stripped);
   }
 
   private startLivePricePolling() {
@@ -644,8 +712,18 @@ export class TradingChartComponent implements OnInit, OnDestroy {
       .subscribe((res: any) => {
         const price: LivePriceDto | null = res?.data ?? null;
         if (price?.bid) {
+          // Engine returns spread in raw price units; FX convention is pips.
+          // Convert at the source so the "0.0 sp" badge in the chart header
+          // shows pip values consistent with the rest of the page.
+          const sym = price.symbol ?? this.selectedSymbol();
+          const isJPY = (sym ?? '').includes('JPY');
+          const pipFactor = isJPY ? 100 : 10000;
+          const normalised: LivePriceDto = {
+            ...price,
+            spread: +(price.spread * pipFactor).toFixed(1),
+          };
           this.previousBid.set(this.livePrice()?.bid ?? 0);
-          this.livePrice.set(price);
+          this.livePrice.set(normalised);
         }
       });
   }
@@ -683,7 +761,76 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     // Show last 80 candles by default
     const zoomStart = Math.max(0, ((data.length - 80) / data.length) * 100);
 
-    this.chartMerge.set({
+    // Build the bid/ask markLine inline so it ships in the same merge as the
+    // candle data. Visual convention:
+    //   BID — solid green, label below the line (bid is the lower price).
+    //   ASK — dashed red,  label above the line (ask is the higher price).
+    const price = this.livePrice();
+    const precision = this.pricePrecision();
+    const fmt = (v: number) => v.toFixed(precision);
+    const markLineData: { yAxis: number; lineStyle: any; label: any }[] = [];
+    if (price?.bid && Number.isFinite(price.bid)) {
+      markLineData.push({
+        yAxis: price.bid,
+        lineStyle: { color: '#34C759', width: 1.2, type: 'solid' },
+        label: {
+          show: true,
+          position: 'insideEndBottom',
+          formatter: `BID ${fmt(price.bid)}`,
+          backgroundColor: '#34C759',
+          color: '#fff',
+          padding: [2, 6],
+          borderRadius: 3,
+          fontSize: 10,
+          fontWeight: 600,
+        },
+      });
+    }
+    if (price?.ask && Number.isFinite(price.ask)) {
+      markLineData.push({
+        yAxis: price.ask,
+        lineStyle: { color: '#FF3B30', width: 1.2, type: 'dashed' },
+        label: {
+          show: true,
+          position: 'insideEndTop',
+          formatter: `ASK ${fmt(price.ask)}`,
+          backgroundColor: '#FF3B30',
+          color: '#fff',
+          padding: [2, 6],
+          borderRadius: 3,
+          fontSize: 10,
+          fontWeight: 600,
+        },
+      });
+    }
+
+    // Fallback: when no live tick is available (e.g. EA isn't streaming),
+    // draw a single neutral line at the latest candle close so the chart
+    // always carries a price reference. Labelled "LAST (no feed)" so it
+    // can't be confused with real bid/ask. Real lines take over the moment
+    // the live-price endpoint starts returning data.
+    if (markLineData.length === 0) {
+      const last = data[data.length - 1];
+      if (last && Number.isFinite(last.close)) {
+        markLineData.push({
+          yAxis: last.close,
+          lineStyle: { color: '#8E8E93', width: 1, type: 'dashed' },
+          label: {
+            show: true,
+            position: 'insideEndTop',
+            formatter: `LAST ${fmt(last.close)} · no feed`,
+            backgroundColor: '#8E8E93',
+            color: '#fff',
+            padding: [2, 6],
+            borderRadius: 3,
+            fontSize: 10,
+            fontWeight: 600,
+          },
+        });
+      }
+    }
+
+    const merge: EChartsOption = {
       xAxis: [{ data: dates }, { data: dates }],
       yAxis: [
         {
@@ -693,19 +840,36 @@ export class TradingChartComponent implements OnInit, OnDestroy {
         },
         {},
       ],
-      dataZoom: [
-        { start: zoomStart, end: 100 },
-        { start: zoomStart, end: 100 },
-      ],
       series: [
-        { data: ohlc },
+        {
+          data: ohlc,
+          markLine: {
+            silent: true,
+            symbol: ['none', 'none'],
+            animation: false,
+            data: markLineData,
+          },
+        },
         { data: ma20 },
         { data: ma50 },
         { data: bbUpper },
         { data: bbLower },
         { data: this.showVolume() ? volumes : [] },
       ],
-    });
+    };
+
+    // Only emit dataZoom when the candle dataset actually changes — emitting
+    // it on every live-price tick would snap the chart back to the default
+    // 80-candle window and break manual pan/zoom.
+    if (data.length !== this.lastZoomCandleCount) {
+      merge.dataZoom = [
+        { start: zoomStart, end: 100 },
+        { start: zoomStart, end: 100 },
+      ];
+      this.lastZoomCandleCount = data.length;
+    }
+
+    this.chartMerge.set(merge);
   }
 
   private calcMA(data: number[], period: number): (number | null)[] {

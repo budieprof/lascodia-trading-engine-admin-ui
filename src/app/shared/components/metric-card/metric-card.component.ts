@@ -28,6 +28,10 @@ import { Component, input, computed, ChangeDetectionStrategy } from '@angular/co
   `,
   styles: [
     `
+      :host {
+        display: block;
+        height: 100%;
+      }
       .metric-card {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
@@ -35,6 +39,11 @@ import { Component, input, computed, ChangeDetectionStrategy } from '@angular/co
         padding: var(--card-padding);
         box-shadow: var(--shadow-sm);
         transition: all 0.2s ease;
+        /* Make every card the same height so values line up vertically across
+         * a row, even when grid sizing makes some cards taller than others. */
+        height: 100%;
+        display: flex;
+        flex-direction: column;
       }
 
       .metric-card:hover {
@@ -44,9 +53,13 @@ import { Component, input, computed, ChangeDetectionStrategy } from '@angular/co
 
       .metric-header {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         gap: var(--space-2);
         margin-bottom: var(--space-3);
+        /* Reserve two lines of label height so cards with one-line labels
+         * (e.g. "Reject rate") and two-line labels (e.g. "Avg slippage (pips)")
+         * push their values down to the same Y position. */
+        min-height: 2.6em;
       }
 
       .dot {
@@ -54,12 +67,16 @@ import { Component, input, computed, ChangeDetectionStrategy } from '@angular/co
         height: 8px;
         border-radius: 50%;
         flex-shrink: 0;
+        /* Keep the dot aligned with the first line of the label rather than
+         * the centre of the (now multi-line) header block. */
+        margin-top: 0.4em;
       }
 
       .metric-label {
         font-size: var(--text-sm);
         color: var(--text-secondary);
         font-weight: var(--font-medium);
+        line-height: 1.3;
       }
 
       .metric-value {

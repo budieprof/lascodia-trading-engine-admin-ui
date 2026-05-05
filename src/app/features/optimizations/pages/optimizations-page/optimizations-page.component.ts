@@ -1,8 +1,17 @@
-import { ChangeDetectionStrategy, Component, ViewChild, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ViewChild,
+  computed,
+  inject,
+  signal,
+  OnInit,
+} from '@angular/core';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { catchError, map, of, Observable } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
+import type { EChartsOption } from 'echarts';
 
 import { StrategyFeedbackService } from '@core/services/strategy-feedback.service';
 import { StrategiesService } from '@core/services/strategies.service';
@@ -20,6 +29,7 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
+import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import {
   FormFieldComponent,
   FormFieldControlDirective,
@@ -35,6 +45,7 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
     DataTableComponent,
     ConfirmDialogComponent,
     CardSkeletonComponent,
+    ChartCardComponent,
     ReactiveFormsModule,
     FormFieldComponent,
     FormFieldControlDirective,
@@ -140,13 +151,199 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
         </form>
       }
 
-      <app-data-table
-        #table
-        [columnDefs]="columns"
-        [fetchData]="fetchData"
-        [searchable]="true"
-        (rowClick)="select($event)"
-      />
+      <!-- 8-card KPI strip — fleet-wide optimization-run posture -->
+      <div class="op-kpis">
+        <div class="op-kpi">
+          <span class="kpi-label">Total runs</span>
+          <span class="kpi-value">{{ optStats().total }}</span>
+        </div>
+        <div class="op-kpi">
+          <span class="kpi-label">Running</span>
+          <span class="kpi-value info">{{ optStats().running }}</span>
+        </div>
+        <div class="op-kpi">
+          <span class="kpi-label">Completed</span>
+          <span class="kpi-value good">{{ optStats().completed }}</span>
+        </div>
+        <div class="op-kpi">
+          <span class="kpi-label">Abandoned</span>
+          <span
+            class="kpi-value"
+            [class.warn]="optStats().abandoned > 0"
+            [class.good]="optStats().abandoned === 0"
+          >
+            {{ optStats().abandoned }}
+          </span>
+        </div>
+        <div class="op-kpi">
+          <span class="kpi-label">Approved</span>
+          <span class="kpi-value good">{{ optStats().approved }}</span>
+        </div>
+        <div class="op-kpi">
+          <span class="kpi-label">Avg iterations</span>
+          <span class="kpi-value">
+            {{ optStats().avgIterations !== null ? optStats().avgIterations!.toFixed(1) : '—' }}
+          </span>
+        </div>
+        <div class="op-kpi">
+          <span class="kpi-label">Avg lift</span>
+          <span
+            class="kpi-value"
+            [class.good]="optStats().avgLift !== null && optStats().avgLift! > 0"
+            [class.bad]="optStats().avgLift !== null && optStats().avgLift! < 0"
+          >
+            @if (optStats().avgLift !== null) {
+              {{ optStats().avgLift! >= 0 ? '+' : '' }}{{ optStats().avgLift! | number: '1.3-3' }}
+            } @else {
+              —
+            }
+          </span>
+        </div>
+        <div class="op-kpi">
+          <span class="kpi-label">Strategies covered</span>
+          <span class="kpi-value">{{ optStats().strategiesCovered }}</span>
+        </div>
+      </div>
+
+      <!-- 3-col chart row -->
+      <div class="op-charts">
+        <app-chart-card
+          title="Status distribution"
+          subtitle="Run lifecycle states across the fleet"
+          [options]="optStatusDonutOptions()"
+          height="240px"
+        />
+        <app-chart-card
+          title="By trigger type"
+          subtitle="Manual · Scheduled · AutoDegrading"
+          [options]="optByTriggerOptions()"
+          height="240px"
+        />
+        <app-chart-card
+          title="Activity (last 14 days)"
+          subtitle="Daily optimization-run starts"
+          [options]="optActivityOptions()"
+          height="240px"
+        />
+      </div>
+
+      <!-- 2-col tables: biggest lifts + per-strategy breakdown -->
+      <div class="op-board-row">
+        <section class="op-board">
+          <header class="op-board-head">
+            <h3>Biggest health-score lifts</h3>
+            <span class="muted">Completed runs where the search beat the baseline the most</span>
+          </header>
+          @if (topLifts().length > 0) {
+            <table class="op-board-table">
+              <thead>
+                <tr>
+                  <th>Run</th>
+                  <th class="num">Strategy</th>
+                  <th class="num">Iterations</th>
+                  <th class="num">Baseline</th>
+                  <th class="num">Best</th>
+                  <th class="num">Δ</th>
+                  <th>Trigger</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (r of topLifts(); track r.id) {
+                  <tr (click)="select(r)">
+                    <td class="mono">#{{ r.id }}</td>
+                    <td class="num mono">#{{ r.strategyId }}</td>
+                    <td class="num mono">{{ r.iterations }}</td>
+                    <td class="num mono">
+                      {{
+                        r.baselineHealthScore !== null
+                          ? (r.baselineHealthScore | number: '1.3-3')
+                          : '—'
+                      }}
+                    </td>
+                    <td class="num mono">
+                      {{ r.bestHealthScore !== null ? (r.bestHealthScore | number: '1.3-3') : '—' }}
+                    </td>
+                    <td
+                      class="num mono"
+                      [class.profit]="(r.bestHealthScore ?? 0) > (r.baselineHealthScore ?? 0)"
+                      [class.loss]="(r.bestHealthScore ?? 0) < (r.baselineHealthScore ?? 0)"
+                    >
+                      @if (r.bestHealthScore !== null && r.baselineHealthScore !== null) {
+                        {{ r.bestHealthScore - r.baselineHealthScore >= 0 ? '+' : ''
+                        }}{{ r.bestHealthScore - r.baselineHealthScore | number: '1.3-3' }}
+                      } @else {
+                        —
+                      }
+                    </td>
+                    <td class="mono">{{ r.triggerType }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          } @else {
+            <p class="muted" style="padding: var(--space-4)">
+              No completed runs with measurable lift yet.
+            </p>
+          }
+        </section>
+
+        <section class="op-board">
+          <header class="op-board-head">
+            <h3>Per-strategy breakdown</h3>
+            <span class="muted">Runs and outcomes grouped by strategy</span>
+          </header>
+          @if (perStrategyBreakdown().length > 0) {
+            <table class="op-board-table">
+              <thead>
+                <tr>
+                  <th>Strategy</th>
+                  <th class="num">Runs</th>
+                  <th class="num">Completed</th>
+                  <th class="num">Abandoned</th>
+                  <th class="num">Avg iter</th>
+                  <th class="num">Best lift</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of perStrategyBreakdown(); track row.strategyId) {
+                  <tr>
+                    <td class="mono">#{{ row.strategyId }}</td>
+                    <td class="num mono">{{ row.runs }}</td>
+                    <td class="num mono profit">{{ row.completed }}</td>
+                    <td class="num mono" [class.warn]="row.abandoned > 0">{{ row.abandoned }}</td>
+                    <td class="num mono">{{ row.avgIterations.toFixed(1) }}</td>
+                    <td
+                      class="num mono"
+                      [class.profit]="row.bestLift !== null && row.bestLift > 0"
+                      [class.loss]="row.bestLift !== null && row.bestLift < 0"
+                    >
+                      @if (row.bestLift !== null) {
+                        {{ row.bestLift >= 0 ? '+' : '' }}{{ row.bestLift | number: '1.3-3' }}
+                      } @else {
+                        —
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          }
+        </section>
+      </div>
+
+      <section class="op-board">
+        <header class="op-board-head">
+          <h3>All optimization runs</h3>
+          <span class="muted">Server-paged — click any row for params + lift detail</span>
+        </header>
+        <app-data-table
+          #table
+          [columnDefs]="columns"
+          [fetchData]="fetchData"
+          [searchable]="true"
+          (rowClick)="select($event)"
+        />
+      </section>
 
       @if (selected()) {
         @if (selected(); as r) {
@@ -411,6 +608,152 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
         color: var(--text-tertiary);
       }
 
+      /* Optimizations density additions */
+      .op-kpis {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        gap: var(--space-2);
+      }
+      @media (max-width: 1400px) {
+        .op-kpis {
+          grid-template-columns: repeat(4, 1fr);
+        }
+      }
+      @media (max-width: 720px) {
+        .op-kpis {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      .op-kpi {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .op-kpi .kpi-label {
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .op-kpi .kpi-value {
+        font-size: var(--text-xl);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+      }
+      .op-kpi .kpi-value.good {
+        color: var(--profit);
+      }
+      .op-kpi .kpi-value.bad {
+        color: var(--loss);
+      }
+      .op-kpi .kpi-value.warn {
+        color: #c93400;
+      }
+      .op-kpi .kpi-value.info {
+        color: var(--accent);
+      }
+
+      .op-charts {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1.4fr;
+        gap: var(--space-3);
+      }
+      @media (max-width: 1100px) {
+        .op-charts {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .op-board-row {
+        display: grid;
+        grid-template-columns: 1.5fr 1fr;
+        gap: var(--space-3);
+      }
+      @media (max-width: 1100px) {
+        .op-board-row {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .op-board {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+      }
+      .op-board-head {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .op-board-head h3 {
+        margin: 0;
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .op-board-head .muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+      .op-board-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .op-board-table th,
+      .op-board-table td {
+        padding: 8px var(--space-3);
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        font-size: var(--text-xs);
+      }
+      .op-board-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+      .op-board-table tbody tr {
+        cursor: pointer;
+        transition: background 0.1s;
+      }
+      .op-board-table tbody tr:hover {
+        background: var(--bg-tertiary);
+      }
+      .op-board-table th {
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .op-board-table th.num,
+      .op-board-table td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .op-board-table .mono {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+      }
+      .op-board-table .profit {
+        color: var(--profit);
+      }
+      .op-board-table .loss {
+        color: var(--loss);
+      }
+      .op-board-table .warn {
+        color: #c93400;
+      }
+      .muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+
       .detail {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
@@ -528,7 +871,7 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
     `,
   ],
 })
-export class OptimizationsPageComponent {
+export class OptimizationsPageComponent implements OnInit {
   private readonly service = inject(StrategyFeedbackService);
   private readonly strategiesService = inject(StrategiesService);
   private readonly notifications = inject(NotificationService);
@@ -546,6 +889,245 @@ export class OptimizationsPageComponent {
   readonly showReject = signal(false);
   readonly dryRun = signal<OptimizationDryRunDto | null>(null);
   readonly dryRunLoading = signal(false);
+
+  // Analytics sample — drives KPI strip, charts, breakdown tables. Loaded
+  // via probe-and-fetch so totals reflect the whole DB; capped at 5000 rows.
+  readonly optsSample = signal<OptimizationRunDto[]>([]);
+
+  optStats = computed(() => {
+    const all = this.optsSample();
+    if (all.length === 0) {
+      return {
+        total: 0,
+        running: 0,
+        completed: 0,
+        abandoned: 0,
+        approved: 0,
+        avgIterations: null as number | null,
+        avgLift: null as number | null,
+        strategiesCovered: 0,
+      };
+    }
+    let running = 0;
+    let completed = 0;
+    let abandoned = 0;
+    let approved = 0;
+    let iterSum = 0;
+    let liftSum = 0;
+    let liftCount = 0;
+    const strategies = new Set<number>();
+    for (const r of all) {
+      const status = String(r.status);
+      if (status === 'Running') running++;
+      else if (status === 'Completed') completed++;
+      else if (status === 'Abandoned') abandoned++;
+      if (r.approvedAt) approved++;
+      iterSum += r.iterations ?? 0;
+      strategies.add(r.strategyId);
+      if (r.bestHealthScore != null && r.baselineHealthScore != null) {
+        liftSum += r.bestHealthScore - r.baselineHealthScore;
+        liftCount++;
+      }
+    }
+    return {
+      total: all.length,
+      running,
+      completed,
+      abandoned,
+      approved,
+      avgIterations: +(iterSum / all.length).toFixed(1),
+      avgLift: liftCount > 0 ? +(liftSum / liftCount).toFixed(3) : null,
+      strategiesCovered: strategies.size,
+    };
+  });
+
+  optStatusDonutOptions = computed<EChartsOption>(() => {
+    const counts: Record<string, number> = {};
+    for (const r of this.optsSample()) {
+      const k = String(r.status);
+      counts[k] = (counts[k] ?? 0) + 1;
+    }
+    if (Object.keys(counts).length === 0) return {};
+    const colors: Record<string, string> = {
+      Running: '#0071E3',
+      Completed: '#34C759',
+      Abandoned: '#FF9500',
+      Failed: '#FF3B30',
+    };
+    return {
+      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
+      series: [
+        {
+          type: 'pie',
+          radius: ['45%', '70%'],
+          center: ['50%', '45%'],
+          avoidLabelOverlap: true,
+          label: { show: false },
+          data: Object.entries(counts).map(([name, value]) => ({
+            name,
+            value,
+            itemStyle: { color: colors[name] ?? '#8E8E93' },
+          })),
+        },
+      ],
+    };
+  });
+
+  optByTriggerOptions = computed<EChartsOption>(() => {
+    const counts: Record<string, number> = {};
+    for (const r of this.optsSample()) {
+      const k = String(r.triggerType ?? 'unknown');
+      counts[k] = (counts[k] ?? 0) + 1;
+    }
+    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    if (entries.length === 0) return {};
+    return {
+      grid: { top: 10, right: 30, bottom: 30, left: 100 },
+      xAxis: {
+        type: 'value',
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+      },
+      yAxis: {
+        type: 'category',
+        data: entries.map(([k]) => k).reverse(),
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: entries
+            .map(([, v]) => ({
+              value: v,
+              itemStyle: { color: '#AF52DE', borderRadius: [0, 4, 4, 0] },
+            }))
+            .reverse(),
+          barWidth: 14,
+          label: { show: true, position: 'right', fontSize: 10, color: '#6E6E73' },
+        },
+      ],
+    };
+  });
+
+  optActivityOptions = computed<EChartsOption>(() => {
+    const buckets: Record<string, number> = {};
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      buckets[d.toISOString().slice(0, 10)] = 0;
+    }
+    for (const r of this.optsSample()) {
+      if (!r.startedAt) continue;
+      const day = r.startedAt.slice(0, 10);
+      if (day in buckets) buckets[day]++;
+    }
+    const dates = Object.keys(buckets);
+    const counts = Object.values(buckets);
+    if (counts.every((c) => c === 0)) return {};
+    return {
+      tooltip: { trigger: 'axis' },
+      grid: { top: 10, right: 20, bottom: 30, left: 40 },
+      xAxis: {
+        type: 'category',
+        data: dates.map((d) => d.slice(5)),
+        axisLabel: { fontSize: 9, color: '#6E6E73', rotate: 35 },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: counts.map((c) => ({
+            value: c,
+            itemStyle: { color: '#5AC8FA', borderRadius: [4, 4, 0, 0] },
+          })),
+          barWidth: '60%',
+        },
+      ],
+    };
+  });
+
+  topLifts = computed(() =>
+    [...this.optsSample()]
+      .filter((r) => r.bestHealthScore != null && r.baselineHealthScore != null)
+      .sort(
+        (a, b) =>
+          (b.bestHealthScore ?? 0) -
+          (b.baselineHealthScore ?? 0) -
+          ((a.bestHealthScore ?? 0) - (a.baselineHealthScore ?? 0)),
+      )
+      .slice(0, 8),
+  );
+
+  perStrategyBreakdown = computed(() => {
+    type Row = {
+      strategyId: number;
+      runs: number;
+      completed: number;
+      abandoned: number;
+      avgIterations: number;
+      bestLift: number | null;
+      _iterSum: number;
+    };
+    const groups: Record<number, Row> = {};
+    for (const r of this.optsSample()) {
+      if (!groups[r.strategyId])
+        groups[r.strategyId] = {
+          strategyId: r.strategyId,
+          runs: 0,
+          completed: 0,
+          abandoned: 0,
+          avgIterations: 0,
+          bestLift: null,
+          _iterSum: 0,
+        };
+      const g = groups[r.strategyId];
+      g.runs++;
+      g._iterSum += r.iterations ?? 0;
+      if (String(r.status) === 'Completed') g.completed++;
+      else if (String(r.status) === 'Abandoned') g.abandoned++;
+      if (r.bestHealthScore != null && r.baselineHealthScore != null) {
+        const lift = r.bestHealthScore - r.baselineHealthScore;
+        if (g.bestLift == null || lift > g.bestLift) g.bestLift = lift;
+      }
+    }
+    return Object.values(groups)
+      .map((g) => ({ ...g, avgIterations: g.runs > 0 ? g._iterSum / g.runs : 0 }))
+      .sort((a, b) => b.runs - a.runs);
+  });
+
+  ngOnInit(): void {
+    this.loadOptimizationsAnalyticsSample();
+  }
+
+  private loadOptimizationsAnalyticsSample(): void {
+    this.service
+      .listOptimizationRuns({ currentPage: 1, itemCountPerPage: 1, filter: null })
+      .pipe(catchError(() => of(null)))
+      .subscribe((probe) => {
+        const total = probe?.data?.pager?.totalItemCount ?? 0;
+        if (total === 0) {
+          this.optsSample.set([]);
+          return;
+        }
+        this.service
+          .listOptimizationRuns({
+            currentPage: 1,
+            itemCountPerPage: Math.min(total, 5000),
+            filter: null,
+          })
+          .pipe(catchError(() => of(null)))
+          .subscribe((full) => {
+            this.optsSample.set(full?.data?.data ?? []);
+          });
+      });
+  }
 
   readonly triggerForm = this.fb.nonNullable.group({
     strategyId: [null as number | null, Validators.required],

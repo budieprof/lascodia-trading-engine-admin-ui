@@ -45,6 +45,58 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         subtitle="Allocations, throttle posture, and multiple-testing-tax across the active set"
       />
 
+      <!-- 8-card KPI strip — combined allocation + FWER posture -->
+      <div class="pf-kpis">
+        <div class="pf-kpi">
+          <span class="kpi-label">Covered strategies</span>
+          <span class="kpi-value">{{ portfolioKpis().covered }}</span>
+        </div>
+        <div class="pf-kpi">
+          <span class="kpi-label">Throttled</span>
+          <span
+            class="kpi-value"
+            [class.warn]="portfolioKpis().throttled > 0"
+            [class.good]="portfolioKpis().throttled === 0 && portfolioKpis().covered > 0"
+          >
+            {{ portfolioKpis().throttled }}
+          </span>
+        </div>
+        <div class="pf-kpi">
+          <span class="kpi-label">Target Sharpe</span>
+          <span class="kpi-value">{{ portfolioKpis().targetSharpe.toFixed(2) }}</span>
+        </div>
+        <div class="pf-kpi">
+          <span class="kpi-label">Avg recent Sharpe</span>
+          <span
+            class="kpi-value"
+            [class.good]="portfolioKpis().avgSharpe > 1"
+            [class.bad]="portfolioKpis().avgSharpe < 0"
+          >
+            {{ portfolioKpis().avgSharpe.toFixed(2) }}
+          </span>
+        </div>
+        <div class="pf-kpi">
+          <span class="kpi-label">Active strategies</span>
+          <span class="kpi-value">{{ portfolioKpis().fwerActive }}</span>
+        </div>
+        <div class="pf-kpi">
+          <span class="kpi-label">FWER eligible</span>
+          <span class="kpi-value">{{ portfolioKpis().fwerEligible }}</span>
+        </div>
+        <div class="pf-kpi">
+          <span class="kpi-label">Bonferroni passes</span>
+          <span class="kpi-value" [class.good]="portfolioKpis().bonf > 0">
+            {{ portfolioKpis().bonf }}
+          </span>
+        </div>
+        <div class="pf-kpi">
+          <span class="kpi-label">BH-FDR passes</span>
+          <span class="kpi-value" [class.good]="portfolioKpis().bh > 0">
+            {{ portfolioKpis().bh }}
+          </span>
+        </div>
+      </div>
+
       <!-- Allocations -->
       <section class="section">
         <header class="section-head">
@@ -52,8 +104,12 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           @if (weights(); as w) {
             <span class="muted small">
               {{ w.coveredStrategies }} strategies · {{ w.throttledStrategies }} throttled · target
-              Sharpe {{ w.targetSharpe.toFixed(2) }} · floor {{ (w.minWeight * 100).toFixed(0) }}% ·
-              updated {{ w.latestComputedAt | relativeTime }}
+              Sharpe {{ w.targetSharpe.toFixed(2) }} · floor {{ (w.minWeight * 100).toFixed(0) }}%
+              @if (w.latestComputedAt) {
+                · updated {{ w.latestComputedAt | relativeTime }}
+              } @else {
+                · never run
+              }
             </span>
           }
         </header>
@@ -90,7 +146,13 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                           <td class="num" [attr.data-throttled]="e.weight < 1 ? '1' : null">
                             {{ (e.weight * 100).toFixed(0) }}%
                           </td>
-                          <td class="num">{{ e.recentSharpe.toFixed(2) }}</td>
+                          <td
+                            class="num"
+                            [class.profit]="e.recentSharpe > 1"
+                            [class.loss]="e.recentSharpe < 0"
+                          >
+                            {{ e.recentSharpe.toFixed(2) }}
+                          </td>
                           <td class="num">{{ e.observationCount }}</td>
                         </tr>
                       }
@@ -98,6 +160,22 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                   </table>
                 </div>
               </div>
+            </div>
+
+            <!-- 2-col below: weight bars + sharpe scatter -->
+            <div class="pf-charts">
+              <app-chart-card
+                title="Weight bars"
+                subtitle="Sorted high → low · throttled bars rendered amber"
+                [options]="weightBarOptions()"
+                height="280px"
+              />
+              <app-chart-card
+                title="Sharpe vs observations"
+                subtitle="Dots in the lower-right are throttled-eligible (low Sharpe, high N)"
+                [options]="sharpeScatterOptions()"
+                height="280px"
+              />
             </div>
           } @else {
             <app-empty-state
@@ -151,27 +229,56 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             </div>
           </div>
 
+          <!-- 2-col charts: survival comparison + class distribution -->
+          <div class="pf-charts">
+            <app-chart-card
+              title="Survival comparison"
+              subtitle="Active → Eligible → Bonferroni → BH-FDR funnel"
+              [options]="fwerFunnelOptions()"
+              height="240px"
+            />
+            <app-chart-card
+              title="Trials by hypothesis class"
+              subtitle="How the testing tax is distributed across classes"
+              [options]="fwerClassDonutOptions()"
+              height="240px"
+            />
+          </div>
+
           @if (f.byHypothesisClass.length > 0) {
-            <table class="fwer-table">
-              <thead>
-                <tr>
-                  <th>Hypothesis class</th>
-                  <th class="num">Active</th>
-                  <th class="num">Trials</th>
-                  <th class="num">Bonferroni survivors</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (row of f.byHypothesisClass; track row.hypothesisClass) {
+            <section class="drift-card">
+              <h4 class="card-title">Per-hypothesis-class breakdown</h4>
+              <table class="fwer-table">
+                <thead>
                   <tr>
-                    <td>{{ row.hypothesisClass }}</td>
-                    <td class="num">{{ row.activeStrategies }}</td>
-                    <td class="num">{{ row.trialsInWindow }}</td>
-                    <td class="num">{{ row.bonferroniSurvivors }}</td>
+                    <th>Hypothesis class</th>
+                    <th class="num">Active</th>
+                    <th class="num">Trials</th>
+                    <th class="num">Bonferroni survivors</th>
+                    <th class="num">Survival rate</th>
                   </tr>
-                }
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  @for (row of f.byHypothesisClass; track row.hypothesisClass) {
+                    <tr>
+                      <td>{{ row.hypothesisClass }}</td>
+                      <td class="num">{{ row.activeStrategies }}</td>
+                      <td class="num">{{ row.trialsInWindow }}</td>
+                      <td class="num" [class.profit]="row.bonferroniSurvivors > 0">
+                        {{ row.bonferroniSurvivors }}
+                      </td>
+                      <td class="num">
+                        @if (row.activeStrategies > 0) {
+                          {{ ((row.bonferroniSurvivors / row.activeStrategies) * 100).toFixed(1) }}%
+                        } @else {
+                          —
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </section>
           }
         } @else {
           <app-empty-state
@@ -307,6 +414,79 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         color: var(--text-primary);
         font-variant-numeric: tabular-nums;
       }
+
+      /* Portfolio density additions */
+      .pf-kpis {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        gap: var(--space-2);
+      }
+      @media (max-width: 1400px) {
+        .pf-kpis {
+          grid-template-columns: repeat(4, 1fr);
+        }
+      }
+      @media (max-width: 720px) {
+        .pf-kpis {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      .pf-kpi {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 4px;
+        min-height: 72px;
+      }
+      .pf-kpi .kpi-label {
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .pf-kpi .kpi-value {
+        font-size: var(--text-xl);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+      }
+      .pf-kpi .kpi-value.good {
+        color: var(--profit);
+      }
+      .pf-kpi .kpi-value.bad {
+        color: var(--loss);
+      }
+      .pf-kpi .kpi-value.warn {
+        color: #c93400;
+      }
+
+      .pf-charts {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-3);
+      }
+      @media (max-width: 1100px) {
+        .pf-charts {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .drift-table .profit,
+      .fwer-table .profit {
+        color: var(--profit);
+      }
+      .drift-table .loss,
+      .fwer-table .loss {
+        color: var(--loss);
+      }
     `,
   ],
 })
@@ -339,6 +519,173 @@ export class StrategyPortfolioPageComponent {
           data: w.entries.map((e) => ({
             name: `${e.strategyName} (${e.symbol})`,
             value: +(e.weight * 100).toFixed(2),
+          })),
+        },
+      ],
+    };
+  });
+
+  // ── Combined KPI roll-ups for the strip at the top ────────────────────
+  readonly portfolioKpis = computed(() => {
+    const w = this.weights();
+    const f = this.fwer();
+    const sharpes =
+      w?.entries.filter((e) => Number.isFinite(e.recentSharpe)).map((e) => e.recentSharpe) ?? [];
+    return {
+      covered: w?.coveredStrategies ?? 0,
+      throttled: w?.throttledStrategies ?? 0,
+      targetSharpe: w?.targetSharpe ?? 0,
+      avgSharpe: sharpes.length > 0 ? sharpes.reduce((s, v) => s + v, 0) / sharpes.length : 0,
+      fwerActive: f?.totalActiveStrategies ?? 0,
+      fwerEligible: f?.eligibleStrategies ?? 0,
+      bonf: f?.bonferroniSurvivors ?? 0,
+      bh: f?.benjaminiHochbergSurvivors ?? 0,
+    };
+  });
+
+  // ── Allocation charts ────────────────────────────────────────────────
+  readonly weightBarOptions = computed<EChartsOption>(() => {
+    const w = this.weights();
+    if (!w || w.entries.length === 0) return {};
+    const sorted = [...w.entries].sort((a, b) => b.weight - a.weight);
+    return {
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      grid: { top: 10, right: 30, bottom: 30, left: 140 },
+      xAxis: {
+        type: 'value',
+        max: 100,
+        axisLabel: { formatter: '{value}%', fontSize: 10, color: '#6E6E73' },
+        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+      },
+      yAxis: {
+        type: 'category',
+        data: sorted.map((e) => e.strategyName).reverse(),
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: sorted
+            .map((e) => ({
+              value: +(e.weight * 100).toFixed(1),
+              itemStyle: {
+                // Throttled (weight < 1) bars are amber so the eye lands on
+                // sub-cycle allocations first.
+                color: e.weight < 1 ? '#FF9500' : '#0071E3',
+                borderRadius: [0, 4, 4, 0],
+              },
+            }))
+            .reverse(),
+          barWidth: 14,
+          label: {
+            show: true,
+            position: 'right',
+            fontSize: 10,
+            color: '#6E6E73',
+            formatter: '{c}%',
+          },
+        },
+      ],
+    };
+  });
+
+  readonly sharpeScatterOptions = computed<EChartsOption>(() => {
+    const w = this.weights();
+    if (!w || w.entries.length === 0) return {};
+    return {
+      tooltip: {
+        trigger: 'item',
+        formatter: (p: any) =>
+          `${p.data.name}<br/>Sharpe: ${p.value[0]}<br/>Observations: ${p.value[1]}<br/>Weight: ${p.value[2]}%`,
+      },
+      grid: { top: 20, right: 30, bottom: 50, left: 50 },
+      xAxis: {
+        type: 'value',
+        name: 'Recent Sharpe',
+        nameLocation: 'middle',
+        nameGap: 28,
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+      },
+      yAxis: {
+        type: 'value',
+        name: 'Observations',
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+      },
+      series: [
+        {
+          type: 'scatter',
+          symbolSize: (val: any) => 8 + (val[2] ?? 0) / 10,
+          data: w.entries.map((e) => ({
+            name: e.strategyName,
+            value: [+e.recentSharpe.toFixed(3), e.observationCount, +(e.weight * 100).toFixed(1)],
+            itemStyle: {
+              color: e.weight < 1 ? '#FF9500' : '#0071E3',
+              opacity: 0.8,
+            },
+          })),
+        },
+      ],
+    };
+  });
+
+  // ── FWER charts ──────────────────────────────────────────────────────
+  readonly fwerFunnelOptions = computed<EChartsOption>(() => {
+    const f = this.fwer();
+    if (!f) return {};
+    const stages = [
+      { name: 'Active', value: f.totalActiveStrategies, color: '#0071E3' },
+      { name: 'Eligible', value: f.eligibleStrategies, color: '#5AC8FA' },
+      { name: 'Bonferroni', value: f.bonferroniSurvivors, color: '#34C759' },
+      { name: 'BH-FDR', value: f.benjaminiHochbergSurvivors, color: '#AF52DE' },
+    ];
+    return {
+      tooltip: { trigger: 'axis' },
+      grid: { top: 10, right: 30, bottom: 30, left: 50 },
+      xAxis: {
+        type: 'category',
+        data: stages.map((s) => s.name),
+        axisLabel: { fontSize: 11, color: '#6E6E73' },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: stages.map((s) => ({
+            value: s.value,
+            itemStyle: { color: s.color, borderRadius: [4, 4, 0, 0] },
+          })),
+          barWidth: '50%',
+          label: { show: true, position: 'top', fontSize: 11, color: '#6E6E73' },
+        },
+      ],
+    };
+  });
+
+  readonly fwerClassDonutOptions = computed<EChartsOption>(() => {
+    const f = this.fwer();
+    if (!f || f.byHypothesisClass.length === 0) return {};
+    const palette = ['#0071E3', '#34C759', '#FF9500', '#AF52DE', '#5AC8FA', '#FF3B30'];
+    return {
+      tooltip: { trigger: 'item', formatter: '{b}: {c} trials ({d}%)' },
+      legend: { bottom: 0, type: 'scroll', textStyle: { fontSize: 10, color: '#6E6E73' } },
+      series: [
+        {
+          type: 'pie',
+          radius: ['45%', '70%'],
+          center: ['50%', '45%'],
+          avoidLabelOverlap: true,
+          itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+          label: { show: false },
+          data: f.byHypothesisClass.map((row, i) => ({
+            name: row.hypothesisClass,
+            value: row.trialsInWindow,
+            itemStyle: { color: palette[i % palette.length] },
           })),
         },
       ],

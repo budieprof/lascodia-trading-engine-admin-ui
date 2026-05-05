@@ -502,10 +502,18 @@ export class DataTableComponent<T> implements OnInit, OnDestroy {
     // exposes that property name, and unknown properties are tolerated by the
     // server-side Newtonsoft deserialization in `GetFilter<T>()`.
     const term = this.searchTerm();
+    // Sort is sent to the server on every refetch — ag-grid's onSortChanged
+    // already calls loadData(), but until we forward sortBy/sortDirection the
+    // server returns its default order and ag-grid only sorts the current
+    // page in memory. Server-side handler safelists the column name.
+    const sortBy = this.sortBy();
+    const sortDir = this.sortDirection();
     const params: PagerRequest = {
       currentPage: this.currentPage(),
       itemCountPerPage: this.pageSize(),
       filter: term ? { search: term } : null,
+      sortBy: sortBy,
+      sortDirection: sortDir === 'asc' || sortDir === 'desc' ? sortDir : undefined,
     };
 
     this.fetchData()(params)

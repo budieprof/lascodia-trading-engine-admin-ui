@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { catchError, map, of } from 'rxjs';
+import { catchError, map, of, switchMap } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 import type { ColDef } from 'ag-grid-community';
 
@@ -16,6 +16,7 @@ import { FeatureFlagsService } from '@core/feature-flags/feature-flags.service';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { GaugeComponent } from '@shared/components/gauge/gauge.component';
+import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
@@ -42,6 +43,7 @@ const MODE_COLOR: Record<RecoveryMode, string> = {
     FormsModule,
     PageHeaderComponent,
     GaugeComponent,
+    MetricCardComponent,
     CardSkeletonComponent,
     EmptyStateComponent,
     TabsComponent,
@@ -103,6 +105,155 @@ const MODE_COLOR: Record<RecoveryMode, string> = {
                 </div>
               </div>
             </div>
+
+            <!-- 8-card KPI strip — derived from the analytics window -->
+            <div class="kpis">
+              <app-metric-card
+                label="Current DD %"
+                [value]="s.drawdownPct"
+                format="percent"
+                [dotColor]="
+                  s.drawdownPct < 5 ? '#34C759' : s.drawdownPct < 10 ? '#FF9500' : '#FF3B30'
+                "
+              />
+              <app-metric-card
+                label="Drawdown amount"
+                [value]="drawdownAmount()"
+                format="currency"
+                [dotColor]="drawdownAmount() < 0 ? '#FF3B30' : '#34C759'"
+              />
+              <app-metric-card
+                label="Max DD 24h"
+                [value]="maxDd24h()"
+                format="percent"
+                [dotColor]="maxDd24h() < 5 ? '#34C759' : maxDd24h() < 10 ? '#FF9500' : '#FF3B30'"
+              />
+              <app-metric-card
+                label="Max DD 7d"
+                [value]="maxDd7d()"
+                format="percent"
+                [dotColor]="maxDd7d() < 5 ? '#34C759' : maxDd7d() < 10 ? '#FF9500' : '#FF3B30'"
+              />
+              <app-metric-card
+                label="Days since peak"
+                [value]="daysSincePeak()"
+                format="number"
+                [dotColor]="daysSincePeak() === 0 ? '#34C759' : '#FF9500'"
+              />
+              <app-metric-card
+                label="Time in {{ s.recoveryMode }}"
+                [value]="timeInCurrentModeHours()"
+                format="number"
+                [dotColor]="modeColorFor(s.recoveryMode)"
+              />
+              <app-metric-card
+                label="Mode transitions 7d"
+                [value]="modeTransitions().length"
+                format="number"
+                [dotColor]="modeTransitions().length > 5 ? '#FF9500' : '#34C759'"
+              />
+              <app-metric-card
+                label="Snapshots in window"
+                [value]="analyticsRows().length"
+                format="number"
+                dotColor="#0071E3"
+              />
+            </div>
+
+            <!-- 2-col chart row: drawdown sparkline (24h) + mode breakdown (7d) -->
+            <div class="chart-row">
+              <app-chart-card
+                title="Drawdown — last 24h"
+                subtitle="Live ticker — gauge view, including peak markers"
+                [options]="liveSparklineOptions()"
+                height="220px"
+              />
+              <app-chart-card
+                title="Mode dwell time — last 7d"
+                subtitle="How long the engine spent in each recovery mode"
+                [options]="modeBreakdownDonutOptions()"
+                height="220px"
+              />
+            </div>
+
+            <!-- Threshold reference + recent mode transitions -->
+            <div class="info-row">
+              <section class="threshold-card">
+                <header class="card-head">
+                  <h3>Recovery thresholds</h3>
+                  <span class="muted">When does the engine throttle back?</span>
+                </header>
+                <ul class="threshold-list">
+                  <li class="t-row" [class.active]="s.recoveryMode === 'Normal'">
+                    <span class="t-dot" style="background:#34C759"></span>
+                    <span class="t-label">Normal</span>
+                    <span class="t-range">DD &lt; 5%</span>
+                    <span class="t-desc">Full size · all strategies trading</span>
+                  </li>
+                  <li class="t-row" [class.active]="s.recoveryMode === 'Reduced'">
+                    <span class="t-dot" style="background:#FF9500"></span>
+                    <span class="t-label">Reduced</span>
+                    <span class="t-range">DD 5–10%</span>
+                    <span class="t-desc">Position sizes scaled down · risk controls tighten</span>
+                  </li>
+                  <li class="t-row" [class.active]="s.recoveryMode === 'Halted'">
+                    <span class="t-dot" style="background:#FF3B30"></span>
+                    <span class="t-label">Halted</span>
+                    <span class="t-range">DD ≥ 10%</span>
+                    <span class="t-desc">No new positions · existing positions managed</span>
+                  </li>
+                </ul>
+              </section>
+
+              <section class="trans-card">
+                <header class="card-head">
+                  <h3>Recent mode transitions</h3>
+                  <span class="muted"
+                    >{{ modeTransitions().length }} transitions in the window</span
+                  >
+                </header>
+                @if (modeTransitions().length > 0) {
+                  <div class="trans-scroll">
+                    <table class="trans-table">
+                      <thead>
+                        <tr>
+                          <th>When</th>
+                          <th>From</th>
+                          <th></th>
+                          <th>To</th>
+                          <th class="num">DD %</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (t of modeTransitions().slice().reverse().slice(0, 12); track t.at) {
+                          <tr>
+                            <td class="mono muted">{{ t.at | date: 'MMM d, HH:mm' }}</td>
+                            <td>
+                              <span class="mode-pill" [attr.data-mode]="t.from">{{ t.from }}</span>
+                            </td>
+                            <td class="muted">→</td>
+                            <td>
+                              <span class="mode-pill" [attr.data-mode]="t.to">{{ t.to }}</span>
+                            </td>
+                            <td
+                              class="num mono"
+                              [class.warn]="t.drawdownPct >= 5 && t.drawdownPct < 10"
+                              [class.bad]="t.drawdownPct >= 10"
+                            >
+                              {{ t.drawdownPct | number: '1.2-2' }}%
+                            </td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                } @else {
+                  <span class="empty good">
+                    No mode transitions in the window — engine stayed in {{ s.recoveryMode }}.
+                  </span>
+                }
+              </section>
+            </div>
           }
         } @else {
           <app-empty-state
@@ -125,6 +276,50 @@ const MODE_COLOR: Record<RecoveryMode, string> = {
           }
         </div>
 
+        <!-- 6-card KPI strip computed from the loaded history page -->
+        @if (historySeries().length > 0) {
+          <div class="kpis kpis-6">
+            <app-metric-card
+              label="Snapshots loaded"
+              [value]="historySeries().length"
+              format="number"
+              dotColor="#0071E3"
+            />
+            <app-metric-card
+              label="Max DD in page"
+              [value]="historyMaxDd()"
+              format="percent"
+              [dotColor]="
+                historyMaxDd() < 5 ? '#34C759' : historyMaxDd() < 10 ? '#FF9500' : '#FF3B30'
+              "
+            />
+            <app-metric-card
+              label="Avg DD in page"
+              [value]="historyAvgDd()"
+              format="percent"
+              dotColor="#5AC8FA"
+            />
+            <app-metric-card
+              label="Equity range"
+              [value]="historyEquityRange()"
+              format="currency"
+              dotColor="#AF52DE"
+            />
+            <app-metric-card
+              label="Mode transitions"
+              [value]="historyModeTransitions().length"
+              format="number"
+              [dotColor]="historyModeTransitions().length > 0 ? '#FF9500' : '#34C759'"
+            />
+            <app-metric-card
+              label="Time in non-Normal"
+              [value]="historyTimeInNonNormalPct()"
+              format="percent"
+              [dotColor]="historyTimeInNonNormalPct() === 0 ? '#34C759' : '#FF9500'"
+            />
+          </div>
+        }
+
         <app-chart-card
           title="Drawdown over time"
           subtitle="Most recent {{ historyChartCount() }} snapshots, oldest first"
@@ -132,6 +327,64 @@ const MODE_COLOR: Record<RecoveryMode, string> = {
           height="320px"
           [loading]="historyLoading()"
         />
+
+        @if (historySeries().length > 0) {
+          <div class="chart-row">
+            <app-chart-card
+              title="Mode distribution in loaded page"
+              subtitle="Time spent per recovery mode"
+              [options]="historyModeDonutOptions()"
+              height="220px"
+            />
+            <section class="trans-card">
+              <header class="card-head">
+                <h3>Mode transitions in loaded page</h3>
+                <span class="muted"> {{ historyModeTransitions().length }} transitions </span>
+              </header>
+              @if (historyModeTransitions().length > 0) {
+                <div class="trans-scroll">
+                  <table class="trans-table">
+                    <thead>
+                      <tr>
+                        <th>When</th>
+                        <th>From</th>
+                        <th></th>
+                        <th>To</th>
+                        <th class="num">DD %</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (t of historyModeTransitions().slice().reverse(); track t.at) {
+                        <tr>
+                          <td class="mono muted">{{ t.at | date: 'MMM d, HH:mm' }}</td>
+                          <td>
+                            <span class="mode-pill" [attr.data-mode]="t.from">{{ t.from }}</span>
+                          </td>
+                          <td class="muted">→</td>
+                          <td>
+                            <span class="mode-pill" [attr.data-mode]="t.to">{{ t.to }}</span>
+                          </td>
+                          <td
+                            class="num mono"
+                            [class.warn]="t.drawdownPct >= 5 && t.drawdownPct < 10"
+                            [class.bad]="t.drawdownPct >= 10"
+                          >
+                            {{ t.drawdownPct | number: '1.2-2' }}%
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              } @else {
+                <span class="empty good">
+                  No mode transitions on the loaded page — engine stayed in a single mode.
+                </span>
+              }
+            </section>
+          </div>
+        }
+
         <app-data-table
           [columnDefs]="historyColumns"
           [fetchData]="fetchHistoryPage"
@@ -305,6 +558,181 @@ const MODE_COLOR: Record<RecoveryMode, string> = {
         }
       }
 
+      /* 8-card KPI strip — fleet-wide drawdown analytics */
+      .kpis {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        gap: var(--space-2);
+      }
+      .kpis.kpis-6 {
+        grid-template-columns: repeat(6, 1fr);
+      }
+      @media (max-width: 1400px) {
+        .kpis,
+        .kpis.kpis-6 {
+          grid-template-columns: repeat(4, 1fr);
+        }
+      }
+      @media (max-width: 720px) {
+        .kpis,
+        .kpis.kpis-6 {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      /* 2-col chart row */
+      .chart-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-3);
+      }
+      @media (max-width: 1100px) {
+        .chart-row {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* Threshold reference + transitions row */
+      .info-row {
+        display: grid;
+        grid-template-columns: 1fr 1.2fr;
+        gap: var(--space-3);
+      }
+      @media (max-width: 1100px) {
+        .info-row {
+          grid-template-columns: 1fr;
+        }
+      }
+      .threshold-card,
+      .trans-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+      }
+      .card-head {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .card-head h3 {
+        margin: 0;
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .threshold-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      .t-row {
+        display: grid;
+        grid-template-columns: 16px 80px 80px 1fr;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+        font-size: var(--text-xs);
+      }
+      .t-row:last-child {
+        border-bottom: none;
+      }
+      .t-row.active {
+        background: var(--bg-tertiary);
+      }
+      .t-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+      }
+      .t-label {
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      .t-range {
+        font-family: 'SF Mono', 'Menlo', monospace;
+        color: var(--text-secondary);
+      }
+      .t-desc {
+        color: var(--text-tertiary);
+      }
+
+      /* Transitions table */
+      .trans-scroll {
+        max-height: 320px;
+        overflow-y: auto;
+      }
+      .trans-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .trans-table th,
+      .trans-table td {
+        padding: 6px var(--space-3);
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        font-size: var(--text-xs);
+      }
+      .trans-table thead th {
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      .trans-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+      .trans-table .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .trans-table .mono {
+        font-family: 'SF Mono', 'Menlo', monospace;
+      }
+      .trans-table .warn {
+        color: #c93400;
+        font-weight: var(--font-semibold);
+      }
+      .trans-table .bad {
+        color: var(--loss);
+        font-weight: var(--font-semibold);
+      }
+      .mode-pill {
+        display: inline-flex;
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+      }
+      .mode-pill[data-mode='Normal'] {
+        background: rgba(52, 199, 89, 0.12);
+        color: #248a3d;
+      }
+      .mode-pill[data-mode='Reduced'] {
+        background: rgba(255, 149, 0, 0.12);
+        color: #c93400;
+      }
+      .mode-pill[data-mode='Halted'] {
+        background: rgba(255, 59, 48, 0.12);
+        color: #d70015;
+      }
+      .empty {
+        display: block;
+        padding: var(--space-4);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .empty.good {
+        color: var(--profit);
+      }
+
       /* ── History-tab toolbar + annotation dialog ───────────────────── */
       .history-toolbar {
         display: flex;
@@ -442,11 +870,346 @@ export class DrawdownPageComponent {
     return s.currentEquity - s.peakEquity;
   });
 
+  // ── Live-tab analytics window ────────────────────────────────────────────
+  // Probe-and-fetch the most recent 7 days of snapshots (capped at 5000) so
+  // the KPIs and breakdown chart reflect the current state of the engine
+  // rather than a single moment in time. Polled every 60s.
+  private readonly DAY_MS = 24 * 60 * 60 * 1000;
+
+  private readonly analyticsResource = createPolledResource(
+    () => {
+      const fromDate = new Date(Date.now() - 7 * this.DAY_MS).toISOString();
+      return this.service
+        .listHistory({ currentPage: 1, itemCountPerPage: 1, filter: { fromDate } })
+        .pipe(
+          switchMap((probe) => {
+            const total = probe.data?.pager?.totalItemCount ?? 0;
+            const limit = Math.min(total, 5000);
+            if (limit === 0) return of([] as DrawdownSnapshotDto[]);
+            return this.service
+              .listHistory({
+                currentPage: 1,
+                itemCountPerPage: limit,
+                filter: { fromDate },
+              })
+              .pipe(map((r) => r.data?.data ?? []));
+          }),
+          catchError(() => of([] as DrawdownSnapshotDto[])),
+        );
+    },
+    { intervalMs: 60_000 },
+  );
+
+  // Engine returns newest-first; keep oldest-first internally so all the
+  // walking logic (transitions, dwell time) reads forward in time.
+  readonly analyticsRows = computed(() => {
+    const rows = this.analyticsResource.value() ?? [];
+    return [...rows].sort(
+      (a, b) => new Date(a.recordedAt).getTime() - new Date(b.recordedAt).getTime(),
+    );
+  });
+
+  readonly maxDd24h = computed(() => {
+    const cutoff = Date.now() - this.DAY_MS;
+    let max = 0;
+    for (const r of this.analyticsRows()) {
+      if (new Date(r.recordedAt).getTime() < cutoff) continue;
+      if (r.drawdownPct > max) max = r.drawdownPct;
+    }
+    // Include the current snapshot — it might be fresher than the last
+    // analytics row, especially right after a sudden drop.
+    const s = this.snapshot();
+    if (s && s.drawdownPct > max) max = s.drawdownPct;
+    return max;
+  });
+
+  readonly maxDd7d = computed(() => {
+    let max = 0;
+    for (const r of this.analyticsRows()) if (r.drawdownPct > max) max = r.drawdownPct;
+    const s = this.snapshot();
+    if (s && s.drawdownPct > max) max = s.drawdownPct;
+    return max;
+  });
+
+  // Days since the most recent equity peak — when did we last touch
+  // peakEquity? If currentEquity == peakEquity right now, this is 0.
+  readonly daysSincePeak = computed(() => {
+    const s = this.snapshot();
+    if (!s) return 0;
+    if (s.currentEquity >= s.peakEquity) return 0;
+    // Walk the analytics rows newest-to-oldest looking for the most recent
+    // moment where equity was at or near the current peak.
+    const target = s.peakEquity;
+    const rows = this.analyticsRows();
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i].currentEquity >= target * 0.9999) {
+        const elapsed = Date.now() - new Date(rows[i].recordedAt).getTime();
+        return Math.max(0, Math.floor(elapsed / this.DAY_MS));
+      }
+    }
+    // Fall back to "older than the analytics window."
+    if (rows.length > 0) {
+      const elapsed = Date.now() - new Date(rows[0].recordedAt).getTime();
+      return Math.floor(elapsed / this.DAY_MS);
+    }
+    return 0;
+  });
+
+  // How long the engine has been continuously in the current mode — walk
+  // backwards through history while the mode matches the latest snapshot.
+  readonly timeInCurrentModeHours = computed(() => {
+    const s = this.snapshot();
+    if (!s) return 0;
+    const rows = this.analyticsRows();
+    if (rows.length === 0) return 0;
+    let startedAt: number | null = null;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i].recoveryMode === s.recoveryMode) {
+        startedAt = new Date(rows[i].recordedAt).getTime();
+      } else {
+        break;
+      }
+    }
+    if (startedAt === null) return 0;
+    return Math.round((Date.now() - startedAt) / (60 * 60 * 1000));
+  });
+
+  // List of mode transitions across the analytics window.
+  readonly modeTransitions = computed(() => this.computeModeTransitions(this.analyticsRows()));
+
+  // Seconds in each mode across the analytics window. Each adjacent pair of
+  // snapshots contributes its time interval to the earlier snapshot's mode.
+  readonly modeBreakdownSeconds = computed(() => this.computeModeBreakdown(this.analyticsRows()));
+
+  modeColorFor(mode: RecoveryMode): string {
+    return MODE_COLOR[mode];
+  }
+
+  // ── Live-tab charts ──────────────────────────────────────────────────────
+
+  readonly liveSparklineOptions = computed<EChartsOption>(() => {
+    const cutoff = Date.now() - this.DAY_MS;
+    const rows = this.analyticsRows().filter((r) => new Date(r.recordedAt).getTime() >= cutoff);
+    if (rows.length === 0) {
+      return {
+        title: {
+          text: 'No drawdown samples in last 24h',
+          left: 'center',
+          top: 'middle',
+          textStyle: { fontSize: 12, color: '#8E8E93', fontWeight: 'normal' },
+        },
+      };
+    }
+    return {
+      grid: { left: 40, right: 16, top: 16, bottom: 24 },
+      tooltip: { trigger: 'axis' },
+      xAxis: {
+        type: 'time',
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { fontSize: 10, color: '#6E6E73', formatter: '{value}%' },
+        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+      },
+      series: [
+        {
+          type: 'line',
+          smooth: true,
+          showSymbol: false,
+          data: rows.map((r) => [r.recordedAt, r.drawdownPct]),
+          lineStyle: { width: 2, color: '#FF9500' },
+          areaStyle: { color: 'rgba(255, 149, 0, 0.16)' },
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            label: { fontSize: 9, color: '#6E6E73' },
+            data: [
+              {
+                yAxis: 5,
+                lineStyle: { color: '#FF9500', type: 'dashed', width: 1 },
+                label: { formatter: 'Reduced' },
+              },
+              {
+                yAxis: 10,
+                lineStyle: { color: '#FF3B30', type: 'dashed', width: 1 },
+                label: { formatter: 'Halted' },
+              },
+            ],
+          },
+        },
+      ],
+    };
+  });
+
+  readonly modeBreakdownDonutOptions = computed<EChartsOption>(() => {
+    const breakdown = this.modeBreakdownSeconds();
+    const data = (Object.entries(breakdown) as [RecoveryMode, number][])
+      .filter(([, secs]) => secs > 0)
+      .map(([mode, secs]) => ({
+        name: mode,
+        value: Math.round(secs / 60),
+        itemStyle: { color: MODE_COLOR[mode] },
+      }));
+    if (data.length === 0) {
+      return {
+        title: {
+          text: 'No samples in window',
+          left: 'center',
+          top: 'middle',
+          textStyle: { fontSize: 12, color: '#8E8E93', fontWeight: 'normal' },
+        },
+      };
+    }
+    return {
+      tooltip: {
+        trigger: 'item',
+        formatter: (params: any) => {
+          const mins: number = params.value;
+          const hours = Math.floor(mins / 60);
+          const remMins = mins % 60;
+          const label = hours > 0 ? `${hours}h ${remMins}m` : `${mins}m`;
+          return `${params.name}: ${label} (${params.percent}%)`;
+        },
+      },
+      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
+      series: [
+        {
+          type: 'pie',
+          radius: ['45%', '70%'],
+          center: ['50%', '45%'],
+          label: { show: false },
+          data,
+        },
+      ],
+    };
+  });
+
+  // ── Helpers for both tabs ────────────────────────────────────────────────
+
+  private computeModeTransitions(rows: DrawdownSnapshotDto[]): {
+    at: string;
+    from: RecoveryMode;
+    to: RecoveryMode;
+    drawdownPct: number;
+  }[] {
+    const out: { at: string; from: RecoveryMode; to: RecoveryMode; drawdownPct: number }[] = [];
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i].recoveryMode !== rows[i - 1].recoveryMode) {
+        out.push({
+          at: rows[i].recordedAt,
+          from: rows[i - 1].recoveryMode,
+          to: rows[i].recoveryMode,
+          drawdownPct: rows[i].drawdownPct,
+        });
+      }
+    }
+    return out;
+  }
+
+  private computeModeBreakdown(rows: DrawdownSnapshotDto[]): Record<RecoveryMode, number> {
+    const out: Record<RecoveryMode, number> = { Normal: 0, Reduced: 0, Halted: 0 };
+    for (let i = 1; i < rows.length; i++) {
+      const dt =
+        (new Date(rows[i].recordedAt).getTime() - new Date(rows[i - 1].recordedAt).getTime()) /
+        1000;
+      if (dt > 0 && dt < 7 * this.DAY_MS) {
+        out[rows[i - 1].recoveryMode] += dt;
+      }
+    }
+    return out;
+  }
+
   // ── History tab ──────────────────────────────────────────────────────────
   readonly historySeries = signal<DrawdownSnapshotDto[]>([]);
   readonly historyLoading = signal(false);
   readonly historyChartCount = computed(() => this.historySeries().length);
   readonly annotations = signal<ChartAnnotationDto[]>([]);
+
+  // History-tab KPI strip + breakdown — analytics computed from the loaded
+  // page (no extra fetch). The page is already oldest-first.
+  readonly historyMaxDd = computed(() => {
+    let max = 0;
+    for (const r of this.historySeries()) if (r.drawdownPct > max) max = r.drawdownPct;
+    return max;
+  });
+
+  readonly historyAvgDd = computed(() => {
+    const rows = this.historySeries();
+    if (rows.length === 0) return 0;
+    const sum = rows.reduce((s, r) => s + (r.drawdownPct ?? 0), 0);
+    return sum / rows.length;
+  });
+
+  readonly historyEquityRange = computed(() => {
+    const rows = this.historySeries();
+    if (rows.length === 0) return 0;
+    let min = Infinity;
+    let max = -Infinity;
+    for (const r of rows) {
+      if (r.currentEquity < min) min = r.currentEquity;
+      if (r.currentEquity > max) max = r.currentEquity;
+    }
+    return Number.isFinite(min) && Number.isFinite(max) ? max - min : 0;
+  });
+
+  readonly historyModeTransitions = computed(() =>
+    this.computeModeTransitions(this.historySeries()),
+  );
+
+  readonly historyModeBreakdownSeconds = computed(() =>
+    this.computeModeBreakdown(this.historySeries()),
+  );
+
+  readonly historyTimeInNonNormalPct = computed(() => {
+    const b = this.historyModeBreakdownSeconds();
+    const total = b.Normal + b.Reduced + b.Halted;
+    if (total === 0) return 0;
+    return ((b.Reduced + b.Halted) / total) * 100;
+  });
+
+  readonly historyModeDonutOptions = computed<EChartsOption>(() => {
+    const b = this.historyModeBreakdownSeconds();
+    const data = (Object.entries(b) as [RecoveryMode, number][])
+      .filter(([, secs]) => secs > 0)
+      .map(([mode, secs]) => ({
+        name: mode,
+        value: Math.round(secs / 60),
+        itemStyle: { color: MODE_COLOR[mode] },
+      }));
+    if (data.length === 0) {
+      return {
+        title: {
+          text: 'No samples in loaded page',
+          left: 'center',
+          top: 'middle',
+          textStyle: { fontSize: 12, color: '#8E8E93', fontWeight: 'normal' },
+        },
+      };
+    }
+    return {
+      tooltip: {
+        trigger: 'item',
+        formatter: (params: any) => {
+          const mins: number = params.value;
+          const hours = Math.floor(mins / 60);
+          const remMins = mins % 60;
+          const label = hours > 0 ? `${hours}h ${remMins}m` : `${mins}m`;
+          return `${params.name}: ${label} (${params.percent}%)`;
+        },
+      },
+      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
+      series: [
+        {
+          type: 'pie',
+          radius: ['45%', '70%'],
+          center: ['50%', '45%'],
+          label: { show: false },
+          data,
+        },
+      ],
+    };
+  });
 
   // ── Annotation editor state ───────────────────────────────────────────
   readonly annotationDrawerOpen = signal(false);

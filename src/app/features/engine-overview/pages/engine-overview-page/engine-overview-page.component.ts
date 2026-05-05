@@ -15,9 +15,12 @@ import { WorkersService } from '@core/services/workers.service';
 import { DeadLetterService } from '@core/services/dead-letter.service';
 import type { DeadLetterDto, EngineStatusDto, WorkerHealthDto } from '@core/api/api.types';
 
+import type { EChartsOption } from 'echarts';
+
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 /**
@@ -38,7 +41,13 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
   selector: 'app-engine-overview-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PageHeaderComponent, CardSkeletonComponent, EmptyStateComponent, RelativeTimePipe],
+  imports: [
+    PageHeaderComponent,
+    CardSkeletonComponent,
+    EmptyStateComponent,
+    ChartCardComponent,
+    RelativeTimePipe,
+  ],
   template: `
     <div class="page" [class.wall]="wallMode()">
       @if (!wallMode()) {
@@ -65,7 +74,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       @if (loading() && !status()) {
         <app-card-skeleton [lines]="6" />
       } @else {
-        <!-- Engine status row -->
+        <!-- Engine status row — engine card stays prominent, KPIs flow to its right -->
         <section class="row status-row">
           <div class="status-card" [attr.data-running]="status()?.isRunning ? '1' : '0'">
             <div class="status-dot"></div>
@@ -95,7 +104,56 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             <span class="label">Paper mode</span>
             <span class="value">{{ status()?.paperMode ?? '—' }}</span>
           </div>
+          <div class="kpi">
+            <span class="label">Total workers</span>
+            <span class="value">{{ workerSnapshots().length }}</span>
+          </div>
+          <div class="kpi">
+            <span class="label">Healthy %</span>
+            <span
+              class="value"
+              [class.good]="healthyPct() >= 95"
+              [class.warn]="healthyPct() < 95 && healthyPct() >= 80"
+              [class.bad]="healthyPct() < 80"
+            >
+              {{ healthyPct().toFixed(0) }}%
+            </span>
+          </div>
+          <div class="kpi">
+            <span class="label">Unresolved DLQ</span>
+            <span
+              class="value"
+              [class.bad]="deadLetters().length > 0"
+              [class.good]="deadLetters().length === 0"
+            >
+              {{ deadLetters().length }}
+            </span>
+          </div>
         </section>
+
+        <!-- 3-col chart row: worker status donut + DLQ event types donut + activity heatmap (placeholder) -->
+        @if (!wallMode()) {
+          <section class="row charts-row">
+            <app-chart-card
+              title="Worker status"
+              subtitle="Healthy · Degraded · Failed · Idle distribution"
+              [options]="workerDonutOptions()"
+              height="240px"
+            />
+            <app-chart-card
+              title="DLQ by event type"
+              subtitle="Unresolved events grouped by type"
+              [options]="dlqEventTypeOptions()"
+              height="240px"
+            />
+            <app-chart-card
+              title="DLQ retry distribution"
+              subtitle="Histogram of attempt counts on unresolved rows"
+              [options]="dlqAttemptHistogram()"
+              height="240px"
+            />
+          </section>
+        }
 
         <!-- Worker health row -->
         <section class="row">
@@ -128,8 +186,10 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                   <li class="worker-item" [attr.data-status]="w.status.toLowerCase()">
                     <span class="status-pill">{{ w.status }}</span>
                     <span class="worker-name">{{ w.name }}</span>
-                    @if (w.lastMessage) {
-                      <span class="worker-msg" [title]="w.lastMessage">{{ w.lastMessage }}</span>
+                    @if (w.lastErrorMessage) {
+                      <span class="worker-msg" [title]="w.lastErrorMessage">
+                        {{ w.lastErrorMessage }}
+                      </span>
                     }
                   </li>
                 }
@@ -234,17 +294,24 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         display: grid;
         gap: var(--space-4);
       }
+      /* Status row now carries 8 cells (engine card + 7 KPIs). The engine
+         card stays wider via 1.4fr; the rest split the remaining width. */
       .status-row {
-        grid-template-columns: minmax(220px, 1.4fr) repeat(4, 1fr);
+        grid-template-columns: minmax(220px, 1.4fr) repeat(7, 1fr);
       }
-      .row:not(.status-row) {
+      .row:not(.status-row):not(.charts-row) {
         grid-template-columns: 1fr 1fr;
+      }
+      @media (max-width: 1400px) {
+        .status-row {
+          grid-template-columns: minmax(220px, 1.4fr) repeat(3, 1fr);
+        }
       }
       @media (max-width: 900px) {
         .status-row {
           grid-template-columns: repeat(2, 1fr);
         }
-        .row:not(.status-row) {
+        .row:not(.status-row):not(.charts-row) {
           grid-template-columns: 1fr;
         }
       }
@@ -257,7 +324,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
          project this onto large screens so the smallest source viewport
          is still wide. */
       .page.wall .status-row {
-        grid-template-columns: minmax(280px, 1.6fr) repeat(4, 1fr);
+        grid-template-columns: minmax(280px, 1.6fr) repeat(7, 1fr);
         gap: var(--space-3);
       }
 
@@ -375,10 +442,31 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         font-weight: var(--font-semibold);
         font-variant-numeric: tabular-nums;
       }
+      .value.good {
+        color: var(--profit);
+      }
+      .value.warn {
+        color: #c93400;
+      }
+      .value.bad {
+        color: var(--loss);
+      }
       .page.wall .value {
         font-size: 3.4rem;
         line-height: 1;
         letter-spacing: -0.02em;
+      }
+
+      /* 3-col chart row (compact mode only — wall mode keeps the 2-panel layout) */
+      .charts-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: var(--space-3);
+      }
+      @media (max-width: 1100px) {
+        .charts-row {
+          grid-template-columns: 1fr;
+        }
       }
 
       .panel {
@@ -590,6 +678,109 @@ export class EngineOverviewPageComponent {
     return buckets;
   });
 
+  // Healthy % across the worker fleet — feeds the new KPI tile and lets
+  // the operator spot a drift before opening the workers page.
+  readonly healthyPct = computed(() => {
+    const total = this.workerSnapshots().length;
+    if (total === 0) return 0;
+    return (this.workerCounts().Healthy / total) * 100;
+  });
+
+  readonly workerDonutOptions = computed<EChartsOption>(() => {
+    const c = this.workerCounts();
+    if (this.workerSnapshots().length === 0) return {};
+    return {
+      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
+      series: [
+        {
+          type: 'pie',
+          radius: ['45%', '70%'],
+          center: ['50%', '45%'],
+          label: { show: false },
+          data: [
+            { value: c.Healthy, name: 'Healthy', itemStyle: { color: '#34C759' } },
+            { value: c.Degraded, name: 'Degraded', itemStyle: { color: '#FF9500' } },
+            { value: c.Failed, name: 'Failed', itemStyle: { color: '#FF3B30' } },
+            { value: c.Idle, name: 'Idle', itemStyle: { color: '#0071E3' } },
+          ].filter((d) => d.value > 0),
+        },
+      ],
+    };
+  });
+
+  readonly dlqEventTypeOptions = computed<EChartsOption>(() => {
+    const counts: Record<string, number> = {};
+    for (const d of this.deadLetters()) {
+      const k = d.eventType ?? 'unknown';
+      counts[k] = (counts[k] ?? 0) + 1;
+    }
+    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    if (entries.length === 0) return {};
+    const palette = ['#FF3B30', '#FF9500', '#AF52DE', '#FFCC00', '#5AC8FA', '#0071E3', '#8E8E93'];
+    return {
+      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+      legend: { bottom: 0, type: 'scroll', textStyle: { fontSize: 10, color: '#6E6E73' } },
+      series: [
+        {
+          type: 'pie',
+          radius: ['45%', '70%'],
+          center: ['50%', '45%'],
+          label: { show: false },
+          data: entries.map(([name, value], i) => ({
+            name,
+            value,
+            itemStyle: { color: palette[i % palette.length] },
+          })),
+        },
+      ],
+    };
+  });
+
+  readonly dlqAttemptHistogram = computed<EChartsOption>(() => {
+    const buckets: Record<string, number> = { '1': 0, '2': 0, '3': 0, '4': 0, '5+': 0 };
+    for (const d of this.deadLetters()) {
+      const a = d.attemptCount ?? 0;
+      if (a <= 1) buckets['1']++;
+      else if (a === 2) buckets['2']++;
+      else if (a === 3) buckets['3']++;
+      else if (a === 4) buckets['4']++;
+      else buckets['5+']++;
+    }
+    if (this.deadLetters().length === 0) return {};
+    return {
+      tooltip: { trigger: 'axis' },
+      grid: { top: 10, right: 20, bottom: 30, left: 40 },
+      xAxis: {
+        type: 'category',
+        data: Object.keys(buckets),
+        name: 'attempts',
+        nameLocation: 'middle',
+        nameGap: 22,
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: Object.entries(buckets).map(([k, v]) => ({
+            value: v,
+            // Color escalates with retry count so a tall "5+" bar stands out.
+            itemStyle: {
+              color: k === '1' || k === '2' ? '#FF9500' : k === '3' ? '#FF6B30' : '#FF3B30',
+              borderRadius: [4, 4, 0, 0],
+            },
+          })),
+          barWidth: '60%',
+        },
+      ],
+    };
+  });
+
   readonly worstWorkers = computed(() => {
     const order: Record<string, number> = { Failed: 0, Degraded: 1, Idle: 2, Healthy: 3 };
     // Wall mode shows more rows because the screen is bigger and a NOC
@@ -657,7 +848,8 @@ export class EngineOverviewPageComponent {
         .pipe(catchError(() => of(null))),
     }).subscribe(({ status, workers, deadLetters }) => {
       if (status?.data) this.status.set(status.data);
-      if (workers?.data) this.workerSnapshots.set(workers.data);
+      // /health/workers returns a raw array, not a ResponseData envelope.
+      if (workers) this.workerSnapshots.set(workers);
       if (deadLetters?.data) this.deadLetters.set(deadLetters.data.data ?? []);
       this.lastRefreshAt.set(new Date().toISOString());
       this.loading.set(false);

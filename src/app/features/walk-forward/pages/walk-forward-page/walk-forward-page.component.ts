@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, inject, signal, viewChild } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  signal,
+  viewChild,
+  OnInit,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
@@ -6,6 +14,7 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 // DatePipe + DecimalPipe instantiated directly in the class for column valueFormatters; no template pipes used.
 import { Observable, map, merge, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
+import type { EChartsOption } from 'echarts';
 
 import { WalkForwardService } from '@core/services/walk-forward.service';
 import { StrategiesService } from '@core/services/strategies.service';
@@ -22,6 +31,7 @@ import type {
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
+import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import {
   FormFieldComponent,
   FormFieldControlDirective,
@@ -35,6 +45,7 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
   imports: [
     PageHeaderComponent,
     DataTableComponent,
+    ChartCardComponent,
     ReactiveFormsModule,
     FormFieldComponent,
     FormFieldControlDirective,
@@ -131,13 +142,181 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
         </form>
       }
 
-      <app-data-table
-        #runsTable
-        [columnDefs]="columnDefs"
-        [fetchData]="fetch"
-        [searchable]="true"
-        (rowClick)="goToDetail($event)"
-      />
+      <!-- 8-card KPI strip — fleet-wide walk-forward posture -->
+      <div class="wf-kpis">
+        <div class="wf-kpi">
+          <span class="kpi-label">Total runs</span>
+          <span class="kpi-value">{{ wfStats().total }}</span>
+        </div>
+        <div class="wf-kpi">
+          <span class="kpi-label">Completed</span>
+          <span class="kpi-value good">{{ wfStats().completed }}</span>
+        </div>
+        <div class="wf-kpi">
+          <span class="kpi-label">Failed</span>
+          <span
+            class="kpi-value"
+            [class.bad]="wfStats().failed > 0"
+            [class.good]="wfStats().failed === 0"
+          >
+            {{ wfStats().failed }}
+          </span>
+        </div>
+        <div class="wf-kpi">
+          <span class="kpi-label">Avg OOS score</span>
+          <span class="kpi-value">
+            {{ wfStats().avgOos !== null ? (wfStats().avgOos! * 100).toFixed(1) + '%' : '—' }}
+          </span>
+        </div>
+        <div class="wf-kpi">
+          <span class="kpi-label">Best OOS</span>
+          <span class="kpi-value good">
+            {{ wfStats().bestOos !== null ? (wfStats().bestOos! * 100).toFixed(1) + '%' : '—' }}
+          </span>
+        </div>
+        <div class="wf-kpi">
+          <span class="kpi-label">Avg consistency</span>
+          <span class="kpi-value">
+            {{ wfStats().avgConsistency !== null ? wfStats().avgConsistency!.toFixed(3) : '—' }}
+          </span>
+        </div>
+        <div class="wf-kpi">
+          <span class="kpi-label">Avg IS days</span>
+          <span class="kpi-value">{{ wfStats().avgIs }}</span>
+        </div>
+        <div class="wf-kpi">
+          <span class="kpi-label">Avg OOS days</span>
+          <span class="kpi-value">{{ wfStats().avgOosDays }}</span>
+        </div>
+      </div>
+
+      <!-- 3-col chart row -->
+      <div class="wf-charts">
+        <app-chart-card
+          title="Status distribution"
+          subtitle="Completed · Failed · Running · Pending"
+          [options]="statusDonutOptions()"
+          height="240px"
+        />
+        <app-chart-card
+          title="OOS score distribution"
+          subtitle="Histogram of avg out-of-sample scores"
+          [options]="oosHistogramOptions()"
+          height="240px"
+        />
+        <app-chart-card
+          title="Runs by symbol"
+          subtitle="Top 12 symbols by run count"
+          [options]="bySymbolOptions()"
+          height="240px"
+        />
+      </div>
+
+      <!-- 2-col tables: top performers + per-strategy breakdown -->
+      <div class="wf-board-row">
+        <section class="wf-board">
+          <header class="wf-board-head">
+            <h3>Top performers</h3>
+            <span class="muted">Highest avg OOS score across completed runs</span>
+          </header>
+          @if (topOos().length > 0) {
+            <table class="wf-board-table">
+              <thead>
+                <tr>
+                  <th>Run</th>
+                  <th>Strategy</th>
+                  <th>Symbol</th>
+                  <th>TF</th>
+                  <th class="num">Avg OOS</th>
+                  <th class="num">Consistency</th>
+                  <th class="num">IS / OOS</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (r of topOos(); track r.id) {
+                  <tr (click)="goToDetail(r)">
+                    <td class="mono">#{{ r.id }}</td>
+                    <td class="mono">#{{ r.strategyId }}</td>
+                    <td class="mono">{{ r.symbol }}</td>
+                    <td class="mono">{{ r.timeframe }}</td>
+                    <td class="num mono profit">
+                      {{
+                        r.averageOutOfSampleScore !== null
+                          ? (r.averageOutOfSampleScore * 100).toFixed(1) + '%'
+                          : '—'
+                      }}
+                    </td>
+                    <td class="num mono">
+                      {{ r.scoreConsistency !== null ? r.scoreConsistency.toFixed(3) : '—' }}
+                    </td>
+                    <td class="num mono">{{ r.inSampleDays }} / {{ r.outOfSampleDays }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          } @else {
+            <p class="muted" style="padding: var(--space-4)">
+              No completed runs with OOS scores yet.
+            </p>
+          }
+        </section>
+
+        <section class="wf-board">
+          <header class="wf-board-head">
+            <h3>Per-strategy breakdown</h3>
+            <span class="muted">
+              Outcomes grouped by strategy id ·
+              {{ perStrategyBreakdown().length }} total
+            </span>
+          </header>
+          @if (perStrategyBreakdown().length > 0) {
+            <div class="wf-scroll">
+              <table class="wf-board-table sticky-head">
+                <thead>
+                  <tr>
+                    <th>Strategy</th>
+                    <th class="num">Runs</th>
+                    <th class="num">Completed</th>
+                    <th class="num">Failed</th>
+                    <th class="num">Avg OOS</th>
+                    <th class="num">Best OOS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of perStrategyBreakdown(); track row.strategyId) {
+                    <tr>
+                      <td class="mono">#{{ row.strategyId }}</td>
+                      <td class="num mono">{{ row.runs }}</td>
+                      <td class="num mono profit">{{ row.completed }}</td>
+                      <td class="num mono" [class.bad]="row.failed > 0">{{ row.failed }}</td>
+                      <td class="num mono">
+                        {{ row.avgOos !== null ? (row.avgOos * 100).toFixed(1) + '%' : '—' }}
+                      </td>
+                      <td class="num mono profit">
+                        {{ row.bestOos !== null ? (row.bestOos * 100).toFixed(1) + '%' : '—' }}
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+        </section>
+      </div>
+
+      <section class="wf-board">
+        <header class="wf-board-head">
+          <h3>All walk-forward runs</h3>
+          <span class="muted">Server-paged — click any row for the detail page</span>
+        </header>
+        <app-data-table
+          #runsTable
+          [columnDefs]="columnDefs"
+          [fetchData]="fetch"
+          [searchable]="true"
+          (rowClick)="goToDetail($event)"
+        />
+      </section>
     </div>
   `,
   styles: [
@@ -258,10 +437,162 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
           transform: rotate(360deg);
         }
       }
+
+      /* Walk-Forward density additions */
+      .wf-kpis {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        gap: var(--space-2);
+      }
+      @media (max-width: 1400px) {
+        .wf-kpis {
+          grid-template-columns: repeat(4, 1fr);
+        }
+      }
+      @media (max-width: 720px) {
+        .wf-kpis {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      .wf-kpi {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .kpi-label {
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .kpi-value {
+        font-size: var(--text-xl);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+      }
+      .kpi-value.good {
+        color: var(--profit);
+      }
+      .kpi-value.bad {
+        color: var(--loss);
+      }
+
+      .wf-charts {
+        display: grid;
+        grid-template-columns: 1fr 1.2fr 1fr;
+        gap: var(--space-3);
+      }
+      @media (max-width: 1100px) {
+        .wf-charts {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .wf-board-row {
+        display: grid;
+        grid-template-columns: 1.6fr 1fr;
+        gap: var(--space-3);
+      }
+      @media (max-width: 1100px) {
+        .wf-board-row {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .wf-board {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+      }
+      .wf-board-head {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .wf-board-head h3 {
+        margin: 0;
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .wf-board-head .muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+      .wf-board-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .wf-board-table th,
+      .wf-board-table td {
+        padding: 8px var(--space-3);
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        font-size: var(--text-xs);
+      }
+      .wf-board-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+      .wf-board-table tbody tr {
+        cursor: pointer;
+        transition: background 0.1s;
+      }
+      .wf-board-table tbody tr:hover {
+        background: var(--bg-tertiary);
+      }
+      .wf-board-table th {
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .wf-board-table th.num,
+      .wf-board-table td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .wf-board-table .mono {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+      }
+      .wf-board-table .profit {
+        color: var(--profit);
+      }
+      .wf-board-table .loss {
+        color: var(--loss);
+      }
+      .wf-board-table .bad {
+        color: var(--loss);
+      }
+
+      /* Cap tall breakdown tables; sticky header keeps the columns labelled
+         while the operator scrolls through 100+ strategies. */
+      .wf-scroll {
+        max-height: 360px;
+        overflow-y: auto;
+      }
+      .wf-board-table.sticky-head thead th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      .muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
     `,
   ],
 })
-export class WalkForwardPageComponent {
+export class WalkForwardPageComponent implements OnInit {
   private readonly service = inject(WalkForwardService);
   private readonly strategiesService = inject(StrategiesService);
   private readonly notifications = inject(NotificationService);
@@ -276,6 +607,237 @@ export class WalkForwardPageComponent {
   readonly busy = signal(false);
   readonly showCreatePanel = signal(false);
   readonly strategies = signal<StrategyDto[]>([]);
+
+  // Analytics sample — probe-and-fetch capped at 5000.
+  readonly wfSample = signal<WalkForwardRunDto[]>([]);
+
+  wfStats = computed(() => {
+    const all = this.wfSample();
+    if (all.length === 0) {
+      return {
+        total: 0,
+        completed: 0,
+        failed: 0,
+        avgOos: null as number | null,
+        bestOos: null as number | null,
+        avgConsistency: null as number | null,
+        avgIs: 0,
+        avgOosDays: 0,
+      };
+    }
+    let completed = 0;
+    let failed = 0;
+    let oosSum = 0;
+    let oosCount = 0;
+    let bestOos = -Infinity;
+    let consSum = 0;
+    let consCount = 0;
+    let isSum = 0;
+    let oosDaysSum = 0;
+    for (const r of all) {
+      const status = String(r.status);
+      if (status === 'Completed') completed++;
+      else if (status === 'Failed') failed++;
+      if (r.averageOutOfSampleScore != null) {
+        oosSum += r.averageOutOfSampleScore;
+        oosCount++;
+        if (r.averageOutOfSampleScore > bestOos) bestOos = r.averageOutOfSampleScore;
+      }
+      if (r.scoreConsistency != null) {
+        consSum += r.scoreConsistency;
+        consCount++;
+      }
+      isSum += r.inSampleDays ?? 0;
+      oosDaysSum += r.outOfSampleDays ?? 0;
+    }
+    return {
+      total: all.length,
+      completed,
+      failed,
+      avgOos: oosCount > 0 ? +(oosSum / oosCount).toFixed(4) : null,
+      bestOos: bestOos === -Infinity ? null : +bestOos.toFixed(4),
+      avgConsistency: consCount > 0 ? +(consSum / consCount).toFixed(3) : null,
+      avgIs: Math.round(isSum / all.length),
+      avgOosDays: Math.round(oosDaysSum / all.length),
+    };
+  });
+
+  statusDonutOptions = computed<EChartsOption>(() => {
+    const counts: Record<string, number> = {};
+    for (const r of this.wfSample()) {
+      const k = String(r.status);
+      counts[k] = (counts[k] ?? 0) + 1;
+    }
+    if (Object.keys(counts).length === 0) return {};
+    const colors: Record<string, string> = {
+      Completed: '#34C759',
+      Failed: '#FF3B30',
+      Running: '#0071E3',
+      Pending: '#5AC8FA',
+    };
+    return {
+      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
+      series: [
+        {
+          type: 'pie',
+          radius: ['45%', '70%'],
+          center: ['50%', '45%'],
+          label: { show: false },
+          data: Object.entries(counts).map(([name, value]) => ({
+            name,
+            value,
+            itemStyle: { color: colors[name] ?? '#8E8E93' },
+          })),
+        },
+      ],
+    };
+  });
+
+  oosHistogramOptions = computed<EChartsOption>(() => {
+    const scores = this.wfSample()
+      .filter((r) => r.averageOutOfSampleScore != null)
+      .map((r) => (r.averageOutOfSampleScore ?? 0) * 100);
+    if (scores.length === 0) return {};
+    const min = Math.min(...scores);
+    const max = Math.max(...scores);
+    if (max === min) {
+      return {
+        grid: { top: 10, right: 20, bottom: 30, left: 40 },
+        xAxis: { type: 'category', data: [`${min.toFixed(0)}%`] },
+        yAxis: { type: 'value' },
+        series: [
+          {
+            type: 'bar',
+            data: [{ value: scores.length, itemStyle: { color: '#0071E3' } }],
+            barWidth: '40%',
+          },
+        ],
+      };
+    }
+    const bins = 12;
+    const width = (max - min) / bins;
+    const counts = new Array(bins).fill(0);
+    const labels: string[] = [];
+    for (let i = 0; i < bins; i++) labels.push(`${(min + i * width).toFixed(0)}%`);
+    for (const v of scores) {
+      const idx = Math.min(Math.floor((v - min) / width), bins - 1);
+      counts[idx]++;
+    }
+    return {
+      grid: { top: 10, right: 20, bottom: 30, left: 40 },
+      xAxis: {
+        type: 'category',
+        data: labels,
+        axisLabel: { fontSize: 9, color: '#6E6E73', rotate: 35 },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: counts.map((c) => ({
+            value: c,
+            itemStyle: { color: '#0071E3', borderRadius: [4, 4, 0, 0] },
+          })),
+          barWidth: '80%',
+        },
+      ],
+    };
+  });
+
+  bySymbolOptions = computed<EChartsOption>(() => {
+    const counts: Record<string, number> = {};
+    for (const r of this.wfSample()) {
+      const k = r.symbol ?? 'unknown';
+      counts[k] = (counts[k] ?? 0) + 1;
+    }
+    const entries = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12);
+    if (entries.length === 0) return {};
+    return {
+      grid: { top: 10, right: 30, bottom: 30, left: 90 },
+      xAxis: {
+        type: 'value',
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+      },
+      yAxis: {
+        type: 'category',
+        data: entries.map(([k]) => k).reverse(),
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: entries
+            .map(([, v]) => ({
+              value: v,
+              itemStyle: { color: '#AF52DE', borderRadius: [0, 4, 4, 0] },
+            }))
+            .reverse(),
+          barWidth: 14,
+          label: { show: true, position: 'right', fontSize: 10, color: '#6E6E73' },
+        },
+      ],
+    };
+  });
+
+  topOos = computed(() =>
+    [...this.wfSample()]
+      .filter((r) => r.averageOutOfSampleScore != null)
+      .sort((a, b) => (b.averageOutOfSampleScore ?? 0) - (a.averageOutOfSampleScore ?? 0))
+      .slice(0, 8),
+  );
+
+  perStrategyBreakdown = computed(() => {
+    type Row = {
+      strategyId: number;
+      runs: number;
+      completed: number;
+      failed: number;
+      avgOos: number | null;
+      bestOos: number | null;
+      _oosSum: number;
+      _oosCount: number;
+    };
+    const groups: Record<number, Row> = {};
+    for (const r of this.wfSample()) {
+      if (!groups[r.strategyId])
+        groups[r.strategyId] = {
+          strategyId: r.strategyId,
+          runs: 0,
+          completed: 0,
+          failed: 0,
+          avgOos: null,
+          bestOos: null,
+          _oosSum: 0,
+          _oosCount: 0,
+        };
+      const g = groups[r.strategyId];
+      g.runs++;
+      const status = String(r.status);
+      if (status === 'Completed') g.completed++;
+      else if (status === 'Failed') g.failed++;
+      if (r.averageOutOfSampleScore != null) {
+        g._oosSum += r.averageOutOfSampleScore;
+        g._oosCount++;
+        if (g.bestOos == null || r.averageOutOfSampleScore > g.bestOos)
+          g.bestOos = r.averageOutOfSampleScore;
+      }
+    }
+    return Object.values(groups)
+      .map((g) => ({
+        ...g,
+        avgOos: g._oosCount > 0 ? +(g._oosSum / g._oosCount).toFixed(4) : null,
+        bestOos: g.bestOos != null ? +g.bestOos.toFixed(4) : null,
+      }))
+      .sort((a, b) => b.runs - a.runs);
+  });
 
   readonly form = this.fb.nonNullable.group({
     strategyId: [null as number | null, Validators.required],
@@ -347,7 +909,31 @@ export class WalkForwardPageComponent {
     // quick succession as each window finishes, and we only need one reload.
     merge(this.realtime.on('backtestCompleted'), this.realtime.on('optimizationCompleted'))
       .pipe(throttleTime(5_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
-      .subscribe(() => this.runsTable()?.loadData());
+      .subscribe(() => {
+        this.runsTable()?.loadData();
+        this.loadAnalyticsSample();
+      });
+  }
+
+  ngOnInit(): void {
+    this.loadAnalyticsSample();
+  }
+
+  private loadAnalyticsSample(): void {
+    this.service.list({ currentPage: 1, itemCountPerPage: 1, filter: null }).subscribe({
+      next: (probe) => {
+        const total = probe?.data?.pager?.totalItemCount ?? 0;
+        if (total === 0) {
+          this.wfSample.set([]);
+          return;
+        }
+        this.service
+          .list({ currentPage: 1, itemCountPerPage: Math.min(total, 5000), filter: null })
+          .subscribe({
+            next: (full) => this.wfSample.set(full?.data?.data ?? []),
+          });
+      },
+    });
   }
 
   togglePanel(): void {
@@ -374,6 +960,7 @@ export class WalkForwardPageComponent {
         if (res.status && res.data) {
           this.notifications.success(`Walk-forward run #${res.data.id} queued`);
           this.showCreatePanel.set(false);
+          this.loadAnalyticsSample();
           this.router.navigate(['/walk-forward', res.data.id]);
         } else {
           this.notifications.error(res.message ?? 'Failed to queue walk-forward run');

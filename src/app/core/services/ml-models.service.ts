@@ -7,6 +7,7 @@ import {
   PagerRequest,
   MLModelDto,
   MLModelFeatureImportanceDto,
+  MLModelOverfitFlagDto,
   MLTrainingRunDto,
   MLTrainingRunDiagnosticsDto,
   MLSignalAbTestResultDto,
@@ -53,6 +54,17 @@ export class MLModelsService {
 
   getTrainingRun(id: number): Observable<ResponseData<MLTrainingRunDto>> {
     return this.api.get(`/ml-model/training/${id}`);
+  }
+
+  getOverfitWatchlist(
+    ratioThreshold?: number,
+    minResolvedSignals?: number,
+  ): Observable<ResponseData<MLModelOverfitFlagDto[]>> {
+    const params = new URLSearchParams();
+    if (ratioThreshold != null) params.set('ratioThreshold', String(ratioThreshold));
+    if (minResolvedSignals != null) params.set('minResolvedSignals', String(minResolvedSignals));
+    const qs = params.toString();
+    return this.api.get(`/ml-model/overfit-watchlist${qs ? '?' + qs : ''}`);
   }
 
   getTrainingRunDiagnostics(id: number): Observable<ResponseData<MLTrainingRunDiagnosticsDto>> {

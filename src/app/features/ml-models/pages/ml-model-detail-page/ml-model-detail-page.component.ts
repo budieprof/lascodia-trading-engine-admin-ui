@@ -153,6 +153,170 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
             </dl>
           </section>
 
+          <!-- Training quality metrics — fields from the producing run's
+               diagnostics (Sharpe / F1 / EV / Brier / abstention) plus the
+               learner architecture + hyperparam audit trail. -->
+          <section class="card">
+            <header class="card-head">
+              <h3>Training Quality Metrics</h3>
+              @if (producingDiagnostics()) {
+                <span class="card-sub mono">run #{{ producingDiagnostics()!.id }}</span>
+              }
+            </header>
+            @if (producingDiagnosticsLoading()) {
+              <app-card-skeleton [lines]="4" />
+            } @else if (producingDiagnostics(); as d) {
+              <dl class="grid">
+                <div class="item">
+                  <dt>Direction Accuracy</dt>
+                  <dd class="mono">
+                    {{
+                      d.directionAccuracy !== null
+                        ? (d.directionAccuracy * 100 | number: '1.2-2') + '%'
+                        : '—'
+                    }}
+                  </dd>
+                </div>
+                <div class="item">
+                  <dt>F1 Score</dt>
+                  <dd class="mono">
+                    {{ d.f1Score !== null ? (d.f1Score | number: '1.3-3') : '—' }}
+                  </dd>
+                </div>
+                <div class="item">
+                  <dt>Sharpe Ratio</dt>
+                  <dd class="mono">
+                    {{ d.sharpeRatio !== null ? (d.sharpeRatio | number: '1.3-3') : '—' }}
+                  </dd>
+                </div>
+                <div class="item">
+                  <dt>Expected Value</dt>
+                  <dd class="mono">
+                    {{ d.expectedValue !== null ? (d.expectedValue | number: '1.4-4') : '—' }}
+                  </dd>
+                </div>
+                <div class="item">
+                  <dt>Brier Score</dt>
+                  <dd class="mono">
+                    {{ d.brierScore !== null ? (d.brierScore | number: '1.4-4') : '—' }}
+                  </dd>
+                </div>
+                <div class="item">
+                  <dt>Magnitude RMSE</dt>
+                  <dd class="mono">
+                    {{ d.magnitudeRMSE !== null ? (d.magnitudeRMSE | number: '1.4-4') : '—' }}
+                  </dd>
+                </div>
+                <div class="item">
+                  <dt>Abstention Rate</dt>
+                  <dd class="mono">
+                    {{
+                      d.abstentionRate !== null
+                        ? (d.abstentionRate * 100 | number: '1.2-2') + '%'
+                        : '—'
+                    }}
+                  </dd>
+                </div>
+                <div class="item">
+                  <dt>Abstention Precision</dt>
+                  <dd class="mono">
+                    {{
+                      d.abstentionPrecision !== null
+                        ? (d.abstentionPrecision * 100 | number: '1.2-2') + '%'
+                        : '—'
+                    }}
+                  </dd>
+                </div>
+                <div class="item">
+                  <dt>Label Imbalance</dt>
+                  <dd class="mono">
+                    {{
+                      d.labelImbalanceRatio !== null
+                        ? (d.labelImbalanceRatio | number: '1.3-3')
+                        : '—'
+                    }}
+                  </dd>
+                </div>
+                <div class="item">
+                  <dt>Training Duration</dt>
+                  <dd class="mono">
+                    {{
+                      d.trainingDurationMs !== null
+                        ? (d.trainingDurationMs / 1000 | number: '1.0-0') + 's'
+                        : '—'
+                    }}
+                  </dd>
+                </div>
+                <div class="item">
+                  <dt>Total Samples</dt>
+                  <dd class="mono">{{ d.totalSamples | number }}</dd>
+                </div>
+                <div class="item">
+                  <dt>Attempts</dt>
+                  <dd class="mono">{{ d.attemptCount }}</dd>
+                </div>
+              </dl>
+            } @else {
+              <p class="muted" style="padding: var(--space-4)">
+                No diagnostics available — this model wasn't produced by a tracked training run, or
+                the diagnostic record was pruned.
+              </p>
+            }
+          </section>
+
+          <!-- Learner architecture + hyperparams + training-flag audit -->
+          @if (producingDiagnostics(); as d) {
+            <section class="card">
+              <header class="card-head">
+                <h3>Architecture &amp; Hyperparameters</h3>
+              </header>
+              <dl class="grid">
+                <div class="item">
+                  <dt>Learner Architecture</dt>
+                  <dd class="mono">{{ d.learnerArchitecture || '—' }}</dd>
+                </div>
+                <div class="item">
+                  <dt>Trigger Type</dt>
+                  <dd>{{ d.triggerType }}</dd>
+                </div>
+                <div class="item">
+                  <dt>Drift Trigger</dt>
+                  <dd class="mono">{{ d.driftTriggerType ?? '—' }}</dd>
+                </div>
+                <div class="item">
+                  <dt>Training Flags</dt>
+                  <dd class="mono">{{ trainingFlagSummary(d) ?? 'none' }}</dd>
+                </div>
+                <div class="item">
+                  <dt>Dataset Hash</dt>
+                  <dd class="mono trunc">{{ d.datasetHash ?? '—' }}</dd>
+                </div>
+                <div class="item">
+                  <dt>Candle Range</dt>
+                  <dd class="mono">
+                    @if (d.candleIdRangeStart !== null && d.candleIdRangeEnd !== null) {
+                      {{ d.candleIdRangeStart | number }} – {{ d.candleIdRangeEnd | number }}
+                    } @else {
+                      —
+                    }
+                  </dd>
+                </div>
+              </dl>
+              @if (d.hyperparamConfigJson) {
+                <details class="hp-block">
+                  <summary>Hyperparameters</summary>
+                  <pre class="mono code-block">{{ prettyJson(d.hyperparamConfigJson) }}</pre>
+                </details>
+              }
+              @if (d.cvFoldScoresJson) {
+                <details class="hp-block">
+                  <summary>CV fold scores</summary>
+                  <pre class="mono code-block">{{ prettyJson(d.cvFoldScoresJson) }}</pre>
+                </details>
+              }
+            </section>
+          }
+
           <section class="card">
             <header class="card-head">
               <h3>Recent Training Runs</h3>
@@ -827,6 +991,45 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
         overflow: hidden;
         text-overflow: ellipsis;
       }
+
+      /* Quality + architecture cards */
+      .grid .item dd.trunc {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+        max-width: 100%;
+      }
+      .hp-block {
+        margin-top: var(--space-3);
+        padding: 0 var(--space-4) var(--space-3);
+      }
+      .hp-block summary {
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+        cursor: pointer;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: var(--space-2) 0;
+      }
+      .hp-block summary:hover {
+        color: var(--text-primary);
+      }
+      .code-block {
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: var(--space-3);
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: 11px;
+        color: var(--text-primary);
+        overflow-x: auto;
+        line-height: 1.6;
+        margin: 0;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+      }
       .diag-wide {
         grid-column: 1 / -1;
       }
@@ -958,6 +1161,12 @@ export class MLModelDetailPageComponent implements OnInit {
   readonly expandedRunId = signal<number | null>(null);
   readonly diagnostics = signal<MLTrainingRunDiagnosticsDto | null>(null);
   readonly diagnosticsLoading = signal(false);
+
+  // Diagnostics for the training run that produced THIS model — surfaces
+  // Sharpe / F1 / EV / Brier / learner architecture / hyperparams without
+  // requiring the operator to expand a specific run row.
+  readonly producingDiagnostics = signal<MLTrainingRunDiagnosticsDto | null>(null);
+  readonly producingDiagnosticsLoading = signal(false);
 
   readonly featureImportance = signal<MLModelFeatureImportanceDto | null>(null);
   readonly featureImportanceLoading = signal(false);
@@ -1231,12 +1440,43 @@ export class MLModelDetailPageComponent implements OnInit {
         next: (res) => {
           this.trainingRunsLoading.set(false);
           this.trainingRuns.set(res.data?.data ?? []);
+          this.loadProducingDiagnostics(m.id);
         },
         error: () => {
           this.trainingRunsLoading.set(false);
           this.trainingRuns.set([]);
         },
       });
+  }
+
+  // Auto-fetch the diagnostics for the training run that PRODUCED this
+  // model — that's the run carrying the quality-gate fields the operator
+  // needs (Sharpe, F1, EV, Brier, abstention rate, learner architecture,
+  // hyperparams, augmentation flags). The page already fetches diagnostics
+  // on row-expand; this just makes the producing run's set surface
+  // automatically without forcing the operator to scroll down and click.
+  private loadProducingDiagnostics(modelId: number): void {
+    const producing = this.trainingRuns().find((r) => r.mlModelId === modelId);
+    if (!producing) {
+      this.producingDiagnostics.set(null);
+      return;
+    }
+    const cached = this.diagCache.get(producing.id);
+    if (cached) {
+      this.producingDiagnostics.set(cached);
+      return;
+    }
+    this.producingDiagnosticsLoading.set(true);
+    this.service.getTrainingRunDiagnostics(producing.id).subscribe({
+      next: (res) => {
+        this.producingDiagnosticsLoading.set(false);
+        if (res.data) {
+          this.diagCache.set(producing.id, res.data);
+          this.producingDiagnostics.set(res.data);
+        }
+      },
+      error: () => this.producingDiagnosticsLoading.set(false),
+    });
   }
 
   private loadFeatureImportance(id: number): void {

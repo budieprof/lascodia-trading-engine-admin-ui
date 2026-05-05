@@ -1,7 +1,16 @@
-import { ChangeDetectionStrategy, Component, ViewChild, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ViewChild,
+  computed,
+  inject,
+  signal,
+  OnInit,
+} from '@angular/core';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { map, Observable } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
+import type { EChartsOption } from 'echarts';
 
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { NotificationService } from '@core/notifications/notification.service';
@@ -16,6 +25,8 @@ import type {
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
+import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import {
   FormFieldComponent,
   FormFieldControlDirective,
@@ -31,6 +42,8 @@ import {
     ReactiveFormsModule,
     FormFieldComponent,
     FormFieldControlDirective,
+    MetricCardComponent,
+    ChartCardComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -148,6 +161,118 @@ import {
             </div>
           </div>
         </form>
+      }
+
+      <!-- 8-card KPI strip -->
+      <div class="cp-kpis">
+        <app-metric-card
+          label="Total pairs"
+          [value]="cpStats().total"
+          format="number"
+          dotColor="#0071E3"
+        />
+        <app-metric-card
+          label="Active"
+          [value]="cpStats().active"
+          format="number"
+          dotColor="#34C759"
+        />
+        <app-metric-card
+          label="Inactive"
+          [value]="cpStats().inactive"
+          format="number"
+          [dotColor]="cpStats().inactive > 0 ? '#FF9500' : '#34C759'"
+        />
+        <app-metric-card
+          label="Base currencies"
+          [value]="cpStats().baseCurrencies"
+          format="number"
+          dotColor="#AF52DE"
+        />
+        <app-metric-card
+          label="Quote currencies"
+          [value]="cpStats().quoteCurrencies"
+          format="number"
+          dotColor="#5AC8FA"
+        />
+        <app-metric-card
+          label="JPY pairs"
+          [value]="cpStats().jpyPairs"
+          format="number"
+          dotColor="#FF9500"
+        />
+        <app-metric-card
+          label="USD pairs"
+          [value]="cpStats().usdPairs"
+          format="number"
+          dotColor="#FF2D55"
+        />
+        <app-metric-card
+          label="Avg max lot"
+          [value]="cpStats().avgMaxLot"
+          format="number"
+          dotColor="#30D158"
+        />
+      </div>
+
+      <!-- 3-col chart row: by base, by quote, currency exposure -->
+      <div class="cp-charts">
+        <app-chart-card
+          title="Pairs by base currency"
+          subtitle="How many pairs use each currency as the base"
+          [options]="byBaseOptions()"
+          height="260px"
+        />
+        <app-chart-card
+          title="Pairs by quote currency"
+          subtitle="How many pairs use each currency as the quote"
+          [options]="byQuoteOptions()"
+          height="260px"
+        />
+        <app-chart-card
+          title="Currency exposure"
+          subtitle="Total appearances (base + quote) per currency"
+          [options]="exposureOptions()"
+          height="260px"
+        />
+      </div>
+
+      <!-- Currency exposure matrix -->
+      @if (exposureRows().length > 0) {
+        <section class="cp-matrix">
+          <header class="cp-matrix-head">
+            <h3>Currency exposure matrix</h3>
+            <span class="muted">Sorted by total appearances</span>
+          </header>
+          <table class="cp-matrix-table">
+            <thead>
+              <tr>
+                <th>Currency</th>
+                <th class="num">As base</th>
+                <th class="num">As quote</th>
+                <th class="num">Total pairs</th>
+                <th class="num">Active pairs</th>
+                <th>Pairs</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of exposureRows(); track row.currency) {
+                <tr>
+                  <td class="mono">{{ row.currency }}</td>
+                  <td class="num mono">{{ row.asBase }}</td>
+                  <td class="num mono">{{ row.asQuote }}</td>
+                  <td class="num mono">{{ row.total }}</td>
+                  <td class="num mono">{{ row.activeCount }}</td>
+                  <td class="cp-pair-list">
+                    @for (sym of row.pairs; track sym) {
+                      <span class="cp-pill">{{ sym }}</span>
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </section>
       }
 
       <app-data-table
@@ -303,6 +428,101 @@ import {
         border-radius: 50%;
         animation: spin 0.6s linear infinite;
       }
+
+      /* Currency-pairs density additions */
+      .cp-kpis {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        gap: var(--space-2);
+      }
+      @media (max-width: 1400px) {
+        .cp-kpis {
+          grid-template-columns: repeat(4, 1fr);
+        }
+      }
+      @media (max-width: 720px) {
+        .cp-kpis {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      .cp-charts {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1.4fr;
+        gap: var(--space-3);
+      }
+      @media (max-width: 1100px) {
+        .cp-charts {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .cp-matrix {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+      }
+      .cp-matrix-head {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .cp-matrix-head h3 {
+        margin: 0;
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .cp-matrix-head .muted,
+      .muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+      .cp-matrix-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .cp-matrix-table th,
+      .cp-matrix-table td {
+        padding: 8px var(--space-3);
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        font-size: var(--text-xs);
+      }
+      .cp-matrix-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+      .cp-matrix-table th {
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .cp-matrix-table th.num,
+      .cp-matrix-table td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .cp-matrix-table .mono {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+      }
+      .cp-pair-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+      .cp-pill {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: 10.5px;
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+      }
       @keyframes spin {
         to {
           transform: rotate(360deg);
@@ -311,7 +531,7 @@ import {
     `,
   ],
 })
-export class CurrencyPairsPageComponent {
+export class CurrencyPairsPageComponent implements OnInit {
   private readonly service = inject(CurrencyPairsService);
   private readonly notifications = inject(NotificationService);
   private readonly fb = inject(FormBuilder);
@@ -321,6 +541,210 @@ export class CurrencyPairsPageComponent {
   readonly editing = signal<CurrencyPairDto | Partial<CurrencyPairDto> | null>(null);
   readonly busy = signal(false);
   readonly showDeleteDialog = signal(false);
+
+  // Analytics sample, separate from the paged table source so KPIs/charts
+  // stay stable as the user pages or filters the grid.
+  readonly pairsSample = signal<CurrencyPairDto[]>([]);
+
+  cpStats = computed(() => {
+    const rows = this.pairsSample();
+    if (rows.length === 0) {
+      return {
+        total: 0,
+        active: 0,
+        inactive: 0,
+        baseCurrencies: 0,
+        quoteCurrencies: 0,
+        jpyPairs: 0,
+        usdPairs: 0,
+        avgMaxLot: null as number | null,
+      };
+    }
+    const baseSet = new Set<string>();
+    const quoteSet = new Set<string>();
+    let active = 0;
+    let jpy = 0;
+    let usd = 0;
+    let lotSum = 0;
+    for (const r of rows) {
+      if (r.baseCurrency) baseSet.add(r.baseCurrency);
+      if (r.quoteCurrency) quoteSet.add(r.quoteCurrency);
+      if (r.isActive) active++;
+      if ((r.symbol ?? '').includes('JPY')) jpy++;
+      if (r.baseCurrency === 'USD' || r.quoteCurrency === 'USD') usd++;
+      lotSum += r.maxLotSize ?? 0;
+    }
+    return {
+      total: rows.length,
+      active,
+      inactive: rows.length - active,
+      baseCurrencies: baseSet.size,
+      quoteCurrencies: quoteSet.size,
+      jpyPairs: jpy,
+      usdPairs: usd,
+      avgMaxLot: +(lotSum / rows.length).toFixed(2),
+    };
+  });
+
+  byBaseOptions = computed<EChartsOption>(() => {
+    const map: Record<string, number> = {};
+    for (const r of this.pairsSample()) {
+      const k = r.baseCurrency ?? '—';
+      map[k] = (map[k] ?? 0) + 1;
+    }
+    const entries = Object.entries(map).sort((a, b) => b[1] - a[1]);
+    if (entries.length === 0) return {};
+    return {
+      grid: { top: 10, right: 30, bottom: 30, left: 50 },
+      xAxis: {
+        type: 'category',
+        data: entries.map(([k]) => k),
+        axisLabel: { fontSize: 11, color: '#6E6E73' },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: entries.map(([, v]) => ({
+            value: v,
+            itemStyle: { color: '#AF52DE', borderRadius: [4, 4, 0, 0] },
+          })),
+          barWidth: '60%',
+          label: { show: true, position: 'top', fontSize: 10, color: '#6E6E73' },
+        },
+      ],
+    };
+  });
+
+  byQuoteOptions = computed<EChartsOption>(() => {
+    const map: Record<string, number> = {};
+    for (const r of this.pairsSample()) {
+      const k = r.quoteCurrency ?? '—';
+      map[k] = (map[k] ?? 0) + 1;
+    }
+    const entries = Object.entries(map).sort((a, b) => b[1] - a[1]);
+    if (entries.length === 0) return {};
+    return {
+      grid: { top: 10, right: 30, bottom: 30, left: 50 },
+      xAxis: {
+        type: 'category',
+        data: entries.map(([k]) => k),
+        axisLabel: { fontSize: 11, color: '#6E6E73' },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: entries.map(([, v]) => ({
+            value: v,
+            itemStyle: { color: '#5AC8FA', borderRadius: [4, 4, 0, 0] },
+          })),
+          barWidth: '60%',
+          label: { show: true, position: 'top', fontSize: 10, color: '#6E6E73' },
+        },
+      ],
+    };
+  });
+
+  exposureRows = computed(() => {
+    type Row = {
+      currency: string;
+      asBase: number;
+      asQuote: number;
+      total: number;
+      activeCount: number;
+      pairs: string[];
+    };
+    const rows: Record<string, Row> = {};
+    for (const p of this.pairsSample()) {
+      const sym = p.symbol ?? '';
+      const ensure = (c: string): Row => {
+        if (!rows[c])
+          rows[c] = { currency: c, asBase: 0, asQuote: 0, total: 0, activeCount: 0, pairs: [] };
+        return rows[c];
+      };
+      if (p.baseCurrency) {
+        const r = ensure(p.baseCurrency);
+        r.asBase++;
+        r.total++;
+        if (p.isActive) r.activeCount++;
+        if (sym && !r.pairs.includes(sym)) r.pairs.push(sym);
+      }
+      if (p.quoteCurrency) {
+        const r = ensure(p.quoteCurrency);
+        r.asQuote++;
+        r.total++;
+        if (p.isActive) r.activeCount++;
+        if (sym && !r.pairs.includes(sym)) r.pairs.push(sym);
+      }
+    }
+    return Object.values(rows).sort((a, b) => b.total - a.total);
+  });
+
+  exposureOptions = computed<EChartsOption>(() => {
+    const rows = this.exposureRows();
+    if (rows.length === 0) return {};
+    return {
+      grid: { top: 10, right: 30, bottom: 30, left: 50 },
+      xAxis: {
+        type: 'category',
+        data: rows.map((r) => r.currency),
+        axisLabel: { fontSize: 11, color: '#6E6E73' },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+      },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      legend: { top: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
+      series: [
+        {
+          name: 'As base',
+          type: 'bar',
+          stack: 'exp',
+          data: rows.map((r) => r.asBase),
+          itemStyle: { color: '#AF52DE' },
+          barWidth: '50%',
+        },
+        {
+          name: 'As quote',
+          type: 'bar',
+          stack: 'exp',
+          data: rows.map((r) => r.asQuote),
+          itemStyle: { color: '#5AC8FA' },
+          barWidth: '50%',
+          label: {
+            show: true,
+            position: 'top',
+            fontSize: 10,
+            color: '#6E6E73',
+            formatter: (p: any) => String(rows[p.dataIndex].total),
+          },
+        },
+      ],
+    };
+  });
+
+  ngOnInit(): void {
+    this.loadPairsSample();
+  }
+
+  private loadPairsSample(): void {
+    this.service.list({ currentPage: 1, itemCountPerPage: 200, filter: null }).subscribe({
+      next: (res) => {
+        if (res?.data?.data) this.pairsSample.set(res.data.data);
+      },
+    });
+  }
 
   readonly form = this.fb.nonNullable.group({
     symbol: ['', Validators.required],
@@ -335,33 +759,70 @@ export class CurrencyPairsPageComponent {
   });
 
   readonly columns: ColDef<CurrencyPairDto>[] = [
-    { headerName: 'Symbol', field: 'symbol', flex: 1, minWidth: 120 },
-    { headerName: 'Base', field: 'baseCurrency', width: 100 },
-    { headerName: 'Quote', field: 'quoteCurrency', width: 100 },
-    { headerName: 'Digits', field: 'decimalPlaces', width: 90 },
+    { headerName: 'Symbol', field: 'symbol', flex: 1, minWidth: 110 },
+    { headerName: 'Base', field: 'baseCurrency', width: 90 },
+    { headerName: 'Quote', field: 'quoteCurrency', width: 90 },
+    {
+      headerName: 'Class',
+      field: 'symbol',
+      width: 100,
+      valueGetter: (p: any) => this.classifyPair(p.data),
+      cellRenderer: (p: { value: string }) => {
+        const map: Record<string, { bg: string; color: string }> = {
+          Major: { bg: 'rgba(52,199,89,0.12)', color: '#248A3D' },
+          Cross: { bg: 'rgba(0,113,227,0.12)', color: '#0040DD' },
+          Exotic: { bg: 'rgba(255,149,0,0.12)', color: '#C93400' },
+          Other: { bg: 'rgba(142,142,147,0.12)', color: '#636366' },
+        };
+        const v = map[p.value] ?? map['Other'];
+        return `<span style="background:${v.bg};color:${v.color};padding:2px 10px;border-radius:999px;font-size:11px;font-weight:600">${p.value}</span>`;
+      },
+    },
+    { headerName: 'Digits', field: 'decimalPlaces', width: 80 },
+    {
+      headerName: 'Pip size',
+      field: 'decimalPlaces',
+      width: 100,
+      valueFormatter: (p: any) => {
+        const d = p.value as number;
+        if (d == null) return '—';
+        // FX pip = 10^-(digits-1) for 5/3-digit feeds; 10^-digits otherwise.
+        return Math.pow(10, -(d > 0 ? d - 1 : 0)).toFixed(d > 0 ? d - 1 : 0);
+      },
+    },
     {
       headerName: 'Contract Size',
       field: 'contractSize',
-      width: 130,
+      width: 120,
       valueFormatter: (p) => (p.value as number)?.toLocaleString() ?? '-',
     },
     {
       headerName: 'Min Lot',
       field: 'minLotSize',
-      width: 100,
+      width: 90,
       valueFormatter: (p) => (p.value as number)?.toFixed(2) ?? '-',
     },
     {
       headerName: 'Max Lot',
       field: 'maxLotSize',
-      width: 100,
+      width: 90,
       valueFormatter: (p) => (p.value as number)?.toFixed(2) ?? '-',
     },
     {
       headerName: 'Step',
       field: 'lotStep',
-      width: 100,
+      width: 90,
       valueFormatter: (p) => (p.value as number)?.toFixed(2) ?? '-',
+    },
+    {
+      headerName: 'Lot range',
+      field: 'maxLotSize',
+      width: 110,
+      valueGetter: (p: any) =>
+        (p.data?.maxLotSize ?? 0) > 0
+          ? Math.round((p.data.maxLotSize - (p.data.minLotSize ?? 0)) / (p.data.lotStep || 1))
+          : 0,
+      headerTooltip: 'Number of distinct lot sizes between min and max',
     },
     {
       headerName: 'Status',
@@ -376,6 +837,18 @@ export class CurrencyPairsPageComponent {
       },
     },
   ];
+
+  // Major: USD vs EUR/GBP/JPY/CHF/AUD/NZD/CAD. Cross: two majors without USD.
+  // Exotic: anything else. Quick classification used by the table + KPIs.
+  private readonly majorCcys = new Set(['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'NZD', 'CAD']);
+  classifyPair(p?: CurrencyPairDto | null): string {
+    if (!p) return 'Other';
+    const b = p.baseCurrency ?? '';
+    const q = p.quoteCurrency ?? '';
+    if (b === 'USD' || q === 'USD') return 'Major';
+    if (this.majorCcys.has(b) && this.majorCcys.has(q)) return 'Cross';
+    return 'Exotic';
+  }
 
   readonly fetchData = (params: PagerRequest): Observable<PagedData<CurrencyPairDto>> =>
     this.service.list(params).pipe(map((r) => r.data ?? { pager: emptyPager(), data: [] }));
@@ -440,6 +913,7 @@ export class CurrencyPairsPageComponent {
           this.notifications.success(isEdit ? 'Pair updated' : 'Pair created');
           this.editing.set(null);
           this.table?.loadData();
+          this.loadPairsSample();
         } else {
           this.notifications.error(res.message ?? 'Save failed');
         }
@@ -460,6 +934,7 @@ export class CurrencyPairsPageComponent {
           this.notifications.success('Pair deleted');
           this.editing.set(null);
           this.table?.loadData();
+          this.loadPairsSample();
         } else {
           this.notifications.error(res.message ?? 'Delete failed');
         }

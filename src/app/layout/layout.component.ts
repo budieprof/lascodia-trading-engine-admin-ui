@@ -106,9 +106,7 @@ import { KeyboardShortcutsService } from '@core/keyboard/keyboard-shortcuts.serv
       .content {
         flex: 1;
         padding: var(--space-6) var(--space-8);
-        max-width: var(--content-max-width);
         width: 100%;
-        margin: 0 auto;
       }
       .content:focus {
         outline: none;
