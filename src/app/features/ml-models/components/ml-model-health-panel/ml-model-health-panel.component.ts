@@ -94,13 +94,12 @@ interface QualityWarning {
 
             <dt
               [title]="
-                'Matthews correlation coefficient — class-imbalance-robust skill score, range −1 to +1. ' +
-                'Computed UI-side from (accuracy, F1) under the FP=FN symmetric-error assumption ' +
-                '(exact when class balance is 50/50; a fair rank-order proxy otherwise). ' +
-                'A predict-majority-always model scores 0 here regardless of headline accuracy.'
+                mccIsExact()
+                  ? 'Matthews correlation coefficient — class-imbalance-robust skill score, range −1 to +1. Computed at training time from the persisted confusion-matrix counts; this is the exact value, not a UI estimate. A predict-majority-always model scores 0 here regardless of headline accuracy.'
+                  : 'Matthews correlation coefficient — class-imbalance-robust skill score, range −1 to +1. Computed UI-side from (accuracy, F1) under the FP=FN symmetric-error assumption (this model predates the engine persisting MCC). Re-train to get the exact value.'
               "
             >
-              MCC <span class="hint">(est)</span>
+              MCC <span class="hint">{{ mccIsExact() ? '' : '(est)' }}</span>
             </dt>
             <dd
               class="num"
@@ -479,25 +478,25 @@ export class MLModelHealthPanelComponent {
   });
 
   /**
-   * MCC (Matthews Correlation Coefficient) computed UI-side from `accuracy`
-   * and `f1` under the FP=FN symmetric-error assumption.
+   * MCC (Matthews Correlation Coefficient). Prefers the engine-persisted exact
+   * value (`MLModelDto.mcc`, computed at training time from the full TP/TN/FP/FN
+   * confusion-matrix counts). Falls back to the UI-side symmetric-error estimate
+   * for older models trained before the engine started persisting this column.
    *
-   * Why this is needed:
-   *  - The engine persists `DirectionAccuracy` and `F1Score` but not the four
-   *    confusion-matrix cells separately. MCC requires (TP, TN, FP, FN).
-   *  - Three of those four cells can be solved from (accuracy, F1, N), but
-   *    FP and FN can't be separated without an additional equation (e.g. the
-   *    validation-set class prior). Under FP=FN the result is exact for
-   *    50/50-balanced classes and a faithful rank-order proxy otherwise.
-   *  - For a predict-majority-always classifier, F1=0 → TP=0 → MCC=0
-   *    regardless of accuracy. That's the precise property we want — operators
-   *    can no longer be fooled by a 73%-accuracy / 0.0-F1 model that's actually
-   *    dead.
-   *
-   * Returns null when (accuracy, F1) are missing or self-inconsistent.
+   * The fall-back is a faithful rank-order proxy under FP=FN (see
+   * `estimateMccFromAccuracyAndF1` for the derivation), but only the persisted
+   * value is exact for arbitrary class priors.
    */
   readonly estimatedMcc = computed<number | null>(() => {
-    return estimateMccFromAccuracyAndF1(this.model().directionAccuracy, this.model().f1Score);
+    const m = this.model();
+    if (m.mcc !== null && m.mcc !== undefined) return m.mcc;
+    return estimateMccFromAccuracyAndF1(m.directionAccuracy, m.f1Score);
+  });
+
+  /** True when the displayed MCC is the engine's exact value vs the UI estimate. */
+  readonly mccIsExact = computed<boolean>(() => {
+    const v = this.model().mcc;
+    return v !== null && v !== undefined;
   });
 
   /**

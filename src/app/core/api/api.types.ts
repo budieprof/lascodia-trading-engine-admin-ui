@@ -623,6 +623,14 @@ export interface MLModelDto {
   // Quality metrics — populated when training writes the model row.
   /** F1 on the validation set. <0.10 alongside high accuracy = severe class imbalance. */
   f1Score: number | null;
+  /**
+   * Matthews Correlation Coefficient — class-imbalance-robust skill score in [−1, +1].
+   * Computed at training time from the persisted confusion-matrix counts (TP/TN/FP/FN),
+   * so this is the *exact* MCC, not the UI-side symmetric-error estimate. When present,
+   * the model health panel shows it directly; when null (older models trained before
+   * this column existed) the UI falls back to `estimateMccFromAccuracyAndF1`.
+   */
+  mcc: number | null;
   /** Brier score (calibration). Lower is better; >0.25 typically indicates poor calibration. */
   brierScore: number | null;
   sharpeRatio: number | null;
