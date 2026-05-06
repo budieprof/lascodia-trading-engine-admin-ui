@@ -33,6 +33,7 @@ import {
   BulkUpdateStrategiesResult,
   BacktestPreviewSnapshotDto,
   SaveBacktestPreviewSnapshotRequest,
+  PromotionGatesDto,
 } from '@core/api/api.types';
 
 @Injectable({ providedIn: 'root' })
@@ -97,8 +98,28 @@ export class StrategiesService {
     return this.api.delete(`/strategy/${id}`);
   }
 
-  activate(id: number): Observable<ResponseData<StrategyDto>> {
-    return this.api.put(`/strategy/${id}/activate`);
+  /**
+   * Activate a strategy.
+   * @param bypassPaperGate Operator override that skips the paper-execution
+   * duration/count gate (chicken-and-egg for newly-promoted strategies that
+   * have never paper-traded). Adversarial robustness + edge-posterior + CPCV
+   * + TCA + correlation gates always run regardless. Default false.
+   */
+  activate(id: number, bypassPaperGate = false): Observable<ResponseData<StrategyDto>> {
+    const qs = bypassPaperGate ? '?bypassPaperGate=true' : '';
+    return this.api.put(`/strategy/${id}/activate${qs}`);
+  }
+
+  /**
+   * Read-only evaluation of every promotion gate. Used by the strategy detail
+   * page's "Promotion Readiness" card to show the breakdown before activation.
+   */
+  getPromotionGates(
+    id: number,
+    bypassPaperGate = false,
+  ): Observable<ResponseData<PromotionGatesDto>> {
+    const qs = bypassPaperGate ? '?bypassPaperGate=true' : '';
+    return this.api.get(`/strategy/${id}/promotion-gates${qs}`);
   }
 
   pause(id: number): Observable<ResponseData<StrategyDto>> {

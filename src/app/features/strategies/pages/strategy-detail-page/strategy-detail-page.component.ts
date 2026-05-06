@@ -45,6 +45,7 @@ import { EnumLabelPipe } from '@shared/pipes/enum-label.pipe';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 import { StrategyFormComponent } from '../../components/strategy-form/strategy-form.component';
+import { PromotionReadinessCardComponent } from '../../components/promotion-readiness-card/promotion-readiness-card.component';
 
 @Component({
   selector: 'app-strategy-detail-page',
@@ -60,6 +61,7 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
     EnumLabelPipe,
     RelativeTimePipe,
     StrategyFormComponent,
+    PromotionReadinessCardComponent,
     RouterLink,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -329,6 +331,18 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
                 </button>
               </div>
             </div>
+          }
+
+          <!-- Promotion Tab — live evaluation of every PromotionGateValidator
+               check (paper-trade duration, adversarial robustness, edge posterior,
+               CPCV, TCA, correlation). Shows the breakdown the engine would emit
+               on activation, with a paper-gate bypass toggle for hand-promoted
+               strategies that have no PaperExecution history yet. -->
+          @if (activeTab() === 'promotion' && strategy()) {
+            <app-promotion-readiness-card
+              [strategyId]="strategy()!.id"
+              (activated)="onPromotionActivated()"
+            />
           }
 
           <!-- Signals Tab -->
@@ -1204,6 +1218,7 @@ export class StrategyDetailPageComponent implements OnInit {
 
   readonly detailTabs: TabItem[] = [
     { label: 'Config', value: 'config' },
+    { label: 'Promotion', value: 'promotion' },
     { label: 'Signals', value: 'signals' },
     { label: 'Orders', value: 'orders' },
     { label: 'Optimization', value: 'optimization' },
@@ -1613,6 +1628,15 @@ export class StrategyDetailPageComponent implements OnInit {
         this.actionLoading.set(false);
       },
     });
+  }
+
+  /**
+   * Fired by `<app-promotion-readiness-card>` after a successful activation
+   * from inside the Promotion tab. Re-fetches the parent strategy so the
+   * detail header (Status pill, lifecycle stage) reflects the new state.
+   */
+  onPromotionActivated(): void {
+    this.loadStrategy();
   }
 
   onPause(): void {

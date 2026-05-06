@@ -73,7 +73,19 @@ if [[ -z "$TARGETS" ]]; then
 fi
 
 TO_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-FROM_ISO=$(date -u -v-180d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '180 days ago' +%Y-%m-%dT%H:%M:%SZ)
+
+# Timeframe-aware backtest window — see scripts/strategy-hunt.sh for the rationale.
+days_for_backtest_tf() {
+  case "$1" in
+    M1|M5)  echo 180 ;;
+    M15)    echo 365 ;;
+    H1)     echo 720 ;;
+    H4)     echo 1080 ;;
+    D1)     echo 2000 ;;
+    *)      echo 720 ;;
+  esac
+}
+
 COUNT=$(echo "$TARGETS" | grep -c .)
 log "batch start — re-optimizing $COUNT strategies (in-flight=$INFLIGHT)"
 
@@ -91,13 +103,15 @@ while IFS=: read -r SID SYM TF; do
   RECENT_BT=$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
     "SELECT EXISTS(SELECT 1 FROM \"BacktestRun\" WHERE \"StrategyId\" = $SID AND \"Status\" = 'Completed' AND \"CompletedAt\" > NOW() - INTERVAL '7 days');")
   BT=""
+  bt_days=$(days_for_backtest_tf "$TF")
   if [[ "$RECENT_BT" != "t" ]]; then
+    FROM_ISO=$(date -u -v-${bt_days}d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "${bt_days} days ago" +%Y-%m-%dT%H:%M:%SZ)
     BT=$(curl -s -X POST "$ENGINE_URL/api/v1/lascodia-trading-engine/backtest" \
       -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
       -d "{\"strategyId\":$SID,\"symbol\":\"$SYM\",\"timeframe\":\"$TF\",\"fromDate\":\"$FROM_ISO\",\"toDate\":\"$TO_ISO\",\"initialBalance\":10000}" \
       | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data','') if d.get('status') else '')")
   fi
-  log "  sid=$SID $SYM $TF rid=$RID${BT:+ bt=$BT}${BT:- bt=cached}"
+  log "  sid=$SID $SYM $TF rid=$RID${BT:+ bt=$BT (${bt_days}d)}${BT:- bt=cached}"
 done <<<"$TARGETS"
 
 log "batch done"

@@ -9,12 +9,14 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
-import { catchError, map, merge, of, switchMap, throttleTime } from 'rxjs';
+import { catchError, forkJoin, map, merge, of, switchMap, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
 
 import { StrategiesService } from '@core/services/strategies.service';
 import { StrategyFeedbackService } from '@core/services/strategy-feedback.service';
+import { BacktestsService } from '@core/services/backtests.service';
+import { WalkForwardService } from '@core/services/walk-forward.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import {
@@ -26,6 +28,9 @@ import {
   ApplyStrategyTemplateRequest,
   StrategyRejectionSummaryDto,
   RiskProfileDto,
+  BacktestRunDto,
+  WalkForwardRunDto,
+  OptimizationRunDto,
 } from '@core/api/api.types';
 import { RiskProfilesService } from '@core/services/risk-profiles.service';
 
@@ -502,6 +507,15 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
                 title="Detach the risk profile from every selected strategy"
               >
                 Clear risk profile
+              </button>
+              <button
+                type="button"
+                class="btn btn-link"
+                [disabled]="bulkBusy()"
+                (click)="bulkRunOptimization(rows, clear)"
+                title="Queue a Manual optimization run for every selected strategy. The OptimizationWorker picks up queued runs and searches for improved parameters."
+              >
+                🔧 Run optimization
               </button>
               @if (bulkBusy()) {
                 <span class="muted small">Applying…</span>
@@ -1021,6 +1035,8 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
 export class StrategiesPageComponent {
   private readonly strategiesService = inject(StrategiesService);
   private readonly feedbackService = inject(StrategyFeedbackService);
+  private readonly backtestsService = inject(BacktestsService);
+  private readonly walkForwardService = inject(WalkForwardService);
   private readonly riskProfilesService = inject(RiskProfilesService);
   private readonly notifications = inject(NotificationService);
   private readonly realtime = inject(RealtimeService);
@@ -1592,6 +1608,102 @@ export class StrategiesPageComponent {
       } satisfies SparklineCellRendererParams,
     },
     {
+      field: 'lifecycleStage',
+      headerName: 'Lifecycle',
+      flex: 1,
+      minWidth: 110,
+      cellRenderer: (p: any) => {
+        const stage = (p.value as string | undefined) ?? '—';
+        const variant = lifecycleVariant(stage);
+        return `<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600;background:${variant.bg};color:${variant.color}">${stage}</span>`;
+      },
+    },
+    {
+      colId: 'btReturn',
+      headerName: 'Last BT %',
+      flex: 1,
+      minWidth: 90,
+      sortable: false,
+      filter: false,
+      valueGetter: (p: any) => {
+        const ret = parseTotalReturn(p.data?.latestBt?.resultJson);
+        return ret != null ? ret * 100 : null;
+      },
+      cellRenderer: (p: any) => {
+        const v = p.value as number | null;
+        if (v == null) return '<span style="color:var(--text-tertiary,#999)">—</span>';
+        const color = v >= 0 ? 'var(--profit,#1f8a4c)' : 'var(--loss,#c0392b)';
+        const sign = v >= 0 ? '+' : '';
+        return `<span style="color:${color};font-variant-numeric:tabular-nums">${sign}${v.toFixed(2)}%</span>`;
+      },
+    },
+    {
+      colId: 'wfOos',
+      headerName: 'Last WF avgOOS',
+      flex: 1,
+      minWidth: 110,
+      sortable: false,
+      filter: false,
+      valueGetter: (p: any) =>
+        (p.data?.latestWf as WalkForwardRunDto | null | undefined)?.averageOutOfSampleScore ?? null,
+      cellRenderer: (p: any) => {
+        const v = p.value as number | null;
+        if (v == null) return '<span style="color:var(--text-tertiary,#999)">—</span>';
+        const color = v >= 0 ? 'var(--profit,#1f8a4c)' : 'var(--loss,#c0392b)';
+        const sign = v >= 0 ? '+' : '';
+        return `<span style="color:${color};font-variant-numeric:tabular-nums">${sign}${v.toFixed(3)}</span>`;
+      },
+    },
+    {
+      colId: 'optUplift',
+      headerName: 'Opt uplift',
+      flex: 1,
+      minWidth: 90,
+      sortable: false,
+      filter: false,
+      valueGetter: (p: any) => {
+        const o = p.data?.latestOpt as OptimizationRunDto | null | undefined;
+        if (!o || o.bestHealthScore == null || o.baselineHealthScore == null) return null;
+        return o.bestHealthScore - o.baselineHealthScore;
+      },
+      cellRenderer: (p: any) => {
+        const v = p.value as number | null;
+        if (v == null) return '<span style="color:var(--text-tertiary,#999)">—</span>';
+        const color = v >= 0 ? 'var(--profit,#1f8a4c)' : 'var(--loss,#c0392b)';
+        const sign = v >= 0 ? '+' : '';
+        return `<span style="color:${color};font-variant-numeric:tabular-nums">${sign}${v.toFixed(3)}</span>`;
+      },
+    },
+    {
+      colId: 'eligibility',
+      headerName: 'Eligible',
+      flex: 1.4,
+      minWidth: 140,
+      sortable: false,
+      filter: false,
+      cellRenderer: (p: any) => {
+        const e = (p.data?.eligibility as ActivationEligibility | undefined) ?? { kind: 'unknown' };
+        const variant = eligibilityVariant(e.kind);
+        const label = eligibilityLabel(e);
+        const tooltip = eligibilityTooltip(e);
+        return `<span title="${tooltip}" style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600;background:${variant.bg};color:${variant.color}">${label}</span>`;
+      },
+    },
+    {
+      field: 'rolloutPct',
+      headerName: 'Rollout',
+      flex: 0.8,
+      minWidth: 80,
+      valueFormatter: (p: any) => (p.value != null ? `${p.value}%` : '—'),
+    },
+    {
+      field: 'lastSignalAt',
+      headerName: 'Last signal',
+      flex: 1,
+      minWidth: 100,
+      valueFormatter: (p: any) => (p.value ? this.relativeTime.transform(p.value) : 'never'),
+    },
+    {
       field: 'riskProfileId',
       headerName: 'Risk Profile',
       flex: 1,
@@ -1624,20 +1736,49 @@ export class StrategiesPageComponent {
         const ids = page?.data?.map((s) => s.id).filter((id): id is number => id != null) ?? [];
         if (ids.length === 0) return of(page!);
 
-        // One bulk round-trip per page — not per row. Failure here just leaves
-        // the sparkline column blank; the rest of the row stays usable.
-        return this.strategiesService.getRecentSnapshots({ strategyIds: ids, count: 24 }).pipe(
-          map((snapRes) => {
+        // Bulk fan-out per page (NOT per row). Pulls the most-recent 500 of
+        // each so the active-strategy slice (~200 today) is comfortably covered;
+        // grouping is client-side. Failures degrade gracefully — empty cells,
+        // not a blank table.
+        const wide = { currentPage: 1, itemCountPerPage: 500, filter: null } as PagerRequest;
+        return forkJoin({
+          snaps: this.strategiesService
+            .getRecentSnapshots({ strategyIds: ids, count: 24 })
+            .pipe(catchError(() => of(null))),
+          backtests: this.backtestsService.list(wide).pipe(catchError(() => of(null))),
+          walkForwards: this.walkForwardService.list(wide).pipe(catchError(() => of(null))),
+          opts: this.feedbackService.listOptimizationRuns(wide).pipe(catchError(() => of(null))),
+        }).pipe(
+          map(({ snaps, backtests, walkForwards, opts }) => {
+            // ── Health sparkline (existing behavior) ────────────────────
             const grouped = new Map<number, number[]>();
-            for (const s of snapRes.data ?? []) {
+            for (const s of snaps?.data ?? []) {
               if (!grouped.has(s.strategyId)) grouped.set(s.strategyId, []);
               grouped.get(s.strategyId)!.push(s.healthScore);
             }
+            // ── Latest-per-strategy lookups ─────────────────────────────
+            const latestBt = pickLatestPerStrategy(
+              backtests?.data?.data ?? [],
+              (b) => b.strategyId,
+              (b) => b.completedAt ?? b.startedAt,
+            );
+            const latestWf = pickLatestPerStrategy(
+              walkForwards?.data?.data ?? [],
+              (w) => w.strategyId,
+              (w) => w.completedAt ?? w.startedAt,
+            );
+            const latestOpt = pickLatestPerStrategy(
+              opts?.data?.data ?? [],
+              (o) => o.strategyId,
+              (o) => o.completedAt ?? o.startedAt,
+            );
             for (const row of page!.data) {
-              // Server returns newest-first; sparkline reads left→right
-              // chronologically, so flip the order.
-              const series = (grouped.get(row.id) ?? []).slice().reverse();
-              (row as StrategyDto & { healthSeries?: number[] }).healthSeries = series;
+              const decorated = row as StrategyRowAugment;
+              decorated.healthSeries = (grouped.get(row.id) ?? []).slice().reverse();
+              decorated.latestBt = latestBt.get(row.id) ?? null;
+              decorated.latestWf = latestWf.get(row.id) ?? null;
+              decorated.latestOpt = latestOpt.get(row.id) ?? null;
+              decorated.eligibility = computeEligibility(row, decorated);
             }
             return page!;
           }),
@@ -1953,6 +2094,56 @@ export class StrategiesPageComponent {
     this.pickerClearFn = null;
   }
 
+  /**
+   * Queue a Manual-trigger optimization run for every selected strategy.
+   * The {@link StrategyFeedbackService.triggerOptimization} call is idempotent
+   * — re-triggering a strategy that already has a Queued/Running run returns
+   * the existing run id with a 200, so confirming the action only needs the
+   * count of rows we'll dispatch to. Each call returns its run id; we tally
+   * successes and surface skipped/duplicates in the notification.
+   */
+  bulkRunOptimization(rows: StrategyDto[], clear: () => void): void {
+    if (this.bulkBusy() || rows.length === 0) return;
+    const n = rows.length;
+    if (
+      !confirm(
+        `Queue an optimization run for ${n} strateg${n === 1 ? 'y' : 'ies'}? ` +
+          `Strategies that already have a Queued or Running optimization will be skipped (idempotent).`,
+      )
+    )
+      return;
+
+    this.bulkBusy.set(true);
+    let succeeded = 0;
+    let failed = 0;
+    let remaining = rows.length;
+    const finish = () => {
+      this.bulkBusy.set(false);
+      const msg =
+        `Optimization queued for ${succeeded} strateg${succeeded === 1 ? 'y' : 'ies'}` +
+        (failed > 0 ? ` (${failed} failed)` : '');
+      if (failed > 0 && succeeded === 0) this.notifications.error(msg);
+      else this.notifications.success(msg);
+      clear();
+    };
+
+    for (const row of rows) {
+      this.feedbackService
+        .triggerOptimization({ strategyId: row.id, triggerType: 'Manual' })
+        .subscribe({
+          next: (res) => {
+            if (res?.status) succeeded++;
+            else failed++;
+            if (--remaining === 0) finish();
+          },
+          error: () => {
+            failed++;
+            if (--remaining === 0) finish();
+          },
+        });
+    }
+  }
+
   private getStatusVariant(status: string): { bg: string; color: string } {
     const map: Record<string, { bg: string; color: string }> = {
       Active: { bg: 'rgba(52, 199, 89, 0.12)', color: '#248A3D' },
@@ -2165,4 +2356,202 @@ export class StrategiesPageComponent {
       ],
     } as EChartsOption;
   })();
+}
+
+// ── Helpers for the strategy-list inline metrics ──────────────────────────
+
+/** Augmented row shape — fields appended client-side per page. */
+type StrategyRowAugment = StrategyDto & {
+  healthSeries?: number[];
+  latestBt?: BacktestRunDto | null;
+  latestWf?: WalkForwardRunDto | null;
+  latestOpt?: OptimizationRunDto | null;
+  eligibility?: ActivationEligibility;
+};
+
+/**
+ * Three-tier eligibility verdict shown in the strategies list. The exact
+ * thresholds match the project memory's "all 3 legs positive" rule. `Active`
+ * isn't a verdict per se — strategies already in flight are tagged separately.
+ */
+type ActivationEligibility =
+  | { kind: 'live'; label: string } // already active / rolling out
+  | { kind: 'ready'; reasons: string[] } // all-three-legs green
+  | { kind: 'partial'; reasons: string[] } // mixed evidence
+  | { kind: 'blocked'; reasons: string[] } // failing or no evidence
+  | { kind: 'unknown' };
+
+function pickLatestPerStrategy<T>(
+  rows: T[],
+  getStrategyId: (r: T) => number,
+  getTimestamp: (r: T) => string | null,
+): Map<number, T> {
+  const out = new Map<number, T>();
+  for (const r of rows) {
+    const sid = getStrategyId(r);
+    if (sid == null) continue;
+    const tsStr = getTimestamp(r);
+    const ts = tsStr ? Date.parse(tsStr) : 0;
+    const prev = out.get(sid);
+    if (!prev) {
+      out.set(sid, r);
+      continue;
+    }
+    const prevTs = Date.parse(getTimestamp(prev) ?? '');
+    if (ts > (Number.isFinite(prevTs) ? prevTs : 0)) out.set(sid, r);
+  }
+  return out;
+}
+
+function computeEligibility(row: StrategyDto, aug: StrategyRowAugment): ActivationEligibility {
+  // 1. Already running / rolling out — short-circuit.
+  if (row.status === 'Active') {
+    const pct = row.rolloutPct;
+    return {
+      kind: 'live',
+      label: pct != null && pct < 100 ? `Rolling out (${pct}%)` : 'Active',
+    };
+  }
+  if (row.lifecycleStage === 'Active' || row.lifecycleStage === 'Approved') {
+    return {
+      kind: 'live',
+      label: row.lifecycleStage === 'Active' ? 'Active' : 'Approved',
+    };
+  }
+
+  // 2. Three-leg evidence check.
+  const reasonsGreen: string[] = [];
+  const reasonsRed: string[] = [];
+
+  const opt = aug.latestOpt;
+  if (opt) {
+    if (
+      opt.status === 'Completed' &&
+      opt.bestHealthScore != null &&
+      opt.baselineHealthScore != null &&
+      opt.bestHealthScore > opt.baselineHealthScore
+    ) {
+      reasonsGreen.push('opt+');
+    } else if (opt.status === 'Failed') {
+      reasonsRed.push('opt fail');
+    } else if (opt.status === 'Completed') {
+      reasonsRed.push('opt flat');
+    }
+  }
+
+  const bt = aug.latestBt;
+  if (bt) {
+    if (bt.status === 'Completed') {
+      const ret = parseTotalReturn(bt.resultJson);
+      if (ret != null) {
+        if (ret > 0) reasonsGreen.push(`BT +${(ret * 100).toFixed(1)}%`);
+        else reasonsRed.push(`BT ${(ret * 100).toFixed(1)}%`);
+      } else {
+        reasonsRed.push('BT no result');
+      }
+    } else if (bt.status === 'Failed') {
+      reasonsRed.push('BT fail');
+    }
+  }
+
+  const wf = aug.latestWf;
+  if (wf) {
+    if (wf.status === 'Completed' && wf.averageOutOfSampleScore != null) {
+      if (wf.averageOutOfSampleScore > 0) {
+        reasonsGreen.push(`WF +${wf.averageOutOfSampleScore.toFixed(2)}`);
+      } else {
+        reasonsRed.push(`WF ${wf.averageOutOfSampleScore.toFixed(2)}`);
+      }
+    } else if (wf.status === 'Failed') {
+      reasonsRed.push('WF fail');
+    }
+  }
+
+  if (reasonsGreen.length === 0 && reasonsRed.length === 0) {
+    return { kind: 'unknown' };
+  }
+  if (reasonsGreen.length === 3 && reasonsRed.length === 0) {
+    return { kind: 'ready', reasons: reasonsGreen };
+  }
+  if (reasonsRed.length === 3 || (reasonsRed.length > 0 && reasonsGreen.length === 0)) {
+    return { kind: 'blocked', reasons: reasonsRed };
+  }
+  return {
+    kind: 'partial',
+    reasons: [...reasonsGreen, ...reasonsRed],
+  };
+}
+
+function parseTotalReturn(resultJson: string | null | undefined): number | null {
+  if (!resultJson) return null;
+  try {
+    const v = JSON.parse(resultJson)?.TotalReturn;
+    return typeof v === 'number' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function lifecycleVariant(stage: string): { bg: string; color: string } {
+  switch (stage) {
+    case 'Active':
+      return { bg: 'rgba(31,138,76,0.15)', color: '#1f8a4c' };
+    case 'Approved':
+      return { bg: 'rgba(34,197,94,0.15)', color: '#15803d' };
+    case 'ShadowLive':
+      return { bg: 'rgba(59,130,246,0.15)', color: '#1d4ed8' };
+    case 'BacktestQualified':
+      return { bg: 'rgba(245,158,11,0.15)', color: '#b45309' };
+    case 'PaperTrading':
+      return { bg: 'rgba(139,92,246,0.15)', color: '#6d28d9' };
+    case 'Draft':
+      return { bg: 'rgba(120,120,128,0.15)', color: '#52525b' };
+    default:
+      return { bg: 'rgba(120,120,128,0.10)', color: '#71717a' };
+  }
+}
+
+function eligibilityVariant(kind: ActivationEligibility['kind']): { bg: string; color: string } {
+  switch (kind) {
+    case 'live':
+      return { bg: 'rgba(31,138,76,0.18)', color: '#0e7c3a' };
+    case 'ready':
+      return { bg: 'rgba(34,197,94,0.18)', color: '#15803d' };
+    case 'partial':
+      return { bg: 'rgba(245,158,11,0.18)', color: '#b45309' };
+    case 'blocked':
+      return { bg: 'rgba(239,68,68,0.15)', color: '#b91c1c' };
+    default:
+      return { bg: 'rgba(120,120,128,0.10)', color: '#71717a' };
+  }
+}
+
+function eligibilityLabel(e: ActivationEligibility): string {
+  switch (e.kind) {
+    case 'live':
+      return e.label;
+    case 'ready':
+      return '✓ Ready';
+    case 'partial':
+      return 'Partial';
+    case 'blocked':
+      return 'Blocked';
+    default:
+      return '—';
+  }
+}
+
+function eligibilityTooltip(e: ActivationEligibility): string {
+  switch (e.kind) {
+    case 'live':
+      return e.label;
+    case 'ready':
+      return `All three legs positive: ${e.reasons.join(' · ')}. Promote via the lifecycle ladder.`;
+    case 'partial':
+      return `Mixed evidence: ${e.reasons.join(' · ')}.`;
+    case 'blocked':
+      return `Negative evidence: ${e.reasons.join(' · ')}.`;
+    default:
+      return 'No optimization / backtest / walk-forward results yet.';
+  }
 }

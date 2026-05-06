@@ -251,6 +251,32 @@ export type StrategyType =
 
 export type StrategyStatus = 'Active' | 'Paused' | 'Backtesting' | 'Stopped';
 
+/**
+ * Wire-format projection of the engine's `PromotionGateResult`. Returned by
+ * `GET /strategy/{id}/promotion-gates`. The diagnostics list is the per-gate
+ * detail breakdown the engine emits during evaluation; the UI renders one row
+ * per entry, parsing common shapes (`Key=Value`) where possible.
+ */
+export interface PromotionGatesDto {
+  passed: boolean;
+  failureSummary: string;
+  diagnostics: string[];
+}
+
+/**
+ * Promotion-ladder stage. Auto-advanced by `StrategyPromotionWorker`:
+ * `BacktestQualified → Approved` after observation passes health gates,
+ * `Approved → Active` after capacity gates pass. The `Draft → BacktestQualified`
+ * transition is operator-driven; hunt-script-created strategies land in `Draft`.
+ */
+export type StrategyLifecycleStage =
+  | 'Draft'
+  | 'PaperTrading'
+  | 'BacktestQualified'
+  | 'ShadowLive'
+  | 'Approved'
+  | 'Active';
+
 export type BrokerType = 'Oanda' | 'IB' | 'Paper' | 'Fxcm';
 
 export type BrokerEnvironment = 'Live' | 'Practice';
@@ -390,7 +416,16 @@ export interface StrategyDto {
   timeframe: Timeframe;
   parametersJson: string | null;
   status: StrategyStatus;
+  pauseReason: string | null;
   riskProfileId: number | null;
+  /** Promotion-ladder stage. See `StrategyLifecycleStage` for the auto-advance rules. */
+  lifecycleStage: StrategyLifecycleStage;
+  /** When the strategy entered its current lifecycle stage (UTC ISO). */
+  lifecycleStageEnteredAt: string | null;
+  /** Active rollout percentage (25/50/75/100); null when no rollout is in progress. */
+  rolloutPct: number | null;
+  /** UTC timestamp of the most recent live signal this strategy fired (null = never fired). */
+  lastSignalAt: string | null;
   createdAt: string;
   riskOverridesJson: string | null;
   sizingConfigJson: string | null;

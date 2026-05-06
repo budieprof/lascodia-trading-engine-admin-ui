@@ -133,7 +133,22 @@ if [[ ${#SELECTED[@]} -eq 0 ]]; then
 fi
 
 TO_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-FROM_ISO=$(date -u -v-180d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '180 days ago' +%Y-%m-%dT%H:%M:%SZ)
+
+# Timeframe-aware backtest window. Sized so the auto-walkforward policy can fit
+# the engine's required ≥3 non-overlapping anchored folds and so each OOS fold
+# has enough bars for typical low-frequency rules to clear `MinTradesPerFold`.
+# Mirrors scripts/ml-train.sh's lookback table.
+days_for_backtest_tf() {
+  case "$1" in
+    M1|M5)  echo 180 ;;
+    M15)    echo 365 ;;
+    H1)     echo 720 ;;
+    H4)     echo 1080 ;;
+    D1)     echo 2000 ;;
+    *)      echo 720 ;;
+  esac
+}
+
 log "batch start — queuing ${#SELECTED[@]} candidates (in-flight=$INFLIGHT)"
 
 # Parameter generator — Python emits the JSON; bash captures it.
@@ -276,6 +291,8 @@ print(json.dumps({
     log "  CREATE FAILED: $NAME"
     continue
   fi
+  bt_days=$(days_for_backtest_tf "$TF")
+  FROM_ISO=$(date -u -v-${bt_days}d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "${bt_days} days ago" +%Y-%m-%dT%H:%M:%SZ)
   BT=$(curl -s -X POST "$ENGINE_URL/api/v1/lascodia-trading-engine/backtest" \
     -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
     -d "{\"strategyId\":$SID,\"symbol\":\"$SYM\",\"timeframe\":\"$TF\",\"fromDate\":\"$FROM_ISO\",\"toDate\":\"$TO_ISO\",\"initialBalance\":10000}" \
@@ -284,7 +301,7 @@ print(json.dumps({
     -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
     -d "{\"strategyId\":$SID,\"triggerType\":\"Manual\"}" \
     | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data','') if d.get('status') else '')")
-  log "  sid=$SID bt=$BT rid=$RID '$NAME'"
+  log "  sid=$SID bt=$BT (${bt_days}d) rid=$RID '$NAME'"
 done
 
 log "batch done"
