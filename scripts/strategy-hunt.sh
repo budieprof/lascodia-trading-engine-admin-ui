@@ -28,11 +28,15 @@ if [[ -z "$TOKEN" ]]; then
   exit 0
 fi
 
-# Capacity check — don't queue if there are already active runs
+# Capacity check — count only runs the worker is actively touching.
+# Deferred runs (DeferredUntilUtc in the future) are sleeping, not consuming worker capacity.
 INFLIGHT=$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
-  "SELECT COUNT(*) FROM \"OptimizationRun\" WHERE \"Status\" IN ('Queued','Running','Claimed') AND NOT \"IsDeleted\";")
+  "SELECT COUNT(*) FROM \"OptimizationRun\"
+   WHERE \"Status\" IN ('Queued','Running','Claimed')
+     AND NOT \"IsDeleted\"
+     AND (\"DeferredUntilUtc\" IS NULL OR \"DeferredUntilUtc\" < NOW());")
 if [[ "${INFLIGHT:-0}" -ge 4 ]]; then
-  log "queue saturated (in-flight=$INFLIGHT), skipping batch"
+  log "queue saturated (in-flight=$INFLIGHT non-deferred), skipping batch"
   exit 0
 fi
 
