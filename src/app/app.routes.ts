@@ -273,6 +273,14 @@ export const routes: Routes = [
             (m) => m.OPTIMIZATIONS_ROUTES,
           ),
       },
+      {
+        path: 'automation-monitor',
+        data: { breadcrumb: 'Automation Monitor' },
+        loadChildren: () =>
+          import('@features/automation-monitor/automation-monitor.routes').then(
+            (m) => m.AUTOMATION_MONITOR_ROUTES,
+          ),
+      },
       { path: '**', redirectTo: 'dashboard' },
     ],
   },

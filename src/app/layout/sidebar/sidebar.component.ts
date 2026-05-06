@@ -365,6 +365,12 @@ export class SidebarComponent {
       label: 'Ops',
       items: [
         { label: 'Alert Triage', route: '/alert-triage', icon: '🚨' },
+        {
+          label: 'Automation Monitor',
+          route: '/automation-monitor',
+          icon: '🤖',
+          policy: 'Operator',
+        },
         { label: 'Kill Switches', route: '/kill-switches', icon: '⛔', policy: 'Operator' },
         { label: 'Dead Letters', route: '/dead-letter', icon: '✉', policy: 'Operator' },
         { label: 'Tuning', route: '/calibration', icon: '🎚' },
