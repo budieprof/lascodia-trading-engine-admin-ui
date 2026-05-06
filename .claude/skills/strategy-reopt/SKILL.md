@@ -119,39 +119,77 @@ Will queue 5 Manual optimization runs:
 
 Then ask the user once: "Queue these N runs? (y/N)" — accept y/Y/yes; anything else aborts. If `confirm` was passed, skip the prompt. If `dry-run` was passed, print the plan and **stop without triggering**.
 
-### 5. Trigger each
+### 5. Trigger each — opt + standalone backtest
+
+Re-optimization alone won't create `BacktestRun` / `WalkForwardRun` rows; the optimizer only creates them post-approval, and approval is rare. To make sure the strategy actually gets validated against real candles, queue a Manual backtest in parallel — the BacktestWorker auto-chains a `WalkForwardRun` once the backtest completes (`QueueSource = "BacktestFollowUp"`).
+
+Skip the backtest leg only if a recent (≤7 days old) Completed BacktestRun already exists for that strategy — querying:
+
+```sql
+SELECT EXISTS(
+  SELECT 1 FROM "BacktestRun"
+  WHERE "StrategyId" = <sid> AND "Status" = 'Completed'
+    AND "CompletedAt" > NOW() - INTERVAL '7 days'
+);
+```
 
 ```bash
 trigger_one() {
-  local SID="$1"
+  local SID="$1" SYM="$2" TF="$3"
+
+  # 5a. Optimization
   local RESP=$(curl -s -X POST http://localhost:5081/api/v1/lascodia-trading-engine/strategy-feedback/optimization/trigger \
     -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
     -d "{\"strategyId\":$SID,\"triggerType\":\"Manual\"}")
   local RID=$(echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data','') if d.get('status') else '')")
+
+  # 5b. Backtest (only if no recent completed one) — auto-chains walkforward
+  local RECENT_BT=$(docker exec lascodia-trading-engine-postgres-1 psql -U postgres -d LascodiaTradingEngineDb -tAc \
+    "SELECT EXISTS(SELECT 1 FROM \"BacktestRun\" WHERE \"StrategyId\" = $SID AND \"Status\" = 'Completed' AND \"CompletedAt\" > NOW() - INTERVAL '7 days');")
+  local BT_ID=""
+  if [ "$RECENT_BT" != "t" ]; then
+    local TO_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    local FROM_ISO=$(date -u -v-180d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '180 days ago' +%Y-%m-%dT%H:%M:%SZ)
+    local BTRESP=$(curl -s -X POST http://localhost:5081/api/v1/lascodia-trading-engine/backtest \
+      -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+      -d "{\"strategyId\":$SID,\"symbol\":\"$SYM\",\"timeframe\":\"$TF\",\"fromDate\":\"$FROM_ISO\",\"toDate\":\"$TO_ISO\",\"initialBalance\":10000}")
+    BT_ID=$(echo "$BTRESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data','') if d.get('status') else '')")
+  fi
+
   if [ -z "$RID" ]; then
     echo "  TRIGGER FAILED for sid=$SID: $RESP"
     return 1
   fi
-  echo "  queued: sid=$SID rid=$RID"
-  echo "$SID:$RID" >> /tmp/reopt-batch.log
+  echo "  queued: sid=$SID rid=$RID${BT_ID:+ bt=$BT_ID}${BT_ID:- bt=cached}"
+  echo "$SID:$RID:$BT_ID" >> /tmp/reopt-batch.log
 }
 ```
 
-Don't fail the whole batch on one trigger error — log it and keep going.
+Don't fail the whole batch on one trigger error — log it and keep going. Walkforward is auto-chained, so don't trigger it explicitly.
 
 ### 6. Background poll + report
 
 Identical to `/strategy-hunt` step 7. Spawn a `nohup bash` poll loop watching the run ids; the polling pattern is documented in `/strategy-hunt`.
 
-When woken (via /loop or manually), query the runs and print a result table:
+When woken (via /loop or manually), report **all three legs** per strategy — opt + bt + wf — using the same three-leg layout as `/strategy-hunt` step 8. Pull bt/wf rows for the strategies in the batch:
 
-```
-WIN  rid=70 sid=176 AUDUSD H1 MovingAverageCrossover  baseline 0.22 → best 0.41  (Sharpe 0.18, DD 11%, WR 51%)
-flat rid=71 sid=178 USDJPY H1 RuleBased               baseline 0.38 → best 0.36  (regression, not promoted)
-loss rid=72 sid=179 AUDUSD H1 RuleBased               search exhausted, 152 candidates evaluated
+```sql
+-- bt leg (Manual + recent)
+SELECT bt."Id", bt."StrategyId", bt."Status", LEFT(COALESCE(bt."ResultJson",''), 200) AS result_preview
+FROM "BacktestRun" bt
+WHERE bt."StrategyId" IN (<sids>) AND bt."QueueSource" = 'Manual'
+  AND bt."QueuedAt" > NOW() - INTERVAL '2 hours'
+ORDER BY bt."Id";
+
+-- wf leg (auto-chained from the bt above)
+SELECT wf."Id", wf."StrategyId", wf."Status", wf."AverageOutOfSampleScore", wf."ScoreConsistency"
+FROM "WalkForwardRun" wf
+WHERE wf."StrategyId" IN (<sids>) AND wf."QueueSource" = 'BacktestFollowUp'
+  AND wf."QueuedAt" > NOW() - INTERVAL '2 hours'
+ORDER BY wf."Id";
 ```
 
-`WIN` = Completed AND best > baseline. `flat` = Completed but no improvement. `loss` = Failed/Cancelled.
+`WIN` requires opt-completion-and-improvement **AND** bt-Completed-with-trades **AND** wf-Completed-with-positive-OOS. `flat` = opt completed but no overall improvement. `loss` = any leg Failed/Cancelled.
 
 ### 7. Memory updates
 

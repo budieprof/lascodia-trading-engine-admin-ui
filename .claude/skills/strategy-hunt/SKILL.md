@@ -157,7 +157,14 @@ Wrap as full DSL ParametersJson:
 
 ### 6. Create + trigger each candidate
 
-For each candidate (call sequentially — keeps log output legible and lets you abort if the first one fails):
+A hunt-created strategy needs **three** parallel pipelines kicked off — they're independent and produce different signal:
+
+| Pipeline                                                                 | Why                                                                                                                                                                                                                                                                                                                                                        | Auto-chains?      |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| **Manual backtest** (`POST /backtest`)                                   | Validates the **baseline** parameters against real historical candles, persists a `BacktestRun` row, and **auto-chains a `WalkForwardRun`** with `QueueSource = "BacktestFollowUp"` once the backtest completes. Without this step, only the optimizer's internal screening runs — no `BacktestRun`/`WalkForwardRun` rows appear.                          | Yes → walkforward |
+| **Manual optimization** (`POST /strategy-feedback/optimization/trigger`) | Sweeps the parameter grid, runs the surrogate-guided search, and produces `BestHealthScore` / `BestParametersJson`. This pipeline does its own internal validation (gates `wfStable`, `permSignificant`, etc. captured in `ApprovalReportJson`) but does **not** create standalone `BacktestRun`/`WalkForwardRun` rows unless the candidate gets approved. | No                |
+
+So for each candidate (call sequentially — keeps log output legible and lets you abort if the first one fails):
 
 ```bash
 # Create strategy
@@ -167,13 +174,24 @@ RESP=$(curl -s -X POST http://localhost:5081/api/v1/lascodia-trading-engine/stra
 SID=$(echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data'] if d.get('status') else '')")
 [ -z "$SID" ] && echo "create failed: $RESP" && continue
 
-# Trigger optimization (Manual bypasses the regime-stability gate)
+# 6a. Enqueue Manual backtest (auto-chains a WalkForwardRun on completion)
+TO_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+FROM_ISO=$(date -u -v-180d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '180 days ago' +%Y-%m-%dT%H:%M:%SZ)
+BTRESP=$(curl -s -X POST http://localhost:5081/api/v1/lascodia-trading-engine/backtest \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{\"strategyId\":$SID,\"symbol\":\"$SYMBOL\",\"timeframe\":\"$TIMEFRAME\",\"fromDate\":\"$FROM_ISO\",\"toDate\":\"$TO_ISO\",\"initialBalance\":10000}")
+BT_ID=$(echo "$BTRESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data','') if d.get('status') else '')")
+
+# 6b. Trigger optimization (Manual bypasses the regime-stability gate)
 TRESP=$(curl -s -X POST http://localhost:5081/api/v1/lascodia-trading-engine/strategy-feedback/optimization/trigger \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d "{\"strategyId\":$SID,\"triggerType\":\"Manual\"}")
 RID=$(echo "$TRESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data'] if d.get('status') else '')")
-echo "queued: sid=$SID rid=$RID name=$NAME"
+
+echo "queued: sid=$SID rid=$RID bt=$BT_ID name=$NAME"
 ```
+
+**Date window for backtest**: same 180 days for M15/H1; for D1 lift to 720d. If the backtest fails with insufficient-candle errors, widen the window. The walkforward worker uses `IAutoWalkForwardWindowPolicy` to size the IS/OOS split automatically (typically ~67d IS / ~29d OOS for a 180d window on H1).
 
 The `CreateStrategyCommand` shape (camelCase fields):
 
@@ -212,27 +230,55 @@ When woken: query the runs, evaluate, report. If still in flight, ScheduleWakeup
 
 A simpler mode (smaller batches, willing to wait): poll synchronously up to ~10 minutes; if any run hasn't terminated, write a partial report and let the user re-invoke to see final results.
 
-### 8. Evaluate & report
+### 8. Evaluate & report — three legs
+
+A complete batch report covers **both** the optimization sweep AND the standalone backtest+walkforward result. Without the second leg, "Completed" only tells you the optimizer's internal screening finished — not that the baseline strategy actually trades profitably on real candles.
 
 ```sql
-SELECT r."Id", r."StrategyId", s."Name", s."StrategyType", s."Symbol", s."Timeframe",
-       r."Status", r."FailureCategory", r."Iterations",
+-- optimization leg
+SELECT r."Id" AS rid, s."Id" AS sid, s."Name", s."Symbol", s."Timeframe", s."StrategyType",
+       r."Status", r."Iterations",
        r."BaselineHealthScore", r."BestHealthScore",
        r."BestSharpeRatio", r."BestMaxDrawdownPct", r."BestWinRate",
        r."ErrorMessage"
 FROM "OptimizationRun" r JOIN "Strategy" s ON s."Id" = r."StrategyId"
-WHERE r."Id" IN (<your run ids>)
+WHERE r."Id" IN (<rids>)
 ORDER BY r."Id";
+
+-- backtest leg
+SELECT bt."Id" AS bt_id, bt."StrategyId" AS sid, bt."Status", bt."FailureCode",
+       LEFT(COALESCE(bt."ResultJson",''), 200) AS result_preview,
+       bt."ErrorMessage"
+FROM "BacktestRun" bt
+WHERE bt."Id" IN (<bt_ids>)
+ORDER BY bt."Id";
+
+-- walkforward leg (auto-chained)
+SELECT wf."Id" AS wf_id, wf."StrategyId" AS sid, wf."Status",
+       wf."AverageOutOfSampleScore" AS avg_oos, wf."ScoreConsistency" AS consistency,
+       wf."InSampleDays"||'/'||wf."OutOfSampleDays" AS window_days,
+       wf."ErrorMessage"
+FROM "WalkForwardRun" wf
+WHERE wf."StrategyId" IN (<sids>) AND wf."QueueSource" = 'BacktestFollowUp'
+  AND wf."QueuedAt" > NOW() - INTERVAL '2 hours'
+ORDER BY wf."Id";
 ```
 
-Print a concise table:
+Print a concise three-leg table:
 
 ```
-WIN  rid=66 sid=185 EURGBP H1 BBReversion   baseline 0.51 → best 0.58  (Sharpe 0.42, DD 8.1%, WR 56%)
-loss rid=67 sid=186 USDJPY H1 RSIReversion  search exhausted, 11 candidates evaluated
+sid=185 USDJPY M15 BreakoutScalper
+  opt   WIN  baseline 0.52 → best 0.62  (Sharpe 0.09, DD 26%, WR 43%)
+  bt    OK   final equity 10421, max DD 11%, 38 trades
+  wf    OK   avgOOS 0.504, consistency 0.31, 67d/29d windows
+
+sid=186 GBPJPY H1 RuleBased RSI Fade
+  opt   loss search exhausted, 11 candidates evaluated
+  bt    OK   final equity 9892, max DD 8%, 12 trades
+  wf    pending
 ```
 
-Mark wins with `WIN`, score regressions with `flat`, terminal failures with `loss`.
+A genuine **WIN** requires `opt` win **and** `bt` Completed without a degenerate result (e.g. zero trades, max DD > 50%) **and** `wf` Completed with `AverageOutOfSampleScore > 0`. Anything less, treat as `partial`.
 
 ### 9. Save insights to memory
 
