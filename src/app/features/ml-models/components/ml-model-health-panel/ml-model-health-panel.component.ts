@@ -92,6 +92,27 @@ interface QualityWarning {
               {{ num(model().sharpeRatio, 3) }}
             </dd>
 
+            <dt
+              [title]="
+                'Matthews correlation coefficient — class-imbalance-robust skill score, range −1 to +1. ' +
+                'Computed UI-side from (accuracy, F1) under the FP=FN symmetric-error assumption ' +
+                '(exact when class balance is 50/50; a fair rank-order proxy otherwise). ' +
+                'A predict-majority-always model scores 0 here regardless of headline accuracy.'
+              "
+            >
+              MCC <span class="hint">(est)</span>
+            </dt>
+            <dd
+              class="num"
+              [class.good]="hi(estimatedMcc(), 0.1)"
+              [class.bad]="lo(estimatedMcc(), 0.02)"
+              [class.warn]="
+                estimatedMcc() !== null && estimatedMcc()! >= 0.02 && estimatedMcc()! < 0.1
+              "
+            >
+              {{ num(estimatedMcc(), 3) }}
+            </dd>
+
             <dt>Expected value</dt>
             <dd
               class="num"
@@ -458,6 +479,28 @@ export class MLModelHealthPanelComponent {
   });
 
   /**
+   * MCC (Matthews Correlation Coefficient) computed UI-side from `accuracy`
+   * and `f1` under the FP=FN symmetric-error assumption.
+   *
+   * Why this is needed:
+   *  - The engine persists `DirectionAccuracy` and `F1Score` but not the four
+   *    confusion-matrix cells separately. MCC requires (TP, TN, FP, FN).
+   *  - Three of those four cells can be solved from (accuracy, F1, N), but
+   *    FP and FN can't be separated without an additional equation (e.g. the
+   *    validation-set class prior). Under FP=FN the result is exact for
+   *    50/50-balanced classes and a faithful rank-order proxy otherwise.
+   *  - For a predict-majority-always classifier, F1=0 → TP=0 → MCC=0
+   *    regardless of accuracy. That's the precise property we want — operators
+   *    can no longer be fooled by a 73%-accuracy / 0.0-F1 model that's actually
+   *    dead.
+   *
+   * Returns null when (accuracy, F1) are missing or self-inconsistent.
+   */
+  readonly estimatedMcc = computed<number | null>(() => {
+    return estimateMccFromAccuracyAndF1(this.model().directionAccuracy, this.model().f1Score);
+  });
+
+  /**
    * Static interpretation rules for the metric panel — surface the gotchas an
    * operator would otherwise need to derive themselves (F1 vs accuracy, OOS
    * drop, fragility, calibration). Each rule produces at most one warning.
@@ -570,4 +613,51 @@ export class MLModelHealthPanelComponent {
         }
       });
   }
+}
+
+/**
+ * Pure helper — exported for unit testing. Computes MCC from (accuracy, F1)
+ * under the symmetric-error assumption FP=FN. Returns null when inputs are
+ * missing or self-inconsistent (e.g. F1>0 with TP-derivation < 0). Scale-
+ * invariant: works directly with rates instead of counts.
+ *
+ * Derivation:
+ *  - F1   = 2·TP / (2·TP + FP + FN) → FP+FN = 2·TP·(1−F1)/F1
+ *  - acc  = (TP + TN) / N           → TP+TN = N·acc
+ *  - sum:                          (TP+TN) + (FP+FN) = N
+ *    ⇒ N·acc + 2·TP·(1−F1)/F1 = N
+ *    ⇒ TP = N·F1·(1−acc) / (2·(1−F1))
+ *  - TN = N·acc − TP
+ *  - FP = FN = (N·(1−acc)) / 2  (the symmetric assumption)
+ *  - MCC = (TP·TN − FP·FN) / sqrt((TP+FP)(TP+FN)(TN+FP)(TN+FN))
+ *
+ * Edge cases:
+ *  - F1 = 0  → TP = 0  → MCC = 0  (predict-majority collapse — by definition)
+ *  - F1 = 1  → MCC = 1
+ *  - Either input null/out-of-range → null
+ */
+export function estimateMccFromAccuracyAndF1(
+  accuracy: number | null | undefined,
+  f1: number | null | undefined,
+): number | null {
+  if (accuracy == null || f1 == null) return null;
+  if (accuracy < 0 || accuracy > 1 || f1 < 0 || f1 > 1) return null;
+
+  // Boundary cases — return analytic limits to avoid divide-by-zero noise.
+  if (f1 === 0) return 0;
+  if (f1 === 1) return 1;
+
+  // Use proportions (N = 1). MCC is scale-invariant under common scaling.
+  const tp = (f1 * (1 - accuracy)) / (2 * (1 - f1));
+  const tn = accuracy - tp;
+  const errHalf = (1 - accuracy) / 2; // FP = FN = errHalf
+
+  // Self-consistency: with TP and TN both nonneg, the inputs describe a
+  // realisable confusion matrix.
+  if (tp < 0 || tn < 0) return null;
+
+  const num = tp * tn - errHalf * errHalf;
+  const denom = Math.sqrt((tp + errHalf) * (tp + errHalf) * (tn + errHalf) * (tn + errHalf));
+  if (denom === 0) return 0;
+  return num / denom;
 }
