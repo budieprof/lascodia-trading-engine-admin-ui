@@ -7,6 +7,7 @@ import {
   PagerRequest,
   MLModelDto,
   MLModelFeatureImportanceDto,
+  MLModelLifecycleLogEntryDto,
   MLModelOverfitFlagDto,
   MLTrainingRunDto,
   MLTrainingRunDiagnosticsDto,
@@ -24,6 +25,16 @@ export class MLModelsService {
 
   getById(id: number): Observable<ResponseData<MLModelDto>> {
     return this.api.get(`/ml-model/${id}`);
+  }
+
+  /**
+   * Returns the lifecycle-log timeline for a single model. Powers the
+   * "Lifecycle" timeline on the model detail page so operators can read
+   * the engine's transition reasoning ("Retired after 3 consecutive failed
+   * retrains — edge likely gone, generate a new strategy rather than retrain").
+   */
+  getLifecycleLog(id: number): Observable<ResponseData<MLModelLifecycleLogEntryDto[]>> {
+    return this.api.get(`/ml-model/${id}/lifecycle`);
   }
 
   getFeatureImportance(id: number): Observable<ResponseData<MLModelFeatureImportanceDto>> {

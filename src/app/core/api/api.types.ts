@@ -620,6 +620,45 @@ export interface MLModelDto {
   trainingSamples: number;
   trainedAt: string;
   activatedAt: string | null;
+  // Quality metrics — populated when training writes the model row.
+  /** F1 on the validation set. <0.10 alongside high accuracy = severe class imbalance. */
+  f1Score: number | null;
+  /** Brier score (calibration). Lower is better; >0.25 typically indicates poor calibration. */
+  brierScore: number | null;
+  sharpeRatio: number | null;
+  expectedValue: number | null;
+  /** Adversarial fragility score (0..1, lower better; null when not measured). */
+  fragilityScore: number | null;
+  // Walk-forward cross-validation summary.
+  walkForwardFolds: number | null;
+  /** Mean accuracy across folds — compare to `directionAccuracy` to spot lucky-window concentration. */
+  walkForwardAvgAccuracy: number | null;
+  walkForwardStdDev: number | null;
+  // Suppression / lifecycle flags.
+  isSuppressed: boolean;
+  isFallbackChampion: boolean;
+}
+
+/**
+ * One row from `MLModelLifecycleLog` returned by `GET /ml-model/{id}/lifecycle`.
+ * Surfaces the engine's "why did this model transition?" reasoning.
+ */
+export interface MLModelLifecycleLogEntryDto {
+  id: number;
+  mlModelId: number;
+  /** e.g. `Activation`, `Supersession`, `DegradationRetirement`, `Suppression`, `Promotion`. */
+  eventType: string;
+  previousStatus: MLModelStatus | null;
+  newStatus: MLModelStatus | null;
+  previousChampionModelId: number | null;
+  shadowEvaluationId: number | null;
+  /** Operator-readable reason for the transition. */
+  reason: string | null;
+  triggeredByAccountId: number | null;
+  directionAccuracyAtTransition: number | null;
+  liveAccuracyAtTransition: number | null;
+  brierScoreAtTransition: number | null;
+  occurredAt: string;
 }
 
 export interface MLTrainingRunDto {

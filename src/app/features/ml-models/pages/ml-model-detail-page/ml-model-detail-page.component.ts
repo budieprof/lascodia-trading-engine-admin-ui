@@ -25,6 +25,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+import { MLModelHealthPanelComponent } from '../../components/ml-model-health-panel/ml-model-health-panel.component';
 
 @Component({
   selector: 'app-ml-model-detail-page',
@@ -39,6 +40,7 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
     ErrorStateComponent,
     EmptyStateComponent,
     ConfirmDialogComponent,
+    MLModelHealthPanelComponent,
   ],
   template: `
     <div class="page">
@@ -94,6 +96,17 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
               }
             </div>
           }
+
+          <!-- Model health panel — quality-metric breakdown with interpretation
+               warnings (F1/accuracy mismatch, OOS collapse, calibration drift,
+               fragility), walk-forward summary, and the engine's lifecycle-log
+               timeline. Surfaces the "why did this model fail" reasoning that
+               used to require operators to read engine logs or query the
+               MLModelLifecycleLog table directly. -->
+          <app-ml-model-health-panel
+            [model]="m"
+            style="display: block; margin-bottom: var(--space-5);"
+          />
 
           <section class="card">
             <header class="card-head"><h3>Model Information</h3></header>
