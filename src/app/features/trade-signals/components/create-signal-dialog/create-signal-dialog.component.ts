@@ -49,135 +49,159 @@ import type { CreateTradeSignalRequest, StrategyDto } from '@core/api/api.types'
     >
       <div class="dialog-inner" role="document" (click)="$event.stopPropagation()">
         <header class="dialog-head">
-          <h3 id="create-signal-title">Create trade signal</h3>
+          <div>
+            <h3 id="create-signal-title">Create trade signal</h3>
+            <p class="lede">
+              Hand-author a signal — enters the queue as Pending and flows through the standard
+              approval workflow.
+            </p>
+          </div>
           <button type="button" class="btn-close" (click)="cancel()" aria-label="Close">×</button>
         </header>
 
         <div class="dialog-body">
-          <p class="hint">
-            Operator-authored signals enter the queue in <strong>Pending</strong> status and are
-            handled by the same approval workflow as engine-generated signals. ML scoring fields are
-            intentionally not filled — the engine will treat this as an unscored signal.
-          </p>
-
-          <div class="grid">
-            <label class="field">
-              <span>Strategy</span>
-              <select [(ngModel)]="strategyId" name="strategyId" required>
-                <option [ngValue]="null" disabled>— pick a strategy —</option>
-                @for (s of activeStrategies(); track s.id) {
-                  <option [ngValue]="s.id">
-                    #{{ s.id }} · {{ s.symbol }} {{ s.timeframe }} · {{ s.name }}
-                  </option>
+          <!-- Section 1: which strategy + which instrument ─────────────── -->
+          <section class="form-section">
+            <h4 class="section-title">Source</h4>
+            <div class="row">
+              <label class="field span-2">
+                <span class="label">Strategy</span>
+                <select [(ngModel)]="strategyId" name="strategyId" required>
+                  <option [ngValue]="null" disabled>— pick a strategy —</option>
+                  @for (s of activeStrategies(); track s.id) {
+                    <option [ngValue]="s.id">
+                      #{{ s.id }} · {{ s.symbol }} {{ s.timeframe }} · {{ s.name }}
+                    </option>
+                  }
+                </select>
+                @if (strategiesLoading()) {
+                  <small class="muted">loading strategies…</small>
+                } @else if (activeStrategies().length === 0) {
+                  <small class="muted">No strategies available — create one first.</small>
                 }
-              </select>
-              @if (strategiesLoading()) {
-                <small class="muted">loading strategies…</small>
-              } @else if (activeStrategies().length === 0) {
-                <small class="muted">No strategies available — create one first.</small>
-              }
-            </label>
+              </label>
 
-            <label class="field">
-              <span>Symbol</span>
-              <input
-                type="text"
-                [(ngModel)]="symbol"
-                name="symbol"
-                placeholder="EURUSD"
-                maxlength="10"
-                required
-              />
-              @if (resolvedStrategy(); as s) {
-                <small class="muted">strategy default: {{ s.symbol }}</small>
-              }
-            </label>
+              <label class="field">
+                <span class="label">Symbol</span>
+                <input
+                  type="text"
+                  [(ngModel)]="symbol"
+                  name="symbol"
+                  placeholder="EURUSD"
+                  maxlength="10"
+                  required
+                />
+              </label>
+            </div>
+          </section>
 
-            <label class="field">
-              <span>Direction</span>
-              <div class="direction-toggle">
-                <button
-                  type="button"
-                  [class.active]="direction() === 'Buy'"
-                  [class.buy]="direction() === 'Buy'"
-                  (click)="direction.set('Buy')"
-                >
-                  Buy
-                </button>
-                <button
-                  type="button"
-                  [class.active]="direction() === 'Sell'"
-                  [class.sell]="direction() === 'Sell'"
-                  (click)="direction.set('Sell')"
-                >
-                  Sell
-                </button>
+          <!-- Section 2: trade intent (direction + confidence + lot) ────── -->
+          <section class="form-section">
+            <h4 class="section-title">Intent</h4>
+            <div class="row">
+              <div class="field">
+                <span class="label">Direction</span>
+                <div class="direction-toggle" role="radiogroup" aria-label="Direction">
+                  <button
+                    type="button"
+                    role="radio"
+                    [attr.aria-checked]="direction() === 'Buy'"
+                    [class.active]="direction() === 'Buy'"
+                    [class.buy]="direction() === 'Buy'"
+                    (click)="direction.set('Buy')"
+                  >
+                    ▲ Buy
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    [attr.aria-checked]="direction() === 'Sell'"
+                    [class.active]="direction() === 'Sell'"
+                    [class.sell]="direction() === 'Sell'"
+                    (click)="direction.set('Sell')"
+                  >
+                    ▼ Sell
+                  </button>
+                </div>
               </div>
-            </label>
 
+              <label class="field">
+                <span class="label">Lot size</span>
+                <input
+                  type="number"
+                  [(ngModel)]="lotSize"
+                  name="lotSize"
+                  step="0.01"
+                  min="0.01"
+                  required
+                />
+              </label>
+
+              <label class="field">
+                <span class="label">Confidence <span class="hint">0–1</span></span>
+                <input
+                  type="number"
+                  [(ngModel)]="confidence"
+                  name="confidence"
+                  step="0.05"
+                  min="0"
+                  max="1"
+                  required
+                />
+              </label>
+            </div>
+          </section>
+
+          <!-- Section 3: price levels (entry + SL + TP) ──────────────────── -->
+          <section class="form-section">
+            <h4 class="section-title">Price levels</h4>
+            <div class="row">
+              <label class="field">
+                <span class="label">Entry price</span>
+                <input
+                  type="number"
+                  [(ngModel)]="entryPrice"
+                  name="entryPrice"
+                  step="0.00001"
+                  min="0"
+                  required
+                />
+              </label>
+              <label class="field">
+                <span class="label">Stop loss <span class="hint">opt.</span></span>
+                <input
+                  type="number"
+                  [(ngModel)]="stopLoss"
+                  name="stopLoss"
+                  step="0.00001"
+                  min="0"
+                />
+              </label>
+              <label class="field">
+                <span class="label">Take profit <span class="hint">opt.</span></span>
+                <input
+                  type="number"
+                  [(ngModel)]="takeProfit"
+                  name="takeProfit"
+                  step="0.00001"
+                  min="0"
+                />
+              </label>
+            </div>
+            @if (sanityWarning(); as msg) {
+              <div class="warn-banner">⚠ {{ msg }}</div>
+            }
+          </section>
+
+          <!-- Section 4: expiry ────────────────────────────────────────── -->
+          <section class="form-section">
+            <h4 class="section-title">Expiry</h4>
             <label class="field">
-              <span>Confidence <span class="hint">(0–1)</span></span>
-              <input
-                type="number"
-                [(ngModel)]="confidence"
-                name="confidence"
-                step="0.05"
-                min="0"
-                max="1"
-                required
-              />
-            </label>
-
-            <label class="field">
-              <span>Entry price</span>
-              <input
-                type="number"
-                [(ngModel)]="entryPrice"
-                name="entryPrice"
-                step="0.00001"
-                min="0"
-                required
-              />
-            </label>
-
-            <label class="field">
-              <span>Lot size</span>
-              <input
-                type="number"
-                [(ngModel)]="lotSize"
-                name="lotSize"
-                step="0.01"
-                min="0.01"
-                required
-              />
-            </label>
-
-            <label class="field">
-              <span>Stop loss <span class="hint">(optional)</span></span>
-              <input type="number" [(ngModel)]="stopLoss" name="stopLoss" step="0.00001" min="0" />
-            </label>
-
-            <label class="field">
-              <span>Take profit <span class="hint">(optional)</span></span>
-              <input
-                type="number"
-                [(ngModel)]="takeProfit"
-                name="takeProfit"
-                step="0.00001"
-                min="0"
-              />
-            </label>
-
-            <label class="field expires">
-              <span>Expires at <span class="hint">(UTC)</span></span>
+              <span class="label">Expires at <span class="hint">local time, sent UTC</span></span>
               <input type="datetime-local" [(ngModel)]="expiresAtLocal" name="expiresAt" required />
               <small class="muted">{{ defaultExpiryHint() }}</small>
             </label>
-          </div>
-
-          @if (sanityWarning(); as msg) {
-            <div class="warn-banner">⚠ {{ msg }}</div>
-          }
+          </section>
         </div>
 
         <footer class="dialog-foot">
@@ -201,78 +225,114 @@ import type { CreateTradeSignalRequest, StrategyDto } from '@core/api/api.types'
       :host {
         display: contents;
       }
+
       /* Native <dialog> opened with showModal() renders in the browser's top
-       * layer above every stacking context. We just need to style it as a card. */
+       * layer above every stacking context. UA centers via margin:auto, but
+       * Angular's ViewEncapsulation.Emulated can perturb the cascade order,
+       * so we set the centering geometry explicitly via the :modal selector. */
       dialog.dialog {
         padding: 0;
         background: var(--bg-primary, #fff);
         border-radius: var(--radius-lg, 8px);
         box-shadow: var(--shadow-lg, 0 10px 30px rgba(0, 0, 0, 0.2));
-        width: 640px;
-        max-width: 92vw;
-        max-height: 84vh;
+        width: min(680px, 92vw);
+        max-height: 86vh;
         border: 1px solid var(--border);
         color: var(--text-primary);
       }
+      dialog.dialog:modal {
+        position: fixed;
+        inset: 0;
+        margin: auto;
+      }
       dialog.dialog::backdrop {
-        background: rgba(0, 0, 0, 0.5);
+        background: rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(2px);
       }
       .dialog-inner {
         display: flex;
         flex-direction: column;
         max-height: inherit;
       }
+
+      /* ── Header ──────────────────────────────────────────────────────── */
       .dialog-head {
         display: flex;
         justify-content: space-between;
-        align-items: center;
+        align-items: flex-start;
+        gap: var(--space-3);
         padding: var(--space-4) var(--space-5);
         border-bottom: 1px solid var(--border);
       }
       .dialog-head h3 {
         margin: 0;
-        font-size: var(--text-lg);
-        font-weight: var(--font-semibold);
+        font-size: var(--text-lg, 1.05rem);
+        font-weight: var(--font-semibold, 600);
+      }
+      .lede {
+        margin: 4px 0 0;
+        color: var(--text-secondary);
+        font-size: var(--text-xs, 0.78rem);
+        line-height: 1.4;
       }
       .btn-close {
         background: transparent;
         border: none;
-        font-size: 24px;
+        font-size: 22px;
         line-height: 1;
         cursor: pointer;
         color: var(--text-secondary);
+        padding: 0 4px;
       }
+      .btn-close:hover {
+        color: var(--text-primary);
+      }
+
+      /* ── Body / sections ─────────────────────────────────────────────── */
       .dialog-body {
-        padding: var(--space-5);
+        padding: var(--space-4) var(--space-5);
         overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
       }
-      .hint {
+      .form-section {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .section-title {
+        margin: 0 0 2px;
+        font-size: var(--text-xs, 0.72rem);
+        font-weight: var(--font-semibold, 600);
         color: var(--text-secondary);
-        font-size: var(--text-xs);
-        font-weight: 400;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
       }
-      .dialog-body > .hint {
-        font-size: var(--text-sm);
-        margin: 0 0 var(--space-4);
-        line-height: 1.5;
-      }
-      .grid {
+      .row {
         display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: var(--space-3) var(--space-4);
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--space-3);
       }
+
       .field {
         display: flex;
         flex-direction: column;
         gap: 4px;
+        min-width: 0;
       }
-      .field.expires {
-        grid-column: 1 / -1;
+      .field.span-2 {
+        grid-column: span 2;
       }
-      .field > span {
-        font-size: var(--text-sm);
+      .label {
+        font-size: var(--text-xs, 0.78rem);
         color: var(--text-secondary);
-        font-weight: var(--font-medium);
+        font-weight: var(--font-medium, 500);
+      }
+      .hint {
+        color: var(--text-tertiary, #999);
+        font-weight: 400;
+        font-size: 0.92em;
       }
       .field input,
       .field select {
@@ -282,62 +342,79 @@ import type { CreateTradeSignalRequest, StrategyDto } from '@core/api/api.types'
         background: var(--bg-secondary);
         color: var(--text-primary);
         font: inherit;
+        min-width: 0;
+      }
+      .field input:focus,
+      .field select:focus {
+        outline: 2px solid var(--accent, #0071e3);
+        outline-offset: -1px;
+        border-color: transparent;
       }
       .field small.muted {
         color: var(--text-tertiary, #999);
-        font-size: var(--text-xs);
+        font-size: var(--text-xs, 0.72rem);
       }
+
+      /* ── Direction toggle ─────────────────────────────────────────── */
       .direction-toggle {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: var(--space-2);
+        gap: var(--space-1, 4px);
+        padding: 2px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
       }
       .direction-toggle button {
-        padding: 8px;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-secondary);
-        color: var(--text-primary);
+        padding: 6px 8px;
+        border: none;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--text-secondary);
         cursor: pointer;
-        font-weight: var(--font-medium);
+        font-weight: var(--font-medium, 500);
+        font-size: var(--text-sm);
       }
       .direction-toggle button.active.buy {
-        background: rgba(34, 197, 94, 0.15);
-        border-color: #15803d;
+        background: rgba(34, 197, 94, 0.18);
         color: #15803d;
       }
       .direction-toggle button.active.sell {
-        background: rgba(239, 68, 68, 0.15);
-        border-color: #b91c1c;
+        background: rgba(239, 68, 68, 0.18);
         color: #b91c1c;
       }
+
+      /* ── Warning banner ─────────────────────────────────────────── */
       .warn-banner {
-        margin-top: var(--space-3);
         padding: var(--space-2) var(--space-3);
         background: rgba(245, 158, 11, 0.1);
         color: #92400e;
         border: 1px solid rgba(245, 158, 11, 0.3);
         border-radius: var(--radius-sm);
-        font-size: var(--text-sm);
+        font-size: var(--text-xs, 0.78rem);
       }
+
+      /* ── Footer ──────────────────────────────────────────────────── */
       .dialog-foot {
         display: flex;
         justify-content: flex-end;
         gap: var(--space-2);
         padding: var(--space-3) var(--space-5);
         border-top: 1px solid var(--border);
+        background: var(--bg-secondary);
+        border-radius: 0 0 var(--radius-lg, 8px) var(--radius-lg, 8px);
       }
       .btn-primary,
       .btn-secondary {
         padding: 6px 14px;
         border-radius: var(--radius-sm);
         font: inherit;
-        font-weight: var(--font-medium);
+        font-weight: var(--font-medium, 500);
         cursor: pointer;
         border: 1px solid var(--border);
       }
       .btn-secondary {
-        background: var(--bg-secondary);
+        background: var(--bg-primary, #fff);
         color: var(--text-primary);
       }
       .btn-primary {
@@ -348,6 +425,16 @@ import type { CreateTradeSignalRequest, StrategyDto } from '@core/api/api.types'
       .btn-primary[disabled] {
         opacity: 0.5;
         cursor: not-allowed;
+      }
+
+      /* Mobile / narrow viewport: collapse 3-col rows to 1-col */
+      @media (max-width: 560px) {
+        .row {
+          grid-template-columns: 1fr;
+        }
+        .field.span-2 {
+          grid-column: span 1;
+        }
       }
     `,
   ],
