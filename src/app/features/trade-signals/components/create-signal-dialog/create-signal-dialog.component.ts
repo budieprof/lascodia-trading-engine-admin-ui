@@ -1,12 +1,16 @@
 import {
+  AfterViewInit,
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  ElementRef,
+  OnDestroy,
   computed,
   effect,
   inject,
   output,
   signal,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
@@ -30,13 +34,20 @@ import type { CreateTradeSignalRequest, StrategyDto } from '@core/api/api.types'
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule],
   template: `
-    <div class="overlay" (click)="onBackdropClick($event)" (keyup.escape)="cancel()" tabindex="0">
-      <div
-        class="dialog"
-        role="dialog"
-        aria-labelledby="create-signal-title"
-        (click)="$event.stopPropagation()"
-      >
+    <!--
+      Native <dialog> with showModal() renders in the browser top layer above
+      every other DOM element regardless of parent transforms / stacking
+      contexts / overflow:hidden chains. Replaces the previous CSS-only overlay
+      that broke whenever a parent created a new containing block.
+    -->
+    <dialog
+      #nativeDialog
+      class="dialog"
+      aria-labelledby="create-signal-title"
+      (close)="onNativeDialogClose()"
+      (click)="onBackdropClick($event)"
+    >
+      <div class="dialog-inner" role="document" (click)="$event.stopPropagation()">
         <header class="dialog-head">
           <h3 id="create-signal-title">Create trade signal</h3>
           <button type="button" class="btn-close" (click)="cancel()" aria-label="Close">×</button>
@@ -183,33 +194,33 @@ import type { CreateTradeSignalRequest, StrategyDto } from '@core/api/api.types'
           </button>
         </footer>
       </div>
-    </div>
+    </dialog>
   `,
   styles: [
     `
       :host {
-        display: block;
+        display: contents;
       }
-      .overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.5);
-        display: flex;
-        justify-content: center;
-        align-items: flex-start;
-        padding-top: 8vh;
-        z-index: 1000;
-      }
-      .dialog {
+      /* Native <dialog> opened with showModal() renders in the browser's top
+       * layer above every stacking context. We just need to style it as a card. */
+      dialog.dialog {
+        padding: 0;
         background: var(--bg-primary, #fff);
         border-radius: var(--radius-lg, 8px);
         box-shadow: var(--shadow-lg, 0 10px 30px rgba(0, 0, 0, 0.2));
         width: 640px;
         max-width: 92vw;
         max-height: 84vh;
+        border: 1px solid var(--border);
+        color: var(--text-primary);
+      }
+      dialog.dialog::backdrop {
+        background: rgba(0, 0, 0, 0.5);
+      }
+      .dialog-inner {
         display: flex;
         flex-direction: column;
-        border: 1px solid var(--border);
+        max-height: inherit;
       }
       .dialog-head {
         display: flex;
@@ -341,11 +352,19 @@ import type { CreateTradeSignalRequest, StrategyDto } from '@core/api/api.types'
     `,
   ],
 })
-export class CreateSignalDialogComponent {
+export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
   private readonly tradeSignals = inject(TradeSignalsService);
   private readonly strategies = inject(StrategiesService);
   private readonly notifications = inject(NotificationService);
   private readonly destroyRef = inject(DestroyRef);
+
+  // Reference to the native <dialog> element — used to call showModal() on
+  // mount so the form renders in the browser's top layer (above every parent
+  // stacking context). The previous CSS-only overlay broke whenever a parent
+  // had `transform`, `filter`, or `contain`, which made `position: fixed`
+  // behave like `position: absolute` relative to the parent instead of the
+  // viewport.
+  private readonly nativeDialog = viewChild.required<ElementRef<HTMLDialogElement>>('nativeDialog');
 
   // Outputs — parent decides whether to keep the dialog open or refresh the list.
   readonly closed = output<void>();
@@ -440,13 +459,44 @@ export class CreateSignalDialogComponent {
     });
   }
 
-  onBackdropClick(event: Event): void {
-    if (event.target === event.currentTarget) this.cancel();
+  ngAfterViewInit(): void {
+    // Open the native dialog as a true modal — top layer, blocks page input.
+    const el = this.nativeDialog().nativeElement;
+    if (typeof el.showModal === 'function' && !el.open) {
+      el.showModal();
+    }
+  }
+
+  ngOnDestroy(): void {
+    // Defensive close in case the parent removes us without an explicit cancel.
+    const el = this.nativeDialog?.()?.nativeElement;
+    if (el?.open) el.close();
+  }
+
+  /**
+   * Backdrop click: native <dialog>'s backdrop click event lands on the
+   * dialog element itself (not on a child). Treat that as cancel.
+   */
+  onBackdropClick(event: MouseEvent): void {
+    if (event.target === this.nativeDialog().nativeElement) {
+      this.cancel();
+    }
+  }
+
+  /**
+   * Fired by the dialog's native `close` event — escape key, programmatic
+   * close, etc. Surfaces the cancel back to the parent.
+   */
+  onNativeDialogClose(): void {
+    this.closed.emit();
   }
 
   cancel(): void {
     if (this.submitting()) return;
-    this.closed.emit();
+    const el = this.nativeDialog().nativeElement;
+    if (el.open)
+      el.close(); // triggers (close) → onNativeDialogClose
+    else this.closed.emit();
   }
 
   submit(): void {
