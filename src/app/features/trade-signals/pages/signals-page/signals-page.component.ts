@@ -30,6 +30,7 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { CreateSignalDialogComponent } from '../../components/create-signal-dialog/create-signal-dialog.component';
 
 type StatusChip = 'all' | TradeSignalStatus;
 type DirectionChip = 'all' | TradeDirection;
@@ -46,6 +47,7 @@ type DirectionChip = 'all' | TradeDirection;
     MetricCardComponent,
     ChartCardComponent,
     ConfirmDialogComponent,
+    CreateSignalDialogComponent,
     RelativeTimePipe,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -54,7 +56,18 @@ type DirectionChip = 'all' | TradeDirection;
       <app-page-header
         title="Trade Signals"
         subtitle="Review pending signals, monitor strategy output, and act on the queue"
-      />
+      >
+        <button class="btn btn-primary" type="button" (click)="showCreateDialog.set(true)">
+          + Create signal
+        </button>
+      </app-page-header>
+
+      @if (showCreateDialog()) {
+        <app-create-signal-dialog
+          (closed)="showCreateDialog.set(false)"
+          (created)="onSignalCreated()"
+        />
+      }
 
       <!-- KPI strip (6 dense tiles) -->
       <div class="kpi-grid">
@@ -642,6 +655,18 @@ export class SignalsPageComponent {
   });
 
   readonly selectedDetail = signal<TradeSignalDto | null>(null);
+  readonly showCreateDialog = signal(false);
+
+  /**
+   * Fired by `<app-create-signal-dialog>` after a successful signal creation.
+   * Closes the dialog and refreshes the data table so the new row appears
+   * without the operator having to manually reload.
+   */
+  onSignalCreated(): void {
+    this.showCreateDialog.set(false);
+    this.dataTable()?.loadData();
+    this.loadRecent();
+  }
 
   // ── Derived KPIs ──────────────────────────────────────────────────────
   private startOfToday = (): number => {

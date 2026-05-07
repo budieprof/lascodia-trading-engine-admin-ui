@@ -1763,6 +1763,26 @@ export interface RejectTradeSignalRequest {
   reason?: string | null;
 }
 
+/**
+ * POST /trade-signal — operator-driven manual signal creation. Mirrors the
+ * subset of `CreateTradeSignalCommand` an operator would actually fill in;
+ * the engine treats omitted ML fields as "no model scored this" (the signal
+ * still flows through the standard pending-approve-execute pipeline).
+ */
+export interface CreateTradeSignalRequest {
+  strategyId: number;
+  symbol: string;
+  direction: 'Buy' | 'Sell';
+  entryPrice: number;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+  suggestedLotSize: number;
+  /** Operator-assigned confidence in [0, 1]. */
+  confidence: number;
+  /** UTC ISO; signal is auto-expired by the engine after this time. */
+  expiresAt: string;
+}
+
 export interface CreateTradingAccountRequest {
   brokerId: number;
   accountId?: string;
