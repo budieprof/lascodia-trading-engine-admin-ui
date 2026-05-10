@@ -1,12 +1,6 @@
-import {
-  ApplicationConfig,
-  ErrorHandler,
-  isDevMode,
-  provideZoneChangeDetection,
-} from '@angular/core';
+import { ApplicationConfig, ErrorHandler, provideZoneChangeDetection } from '@angular/core';
 import { provideRouter, withPreloading } from '@angular/router';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { provideServiceWorker } from '@angular/service-worker';
 import { provideAnimations } from '@angular/platform-browser/animations';
 import { HoverPreloadingStrategy } from '@core/routing/hover-preloading.strategy';
 import { provideEchartsCore } from 'ngx-echarts';
@@ -40,12 +34,6 @@ export function buildAppConfig(runtimeConfig: RuntimeConfig): ApplicationConfig 
       { provide: ErrorHandler, useClass: GlobalErrorHandler },
       ...sentryProviders(),
       ...webVitalsProviders(),
-      provideServiceWorker('ngsw-worker.js', {
-        enabled: !isDevMode(),
-        // 30-second window after boot before the SW takes over; lets the
-        // app settle before registration so initial requests aren't intercepted.
-        registrationStrategy: 'registerWhenStable:30000',
-      }),
     ],
   };
 }

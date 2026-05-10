@@ -1,5 +1,9 @@
 import type { Preview } from '@storybook/angular';
-import '../src/styles.scss';
+// Global SCSS deferred — Storybook 10 Angular builder doesn't chain
+// css-loader after sass-loader, and the app's styles.scss contains
+// `@import url(...)` (fonts, tailwindcss, ag-grid) that needs that
+// post-sass pass. Stories render with browser defaults until we wire
+// `webpackFinal` to inject the missing loader. Tracked as Phase 8 work.
 
 /**
  * Global Storybook preview wiring. Loads the app's design tokens + animations

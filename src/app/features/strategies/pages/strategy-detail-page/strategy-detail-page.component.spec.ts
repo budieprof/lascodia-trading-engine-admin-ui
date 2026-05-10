@@ -130,7 +130,7 @@ describe('StrategyDetailPageComponent (lineage layout)', () => {
         generationSource: null,
         createdAt: '2025-01-01T00:00:00Z',
         depthOffset: 0,
-        parentInTree: null,
+        parentInTree: null as number | null,
       },
     ];
     for (let i = 2; i <= 15; i++) {

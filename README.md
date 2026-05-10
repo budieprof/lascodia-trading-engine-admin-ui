@@ -97,6 +97,21 @@ GitHub Actions workflow at [.github/workflows/ci.yml](.github/workflows/ci.yml):
 - `e2e` — Playwright smoke tests on top of the built bundle.
 - `docker` — Buildx image on `main` pushes with GHA cache.
 
+## State management
+
+One rule, codified after v2 Phase 0:
+
+- **Hot data → signal store.** Anything that ticks frequently (positions P&L, prices, pending signals, kill-switch state, system logs) lives in an `@ngrx/signals` store under [src/app/core/stores/](src/app/core/stores/). Mutations dispatched from anywhere in the app; reads via the store's exposed signals. This is where push channels (Phase 7) land.
+- **Cold reads → service + `createPolledResource`.** Anything fetched on-demand or refreshed every 30s+ (config, audit trail, backtests, walk-forward, alerts) stays as a stateless service that returns observables/promises, consumed via [`createPolledResource`](src/app/core/polling/polled-resource.ts) for component-scoped polling.
+
+If you're tempted to mix the two — e.g. add a service for hot data, or put cold reads in a store — push back. The reason for the split is testability and refresh semantics: stores are tested with deterministic dispatch sequences; services are tested with mock HTTP. Mixing them muddies both.
+
+## Storybook
+
+Stories live next to each shared primitive under [src/app/shared/components/](src/app/shared/components/) as `*.stories.ts`. Run `npm run storybook` for the dev server, `npm run storybook:build` for the static bundle.
+
+The Storybook config in [.storybook/](.storybook/) uses the Angular builder (`@storybook/angular:start-storybook`); legacy CLI invocation is no longer supported in Storybook 10. The preview iframe currently renders stories without the app's global SCSS — the Storybook webpack chain doesn't include css-loader after sass-loader, which breaks the `@import url(...)` lines in [styles.scss](src/styles.scss). Stories use browser defaults plus component-scoped styles. Wiring the full token stack is tracked as Phase 8 follow-up work.
+
 ## Shared primitives worth knowing
 
 - **`createPolledResource`** — [polled-resource.ts](src/app/core/polling/polled-resource.ts). Component-scoped polling with automatic pause on `visibilitychange`.

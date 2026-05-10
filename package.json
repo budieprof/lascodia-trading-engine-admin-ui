@@ -19,8 +19,8 @@
     "format": "prettier --write \"src/**/*.{ts,html,scss,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,html,scss,json}\"",
     "codegen:api": "openapi-typescript \"${SWAGGER_URL:-http://localhost:5000/swagger/v1/swagger.json}\" -o src/app/core/api/_generated/schema.ts",
-    "storybook": "storybook dev -p 6006 --no-open",
-    "storybook:build": "storybook build -o storybook-static",
+    "storybook": "ng run lascodia-admin:storybook",
+    "storybook:build": "ng run lascodia-admin:build-storybook",
     "prepare": "husky"
   },
   "lint-staged": {
@@ -41,7 +41,6 @@
     "@angular/platform-browser": "^20.3.19",
     "@angular/platform-browser-dynamic": "^20.3.19",
     "@angular/router": "^20.3.19",
-    "@angular/service-worker": "^21.2.10",
     "@microsoft/signalr": "^10.0.0",
     "@ngrx/signals": "^21.1.0",
     "@sentry/angular": "^10.50.0",
