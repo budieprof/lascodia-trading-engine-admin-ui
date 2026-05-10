@@ -273,6 +273,24 @@ export class CommandPaletteComponent implements OnInit {
       keywords: 'symbolic genetic programming candidate promoted retired feature',
     },
     {
+      group: 'Strategy',
+      label: 'Strategies — LLM Proposals',
+      route: '/strategies/llm-proposals',
+      keywords: 'llm gpt proposal candidate promote pending dsl',
+    },
+    {
+      group: 'Strategy',
+      label: 'Strategies — Rejection Summary',
+      route: '/strategies/rejections',
+      keywords: 'rejection signal gate audit stage reason',
+    },
+    {
+      group: 'Strategy',
+      label: 'Strategies — Templates',
+      route: '/strategies/templates',
+      keywords: 'template apply bulk symbols multi pair',
+    },
+    {
       group: 'ML',
       label: 'CompositeML — Active Policies',
       route: '/composite-ml',

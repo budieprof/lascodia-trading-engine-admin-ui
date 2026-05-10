@@ -12,6 +12,30 @@ export const STRATEGIES_ROUTES: Routes = [
     data: { breadcrumb: 'Compare' },
   },
   {
+    path: 'llm-proposals',
+    data: { breadcrumb: 'LLM Proposals' },
+    loadComponent: () =>
+      import('./pages/llm-proposals-page/llm-proposals-page.component').then(
+        (m) => m.LlmProposalsPageComponent,
+      ),
+  },
+  {
+    path: 'rejections',
+    data: { breadcrumb: 'Rejection Summary' },
+    loadComponent: () =>
+      import('./pages/rejection-summary-page/rejection-summary-page.component').then(
+        (m) => m.RejectionSummaryPageComponent,
+      ),
+  },
+  {
+    path: 'templates',
+    data: { breadcrumb: 'Templates' },
+    loadComponent: () =>
+      import('./pages/templates-page/templates-page.component').then(
+        (m) => m.TemplatesPageComponent,
+      ),
+  },
+  {
     path: ':id/analytics',
     component: StrategyAnalyticsPageComponent,
     data: { breadcrumb: 'Analytics' },

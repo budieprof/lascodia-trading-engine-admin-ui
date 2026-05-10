@@ -34,6 +34,7 @@ import {
   BacktestPreviewSnapshotDto,
   SaveBacktestPreviewSnapshotRequest,
   PromotionGatesDto,
+  LlmProposalDto,
 } from '@core/api/api.types';
 
 @Injectable({ providedIn: 'root' })
@@ -269,5 +270,24 @@ export class StrategiesService {
     return this.api.post(`/strategy/${strategyId}/versions/capture`, {
       changeReason: changeReason ?? null,
     });
+  }
+
+  /** GET /strategy/llm-proposals — operator-facing review queue. */
+  listLlmProposals(
+    opts: {
+      status?: string | null;
+      limit?: number;
+    } = {},
+  ): Observable<ResponseData<LlmProposalDto[]>> {
+    const params = new URLSearchParams();
+    if (opts.status) params.set('status', opts.status);
+    if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+    const qs = params.toString();
+    return this.api.get(`/strategy/llm-proposals${qs ? '?' + qs : ''}`);
+  }
+
+  /** POST /strategy/llm-proposals/{id}/promote — creates a Paused Strategy + returns its id. */
+  promoteLlmProposal(id: number): Observable<ResponseData<number>> {
+    return this.api.post(`/strategy/llm-proposals/${id}/promote`, {});
   }
 }

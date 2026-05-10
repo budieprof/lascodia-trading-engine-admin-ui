@@ -1689,6 +1689,33 @@ export interface RetireSymbolicFeatureRequest {
   reason: string;
 }
 
+/**
+ * LLM-generated strategy proposal awaiting operator review.
+ * `proposalJson` is the raw DSL the model produced; operators inspect
+ * it before promoting (which creates a Paused Strategy linked via
+ * `promotedStrategyId`) or rejecting.
+ */
+export type LlmProposalStatus =
+  | 'Pending'
+  | 'Approved'
+  | 'Rejected'
+  | 'DslInvalid'
+  | 'Duplicate'
+  | 'Screening'
+  | 'Validating';
+
+export interface LlmProposalDto {
+  id: number;
+  name: string;
+  symbol: string;
+  source: string;
+  status: LlmProposalStatus | string;
+  proposalJson: string;
+  rejectionReason: string | null;
+  promotedStrategyId: number | null;
+  proposedAt: string;
+}
+
 export interface StrategyTemplateDto {
   id: number;
   name: string | null;
