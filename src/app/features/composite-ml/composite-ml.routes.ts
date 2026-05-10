@@ -63,4 +63,12 @@ export const COMPOSITE_ML_ROUTES: Routes = [
         (m) => m.DriftHistoryPageComponent,
       ),
   },
+  {
+    path: 'gate-cutover',
+    data: { breadcrumb: 'Gate Cutover' },
+    loadComponent: () =>
+      import('./pages/gate-cutover-page/gate-cutover-page.component').then(
+        (m) => m.GateCutoverPageComponent,
+      ),
+  },
 ];

@@ -6,10 +6,13 @@ import type {
   CatalogueDriftHistoryDto,
   CatalogueDriftSummaryDto,
   CompositeMLLayerHealthDto,
+  CompositeMLOptionsDiagnosticDto,
+  GateCutoverStatusDto,
   LayerSkillSnapshotDto,
   PolicyLineageDto,
   PolicySnapshotDiffDto,
   ResponseData,
+  SetGateCutoverRequest,
   SetLayerSkillManualOverrideRequest,
   SetTrainerSkillManualOverrideRequest,
   Timeframe,
@@ -163,6 +166,31 @@ export class CompositeMLService {
     if (opts.lookbackDays !== undefined) params.set('lookbackDays', String(opts.lookbackDays));
     return this.api.get<ResponseData<CatalogueDriftHistoryDto>>(
       `/composite-ml/catalogue-drift/history?${params.toString()}`,
+    );
+  }
+
+  /**
+   * GET /composite-ml/gate-cutover/status — one row per catalogue entry with
+   * description, covered knob, current returnLedgerCount flag, and the last
+   * timestamp the flag flipped. Drives the cutover-management table.
+   */
+  getGateCutoverStatus(): Observable<ResponseData<GateCutoverStatusDto>> {
+    return this.api.get<ResponseData<GateCutoverStatusDto>>('/composite-ml/gate-cutover/status');
+  }
+
+  /** POST /composite-ml/gate-cutover — hot-reloads on the next gate invocation. */
+  setGateCutover(payload: SetGateCutoverRequest): Observable<ResponseData<boolean>> {
+    return this.api.post<ResponseData<boolean>>('/composite-ml/gate-cutover', payload);
+  }
+
+  /**
+   * GET /composite-ml/options-health — cross-knob audit findings. Empty
+   * array = clean configuration; non-empty = at least one known-bad combo
+   * (e.g. all RiskAdjustmentLambda* at max, Drawdown↔Calmar double-count).
+   */
+  getOptionsHealth(): Observable<ResponseData<CompositeMLOptionsDiagnosticDto[]>> {
+    return this.api.get<ResponseData<CompositeMLOptionsDiagnosticDto[]>>(
+      '/composite-ml/options-health',
     );
   }
 }

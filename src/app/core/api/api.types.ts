@@ -2268,3 +2268,37 @@ export interface CatalogueDriftHistoryDto {
   lookbackDays: number;
   points: CatalogueDriftHistoryPointDto[];
 }
+
+/**
+ * One catalogue entry's gate-cutover state. `returnLedgerCount = true` means
+ * the gate has been cut over to use the evidence ledger as the source of
+ * truth; `false` means it's still on the legacy hand-rolled idiom.
+ */
+export interface GateCutoverStatusRowDto {
+  layerKey: string;
+  description: string;
+  coveredKnob: string;
+  returnLedgerCount: boolean;
+  lastUpdatedAtUtc: string | null;
+}
+
+export interface GateCutoverStatusDto {
+  rows: GateCutoverStatusRowDto[];
+}
+
+export interface SetGateCutoverRequest {
+  layerKey: string;
+  returnLedgerCount: boolean;
+}
+
+/**
+ * One audit finding from the CompositeML options-health diagnostic.
+ * Severity is engine-defined ("Information" or "Warning"); checkName is the
+ * snake_case identifier matching the log emission tag; message is operator-
+ * readable with the offending knob values inline.
+ */
+export interface CompositeMLOptionsDiagnosticDto {
+  severity: 'Information' | 'Warning';
+  checkName: string;
+  message: string;
+}

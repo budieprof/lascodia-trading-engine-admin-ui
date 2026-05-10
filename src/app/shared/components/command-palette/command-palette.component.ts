@@ -298,6 +298,12 @@ export class CommandPaletteComponent implements OnInit {
     },
     {
       group: 'ML',
+      label: 'CompositeML — Gate Cutover',
+      route: '/composite-ml/gate-cutover',
+      keywords: 'cutover ledger legacy idiom gate flip',
+    },
+    {
+      group: 'ML',
       label: 'Optimizations',
       route: '/optimizations',
       keywords: 'bayesian hyperparam sharpe',

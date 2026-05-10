@@ -8,6 +8,8 @@ import { CompositeMLService } from '@core/services/composite-ml.service';
 import type { ActivePolicyDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
+import { OptionsHealthCardComponent } from '../../components/options-health-card/options-health-card.component';
+
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
@@ -30,6 +32,7 @@ type TierFilter = 'all' | 'live' | 'coldstart';
     CardSkeletonComponent,
     EmptyStateComponent,
     ErrorStateComponent,
+    OptionsHealthCardComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -41,6 +44,7 @@ type TierFilter = 'all' | 'live' | 'coldstart';
         <a routerLink="/composite-ml/diff" class="btn btn-secondary">Diff snapshots</a>
         <a routerLink="/composite-ml/layer-skill" class="btn btn-secondary">Skill panels →</a>
         <a routerLink="/composite-ml/drift" class="btn btn-secondary">Drift →</a>
+        <a routerLink="/composite-ml/gate-cutover" class="btn btn-secondary">Gate Cutover →</a>
         <a routerLink="/composite-ml/layer-health" class="btn btn-secondary">Layer Health →</a>
         <button
           type="button"
@@ -51,6 +55,8 @@ type TierFilter = 'all' | 'live' | 'coldstart';
           Refresh
         </button>
       </app-page-header>
+
+      <app-options-health-card />
 
       @if (loading()) {
         <app-card-skeleton [lines]="6" />
