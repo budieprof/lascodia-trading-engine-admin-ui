@@ -1,4 +1,4 @@
-import { Component, computed, input, output, inject } from '@angular/core';
+import { Component, computed, input, output, inject, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { ThemeService } from '@core/theme/theme.service';
 import { AuthService, type Role } from '@core/auth/auth.service';
@@ -43,8 +43,11 @@ interface NavGroup {
           routerLinkActive="active"
           ariaCurrentWhenActive="page"
           class="nav-item"
-          [attr.title]="collapsed() ? 'Dashboard' : null"
           [attr.aria-label]="collapsed() ? 'Dashboard' : null"
+          (mouseenter)="showTip('Dashboard', $event)"
+          (mouseleave)="hideTip()"
+          (focus)="showTip('Dashboard', $event)"
+          (blur)="hideTip()"
         >
           <span class="nav-icon" aria-hidden="true">⊞</span>
           @if (!collapsed()) {
@@ -64,10 +67,11 @@ interface NavGroup {
               routerLinkActive="active"
               ariaCurrentWhenActive="page"
               class="nav-item"
-              [attr.title]="collapsed() ? item.label : null"
               [attr.aria-label]="collapsed() ? item.label : null"
-              (mouseenter)="preload(item.route)"
-              (focus)="preload(item.route)"
+              (mouseenter)="onItemEnter(item.route, item.label, $event)"
+              (mouseleave)="hideTip()"
+              (focus)="onItemEnter(item.route, item.label, $event)"
+              (blur)="hideTip()"
             >
               <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
               @if (!collapsed()) {
@@ -85,7 +89,10 @@ interface NavGroup {
           target="_blank"
           rel="noopener noreferrer"
           [attr.aria-label]="'Open API Swagger UI in a new tab'"
-          [title]="collapsed() ? 'API Swagger' : null"
+          (mouseenter)="showTip('API Swagger', $event)"
+          (mouseleave)="hideTip()"
+          (focus)="showTip('API Swagger', $event)"
+          (blur)="hideTip()"
         >
           <span class="nav-icon" aria-hidden="true">⌘</span>
           @if (!collapsed()) {
@@ -99,7 +106,12 @@ interface NavGroup {
           [attr.aria-label]="
             themeService.theme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
           "
-          [title]="themeService.theme() === 'dark' ? 'Light mode' : 'Dark mode'"
+          (mouseenter)="
+            showTip(themeService.theme() === 'dark' ? 'Light mode' : 'Dark mode', $event)
+          "
+          (mouseleave)="hideTip()"
+          (focus)="showTip(themeService.theme() === 'dark' ? 'Light mode' : 'Dark mode', $event)"
+          (blur)="hideTip()"
         >
           <span class="nav-icon" aria-hidden="true">{{
             themeService.theme() === 'dark' ? '☀' : '☾'
@@ -114,7 +126,10 @@ interface NavGroup {
           (click)="toggleCollapse.emit()"
           [attr.aria-expanded]="!collapsed()"
           [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
-          title="Toggle sidebar"
+          (mouseenter)="showTip(collapsed() ? 'Expand sidebar' : 'Collapse sidebar', $event)"
+          (mouseleave)="hideTip()"
+          (focus)="showTip(collapsed() ? 'Expand sidebar' : 'Collapse sidebar', $event)"
+          (blur)="hideTip()"
         >
           <span class="nav-icon" aria-hidden="true">{{ collapsed() ? '▸' : '◂' }}</span>
           @if (!collapsed()) {
@@ -122,6 +137,21 @@ interface NavGroup {
           }
         </button>
       </div>
+
+      <!--
+        Custom hover tooltip for the collapsed sidebar. Positioned with
+        position:fixed so it escapes the sidebar's overflow-x:hidden
+        (a CSS-only ::after wouldn't render past the right edge). Top is
+        set from the hovered element's bounding rect; left tracks the
+        collapsed sidebar width via CSS. We render only when the sidebar
+        is collapsed AND a tip is active so we don't shadow the visible
+        labels in the expanded state.
+      -->
+      @if (collapsed() && tooltip(); as tip) {
+        <div class="nav-tooltip" role="tooltip" [style.top.px]="tip.top">
+          {{ tip.label }}
+        </div>
+      }
     </aside>
   `,
   styles: [
@@ -228,6 +258,54 @@ interface NavGroup {
         color: var(--text-primary);
       }
 
+      /*
+        Tooltip rendered when the sidebar is collapsed and the operator
+        hovers a nav item. position:fixed escapes the sidebar's
+        overflow:hidden; left tracks the collapsed sidebar width via the
+        same CSS variable; transform centres it vertically against the
+        hovered element. pointer-events:none so a mouseleave on the item
+        immediately fires (the tooltip itself doesn't capture hover).
+      */
+      .nav-tooltip {
+        position: fixed;
+        left: calc(var(--sidebar-collapsed) + 6px);
+        transform: translateY(-50%);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+        padding: 6px 10px;
+        border-radius: var(--radius-sm);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        white-space: nowrap;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+        z-index: 200;
+        pointer-events: none;
+      }
+      :host-context([data-theme='dark']) .nav-tooltip {
+        background: var(--bg-glass);
+        backdrop-filter: var(--blur-md);
+        -webkit-backdrop-filter: var(--blur-md);
+      }
+      .nav-tooltip::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        right: 100%;
+        transform: translateY(-50%);
+        border: 5px solid transparent;
+        border-right-color: var(--border);
+      }
+      .nav-tooltip::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        right: 100%;
+        transform: translate(1px, -50%);
+        border: 5px solid transparent;
+        border-right-color: var(--bg-primary);
+      }
+
       .nav-item.active {
         background: rgba(0, 113, 227, 0.1);
         color: var(--accent);
@@ -304,6 +382,36 @@ export class SidebarComponent {
     this.preloader.prime(route);
   }
 
+  /**
+   * Custom tooltip state for the collapsed sidebar. We can't rely on a
+   * CSS-only `::after` because the sidebar uses `overflow-x: hidden` and
+   * any pseudo-element extending past the right edge would be clipped.
+   * Instead, we capture the hovered element's bounding rect and render a
+   * `position: fixed` tooltip pinned to its vertical centre.
+   */
+  tooltip = signal<{ label: string; top: number } | null>(null);
+
+  showTip(label: string, ev: MouseEvent | FocusEvent) {
+    if (!this.collapsed()) {
+      this.tooltip.set(null);
+      return;
+    }
+    const target = ev.currentTarget as HTMLElement | null;
+    if (!target) return;
+    const rect = target.getBoundingClientRect();
+    this.tooltip.set({ label, top: rect.top + rect.height / 2 });
+  }
+
+  hideTip() {
+    this.tooltip.set(null);
+  }
+
+  /** Combined handler for nav items — preload the route AND surface the tooltip. */
+  onItemEnter(route: string, label: string, ev: MouseEvent | FocusEvent) {
+    this.preload(route);
+    this.showTip(label, ev);
+  }
+
   navGroups: NavGroup[] = [
     {
       label: 'Trading',
@@ -352,12 +460,13 @@ export class SidebarComponent {
       items: [
         { label: 'Engine Overview', route: '/engine-overview', icon: '🩺' },
         { label: 'Health', route: '/system-health', icon: '💚' },
+        { label: 'Logs', route: '/system-logs', icon: '📝' },
         { label: 'Worker Health', route: '/worker-health', icon: '⚡' },
         { label: 'EA Instances', route: '/ea-instances', icon: '🛰' },
         { label: 'Config', route: '/engine-config', icon: '⚙', policy: 'Operator' },
         { label: 'Audit Trail', route: '/audit-trail', icon: '📜' },
         { label: 'Drawdown', route: '/drawdown-recovery', icon: '📉' },
-        { label: 'Paper Trading', route: '/paper-trading', icon: '📝', policy: 'Operator' },
+        { label: 'Paper Trading', route: '/paper-trading', icon: '🧪', policy: 'Operator' },
         { label: 'Economic Events', route: '/economic-events', icon: '📅' },
       ],
     },

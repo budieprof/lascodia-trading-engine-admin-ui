@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, HostListener, effect, inject, signal } from '@angular/core';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { filter } from 'rxjs';
 import { SidebarComponent } from './sidebar/sidebar.component';
@@ -8,10 +8,10 @@ import { OfflineBannerComponent } from '@shared/components/feedback/offline-bann
 import { RealtimeStatusBannerComponent } from '@shared/components/feedback/realtime-status-banner.component';
 import { PaperModeBannerComponent } from '@shared/components/feedback/paper-mode-banner.component';
 import { KillSwitchBannerComponent } from '@shared/components/feedback/kill-switch-banner.component';
-import { RateLimitStripComponent } from '@shared/components/feedback/rate-limit-strip.component';
 import { CommandPaletteComponent } from '@shared/components/command-palette/command-palette.component';
 import { KeyboardHelpComponent } from '@shared/components/keyboard-help/keyboard-help.component';
 import { KeyboardShortcutsService } from '@core/keyboard/keyboard-shortcuts.service';
+import { WallModeService } from '@core/wall-mode/wall-mode.service';
 
 @Component({
   selector: 'app-layout',
@@ -25,7 +25,6 @@ import { KeyboardShortcutsService } from '@core/keyboard/keyboard-shortcuts.serv
     RealtimeStatusBannerComponent,
     PaperModeBannerComponent,
     KillSwitchBannerComponent,
-    RateLimitStripComponent,
     CommandPaletteComponent,
     KeyboardHelpComponent,
   ],
@@ -35,6 +34,7 @@ import { KeyboardShortcutsService } from '@core/keyboard/keyboard-shortcuts.serv
       class="layout"
       [class.sidebar-collapsed]="sidebarCollapsed()"
       [class.mobile-nav-open]="mobileNavOpen()"
+      [class.wall-mode]="wallMode.enabled()"
     >
       @if (mobileNavOpen()) {
         <button
@@ -54,7 +54,6 @@ import { KeyboardShortcutsService } from '@core/keyboard/keyboard-shortcuts.serv
         <app-kill-switch-banner />
         <app-paper-mode-banner />
         <app-header (openMobileNav)="mobileNavOpen.set(true)" />
-        <app-rate-limit-strip />
         <main id="main-content" class="content" tabindex="-1">
           <app-breadcrumbs />
           <router-outlet />
@@ -161,20 +160,58 @@ import { KeyboardShortcutsService } from '@core/keyboard/keyboard-shortcuts.serv
           opacity: 1;
         }
       }
+
+      /* Wall mode is a pure browser-fullscreen toggle — the app chrome
+         (sidebar, header, breadcrumbs) stays visible so the operator
+         keeps navigation. The header's wall-mode button doubles as the
+         exit control, plus Esc. */
     `,
   ],
 })
 export class LayoutComponent {
   sidebarCollapsed = signal(false);
   mobileNavOpen = signal(false);
+  readonly wallMode = inject(WallModeService);
   // Inject eagerly so the global keydown listener starts on layout init.
   private readonly _shortcuts = inject(KeyboardShortcutsService);
   private readonly router = inject(Router);
+
+  /**
+   * Snapshot of the operator's pre-wall-mode sidebar state, restored on
+   * exit so toggling wall mode doesn't permanently change their layout.
+   */
+  private sidebarCollapsedBeforeWall: boolean | null = null;
 
   constructor() {
     // Close the mobile drawer on any navigation.
     this.router.events
       .pipe(filter((e) => e instanceof NavigationEnd))
       .subscribe(() => this.mobileNavOpen.set(false));
+
+    // Auto-collapse the sidebar in wall mode for maximum content area;
+    // restore the operator's prior state on exit.
+    effect(() => {
+      const on = this.wallMode.enabled();
+      if (on) {
+        if (this.sidebarCollapsedBeforeWall === null) {
+          this.sidebarCollapsedBeforeWall = this.sidebarCollapsed();
+        }
+        this.sidebarCollapsed.set(true);
+      } else if (this.sidebarCollapsedBeforeWall !== null) {
+        this.sidebarCollapsed.set(this.sidebarCollapsedBeforeWall);
+        this.sidebarCollapsedBeforeWall = null;
+      }
+    });
+  }
+
+  /**
+   * Esc exits wall mode. Kept on the Layout (not on a global service)
+   * because the host layout is the natural owner of full-frame UI state
+   * and Angular's @HostListener cleans up automatically with the
+   * component lifecycle.
+   */
+  @HostListener('document:keydown.escape')
+  onEscape(): void {
+    if (this.wallMode.enabled()) this.wallMode.disable();
   }
 }

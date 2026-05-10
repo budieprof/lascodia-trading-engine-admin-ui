@@ -2,6 +2,7 @@ import { Component, inject, output } from '@angular/core';
 import { AuthService } from '@core/auth/auth.service';
 import { Router } from '@angular/router';
 import { CommandPaletteComponent } from '@shared/components/command-palette/command-palette.component';
+import { WallModeService } from '@core/wall-mode/wall-mode.service';
 
 @Component({
   selector: 'app-header',
@@ -48,7 +49,17 @@ import { CommandPaletteComponent } from '@shared/components/command-palette/comm
         }
         <button
           type="button"
-          class="logout-btn"
+          class="icon-btn"
+          (click)="wallMode.toggle()"
+          [attr.aria-pressed]="wallMode.enabled()"
+          aria-label="Toggle wall mode"
+          title="Wall mode (kiosk view) · Esc to exit"
+        >
+          <span aria-hidden="true">{{ wallMode.enabled() ? '⛶' : '⛶' }}</span>
+        </button>
+        <button
+          type="button"
+          class="icon-btn logout"
           (click)="onLogout()"
           aria-label="Sign out"
           title="Sign out"
@@ -201,6 +212,7 @@ import { CommandPaletteComponent } from '@shared/components/command-palette/comm
         color: var(--text-primary);
       }
 
+      .icon-btn,
       .logout-btn {
         width: 36px;
         height: 36px;
@@ -215,7 +227,22 @@ import { CommandPaletteComponent } from '@shared/components/command-palette/comm
         justify-content: center;
         transition: all 0.15s ease;
       }
-
+      .icon-btn:hover {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+      .icon-btn[aria-pressed='true'] {
+        background: var(--accent);
+        color: white;
+      }
+      .icon-btn[aria-pressed='true']:hover {
+        background: var(--accent-hover, var(--accent));
+      }
+      .icon-btn:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .icon-btn.logout:hover,
       .logout-btn:hover {
         background: var(--bg-tertiary);
         color: var(--loss);
@@ -235,6 +262,7 @@ import { CommandPaletteComponent } from '@shared/components/command-palette/comm
 })
 export class HeaderComponent {
   auth = inject(AuthService);
+  readonly wallMode = inject(WallModeService);
   private router = inject(Router);
   private palette = inject(CommandPaletteComponent, { optional: true });
 

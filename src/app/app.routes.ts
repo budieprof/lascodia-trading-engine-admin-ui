@@ -225,6 +225,12 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'system-logs',
+        data: { breadcrumb: 'Engine Logs' },
+        loadChildren: () =>
+          import('@features/system-logs/system-logs.routes').then((m) => m.SYSTEM_LOGS_ROUTES),
+      },
+      {
         path: 'kill-switches',
         data: { breadcrumb: 'Kill Switches' },
         canActivate: [requireRoles('Operator', 'Admin')],

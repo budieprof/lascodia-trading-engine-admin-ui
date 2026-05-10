@@ -8,6 +8,7 @@ import {
   LivePriceDto,
   CandleDto,
   CandleCoverageDto,
+  OrderBookSnapshotDto,
 } from '@core/api/api.types';
 
 @Injectable({ providedIn: 'root' })
@@ -41,6 +42,19 @@ export class MarketDataService {
     if (fromIso) params.set('from', fromIso);
     if (toIso) params.set('to', toIso);
     return this.api.get(`/market-data/candle/coverage?${params.toString()}`);
+  }
+
+  getLatestOrderBook(symbol: string): Observable<ResponseData<OrderBookSnapshotDto>> {
+    return this.api.get(`/market-data/order-book/latest/${this.formatSymbol(symbol)}`);
+  }
+
+  getRecentOrderBooks(
+    symbol: string,
+    limit = 120,
+  ): Observable<ResponseData<OrderBookSnapshotDto[]>> {
+    return this.api.get(
+      `/market-data/order-book/recent?symbol=${this.formatSymbol(symbol)}&limit=${limit}`,
+    );
   }
 
   private formatSymbol(symbol: string): string {

@@ -277,12 +277,6 @@ export type StrategyLifecycleStage =
   | 'Approved'
   | 'Active';
 
-export type BrokerType = 'Oanda' | 'IB' | 'Paper' | 'Fxcm';
-
-export type BrokerEnvironment = 'Live' | 'Practice';
-
-export type BrokerStatus = 'Connected' | 'Disconnected' | 'Error';
-
 export type Timeframe = 'M1' | 'M5' | 'M15' | 'H1' | 'H4' | 'D1';
 
 export type MLModelStatus = 'Training' | 'Active' | 'Superseded' | 'Failed';
@@ -453,34 +447,43 @@ export interface TradeSignalDto {
   orderId: number | null;
   generatedAt: string;
   expiresAt: string;
+  isManual: boolean;
 }
+
+export type AccountType = 'Demo' | 'Real' | 'Contest';
+export type MarginMode = 'Hedging' | 'Netting';
 
 export interface TradingAccountDto {
   id: number;
-  brokerId: number;
   accountId: string | null;
   accountName: string | null;
+  brokerServer: string | null;
+  brokerName: string | null;
+  accountType: AccountType;
+  leverage: number;
+  marginMode: MarginMode;
   currency: string | null;
   balance: number;
   equity: number;
   marginUsed: number;
   marginAvailable: number;
+  /** Broker-reported margin level percentage. */
+  marginLevel: number;
+  /** Floating P&L for currently open positions. */
+  profit: number;
+  /** Credit balance allocated to this account. */
+  credit: number;
+  /** Stop-out mode (Percent / Money). */
+  marginSoMode: string | null;
+  /** Margin level threshold below which the broker raises a margin call. */
+  marginSoCall: number;
+  /** Margin level threshold below which the broker force-liquidates. */
+  marginSoStopOut: number;
+  /** Operator-configured cap on absolute daily realized loss (account currency). */
+  maxAbsoluteDailyLoss: number;
   isActive: boolean;
   isPaper: boolean;
   lastSyncedAt: string;
-}
-
-export interface BrokerDto {
-  id: number;
-  name: string | null;
-  brokerType: BrokerType;
-  environment: BrokerEnvironment;
-  baseUrl: string | null;
-  isActive: boolean;
-  isPaper: boolean;
-  status: BrokerStatus;
-  statusMessage: string | null;
-  createdAt: string;
 }
 
 export interface RiskProfileDto {
@@ -1210,6 +1213,55 @@ export interface LivePriceDto {
   timestamp: string;
 }
 
+/** A single price/volume entry inside an OrderBookSnapshot's `levelsJson` payload. */
+export interface OrderBookLevel {
+  /** Price for this depth level. */
+  P: number;
+  /** Volume resting at this price level. */
+  V: number;
+}
+
+/** Parsed shape of an OrderBookSnapshot's `levelsJson` payload. */
+export interface OrderBookLevels {
+  bids: OrderBookLevel[];
+  asks: OrderBookLevel[];
+}
+
+export interface OrderBookSnapshotDto {
+  id: number;
+  symbol: string;
+  bidPrice: number;
+  askPrice: number;
+  bidVolume: number;
+  askVolume: number;
+  spreadPoints: number;
+  /** Raw JSON of beyond-top-of-book levels — null when the broker only exposes top-of-book. */
+  levelsJson: string | null;
+  instanceId: string;
+  capturedAt: string;
+}
+
+/** One log event captured by the engine's in-memory ring buffer. */
+export interface EngineLogEntryDto {
+  timestamp: string;
+  /** "Trace" | "Debug" | "Information" | "Warning" | "Error" | "Critical". */
+  level: string;
+  category: string;
+  eventId: number;
+  message: string;
+  /** Stringified exception if the log entry carried one. */
+  exception: string | null;
+}
+
+/** Response of GET /system/logs. */
+export interface EngineLogPageDto {
+  entries: EngineLogEntryDto[];
+  bufferSize: number;
+  bufferCapacity: number;
+  /** How many entries have been overwritten since the buffer was initialised. */
+  droppedCount: number;
+}
+
 export interface EngineStatusDto {
   isRunning: boolean;
   activeStrategies: number;
@@ -1306,15 +1358,21 @@ export interface WorkerHealthDto extends WorkerHealthSnapshot {
   isStale: boolean;
 }
 
-export type EAInstanceStatus = 'Active' | 'Idle' | 'Disconnected';
+export type EAInstanceStatus = 'Active' | 'Disconnected' | 'ShuttingDown';
 
 export interface EAInstanceDto {
+  id: number;
   instanceId: string;
-  accountId: number | null;
+  tradingAccountId: number;
+  symbols: string;
+  chartSymbol: string;
+  chartTimeframe: string;
+  isCoordinator: boolean;
   status: EAInstanceStatus;
-  lastHeartbeatAt: string | null;
-  ownedSymbols: string[];
-  registeredAt: string | null;
+  lastHeartbeat: string;
+  eaVersion: string;
+  registeredAt: string;
+  deregisteredAt: string | null;
 }
 
 export interface DeadLetterDto {
@@ -1726,36 +1784,6 @@ export interface SaveBacktestPreviewSnapshotRequest {
   expectancy: number;
   exposurePct: number;
   equityCurveJson?: string | null;
-}
-
-export interface CreateBrokerRequest {
-  name?: string;
-  brokerType?: string;
-  environment?: string;
-  baseUrl?: string;
-  apiKey?: string | null;
-  apiSecret?: string | null;
-  isPaper?: boolean;
-}
-
-export interface UpdateBrokerRequest {
-  name?: string | null;
-  brokerType?: string | null;
-  environment?: string | null;
-  baseUrl?: string | null;
-  apiKey?: string | null;
-  apiSecret?: string | null;
-  isPaper?: boolean | null;
-}
-
-export interface UpdateBrokerStatusRequest {
-  id: number;
-  status?: string;
-  statusMessage?: string | null;
-}
-
-export interface SwitchBrokerRequest {
-  brokerName?: string;
 }
 
 export interface RejectTradeSignalRequest {

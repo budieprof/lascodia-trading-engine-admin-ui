@@ -20,6 +20,7 @@ import {
   switchMap,
 } from 'rxjs';
 import { DatePipe } from '@angular/common';
+import { NgxEchartsDirective } from 'ngx-echarts';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { TabsComponent } from '@shared/components/ui/tabs/tabs.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
@@ -28,12 +29,20 @@ import { DataTableComponent } from '@shared/components/data-table/data-table.com
 import { SparklineComponent } from '@shared/components/sparkline/sparkline.component';
 import { TradingChartComponent } from '@shared/components/trading-chart/trading-chart.component';
 import { MarketDataService } from '@core/services/market-data.service';
+import { MarketRegimeService } from '@core/services/market-regime.service';
+import { TradeSignalsService } from '@core/services/trade-signals.service';
+import { PositionsService } from '@core/services/positions.service';
 import {
   LivePriceDto,
   PagerRequest,
   PagedData,
   CandleDto,
   ResponseData,
+  MarketRegimeSnapshotDto,
+  TradeSignalDto,
+  PositionDto,
+  OrderBookSnapshotDto,
+  OrderBookLevels,
 } from '@core/api/api.types';
 import type { EChartsOption } from 'echarts';
 import type { ColDef } from 'ag-grid-community';
@@ -58,6 +67,7 @@ interface PriceEntry extends LivePriceDto {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     DatePipe,
+    NgxEchartsDirective,
     PageHeaderComponent,
     TabsComponent,
     ChartCardComponent,
@@ -77,6 +87,22 @@ interface PriceEntry extends LivePriceDto {
 
       <!-- ═══════════ TRADING CHART TAB ═══════════ -->
       @if (activeTab() === 'chart') {
+        <!--
+          Stale-feed banner — rendered ABOVE the market-overview grid so
+          it spans the full width. Previously it sat inside the 2-col
+          overview grid and ate one of its cells, distorting the
+          layout when the warning fired.
+        -->
+        @if (isStaleFeed()) {
+          <div class="stale-feed-banner" role="status" aria-live="polite">
+            <span class="stale-feed-icon" aria-hidden="true">⚠</span>
+            <span class="stale-feed-text">
+              Feed stale — last live tick {{ feedAgeSec() }}s ago. Showing candle-fallback prices;
+              spread KPIs reflect last-known live values.
+            </span>
+          </div>
+        }
+
         <!-- Market overview strip: sessions + global market KPIs -->
         <div class="market-overview">
           <div class="sessions-card">
@@ -111,15 +137,6 @@ interface PriceEntry extends LivePriceDto {
             </div>
           </div>
 
-          @if (isStaleFeed()) {
-            <div class="stale-feed-banner" role="status" aria-live="polite">
-              <span class="stale-feed-icon" aria-hidden="true">⚠</span>
-              <span>
-                Feed stale — last live tick {{ feedAgeSec() }}s ago. Showing candle-fallback prices;
-                spread KPIs reflect last-known live values.
-              </span>
-            </div>
-          }
           <div class="overview-kpis">
             <app-metric-card
               label="Watched pairs"
@@ -160,7 +177,679 @@ interface PriceEntry extends LivePriceDto {
           </div>
         </div>
 
-        <app-trading-chart />
+        <app-trading-chart
+          [positions]="chartOpenPositions()"
+          (symbolChange)="chartSymbol.set($event)"
+          (timeframeChange)="chartTimeframe.set($event)"
+          (candlesChange)="chartCandles.set($event)"
+        />
+
+        <!--
+          ═══════════ MARKET INSIGHTS ═══════════
+          Continuous live analysis + prediction for the chart-focused
+          (symbol, timeframe). Polls every 5s.
+            - Regime card     RegimeDetectionWorker snapshot
+                              (label + confidence + ADX/ATR/BBW)
+            - Prediction      most recent TradeSignal ML scoring fields
+                              (direction, confidence, magnitude in pips)
+            - Correlation     Pearson r vs each watched pair from the
+                              rolling 100-tick price history (UI-side, no
+                              extra round-trip)
+        -->
+        <section class="insights-section">
+          <header class="insights-head">
+            <h3>Market Insights</h3>
+            <span class="muted">
+              {{ chartSymbol() }} · {{ chartTimeframe() }} · refreshes every 5s
+            </span>
+          </header>
+          <div class="insights-grid">
+            <!-- Regime ─────────────────────────────────────────────── -->
+            <article class="insight-card">
+              <header class="insight-head">
+                <span class="insight-title">Regime</span>
+                @if (regimeLoading() && !regimeSnapshot()) {
+                  <span class="muted insight-status">loading…</span>
+                } @else if (regimeSnapshot()) {
+                  <span class="muted insight-status">
+                    {{ regimeSnapshot()!.detectedAt | date: 'HH:mm:ss' }}
+                  </span>
+                }
+              </header>
+              @if (regimeSnapshot(); as r) {
+                <div
+                  class="regime-pill"
+                  [class.trending]="r.regime === 'Trending'"
+                  [class.ranging]="r.regime === 'Ranging'"
+                  [class.high-vol]="r.regime === 'HighVolatility'"
+                  [class.low-vol]="r.regime === 'LowVolatility'"
+                  [class.crisis]="r.regime === 'Crisis'"
+                  [class.breakout]="r.regime === 'Breakout'"
+                >
+                  {{ r.regime }}
+                  <span class="regime-conf">{{ (r.confidence * 100).toFixed(0) }}%</span>
+                </div>
+                <dl class="regime-stats">
+                  <div>
+                    <dt>ADX</dt>
+                    <dd class="mono" [title]="'Trend strength · >25 = trending'">
+                      {{ r.adx.toFixed(2) }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>ATR</dt>
+                    <dd class="mono" [title]="'Volatility (price units)'">
+                      {{ r.atr.toFixed(5) }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>BBW</dt>
+                    <dd class="mono" [title]="'Bollinger band width · expansion / squeeze'">
+                      {{ r.bollingerBandWidth.toFixed(2) }}
+                    </dd>
+                  </div>
+                </dl>
+              } @else {
+                <div class="empty-state">
+                  <span class="muted">No regime snapshot yet.</span>
+                  <span class="empty-hint">
+                    RegimeDetectionWorker emits one each cycle — usually appears within a minute.
+                  </span>
+                </div>
+              }
+            </article>
+
+            <!-- ML Prediction ──────────────────────────────────────── -->
+            <article class="insight-card">
+              <header class="insight-head">
+                <span class="insight-title">ML Prediction</span>
+                @if (predictionLoading() && !latestPredictionSignal()) {
+                  <span class="muted insight-status">loading…</span>
+                } @else if (latestPredictionSignal()) {
+                  <span class="muted insight-status">
+                    sig #{{ latestPredictionSignal()!.id }} ·
+                    {{ latestPredictionSignal()!.generatedAt | date: 'HH:mm:ss' }}
+                  </span>
+                }
+              </header>
+              @if (latestPredictionSignal(); as s) {
+                @if (s.mlPredictedDirection) {
+                  <div
+                    class="pred-pill"
+                    [class.up]="s.mlPredictedDirection === 'Buy'"
+                    [class.down]="s.mlPredictedDirection === 'Sell'"
+                  >
+                    {{ s.mlPredictedDirection === 'Buy' ? '▲' : '▼' }} {{ s.mlPredictedDirection }}
+                    @if (s.mlConfidenceScore !== null) {
+                      <span class="pred-conf"> {{ (s.mlConfidenceScore * 100).toFixed(0) }}% </span>
+                    }
+                  </div>
+                  <dl class="pred-stats">
+                    @if (s.mlPredictedMagnitude !== null) {
+                      <div>
+                        <dt>Magnitude</dt>
+                        <dd class="mono">{{ s.mlPredictedMagnitude.toFixed(1) }}p</dd>
+                      </div>
+                    }
+                    <div>
+                      <dt>Strategy conf.</dt>
+                      <dd class="mono">{{ (s.confidence * 100).toFixed(1) }}%</dd>
+                    </div>
+                    <div>
+                      <dt>Status</dt>
+                      <dd>
+                        <span class="status-chip" [class]="'status-' + s.status.toLowerCase()">
+                          {{ s.status }}
+                        </span>
+                      </dd>
+                    </div>
+                  </dl>
+                } @else {
+                  <div class="empty-state">
+                    <span class="muted">Most recent signal had no ML scoring.</span>
+                    <span class="empty-hint">
+                      Strategy emitted signal #{{ s.id }} without an active ML model.
+                    </span>
+                  </div>
+                }
+              } @else {
+                <div class="empty-state">
+                  <span class="muted">No recent trade signal for this pair.</span>
+                  <span class="empty-hint">
+                    ML predictions ride along on signals — appears once a strategy fires.
+                  </span>
+                </div>
+              }
+            </article>
+
+            <!-- Correlation ────────────────────────────────────────── -->
+            <article class="insight-card insight-correlation">
+              <header class="insight-head">
+                <span class="insight-title">Correlation vs {{ chartSymbol() }}</span>
+                <span class="muted insight-status">last 100 ticks</span>
+              </header>
+              @if (correlations().length > 0) {
+                <ul class="corr-list">
+                  @for (c of correlations(); track c.symbol) {
+                    <li class="corr-row">
+                      <span class="mono corr-symbol">{{ c.symbol }}</span>
+                      <span class="corr-bar-wrap">
+                        <span
+                          class="corr-bar"
+                          [class.positive]="c.r > 0"
+                          [class.negative]="c.r < 0"
+                          [style.width.%]="50 * Math.abs(c.r)"
+                          [style.left.%]="c.r >= 0 ? 50 : 50 - 50 * Math.abs(c.r)"
+                        ></span>
+                        <span class="corr-zero"></span>
+                      </span>
+                      <span
+                        class="mono corr-value"
+                        [class.profit]="c.r > 0.3"
+                        [class.loss]="c.r < -0.3"
+                      >
+                        {{ c.r >= 0 ? '+' : '' }}{{ c.r.toFixed(2) }}
+                      </span>
+                    </li>
+                  }
+                </ul>
+              } @else {
+                <div class="empty-state">
+                  <span class="muted">Waiting for ticks…</span>
+                  <span class="empty-hint">
+                    Need ≥5 ticks per symbol before correlation is meaningful.
+                  </span>
+                </div>
+              }
+            </article>
+          </div>
+
+          <!--
+            Price action row — 4 cards computed UI-side from the chart's
+            candle stream (no extra round-trip). Updates whenever the
+            chart re-fetches candles.
+          -->
+          <div class="insights-grid pa-grid">
+            <!-- Trend ─────────────────────────────────────────────── -->
+            <article class="insight-card">
+              <header class="insight-head">
+                <span class="insight-title">Trend</span>
+                <span class="muted insight-status">EMA20 / EMA50</span>
+              </header>
+              @if (trendStats(); as t) {
+                <div
+                  class="bias-pill"
+                  [class.bullish]="t.bias === 'bullish'"
+                  [class.bearish]="t.bias === 'bearish'"
+                  [class.flat]="t.bias === 'flat'"
+                >
+                  {{ t.bias === 'bullish' ? '▲' : t.bias === 'bearish' ? '▼' : '→' }}
+                  {{ t.bias }}
+                </div>
+                <dl class="dense-stats">
+                  <div>
+                    <dt>EMA20</dt>
+                    <dd class="mono">{{ formatPrice(t.ema20, chartSymbol()) }}</dd>
+                  </div>
+                  <div>
+                    <dt>EMA50</dt>
+                    <dd class="mono">{{ formatPrice(t.ema50, chartSymbol()) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Δ from EMA20</dt>
+                    <dd
+                      class="mono"
+                      [class.profit]="t.distancePct > 0"
+                      [class.loss]="t.distancePct < 0"
+                    >
+                      {{ t.distancePct >= 0 ? '+' : '' }}{{ t.distancePct.toFixed(2) }}%
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Slope (pips/bar)</dt>
+                    <dd
+                      class="mono"
+                      [class.profit]="t.slopePipsPerBar > 0"
+                      [class.loss]="t.slopePipsPerBar < 0"
+                    >
+                      {{ t.slopePipsPerBar >= 0 ? '+' : '' }}{{ t.slopePipsPerBar.toFixed(1) }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Streak</dt>
+                    <dd
+                      class="mono"
+                      [class.profit]="closeStreak() > 0"
+                      [class.loss]="closeStreak() < 0"
+                    >
+                      {{ closeStreak() >= 0 ? '↑' : '↓' }}
+                      {{ Math.abs(closeStreak()) }} bars
+                    </dd>
+                  </div>
+                </dl>
+              } @else {
+                <div class="empty-state">
+                  <span class="muted">Need ≥50 candles for EMAs.</span>
+                  <span class="empty-hint">
+                    Switch to a higher timeframe or wait for more bars.
+                  </span>
+                </div>
+              }
+            </article>
+
+            <!-- Momentum ─────────────────────────────────────────── -->
+            <article class="insight-card">
+              <header class="insight-head">
+                <span class="insight-title">Momentum</span>
+                <span class="muted insight-status">RSI(14) · MACD(12,26,9)</span>
+              </header>
+              @if (momentumStats(); as m) {
+                <div class="momentum-pills">
+                  <span
+                    class="momentum-pill"
+                    [class.profit]="m.rsiZone === 'oversold'"
+                    [class.loss]="m.rsiZone === 'overbought'"
+                  >
+                    RSI {{ m.rsi.toFixed(1) }}
+                    <span class="momentum-sub">{{ m.rsiZone }}</span>
+                  </span>
+                  <span
+                    class="momentum-pill"
+                    [class.profit]="m.macdState === 'bullish' || m.macdState === 'bullish-cross'"
+                    [class.loss]="m.macdState === 'bearish' || m.macdState === 'bearish-cross'"
+                  >
+                    MACD {{ m.macdHist >= 0 ? '+' : '' }}{{ m.macdHist.toFixed(5) }}
+                    <span class="momentum-sub">{{ m.macdState }}</span>
+                  </span>
+                </div>
+                <dl class="dense-stats">
+                  <div>
+                    <dt>MACD line</dt>
+                    <dd class="mono">{{ m.macdLine.toFixed(5) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Signal</dt>
+                    <dd class="mono">{{ m.macdSignal.toFixed(5) }}</dd>
+                  </div>
+                  <div>
+                    <dt>RSI gauge</dt>
+                    <dd>
+                      <div class="rsi-gauge">
+                        <span class="rsi-band oversold"></span>
+                        <span class="rsi-band overbought"></span>
+                        <span class="rsi-needle" [style.left.%]="m.rsi"></span>
+                      </div>
+                    </dd>
+                  </div>
+                </dl>
+              } @else {
+                <div class="empty-state">
+                  <span class="muted">Need ≥35 candles.</span>
+                  <span class="empty-hint"> RSI and MACD warm up after a few dozen bars. </span>
+                </div>
+              }
+            </article>
+
+            <!-- Volatility ───────────────────────────────────────── -->
+            <article class="insight-card">
+              <header class="insight-head">
+                <span class="insight-title">Volatility</span>
+                <span class="muted insight-status">ATR(14) · 20-bar range</span>
+              </header>
+              @if (volatilityStats(); as v) {
+                <div
+                  class="bias-pill"
+                  [class.expanding]="v.expansion === 'expanding'"
+                  [class.contracting]="v.expansion === 'contracting'"
+                  [class.flat]="v.expansion === 'stable'"
+                >
+                  {{
+                    v.expansion === 'expanding' ? '⤢' : v.expansion === 'contracting' ? '⤡' : '→'
+                  }}
+                  {{ v.expansion }}
+                </div>
+                <dl class="dense-stats">
+                  <div>
+                    <dt>ATR (pips)</dt>
+                    <dd class="mono">{{ v.atrPips.toFixed(1) }}</dd>
+                  </div>
+                  <div>
+                    <dt>ATR percentile</dt>
+                    <dd class="mono">{{ v.atrPercentile.toFixed(0) }}%</dd>
+                  </div>
+                  <div>
+                    <dt>Last bar range</dt>
+                    <dd class="mono">{{ v.rangePipsLastBar.toFixed(1) }}p</dd>
+                  </div>
+                  <div>
+                    <dt>20-bar avg range</dt>
+                    <dd class="mono">{{ v.rangePipsAvg20.toFixed(1) }}p</dd>
+                  </div>
+                  <div class="span-2">
+                    <dt>ATR percentile bar</dt>
+                    <dd>
+                      <div class="percentile-bar">
+                        <span
+                          class="percentile-fill"
+                          [class.high]="v.atrPercentile > 75"
+                          [class.low]="v.atrPercentile < 25"
+                          [style.width.%]="v.atrPercentile"
+                        ></span>
+                      </div>
+                    </dd>
+                  </div>
+                </dl>
+              } @else {
+                <div class="empty-state">
+                  <span class="muted">Need ≥30 candles for ATR percentile.</span>
+                  <span class="empty-hint"> Try a longer-history timeframe. </span>
+                </div>
+              }
+            </article>
+
+            <!-- Levels & Pivots ──────────────────────────────────── -->
+            <article class="insight-card">
+              <header class="insight-head">
+                <span class="insight-title">Levels</span>
+                <span class="muted insight-status">Floor pivots · 20-bar HL</span>
+              </header>
+              @if (levelStats(); as l) {
+                <div class="bias-pill flat">
+                  Nearest: <strong>{{ l.nearestLabel }}</strong> ·
+                  {{ l.nearestDistPips.toFixed(1) }}p
+                </div>
+                <dl class="dense-stats">
+                  <div>
+                    <dt>R2</dt>
+                    <dd class="mono">{{ formatPrice(l.r2, chartSymbol()) }}</dd>
+                  </div>
+                  <div>
+                    <dt>R1</dt>
+                    <dd class="mono">{{ formatPrice(l.r1, chartSymbol()) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Pivot</dt>
+                    <dd class="mono">{{ formatPrice(l.pivot, chartSymbol()) }}</dd>
+                  </div>
+                  <div>
+                    <dt>S1</dt>
+                    <dd class="mono">{{ formatPrice(l.s1, chartSymbol()) }}</dd>
+                  </div>
+                  <div>
+                    <dt>S2</dt>
+                    <dd class="mono">{{ formatPrice(l.s2, chartSymbol()) }}</dd>
+                  </div>
+                  <div>
+                    <dt>20-bar high Δ</dt>
+                    <dd class="mono">−{{ l.distFromHigh20Pips.toFixed(1) }}p</dd>
+                  </div>
+                  <div>
+                    <dt>20-bar low Δ</dt>
+                    <dd class="mono">+{{ l.distFromLow20Pips.toFixed(1) }}p</dd>
+                  </div>
+                  <div>
+                    <dt>Bar range pos</dt>
+                    <dd>
+                      <div class="percentile-bar">
+                        <span class="percentile-fill" [style.width.%]="l.rangePosPct"></span>
+                      </div>
+                    </dd>
+                  </div>
+                </dl>
+              } @else {
+                <div class="empty-state">
+                  <span class="muted">Need ≥21 candles for pivots.</span>
+                  <span class="empty-hint"> Pivots derive from the prior completed candle. </span>
+                </div>
+              }
+            </article>
+          </div>
+
+          <!--
+            Advanced market analysis row — VWAP, Volume Profile, Depth of
+            book, Footprint (estimated), Liquidity Heatmap. The first two
+            and the footprint compute UI-side from chartCandles. Depth and
+            heatmap fetch /market-data/order-book/* on the same 5s cadence.
+          -->
+          <div class="insights-grid adv-grid">
+            <!-- VWAP ──────────────────────────────────────────────── -->
+            <article class="insight-card">
+              <header class="insight-head">
+                <span class="insight-title">VWAP</span>
+                <span class="muted insight-status">session · cum. typical × vol</span>
+              </header>
+              @if (vwapStats(); as v) {
+                <div
+                  class="bias-pill"
+                  [class.bullish]="v.position === 'above'"
+                  [class.bearish]="v.position === 'below'"
+                  [class.flat]="v.position === 'at'"
+                >
+                  {{ v.position === 'above' ? '▲' : v.position === 'below' ? '▼' : '→' }}
+                  price {{ v.position }} VWAP
+                </div>
+                <dl class="dense-stats">
+                  <div>
+                    <dt>VWAP</dt>
+                    <dd class="mono">{{ formatPrice(v.vwap, chartSymbol()) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Δ from VWAP</dt>
+                    <dd
+                      class="mono"
+                      [class.profit]="v.distancePips > 0"
+                      [class.loss]="v.distancePips < 0"
+                    >
+                      {{ v.distancePips >= 0 ? '+' : '' }}{{ v.distancePips.toFixed(1) }}p
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>+1σ band</dt>
+                    <dd class="mono">{{ formatPrice(v.upperBand, chartSymbol()) }}</dd>
+                  </div>
+                  <div>
+                    <dt>−1σ band</dt>
+                    <dd class="mono">{{ formatPrice(v.lowerBand, chartSymbol()) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Bandwidth</dt>
+                    <dd class="mono">{{ v.bandwidthPips.toFixed(1) }}p</dd>
+                  </div>
+                  <div>
+                    <dt>Bars in</dt>
+                    <dd class="mono">{{ v.barsIncluded }}</dd>
+                  </div>
+                </dl>
+              } @else {
+                <div class="empty-state">
+                  <span class="muted">Need ≥10 candles with volume.</span>
+                  <span class="empty-hint">VWAP needs cumulative volume to be meaningful.</span>
+                </div>
+              }
+            </article>
+
+            <!-- Volume Profile ───────────────────────────────────── -->
+            <article class="insight-card insight-volprofile">
+              <header class="insight-head">
+                <span class="insight-title">Volume Profile</span>
+                <span class="muted insight-status">distribution · POC · VA70</span>
+              </header>
+              @if (volumeProfile(); as vp) {
+                <div class="vp-meta">
+                  <span class="vp-poc-chip">
+                    POC <span class="mono">{{ formatPrice(vp.poc, chartSymbol()) }}</span>
+                  </span>
+                  <span class="muted"
+                    >VA70 {{ formatPrice(vp.vaLow, chartSymbol()) }} –
+                    {{ formatPrice(vp.vaHigh, chartSymbol()) }}</span
+                  >
+                </div>
+                <ul class="vp-rows">
+                  @for (row of vp.bins; track row.idx) {
+                    <li class="vp-row" [class.poc]="row.isPoc" [class.in-va]="row.inVa">
+                      <span class="mono vp-price">{{
+                        formatPrice(row.priceMid, chartSymbol())
+                      }}</span>
+                      <span class="vp-bar-wrap">
+                        <span class="vp-bar" [style.width.%]="row.pct"></span>
+                      </span>
+                      <span class="mono vp-vol">{{ formatVolume(row.volume) }}</span>
+                    </li>
+                  }
+                </ul>
+              } @else {
+                <div class="empty-state">
+                  <span class="muted">Need ≥10 candles with volume.</span>
+                  <span class="empty-hint"
+                    >Volume profile distributes each candle's volume across its OHLC range.</span
+                  >
+                </div>
+              }
+            </article>
+
+            <!-- Depth of book ────────────────────────────────────── -->
+            <article class="insight-card insight-depth">
+              <header class="insight-head">
+                <span class="insight-title">Depth of book</span>
+                @if (latestOrderBook(); as ob) {
+                  <span class="muted insight-status">
+                    {{ ob.capturedAt | date: 'HH:mm:ss' }}
+                  </span>
+                } @else {
+                  <span class="muted insight-status">—</span>
+                }
+              </header>
+              @if (depthLadder(); as d) {
+                <div class="depth-summary">
+                  <span class="depth-spread mono"> spread {{ d.spreadPips.toFixed(1) }}p </span>
+                  <span
+                    class="depth-imb mono"
+                    [class.profit]="d.imbalance > 0"
+                    [class.loss]="d.imbalance < 0"
+                  >
+                    imb {{ d.imbalance >= 0 ? '+' : '' }}{{ (d.imbalance * 100).toFixed(0) }}%
+                  </span>
+                </div>
+                <div class="depth-ladder">
+                  <div class="depth-side asks">
+                    @for (a of d.asks; track a.price) {
+                      <div class="depth-row ask">
+                        <span class="mono depth-price">{{
+                          formatPrice(a.price, chartSymbol())
+                        }}</span>
+                        <span class="depth-bar-wrap">
+                          <span class="depth-bar ask" [style.width.%]="a.pct"></span>
+                        </span>
+                        <span class="mono depth-vol">{{ formatVolume(a.volume) }}</span>
+                      </div>
+                    }
+                  </div>
+                  <div class="depth-mid">
+                    <span class="mono">{{ formatPrice(d.mid, chartSymbol()) }}</span>
+                    <span class="muted">mid</span>
+                  </div>
+                  <div class="depth-side bids">
+                    @for (b of d.bids; track b.price) {
+                      <div class="depth-row bid">
+                        <span class="mono depth-price">{{
+                          formatPrice(b.price, chartSymbol())
+                        }}</span>
+                        <span class="depth-bar-wrap">
+                          <span class="depth-bar bid" [style.width.%]="b.pct"></span>
+                        </span>
+                        <span class="mono depth-vol">{{ formatVolume(b.volume) }}</span>
+                      </div>
+                    }
+                  </div>
+                </div>
+              } @else {
+                <div class="empty-state">
+                  <span class="muted">No depth-of-book snapshot yet.</span>
+                  <span class="empty-hint">
+                    The EA streams MarketBook frames on every tick — appears once a frame lands.
+                  </span>
+                </div>
+              }
+            </article>
+
+            <!-- Footprint (estimated) ───────────────────────────── -->
+            <article class="insight-card insight-footprint">
+              <header class="insight-head">
+                <span class="insight-title">
+                  Footprint
+                  <span class="estimated-tag">estimated</span>
+                </span>
+                <span class="muted insight-status">last 12 bars · OHLCV-derived</span>
+              </header>
+              @if (footprintRows(); as fr) {
+                <div class="fp-legend muted">
+                  Buy/Sell split derived from close-position within bar range. True aggressor-tagged
+                  ticks aren't captured at this depth.
+                </div>
+                <table class="fp-table">
+                  <thead>
+                    <tr>
+                      <th>Bar</th>
+                      <th class="num">Buy</th>
+                      <th class="num">Sell</th>
+                      <th class="num">Δ</th>
+                      <th class="num">CΔ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (r of fr; track r.idx) {
+                      <tr>
+                        <td class="mono">{{ r.label }}</td>
+                        <td class="num mono profit">{{ formatVolume(r.buy) }}</td>
+                        <td class="num mono loss">{{ formatVolume(r.sell) }}</td>
+                        <td
+                          class="num mono"
+                          [class.profit]="r.delta > 0"
+                          [class.loss]="r.delta < 0"
+                        >
+                          {{ r.delta >= 0 ? '+' : '' }}{{ formatVolume(Math.abs(r.delta)) }}
+                        </td>
+                        <td
+                          class="num mono"
+                          [class.profit]="r.cumDelta > 0"
+                          [class.loss]="r.cumDelta < 0"
+                        >
+                          {{ r.cumDelta >= 0 ? '+' : '' }}{{ formatVolume(Math.abs(r.cumDelta)) }}
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              } @else {
+                <div class="empty-state">
+                  <span class="muted">Need candles with volume to estimate footprint.</span>
+                </div>
+              }
+            </article>
+
+            <!-- Liquidity Heatmap ───────────────────────────────── -->
+            <article class="insight-card insight-heatmap">
+              <header class="insight-head">
+                <span class="insight-title">Liquidity Heatmap</span>
+                @if (recentOrderBooks().length > 0) {
+                  <span class="muted insight-status">
+                    last {{ recentOrderBooks().length }} snapshots
+                  </span>
+                } @else {
+                  <span class="muted insight-status">—</span>
+                }
+              </header>
+              @if (liquidityHeatmapOptions(); as opts) {
+                <div echarts [options]="opts" [autoResize]="true" class="heatmap-chart"></div>
+              } @else {
+                <div class="empty-state">
+                  <span class="muted">Waiting for order book snapshots.</span>
+                  <span class="empty-hint"> Need ≥5 snapshots to render a heat surface. </span>
+                </div>
+              }
+            </article>
+          </div>
+        </section>
 
         <!-- Watch ribbon — compact snapshot of every watched symbol. Renders
              8 cards even with no feed; missing symbols show "—" placeholders
@@ -1657,18 +2346,25 @@ interface PriceEntry extends LivePriceDto {
       }
       .stale-feed-banner {
         display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 12px;
+        align-items: flex-start;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        margin-top: var(--space-2);
         margin-bottom: var(--space-2);
         background: rgba(255, 149, 0, 0.08);
         border: 1px solid rgba(255, 149, 0, 0.25);
-        border-radius: 6px;
+        border-radius: var(--radius-sm);
         color: #c93400;
-        font-size: 12px;
+        font-size: var(--text-xs);
+        line-height: 1.4;
       }
       .stale-feed-icon {
         font-size: 14px;
+        line-height: 1.4;
+        flex-shrink: 0;
+      }
+      .stale-feed-text {
+        flex: 1;
       }
 
       /* Watch ribbon */
@@ -1927,12 +2623,1373 @@ interface PriceEntry extends LivePriceDto {
           grid-template-columns: 1fr;
         }
       }
+
+      /* ── Market Insights ─────────────────────────────────────────── */
+      .insights-section {
+        margin-top: var(--space-3);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+      }
+      .insights-head {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .insights-head h3 {
+        margin: 0;
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .insights-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1.2fr;
+        gap: 1px;
+        background: var(--border);
+      }
+      @media (max-width: 1100px) {
+        .insights-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .insight-card {
+        background: var(--bg-secondary);
+        padding: var(--space-3) var(--space-4);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        min-height: 160px;
+      }
+      .insight-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: var(--space-2);
+      }
+      .insight-title {
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .insight-status {
+        font-size: 10.5px;
+      }
+
+      /* Regime card */
+      .regime-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        align-self: flex-start;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        background: rgba(142, 142, 147, 0.12);
+        color: var(--text-primary);
+      }
+      .regime-pill.trending {
+        background: rgba(52, 199, 89, 0.14);
+        color: #15803d;
+      }
+      .regime-pill.ranging {
+        background: rgba(0, 113, 227, 0.12);
+        color: #0071e3;
+      }
+      .regime-pill.high-vol {
+        background: rgba(255, 149, 0, 0.14);
+        color: #c93400;
+      }
+      .regime-pill.low-vol {
+        background: rgba(142, 142, 147, 0.18);
+        color: #636366;
+      }
+      .regime-pill.crisis {
+        background: rgba(255, 59, 48, 0.16);
+        color: #b91c1c;
+      }
+      .regime-pill.breakout {
+        background: rgba(175, 82, 222, 0.14);
+        color: #8a2be2;
+      }
+      .regime-conf {
+        font-size: 11px;
+        font-weight: var(--font-medium);
+        opacity: 0.8;
+      }
+      .regime-stats {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--space-3);
+        margin: 0;
+      }
+      .regime-stats > div {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .regime-stats dt {
+        font-size: 10px;
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .regime-stats dd {
+        margin: 0;
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+
+      /* Prediction card */
+      .pred-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        align-self: flex-start;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        background: rgba(142, 142, 147, 0.12);
+      }
+      .pred-pill.up {
+        background: rgba(52, 199, 89, 0.14);
+        color: #15803d;
+      }
+      .pred-pill.down {
+        background: rgba(255, 59, 48, 0.14);
+        color: #b91c1c;
+      }
+      .pred-conf {
+        font-size: 11px;
+        opacity: 0.85;
+      }
+      .pred-stats {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--space-3);
+        margin: 0;
+      }
+      .pred-stats > div {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .pred-stats dt {
+        font-size: 10px;
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .pred-stats dd {
+        margin: 0;
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+      .status-chip {
+        display: inline-block;
+        padding: 1px 8px;
+        border-radius: 999px;
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        background: rgba(142, 142, 147, 0.18);
+        color: var(--text-secondary);
+      }
+      .status-chip.status-pending {
+        background: rgba(255, 149, 0, 0.14);
+        color: #c93400;
+      }
+      .status-chip.status-approved,
+      .status-chip.status-executed {
+        background: rgba(52, 199, 89, 0.14);
+        color: #15803d;
+      }
+      .status-chip.status-rejected {
+        background: rgba(255, 59, 48, 0.14);
+        color: #b91c1c;
+      }
+
+      /* Correlation strip */
+      .corr-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .corr-row {
+        display: grid;
+        grid-template-columns: 70px 1fr 50px;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: 11px;
+      }
+      .corr-symbol {
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+      }
+      .corr-bar-wrap {
+        position: relative;
+        height: 8px;
+        background: rgba(142, 142, 147, 0.12);
+        border-radius: 4px;
+      }
+      .corr-bar {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        border-radius: 4px;
+      }
+      .corr-bar.positive {
+        background: #34c759;
+      }
+      .corr-bar.negative {
+        background: #ff3b30;
+      }
+      .corr-zero {
+        position: absolute;
+        left: 50%;
+        top: -2px;
+        bottom: -2px;
+        width: 1px;
+        background: var(--border);
+      }
+      .corr-value {
+        text-align: right;
+      }
+
+      /* ── Price action row ──────────────────────────────────────── */
+      .pa-grid {
+        grid-template-columns: 1fr 1fr 1fr 1fr;
+        border-top: 1px solid var(--border);
+      }
+      @media (max-width: 1100px) {
+        .pa-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      @media (max-width: 720px) {
+        .pa-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .bias-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        align-self: flex-start;
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        background: rgba(142, 142, 147, 0.15);
+        color: var(--text-secondary);
+        text-transform: capitalize;
+      }
+      .bias-pill.bullish,
+      .bias-pill.expanding {
+        background: rgba(52, 199, 89, 0.14);
+        color: #15803d;
+      }
+      .bias-pill.bearish,
+      .bias-pill.contracting {
+        background: rgba(255, 59, 48, 0.14);
+        color: #b91c1c;
+      }
+      .bias-pill.flat {
+        background: rgba(142, 142, 147, 0.18);
+      }
+
+      /* Compact two-column dt/dd grid for dense numeric stats. */
+      .dense-stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px var(--space-3);
+        margin: 0;
+      }
+      .dense-stats > div {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      .dense-stats > div.span-2 {
+        grid-column: span 2;
+      }
+      .dense-stats dt {
+        font-size: 9.5px;
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .dense-stats dd {
+        margin: 0;
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+
+      /* RSI gauge (oversold / overbought zones with a needle). */
+      .rsi-gauge {
+        position: relative;
+        height: 8px;
+        background: rgba(142, 142, 147, 0.12);
+        border-radius: 4px;
+      }
+      .rsi-band {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        border-radius: 4px;
+      }
+      .rsi-band.oversold {
+        left: 0;
+        width: 30%;
+        background: rgba(52, 199, 89, 0.22);
+      }
+      .rsi-band.overbought {
+        right: 0;
+        width: 30%;
+        background: rgba(255, 59, 48, 0.22);
+      }
+      .rsi-needle {
+        position: absolute;
+        top: -2px;
+        bottom: -2px;
+        width: 2px;
+        background: var(--text-primary);
+        transform: translateX(-1px);
+      }
+
+      .momentum-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .momentum-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: var(--font-semibold);
+        background: rgba(142, 142, 147, 0.14);
+        color: var(--text-secondary);
+        font-variant-numeric: tabular-nums;
+      }
+      .momentum-pill.profit {
+        background: rgba(52, 199, 89, 0.14);
+        color: #15803d;
+      }
+      .momentum-pill.loss {
+        background: rgba(255, 59, 48, 0.14);
+        color: #b91c1c;
+      }
+      .momentum-sub {
+        font-size: 9.5px;
+        font-weight: var(--font-medium);
+        opacity: 0.85;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .percentile-bar {
+        position: relative;
+        height: 8px;
+        background: rgba(142, 142, 147, 0.12);
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .percentile-fill {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        background: #0071e3;
+        border-radius: 4px;
+      }
+      .percentile-fill.high {
+        background: #ff3b30;
+      }
+      .percentile-fill.low {
+        background: #34c759;
+      }
+
+      /* ── Advanced analysis row (VWAP / VolProfile / Depth / Footprint / Heatmap) ── */
+      .adv-grid {
+        grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+        border-top: 1px solid var(--border);
+      }
+      @media (max-width: 1400px) {
+        .adv-grid {
+          grid-template-columns: 1fr 1fr 1fr;
+        }
+      }
+      @media (max-width: 1000px) {
+        .adv-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      @media (max-width: 720px) {
+        .adv-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .estimated-tag {
+        margin-left: 6px;
+        padding: 1px 6px;
+        font-size: 9px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        background: rgba(255, 159, 10, 0.18);
+        color: #b45309;
+        border-radius: 4px;
+        vertical-align: middle;
+      }
+
+      /* Volume profile horizontal histogram. */
+      .insight-volprofile {
+        min-height: 0;
+      }
+      .vp-meta {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        font-size: 11px;
+      }
+      .vp-poc-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 8px;
+        background: rgba(0, 113, 227, 0.16);
+        color: #0071e3;
+        border-radius: 999px;
+        font-weight: var(--font-semibold);
+      }
+      .vp-rows {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        max-height: 280px;
+        overflow-y: auto;
+      }
+      .vp-row {
+        display: grid;
+        grid-template-columns: 64px 1fr 56px;
+        gap: 6px;
+        align-items: center;
+        font-size: 10.5px;
+        padding: 1px 0;
+      }
+      .vp-row.in-va {
+        background: rgba(0, 113, 227, 0.04);
+      }
+      .vp-row.poc {
+        background: rgba(0, 113, 227, 0.14);
+        font-weight: var(--font-semibold);
+      }
+      .vp-price {
+        text-align: right;
+        color: var(--text-secondary);
+      }
+      .vp-bar-wrap {
+        position: relative;
+        height: 9px;
+        background: rgba(142, 142, 147, 0.08);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+      .vp-bar {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        background: linear-gradient(to right, #0071e3, #4ea1ff);
+        border-radius: 2px;
+      }
+      .vp-row.poc .vp-bar {
+        background: linear-gradient(to right, #ff9500, #ffd166);
+      }
+      .vp-vol {
+        text-align: right;
+        color: var(--text-tertiary);
+      }
+
+      /* Depth of book ladder. */
+      .insight-depth {
+        min-height: 0;
+      }
+      .depth-summary {
+        display: flex;
+        gap: 10px;
+        font-size: 11px;
+      }
+      .depth-spread,
+      .depth-imb {
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(142, 142, 147, 0.12);
+        color: var(--text-secondary);
+        font-weight: var(--font-semibold);
+      }
+      .depth-imb.profit {
+        background: rgba(52, 199, 89, 0.16);
+        color: #15803d;
+      }
+      .depth-imb.loss {
+        background: rgba(255, 59, 48, 0.16);
+        color: #b91c1c;
+      }
+      .depth-ladder {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .depth-side {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .depth-row {
+        display: grid;
+        grid-template-columns: 70px 1fr 60px;
+        gap: 6px;
+        align-items: center;
+        font-size: 10.5px;
+        padding: 1px 0;
+      }
+      .depth-price {
+        text-align: right;
+      }
+      .depth-bar-wrap {
+        position: relative;
+        height: 9px;
+        background: rgba(142, 142, 147, 0.08);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+      .depth-bar {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        border-radius: 2px;
+      }
+      .depth-bar.bid {
+        background: linear-gradient(to right, #34c759, #6ad08a);
+      }
+      .depth-bar.ask {
+        background: linear-gradient(to right, #ff3b30, #ff7a72);
+      }
+      .depth-row.bid .depth-price {
+        color: #15803d;
+      }
+      .depth-row.ask .depth-price {
+        color: #b91c1c;
+      }
+      .depth-vol {
+        text-align: right;
+        color: var(--text-tertiary);
+      }
+      .depth-mid {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        justify-content: center;
+        padding: 4px 0;
+        border-top: 1px dashed var(--border);
+        border-bottom: 1px dashed var(--border);
+        background: rgba(142, 142, 147, 0.05);
+      }
+      .depth-mid .mono {
+        font-size: 12px;
+        font-weight: var(--font-semibold);
+      }
+
+      /* Footprint heuristic table. */
+      .insight-footprint {
+        min-height: 0;
+      }
+      .fp-legend {
+        font-size: 10.5px;
+        line-height: 1.4;
+      }
+      .fp-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 10.5px;
+      }
+      .fp-table th,
+      .fp-table td {
+        padding: 3px 4px;
+        text-align: left;
+      }
+      .fp-table th {
+        font-weight: var(--font-medium);
+        font-size: 9.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
+        border-bottom: 1px solid var(--border);
+      }
+      .fp-table td.num,
+      .fp-table th.num {
+        text-align: right;
+      }
+      .fp-table tbody tr {
+        border-bottom: 1px solid rgba(142, 142, 147, 0.08);
+      }
+      .fp-table tbody tr:last-child {
+        border-bottom: none;
+      }
+
+      /* Liquidity heatmap echarts. */
+      .insight-heatmap {
+        min-height: 0;
+      }
+      .heatmap-chart {
+        width: 100%;
+        height: 200px;
+      }
     `,
   ],
 })
 export class MarketDataPageComponent implements OnInit, OnDestroy {
+  /** Expose `Math` for use in the template (correlation bar widths). */
+  protected readonly Math = Math;
+
   private marketDataService = inject(MarketDataService);
+  private regimeService = inject(MarketRegimeService);
+  private tradeSignalsService = inject(TradeSignalsService);
+  private positionsService = inject(PositionsService);
   private destroy$ = new Subject<void>();
+
+  // ── Market Insights state (chart-focused symbol/timeframe) ───────────
+  /**
+   * Symbol the embedded trading chart is currently focused on (slash form,
+   * e.g. "EUR/USD"). Mirrored from the chart's `symbolChange` output so
+   * the Insights row follows whichever instrument the operator is reading.
+   */
+  readonly chartSymbol = signal<string>('EUR/USD');
+  /** Timeframe selected on the embedded chart (M1/M5/M15/H1/H4/D1). */
+  readonly chartTimeframe = signal<string>('H1');
+
+  /** Latest regime snapshot for (chartSymbol, chartTimeframe). */
+  readonly regimeSnapshot = signal<MarketRegimeSnapshotDto | null>(null);
+  readonly regimeLoading = signal<boolean>(false);
+
+  /**
+   * Most recent trade signal for the chart-focused (symbol, timeframe). The
+   * signal carries the ML scoring fields (`mlPredictedDirection`,
+   * `mlConfidenceScore`, `mlPredictedMagnitude`) that we surface as the
+   * "latest prediction". Null until the first fetch completes — there's
+   * no dedicated `/ml-prediction-log/latest` endpoint yet, so we piggy-back
+   * on TradeSignalDto which is the only place the engine exposes these
+   * fields read-side.
+   */
+  readonly latestPredictionSignal = signal<TradeSignalDto | null>(null);
+  readonly predictionLoading = signal<boolean>(false);
+
+  /**
+   * Open positions for the chart-focused symbol — overlaid on the chart
+   * as entry / SL / TP horizontal lines. Refreshed on the same 5s
+   * cadence as regime / prediction. Filtered server-side by symbol +
+   * Status=Open so we only ship live positions to the chart.
+   */
+  readonly chartOpenPositions = signal<PositionDto[]>([]);
+  readonly positionsLoading = signal<boolean>(false);
+
+  /** Latest depth-of-book snapshot for the chart-focused symbol (drives the
+   *  Depth-of-book card). Null until the EA streams a MarketBook frame. */
+  readonly latestOrderBook = signal<OrderBookSnapshotDto | null>(null);
+
+  /** Recent order book snapshots (newest first, capped at 120 server-side)
+   *  for the chart-focused symbol — drives the liquidity heatmap. */
+  readonly recentOrderBooks = signal<OrderBookSnapshotDto[]>([]);
+
+  /**
+   * Pearson correlation between the chart-focused symbol's tick returns and
+   * each of the other watched pairs over the rolling 100-tick history. Range
+   * [-1, 1]. Computed live in the UI from `priceHistory`; no engine call
+   * needed since we already cache returns per symbol for analytics.
+   */
+  readonly correlations = computed<{ symbol: string; r: number }[]>(() => {
+    // Bind to livePrices so the value updates as new ticks arrive.
+    this.livePrices();
+    const focusSlash = this.chartSymbol();
+    const focusJoined = focusSlash.replace(/\//g, '');
+    const focusHist = this.priceHistory[focusJoined] ?? [];
+    if (focusHist.length < 5) return [];
+    const focusReturns = this.toReturns(focusHist);
+    const out: { symbol: string; r: number }[] = [];
+    for (let i = 0; i < this.watchedSymbols.length; i++) {
+      const apiSym = this.watchedSymbols[i];
+      const dispSym = this.displaySymbols[i];
+      if (apiSym === focusJoined) continue;
+      const hist = this.priceHistory[apiSym] ?? [];
+      if (hist.length < 5) continue;
+      const rets = this.toReturns(hist);
+      // Align to the shorter of the two return series.
+      const n = Math.min(focusReturns.length, rets.length);
+      if (n < 5) continue;
+      const a = focusReturns.slice(-n);
+      const b = rets.slice(-n);
+      out.push({ symbol: dispSym, r: this.pearson(a, b) });
+    }
+    return out.sort((x, y) => y.r - x.r);
+  });
+
+  /** Convert a price history array to a percent-return series. */
+  private toReturns(hist: number[]): number[] {
+    const out: number[] = [];
+    for (let i = 1; i < hist.length; i++) {
+      const prev = hist[i - 1];
+      if (prev === 0) continue;
+      out.push((hist[i] - prev) / prev);
+    }
+    return out;
+  }
+
+  /** Pearson correlation coefficient. Both arrays must be the same length. */
+  private pearson(a: number[], b: number[]): number {
+    const n = a.length;
+    if (n === 0) return 0;
+    let sumA = 0,
+      sumB = 0;
+    for (let i = 0; i < n; i++) {
+      sumA += a[i];
+      sumB += b[i];
+    }
+    const meanA = sumA / n;
+    const meanB = sumB / n;
+    let num = 0,
+      denA = 0,
+      denB = 0;
+    for (let i = 0; i < n; i++) {
+      const da = a[i] - meanA;
+      const db = b[i] - meanB;
+      num += da * db;
+      denA += da * da;
+      denB += db * db;
+    }
+    const den = Math.sqrt(denA * denB);
+    return den === 0 ? 0 : num / den;
+  }
+
+  // ── Price action analytics (computed from chart's candle stream) ─────
+  /**
+   * Mirror of the embedded chart's candle series. Captured via the chart's
+   * `candlesChange` output so we can compute RSI / MACD / ATR / pivots
+   * without a second round-trip for the same data.
+   */
+  readonly chartCandles = signal<CandleDto[]>([]);
+
+  /** Exponential moving average for a price series. */
+  private ema(values: number[], period: number): number[] {
+    if (values.length === 0) return [];
+    const k = 2 / (period + 1);
+    const out: number[] = [values[0]];
+    for (let i = 1; i < values.length; i++) {
+      out.push(values[i] * k + out[i - 1] * (1 - k));
+    }
+    return out;
+  }
+
+  /** Wilder-smoothed RSI(period). Returns the latest value, or null if too short. */
+  private rsi(values: number[], period = 14): number | null {
+    if (values.length <= period) return null;
+    let avgGain = 0;
+    let avgLoss = 0;
+    for (let i = 1; i <= period; i++) {
+      const d = values[i] - values[i - 1];
+      if (d >= 0) avgGain += d;
+      else avgLoss -= d;
+    }
+    avgGain /= period;
+    avgLoss /= period;
+    for (let i = period + 1; i < values.length; i++) {
+      const d = values[i] - values[i - 1];
+      const gain = d > 0 ? d : 0;
+      const loss = d < 0 ? -d : 0;
+      avgGain = (avgGain * (period - 1) + gain) / period;
+      avgLoss = (avgLoss * (period - 1) + loss) / period;
+    }
+    if (avgLoss === 0) return 100;
+    const rs = avgGain / avgLoss;
+    return 100 - 100 / (1 + rs);
+  }
+
+  /** Wilder ATR(period) over OHLC candles. Returns the latest value. */
+  private atr(candles: CandleDto[], period = 14): number | null {
+    if (candles.length <= period) return null;
+    const trs: number[] = [];
+    for (let i = 1; i < candles.length; i++) {
+      const c = candles[i];
+      const p = candles[i - 1];
+      trs.push(Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close)));
+    }
+    let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < trs.length; i++) {
+      atr = (atr * (period - 1) + trs[i]) / period;
+    }
+    return atr;
+  }
+
+  /** Latest MACD line + signal + histogram. */
+  private macd(values: number[]): { line: number; signal: number; hist: number } | null {
+    if (values.length < 35) return null;
+    const fast = this.ema(values, 12);
+    const slow = this.ema(values, 26);
+    const macdLine = fast.map((v, i) => v - slow[i]);
+    const signal = this.ema(macdLine.slice(25), 9);
+    const lastLine = macdLine[macdLine.length - 1];
+    const lastSignal = signal[signal.length - 1];
+    return { line: lastLine, signal: lastSignal, hist: lastLine - lastSignal };
+  }
+
+  /** Pip factor for the focused symbol (JPY pairs = 100, others = 10000). */
+  private pipFactor(symbolSlash: string): number {
+    return symbolSlash.toUpperCase().includes('JPY') ? 100 : 10000;
+  }
+
+  /**
+   * Trend stance for the focused symbol — EMA20 vs EMA50, slope, and
+   * % distance of the last close from the 20-EMA. Slope is computed on
+   * the last 5 EMA20 points, normalized to pips per bar.
+   */
+  readonly trendStats = computed<{
+    ema20: number;
+    ema50: number;
+    bias: 'bullish' | 'bearish' | 'flat';
+    distancePct: number;
+    slopePipsPerBar: number;
+  } | null>(() => {
+    const candles = this.chartCandles();
+    if (candles.length < 50) return null;
+    const closes = candles.map((c) => c.close);
+    const ema20Series = this.ema(closes, 20);
+    const ema50Series = this.ema(closes, 50);
+    const ema20 = ema20Series[ema20Series.length - 1];
+    const ema50 = ema50Series[ema50Series.length - 1];
+    const lastClose = closes[closes.length - 1];
+    const distancePct = ((lastClose - ema20) / ema20) * 100;
+    const tail = ema20Series.slice(-5);
+    const slope = tail.length >= 2 ? (tail[tail.length - 1] - tail[0]) / (tail.length - 1) : 0;
+    const slopePipsPerBar = slope * this.pipFactor(this.chartSymbol());
+    let bias: 'bullish' | 'bearish' | 'flat' = 'flat';
+    if (ema20 > ema50 && lastClose > ema20) bias = 'bullish';
+    else if (ema20 < ema50 && lastClose < ema20) bias = 'bearish';
+    return { ema20, ema50, bias, distancePct, slopePipsPerBar };
+  });
+
+  /** Streak of consecutive same-direction closes (positive = bullish). */
+  readonly closeStreak = computed<number>(() => {
+    const candles = this.chartCandles();
+    if (candles.length < 2) return 0;
+    let streak = 0;
+    const dir = candles[candles.length - 1].close >= candles[candles.length - 2].close ? 1 : -1;
+    for (let i = candles.length - 1; i > 0; i--) {
+      const c = candles[i];
+      const p = candles[i - 1];
+      const d = c.close >= p.close ? 1 : -1;
+      if (d !== dir) break;
+      streak++;
+    }
+    return streak * dir;
+  });
+
+  /** Latest RSI/MACD readings + a coarse momentum verdict. */
+  readonly momentumStats = computed<{
+    rsi: number;
+    rsiZone: 'oversold' | 'neutral' | 'overbought';
+    macdLine: number;
+    macdSignal: number;
+    macdHist: number;
+    macdState: 'bullish-cross' | 'bearish-cross' | 'bullish' | 'bearish' | 'flat';
+  } | null>(() => {
+    const candles = this.chartCandles();
+    if (candles.length < 35) return null;
+    const closes = candles.map((c) => c.close);
+    const rsi = this.rsi(closes, 14);
+    const macd = this.macd(closes);
+    if (rsi === null || !macd) return null;
+    const rsiZone = rsi < 30 ? 'oversold' : rsi > 70 ? 'overbought' : 'neutral';
+    let macdState: 'bullish-cross' | 'bearish-cross' | 'bullish' | 'bearish' | 'flat' = 'flat';
+    if (Math.abs(macd.hist) < 1e-9) macdState = 'flat';
+    else if (
+      macd.hist > 0 &&
+      macd.line > macd.signal &&
+      Math.abs(macd.line - macd.signal) < Math.abs(macd.line) * 0.05
+    ) {
+      macdState = 'bullish-cross';
+    } else if (
+      macd.hist < 0 &&
+      macd.line < macd.signal &&
+      Math.abs(macd.line - macd.signal) < Math.abs(macd.line) * 0.05
+    ) {
+      macdState = 'bearish-cross';
+    } else {
+      macdState = macd.hist > 0 ? 'bullish' : 'bearish';
+    }
+    return {
+      rsi,
+      rsiZone,
+      macdLine: macd.line,
+      macdSignal: macd.signal,
+      macdHist: macd.hist,
+      macdState,
+    };
+  });
+
+  /** ATR + ATR percentile vs the last 50 bars + realized-range stats. */
+  readonly volatilityStats = computed<{
+    atrPips: number;
+    atrPercentile: number;
+    rangePipsLastBar: number;
+    rangePipsAvg20: number;
+    expansion: 'expanding' | 'contracting' | 'stable';
+  } | null>(() => {
+    const candles = this.chartCandles();
+    if (candles.length < 30) return null;
+    const pip = this.pipFactor(this.chartSymbol());
+    const atrLatest = this.atr(candles, 14);
+    if (atrLatest === null) return null;
+    // Rolling ATR series for percentile ranking.
+    const atrSeries: number[] = [];
+    for (let end = 15; end <= candles.length; end++) {
+      const sub = candles.slice(0, end);
+      const v = this.atr(sub, 14);
+      if (v !== null) atrSeries.push(v);
+    }
+    const sortedAtr = [...atrSeries].sort((a, b) => a - b);
+    const rank = sortedAtr.findIndex((v) => v >= atrLatest);
+    const atrPercentile = rank < 0 ? 100 : (rank / Math.max(sortedAtr.length - 1, 1)) * 100;
+    const last20 = candles.slice(-20);
+    const rangePipsAvg20 =
+      (last20.reduce((acc, c) => acc + (c.high - c.low), 0) / last20.length) * pip;
+    const lastBar = candles[candles.length - 1];
+    const rangePipsLastBar = (lastBar.high - lastBar.low) * pip;
+    let expansion: 'expanding' | 'contracting' | 'stable' = 'stable';
+    if (rangePipsLastBar > rangePipsAvg20 * 1.3) expansion = 'expanding';
+    else if (rangePipsLastBar < rangePipsAvg20 * 0.7) expansion = 'contracting';
+    return {
+      atrPips: atrLatest * pip,
+      atrPercentile,
+      rangePipsLastBar,
+      rangePipsAvg20,
+      expansion,
+    };
+  });
+
+  /**
+   * Classic floor-trader pivot levels from the *previous* completed candle
+   * plus the current bar's position within today's range and distances to
+   * the rolling 20-bar high / low.
+   */
+  readonly levelStats = computed<{
+    pivot: number;
+    r1: number;
+    s1: number;
+    r2: number;
+    s2: number;
+    nearestLabel: 'R2' | 'R1' | 'P' | 'S1' | 'S2';
+    nearestDistPips: number;
+    rangePosPct: number;
+    distFromHigh20Pips: number;
+    distFromLow20Pips: number;
+  } | null>(() => {
+    const candles = this.chartCandles();
+    if (candles.length < 21) return null;
+    const pip = this.pipFactor(this.chartSymbol());
+    const prev = candles[candles.length - 2];
+    const last = candles[candles.length - 1];
+    const pivot = (prev.high + prev.low + prev.close) / 3;
+    const r1 = 2 * pivot - prev.low;
+    const s1 = 2 * pivot - prev.high;
+    const r2 = pivot + (prev.high - prev.low);
+    const s2 = pivot - (prev.high - prev.low);
+    const distances: { label: 'R2' | 'R1' | 'P' | 'S1' | 'S2'; v: number }[] = [
+      { label: 'R2', v: Math.abs(last.close - r2) },
+      { label: 'R1', v: Math.abs(last.close - r1) },
+      { label: 'P', v: Math.abs(last.close - pivot) },
+      { label: 'S1', v: Math.abs(last.close - s1) },
+      { label: 'S2', v: Math.abs(last.close - s2) },
+    ];
+    distances.sort((a, b) => a.v - b.v);
+    const nearest = distances[0];
+    const todayRange = last.high - last.low;
+    const rangePosPct = todayRange === 0 ? 50 : ((last.close - last.low) / todayRange) * 100;
+    const last20 = candles.slice(-20);
+    const high20 = Math.max(...last20.map((c) => c.high));
+    const low20 = Math.min(...last20.map((c) => c.low));
+    return {
+      pivot,
+      r1,
+      s1,
+      r2,
+      s2,
+      nearestLabel: nearest.label,
+      nearestDistPips: nearest.v * pip,
+      rangePosPct,
+      distFromHigh20Pips: (high20 - last.close) * pip,
+      distFromLow20Pips: (last.close - low20) * pip,
+    };
+  });
+
+  // ── Advanced market analysis (VWAP / VolProfile / Depth / Footprint / Heatmap) ──
+
+  /**
+   * Cumulative session VWAP from the chart's candle stream + 1σ price-distance
+   * bands. VWAP = Σ(typical × vol) / Σ(vol) where typical = (H+L+C)/3. The
+   * band is one weighted standard deviation of typical price away from VWAP.
+   */
+  readonly vwapStats = computed<{
+    vwap: number;
+    upperBand: number;
+    lowerBand: number;
+    distancePips: number;
+    bandwidthPips: number;
+    barsIncluded: number;
+    position: 'above' | 'below' | 'at';
+  } | null>(() => {
+    const candles = this.chartCandles();
+    if (candles.length < 10) return null;
+    const pip = this.pipFactor(this.chartSymbol());
+    let cumPV = 0;
+    let cumV = 0;
+    let cumP2V = 0;
+    let bars = 0;
+    for (const c of candles) {
+      const v = c.volume ?? 0;
+      if (v <= 0) continue;
+      const tp = (c.high + c.low + c.close) / 3;
+      cumPV += tp * v;
+      cumV += v;
+      cumP2V += tp * tp * v;
+      bars++;
+    }
+    if (cumV === 0 || bars < 5) return null;
+    const vwap = cumPV / cumV;
+    const variance = Math.max(0, cumP2V / cumV - vwap * vwap);
+    const sigma = Math.sqrt(variance);
+    const lastClose = candles[candles.length - 1].close;
+    const distancePips = (lastClose - vwap) * pip;
+    const upperBand = vwap + sigma;
+    const lowerBand = vwap - sigma;
+    const position: 'above' | 'below' | 'at' =
+      Math.abs(distancePips) < 0.2 ? 'at' : distancePips > 0 ? 'above' : 'below';
+    return {
+      vwap,
+      upperBand,
+      lowerBand,
+      distancePips,
+      bandwidthPips: (upperBand - lowerBand) * pip,
+      barsIncluded: bars,
+      position,
+    };
+  });
+
+  /**
+   * Volume distributed across price bins from the candle stream — each
+   * candle's volume is spread uniformly over its OHLC range. The bin with
+   * the highest accumulated volume is the Point of Control (POC). Value
+   * Area (VA70) is the contiguous bin span around POC that captures 70%
+   * of total volume.
+   */
+  readonly volumeProfile = computed<{
+    bins: {
+      idx: number;
+      priceMid: number;
+      volume: number;
+      pct: number;
+      isPoc: boolean;
+      inVa: boolean;
+    }[];
+    poc: number;
+    vaLow: number;
+    vaHigh: number;
+  } | null>(() => {
+    const candles = this.chartCandles();
+    if (candles.length < 10) return null;
+    const withVol = candles.filter((c) => (c.volume ?? 0) > 0);
+    if (withVol.length < 5) return null;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const c of withVol) {
+      if (c.low < lo) lo = c.low;
+      if (c.high > hi) hi = c.high;
+    }
+    if (!isFinite(lo) || !isFinite(hi) || hi <= lo) return null;
+    const BIN_COUNT = 24;
+    const step = (hi - lo) / BIN_COUNT;
+    const buckets = new Array<number>(BIN_COUNT).fill(0);
+    for (const c of withVol) {
+      const v = c.volume ?? 0;
+      const startBin = Math.max(0, Math.floor((c.low - lo) / step));
+      const endBin = Math.min(BIN_COUNT - 1, Math.floor((c.high - lo) / step));
+      const span = Math.max(1, endBin - startBin + 1);
+      const per = v / span;
+      for (let i = startBin; i <= endBin; i++) buckets[i] += per;
+    }
+    const totalVol = buckets.reduce((a, b) => a + b, 0);
+    if (totalVol === 0) return null;
+    let pocIdx = 0;
+    for (let i = 1; i < BIN_COUNT; i++) if (buckets[i] > buckets[pocIdx]) pocIdx = i;
+    // VA70: expand symmetrically from POC, picking whichever neighbour is
+    // larger, until cumulative volume crosses 70% of total.
+    let vaLowIdx = pocIdx;
+    let vaHighIdx = pocIdx;
+    let vaVol = buckets[pocIdx];
+    const target = totalVol * 0.7;
+    while (vaVol < target && (vaLowIdx > 0 || vaHighIdx < BIN_COUNT - 1)) {
+      const left = vaLowIdx > 0 ? buckets[vaLowIdx - 1] : -1;
+      const right = vaHighIdx < BIN_COUNT - 1 ? buckets[vaHighIdx + 1] : -1;
+      if (left >= right) {
+        vaLowIdx--;
+        vaVol += left;
+      } else {
+        vaHighIdx++;
+        vaVol += right;
+      }
+    }
+    const maxVol = buckets[pocIdx];
+    // Render top-down so highest prices sit at top of the histogram.
+    const bins = [];
+    for (let i = BIN_COUNT - 1; i >= 0; i--) {
+      const priceMid = lo + step * (i + 0.5);
+      bins.push({
+        idx: i,
+        priceMid,
+        volume: buckets[i],
+        pct: maxVol > 0 ? (buckets[i] / maxVol) * 100 : 0,
+        isPoc: i === pocIdx,
+        inVa: i >= vaLowIdx && i <= vaHighIdx,
+      });
+    }
+    return {
+      bins,
+      poc: lo + step * (pocIdx + 0.5),
+      vaLow: lo + step * vaLowIdx,
+      vaHigh: lo + step * (vaHighIdx + 1),
+    };
+  });
+
+  /**
+   * Bid/ask ladder from the latest order book snapshot. Parses the upper-
+   * case `{P,V}` levels payload, sorts asks ascending and bids descending
+   * around the mid price, and computes a bid-vs-ask volume imbalance.
+   */
+  readonly depthLadder = computed<{
+    bids: { price: number; volume: number; pct: number }[];
+    asks: { price: number; volume: number; pct: number }[];
+    mid: number;
+    spreadPips: number;
+    imbalance: number;
+  } | null>(() => {
+    const ob = this.latestOrderBook();
+    if (!ob) return null;
+    let parsed: OrderBookLevels | null = null;
+    if (ob.levelsJson) {
+      try {
+        parsed = JSON.parse(ob.levelsJson) as OrderBookLevels;
+      } catch {
+        parsed = null;
+      }
+    }
+    let bids: { price: number; volume: number }[] = [];
+    let asks: { price: number; volume: number }[] = [];
+    if (parsed && Array.isArray(parsed.bids) && Array.isArray(parsed.asks)) {
+      bids = parsed.bids.map((l) => ({ price: l.P, volume: l.V }));
+      asks = parsed.asks.map((l) => ({ price: l.P, volume: l.V }));
+    }
+    // Always fall back to TOB so the ladder shows at least the spread when
+    // the broker doesn't expose deeper levels.
+    if (bids.length === 0 && ob.bidPrice > 0) {
+      bids = [{ price: ob.bidPrice, volume: ob.bidVolume || 0 }];
+    }
+    if (asks.length === 0 && ob.askPrice > 0) {
+      asks = [{ price: ob.askPrice, volume: ob.askVolume || 0 }];
+    }
+    if (bids.length === 0 || asks.length === 0) return null;
+    bids.sort((a, b) => b.price - a.price);
+    asks.sort((a, b) => a.price - b.price);
+    const topBids = bids.slice(0, 7);
+    const topAsks = asks.slice(0, 7).reverse(); // farthest ask at top, closest just above mid
+    const maxVol = Math.max(...topBids.map((b) => b.volume), ...topAsks.map((a) => a.volume), 1);
+    const bidsOut = topBids.map((b) => ({
+      ...b,
+      pct: (b.volume / maxVol) * 100,
+    }));
+    const asksOut = topAsks.map((a) => ({
+      ...a,
+      pct: (a.volume / maxVol) * 100,
+    }));
+    const mid = (topBids[0].price + topAsks[topAsks.length - 1].price) / 2;
+    const pip = this.pipFactor(this.chartSymbol());
+    const spreadPips = (topAsks[topAsks.length - 1].price - topBids[0].price) * pip;
+    const totalBidVol = bids.reduce((acc, b) => acc + b.volume, 0);
+    const totalAskVol = asks.reduce((acc, a) => acc + a.volume, 0);
+    const denom = totalBidVol + totalAskVol;
+    const imbalance = denom > 0 ? (totalBidVol - totalAskVol) / denom : 0;
+    return { bids: bidsOut, asks: asksOut, mid, spreadPips, imbalance };
+  });
+
+  /**
+   * Estimated buy/sell volume per bar from OHLCV (no aggressor-tagged tick
+   * stream is captured at this depth, so this is a heuristic — labelled
+   * "estimated" in the UI). Buy ≈ (close − low)/(high − low) × volume.
+   */
+  readonly footprintRows = computed<
+    | {
+        idx: number;
+        label: string;
+        buy: number;
+        sell: number;
+        delta: number;
+        cumDelta: number;
+      }[]
+    | null
+  >(() => {
+    const candles = this.chartCandles();
+    if (candles.length < 5) return null;
+    const tail = candles.slice(-12);
+    const rows: {
+      idx: number;
+      label: string;
+      buy: number;
+      sell: number;
+      delta: number;
+      cumDelta: number;
+    }[] = [];
+    let cum = 0;
+    tail.forEach((c, i) => {
+      const v = c.volume ?? 0;
+      const range = c.high - c.low;
+      let buyShare = 0.5;
+      if (range > 0) buyShare = (c.close - c.low) / range;
+      const buy = v * buyShare;
+      const sell = v * (1 - buyShare);
+      const delta = buy - sell;
+      cum += delta;
+      const ts = new Date(c.timestamp);
+      const label = `${ts.getUTCHours().toString().padStart(2, '0')}:${ts.getUTCMinutes().toString().padStart(2, '0')}`;
+      rows.push({ idx: i, label, buy, sell, delta, cumDelta: cum });
+    });
+    // Newest first.
+    return rows.reverse();
+  });
+
+  /**
+   * 2D liquidity heatmap from the recent order book stream — x = capture
+   * time, y = price bin (relative to current mid), z = total volume at
+   * that level in that snapshot. Renders nothing if the stream is too
+   * short to convey movement.
+   */
+  readonly liquidityHeatmapOptions = computed<EChartsOption | null>(() => {
+    const snaps = this.recentOrderBooks();
+    if (snaps.length < 5) return null;
+    // Snaps come newest-first; flip so x ascends with time.
+    const ordered = [...snaps].reverse();
+    const allLevels: { t: number; price: number; vol: number }[] = [];
+    let priceLo = Infinity;
+    let priceHi = -Infinity;
+    ordered.forEach((s, t) => {
+      let parsed: OrderBookLevels | null = null;
+      if (s.levelsJson) {
+        try {
+          parsed = JSON.parse(s.levelsJson) as OrderBookLevels;
+        } catch {
+          parsed = null;
+        }
+      }
+      const levels: { price: number; volume: number }[] = [];
+      if (parsed && Array.isArray(parsed.bids) && Array.isArray(parsed.asks)) {
+        for (const l of parsed.bids) levels.push({ price: l.P, volume: l.V });
+        for (const l of parsed.asks) levels.push({ price: l.P, volume: l.V });
+      } else {
+        if (s.bidPrice > 0) levels.push({ price: s.bidPrice, volume: s.bidVolume || 0 });
+        if (s.askPrice > 0) levels.push({ price: s.askPrice, volume: s.askVolume || 0 });
+      }
+      for (const lv of levels) {
+        if (lv.price < priceLo) priceLo = lv.price;
+        if (lv.price > priceHi) priceHi = lv.price;
+        allLevels.push({ t, price: lv.price, vol: lv.volume });
+      }
+    });
+    if (!isFinite(priceLo) || !isFinite(priceHi) || priceHi <= priceLo) return null;
+    const PRICE_BINS = 18;
+    const step = (priceHi - priceLo) / PRICE_BINS;
+    const grid: number[][] = [];
+    for (const p of allLevels) {
+      const yBin = Math.min(PRICE_BINS - 1, Math.max(0, Math.floor((p.price - priceLo) / step)));
+      grid.push([p.t, yBin, p.vol]);
+    }
+    const yLabels: string[] = [];
+    const isJpy = this.chartSymbol().toUpperCase().includes('JPY');
+    const digits = isJpy ? 3 : 5;
+    for (let i = 0; i < PRICE_BINS; i++) {
+      yLabels.push((priceLo + step * (i + 0.5)).toFixed(digits));
+    }
+    const xLabels = ordered.map((s) => {
+      const d = new Date(s.capturedAt);
+      return `${d.getUTCHours().toString().padStart(2, '0')}:${d.getUTCMinutes().toString().padStart(2, '0')}:${d.getUTCSeconds().toString().padStart(2, '0')}`;
+    });
+    let maxVol = 0;
+    for (const cell of grid) if (cell[2] > maxVol) maxVol = cell[2];
+    return {
+      tooltip: {
+        position: 'top',
+        formatter: (p: any) => {
+          const x = xLabels[p.value[0]] ?? '';
+          const y = yLabels[p.value[1]] ?? '';
+          return `${x} · ${y}<br/>vol ${this.formatVolume(p.value[2])}`;
+        },
+      },
+      grid: { top: 6, bottom: 28, left: 60, right: 6 },
+      xAxis: {
+        type: 'category',
+        data: xLabels,
+        axisLabel: { fontSize: 9, color: '#888', interval: Math.ceil(xLabels.length / 6) },
+        splitArea: { show: false },
+      },
+      yAxis: {
+        type: 'category',
+        data: yLabels,
+        axisLabel: { fontSize: 9, color: '#888', interval: 2 },
+        splitArea: { show: false },
+      },
+      visualMap: {
+        min: 0,
+        max: maxVol || 1,
+        calculable: false,
+        show: false,
+        inRange: {
+          color: ['#0d1b2a', '#1b4965', '#5fa8d3', '#cae9ff', '#ffd166', '#ef476f'],
+        },
+      },
+      series: [
+        {
+          type: 'heatmap',
+          data: grid,
+          progressive: 1000,
+          emphasis: { itemStyle: { borderColor: '#fff', borderWidth: 1 } },
+        },
+      ],
+    } as EChartsOption;
+  });
 
   tabs = [
     { label: 'Trading Chart', value: 'chart' },
@@ -1946,6 +4003,23 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   // Price history for analytics (stores last 100 ticks per symbol)
   private priceHistory: Record<string, number[]> = {};
   private spreadHistory: Record<string, number[]> = {};
+
+  // Append-only buffer for the Live Prices "Activity feed". Holds the last
+  // 200 direction-change events across all symbols. Without this, the feed
+  // would flicker empty whenever the latest poll happened to have no
+  // movement — every PriceEntry's `direction` resets to 'none' on a poll
+  // where the bid didn't change, so a snapshot-based feed shows nothing
+  // between ticks. The buffer accumulates events so the panel stays
+  // populated through quiet windows.
+  private activityBuffer = signal<
+    {
+      time: Date;
+      symbol: string;
+      direction: 'up' | 'down';
+      price: string;
+      delta: number;
+    }[]
+  >([]);
   // Last spread observed from a real (non-candle) tick per symbol. Used as
   // the fallback for the Avg/Tightest/Widest KPIs and the spread-comparison
   // chart when the live tick feed has gone stale (EA stopped pushing) — gives
@@ -2038,7 +4112,10 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
 
   currencyStrengthOptions = computed<EChartsOption>(() => {
     const data = this.currencyStrength();
-    if (data.every((d) => d.strength === 0)) return {};
+    // Render flat-grey bars even when every strength is 0 (quiet market) so
+    // the panel stays visible. Returning {} here used to make the whole
+    // card disappear intermittently whenever changePct hit 0 across the
+    // board — operators read that as "panel broken", not "no movement".
     return {
       grid: { top: 10, right: 50, bottom: 30, left: 50 },
       xAxis: {
@@ -2078,41 +4155,13 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     };
   });
 
-  // Activity feed: collect direction changes across symbols, latest first.
-  // Re-derived from the current livePrices snapshot since priceHistory is
-  // append-only — we compare the last vs second-to-last entry per symbol to
-  // build a stable, deduped feed.
-  activityFeed = computed<
-    {
-      time: Date;
-      symbol: string;
-      direction: 'up' | 'down' | 'none';
-      price: string;
-      delta: number;
-    }[]
-  >(() => {
-    const events: {
-      time: Date;
-      symbol: string;
-      direction: 'up' | 'down' | 'none';
-      price: string;
-      delta: number;
-    }[] = [];
-    for (const p of this.livePrices()) {
-      if (p.direction === 'none') continue;
-      const isJPY = (p.symbol ?? '').includes('JPY');
-      const pipFactor = isJPY ? 100 : 10000;
-      const deltaPips = p.change * pipFactor;
-      events.push({
-        time: new Date(p.timestamp),
-        symbol: p.symbol ?? '',
-        direction: p.direction,
-        price: this.formatPrice(p.bid, p.symbol),
-        delta: deltaPips,
-      });
-    }
-    return events.sort((a, b) => b.time.getTime() - a.time.getTime()).slice(0, 12);
-  });
+  // Activity feed: latest 12 direction-change events from the rolling
+  // activityBuffer. Reading from the buffer (rather than the current
+  // livePrices snapshot) keeps the panel populated through polls where no
+  // symbol moved — `direction` is only set on the single poll where a bid
+  // actually changed, so a snapshot-based feed flickered empty in quiet
+  // windows.
+  activityFeed = computed(() => this.activityBuffer().slice(0, 12));
 
   rangeInPips(p: PriceEntry): number {
     const isJPY = (p.symbol ?? '').includes('JPY');
@@ -3163,6 +5212,15 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     effect(() => {
       if (this.activeTab() === 'candles') this.loadCandleAnalytics();
     });
+
+    // Refresh Market Insights immediately when the operator switches
+    // symbol/timeframe on the chart — don't make them wait up to 5s for
+    // the timer-based poller to catch up.
+    effect(() => {
+      this.chartSymbol();
+      this.chartTimeframe();
+      this.loadInsights();
+    });
   }
 
   ngOnInit() {
@@ -3177,6 +5235,15 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     timer(0, 30_000)
       .pipe(takeUntil(this.destroy$))
       .subscribe(() => this.nowMs.set(Date.now()));
+
+    // Market Insights cadence: 5s. Pulls the latest regime snapshot and the
+    // most recent trade signal (which carries ML scoring fields) for the
+    // chart-focused (symbol, timeframe). Slower than tick polling because
+    // regime/predictions don't move per-tick; faster than minute-cadence
+    // so the panel feels live.
+    timer(0, 5000)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(() => this.loadInsights());
   }
 
   ngOnDestroy() {
@@ -3288,6 +5355,127 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
           .filter(Boolean) as PriceEntry[];
 
         this.livePrices.set(newPrices);
+
+        // Capture direction-change events into the rolling activity buffer
+        // (separate from livePrices so the feed survives quiet polls).
+        const newEvents: {
+          time: Date;
+          symbol: string;
+          direction: 'up' | 'down';
+          price: string;
+          delta: number;
+        }[] = [];
+        for (const p of newPrices) {
+          if (p.direction !== 'up' && p.direction !== 'down') continue;
+          const isJPY = (p.symbol ?? '').includes('JPY');
+          const pipFactor = isJPY ? 100 : 10000;
+          newEvents.push({
+            time: new Date(p.timestamp),
+            symbol: p.symbol ?? '',
+            direction: p.direction,
+            price: this.formatPrice(p.bid, p.symbol),
+            delta: p.change * pipFactor,
+          });
+        }
+        if (newEvents.length > 0) {
+          newEvents.sort((a, b) => b.time.getTime() - a.time.getTime());
+          this.activityBuffer.update((buf) => [...newEvents, ...buf].slice(0, 200));
+        }
+      });
+  }
+
+  /**
+   * Pull the latest regime snapshot + most-recent trade signal for the
+   * chart-focused (symbol, timeframe). Called on a 5s timer and immediately
+   * when the operator switches symbols/timeframes on the chart.
+   *
+   * Engine notes:
+   *  - Regime: `GET /market-regime/latest?symbol=&timeframe=` returns a
+   *    `MarketRegimeSnapshotDto` (regime label + ADX/ATR/BBW + confidence).
+   *  - Predictions: there's no `/ml-prediction-log/latest` yet, so we
+   *    paginate trade signals filtered by Search=symbol and read the most
+   *    recent row's ML scoring fields. Signals are persisted in
+   *    `GeneratedAt DESC` order, so page 1 row 0 is the most recent.
+   */
+  private loadInsights(): void {
+    const symSlash = this.chartSymbol();
+    if (!symSlash) return;
+    const symJoined = symSlash.replace(/\//g, '');
+    const tf = this.chartTimeframe();
+
+    this.regimeLoading.set(true);
+    this.regimeService
+      .getLatest(symJoined, tf)
+      .pipe(
+        catchError(() => of(null)),
+        takeUntil(this.destroy$),
+      )
+      .subscribe((res) => {
+        this.regimeLoading.set(false);
+        this.regimeSnapshot.set(res?.data ?? null);
+      });
+
+    this.predictionLoading.set(true);
+    this.tradeSignalsService
+      .list({
+        currentPage: 1,
+        itemCountPerPage: 1,
+        filter: { search: symJoined },
+      })
+      .pipe(
+        catchError(() => of(null)),
+        takeUntil(this.destroy$),
+      )
+      .subscribe((res) => {
+        this.predictionLoading.set(false);
+        const rows = res?.data?.data ?? [];
+        this.latestPredictionSignal.set(rows.length > 0 ? rows[0] : null);
+      });
+
+    // Open positions for the chart overlay. Filter server-side by
+    // (symbol, Status=Open). Page size 50 is well above any realistic
+    // concurrent-position count for one pair — the engine's GetPaged
+    // handler maxes out at one open position per (StrategyId, Symbol)
+    // for risk-checked flows, so 50 is a generous upper bound.
+    this.positionsLoading.set(true);
+    this.positionsService
+      .list({
+        currentPage: 1,
+        itemCountPerPage: 50,
+        filter: { symbol: symJoined, status: 'Open' },
+      })
+      .pipe(
+        catchError(() => of(null)),
+        takeUntil(this.destroy$),
+      )
+      .subscribe((res) => {
+        this.positionsLoading.set(false);
+        const rows = res?.data?.data ?? [];
+        this.chartOpenPositions.set(rows);
+      });
+
+    // Depth-of-book + recent snapshots for the advanced analysis cards.
+    // -14 means the EA hasn't streamed a MarketBook frame for this pair
+    // yet (or the broker doesn't expose one); we just keep the existing
+    // value so the card stays empty rather than flickering.
+    this.marketDataService
+      .getLatestOrderBook(symJoined)
+      .pipe(
+        catchError(() => of(null)),
+        takeUntil(this.destroy$),
+      )
+      .subscribe((res) => {
+        this.latestOrderBook.set(res?.data ?? null);
+      });
+
+    this.marketDataService
+      .getRecentOrderBooks(symJoined, 120)
+      .pipe(
+        catchError(() => of(null)),
+        takeUntil(this.destroy$),
+      )
+      .subscribe((res) => {
+        this.recentOrderBooks.set(res?.data ?? []);
       });
   }
 

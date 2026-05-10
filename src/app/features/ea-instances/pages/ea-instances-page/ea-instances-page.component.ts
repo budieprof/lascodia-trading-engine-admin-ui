@@ -164,7 +164,7 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
                 <dl class="info">
                   <div>
                     <dt>Account</dt>
-                    <dd class="mono">{{ i.accountId ?? '—' }}</dd>
+                    <dd class="mono">{{ i.tradingAccountId }}</dd>
                   </div>
                   <div>
                     <dt>Heartbeat</dt>
@@ -173,7 +173,7 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
                       [class.bad]="heartbeatTier(i) === 'dead'"
                       [class.warn]="heartbeatTier(i) === 'stale'"
                       [class.good]="heartbeatTier(i) === 'fresh'"
-                      [title]="i.lastHeartbeatAt ?? ''"
+                      [title]="i.lastHeartbeat ?? ''"
                     >
                       {{ heartbeatLabel(i) }}
                     </dd>
@@ -188,11 +188,11 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
                     </dd>
                   </div>
                   <div class="full">
-                    <dt>Owned symbols ({{ i.ownedSymbols?.length ?? 0 }})</dt>
+                    <dt>Owned symbols ({{ symbolsOf(i).length }})</dt>
                     <dd>
-                      @if ((i.ownedSymbols?.length ?? 0) > 0) {
+                      @if (symbolsOf(i).length > 0) {
                         <div class="chips">
-                          @for (s of i.ownedSymbols ?? []; track s) {
+                          @for (s of symbolsOf(i); track s) {
                             <span
                               class="chip"
                               [class.chip-active]="activeSymbolSet().has(s)"
@@ -236,8 +236,8 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
                       <span class="pill" [attr.data-status]="i.status">{{ i.status }}</span>
                     </td>
                     <td class="mono name" [title]="i.instanceId">{{ i.instanceId }}</td>
-                    <td class="mono">{{ i.accountId ?? '—' }}</td>
-                    <td class="num mono">{{ i.ownedSymbols?.length ?? 0 }}</td>
+                    <td class="mono">{{ i.tradingAccountId }}</td>
+                    <td class="num mono">{{ symbolsOf(i).length }}</td>
                     <td
                       class="mono"
                       [class.bad]="heartbeatTier(i) === 'dead'"
@@ -248,9 +248,9 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
                     </td>
                     <td class="mono muted">{{ uptimeLabel(i) }}</td>
                     <td class="symbols-cell">
-                      @if ((i.ownedSymbols?.length ?? 0) > 0) {
+                      @if (symbolsOf(i).length > 0) {
                         <span class="symbols-inline">
-                          {{ (i.ownedSymbols ?? []).join(', ') }}
+                          {{ symbolsOf(i).join(', ') }}
                         </span>
                       } @else {
                         <span class="muted">—</span>
@@ -782,6 +782,15 @@ export class EAInstancesPageComponent {
   readonly viewMode = signal<ViewMode>('cards');
   readonly coverageFilter = signal<CoverageFilter>('uncovered');
 
+  /** Split the engine's CSV `symbols` field into a clean array. */
+  protected symbolsOf(ea: EAInstanceDto): string[] {
+    if (!ea?.symbols) return [];
+    return ea.symbols
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+
   readonly filtered = computed(() => {
     const q = this.search().toLowerCase().trim();
     const st = this.statusFilter();
@@ -789,8 +798,8 @@ export class EAInstancesPageComponent {
       if (st !== 'all' && i.status !== st) return false;
       if (!q) return true;
       if (i.instanceId.toLowerCase().includes(q)) return true;
-      if (i.accountId != null && String(i.accountId).includes(q)) return true;
-      if (i.ownedSymbols?.some((s) => s.toLowerCase().includes(q))) return true;
+      if (String(i.tradingAccountId).includes(q)) return true;
+      if (this.symbolsOf(i).some((s) => s.toLowerCase().includes(q))) return true;
       return false;
     });
   });
@@ -798,28 +807,28 @@ export class EAInstancesPageComponent {
   readonly activeCount = computed(
     () => this.instances().filter((i) => i.status === 'Active').length,
   );
-  readonly idleCount = computed(() => this.instances().filter((i) => i.status === 'Idle').length);
+  readonly idleCount = computed(
+    () => this.instances().filter((i) => i.status === 'ShuttingDown').length,
+  );
   readonly disconnectedCount = computed(
     () => this.instances().filter((i) => i.status === 'Disconnected').length,
   );
 
   readonly totalOwnedSymbols = computed(() =>
-    this.instances().reduce((s, i) => s + (i.ownedSymbols?.length ?? 0), 0),
+    this.instances().reduce((s, i) => s + this.symbolsOf(i).length, 0),
   );
 
   readonly uniqueOwnedSymbols = computed(() => {
     const set = new Set<string>();
     for (const i of this.instances()) {
-      for (const s of i.ownedSymbols ?? []) set.add(s);
+      for (const s of this.symbolsOf(i)) set.add(s);
     }
     return set;
   });
 
   readonly uniqueAccounts = computed(() => {
     const set = new Set<number>();
-    for (const i of this.instances()) {
-      if (i.accountId != null) set.add(i.accountId);
-    }
+    for (const i of this.instances()) set.add(i.tradingAccountId);
     return set;
   });
 
@@ -858,7 +867,7 @@ export class EAInstancesPageComponent {
   private readonly symbolOwnerMap = computed(() => {
     const map = new Map<string, EAInstanceDto>();
     for (const i of this.instances()) {
-      for (const s of i.ownedSymbols ?? []) {
+      for (const s of this.symbolsOf(i)) {
         if (!map.has(s)) map.set(s, i);
       }
     }
@@ -910,7 +919,7 @@ export class EAInstancesPageComponent {
           label: { show: false },
           data: [
             { value: this.activeCount(), name: 'Active', itemStyle: { color: '#34C759' } },
-            { value: this.idleCount(), name: 'Idle', itemStyle: { color: '#FF9500' } },
+            { value: this.idleCount(), name: 'Shutting down', itemStyle: { color: '#FF9500' } },
             {
               value: this.disconnectedCount(),
               name: 'Disconnected',
@@ -926,7 +935,7 @@ export class EAInstancesPageComponent {
     const rows = [...this.instances()]
       .map((i) => ({
         name: this.shortenInstanceId(i.instanceId),
-        value: i.ownedSymbols?.length ?? 0,
+        value: this.symbolsOf(i).length,
       }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 12);
@@ -971,8 +980,8 @@ export class EAInstancesPageComponent {
   }
 
   heartbeatLabel(instance: EAInstanceDto): string {
-    if (!instance.lastHeartbeatAt) return '—';
-    const elapsed = Date.now() - new Date(instance.lastHeartbeatAt).getTime();
+    if (!instance.lastHeartbeat) return '—';
+    const elapsed = Date.now() - new Date(instance.lastHeartbeat).getTime();
     if (elapsed < 60_000) return `${Math.round(elapsed / 1000)}s ago`;
     if (elapsed < 3_600_000) return `${Math.round(elapsed / 60_000)}m ago`;
     return `${Math.round(elapsed / 3_600_000)}h ago`;
@@ -981,8 +990,8 @@ export class EAInstancesPageComponent {
   // Heartbeat tier mirrors the engine's 60s DATA_UNAVAILABLE threshold — past
   // that, the EA's symbols are about to be released.
   heartbeatTier(instance: EAInstanceDto): 'fresh' | 'stale' | 'dead' | 'unknown' {
-    if (!instance.lastHeartbeatAt) return 'unknown';
-    const elapsed = Date.now() - new Date(instance.lastHeartbeatAt).getTime();
+    if (!instance.lastHeartbeat) return 'unknown';
+    const elapsed = Date.now() - new Date(instance.lastHeartbeat).getTime();
     if (elapsed < 30_000) return 'fresh';
     if (elapsed < 60_000) return 'stale';
     return 'dead';

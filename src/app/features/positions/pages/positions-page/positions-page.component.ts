@@ -1,6 +1,7 @@
 import {
   Component,
   ChangeDetectionStrategy,
+  DestroyRef,
   inject,
   signal,
   computed,
@@ -10,12 +11,13 @@ import {
   effect,
 } from '@angular/core';
 import { Router } from '@angular/router';
-import { map, merge, Observable, throttleTime } from 'rxjs';
+import { catchError, map, merge, Observable, of, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
 
 import { PositionsService } from '@core/services/positions.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
+import { NotificationService } from '@core/notifications/notification.service';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { PositionDto, PagedData, PagerRequest } from '@core/api/api.types';
 
@@ -981,9 +983,63 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   private readonly positionsService = inject(PositionsService);
   private readonly router = inject(Router);
   private readonly realtime = inject(RealtimeService);
+  private readonly notifications = inject(NotificationService);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly currencyPipe = new CurrencyFormatPipe();
   private readonly relativeTimePipe = new RelativeTimePipe();
   private pollingInterval: ReturnType<typeof setInterval> | null = null;
+
+  /** Position id currently being closed, so we can disable the row's button mid-flight. */
+  readonly closingId = signal<number | null>(null);
+
+  /**
+   * Send a manual close request to the engine for the given position.
+   * Engine updates the position record AND queues an EA command for MT5
+   * to flatten the trade. We use the engine-tracked `currentPrice` as the
+   * close price — it's the most recent broker-side bid/ask the engine
+   * has on file. Falls back to `averageEntryPrice` only if currentPrice
+   * is missing (which would indicate a stale position record).
+   */
+  requestClose(p: PositionDto): void {
+    if (!p?.id || p.status !== 'Open') return;
+    if (this.closingId() !== null) return; // a close is already in flight
+    const closePrice = p.currentPrice ?? p.averageEntryPrice;
+    if (!Number.isFinite(closePrice) || closePrice <= 0) {
+      this.notifications.error('No current price available for this position.');
+      return;
+    }
+    const dirLabel = p.direction === 'Long' ? 'Long' : 'Short';
+    const ok = window.confirm(
+      `Close ${dirLabel} ${p.openLots} ${p.symbol ?? ''} @ ${Number(closePrice).toFixed(5)} ` +
+        `(unrealized ${p.unrealizedPnL >= 0 ? '+' : ''}${Number(p.unrealizedPnL).toFixed(2)})?\n\n` +
+        `The engine will queue an EA command to flatten this trade on MT5.`,
+    );
+    if (!ok) return;
+
+    this.closingId.set(p.id);
+    this.positionsService
+      .close(p.id, closePrice)
+      .pipe(
+        catchError((err) => {
+          const msg = (err?.error?.message as string | undefined) ?? err?.message ?? String(err);
+          this.notifications.error(`Close failed: ${msg}`);
+          this.closingId.set(null);
+          return of(null);
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((res) => {
+        this.closingId.set(null);
+        if (res?.status) {
+          this.notifications.success(`Close requested for #${p.id}. EA command queued for MT5.`);
+          // Trigger an immediate refresh; the realtime channel will also push
+          // when the EA acknowledges and the engine closes the position.
+          this.openTable?.loadData();
+        } else if (res) {
+          this.notifications.error(res.message ?? 'Close refused.');
+        }
+      });
+  }
 
   constructor() {
     // Refresh positions whenever the engine pushes open/close events so the
@@ -1202,6 +1258,29 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       width: 95,
       cellRenderer: StatusPillCellComponent,
       cellRendererParams: { label: 'Position status' },
+    },
+    {
+      headerName: 'Actions',
+      colId: 'actions',
+      width: 110,
+      sortable: false,
+      cellRenderer: (params: any) => {
+        const pos = params.data as PositionDto | undefined;
+        if (!pos || pos.status !== 'Open') return '';
+        const isClosing = this.closingId() === pos.id;
+        const disabled = isClosing || this.closingId() !== null;
+        const bg = disabled ? 'rgba(142,142,147,0.18)' : 'rgba(255,59,48,0.14)';
+        const color = disabled ? '#8E8E93' : '#D70015';
+        const label = isClosing ? 'Closing…' : 'Close';
+        return `<button data-action="close" ${disabled ? 'disabled' : ''} style="height:24px;padding:0 12px;border:none;border-radius:999px;font-size:11px;font-weight:600;cursor:${disabled ? 'not-allowed' : 'pointer'};background:${bg};color:${color}">${label}</button>`;
+      },
+      onCellClicked: (p: any) => {
+        const target = p.event?.target as HTMLElement | undefined;
+        const action = target?.getAttribute('data-action');
+        if (action === 'close' && p.data) {
+          this.requestClose(p.data as PositionDto);
+        }
+      },
     },
   ];
 

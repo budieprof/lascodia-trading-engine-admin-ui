@@ -18,8 +18,15 @@ import { catchError, of } from 'rxjs';
 
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import { StrategiesService } from '@core/services/strategies.service';
+import { MarketDataService } from '@core/services/market-data.service';
+import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { NotificationService } from '@core/notifications/notification.service';
-import type { CreateTradeSignalRequest, StrategyDto } from '@core/api/api.types';
+import type {
+  CreateTradeSignalRequest,
+  CurrencyPairDto,
+  LivePriceDto,
+  StrategyDto,
+} from '@core/api/api.types';
 
 /**
  * Operator-facing form to hand-author a trade signal. Mirrors the subset of
@@ -62,24 +69,54 @@ import type { CreateTradeSignalRequest, StrategyDto } from '@core/api/api.types'
         <div class="dialog-body">
           <!-- Section 1: which strategy + which instrument ─────────────── -->
           <section class="form-section">
-            <h4 class="section-title">Source</h4>
-            <div class="row">
-              <label class="field span-2">
-                <span class="label">Strategy</span>
-                <select [(ngModel)]="strategyId" name="strategyId" required>
-                  <option [ngValue]="null" disabled>— pick a strategy —</option>
-                  @for (s of activeStrategies(); track s.id) {
-                    <option [ngValue]="s.id">
-                      #{{ s.id }} · {{ s.symbol }} {{ s.timeframe }} · {{ s.name }}
-                    </option>
-                  }
-                </select>
-                @if (strategiesLoading()) {
-                  <small class="muted">loading strategies…</small>
-                } @else if (activeStrategies().length === 0) {
-                  <small class="muted">No strategies available — create one first.</small>
-                }
+            <div class="section-head">
+              <h4 class="section-title">Source</h4>
+              <label class="auto-toggle">
+                <input
+                  type="checkbox"
+                  [checked]="useAutoStrategy()"
+                  (change)="onToggleAutoStrategy($event)"
+                />
+                <span>Auto-pick strategy</span>
               </label>
+            </div>
+            <div class="row">
+              @if (useAutoStrategy()) {
+                <div class="field span-2 auto-pick">
+                  <span class="label">Strategy</span>
+                  @if (autoPickedStrategy(); as s) {
+                    <div class="auto-pick-result">
+                      <strong>#{{ s.id }}</strong> · {{ s.symbol }} {{ s.timeframe }} ·
+                      {{ s.name }}
+                      <span class="hint">{{ autoPickHint() }}</span>
+                    </div>
+                  } @else {
+                    <div class="auto-pick-result empty">
+                      <em
+                        >No active strategy matches the symbol — uncheck "Auto-pick" to choose
+                        manually.</em
+                      >
+                    </div>
+                  }
+                </div>
+              } @else {
+                <label class="field span-2">
+                  <span class="label">Strategy</span>
+                  <select [(ngModel)]="strategyId" name="strategyId" required>
+                    <option [ngValue]="null" disabled>— pick a strategy —</option>
+                    @for (s of activeStrategies(); track s.id) {
+                      <option [ngValue]="s.id">
+                        #{{ s.id }} · {{ s.symbol }} {{ s.timeframe }} · {{ s.name }}
+                      </option>
+                    }
+                  </select>
+                  @if (strategiesLoading()) {
+                    <small class="muted">loading strategies…</small>
+                  } @else if (activeStrategies().length === 0) {
+                    <small class="muted">No strategies available — create one first.</small>
+                  }
+                </label>
+              }
 
               <label class="field">
                 <span class="label">Symbol</span>
@@ -89,8 +126,15 @@ import type { CreateTradeSignalRequest, StrategyDto } from '@core/api/api.types'
                   name="symbol"
                   placeholder="EURUSD"
                   maxlength="10"
+                  list="signal-symbol-options"
+                  autocomplete="off"
                   required
                 />
+                <datalist id="signal-symbol-options">
+                  @for (p of symbolOptions(); track p) {
+                    <option [value]="p"></option>
+                  }
+                </datalist>
               </label>
             </div>
           </section>
@@ -154,10 +198,31 @@ import type { CreateTradeSignalRequest, StrategyDto } from '@core/api/api.types'
 
           <!-- Section 3: price levels (entry + SL + TP) ──────────────────── -->
           <section class="form-section">
-            <h4 class="section-title">Price levels</h4>
+            <div class="section-head">
+              <h4 class="section-title">Price levels</h4>
+              @if (livePrice(); as p) {
+                <span class="live-price-tag"> live · bid {{ p.bid }} · ask {{ p.ask }} </span>
+              } @else if (priceFallback(); as f) {
+                <span
+                  class="live-price-tag"
+                  title="No live tick stream — using last closed H1 candle close."
+                >
+                  fallback · last H1 close {{ f }}
+                </span>
+              } @else if (priceLoading()) {
+                <span class="live-price-tag muted">fetching price…</span>
+              } @else if (symbol().trim().length >= 6) {
+                <span class="live-price-tag muted">no price data — enter manually</span>
+              }
+            </div>
             <div class="row">
               <label class="field">
-                <span class="label">Entry price</span>
+                <span class="label">
+                  Entry price
+                  @if (!entryDirty() && entryPrice() !== null) {
+                    <span class="hint">auto · {{ entrySource() }}</span>
+                  }
+                </span>
                 <input
                   type="number"
                   [(ngModel)]="entryPrice"
@@ -165,28 +230,50 @@ import type { CreateTradeSignalRequest, StrategyDto } from '@core/api/api.types'
                   step="0.00001"
                   min="0"
                   required
+                  (input)="entryDirty.set(true)"
                 />
               </label>
               <label class="field">
-                <span class="label">Stop loss <span class="hint">opt.</span></span>
+                <span class="label">
+                  Stop loss
+                  @if (!slDirty() && stopLoss() !== null) {
+                    <span class="hint">auto · {{ pipsHint() }}p</span>
+                  } @else {
+                    <span class="hint">opt.</span>
+                  }
+                </span>
                 <input
                   type="number"
                   [(ngModel)]="stopLoss"
                   name="stopLoss"
                   step="0.00001"
                   min="0"
+                  (input)="slDirty.set(true)"
                 />
               </label>
               <label class="field">
-                <span class="label">Take profit <span class="hint">opt.</span></span>
+                <span class="label">
+                  Take profit
+                  @if (!tpDirty() && takeProfit() !== null) {
+                    <span class="hint">auto · {{ pipsHint() * 2 }}p</span>
+                  } @else {
+                    <span class="hint">opt.</span>
+                  }
+                </span>
                 <input
                   type="number"
                   [(ngModel)]="takeProfit"
                   name="takeProfit"
                   step="0.00001"
                   min="0"
+                  (input)="tpDirty.set(true)"
                 />
               </label>
+            </div>
+            <div class="auto-actions">
+              <button type="button" class="btn-link" (click)="resetAutoCalc()">
+                ↻ Reset to auto
+              </button>
             </div>
             @if (sanityWarning(); as msg) {
               <div class="warn-banner">⚠ {{ msg }}</div>
@@ -308,6 +395,63 @@ import type { CreateTradeSignalRequest, StrategyDto } from '@core/api/api.types'
         color: var(--text-secondary);
         text-transform: uppercase;
         letter-spacing: 0.06em;
+      }
+      .section-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: var(--space-3);
+      }
+      .auto-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: var(--text-xs, 0.78rem);
+        color: var(--text-secondary);
+        cursor: pointer;
+        user-select: none;
+      }
+      .auto-pick-result {
+        padding: 8px 10px;
+        background: var(--bg-tertiary);
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-sm);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 6px;
+      }
+      .auto-pick-result.empty {
+        color: var(--text-secondary);
+      }
+      .auto-pick-result strong {
+        font-weight: var(--font-semibold, 600);
+      }
+      .live-price-tag {
+        font-family: var(--font-mono, ui-monospace, Menlo, monospace);
+        font-size: var(--text-xs, 0.72rem);
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      .auto-actions {
+        margin-top: 4px;
+        display: flex;
+        justify-content: flex-end;
+      }
+      .btn-link {
+        background: transparent;
+        border: none;
+        color: var(--accent, #0071e3);
+        font-size: var(--text-xs, 0.78rem);
+        cursor: pointer;
+        padding: 0;
+      }
+      .btn-link:hover {
+        text-decoration: underline;
       }
       .row {
         display: grid;
@@ -442,6 +586,8 @@ import type { CreateTradeSignalRequest, StrategyDto } from '@core/api/api.types'
 export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
   private readonly tradeSignals = inject(TradeSignalsService);
   private readonly strategies = inject(StrategiesService);
+  private readonly marketData = inject(MarketDataService);
+  private readonly currencyPairsService = inject(CurrencyPairsService);
   private readonly notifications = inject(NotificationService);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -457,7 +603,7 @@ export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
   readonly closed = output<void>();
   readonly created = output<number>();
 
-  // Form state.
+  // ── Form state ────────────────────────────────────────────────────────
   readonly strategyId = signal<number | null>(null);
   readonly symbol = signal<string>('');
   readonly direction = signal<'Buy' | 'Sell'>('Buy');
@@ -468,17 +614,104 @@ export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
   readonly confidence = signal<number>(0.6);
   readonly expiresAtLocal = signal<string>(this.defaultExpiryLocalIso());
 
+  // ── User-mutated flags ───────────────────────────────────────────────
+  // Set when the user types into the field — guards the auto-calc effects
+  // so they don't clobber a value the operator has explicitly entered.
+  readonly entryDirty = signal(false);
+  readonly slDirty = signal(false);
+  readonly tpDirty = signal(false);
+
+  // ── Auto-pick strategy mode ──────────────────────────────────────────
+  readonly useAutoStrategy = signal(true);
+
+  // ── Live-price state ─────────────────────────────────────────────────
+  readonly livePrice = signal<LivePriceDto | null>(null);
+  readonly livePriceLoading = signal(false);
+
+  // Last closed H1 candle close — used as a fallback when no EA is streaming
+  // ticks (markets closed / dev). Populated only when livePrice is null.
+  readonly fallbackCandleClose = signal<number | null>(null);
+  readonly fallbackLoading = signal(false);
+
+  /** Convenience: did either source produce a usable price? */
+  readonly priceLoading = computed(() => this.livePriceLoading() || this.fallbackLoading());
+  readonly priceFallback = computed(() => (this.livePrice() ? null : this.fallbackCandleClose()));
+
+  /** Human label for what the entry-price auto-default came from. */
+  readonly entrySource = computed(() => (this.livePrice() ? 'live mid' : 'last H1 close'));
+
+  // ── Async loading state ──────────────────────────────────────────────
   readonly submitting = signal(false);
   readonly strategiesLoading = signal(true);
   readonly strategies_ = signal<StrategyDto[]>([]);
+  readonly currencyPairs = signal<CurrencyPairDto[]>([]);
+
+  /** Active currency-pair symbols feeding the symbol input's datalist. */
+  readonly symbolOptions = computed<string[]>(() => {
+    const fromPairs = this.currencyPairs()
+      .filter((p) => p.isActive && !!p.symbol)
+      .map((p) => (p.symbol as string).toUpperCase());
+    if (fromPairs.length > 0) return fromPairs;
+    // Fallback: derive symbols from active strategies if currency-pair list
+    // didn't load (e.g. legacy backend without /currency-pair endpoint).
+    return Array.from(
+      new Set(
+        this.activeStrategies()
+          .map((s) => (s.symbol ?? '').toUpperCase())
+          .filter((s) => s.length > 0),
+      ),
+    );
+  });
 
   readonly activeStrategies = computed(() => this.strategies_());
 
+  /**
+   * Auto-picked strategy when `useAutoStrategy` is true. Picks the first
+   * active strategy whose Symbol matches the entered symbol; falls back to
+   * the first active strategy overall when the symbol matches nothing.
+   * Returns null only when there are zero strategies in the system.
+   */
+  readonly autoPickedStrategy = computed<StrategyDto | null>(() => {
+    const list = this.activeStrategies();
+    if (list.length === 0) return null;
+    const sym = this.symbol().trim().toUpperCase();
+    if (sym) {
+      const symMatch = list.find((s) => (s.symbol ?? '').toUpperCase() === sym);
+      if (symMatch) return symMatch;
+    }
+    return list[0];
+  });
+
+  /** Strategy that actually gets sent on submit — auto-pick or operator-pick. */
+  readonly effectiveStrategyId = computed<number | null>(() => {
+    return this.useAutoStrategy() ? (this.autoPickedStrategy()?.id ?? null) : this.strategyId();
+  });
+
+  /** Honest hint copy — distinguishes a real symbol match from the list[0] fallback. */
+  readonly autoPickHint = computed(() => {
+    const s = this.autoPickedStrategy();
+    if (!s) return '';
+    const sym = this.symbol().trim().toUpperCase();
+    const matchesSymbol = sym && (s.symbol ?? '').toUpperCase() === sym;
+    return matchesSymbol
+      ? 'auto-picked from active strategies on this symbol'
+      : 'no symbol match yet — showing the first active strategy';
+  });
+
   readonly resolvedStrategy = computed(() => {
-    const id = this.strategyId();
+    const id = this.useAutoStrategy() ? (this.autoPickedStrategy()?.id ?? null) : this.strategyId();
     if (id === null) return null;
     return this.activeStrategies().find((s) => s.id === id) ?? null;
   });
+
+  // ── SL/TP auto-calc helpers ──────────────────────────────────────────
+  /** Pip size for the current symbol — JPY pairs are 0.01, others 0.0001. */
+  private pipSize(): number {
+    return this.symbol().toUpperCase().includes('JPY') ? 0.01 : 0.0001;
+  }
+
+  /** SL distance in pips for the auto-default. 1:2 R:R with TP. */
+  readonly pipsHint = computed(() => 30);
 
   readonly defaultExpiryHint = computed(() => {
     const local = this.expiresAtLocal();
@@ -489,7 +722,7 @@ export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
 
   readonly canSubmit = computed(() => {
     return (
-      this.strategyId() !== null &&
+      this.effectiveStrategyId() !== null &&
       !!this.symbol().trim() &&
       this.entryPrice() !== null &&
       (this.entryPrice() ?? 0) > 0 &&
@@ -544,6 +777,100 @@ export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
         this.symbol.set(s.symbol);
       }
     });
+
+    // ── Load currency pairs once for the symbol datalist ─────────────────
+    this.currencyPairsService
+      .list({ currentPage: 1, itemCountPerPage: 500 })
+      .pipe(
+        catchError(() => of(null)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((res) => {
+        if (res?.data?.data) this.currencyPairs.set(res.data.data);
+      });
+
+    // ── Live-price fetch on symbol change, with candle fallback ─────────
+    // Symbol must be at least 6 chars (e.g. EURUSD) before we hit the API.
+    // If the live-price cache has nothing for the symbol (status -14, no EA
+    // streaming) we fall back to the last closed H1 candle's close so the
+    // entry/SL/TP auto-fill still works during dev / market closures.
+    effect(() => {
+      const sym = this.symbol().trim().toUpperCase();
+      if (sym.length < 6) {
+        this.livePrice.set(null);
+        this.fallbackCandleClose.set(null);
+        return;
+      }
+      this.livePrice.set(null);
+      this.fallbackCandleClose.set(null);
+      this.livePriceLoading.set(true);
+      this.marketData
+        .getLivePrice(sym)
+        .pipe(
+          catchError(() => of(null)),
+          takeUntilDestroyed(this.destroyRef),
+        )
+        .subscribe((res) => {
+          this.livePriceLoading.set(false);
+          if (res?.data) {
+            this.livePrice.set(res.data);
+            return;
+          }
+          // No live tick — try last closed H1 candle close.
+          this.fallbackLoading.set(true);
+          this.marketData
+            .getLatestCandle(sym, 'H1')
+            .pipe(
+              catchError(() => of(null)),
+              takeUntilDestroyed(this.destroyRef),
+            )
+            .subscribe((cres) => {
+              this.fallbackLoading.set(false);
+              if (cres?.data?.close != null) {
+                this.fallbackCandleClose.set(Number(cres.data.close));
+              }
+            });
+        });
+    });
+
+    // ── Default entry price from whichever source has data ──────────────
+    // Prefers live mid; falls back to last H1 candle close. Skipped once
+    // the operator types into the entry field (entryDirty).
+    effect(() => {
+      if (this.entryDirty()) return;
+      const lp = this.livePrice();
+      if (lp) {
+        const mid = (lp.bid + lp.ask) / 2;
+        this.entryPrice.set(Math.round(mid * 1e5) / 1e5);
+        return;
+      }
+      const fb = this.fallbackCandleClose();
+      if (fb != null) {
+        this.entryPrice.set(Math.round(fb * 1e5) / 1e5);
+      }
+    });
+
+    // ── Auto-calc SL/TP relative to entry + direction ────────────────────
+    // 30 pips SL, 60 pips TP (1:2 R:R). Re-runs when entry, direction, or
+    // symbol (pip size) changes; skipped per-field once the operator types.
+    effect(() => {
+      const e = this.entryPrice();
+      const dir = this.direction();
+      // Re-read symbol so pip size recomputes when it flips JPY/non-JPY.
+      const _sym = this.symbol();
+      void _sym;
+      if (e === null || e <= 0) return;
+      const pip = this.pipSize();
+      const slPips = 30;
+      const tpPips = 60;
+      const round = (n: number) => Math.round(n * 1e5) / 1e5;
+      if (!this.slDirty()) {
+        this.stopLoss.set(round(dir === 'Buy' ? e - slPips * pip : e + slPips * pip));
+      }
+      if (!this.tpDirty()) {
+        this.takeProfit.set(round(dir === 'Buy' ? e + tpPips * pip : e - tpPips * pip));
+      }
+    });
   }
 
   ngAfterViewInit(): void {
@@ -586,12 +913,29 @@ export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
     else this.closed.emit();
   }
 
+  onToggleAutoStrategy(ev: Event): void {
+    this.useAutoStrategy.set((ev.target as HTMLInputElement).checked);
+  }
+
+  /**
+   * Wipe the entry/SL/TP fields and clear the dirty flags so the auto-calc
+   * effects re-run from the latest live price.
+   */
+  resetAutoCalc(): void {
+    this.entryDirty.set(false);
+    this.slDirty.set(false);
+    this.tpDirty.set(false);
+    this.entryPrice.set(null);
+    this.stopLoss.set(null);
+    this.takeProfit.set(null);
+  }
+
   submit(): void {
     if (!this.canSubmit() || this.submitting()) return;
 
     const expiresAtUtc = new Date(this.expiresAtLocal()).toISOString();
     const body: CreateTradeSignalRequest = {
-      strategyId: this.strategyId()!,
+      strategyId: this.effectiveStrategyId()!,
       symbol: this.symbol().trim().toUpperCase(),
       direction: this.direction(),
       entryPrice: this.entryPrice()!,

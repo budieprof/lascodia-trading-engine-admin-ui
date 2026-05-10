@@ -10,12 +10,12 @@ import {
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
 import { DatePipe } from '@angular/common';
+import { Router } from '@angular/router';
 import { map } from 'rxjs';
 
 import { TradingAccountsService } from '@core/services/trading-accounts.service';
-import { BrokersService } from '@core/services/brokers.service';
 import { NotificationService } from '@core/notifications/notification.service';
-import type { TradingAccountDto, BrokerDto, PagedData, PagerRequest } from '@core/api/api.types';
+import type { TradingAccountDto, PagedData, PagerRequest } from '@core/api/api.types';
 
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -116,7 +116,7 @@ import { CurrencyFormatPipe } from '@shared/pipes/currency-format.pipe';
         <section class="board-card">
           <header class="board-head">
             <h3>Per-broker breakdown</h3>
-            <span class="muted">Aggregated by brokerId</span>
+            <span class="muted">Aggregated by broker name</span>
           </header>
           @if (perBrokerBreakdown().length > 0) {
             <table class="board-table">
@@ -131,7 +131,7 @@ import { CurrencyFormatPipe } from '@shared/pipes/currency-format.pipe';
                 </tr>
               </thead>
               <tbody>
-                @for (b of perBrokerBreakdown(); track b.brokerId) {
+                @for (b of perBrokerBreakdown(); track b.brokerName) {
                   <tr>
                     <td class="mono">{{ b.brokerName }}</td>
                     <td class="num mono">{{ b.count }}</td>
@@ -236,7 +236,7 @@ import { CurrencyFormatPipe } from '@shared/pipes/currency-format.pipe';
                 </div>
               </div>
               <footer class="acct-foot">
-                <span class="acct-foot-label">Broker #{{ a.brokerId }}</span>
+                <span class="acct-foot-label">{{ a.brokerName ?? '—' }}</span>
                 <span class="acct-foot-time">
                   Synced {{ a.lastSyncedAt ? (a.lastSyncedAt | date: 'HH:mm') : '—' }}
                 </span>
@@ -246,7 +246,11 @@ import { CurrencyFormatPipe } from '@shared/pipes/currency-format.pipe';
         </div>
       }
 
-      <app-data-table [columnDefs]="columns" [fetchData]="fetchData" />
+      <app-data-table
+        [columnDefs]="columns"
+        [fetchData]="fetchData"
+        (rowClick)="goToDetail($event)"
+      />
 
       <app-confirm-dialog
         [open]="showDeleteDialog()"
@@ -529,9 +533,13 @@ import { CurrencyFormatPipe } from '@shared/pipes/currency-format.pipe';
 })
 export class AccountsPageComponent implements OnInit {
   private readonly accountsService = inject(TradingAccountsService);
-  private readonly brokersService = inject(BrokersService);
   private readonly notifications = inject(NotificationService);
+  private readonly router = inject(Router);
   private readonly currencyPipe = new CurrencyFormatPipe();
+
+  goToDetail(account: TradingAccountDto): void {
+    if (account?.id != null) this.router.navigate(['/trading-accounts', account.id]);
+  }
   private readonly dataTable = viewChild(DataTableComponent);
 
   processing = signal(false);
@@ -542,7 +550,6 @@ export class AccountsPageComponent implements OnInit {
   // breakdown tables + account snapshot cards). Loaded once on mount;
   // refreshed after every successful activate / sync / delete action.
   allAccounts = signal<TradingAccountDto[]>([]);
-  brokerNames = signal<Record<number, string>>({});
 
   formatCurrency(value: number, currency: string): string {
     return this.currencyPipe.transform(value, currency || 'USD') ?? '—';
@@ -688,11 +695,11 @@ export class AccountsPageComponent implements OnInit {
 
   perBrokerBreakdown = computed(() => {
     const groups: Record<
-      number,
+      string,
       { count: number; active: number; balance: number; equity: number; marginUsed: number }
     > = {};
     for (const a of this.allAccounts()) {
-      const k = a.brokerId;
+      const k = a.brokerName ?? '—';
       if (!groups[k]) groups[k] = { count: 0, active: 0, balance: 0, equity: 0, marginUsed: 0 };
       groups[k].count++;
       if (a.isActive) groups[k].active++;
@@ -700,13 +707,8 @@ export class AccountsPageComponent implements OnInit {
       groups[k].equity += a.equity ?? 0;
       groups[k].marginUsed += a.marginUsed ?? 0;
     }
-    const names = this.brokerNames();
     return Object.entries(groups)
-      .map(([id, g]) => ({
-        brokerId: +id,
-        brokerName: names[+id] ?? `Broker #${id}`,
-        ...g,
-      }))
+      .map(([brokerName, g]) => ({ brokerName, ...g }))
       .sort((a, b) => b.equity - a.equity);
   });
 
@@ -736,7 +738,7 @@ export class AccountsPageComponent implements OnInit {
   columns: ColDef<TradingAccountDto>[] = [
     { headerName: 'ID', field: 'id', width: 70, sortable: true },
     { headerName: 'Name', field: 'accountName', flex: 1, minWidth: 140 },
-    { headerName: 'Broker ID', field: 'brokerId', width: 90 },
+    { headerName: 'Broker', field: 'brokerName', width: 140 },
     { headerName: 'Currency', field: 'currency', width: 90 },
     {
       headerName: 'Balance',
@@ -851,7 +853,6 @@ export class AccountsPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadAnalyticsSample();
-    this.loadBrokerNames();
   }
 
   private loadAnalyticsSample(): void {
@@ -861,18 +862,6 @@ export class AccountsPageComponent implements OnInit {
     this.accountsService.list({ currentPage: 1, itemCountPerPage: 200, filter: null }).subscribe({
       next: (res) => {
         if (res?.data?.data) this.allAccounts.set(res.data.data);
-      },
-    });
-  }
-
-  private loadBrokerNames(): void {
-    this.brokersService.list({ currentPage: 1, itemCountPerPage: 100, filter: null }).subscribe({
-      next: (res) => {
-        const map: Record<number, string> = {};
-        for (const b of (res?.data?.data ?? []) as BrokerDto[]) {
-          map[b.id] = b.name ?? `Broker #${b.id}`;
-        }
-        this.brokerNames.set(map);
       },
     });
   }
