@@ -15,6 +15,8 @@ import { MLModelsService } from '@core/services/ml-models.service';
 import type { MLModelOverfitFlagDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
+import { V6OrderBookCardComponent } from '../../components/v6-orderbook-card/v6-orderbook-card.component';
+
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
@@ -37,6 +39,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     ErrorStateComponent,
     EmptyStateComponent,
     RelativeTimePipe,
+    V6OrderBookCardComponent,
   ],
   template: `
     <div class="page">
@@ -54,6 +57,8 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           Refresh
         </button>
       </app-page-header>
+
+      <app-v6-orderbook-card />
 
       <section class="controls">
         <div class="control-group">

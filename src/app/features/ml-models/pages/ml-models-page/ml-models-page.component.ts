@@ -1339,11 +1339,14 @@ import {
                       [control]="trainingForm.controls.learnerArchitecture"
                     >
                       <select appFormFieldControl formControlName="learnerArchitecture">
-                        @for (arch of learnerArchitectures; track arch.value) {
+                        @for (arch of learnerArchitectures(); track arch.value) {
                           <option [ngValue]="arch.value">{{ arch.label }}</option>
                         }
                       </select>
                     </app-form-field>
+                    @if (disabledArchitecturesReason(); as reason) {
+                      <p class="arch-disabled-note">⚠ {{ reason }}</p>
+                    }
                   </div>
                   <div class="modal-footer">
                     <button
@@ -4030,6 +4033,43 @@ export class MlModelsPageComponent implements OnInit {
       });
   }
 
+  /**
+   * Bootstraps the architecture dropdown from the engine. If Torch is
+   * unavailable on the host, the engine filters out Torch-dependent
+   * architectures and reports why; the UI surfaces both the filtered
+   * list and the reason so operators see at-form-load-time why a
+   * specific architecture isn't selectable. Falls back to the hardcoded
+   * default list on error (already populated by the signal's initial value).
+   */
+  private loadAvailableArchitectures(): void {
+    this.mlModelsService.getAvailableArchitectures().subscribe({
+      next: (res) => {
+        const data = res?.data;
+        if (!res?.status || !data) return;
+        if (data.architectures.length > 0) {
+          this.learnerArchitectures.set(
+            data.architectures.map((a) => ({
+              value: a.value,
+              label: a.value === 0 ? `${a.name} (default)` : a.name,
+            })),
+          );
+        }
+        this.torchAvailable.set(data.torchAvailable);
+        this.disabledArchitecturesReason.set(
+          data.torchAvailable
+            ? null
+            : (data.disabledReason ??
+                (data.disabledArchitectures.length > 0
+                  ? `Torch unavailable — ${data.disabledArchitectures.join(', ')} hidden.`
+                  : 'Torch unavailable on this host.')),
+        );
+      },
+      error: () => {
+        /* keep the hardcoded fallback list */
+      },
+    });
+  }
+
   // ─────────────────────────────────────────────────────────────────────
   // Shadow-arena analytics — same probe-and-fetch pattern.
   // ─────────────────────────────────────────────────────────────────────
@@ -4613,10 +4653,16 @@ export class MlModelsPageComponent implements OnInit {
     return years > 20 ? Math.round(years) : null;
   }
 
-  // Mirror of LascodiaTradingEngine.Domain.Enums.LearnerArchitecture — keep in sync
-  // with the engine enum. Operator picks one when manually triggering a training run;
-  // the value is sent as the integer enum value (defaults to BaggedLogistic = 0).
-  readonly learnerArchitectures: ReadonlyArray<{ value: number; label: string }> = [
+  /**
+   * Architecture dropdown options. Populated dynamically from
+   * `/ml-model/training/available-architectures` on init so the host's
+   * actual capabilities (Torch availability, arm64 filtering) gate the
+   * pick — operators no longer see Torch-only options on a Torch-less
+   * host and try to launch a doomed training run. The fallback list
+   * matches the engine enum exactly so the page renders sane defaults
+   * even if the bootstrap call fails or returns empty.
+   */
+  readonly learnerArchitectures = signal<ReadonlyArray<{ value: number; label: string }>>([
     { value: 0, label: 'BaggedLogistic (default)' },
     { value: 1, label: 'TemporalConvNet' },
     { value: 3, label: 'Gbm' },
@@ -4630,7 +4676,9 @@ export class MlModelsPageComponent implements OnInit {
     { value: 81, label: 'Smote' },
     { value: 90, label: 'QuantileRf' },
     { value: 92, label: 'Stacked' },
-  ];
+  ]);
+  readonly torchAvailable = signal<boolean>(true);
+  readonly disabledArchitecturesReason = signal<string | null>(null);
 
   // ── Shadow state ──
   showShadowModal = signal(false);
@@ -5270,6 +5318,7 @@ export class MlModelsPageComponent implements OnInit {
     this.loadTrainingAnalyticsSample();
     this.loadShadowAnalyticsSample();
     this.loadAbAnalyticsSample();
+    this.loadAvailableArchitectures();
 
     // Coverage preview: trail the form by 350ms so we don't fire a request on every
     // keystroke. The watcher only fires when symbol+timeframe are populated; date
