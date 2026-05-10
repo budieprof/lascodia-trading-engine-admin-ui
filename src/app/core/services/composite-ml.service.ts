@@ -4,9 +4,14 @@ import { ApiService } from '@core/api/api.service';
 import type {
   ActivePolicyDto,
   CompositeMLLayerHealthDto,
+  LayerSkillSnapshotDto,
   PolicyLineageDto,
   PolicySnapshotDiffDto,
   ResponseData,
+  SetLayerSkillManualOverrideRequest,
+  SetTrainerSkillManualOverrideRequest,
+  TrainerSkillSnapshotDto,
+  Timeframe,
 } from '@core/api/api.types';
 
 /**
@@ -59,4 +64,65 @@ export class CompositeMLService {
       `/composite-ml/policy-snapshots/diff?fromId=${fromId}&toId=${toId}`,
     );
   }
+
+  /**
+   * GET /composite-ml/layer-skill-snapshots — active per-(layer, partition tier)
+   * skill snapshots driving the auto-arbitration weight. All filters are
+   * optional; passing none returns the full set across global / per-symbol /
+   * per-pair tiers.
+   */
+  listLayerSkillSnapshots(
+    filter: { symbol?: string | null; timeframe?: Timeframe | null; layerId?: string | null } = {},
+  ): Observable<ResponseData<LayerSkillSnapshotDto[]>> {
+    return this.api.get<ResponseData<LayerSkillSnapshotDto[]>>(
+      `/composite-ml/layer-skill-snapshots${buildSkillFilterQuery(filter, 'layerId')}`,
+    );
+  }
+
+  /** POST /composite-ml/layer-skill-manual-override — hot-reloads next cycle. */
+  setLayerSkillOverride(
+    payload: SetLayerSkillManualOverrideRequest,
+  ): Observable<ResponseData<boolean>> {
+    return this.api.post<ResponseData<boolean>>(
+      '/composite-ml/layer-skill-manual-override',
+      payload,
+    );
+  }
+
+  /** GET /composite-ml/trainer-skill-snapshots — symmetric to listLayerSkillSnapshots for trainers. */
+  listTrainerSkillSnapshots(
+    filter: {
+      symbol?: string | null;
+      timeframe?: Timeframe | null;
+      trainerId?: string | null;
+    } = {},
+  ): Observable<ResponseData<TrainerSkillSnapshotDto[]>> {
+    return this.api.get<ResponseData<TrainerSkillSnapshotDto[]>>(
+      `/composite-ml/trainer-skill-snapshots${buildSkillFilterQuery(filter, 'trainerId')}`,
+    );
+  }
+
+  /** POST /composite-ml/trainer-skill-manual-override — hot-reloads next cycle. */
+  setTrainerSkillOverride(
+    payload: SetTrainerSkillManualOverrideRequest,
+  ): Observable<ResponseData<boolean>> {
+    return this.api.post<ResponseData<boolean>>(
+      '/composite-ml/trainer-skill-manual-override',
+      payload,
+    );
+  }
+}
+
+/** Build `?symbol=&timeframe=&{idKey}=` query string from optional filter. */
+function buildSkillFilterQuery(
+  filter: { symbol?: string | null; timeframe?: Timeframe | null } & Record<string, unknown>,
+  idKey: 'layerId' | 'trainerId',
+): string {
+  const params = new URLSearchParams();
+  if (filter.symbol) params.set('symbol', filter.symbol);
+  if (filter.timeframe) params.set('timeframe', String(filter.timeframe));
+  const idValue = filter[idKey];
+  if (typeof idValue === 'string' && idValue) params.set(idKey, idValue);
+  const q = params.toString();
+  return q ? `?${q}` : '';
 }

@@ -31,4 +31,20 @@ export const COMPOSITE_ML_ROUTES: Routes = [
     loadComponent: () =>
       import('./pages/diff-page/diff-page.component').then((m) => m.DiffPageComponent),
   },
+  {
+    path: 'layer-skill',
+    data: { breadcrumb: 'Layer Skill' },
+    loadComponent: () =>
+      import('./pages/layer-skill-page/layer-skill-page.component').then(
+        (m) => m.LayerSkillPageComponent,
+      ),
+  },
+  {
+    path: 'trainer-skill',
+    data: { breadcrumb: 'Trainer Skill' },
+    loadComponent: () =>
+      import('./pages/trainer-skill-page/trainer-skill-page.component').then(
+        (m) => m.TrainerSkillPageComponent,
+      ),
+  },
 ];

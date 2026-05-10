@@ -2164,3 +2164,65 @@ export interface PolicySnapshotDiffDto {
   toSchemaVersion: number;
   knobs: PolicySnapshotKnobDiffDto[];
 }
+
+/**
+ * Active layer-skill snapshot driving the auto-arbitration weight applied at
+ * slate-scoring time. Three-tier partitioned: a single (layer, pair) lookup
+ * can yield up to 3 rows — per-pair, per-symbol, global — with caller
+ * resolving most-specific-first. `autoDisabledUntilUtc` non-null = auto-
+ * arbitration has temporarily suppressed this layer until that timestamp.
+ */
+export interface LayerSkillSnapshotDto {
+  id: number;
+  layerId: string;
+  symbol: string | null;
+  timeframe: Timeframe | null;
+  evaluatedAtUtc: string;
+  observationsEnabled: number;
+  observationsAblated: number;
+  meanRewardEnabled: number;
+  meanRewardAblated: number;
+  skillEstimate: number;
+  skillStandardError: number;
+  zStatistic: number | null;
+  autoDisabledUntilUtc: string | null;
+  rewardVarianceEnabled: number | null;
+  rewardVarianceAblated: number | null;
+}
+
+/** Same partitioning as LayerSkillSnapshotDto but for trainer arbitration. */
+export interface TrainerSkillSnapshotDto {
+  id: number;
+  trainerId: string;
+  symbol: string | null;
+  timeframe: Timeframe | null;
+  evaluatedAtUtc: string;
+  observationsActive: number;
+  observationsAlternate: number;
+  meanRewardActive: number;
+  meanRewardAlternate: number;
+  skillEstimate: number;
+  skillStandardError: number;
+  zStatistic: number | null;
+  autoDisabledUntilUtc: string | null;
+  rewardVarianceActive: number | null;
+  rewardVarianceAlternate: number | null;
+  primaryStratumKey: string | null;
+}
+
+/** Operator action set for skill overrides. */
+export type SkillOverrideAction = 'enabled' | 'disabled' | 'clear';
+
+export interface SetLayerSkillManualOverrideRequest {
+  layerId: string;
+  action: SkillOverrideAction;
+  symbol?: string | null;
+  timeframe?: Timeframe | null;
+}
+
+export interface SetTrainerSkillManualOverrideRequest {
+  trainerId: string;
+  action: SkillOverrideAction;
+  symbol?: string | null;
+  timeframe?: Timeframe | null;
+}

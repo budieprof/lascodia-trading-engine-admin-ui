@@ -274,6 +274,24 @@ export class CommandPaletteComponent implements OnInit {
     },
     {
       group: 'ML',
+      label: 'CompositeML — Policy Diff',
+      route: '/composite-ml/diff',
+      keywords: 'compare snapshots knob delta',
+    },
+    {
+      group: 'ML',
+      label: 'CompositeML — Layer Skill',
+      route: '/composite-ml/layer-skill',
+      keywords: 'arbitration weight override skill estimate z-statistic',
+    },
+    {
+      group: 'ML',
+      label: 'CompositeML — Trainer Skill',
+      route: '/composite-ml/trainer-skill',
+      keywords: 'trainer suppression promotion skill estimate z-statistic',
+    },
+    {
+      group: 'ML',
       label: 'Optimizations',
       route: '/optimizations',
       keywords: 'bayesian hyperparam sharpe',

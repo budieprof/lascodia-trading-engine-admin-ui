@@ -39,6 +39,7 @@ type TierFilter = 'all' | 'live' | 'coldstart';
         subtitle="One row per (Symbol, Timeframe, IsColdStart) partition tier"
       >
         <a routerLink="/composite-ml/diff" class="btn btn-secondary">Diff snapshots</a>
+        <a routerLink="/composite-ml/layer-skill" class="btn btn-secondary">Skill panels →</a>
         <a routerLink="/composite-ml/layer-health" class="btn btn-secondary">Layer Health →</a>
         <button
           type="button"
