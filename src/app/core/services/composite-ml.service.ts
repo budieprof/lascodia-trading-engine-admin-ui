@@ -3,6 +3,8 @@ import { Observable } from 'rxjs';
 import { ApiService } from '@core/api/api.service';
 import type {
   ActivePolicyDto,
+  CatalogueDriftHistoryDto,
+  CatalogueDriftSummaryDto,
   CompositeMLLayerHealthDto,
   LayerSkillSnapshotDto,
   PolicyLineageDto,
@@ -10,8 +12,8 @@ import type {
   ResponseData,
   SetLayerSkillManualOverrideRequest,
   SetTrainerSkillManualOverrideRequest,
-  TrainerSkillSnapshotDto,
   Timeframe,
+  TrainerSkillSnapshotDto,
 } from '@core/api/api.types';
 
 /**
@@ -109,6 +111,58 @@ export class CompositeMLService {
     return this.api.post<ResponseData<boolean>>(
       '/composite-ml/trainer-skill-manual-override',
       payload,
+    );
+  }
+
+  /**
+   * GET /composite-ml/catalogue-drift/summary — latest-vs-prior summary across
+   * all (layerKey, scope) entries. `isDropAlert` flags rows where the latest
+   * observed count fell by ≥ `dropAlertRelativeThreshold` over the comparison
+   * window and the prior count was ≥ `dropAlertMinPriorCount`. Engine
+   * computes the alert; UI just renders.
+   */
+  getCatalogueDriftSummary(
+    opts: {
+      compareWindowDays?: number;
+      symbol?: string | null;
+      timeframe?: Timeframe | null;
+      dropAlertRelativeThreshold?: number;
+      dropAlertMinPriorCount?: number;
+    } = {},
+  ): Observable<ResponseData<CatalogueDriftSummaryDto>> {
+    const params = new URLSearchParams();
+    if (opts.compareWindowDays !== undefined)
+      params.set('compareWindowDays', String(opts.compareWindowDays));
+    if (opts.symbol) params.set('symbol', opts.symbol);
+    if (opts.timeframe) params.set('timeframe', String(opts.timeframe));
+    if (opts.dropAlertRelativeThreshold !== undefined)
+      params.set('dropAlertRelativeThreshold', String(opts.dropAlertRelativeThreshold));
+    if (opts.dropAlertMinPriorCount !== undefined)
+      params.set('dropAlertMinPriorCount', String(opts.dropAlertMinPriorCount));
+    const q = params.toString();
+    return this.api.get<ResponseData<CatalogueDriftSummaryDto>>(
+      `/composite-ml/catalogue-drift/summary${q ? `?${q}` : ''}`,
+    );
+  }
+
+  /**
+   * GET /composite-ml/catalogue-drift/history — time-series of one
+   * (layerKey, scope). Layer-key is required. Engine clamps `lookbackDays`
+   * to [1, 365]; default 30.
+   */
+  getCatalogueDriftHistory(opts: {
+    layerKey: string;
+    symbol?: string | null;
+    timeframe?: Timeframe | null;
+    lookbackDays?: number;
+  }): Observable<ResponseData<CatalogueDriftHistoryDto>> {
+    const params = new URLSearchParams();
+    params.set('layerKey', opts.layerKey);
+    if (opts.symbol) params.set('symbol', opts.symbol);
+    if (opts.timeframe) params.set('timeframe', String(opts.timeframe));
+    if (opts.lookbackDays !== undefined) params.set('lookbackDays', String(opts.lookbackDays));
+    return this.api.get<ResponseData<CatalogueDriftHistoryDto>>(
+      `/composite-ml/catalogue-drift/history?${params.toString()}`,
     );
   }
 }

@@ -292,6 +292,12 @@ export class CommandPaletteComponent implements OnInit {
     },
     {
       group: 'ML',
+      label: 'CompositeML — Catalogue Drift',
+      route: '/composite-ml/drift',
+      keywords: 'drift summary drop alert observed count threshold warm cold',
+    },
+    {
+      group: 'ML',
       label: 'Optimizations',
       route: '/optimizations',
       keywords: 'bayesian hyperparam sharpe',

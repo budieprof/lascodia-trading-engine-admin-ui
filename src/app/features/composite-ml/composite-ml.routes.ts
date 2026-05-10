@@ -47,4 +47,20 @@ export const COMPOSITE_ML_ROUTES: Routes = [
         (m) => m.TrainerSkillPageComponent,
       ),
   },
+  {
+    path: 'drift',
+    data: { breadcrumb: 'Catalogue Drift' },
+    loadComponent: () =>
+      import('./pages/drift-summary-page/drift-summary-page.component').then(
+        (m) => m.DriftSummaryPageComponent,
+      ),
+  },
+  {
+    path: 'drift/history',
+    data: { breadcrumb: 'Drift History' },
+    loadComponent: () =>
+      import('./pages/drift-history-page/drift-history-page.component').then(
+        (m) => m.DriftHistoryPageComponent,
+      ),
+  },
 ];

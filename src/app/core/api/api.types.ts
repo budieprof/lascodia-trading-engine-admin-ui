@@ -2226,3 +2226,45 @@ export interface SetTrainerSkillManualOverrideRequest {
   symbol?: string | null;
   timeframe?: Timeframe | null;
 }
+
+/**
+ * One row in the catalogue-drift summary. `isDropAlert` is engine-computed
+ * (relativeDelta ≤ −threshold AND priorObservedCount ≥ minPriorCount); the
+ * UI just renders it. `relativeDelta` is null when prior is absent or zero.
+ */
+export interface CatalogueDriftSummaryRowDto {
+  layerKey: string;
+  symbol: string | null;
+  timeframe: Timeframe | null;
+  latestObservedCount: number;
+  latestThreshold: number;
+  latestIsWarm: boolean;
+  latestEvaluatedAtUtc: string;
+  priorObservedCount: number | null;
+  priorEvaluatedAtUtc: string | null;
+  absoluteDelta: number | null;
+  relativeDelta: number | null;
+  isDropAlert: boolean;
+}
+
+export interface CatalogueDriftSummaryDto {
+  compareWindowDays: number;
+  queriedAtUtc: string;
+  rows: CatalogueDriftSummaryRowDto[];
+}
+
+/** One time-series sample of a catalogue layer-key + scope. */
+export interface CatalogueDriftHistoryPointDto {
+  evaluatedAtUtc: string;
+  observedCount: number;
+  threshold: number;
+  isWarm: boolean;
+}
+
+export interface CatalogueDriftHistoryDto {
+  layerKey: string;
+  symbol: string | null;
+  timeframe: Timeframe | null;
+  lookbackDays: number;
+  points: CatalogueDriftHistoryPointDto[];
+}
