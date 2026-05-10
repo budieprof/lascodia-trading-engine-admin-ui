@@ -437,6 +437,7 @@ export class SidebarComponent {
       label: 'ML & Optimization',
       items: [
         { label: 'ML Models', route: '/ml-models', icon: '🧠' },
+        { label: 'CompositeML', route: '/composite-ml', icon: '🧩' },
         { label: 'Drift Report', route: '/drift-report', icon: '📊' },
         { label: 'Optimizations', route: '/optimizations', icon: '🧪', policy: 'Analyst' },
         { label: 'Backtesting', route: '/backtests', icon: '📈', policy: 'Analyst' },

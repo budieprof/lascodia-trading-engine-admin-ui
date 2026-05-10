@@ -2080,3 +2080,39 @@ export interface TriggerOptimizationRequest {
   strategyId: number;
   triggerType?: string;
 }
+
+// ============================================================
+// CompositeML Operator Console (v2 Phase 1)
+// ============================================================
+
+/**
+ * One currently-Active CompositeML policy snapshot. One row per
+ * (Symbol, Timeframe, IsColdStart) partition tier. `policyKnobDeltaJson`
+ * is opaque on the UI side — it carries the per-knob change vs the prior
+ * activation as a JSON blob. UI renders it lazily on detail expand.
+ */
+export interface ActivePolicyDto {
+  id: number;
+  symbol: string | null;
+  timeframe: Timeframe | null;
+  isColdStart: boolean;
+  trainer: string | null;
+  activatedAtUtc: string | null;
+  evaluationOutcome: string;
+  policyKnobDeltaJson: string | null;
+}
+
+/**
+ * Per-layer health snapshot over a lookback window. `enabledFraction` of
+ * 1.0 = always on, 0.0 = always off, anything in between = toggled
+ * mid-window (often a soak experiment). `distinctConfigHashes > 1`
+ * means the layer's config changed during the window.
+ */
+export interface CompositeMLLayerHealthDto {
+  layerName: string;
+  enabledFraction: number;
+  cycleCount: number;
+  distinctConfigHashes: number;
+  lastEnabledAtUtc: string | null;
+  lastDisabledAtUtc: string | null;
+}

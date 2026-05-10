@@ -262,6 +262,18 @@ export class CommandPaletteComponent implements OnInit {
     { group: 'ML', label: 'ML Models', route: '/ml-models', keywords: 'training shadow ab test' },
     {
       group: 'ML',
+      label: 'CompositeML — Active Policies',
+      route: '/composite-ml',
+      keywords: 'policy snapshot trainer activation',
+    },
+    {
+      group: 'ML',
+      label: 'CompositeML — Layer Health',
+      route: '/composite-ml/layer-health',
+      keywords: 'layer enabled fraction cycle config hash',
+    },
+    {
+      group: 'ML',
       label: 'Optimizations',
       route: '/optimizations',
       keywords: 'bayesian hyperparam sharpe',
