@@ -1611,6 +1611,84 @@ export interface AvailableArchitecturesDto {
   architectures: ArchitectureOptionDto[];
 }
 
+/**
+ * Mined symbolic feature. Status flows Candidate → Promoted → Retired
+ * (or Rejected at mine-time). `expressionJson` is the polymorphic
+ * expression tree; UI renders the human-friendly `name` and optionally
+ * lets operators peek the JSON for advanced inspection.
+ */
+export type SymbolicFeatureStatus = 'Candidate' | 'Promoted' | 'Retired' | 'Rejected';
+
+export interface SymbolicFeatureDto {
+  id: number;
+  symbol: string;
+  timeframe: string;
+  name: string;
+  expressionJson: string;
+  nodeCount: number;
+  depth: number;
+  trainingIc: number;
+  validationIc: number;
+  trainingCoverage: number;
+  validationCoverage: number;
+  forwardReturnHorizonBars: number;
+  status: SymbolicFeatureStatus | string;
+  retirementReason: string | null;
+  minedAt: string;
+  promotedAt: string | null;
+  retiredAt: string | null;
+}
+
+/** One decay-evaluation snapshot for an active symbolic feature. */
+export interface SymbolicFeatureDecaySnapshotDto {
+  id: number;
+  featureId: number;
+  symbol: string;
+  timeframe: string;
+  liveIc: number;
+  liveCoverage: number;
+  liveWindowBars: number;
+  outcome: string;
+  consecutiveDecayCyclesAfter: number;
+  evaluatedAt: string;
+}
+
+/** Per-slot V6 OrderBook feature stats. */
+export interface V6FeatureSlotStatsDto {
+  slotIndex: number;
+  semanticName: string;
+  modelsWithFeature: number;
+  modelsAboveThreshold: number;
+  fractionAboveThreshold: number;
+  meanImportance: number;
+  maxImportance: number;
+}
+
+/**
+ * Operator-facing diagnostic: are the V6 OrderBook features (slots 52-56)
+ * actually being used by trained models? Drives the "should we invest more
+ * in microstructure infra" decision.
+ */
+export interface V6OrderBookFeatureUtilizationDto {
+  computedAtUtc: string;
+  modelsExamined: number;
+  modelsWithV6Schema: number;
+  modelsSkippedDeserialisation: number;
+  modelsWithUsableImportance: number;
+  importanceThreshold: number;
+  slotStats: V6FeatureSlotStatsDto[];
+  verdict: 'ImportancesHigh' | 'ImportancesMixed' | 'ImportancesLow' | 'InsufficientData' | string;
+  verdictReason: string;
+}
+
+export interface PromoteSymbolicFeatureRequest {
+  reason?: string | null;
+}
+
+export interface RetireSymbolicFeatureRequest {
+  reason: string;
+}
+
 export interface StrategyTemplateDto {
   id: number;
   name: string | null;

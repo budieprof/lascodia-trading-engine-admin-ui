@@ -262,6 +262,18 @@ export class CommandPaletteComponent implements OnInit {
     { group: 'ML', label: 'ML Models', route: '/ml-models', keywords: 'training shadow ab test' },
     {
       group: 'ML',
+      label: 'ML — Overfit Watchlist',
+      route: '/ml-models/overfit-watchlist',
+      keywords: 'overfit cv live sharpe edge collapse ratio',
+    },
+    {
+      group: 'ML',
+      label: 'ML — Symbolic Features',
+      route: '/ml-models/symbolic-features',
+      keywords: 'symbolic genetic programming candidate promoted retired feature',
+    },
+    {
+      group: 'ML',
       label: 'CompositeML — Active Policies',
       route: '/composite-ml',
       keywords: 'policy snapshot trainer activation',
