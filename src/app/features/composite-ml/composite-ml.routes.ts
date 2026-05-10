@@ -71,4 +71,12 @@ export const COMPOSITE_ML_ROUTES: Routes = [
         (m) => m.GateCutoverPageComponent,
       ),
   },
+  {
+    path: 'cold-start',
+    data: { breadcrumb: 'Cold-Start' },
+    loadComponent: () =>
+      import('./pages/cold-start-page/cold-start-page.component').then(
+        (m) => m.ColdStartPageComponent,
+      ),
+  },
 ];

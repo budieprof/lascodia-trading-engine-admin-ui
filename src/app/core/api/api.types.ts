@@ -2302,3 +2302,50 @@ export interface CompositeMLOptionsDiagnosticDto {
   checkName: string;
   message: string;
 }
+
+/**
+ * One row of the cold-start diagnostic dashboard. For scalar floors,
+ * `groupingDetail` is either null or an upstream-missing hint string
+ * (e.g. "(no active Champion MLModel for this scope)"). For grouped
+ * floors, it carries the per-group counts (e.g. "Blend=12,Ucb1=4").
+ * `outcomeNetPnL` / `outcomeRowCount` / `isOutcomeWarm` are non-null
+ * only for outcome-aware catalogue entries — they let ops spot pairs
+ * that are count-warm but outcome-cold (≥N observations but NetPnL ≤ 0).
+ */
+export interface ColdStartFloorRowDto {
+  layerKey: string;
+  description: string;
+  threshold: number;
+  observed: number;
+  isWarm: boolean;
+  observationsNeeded: number;
+  groupingDetail: string | null;
+  outcomeNetPnL: number | null;
+  outcomeRowCount: number | null;
+  isOutcomeWarm: boolean | null;
+}
+
+export interface ColdStartReportDto {
+  symbol: string | null;
+  timeframe: Timeframe | null;
+  asOfUtc: string;
+  floors: ColdStartFloorRowDto[];
+}
+
+/**
+ * Donor-warm-start forensic row. For each Active CompositeML pair
+ * (target), reports the best donor the canonical PolicyDonorSelector
+ * would pick. `donorSymbol`/`donorTimeframe`/`donorScore` are null when
+ * no candidate scored above `minScoreFloor`. `scoreBucket` is the
+ * coarse bucket matching the engine's `donor_warm_start.decisions`
+ * metric tag (e.g. "exact_match" / "high" / "medium" / "low" / "none").
+ */
+export interface CompositeMLDonorSelectionDto {
+  targetSymbol: string;
+  targetTimeframe: Timeframe;
+  donorSymbol: string | null;
+  donorTimeframe: Timeframe | null;
+  donorScore: number | null;
+  scoreBucket: string;
+  minScoreFloor: number;
+}

@@ -45,6 +45,7 @@ type TierFilter = 'all' | 'live' | 'coldstart';
         <a routerLink="/composite-ml/layer-skill" class="btn btn-secondary">Skill panels →</a>
         <a routerLink="/composite-ml/drift" class="btn btn-secondary">Drift →</a>
         <a routerLink="/composite-ml/gate-cutover" class="btn btn-secondary">Gate Cutover →</a>
+        <a routerLink="/composite-ml/cold-start" class="btn btn-secondary">Cold-Start →</a>
         <a routerLink="/composite-ml/layer-health" class="btn btn-secondary">Layer Health →</a>
         <button
           type="button"

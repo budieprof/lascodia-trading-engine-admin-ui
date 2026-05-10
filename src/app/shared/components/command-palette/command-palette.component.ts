@@ -304,6 +304,12 @@ export class CommandPaletteComponent implements OnInit {
     },
     {
       group: 'ML',
+      label: 'CompositeML — Cold-Start Diagnostics',
+      route: '/composite-ml/cold-start',
+      keywords: 'cold start warm threshold donor selection forensic',
+    },
+    {
+      group: 'ML',
       label: 'Optimizations',
       route: '/optimizations',
       keywords: 'bayesian hyperparam sharpe',

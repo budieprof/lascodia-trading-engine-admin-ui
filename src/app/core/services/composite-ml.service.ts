@@ -5,6 +5,8 @@ import type {
   ActivePolicyDto,
   CatalogueDriftHistoryDto,
   CatalogueDriftSummaryDto,
+  ColdStartReportDto,
+  CompositeMLDonorSelectionDto,
   CompositeMLLayerHealthDto,
   CompositeMLOptionsDiagnosticDto,
   GateCutoverStatusDto,
@@ -191,6 +193,35 @@ export class CompositeMLService {
   getOptionsHealth(): Observable<ResponseData<CompositeMLOptionsDiagnosticDto[]>> {
     return this.api.get<ResponseData<CompositeMLOptionsDiagnosticDto[]>>(
       '/composite-ml/options-health',
+    );
+  }
+
+  /**
+   * GET /composite-ml/cold-start-report — walks every catalogue floor and
+   * reports warm/cold status for the requested scope. Pass both symbol and
+   * timeframe for per-pair tier; symbol only for per-symbol tier; neither
+   * for global tier.
+   */
+  getColdStartReport(
+    opts: { symbol?: string | null; timeframe?: Timeframe | null } = {},
+  ): Observable<ResponseData<ColdStartReportDto>> {
+    const params = new URLSearchParams();
+    if (opts.symbol) params.set('symbol', opts.symbol);
+    if (opts.timeframe) params.set('timeframe', String(opts.timeframe));
+    const q = params.toString();
+    return this.api.get<ResponseData<ColdStartReportDto>>(
+      `/composite-ml/cold-start-report${q ? `?${q}` : ''}`,
+    );
+  }
+
+  /**
+   * GET /composite-ml/donor-selection — per-pair donor-warm-start forensic
+   * surface. Lists, for every Active CompositeML pair, the best donor
+   * the canonical selector would pick + its similarity score + bucket.
+   */
+  getDonorSelection(): Observable<ResponseData<CompositeMLDonorSelectionDto[]>> {
+    return this.api.get<ResponseData<CompositeMLDonorSelectionDto[]>>(
+      '/composite-ml/donor-selection',
     );
   }
 }
