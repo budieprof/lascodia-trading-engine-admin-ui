@@ -38,6 +38,7 @@ type TierFilter = 'all' | 'live' | 'coldstart';
         title="CompositeML — Active Policies"
         subtitle="One row per (Symbol, Timeframe, IsColdStart) partition tier"
       >
+        <a routerLink="/composite-ml/diff" class="btn btn-secondary">Diff snapshots</a>
         <a routerLink="/composite-ml/layer-health" class="btn btn-secondary">Layer Health →</a>
         <button
           type="button"
@@ -143,7 +144,13 @@ type TierFilter = 'all' | 'live' | 'coldstart';
                 @for (p of filteredPolicies(); track p.id) {
                   <tr [class.expanded]="expandedId() === p.id">
                     <td>
-                      <span class="mono">#{{ p.id }}</span>
+                      <a
+                        class="snapshot-link mono"
+                        [routerLink]="['/composite-ml/snapshot', p.id]"
+                        title="Walk ancestry chain"
+                      >
+                        #{{ p.id }}
+                      </a>
                     </td>
                     <td>
                       @if (p.symbol) {
@@ -298,6 +305,14 @@ type TierFilter = 'all' | 'live' | 'coldstart';
       .mono {
         font-family: var(--font-mono);
         font-size: 0.95em;
+      }
+      .snapshot-link {
+        color: var(--accent);
+        text-decoration: none;
+        font-weight: var(--font-semibold);
+      }
+      .snapshot-link:hover {
+        text-decoration: underline;
       }
       .muted {
         color: var(--text-tertiary);

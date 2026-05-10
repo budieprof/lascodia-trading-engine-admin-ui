@@ -17,4 +17,18 @@ export const COMPOSITE_ML_ROUTES: Routes = [
         (m) => m.LayerHealthPageComponent,
       ),
   },
+  {
+    path: 'snapshot/:id',
+    data: { breadcrumb: 'Snapshot' },
+    loadComponent: () =>
+      import('./pages/snapshot-detail-page/snapshot-detail-page.component').then(
+        (m) => m.SnapshotDetailPageComponent,
+      ),
+  },
+  {
+    path: 'diff',
+    data: { breadcrumb: 'Policy Diff' },
+    loadComponent: () =>
+      import('./pages/diff-page/diff-page.component').then((m) => m.DiffPageComponent),
+  },
 ];

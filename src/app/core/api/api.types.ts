@@ -2116,3 +2116,51 @@ export interface CompositeMLLayerHealthDto {
   lastEnabledAtUtc: string | null;
   lastDisabledAtUtc: string | null;
 }
+
+/** Lifecycle stage of a CompositeML policy snapshot. */
+export type CompositeMLPolicySnapshotStatus = 'Candidate' | 'Active' | 'Retired' | 'Rejected';
+
+/**
+ * One node in a policy snapshot's ancestry chain. Depth 0 = the snapshot
+ * the caller asked about; subsequent depths walk backwards via the
+ * `priorSnapshotId` recorded inside `policyKnobDeltaJson`.
+ */
+export interface PolicyLineageNodeDto {
+  id: number;
+  depth: number;
+  status: CompositeMLPolicySnapshotStatus;
+  trainer: string | null;
+  evaluationOutcome: string;
+  activatedAtUtc: string | null;
+  retiredAtUtc: string | null;
+  policyKnobDeltaJson: string | null;
+}
+
+/** Full lineage payload for a snapshot. Chain is depth-ascending. */
+export interface PolicyLineageDto {
+  rootId: number;
+  chainLength: number;
+  truncatedByDepth: boolean;
+  chain: PolicyLineageNodeDto[];
+}
+
+/**
+ * Per-knob diff entry. `deltaFraction` is `(to - from) / |from|` — null
+ * when from = 0 (divide-by-zero), either value is null/non-finite, or
+ * the knob is absent from one of the snapshots (legacy schema).
+ */
+export interface PolicySnapshotKnobDiffDto {
+  name: string;
+  fromValue: number | null;
+  toValue: number | null;
+  deltaFraction: number | null;
+}
+
+/** Full diff payload between two snapshots. Knobs ordered by schema. */
+export interface PolicySnapshotDiffDto {
+  fromId: number;
+  toId: number;
+  fromSchemaVersion: number;
+  toSchemaVersion: number;
+  knobs: PolicySnapshotKnobDiffDto[];
+}
