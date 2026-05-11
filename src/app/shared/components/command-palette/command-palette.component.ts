@@ -241,9 +241,21 @@ export class CommandPaletteComponent implements OnInit {
     { group: 'Trading', label: 'Positions', route: '/positions' },
     {
       group: 'Trading',
+      label: 'Position Deltas',
+      route: '/positions/deltas',
+      keywords: 'lifecycle delta feed open close modify reconcile stale audit timeline',
+    },
+    {
+      group: 'Trading',
       label: 'Trade Signals',
       route: '/trade-signals',
       keywords: 'approve reject pending',
+    },
+    {
+      group: 'Trading',
+      label: 'EA Signal Feedback',
+      route: '/trade-signals/feedback',
+      keywords: 'ea expert advisor rejection expired dropped spread feedback feed',
     },
     {
       group: 'Trading',
