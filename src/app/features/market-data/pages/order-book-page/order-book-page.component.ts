@@ -16,6 +16,8 @@ import { MarketDataService } from '@core/services/market-data.service';
 import type { OrderBookLevel, OrderBookLevels, OrderBookSnapshotDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
+import { OrderBookHeatmapComponent } from '../../components/order-book-heatmap/order-book-heatmap.component';
+
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
@@ -47,6 +49,7 @@ interface DepthLevel {
     ErrorStateComponent,
     EmptyStateComponent,
     RelativeTimePipe,
+    OrderBookHeatmapComponent,
   ],
   template: `
     <div class="page">
@@ -201,6 +204,18 @@ interface DepthLevel {
             </div>
           }
         </section>
+
+        <section class="heatmap-section">
+          <header class="heatmap-head">
+            <h3>Recent depth — liquidity heatmap</h3>
+            <button type="button" class="toggle" (click)="showHeatmap.set(!showHeatmap())">
+              {{ showHeatmap() ? 'Hide heatmap' : 'Show heatmap (fetch 60 recent snapshots)' }}
+            </button>
+          </header>
+          @if (showHeatmap()) {
+            <app-order-book-heatmap [symbol]="symbol()" [limit]="60" />
+          }
+        </section>
       }
     </div>
   `,
@@ -353,6 +368,39 @@ interface DepthLevel {
         position: relative;
         z-index: 1;
       }
+      .heatmap-section {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
+      .heatmap-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .heatmap-head h3 {
+        margin: 0;
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+      }
+      .toggle {
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        color: var(--accent);
+        padding: 6px 14px;
+        border-radius: var(--radius-sm);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        cursor: pointer;
+      }
+      .toggle:hover {
+        background: var(--accent);
+        color: #fff;
+      }
     `,
   ],
 })
@@ -362,6 +410,7 @@ export class OrderBookPageComponent {
 
   protected readonly symbolInput = signal<string>('');
   protected readonly symbol = signal<string>('');
+  protected readonly showHeatmap = signal<boolean>(false);
 
   // Hydrate symbol from query param so deep-links work.
   private readonly _qpSymbol = toSignal(
