@@ -48,6 +48,7 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
 import { PromotionReadinessCardComponent } from '../../components/promotion-readiness-card/promotion-readiness-card.component';
 import { StrategyVariantsTabComponent } from '../../components/strategy-variants-tab/strategy-variants-tab.component';
 import { StrategyCapacityCardComponent } from '../../components/strategy-capacity-card/strategy-capacity-card.component';
+import { RejectionDistributionDrawerComponent } from '../../components/rejection-distribution-drawer/rejection-distribution-drawer.component';
 
 @Component({
   selector: 'app-strategy-detail-page',
@@ -66,6 +67,7 @@ import { StrategyCapacityCardComponent } from '../../components/strategy-capacit
     PromotionReadinessCardComponent,
     StrategyVariantsTabComponent,
     StrategyCapacityCardComponent,
+    RejectionDistributionDrawerComponent,
     RouterLink,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -78,6 +80,14 @@ import { StrategyCapacityCardComponent } from '../../components/strategy-capacit
         >
           <app-presence-badge [routeKey]="'strategy:' + strategyId" />
           <button class="btn btn-secondary" (click)="openAnalytics()">Open analytics →</button>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            (click)="showRejectionDrawer.set(true)"
+            title="Show per-gate signal-rejection counts for this strategy"
+          >
+            Why no signals?
+          </button>
           <button class="btn btn-ghost" (click)="goBack()">Back</button>
         </app-page-header>
 
@@ -507,6 +517,13 @@ import { StrategyCapacityCardComponent } from '../../components/strategy-capacit
         (submitted)="onUpdate($event)"
         (cancelled)="showEditForm.set(false)"
       />
+
+      @if (showRejectionDrawer()) {
+        <app-rejection-distribution-drawer
+          [strategyId]="strategyId"
+          (closed)="showRejectionDrawer.set(false)"
+        />
+      }
     </div>
   `,
   styles: [
@@ -1042,6 +1059,7 @@ export class StrategyDetailPageComponent implements OnInit {
   showDeleteConfirm = signal(false);
   deleteLoading = signal(false);
   showEditForm = signal(false);
+  showRejectionDrawer = signal(false);
   optimizationLoading = signal(false);
 
   // Config-tab roll-up signals: lifetime counters and last-N feeds.
