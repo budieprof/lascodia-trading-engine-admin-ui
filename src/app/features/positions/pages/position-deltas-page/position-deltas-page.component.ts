@@ -136,16 +136,10 @@ interface TypeBucket {
         />
       } @else {
         <div class="kpis">
-          <app-metric-card label="Events" [value]="rows().length.toString()" />
-          <app-metric-card label="Types" [value]="typeBuckets().length.toString()" />
-          <app-metric-card
-            label="StaleCloses"
-            [value]="staleCloseCount().toString()"
-            [trend]="
-              staleCloseShare() > 0 ? (staleCloseShare() * 100 | number: '1.0-0') + '%' : null
-            "
-          />
-          <app-metric-card label="Positions touched" [value]="distinctPositionCount().toString()" />
+          <app-metric-card label="Events" [value]="rows().length" />
+          <app-metric-card label="Types" [value]="typeBuckets().length" />
+          <app-metric-card label="StaleCloses" [value]="staleCloseCount()" />
+          <app-metric-card label="Positions touched" [value]="distinctPositionCount()" />
         </div>
 
         <section class="card">
@@ -472,10 +466,6 @@ export class PositionDeltasPageComponent {
   protected readonly staleCloseCount = computed(
     () => this.rows().filter((r) => r.eventType === 'StaleClose').length,
   );
-  protected readonly staleCloseShare = computed(() => {
-    const total = this.rows().length;
-    return total > 0 ? this.staleCloseCount() / total : 0;
-  });
 
   protected readonly typeBuckets = computed<TypeBucket[]>(() => {
     const rows = this.rows();

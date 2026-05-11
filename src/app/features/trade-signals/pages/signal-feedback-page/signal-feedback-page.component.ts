@@ -116,18 +116,10 @@ interface ReasonBucket {
         />
       } @else {
         <div class="kpis">
-          <app-metric-card label="Events" [value]="filteredRows().length.toString()" />
-          <app-metric-card label="Reasons" [value]="reasonBuckets().length.toString()" />
-          <app-metric-card
-            label="Rejected"
-            [value]="rejectedCount().toString()"
-            [trend]="rejectedShare() > 0 ? (rejectedShare() * 100 | number: '1.0-0') + '%' : null"
-          />
-          <app-metric-card
-            label="Expired"
-            [value]="expiredCount().toString()"
-            [trend]="expiredShare() > 0 ? (expiredShare() * 100 | number: '1.0-0') + '%' : null"
-          />
+          <app-metric-card label="Events" [value]="filteredRows().length" />
+          <app-metric-card label="Reasons" [value]="reasonBuckets().length" />
+          <app-metric-card label="Rejected" [value]="rejectedCount()" />
+          <app-metric-card label="Expired" [value]="expiredCount()" />
         </div>
 
         <section class="card">
@@ -389,14 +381,6 @@ export class SignalFeedbackPageComponent {
   protected readonly expiredCount = computed(
     () => this.filteredRows().filter((r) => r.status === 'Expired').length,
   );
-  protected readonly rejectedShare = computed(() => {
-    const total = this.filteredRows().length;
-    return total > 0 ? this.rejectedCount() / total : 0;
-  });
-  protected readonly expiredShare = computed(() => {
-    const total = this.filteredRows().length;
-    return total > 0 ? this.expiredCount() / total : 0;
-  });
 
   protected readonly reasonBuckets = computed<ReasonBucket[]>(() => {
     const rows = this.filteredRows();
