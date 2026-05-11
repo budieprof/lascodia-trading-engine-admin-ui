@@ -12,6 +12,7 @@ import { CommandPaletteComponent } from '@shared/components/command-palette/comm
 import { KeyboardHelpComponent } from '@shared/components/keyboard-help/keyboard-help.component';
 import { KeyboardShortcutsService } from '@core/keyboard/keyboard-shortcuts.service';
 import { WallModeService } from '@core/wall-mode/wall-mode.service';
+import { FooterVersionPillComponent } from './footer-version-pill/footer-version-pill.component';
 
 @Component({
   selector: 'app-layout',
@@ -27,6 +28,7 @@ import { WallModeService } from '@core/wall-mode/wall-mode.service';
     KillSwitchBannerComponent,
     CommandPaletteComponent,
     KeyboardHelpComponent,
+    FooterVersionPillComponent,
   ],
   template: `
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -58,6 +60,7 @@ import { WallModeService } from '@core/wall-mode/wall-mode.service';
           <app-breadcrumbs />
           <router-outlet />
         </main>
+        <app-footer-version-pill />
       </div>
       <app-command-palette />
       <app-keyboard-help />

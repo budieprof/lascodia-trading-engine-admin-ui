@@ -16,6 +16,14 @@ export interface RuntimeConfig {
    * rollout knobs. See `feature-flags.service.ts`.
    */
   featureFlags?: Record<string, unknown>;
+
+  // ── Build metadata — surfaced in the footer version pill. Populate via the
+  // docker entrypoint at run-time so the same image carries different SHAs
+  // across deploys. All optional; the pill degrades gracefully.
+  appVersion?: string;
+  buildSha?: string;
+  buildTime?: string;
+  environmentLabel?: string;
 }
 
 export const RUNTIME_CONFIG = new InjectionToken<RuntimeConfig>('RUNTIME_CONFIG');
@@ -36,6 +44,10 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
       sentryRelease: cfg.sentryRelease,
       sentryTracesSampleRate: cfg.sentryTracesSampleRate,
       featureFlags: cfg.featureFlags,
+      appVersion: cfg.appVersion,
+      buildSha: cfg.buildSha,
+      buildTime: cfg.buildTime,
+      environmentLabel: cfg.environmentLabel,
     };
   } catch {
     return FALLBACK_CONFIG;
