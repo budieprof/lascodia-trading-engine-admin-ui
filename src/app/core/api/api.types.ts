@@ -1770,6 +1770,28 @@ export interface WorkerOverrideKnobsDto {
   overrideKnobs: string[];
 }
 
+/**
+ * Hot-reload EA safety config. Zero / undefined values mean "keep current"
+ * per engine convention — the EA ignores them. Only `targetInstanceId` is
+ * required when scoping to one EA; omit for fleet-wide push.
+ */
+export interface UpdateEAConfigRequest {
+  targetInstanceId?: string | null;
+  maxPosPerSymbol?: number;
+  maxLotPerOrder?: number;
+  maxSpreadPoints?: number;
+  maxConsecLosses?: number;
+  consecLossPauseMin?: number;
+  maxDailyLossPerSymbolPct?: number;
+  maxOpenPositions?: number;
+  maxDailyLossPct?: number;
+  maxOrdersPerMin?: number;
+}
+
+export interface RefreshSymbolSpecsRequest {
+  tradingAccountId: number;
+}
+
 export interface StrategyTemplateDto {
   id: number;
   name: string | null;
