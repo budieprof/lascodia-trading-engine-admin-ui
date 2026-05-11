@@ -43,12 +43,14 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     <section class="panel">
       <header class="panel-head">
         <h3>Capacity Profile</h3>
-        <span class="muted small" *ngIf="profile() as p">
-          Computed
-          <span [title]="p.computedAt | date: 'yyyy-MM-dd HH:mm:ss UTC'">
-            {{ p.computedAt | relativeTime }}
+        @if (profile(); as p) {
+          <span class="muted small">
+            Computed
+            <span [title]="p.computedAt | date: 'yyyy-MM-dd HH:mm:ss UTC'">
+              {{ p.computedAt | relativeTime }}
+            </span>
           </span>
-        </span>
+        }
       </header>
 
       @if (loading()) {
