@@ -401,6 +401,26 @@ export interface PositionDto {
   closedAt: string | null;
 }
 
+/**
+ * One row of a position's lifecycle audit trail (PRD-V2 FR-5.8). `eventType`
+ * and `source` are free-form strings on the engine entity so the UI buckets
+ * them at render-time. Common eventType values: Opened, Modified,
+ * PartialClose, Closed, ForceClosed, Reconciled, StaleClose. Common source
+ * values: EA, PositionWorker, ReconciliationWorker, Broker, Manual.
+ */
+export interface PositionLifecycleEventDto {
+  id: number;
+  positionId: number;
+  eventType: string;
+  source: string;
+  previousLots: number | null;
+  newLots: number | null;
+  swapAccumulated: number | null;
+  commissionAccumulated: number | null;
+  description: string | null;
+  occurredAt: string;
+}
+
 export interface StrategyDto {
   id: number;
   name: string | null;

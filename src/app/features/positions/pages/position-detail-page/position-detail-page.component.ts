@@ -20,6 +20,7 @@ import {
   FormFieldComponent,
   FormFieldControlDirective,
 } from '@shared/components/form-field/form-field.component';
+import { PositionLifecycleCardComponent } from '../../components/position-lifecycle-card/position-lifecycle-card.component';
 
 @Component({
   selector: 'app-position-detail-page',
@@ -34,6 +35,7 @@ import {
     FormFieldComponent,
     FormFieldControlDirective,
     CardSkeletonComponent,
+    PositionLifecycleCardComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -308,6 +310,8 @@ import {
               </a>
             </div>
           </section>
+
+          <app-position-lifecycle-card [positionId]="p.id" />
         }
       } @else {
         <app-error-state

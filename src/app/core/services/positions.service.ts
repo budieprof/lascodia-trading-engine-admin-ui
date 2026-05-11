@@ -1,7 +1,13 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from '@core/api/api.service';
-import { ResponseData, PagedData, PagerRequest, PositionDto } from '@core/api/api.types';
+import {
+  ResponseData,
+  PagedData,
+  PagerRequest,
+  PositionDto,
+  PositionLifecycleEventDto,
+} from '@core/api/api.types';
 
 @Injectable({ providedIn: 'root' })
 export class PositionsService {
@@ -27,5 +33,15 @@ export class PositionsService {
       closePrice,
       closeLots: closeLots ?? null,
     });
+  }
+
+  /**
+   * GET /position/{id}/lifecycle — chronological lifecycle / delta timeline.
+   * Returns an empty list until the writer-side wiring lands across the
+   * position-management command handlers (see engine commit 3fb257d).
+   */
+  getLifecycle(id: number, limit?: number): Observable<ResponseData<PositionLifecycleEventDto[]>> {
+    const qs = limit !== undefined ? `?limit=${limit}` : '';
+    return this.api.get(`/position/${id}/lifecycle${qs}`);
   }
 }
