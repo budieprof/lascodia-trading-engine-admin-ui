@@ -310,6 +310,12 @@ export class CommandPaletteComponent implements OnInit {
     },
     {
       group: 'System',
+      label: 'Market Data — Candle Coverage',
+      route: '/market-data/coverage',
+      keywords: 'candle coverage gaps history segments missing ohlcv backfill',
+    },
+    {
+      group: 'System',
       label: 'System — Worker Override Knobs',
       route: '/system-health/worker-override-knobs',
       keywords: 'override knob worker config key reference allow-list',

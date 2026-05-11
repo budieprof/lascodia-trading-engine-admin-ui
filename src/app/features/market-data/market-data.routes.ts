@@ -11,4 +11,10 @@ export const MARKET_DATA_ROUTES: Routes = [
         (m) => m.OrderBookPageComponent,
       ),
   },
+  {
+    path: 'coverage',
+    data: { breadcrumb: 'Candle Coverage' },
+    loadComponent: () =>
+      import('./pages/coverage-page/coverage-page.component').then((m) => m.CoveragePageComponent),
+  },
 ];
