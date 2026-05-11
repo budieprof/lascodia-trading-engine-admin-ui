@@ -48,6 +48,7 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
 import { PromotionReadinessCardComponent } from '../../components/promotion-readiness-card/promotion-readiness-card.component';
 import { StrategyVariantsTabComponent } from '../../components/strategy-variants-tab/strategy-variants-tab.component';
 import { StrategyCapacityCardComponent } from '../../components/strategy-capacity-card/strategy-capacity-card.component';
+import { StrategyPromotionReviewsTabComponent } from '../../components/strategy-promotion-reviews-tab/strategy-promotion-reviews-tab.component';
 import { RejectionDistributionDrawerComponent } from '../../components/rejection-distribution-drawer/rejection-distribution-drawer.component';
 
 @Component({
@@ -67,6 +68,7 @@ import { RejectionDistributionDrawerComponent } from '../../components/rejection
     PromotionReadinessCardComponent,
     StrategyVariantsTabComponent,
     StrategyCapacityCardComponent,
+    StrategyPromotionReviewsTabComponent,
     RejectionDistributionDrawerComponent,
     RouterLink,
   ],
@@ -420,6 +422,11 @@ import { RejectionDistributionDrawerComponent } from '../../components/rejection
           <!-- Capacity Profile Tab — AUM-vs-Sharpe sweep with sizing guidance. -->
           @if (activeTab() === 'capacity') {
             <app-strategy-capacity-card [strategyId]="strategyId" />
+          }
+
+          <!-- Promotion Reviews Tab — bull/bear/judge advisory pipeline output. -->
+          @if (activeTab() === 'reviews') {
+            <app-strategy-promotion-reviews-tab [strategyId]="strategyId" />
           }
 
           <!-- Lineage Tab — parent/child tree centred on this strategy. -->
@@ -1258,6 +1265,7 @@ export class StrategyDetailPageComponent implements OnInit {
     { label: 'Walk-Forward', value: 'walkforward' },
     { label: 'Variants', value: 'variants' },
     { label: 'Capacity', value: 'capacity' },
+    { label: 'Reviews', value: 'reviews' },
     { label: 'Lineage', value: 'lineage' },
   ];
 

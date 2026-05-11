@@ -1704,6 +1704,38 @@ export type LlmProposalStatus =
   | 'Screening'
   | 'Validating';
 
+/**
+ * Bull/bear/judge advisory review of an auto-promoted strategy (PRD-0001 §6 F4).
+ * Strictly informational — never blocks the deterministic gates. The four
+ * JSON fields stay as raw strings so the UI deserializes the thesis blobs
+ * on demand (avoids duplicating the engine-side PromotionReviewSchemas).
+ */
+export type PromotionReviewRecommendation = 'Confirm' | 'Caution' | 'SkipRecommend';
+
+export type PromotionReviewOutcome =
+  | 'Completed'
+  | 'Truncated'
+  | 'GenerationFailed'
+  | 'SkippedOutOfBand'
+  | 'SkippedDisabled';
+
+export interface PromotionReviewSnapshotDto {
+  id: number;
+  strategyId: number;
+  screeningScore: number;
+  borderlineLowerPercentile: number;
+  borderlineUpperPercentile: number;
+  bullThesisJson: string | null;
+  bearThesisJson: string | null;
+  judgeRecommendation: PromotionReviewRecommendation | null;
+  judgeConfidence: number | null;
+  judgeKeyConcernsJson: string | null;
+  outcome: PromotionReviewOutcome;
+  totalCostUsd: number;
+  llmInvocationIdsJson: string | null;
+  createdAt: string;
+}
+
 export interface LlmProposalDto {
   id: number;
   name: string;

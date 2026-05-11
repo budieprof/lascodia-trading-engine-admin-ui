@@ -35,6 +35,9 @@ import {
   SaveBacktestPreviewSnapshotRequest,
   PromotionGatesDto,
   LlmProposalDto,
+  PromotionReviewSnapshotDto,
+  PromotionReviewRecommendation,
+  PromotionReviewOutcome,
 } from '@core/api/api.types';
 
 @Injectable({ providedIn: 'root' })
@@ -289,5 +292,23 @@ export class StrategiesService {
   /** POST /strategy/llm-proposals/{id}/promote — creates a Paused Strategy + returns its id. */
   promoteLlmProposal(id: number): Observable<ResponseData<number>> {
     return this.api.post(`/strategy/llm-proposals/${id}/promote`, {});
+  }
+
+  /** GET /promotion-review/{id} — single bull/bear/judge advisory review. */
+  getPromotionReview(id: number): Observable<ResponseData<PromotionReviewSnapshotDto>> {
+    return this.api.get(`/promotion-review/${id}`);
+  }
+
+  /** POST /promotion-review/list — paged list with optional strategy / verdict / outcome filters. */
+  listPromotionReviews(
+    params: PagerRequest & {
+      filter?: {
+        strategyId?: number | null;
+        judgeRecommendation?: PromotionReviewRecommendation | null;
+        outcome?: PromotionReviewOutcome | null;
+      };
+    },
+  ): Observable<ResponseData<PagedData<PromotionReviewSnapshotDto>>> {
+    return this.api.post(`/promotion-review/list`, params);
   }
 }
