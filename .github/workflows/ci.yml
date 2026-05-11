@@ -100,19 +100,71 @@ jobs:
           retention-days: 14
 
   docker:
-    name: Docker image
+    name: Docker image — build & push to GHCR
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: build-test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Workflow-scoped GITHUB_TOKEN permissions: read for repo content,
+    # write for the package registry so build-push-action can push to GHCR.
+    # No additional secrets needed — uses the auto-provisioned GITHUB_TOKEN.
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Build image
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/lascodia-admin-ui
+          # Tags emitted per push to main:
+          #   - sha-<short-sha> (immutable, e.g. sha-abc1234)
+          #   - staging         (moving tag the staging host pulls from)
+          #   - latest          (moving tag for the most-recent main build)
+          # A tagged release (v*.*.*) would also produce a semver tag, but
+          # this workflow only fires on push to main today — releases can
+          # add their own job later.
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=staging,enable={{is_default_branch}}
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=Lascodia Trading Engine — Admin UI
+            org.opencontainers.image.description=Angular admin console for the Lascodia trading engine
+
+      - name: Build and push to GHCR
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: false
-          tags: lascodia-admin:${{ github.sha }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Pass build args so the docker entrypoint can bake the build SHA
+          # into the runtime config.json — the footer version pill picks
+          # this up via /config.json's buildSha field.
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
+            BUILD_TIME=${{ github.event.head_commit.timestamp }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Image digest
+        run: |
+          echo "Published tags:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Staging pull:** \`docker pull ghcr.io/${{ github.repository_owner }}/lascodia-admin-ui:staging\`" >> "$GITHUB_STEP_SUMMARY"
