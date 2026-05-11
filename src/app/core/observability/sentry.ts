@@ -19,6 +19,11 @@ export interface SentryRuntimeConfig {
   sentryEnvironment?: string;
   sentryRelease?: string;
   sentryTracesSampleRate?: number;
+  // Session Replay sample rates. Defaults are conservative: 0% of normal
+  // sessions, 100% of error sessions. Operators can bump the session rate
+  // (e.g. 0.05) per environment via runtime config without a rebuild.
+  sentryReplaysSessionSampleRate?: number;
+  sentryReplaysOnErrorSampleRate?: number;
 }
 
 export function initSentry(config: RuntimeConfig & SentryRuntimeConfig): void {
@@ -30,7 +35,21 @@ export function initSentry(config: RuntimeConfig & SentryRuntimeConfig): void {
     environment: config.sentryEnvironment ?? 'production',
     release: config.sentryRelease,
     tracesSampleRate: config.sentryTracesSampleRate ?? 0.05,
-    integrations: [Sentry.browserTracingIntegration()],
+    replaysSessionSampleRate: config.sentryReplaysSessionSampleRate ?? 0,
+    replaysOnErrorSampleRate: config.sentryReplaysOnErrorSampleRate ?? 1.0,
+    integrations: [
+      Sentry.browserTracingIntegration(),
+      // Session Replay: mask all text + block all media by default so we
+      // never ship trader PnL numbers or strategy parameters to Sentry.
+      // The error-sample path is what makes this useful for an operator
+      // console — when something breaks, the replay shows what they were
+      // looking at without us paying for full-session recording.
+      Sentry.replayIntegration({
+        maskAllText: true,
+        maskAllInputs: true,
+        blockAllMedia: true,
+      }),
+    ],
     // Scrub Authorization headers from network breadcrumbs so engine JWTs
     // don't land in reports.
     beforeBreadcrumb(breadcrumb) {

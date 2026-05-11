@@ -9,6 +9,8 @@ export interface RuntimeConfig {
   sentryEnvironment?: string;
   sentryRelease?: string;
   sentryTracesSampleRate?: number;
+  sentryReplaysSessionSampleRate?: number;
+  sentryReplaysOnErrorSampleRate?: number;
 
   /**
    * Flag map consumed by `FeatureFlagsService`. Keyed by flag name; values
@@ -43,6 +45,8 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
       sentryEnvironment: cfg.sentryEnvironment,
       sentryRelease: cfg.sentryRelease,
       sentryTracesSampleRate: cfg.sentryTracesSampleRate,
+      sentryReplaysSessionSampleRate: cfg.sentryReplaysSessionSampleRate,
+      sentryReplaysOnErrorSampleRate: cfg.sentryReplaysOnErrorSampleRate,
       featureFlags: cfg.featureFlags,
       appVersion: cfg.appVersion,
       buildSha: cfg.buildSha,

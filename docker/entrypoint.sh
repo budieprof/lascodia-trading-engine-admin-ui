@@ -11,6 +11,12 @@ APP_VERSION=${APP_VERSION:-}
 BUILD_SHA=${BUILD_SHA:-}
 BUILD_TIME=${BUILD_TIME:-}
 ENVIRONMENT_LABEL=${ENVIRONMENT_LABEL:-}
+SENTRY_DSN=${SENTRY_DSN:-}
+SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-}
+SENTRY_RELEASE=${SENTRY_RELEASE:-}
+SENTRY_TRACES_SAMPLE_RATE=${SENTRY_TRACES_SAMPLE_RATE:-}
+SENTRY_REPLAYS_SESSION_SAMPLE_RATE=${SENTRY_REPLAYS_SESSION_SAMPLE_RATE:-}
+SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE=${SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE:-}
 
 # Build a JSON object piece by piece. Only emit keys whose env var is non-empty.
 # Using printf + manual JSON construction (no jq dependency) — values are
@@ -23,7 +29,13 @@ if [ -n "$API_BASE_URL" ] \
    || [ -n "$APP_VERSION" ] \
    || [ -n "$BUILD_SHA" ] \
    || [ -n "$BUILD_TIME" ] \
-   || [ -n "$ENVIRONMENT_LABEL" ]; then
+   || [ -n "$ENVIRONMENT_LABEL" ] \
+   || [ -n "$SENTRY_DSN" ] \
+   || [ -n "$SENTRY_ENVIRONMENT" ] \
+   || [ -n "$SENTRY_RELEASE" ] \
+   || [ -n "$SENTRY_TRACES_SAMPLE_RATE" ] \
+   || [ -n "$SENTRY_REPLAYS_SESSION_SAMPLE_RATE" ] \
+   || [ -n "$SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE" ]; then
   sep=""
   printf '{' > "$CONFIG_FILE"
   if [ -n "$API_BASE_URL" ]; then
@@ -41,8 +53,28 @@ if [ -n "$API_BASE_URL" ] \
   if [ -n "$ENVIRONMENT_LABEL" ]; then
     printf '%s"environmentLabel":"%s"' "$sep" "$(escape "$ENVIRONMENT_LABEL")" >> "$CONFIG_FILE"; sep=","
   fi
+  if [ -n "$SENTRY_DSN" ]; then
+    printf '%s"sentryDsn":"%s"' "$sep" "$(escape "$SENTRY_DSN")" >> "$CONFIG_FILE"; sep=","
+  fi
+  if [ -n "$SENTRY_ENVIRONMENT" ]; then
+    printf '%s"sentryEnvironment":"%s"' "$sep" "$(escape "$SENTRY_ENVIRONMENT")" >> "$CONFIG_FILE"; sep=","
+  fi
+  if [ -n "$SENTRY_RELEASE" ]; then
+    printf '%s"sentryRelease":"%s"' "$sep" "$(escape "$SENTRY_RELEASE")" >> "$CONFIG_FILE"; sep=","
+  fi
+  # Numeric sample-rate fields emit as JSON numbers (not strings) — operators
+  # set these to floats like 0.05 so they must parse as numbers at the client.
+  if [ -n "$SENTRY_TRACES_SAMPLE_RATE" ]; then
+    printf '%s"sentryTracesSampleRate":%s' "$sep" "$SENTRY_TRACES_SAMPLE_RATE" >> "$CONFIG_FILE"; sep=","
+  fi
+  if [ -n "$SENTRY_REPLAYS_SESSION_SAMPLE_RATE" ]; then
+    printf '%s"sentryReplaysSessionSampleRate":%s' "$sep" "$SENTRY_REPLAYS_SESSION_SAMPLE_RATE" >> "$CONFIG_FILE"; sep=","
+  fi
+  if [ -n "$SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE" ]; then
+    printf '%s"sentryReplaysOnErrorSampleRate":%s' "$sep" "$SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE" >> "$CONFIG_FILE"; sep=","
+  fi
   printf '}\n' >> "$CONFIG_FILE"
-  echo "[entrypoint] Wrote runtime config to $CONFIG_FILE (API_BASE_URL=${API_BASE_URL:-baked}, SHA=${BUILD_SHA:-none})"
+  echo "[entrypoint] Wrote runtime config to $CONFIG_FILE (API_BASE_URL=${API_BASE_URL:-baked}, SHA=${BUILD_SHA:-none}, SENTRY=${SENTRY_DSN:+on})"
 else
   echo "[entrypoint] No runtime overrides set; using baked $CONFIG_FILE"
 fi
