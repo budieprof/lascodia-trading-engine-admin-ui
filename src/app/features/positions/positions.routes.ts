@@ -4,5 +4,13 @@ import { PositionDetailPageComponent } from './pages/position-detail-page/positi
 
 export const POSITIONS_ROUTES: Routes = [
   { path: '', component: PositionsPageComponent, data: { breadcrumb: 'Positions' } },
+  {
+    path: 'deltas',
+    data: { breadcrumb: 'Position Deltas' },
+    loadComponent: () =>
+      import('./pages/position-deltas-page/position-deltas-page.component').then(
+        (m) => m.PositionDeltasPageComponent,
+      ),
+  },
   { path: ':id', component: PositionDetailPageComponent, data: { breadcrumb: 'Detail' } },
 ];

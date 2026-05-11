@@ -44,4 +44,25 @@ export class PositionsService {
     const qs = limit !== undefined ? `?limit=${limit}` : '';
     return this.api.get(`/position/${id}/lifecycle${qs}`);
   }
+
+  /**
+   * POST /position/lifecycle/list — fleet-wide position-delta feed
+   * (PRD-V2 FR-5.8). The filter shape on the engine accepts substring
+   * matches on eventType / source via ILIKE, so a `source: 'PositionWorker'`
+   * filter catches all the colon-suffixed close-reason variants
+   * ("PositionWorker:StopLoss", "PositionWorker:TakeProfit", etc.).
+   */
+  listLifecycleEvents(
+    params: PagerRequest & {
+      filter?: {
+        positionId?: number | null;
+        eventType?: string | null;
+        source?: string | null;
+        from?: string | null;
+        to?: string | null;
+      };
+    },
+  ): Observable<ResponseData<PagedData<PositionLifecycleEventDto>>> {
+    return this.api.post(`/position/lifecycle/list`, params);
+  }
 }
