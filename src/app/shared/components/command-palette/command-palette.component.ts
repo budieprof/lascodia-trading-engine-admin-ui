@@ -303,6 +303,18 @@ export class CommandPaletteComponent implements OnInit {
       keywords: 'auto apply safety gate convergence quiet period',
     },
     {
+      group: 'System',
+      label: 'Market Data — Order Book',
+      route: '/market-data/order-book',
+      keywords: 'order book depth ladder dom bid ask spread microstructure',
+    },
+    {
+      group: 'System',
+      label: 'System — Worker Override Knobs',
+      route: '/system-health/worker-override-knobs',
+      keywords: 'override knob worker config key reference allow-list',
+    },
+    {
       group: 'ML',
       label: 'CompositeML — Active Policies',
       route: '/composite-ml',

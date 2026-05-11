@@ -1761,6 +1761,15 @@ export interface UpsertAutoApplyConfigRequest {
   maxValue?: number | null;
 }
 
+/**
+ * One worker's override-knob allow-list. Replaces the "grep CLAUDE.md to
+ * find the override key" workflow with a queryable surface.
+ */
+export interface WorkerOverrideKnobsDto {
+  workerName: string;
+  overrideKnobs: string[];
+}
+
 export interface StrategyTemplateDto {
   id: number;
   name: string | null;
