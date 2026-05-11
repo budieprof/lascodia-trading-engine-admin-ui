@@ -41,6 +41,11 @@ jobs:
       - name: Production build
         run: npm run build -- --configuration production
 
+      - name: Bundle size report
+        # Renders a per-bucket + top-10 table into the workflow summary so
+        # operators see bundle drift in PR checks without leaving GitHub.
+        run: node scripts/bundle-stats.mjs dist/lascodia-admin/browser >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload dist
         uses: actions/upload-artifact@v4
         with:
