@@ -2,11 +2,19 @@
   padding: var(--space-2) 0;
 }
 
-.metrics-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--space-4);
-  margin-bottom: var(--space-6);
+// Card scaffolding shared across every panel-style block on this page.
+// Extracted to a single rule so adding new card variants is a one-class
+// addition rather than a four-property duplication. Keeps the
+// anyComponentStyle budget headroom for the per-card overrides below.
+.stats-table-card,
+.summary-card,
+.data-table-card,
+.activity-feed,
+.spread-board {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
 }
 
 .kpi-strip {
@@ -112,12 +120,10 @@
   }
 }
 
+// Scaffolding covered by the consolidated rule above; the flex column
+// layout is the actual differentiator for these two.
 .spread-board,
 .activity-feed {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
@@ -167,6 +173,9 @@
 .board-table .loss {
   color: var(--loss);
 }
+.board-table .profit {
+  color: var(--profit);
+}
 .src-pill {
   padding: 2px 6px;
   border-radius: 3px;
@@ -181,18 +190,10 @@
   color: #c93400;
 }
 
+// Scaffolding from the consolidated rule above; only the spacing override
+// is local to this variant.
 .stats-table-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
   margin-top: var(--space-3);
-}
-.stats-table-card .board-table .profit {
-  color: var(--profit);
-}
-.stats-table-card .board-table .loss {
-  color: var(--loss);
 }
 
 /* Candle History tab — denser layout */
@@ -222,25 +223,8 @@
   }
 }
 
-.summary-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-.summary-card .board-table .profit {
-  color: var(--profit);
-}
-.summary-card .board-table .loss {
-  color: var(--loss);
-}
-
-.data-table-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
+// summary-card scaffolding from the consolidated rule above; profit/loss
+// colors picked up from the generic .board-table .profit/.loss rules.
 .data-table-card .board-head {
   margin-bottom: 0;
 }
