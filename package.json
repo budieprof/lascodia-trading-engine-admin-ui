@@ -21,6 +21,7 @@
     "codegen:api": "openapi-typescript \"${SWAGGER_URL:-http://localhost:5000/swagger/v1/swagger.json}\" -o src/app/core/api/_generated/schema.ts",
     "storybook": "ng run lascodia-admin:storybook",
     "storybook:build": "ng run lascodia-admin:build-storybook",
+    "lhci": "npx --yes @lhci/cli@^0.15.1 autorun",
     "prepare": "husky"
   },
   "lint-staged": {

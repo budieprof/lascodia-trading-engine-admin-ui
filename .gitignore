@@ -24,6 +24,7 @@ Thumbs.db
 /coverage
 /playwright-report
 /test-results
+/.lighthouseci
 
 # Environment
 *.env
