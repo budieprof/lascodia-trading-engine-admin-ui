@@ -6,12 +6,14 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { catchError, map, of } from 'rxjs';
 
 import { PositionsService } from '@core/services/positions.service';
+import { RealtimeService } from '@core/realtime/realtime.service';
 import type { PositionLifecycleEventDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
@@ -393,10 +395,16 @@ interface TypeBucket {
 })
 export class PositionDeltasPageComponent {
   private readonly positions = inject(PositionsService);
+  private readonly realtime = inject(RealtimeService);
 
   protected readonly windowHours = signal(24);
   protected readonly sourceFilter = signal('');
   protected readonly eventTypeFilter = signal('');
+
+  // Push events arriving via SignalR — merged with polled rows in `rows()` and
+  // deduped by id. Capped so a runaway stream can't grow this unboundedly.
+  private readonly livePrepend = signal<PositionLifecycleEventDto[]>([]);
+  private static readonly LIVE_PREPEND_MAX = 200;
 
   protected readonly resource = createPolledResource(
     () => {
@@ -424,11 +432,38 @@ export class PositionDeltasPageComponent {
       this.windowHours();
       this.sourceFilter();
       this.eventTypeFilter();
+      // Filters changed — discard the live buffer too so the merged view
+      // matches the polled refetch, otherwise stale-filtered push events
+      // linger at the top until the cap rolls them off.
+      this.livePrepend.set([]);
       this.resource.refresh();
     });
+
+    // Live updates: prepend matching push events into the buffer; the rows()
+    // computed merges with polled rows and dedupes by id.
+    this.realtime
+      .on<PositionLifecycleEventDto>('positionLifecycleEvent')
+      .pipe(takeUntilDestroyed())
+      .subscribe((evt) => {
+        if (!this.matchesActiveFilters(evt)) return;
+        this.livePrepend.update((buf) =>
+          [evt, ...buf].slice(0, PositionDeltasPageComponent.LIVE_PREPEND_MAX),
+        );
+      });
   }
 
-  protected readonly rows = computed(() => this.resource.value() ?? []);
+  protected readonly rows = computed(() => {
+    const polled = this.resource.value() ?? [];
+    const live = this.livePrepend();
+    if (live.length === 0) return polled;
+    const seen = new Set(polled.map((r) => r.id));
+    // Live events arrive newest-first; merge unique ones at the front of
+    // the polled list (which is the engine's sorted-by-OccurredAt-desc
+    // result), so the table always shows newest-first.
+    const merged: PositionLifecycleEventDto[] = [];
+    for (const e of live) if (!seen.has(e.id)) merged.push(e);
+    return [...merged, ...polled];
+  });
   protected readonly loading = computed(() => this.resource.loading() && this.rows().length === 0);
 
   protected readonly distinctPositionCount = computed(
@@ -480,5 +515,21 @@ export class PositionDeltasPageComponent {
     if (t === 'modified') return 'modify';
     if (t.includes('reconcile')) return 'reconcile';
     return 'other';
+  }
+
+  // Client-side mirror of the engine's filter logic so push events arriving
+  // in the SignalR stream don't bypass the active selector state. Substring
+  // match on source matches the engine's ILIKE semantics
+  // (PositionWorker matches "PositionWorker:StopLoss" etc.).
+  private matchesActiveFilters(evt: PositionLifecycleEventDto): boolean {
+    const src = this.sourceFilter();
+    if (src && !evt.source.toLowerCase().includes(src.toLowerCase())) return false;
+    const type = this.eventTypeFilter();
+    if (type && !evt.eventType.toLowerCase().includes(type.toLowerCase())) return false;
+    // Window filter — drop events older than the active window. SignalR push
+    // is real-time so this is rarely false, but stricter is safer.
+    const cutoff = Date.now() - this.windowHours() * 60 * 60 * 1000;
+    if (new Date(evt.occurredAt).getTime() < cutoff) return false;
+    return true;
   }
 }

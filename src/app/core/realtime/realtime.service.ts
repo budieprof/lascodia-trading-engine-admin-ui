@@ -32,6 +32,13 @@ export const REALTIME_EVENTS = [
   'strategyCapacityProfileUpdated',
   'strategyVariantPromoted',
   'optimizationApproved',
+  // ── Position lifecycle (PRD-V2 FR-5.8) ──
+  // Pushed directly by the 5 position-management command handlers
+  // (Open / Close / ReceivePositionDelta / ReceivePositionSnapshot /
+  // OrderFilledEventHandler) after their SaveChanges. Bypasses the
+  // integration-event bus because this is admin-UI telemetry rather
+  // than a cross-instance domain event.
+  'positionLifecycleEvent',
   // ── Presence (hub-invoked, not bus-relayed) ──
   'presenceJoined',
   'presenceLeft',

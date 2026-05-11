@@ -7,10 +7,12 @@ import {
   input,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { catchError, finalize, map, of } from 'rxjs';
 
 import { PositionsService } from '@core/services/positions.service';
+import { RealtimeService } from '@core/realtime/realtime.service';
 import type { PositionLifecycleEventDto } from '@core/api/api.types';
 
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
@@ -257,6 +259,7 @@ export class PositionLifecycleCardComponent {
   readonly limit = input<number>(200);
 
   private readonly positions = inject(PositionsService);
+  private readonly realtime = inject(RealtimeService);
 
   protected readonly loading = signal(false);
   protected readonly error = signal<string | null>(null);
@@ -269,6 +272,21 @@ export class PositionLifecycleCardComponent {
       const id = this.positionId();
       if (id) this.load();
     });
+
+    // Live updates: subscribe once and filter by the bound positionId so
+    // re-routing to a different position (same component instance) picks up
+    // the new id automatically without re-subscribing.
+    this.realtime
+      .on<PositionLifecycleEventDto>('positionLifecycleEvent')
+      .pipe(takeUntilDestroyed())
+      .subscribe((evt) => {
+        if (evt.positionId !== this.positionId()) return;
+        // Prepend so the most recent event appears at the top of the timeline
+        // (engine returns oldest-first but UX-wise newest-first feels right
+        // for live updates — the initial render is still oldest-first since
+        // we don't reverse the polled rows).
+        this.events.update((rows) => [evt, ...rows]);
+      });
   }
 
   load(): void {
