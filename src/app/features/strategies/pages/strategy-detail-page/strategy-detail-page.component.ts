@@ -46,6 +46,8 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 import { StrategyFormComponent } from '../../components/strategy-form/strategy-form.component';
 import { PromotionReadinessCardComponent } from '../../components/promotion-readiness-card/promotion-readiness-card.component';
+import { StrategyVariantsTabComponent } from '../../components/strategy-variants-tab/strategy-variants-tab.component';
+import { StrategyCapacityCardComponent } from '../../components/strategy-capacity-card/strategy-capacity-card.component';
 
 @Component({
   selector: 'app-strategy-detail-page',
@@ -62,6 +64,8 @@ import { PromotionReadinessCardComponent } from '../../components/promotion-read
     RelativeTimePipe,
     StrategyFormComponent,
     PromotionReadinessCardComponent,
+    StrategyVariantsTabComponent,
+    StrategyCapacityCardComponent,
     RouterLink,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -396,6 +400,16 @@ import { PromotionReadinessCardComponent } from '../../components/promotion-read
               [fetchData]="fetchWalkForward"
               (rowClick)="onWalkForwardRowClick($event)"
             />
+          }
+
+          <!-- Variants Tab — A/B shadow tests attached to this base strategy. -->
+          @if (activeTab() === 'variants') {
+            <app-strategy-variants-tab [strategyId]="strategyId" />
+          }
+
+          <!-- Capacity Profile Tab — AUM-vs-Sharpe sweep with sizing guidance. -->
+          @if (activeTab() === 'capacity') {
+            <app-strategy-capacity-card [strategyId]="strategyId" />
           }
 
           <!-- Lineage Tab — parent/child tree centred on this strategy. -->
@@ -1224,6 +1238,8 @@ export class StrategyDetailPageComponent implements OnInit {
     { label: 'Optimization', value: 'optimization' },
     { label: 'Backtests', value: 'backtests' },
     { label: 'Walk-Forward', value: 'walkforward' },
+    { label: 'Variants', value: 'variants' },
+    { label: 'Capacity', value: 'capacity' },
     { label: 'Lineage', value: 'lineage' },
   ];
 
