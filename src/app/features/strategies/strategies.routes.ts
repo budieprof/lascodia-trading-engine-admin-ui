@@ -6,6 +6,11 @@ import { StrategiesComparePageComponent } from './pages/strategies-compare-page/
 
 export const STRATEGIES_ROUTES: Routes = [
   { path: '', component: StrategiesPageComponent, data: { breadcrumb: 'Strategies' } },
+  // PRD FR-3.5: the allocation-weights surface lives at /strategy-portfolio
+  // (Operator-gated, combines allocation + FWER report). Anyone hitting the
+  // PRD-canonical /strategies/allocation URL — saved bookmark, command-palette
+  // entry, doc link — is redirected to the real page rather than 404'ing.
+  { path: 'allocation', redirectTo: '/strategy-portfolio', pathMatch: 'full' },
   {
     path: 'compare',
     component: StrategiesComparePageComponent,
