@@ -293,6 +293,13 @@ export const routes: Routes = [
             (m) => m.AUTOMATION_MONITOR_ROUTES,
           ),
       },
+      {
+        path: 'auto-tune',
+        canActivate: [requireRoles('Operator', 'Admin')],
+        data: { breadcrumb: 'Auto-Tune' },
+        loadChildren: () =>
+          import('@features/auto-tune/auto-tune.routes').then((m) => m.AUTO_TUNE_ROUTES),
+      },
       { path: '**', redirectTo: 'dashboard' },
     ],
   },

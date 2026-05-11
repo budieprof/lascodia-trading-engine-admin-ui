@@ -291,6 +291,18 @@ export class CommandPaletteComponent implements OnInit {
       keywords: 'template apply bulk symbols multi pair',
     },
     {
+      group: 'Ops',
+      label: 'Auto-Tune — Proposals',
+      route: '/auto-tune',
+      keywords: 'auto tune proposal apply reject knob mutation',
+    },
+    {
+      group: 'Ops',
+      label: 'Auto-Tune — Auto-Apply Config',
+      route: '/auto-tune/auto-apply',
+      keywords: 'auto apply safety gate convergence quiet period',
+    },
+    {
       group: 'ML',
       label: 'CompositeML — Active Policies',
       route: '/composite-ml',

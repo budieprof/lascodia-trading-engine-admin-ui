@@ -1716,6 +1716,51 @@ export interface LlmProposalDto {
   proposedAt: string;
 }
 
+/**
+ * Auto-tune proposal emitted by CompositeMLAutoTuningWorker. Awaits operator
+ * Apply or Reject. Apply transactionally upserts the EngineConfig row.
+ */
+export type AutoTuneProposalStatus = 'Pending' | 'Applied' | 'Rejected' | 'Stale';
+
+export interface AutoTuneProposalDto {
+  id: number;
+  proposalKey: string;
+  currentValue: number;
+  proposedValue: number;
+  confidenceLow: number;
+  confidenceHigh: number;
+  evidenceCount: number;
+  rationaleJson: string;
+  proposedAtUtc: string;
+  status: AutoTuneProposalStatus | string;
+  reviewedAtUtc: string | null;
+  reviewedBy: string | null;
+  appliedAtUtc: string | null;
+}
+
+/** Per-knob auto-apply config — the 4-gate safety stack on autonomous apply. */
+export interface AutoApplyConfigDto {
+  id: number;
+  proposalKey: string;
+  autoApplyEnabled: boolean;
+  convergenceTolerance: number;
+  requiredConvergenceCount: number;
+  quietPeriodHours: number;
+  minValue: number | null;
+  maxValue: number | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+export interface UpsertAutoApplyConfigRequest {
+  autoApplyEnabled: boolean;
+  convergenceTolerance: number;
+  requiredConvergenceCount: number;
+  quietPeriodHours: number;
+  minValue?: number | null;
+  maxValue?: number | null;
+}
+
 export interface StrategyTemplateDto {
   id: number;
   name: string | null;
