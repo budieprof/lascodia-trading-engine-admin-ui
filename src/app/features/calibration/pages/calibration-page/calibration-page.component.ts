@@ -522,34 +522,40 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                   <p class="default-desc">{{ entry.floorDescription }} · {{ entry.dataSource }}</p>
                   <p class="default-rationale">{{ entry.recommendationRationale }}</p>
 
-                  <div class="distribution">
-                    <span class="dist-label small muted"
-                      >DISTRIBUTION ({{ entry.sampleCount }} samples)</span
-                    >
-                    <div class="dist-bar">
-                      @for (p of percentilePoints(entry); track p.label) {
+                  @if (hasDistribution(entry)) {
+                    <div class="distribution">
+                      <span class="dist-label small muted"
+                        >DISTRIBUTION ({{ entry.sampleCount }} samples)</span
+                      >
+                      <div class="dist-bar">
+                        @for (p of percentilePoints(entry); track p.label) {
+                          <span
+                            class="dist-tick"
+                            [style.left.%]="p.pct"
+                            [title]="p.label + ': ' + p.value"
+                          >
+                            <span class="dist-tick-bar"></span>
+                            <span class="dist-tick-label small">{{ p.label }}</span>
+                            <span class="dist-tick-val mono small">{{ p.value }}</span>
+                          </span>
+                        }
                         <span
-                          class="dist-tick"
-                          [style.left.%]="p.pct"
-                          [title]="p.label + ': ' + p.value"
-                        >
-                          <span class="dist-tick-bar"></span>
-                          <span class="dist-tick-label small">{{ p.label }}</span>
-                          <span class="dist-tick-val mono small">{{ p.value }}</span>
-                        </span>
-                      }
-                      <span
-                        class="dist-marker current"
-                        [style.left.%]="markerPct(entry, entry.currentFloor)"
-                        [title]="'Current: ' + entry.currentFloor"
-                      ></span>
-                      <span
-                        class="dist-marker recommended"
-                        [style.left.%]="markerPct(entry, entry.recommendedFloor)"
-                        [title]="'Recommended: ' + entry.recommendedFloor"
-                      ></span>
+                          class="dist-marker current"
+                          [style.left.%]="markerPct(entry, entry.currentFloor)"
+                          [title]="'Current: ' + entry.currentFloor"
+                        ></span>
+                        <span
+                          class="dist-marker recommended"
+                          [style.left.%]="markerPct(entry, entry.recommendedFloor)"
+                          [title]="'Recommended: ' + entry.recommendedFloor"
+                        ></span>
+                      </div>
                     </div>
-                  </div>
+                  } @else {
+                    <p class="small muted dist-empty">
+                      No distribution available — {{ entry.sampleCount }} sample(s).
+                    </p>
+                  }
                 </article>
               }
             </section>
@@ -967,6 +973,12 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         background: #0071e3;
         box-shadow: 0 0 0 1px var(--bg-secondary);
       }
+      .dist-empty {
+        margin: var(--space-3) 0 0;
+        padding: var(--space-2) var(--space-3);
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-sm);
+      }
     `,
   ],
   providers: [DatePipe],
@@ -1130,9 +1142,12 @@ export class CalibrationPageComponent {
   /**
    * Map an absolute value into a percentage position along the distribution
    * bar (min → 0%, max → 100%). Used to plot the current / recommended
-   * floor markers and the percentile ticks.
+   * floor markers and the percentile ticks. Returns 50% (mid-bar) when the
+   * entry has no distribution — e.g. the strategy-promotion floor that
+   * comes back with 0 samples and no percentile object.
    */
   markerPct(entry: DefaultsCalibrationEntryDto, value: number): number {
+    if (!entry.distribution) return 50;
     const { min, max } = entry.distribution;
     if (max <= min) return 50;
     const pct = ((value - min) / (max - min)) * 100;
@@ -1142,6 +1157,7 @@ export class CalibrationPageComponent {
   percentilePoints(
     entry: DefaultsCalibrationEntryDto,
   ): Array<{ label: string; pct: number; value: number }> {
+    if (!entry.distribution) return [];
     const d = entry.distribution;
     const points: Array<{ label: string; value: number }> = [
       { label: 'P5', value: d.p5 },
@@ -1151,6 +1167,10 @@ export class CalibrationPageComponent {
       { label: 'P95', value: d.p90 },
     ];
     return points.map((p) => ({ ...p, pct: this.markerPct(entry, p.value) }));
+  }
+
+  hasDistribution(entry: DefaultsCalibrationEntryDto): boolean {
+    return !!entry.distribution;
   }
 }
 

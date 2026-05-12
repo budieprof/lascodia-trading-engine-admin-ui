@@ -1508,7 +1508,12 @@ export interface DefaultsCalibrationEntryDto {
   dataSource: string;
   sampleCount: number;
   currentFloor: number;
-  distribution: DefaultsCalibrationDistributionDto;
+  /**
+   * Null when the engine has insufficient samples to compute percentiles
+   * (typically below the configured MinBaselineCount). The UI hides the
+   * percentile chart and shows the sample-count note instead.
+   */
+  distribution: DefaultsCalibrationDistributionDto | null;
   exclusionRatePct: number;
   recommendedFloor: number;
   recommendationRationale: string;
