@@ -206,6 +206,15 @@ const INDICATOR_BY_TYPE: Record<IndicatorType, IndicatorDef> = INDICATOR_DEFS.re
 
 const INDICATOR_STORAGE_PREFIX = 'tradingChart.indicators.v1';
 
+// "Show volume" and "Show positions" are global user preferences — the
+// operator wants their visibility choice to apply across whichever
+// instrument they're inspecting. Persisting them per-(symbol, timeframe)
+// inside INDICATOR_STORAGE_PREFIX was a footgun: an accidental click on
+// one chart silently disabled the overlay forever on that symbol while
+// leaving every other symbol unchanged.
+const SHOW_VOLUME_STORAGE_KEY = 'tradingChart.showVolume';
+const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.showPositions';
+
 @Component({
   selector: 'app-trading-chart',
   standalone: true,
@@ -1215,13 +1224,13 @@ export class TradingChartComponent implements OnInit, OnDestroy {
 
   toggleVolume() {
     this.showVolume.set(!this.showVolume());
-    this.persistChartConfig();
+    this.persistGlobalToggle(SHOW_VOLUME_STORAGE_KEY, this.showVolume());
     this.buildChartMerge();
   }
 
   togglePositions() {
     this.showPositions.set(!this.showPositions());
-    this.persistChartConfig();
+    this.persistGlobalToggle(SHOW_POSITIONS_STORAGE_KEY, this.showPositions());
     this.buildChartMerge();
   }
 
@@ -1300,26 +1309,37 @@ export class TradingChartComponent implements OnInit, OnDestroy {
 
   private loadChartConfig(): void {
     if (typeof localStorage === 'undefined') return;
+
+    // Indicators are per-(symbol, timeframe) because the operator likely
+    // wants different overlays on different pairs (an RSI on majors,
+    // none on crosses) — that part stays in the prefixed key.
     const raw = localStorage.getItem(this.chartConfigStorageKey());
     if (raw) {
       try {
-        const parsed = JSON.parse(raw) as {
-          indicators?: IndicatorConfig[];
-          showVolume?: boolean;
-          showPositions?: boolean;
-        };
-        // Drop any indicator types that aren't in the catalog (e.g. removed
-        // in a later release) so we don't render with `undefined` defs.
+        const parsed = JSON.parse(raw) as { indicators?: IndicatorConfig[] };
         const valid = (parsed.indicators ?? []).filter((i) => i?.type && INDICATOR_BY_TYPE[i.type]);
         this.indicators.set(valid);
-        if (typeof parsed.showVolume === 'boolean') this.showVolume.set(parsed.showVolume);
-        if (typeof parsed.showPositions === 'boolean') this.showPositions.set(parsed.showPositions);
-        return;
       } catch {
         // fall through to defaults
+        this.applyDefaultIndicators();
       }
+    } else {
+      this.applyDefaultIndicators();
     }
-    // First-time defaults — keep parity with the old hard-coded MA20/MA50 toggle.
+
+    // Volume / positions toggles are GLOBAL user preferences — read from
+    // their dedicated keys, falling back to the signal defaults (both
+    // true) when unset. Defensive bool check guards against any stale
+    // non-boolean string that might be lurking from a prior storage shape.
+    const vol = localStorage.getItem(SHOW_VOLUME_STORAGE_KEY);
+    if (vol === 'true' || vol === 'false') this.showVolume.set(vol === 'true');
+    const pos = localStorage.getItem(SHOW_POSITIONS_STORAGE_KEY);
+    if (pos === 'true' || pos === 'false') this.showPositions.set(pos === 'true');
+  }
+
+  private applyDefaultIndicators(): void {
+    // First-time indicator defaults — keep parity with the old hard-coded
+    // MA20/MA50 toggle.
     this.indicators.set([
       {
         id: this.makeIndicatorId('sma'),
@@ -1339,14 +1359,23 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   private persistChartConfig(): void {
     if (typeof localStorage === 'undefined') return;
     try {
+      // Only persist indicators in the per-(symbol, timeframe) key.
+      // Toggles live in their own global keys so an operator never
+      // ends up with "Pos" off on GBP/USD but on for EUR/USD just
+      // because of a stray click weeks ago.
       localStorage.setItem(
         this.chartConfigStorageKey(),
-        JSON.stringify({
-          indicators: this.indicators(),
-          showVolume: this.showVolume(),
-          showPositions: this.showPositions(),
-        }),
+        JSON.stringify({ indicators: this.indicators() }),
       );
+    } catch {
+      // storage full / disabled — operator just won't get persistence
+    }
+  }
+
+  private persistGlobalToggle(key: string, value: boolean): void {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem(key, String(value));
     } catch {
       // storage full / disabled — operator just won't get persistence
     }
