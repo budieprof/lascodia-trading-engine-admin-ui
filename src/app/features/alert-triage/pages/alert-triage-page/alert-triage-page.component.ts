@@ -6,7 +6,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { catchError, map, of } from 'rxjs';
@@ -83,6 +83,7 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     DatePipe,
+    DecimalPipe,
     FormsModule,
     RouterLink,
     PageHeaderComponent,
