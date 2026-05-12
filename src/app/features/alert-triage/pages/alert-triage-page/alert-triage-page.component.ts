@@ -474,7 +474,7 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
         padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
-        gap: var(--space-3);
+        gap: var(--space-4);
       }
 
       .filter-bar {

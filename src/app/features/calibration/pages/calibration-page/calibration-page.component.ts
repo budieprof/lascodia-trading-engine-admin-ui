@@ -576,11 +576,15 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
   `,
   styles: [
     `
+      /* Page-level vertical rhythm matches the other operator-console
+         pages (positions/deltas, alert-triage, etc.) — flex column with
+         space-4 gap between major sections, then each section can still
+         opt for extra bottom margin if it needs more breathing room. */
       .page {
         padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
-        gap: var(--space-3);
+        gap: var(--space-4);
       }
 
       /* ── KPI strip ── */
@@ -588,8 +592,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         display: grid;
         grid-template-columns: repeat(8, 1fr);
         gap: var(--space-2);
-        margin-top: var(--space-4);
-        margin-bottom: var(--space-1);
+        margin-top: var(--space-3);
       }
       @media (max-width: 1400px) {
         .kpi-strip {
@@ -857,13 +860,13 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       .defaults-list {
         display: flex;
         flex-direction: column;
-        gap: var(--space-4);
+        gap: var(--space-5);
       }
       .default-card {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        padding: var(--space-4) var(--space-4) var(--space-5);
+        padding: var(--space-5) var(--space-5) var(--space-5);
         box-shadow: var(--shadow-sm);
       }
       .default-card[data-trend='Tighten'] {
@@ -878,8 +881,8 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         justify-content: space-between;
         gap: var(--space-3);
         flex-wrap: wrap;
-        margin-bottom: var(--space-3);
-        padding-bottom: var(--space-3);
+        margin-bottom: var(--space-4);
+        padding-bottom: var(--space-4);
         border-bottom: 1px solid var(--border);
       }
       .default-title {
@@ -922,6 +925,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         margin: 0;
         font-size: var(--text-xs);
         color: var(--text-tertiary);
+        line-height: 1.5;
       }
       .default-rationale {
         margin: var(--space-3) 0 0;
@@ -931,8 +935,8 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       }
 
       .distribution {
-        margin-top: var(--space-4);
-        padding-top: var(--space-3);
+        margin-top: var(--space-5);
+        padding-top: var(--space-4);
         border-top: 1px dashed var(--border);
       }
       .dist-label {
@@ -969,10 +973,10 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
          their labels without being cut off. */
       .dist-bar {
         position: relative;
-        height: 72px;
+        height: 80px;
         background: var(--bg-tertiary);
         border-radius: var(--radius-sm);
-        margin: 0 var(--space-3);
+        margin: 0 var(--space-4);
       }
       .dist-tick {
         position: absolute;

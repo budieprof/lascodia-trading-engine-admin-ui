@@ -520,7 +520,7 @@ interface AnomalyFlag {
         padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
-        gap: var(--space-3);
+        gap: var(--space-4);
       }
 
       /* ── Filter bar — matches the ml-models / market-data toolbar ── */
