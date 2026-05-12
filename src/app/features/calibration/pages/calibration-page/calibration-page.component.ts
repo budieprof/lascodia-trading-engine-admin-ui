@@ -6,16 +6,16 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { DatePipe } from '@angular/common';
-import { catchError, map, of, switchMap, type Observable } from 'rxjs';
+import { DatePipe, DecimalPipe } from '@angular/common';
+import { Observable, catchError, map, of } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
-import type { EChartsOption } from 'echarts';
 
 import { CalibrationService } from '@core/services/calibration.service';
-import { createPolledResource } from '@core/polling/polled-resource';
 import type {
   CalibrationTrendReportDto,
+  CalibrationTrendRowDto,
   DefaultsCalibrationDto,
+  DefaultsCalibrationEntryDto,
   PagedData,
   PagerRequest,
   ScreeningGateBindingReportDto,
@@ -24,438 +24,536 @@ import type {
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
-import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
-import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
-import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
-import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
+import { DataTableComponent } from '@shared/components/data-table/data-table.component';
+import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
+import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
+/**
+ * Calibration / Tuning operator console — four tabs, all populated from
+ * dedicated engine reports:
+ *
+ *   - Trend: latest-month vs baseline rejection-mix delta with
+ *     anomaly flags
+ *   - Screening Gates: which gate is bindingly tight on candidate
+ *     qualification, with the engine's textual recommendation
+ *   - Signal Rejections: paged audit log of every per-signal rejection
+ *     (paged because the table grows to hundreds of thousands)
+ *   - Recommended Defaults: per-config-key percentile distributions
+ *     with current vs recommended floor
+ *
+ * Follows the same dense layout as /alert-triage, /dead-letters,
+ * /positions/deltas, /trade-signals/feedback — metric-cards in a
+ * kpi-strip + insights-section with insights-grid + board-table
+ * data panes — so the operator's eye knows where to look.
+ */
 @Component({
   selector: 'app-calibration-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    DatePipe,
+    DecimalPipe,
     PageHeaderComponent,
     MetricCardComponent,
-    ChartCardComponent,
+    CardSkeletonComponent,
+    ErrorStateComponent,
     TabsComponent,
     DataTableComponent,
-    CardSkeletonComponent,
-    EmptyStateComponent,
+    RelativeTimePipe,
   ],
   template: `
     <div class="page">
-      <app-page-header title="Tuning" subtitle="Calibration reports and operator guidance" />
+      <app-page-header
+        title="Tuning"
+        subtitle="Calibration reports and operator guidance — what's bindingly tight on candidate qualification, where the rejection mix shifted, which floors to raise."
+      />
 
       <ui-tabs [tabs]="tabs" [(activeTab)]="activeTab">
+        <!-- ═══════════ TREND ═══════════ -->
         @if (activeTab() === 'trend') {
-          <div class="tab-content">
-            @if (trendLoading()) {
-              <app-card-skeleton [lines]="8" />
-            } @else if (trend()) {
-              @if (trend(); as t) {
-                <!-- 6-card KPI strip — anomaly overview -->
-                <div class="kpis kpis-6">
-                  <app-metric-card
-                    label="Metrics tracked"
-                    [value]="metricsTrackedCount()"
-                    format="number"
-                    dotColor="#0071E3"
-                  />
-                  <app-metric-card
-                    label="Anomalies"
-                    [value]="t.anomalies?.length ?? 0"
-                    format="number"
-                    [dotColor]="(t.anomalies?.length ?? 0) > 0 ? '#FF3B30' : '#34C759'"
-                  />
-                  <app-metric-card
-                    label="Critical"
-                    [value]="anomalyCounts().Critical"
-                    format="number"
-                    [dotColor]="anomalyCounts().Critical > 0 ? '#FF3B30' : '#34C759'"
-                  />
-                  <app-metric-card
-                    label="Warning"
-                    [value]="anomalyCounts().Warning"
-                    format="number"
-                    [dotColor]="anomalyCounts().Warning > 0 ? '#FF9500' : '#34C759'"
-                  />
-                  <app-metric-card
-                    label="Largest |Δ|"
-                    [value]="largestAnomalyDelta()"
-                    format="number"
-                    dotColor="#AF52DE"
-                  />
-                  <app-metric-card
-                    label="Baseline window"
-                    [value]="t.baselineMonths"
-                    format="number"
-                    dotColor="#5AC8FA"
-                  />
-                </div>
-
-                <!-- Anomalies + top deltas chart side-by-side -->
-                <div class="trend-row">
-                  <section class="card">
-                    <header class="card-head">
-                      <h3>Anomalies vs {{ t.baselineMonths }}-month baseline</h3>
-                      @if ((t.anomalies?.length ?? 0) > 0) {
-                        <span class="head-meta muted">
-                          {{ anomalyCounts().Critical }} critical ·
-                          {{ anomalyCounts().Warning }} warning · {{ anomalyCounts().Info }} info
-                        </span>
-                      }
-                    </header>
-                    @if ((t.anomalies?.length ?? 0) > 0) {
-                      <ul class="anomaly-list">
-                        @for (a of sortedAnomalies(); track a.metric) {
-                          <li class="anomaly" [attr.data-sev]="a.severity ?? 'Info'">
-                            <span class="metric">{{ a.metric }}</span>
-                            <span class="delta" [class.up]="a.delta > 0" [class.down]="a.delta < 0">
-                              {{ a.delta >= 0 ? '+' : '' }}{{ a.delta }}
-                            </span>
-                            @if (a.severity) {
-                              <span class="sev">{{ a.severity }}</span>
-                            }
-                            @if (a.note) {
-                              <span class="note">{{ a.note }}</span>
-                            }
-                          </li>
-                        }
-                      </ul>
-                    } @else {
-                      <p class="muted">No anomalies detected against baseline.</p>
-                    }
-                  </section>
-
-                  <app-chart-card
-                    title="Largest deltas vs baseline"
-                    subtitle="Top {{ topDeltasCount() }} metrics by |delta|"
-                    [options]="topDeltasOptions()"
-                    height="320px"
-                  />
-                </div>
-
-                <!-- Side-by-side comparison with explicit delta column -->
-                <section class="card">
-                  <header class="card-head">
-                    <h3>Latest month vs baseline</h3>
-                    <span class="head-meta muted">
-                      {{ metricsTrackedCount() }} metrics ·
-                      {{ comparisonRows().length - metricsTrackedCount() }} added/removed
-                    </span>
-                  </header>
-                  <div class="cmp-scroll">
-                    <table class="table sticky">
-                      <thead>
-                        <tr>
-                          <th>Metric</th>
-                          <th class="num">Latest month</th>
-                          <th class="num">Baseline</th>
-                          <th class="num">Δ absolute</th>
-                          <th class="num">Δ %</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        @for (row of comparisonRows(); track row.key) {
-                          <tr>
-                            <td>{{ row.key }}</td>
-                            <td class="num mono">{{ row.latestStr }}</td>
-                            <td class="num mono">{{ row.baselineStr }}</td>
-                            <td
-                              class="num mono"
-                              [class.up]="row.deltaAbs !== null && row.deltaAbs > 0"
-                              [class.down]="row.deltaAbs !== null && row.deltaAbs < 0"
-                            >
-                              {{ formatDelta(row.deltaAbs) }}
-                            </td>
-                            <td
-                              class="num mono"
-                              [class.up]="row.deltaPct !== null && row.deltaPct > 0"
-                              [class.down]="row.deltaPct !== null && row.deltaPct < 0"
-                            >
-                              {{ formatDeltaPct(row.deltaPct) }}
-                            </td>
-                          </tr>
-                        }
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
-              }
-            } @else {
-              <app-empty-state
-                title="Trend report unavailable"
-                description="The engine returned no calibration trend data."
-              />
-            }
-          </div>
-        }
-
-        @if (activeTab() === 'gates') {
-          <div class="tab-content">
-            @if (gatesLoading()) {
-              <app-card-skeleton [lines]="6" />
-            } @else if (gates()) {
-              @if (gates(); as g) {
-                <!-- 4-card KPI strip -->
-                <div class="kpis kpis-4">
-                  <app-metric-card
-                    label="Total rejections"
-                    [value]="totalGateRejections()"
-                    format="number"
-                    dotColor="#0071E3"
-                  />
-                  <app-metric-card
-                    label="Active gates"
-                    [value]="g.gates?.length ?? 0"
-                    format="number"
-                    dotColor="#5AC8FA"
-                  />
-                  <app-metric-card
-                    label="Top gate share"
-                    [value]="topGateShare()"
-                    format="percent"
-                    [dotColor]="topGateShare() > 60 ? '#FF9500' : '#34C759'"
-                  />
-                  <app-metric-card
-                    label="Gates with notes"
-                    [value]="gatesWithNotesCount()"
-                    format="number"
-                    dotColor="#AF52DE"
-                  />
-                </div>
-
-                <div class="gates-row">
-                  <app-chart-card
-                    title="Rejection share by gate"
-                    subtitle="Where signals are getting blocked"
-                    [options]="gateDonutOptions()"
-                    height="280px"
-                  />
-                  <app-chart-card
-                    title="Top gates by rejections"
-                    subtitle="Largest contributors first"
-                    [options]="gateBarOptions()"
-                    height="280px"
-                  />
-                </div>
-
-                <section class="card">
-                  <header class="card-head">
-                    <h3>Screening gate binding</h3>
-                    <span class="head-meta muted">
-                      Concentration:
-                      <span [class.bad]="topGateShare() > 80">
-                        {{ topGateShare().toFixed(1) }}%
-                      </span>
-                      of rejections from a single gate
-                    </span>
-                  </header>
-                  <table class="table">
-                    <thead>
-                      <tr>
-                        <th>Gate</th>
-                        <th class="num">Rejections</th>
-                        <th class="num">Share</th>
-                        <th>Distribution</th>
-                        <th>Notes</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (row of g.gates ?? []; track row.gate) {
-                        <tr>
-                          <td class="mono">{{ row.gate }}</td>
-                          <td class="num">{{ row.rejectionCount }}</td>
-                          <td
-                            class="num"
-                            [class.warn]="(row.sharePct ?? 0) > 40"
-                            [class.bad]="(row.sharePct ?? 0) > 70"
-                          >
-                            {{ (row.sharePct ?? 0).toFixed(1) }}%
-                          </td>
-                          <td class="bar-cell">
-                            <span
-                              class="share-bar"
-                              [style.width.%]="row.sharePct ?? 0"
-                              [class.warn]="(row.sharePct ?? 0) > 40"
-                              [class.bad]="(row.sharePct ?? 0) > 70"
-                            ></span>
-                          </td>
-                          <td class="muted">{{ row.notes ?? '—' }}</td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
-                </section>
-              }
-            } @else {
-              <app-empty-state
-                title="Gate report unavailable"
-                description="No screening-gate binding data returned."
-              />
-            }
-          </div>
-        }
-
-        @if (activeTab() === 'rejections') {
-          <div class="tab-content">
-            <!-- 6-card KPI strip — analytics over recent rejections -->
-            <div class="kpis kpis-6">
+          @if (trendLoading()) {
+            <app-card-skeleton [lines]="6" />
+          } @else if (!trend()) {
+            <app-error-state
+              title="No trend report"
+              message="Engine returned no trend report. The trend endpoint may need data — try the Recommended Defaults tab if this persists."
+            />
+          } @else if (trend(); as t) {
+            <div class="kpi-strip">
               <app-metric-card
-                label="Total ever"
-                [value]="rejectionTotalEver()"
+                label="Latest month"
+                [value]="t.latestMonthTotal"
                 format="number"
                 dotColor="#0071E3"
               />
               <app-metric-card
-                label="In sample"
-                [value]="rejectionAnalyticsRows().length"
+                label="Baseline total"
+                [value]="t.baselineTotal"
                 format="number"
-                dotColor="#5AC8FA"
+                dotColor="#0071E3"
               />
               <app-metric-card
-                label="Distinct rules"
-                [value]="distinctRules().length"
+                label="Anomalies"
+                [value]="anomalyCount()"
+                format="number"
+                [dotColor]="anomalyCount() > 0 ? '#FF9500' : '#34C759'"
+              />
+              <app-metric-card
+                label="Largest |Δ|"
+                [value]="largestDeltaPct()"
+                format="percent"
+                [dotColor]="
+                  largestDeltaPct() >= 30
+                    ? '#FF3B30'
+                    : largestDeltaPct() >= 15
+                      ? '#FF9500'
+                      : '#34C759'
+                "
+              />
+              <app-metric-card
+                label="Buckets"
+                [value]="t.rows.length"
                 format="number"
                 dotColor="#AF52DE"
               />
               <app-metric-card
-                label="Distinct strategies"
-                [value]="distinctStrategies()"
+                label="Threshold"
+                [value]="t.anomalyThresholdPct * 100"
+                format="percent"
+                dotColor="#AF52DE"
+              />
+              <app-metric-card
+                label="Stages"
+                [value]="distinctStages()"
                 format="number"
                 dotColor="#AF52DE"
               />
               <app-metric-card
-                label="Distinct symbols"
-                [value]="distinctSymbols().length"
+                label="Baseline floor"
+                [value]="t.minBaselineCount"
                 format="number"
-                dotColor="#AF52DE"
-              />
-              <app-metric-card
-                label="Last 24h"
-                [value]="rejectionsLast24h()"
-                format="number"
-                [dotColor]="rejectionsLast24h() > 0 ? '#FF9500' : '#34C759'"
+                dotColor="#0071E3"
               />
             </div>
 
-            <div class="rej-row">
-              <app-chart-card
-                title="Top rejection rules"
-                subtitle="Most-active rules in the {{ rejectionAnalyticsRows().length }}-row sample"
-                [options]="topRulesOptions()"
-                height="260px"
+            <section class="insights-section">
+              <header class="insights-head">
+                <h3>Trend insights</h3>
+                <span class="muted">
+                  Latest {{ t.latestMonthStart | date: 'MMM d' }}–{{
+                    t.latestMonthEnd | date: 'MMM d'
+                  }}
+                  vs baseline
+                  {{ t.baselineStart | date: 'MMM d' }}–{{ t.baselineEnd | date: 'MMM d' }}
+                </span>
+              </header>
+              <div class="insights-grid two-col">
+                <article class="insight-card">
+                  <header class="insight-head">
+                    <span class="insight-title">Anomalies</span>
+                    <span class="muted insight-status">
+                      {{ anomalyCount() }} flagged · threshold ±{{
+                        t.anomalyThresholdPct * 100 | number: '1.0-0'
+                      }}%
+                    </span>
+                  </header>
+                  @if (anomalyRows().length === 0) {
+                    <p class="empty-line muted">
+                      No buckets crossed the ±{{ t.anomalyThresholdPct * 100 | number: '1.0-0' }}%
+                      drift threshold. Rejection mix is stable vs baseline.
+                    </p>
+                  } @else {
+                    <ul class="anomaly-list">
+                      @for (row of anomalyRows(); track row.stage + row.reason) {
+                        <li class="anomaly" [attr.data-sign]="row.deltaPct >= 0 ? 'up' : 'down'">
+                          <span class="anomaly-tag">
+                            {{ row.deltaPct >= 0 ? '↑' : '↓' }}
+                            {{ row.deltaPct * 100 | number: '1.0-0' }}%
+                          </span>
+                          <span class="small mono">{{ row.stage }} / {{ row.reason }}</span>
+                          @if (row.hint) {
+                            <span class="small muted">— {{ row.hint }}</span>
+                          }
+                        </li>
+                      }
+                    </ul>
+                  }
+                </article>
+
+                <article class="insight-card">
+                  <header class="insight-head">
+                    <span class="insight-title">Largest |Δ|</span>
+                    <span class="muted insight-status">top by abs delta</span>
+                  </header>
+                  <ul class="breakdown">
+                    @for (row of topDeltaRows(); track row.stage + row.reason) {
+                      <li class="bd-row delta">
+                        <span class="small mono">{{ row.stage }} / {{ row.reason }}</span>
+                        <span class="bd-bar">
+                          <span
+                            class="bd-fill"
+                            [class.up]="row.deltaPct >= 0"
+                            [class.down]="row.deltaPct < 0"
+                            [style.width.%]="deltaBarPct(row.deltaPct)"
+                          ></span>
+                        </span>
+                        <span class="mono num">
+                          {{ row.deltaPct >= 0 ? '+' : ''
+                          }}{{ row.deltaPct * 100 | number: '1.1-1' }}%
+                        </span>
+                      </li>
+                    }
+                  </ul>
+                </article>
+              </div>
+            </section>
+
+            <section class="data-table-card">
+              <header class="board-head">
+                <h3>Latest month vs baseline</h3>
+                <span class="muted">{{ t.rows.length }} (stage, reason) bucket(s)</span>
+              </header>
+              <table class="board-table">
+                <thead>
+                  <tr>
+                    <th>Stage</th>
+                    <th>Reason</th>
+                    <th class="num">Latest #</th>
+                    <th class="num">Latest %</th>
+                    <th class="num">Baseline #</th>
+                    <th class="num">Baseline %</th>
+                    <th class="num">Δ</th>
+                    <th>Anomaly</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of t.rows; track row.stage + row.reason) {
+                    <tr [class.row-anomaly]="row.isAnomaly">
+                      <td class="mono small">{{ row.stage }}</td>
+                      <td class="mono small">{{ row.reason }}</td>
+                      <td class="num mono">{{ row.latestMonthCount | number }}</td>
+                      <td class="num mono">
+                        {{ row.latestMonthSharePct * 100 | number: '1.1-1' }}%
+                      </td>
+                      <td class="num mono">{{ row.baselineCount | number }}</td>
+                      <td class="num mono">{{ row.baselineSharePct * 100 | number: '1.1-1' }}%</td>
+                      <td
+                        class="num mono"
+                        [class.delta-up]="row.deltaPct > 0"
+                        [class.delta-down]="row.deltaPct < 0"
+                      >
+                        {{ row.deltaPct >= 0 ? '+' : ''
+                        }}{{ row.deltaPct * 100 | number: '1.1-1' }}%
+                      </td>
+                      <td>
+                        @if (row.isAnomaly) {
+                          <span class="sev-pill" data-sev="High">flagged</span>
+                        } @else {
+                          <span class="muted small">—</span>
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </section>
+          }
+        }
+
+        <!-- ═══════════ SCREENING GATES ═══════════ -->
+        @if (activeTab() === 'gates') {
+          @if (gatesLoading()) {
+            <app-card-skeleton [lines]="6" />
+          } @else if (!gates()) {
+            <app-error-state
+              title="No screening-gate binding report"
+              message="Engine returned no gate binding report. The endpoint may need recent backtest failures."
+            />
+          } @else if (gates(); as g) {
+            <div class="kpi-strip">
+              <app-metric-card
+                label="Total failures"
+                [value]="g.totalFailures"
+                format="number"
+                dotColor="#FF9500"
               />
-              <app-chart-card
-                title="Top rejected symbols"
-                subtitle="Symbols where signals are getting blocked"
-                [options]="topSymbolsOptions()"
-                height="260px"
+              <app-metric-card
+                label="Lookback"
+                [value]="g.lookbackDays"
+                format="number"
+                dotColor="#AF52DE"
+              />
+              <app-metric-card
+                label="Reliable"
+                [value]="g.isReliable ? 1 : 0"
+                format="number"
+                [dotColor]="g.isReliable ? '#34C759' : '#FF3B30'"
+              />
+              <app-metric-card
+                label="Reasons"
+                [value]="g.rows.length"
+                format="number"
+                dotColor="#AF52DE"
+              />
+              <app-metric-card
+                label="Binding share"
+                [value]="g.bindingReasonShare * 100"
+                format="percent"
+                [dotColor]="
+                  g.bindingReasonShare >= 0.7
+                    ? '#FF3B30'
+                    : g.bindingReasonShare >= 0.4
+                      ? '#FF9500'
+                      : '#34C759'
+                "
+              />
+              <app-metric-card
+                label="Strategy types"
+                [value]="distinctTopTypes()"
+                format="number"
+                dotColor="#AF52DE"
+              />
+              <app-metric-card
+                label="Underfit rows"
+                [value]="underfitCount()"
+                format="number"
+                [dotColor]="underfitCount() > 0 ? '#FF9500' : '#34C759'"
+              />
+              <app-metric-card
+                label="Overfit rows"
+                [value]="overfitCount()"
+                format="number"
+                [dotColor]="overfitCount() > 0 ? '#FF3B30' : '#34C759'"
               />
             </div>
 
+            <section class="insights-section">
+              <header class="insights-head">
+                <h3>Gate binding · {{ g.overallClass }}</h3>
+                <span class="muted">
+                  {{ g.windowStart | date: 'MMM d' }}–{{ g.windowEnd | date: 'MMM d' }} · binding on
+                  <strong>{{ g.bindingReason }}</strong>
+                  ({{ g.bindingReasonShare * 100 | number: '1.0-0' }}%)
+                </span>
+              </header>
+              <div class="insights-grid two-col">
+                <article class="insight-card">
+                  <header class="insight-head">
+                    <span class="insight-title">Engine recommendation</span>
+                    <span
+                      class="sev-pill insight-status"
+                      [attr.data-sev]="g.overallClass === 'Overfit' ? 'High' : 'Medium'"
+                    >
+                      {{ g.overallClass }}
+                    </span>
+                  </header>
+                  <p class="recommendation">{{ g.recommendation }}</p>
+                </article>
+
+                <article class="insight-card">
+                  <header class="insight-head">
+                    <span class="insight-title">By reason</span>
+                    <span class="muted insight-status">share of failures</span>
+                  </header>
+                  <ul class="breakdown">
+                    @for (row of g.rows; track row.reason) {
+                      <li class="bd-row">
+                        <span class="small mono">{{ row.reason }}</span>
+                        <span class="bd-bar">
+                          <span class="bd-fill amber" [style.width.%]="row.sharePct * 100"></span>
+                        </span>
+                        <span class="mono num">{{ row.count | number }}</span>
+                        <span class="muted small">{{ row.sharePct * 100 | number: '1.0-0' }}%</span>
+                      </li>
+                    }
+                  </ul>
+                </article>
+              </div>
+            </section>
+
+            <section class="data-table-card">
+              <header class="board-head">
+                <h3>Per-reason breakdown</h3>
+                <span class="muted">{{ g.rows.length }} reason(s)</span>
+              </header>
+              <table class="board-table">
+                <thead>
+                  <tr>
+                    <th>Reason</th>
+                    <th class="num">Count</th>
+                    <th class="num">Share</th>
+                    <th>Class</th>
+                    <th>Top strategy type</th>
+                    <th class="num">Top type #</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of g.rows; track row.reason) {
+                    <tr [class.row-binding]="row.reason === g.bindingReason">
+                      <td class="mono small">{{ row.reason }}</td>
+                      <td class="num mono">{{ row.count | number }}</td>
+                      <td class="num mono">{{ row.sharePct * 100 | number: '1.1-1' }}%</td>
+                      <td>
+                        <span
+                          class="sev-pill"
+                          [attr.data-sev]="row.class === 'Overfit' ? 'High' : 'Medium'"
+                          >{{ row.class }}</span
+                        >
+                      </td>
+                      <td class="mono small">{{ row.topStrategyType ?? '—' }}</td>
+                      <td class="num mono">{{ row.topStrategyTypeCount | number }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </section>
+          }
+        }
+
+        <!-- ═══════════ SIGNAL REJECTIONS ═══════════ -->
+        @if (activeTab() === 'rejections') {
+          <section class="data-table-card">
+            <header class="board-head">
+              <h3>Signal rejections</h3>
+              <span class="muted">
+                Per-signal audit log — server-side paged. Use the search to filter.
+              </span>
+            </header>
             <app-data-table
               #rejectionsTable
               [columnDefs]="rejectionColumns"
               [fetchData]="fetchRejections"
               [searchable]="true"
             />
-          </div>
+          </section>
         }
 
+        <!-- ═══════════ RECOMMENDED DEFAULTS ═══════════ -->
         @if (activeTab() === 'defaults') {
-          <div class="tab-content">
-            @if (defaultsLoading()) {
-              <app-card-skeleton [lines]="6" />
-            } @else if (defaults()) {
-              @if (defaults(); as d) {
-                <!-- 4-card KPI strip -->
-                <div class="kpis kpis-4">
-                  <app-metric-card
-                    label="Recommendations"
-                    [value]="d.recommendations?.length ?? 0"
-                    format="number"
-                    [dotColor]="(d.recommendations?.length ?? 0) > 0 ? '#FF9500' : '#34C759'"
-                  />
-                  <app-metric-card
-                    label="Numeric diffs"
-                    [value]="numericRecommendations()"
-                    format="number"
-                    dotColor="#5AC8FA"
-                  />
-                  <app-metric-card
-                    label="Avg |Δ %|"
-                    [value]="avgRecommendationDeltaPct()"
-                    format="percent"
-                    dotColor="#AF52DE"
-                  />
-                  <app-metric-card
-                    label="Largest |Δ %|"
-                    [value]="largestRecommendationDeltaPct()"
-                    format="percent"
-                    [dotColor]="largestRecommendationDeltaPct() > 50 ? '#FF3B30' : '#FF9500'"
-                  />
-                </div>
-
-                <section class="card">
-                  <header class="card-head">
-                    <h3>Recommended default floors</h3>
-                    <span class="head-meta muted">
-                      Suggestions are read-only — apply via Engine Config
-                    </span>
-                  </header>
-                  @if ((d.recommendations?.length ?? 0) > 0) {
-                    <table class="table">
-                      <thead>
-                        <tr>
-                          <th>Key</th>
-                          <th class="num">Current</th>
-                          <th class="num">Suggested</th>
-                          <th class="num">Δ</th>
-                          <th class="num">Δ %</th>
-                          <th>Rationale</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        @for (r of recommendationRows(); track r.key) {
-                          <tr>
-                            <td class="mono">{{ r.key }}</td>
-                            <td class="num mono">{{ r.currentStr }}</td>
-                            <td class="num mono">{{ r.suggestedStr }}</td>
-                            <td
-                              class="num mono"
-                              [class.up]="r.delta !== null && r.delta > 0"
-                              [class.down]="r.delta !== null && r.delta < 0"
-                            >
-                              {{ formatDelta(r.delta) }}
-                            </td>
-                            <td
-                              class="num mono"
-                              [class.up]="r.deltaPct !== null && r.deltaPct > 0"
-                              [class.down]="r.deltaPct !== null && r.deltaPct < 0"
-                            >
-                              {{ formatDeltaPct(r.deltaPct) }}
-                            </td>
-                            <td class="muted">{{ r.rationale ?? '—' }}</td>
-                          </tr>
-                        }
-                      </tbody>
-                    </table>
-                  } @else {
-                    <p class="muted">
-                      No recommendations at this time — all floors within empirical ranges.
-                    </p>
-                  }
-                </section>
-              }
-            } @else {
-              <app-empty-state
-                title="Defaults unavailable"
-                description="No defaults-calibration recommendations returned."
+          @if (defaultsLoading()) {
+            <app-card-skeleton [lines]="6" />
+          } @else if (!defaults()) {
+            <app-error-state
+              title="No defaults recommendation"
+              message="Engine returned no defaults report. Needs recent observations to compute distributions."
+            />
+          } @else if (defaults(); as d) {
+            <div class="kpi-strip">
+              <app-metric-card
+                label="Recommendations"
+                [value]="d.defaults.length"
+                format="number"
+                dotColor="#AF52DE"
               />
-            }
-          </div>
+              <app-metric-card
+                label="Tightens"
+                [value]="tightenCount()"
+                format="number"
+                [dotColor]="tightenCount() > 0 ? '#FF9500' : '#34C759'"
+              />
+              <app-metric-card
+                label="Loosens"
+                [value]="loosenCount()"
+                format="number"
+                [dotColor]="loosenCount() > 0 ? '#0071E3' : '#34C759'"
+              />
+              <app-metric-card
+                label="Unchanged"
+                [value]="unchangedCount()"
+                format="number"
+                dotColor="#34C759"
+              />
+              <app-metric-card
+                label="Total samples"
+                [value]="totalSamples()"
+                format="number"
+                dotColor="#AF52DE"
+              />
+              <app-metric-card
+                label="Avg exclusion"
+                [value]="avgExclusion()"
+                format="percent"
+                dotColor="#AF52DE"
+              />
+              <app-metric-card
+                label="Generated (min ago)"
+                [value]="generatedMinutesAgo()"
+                format="number"
+                dotColor="#0071E3"
+              />
+              <app-metric-card
+                label="Analysis days"
+                [value]="analysisDays()"
+                format="number"
+                dotColor="#AF52DE"
+              />
+            </div>
+
+            <section class="defaults-list">
+              @for (entry of d.defaults; track entry.configKey) {
+                <article class="default-card" [attr.data-trend]="trendOf(entry)">
+                  <header class="default-head">
+                    <div class="default-title">
+                      <span class="mono key">{{ entry.configKey }}</span>
+                      <span class="sev-pill" [attr.data-sev]="severityOf(entry)">
+                        {{ trendOf(entry) }}
+                      </span>
+                    </div>
+                    <div class="default-numbers">
+                      <span class="num-cell">
+                        <span class="num-label">CURRENT</span>
+                        <span class="num-val mono">{{ entry.currentFloor }}</span>
+                      </span>
+                      <span class="arrow">→</span>
+                      <span class="num-cell">
+                        <span class="num-label">RECOMMENDED</span>
+                        <span class="num-val mono">{{ entry.recommendedFloor }}</span>
+                      </span>
+                      <span class="num-cell">
+                        <span class="num-label">EXCLUDES</span>
+                        <span class="num-val mono">
+                          {{ entry.exclusionRatePct | number: '1.1-1' }}%
+                        </span>
+                      </span>
+                    </div>
+                  </header>
+                  <p class="default-desc">{{ entry.floorDescription }} · {{ entry.dataSource }}</p>
+                  <p class="default-rationale">{{ entry.recommendationRationale }}</p>
+
+                  <div class="distribution">
+                    <span class="dist-label small muted"
+                      >DISTRIBUTION ({{ entry.sampleCount }} samples)</span
+                    >
+                    <div class="dist-bar">
+                      @for (p of percentilePoints(entry); track p.label) {
+                        <span
+                          class="dist-tick"
+                          [style.left.%]="p.pct"
+                          [title]="p.label + ': ' + p.value"
+                        >
+                          <span class="dist-tick-bar"></span>
+                          <span class="dist-tick-label small">{{ p.label }}</span>
+                          <span class="dist-tick-val mono small">{{ p.value }}</span>
+                        </span>
+                      }
+                      <span
+                        class="dist-marker current"
+                        [style.left.%]="markerPct(entry, entry.currentFloor)"
+                        [title]="'Current: ' + entry.currentFloor"
+                      ></span>
+                      <span
+                        class="dist-marker recommended"
+                        [style.left.%]="markerPct(entry, entry.recommendedFloor)"
+                        [title]="'Recommended: ' + entry.recommendedFloor"
+                      ></span>
+                    </div>
+                  </div>
+                </article>
+              }
+            </section>
+          }
         }
       </ui-tabs>
     </div>
@@ -466,150 +564,217 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
-        gap: var(--space-4);
-      }
-      /* Each tab's body — flex column with consistent gap. The .page-level
-         flex gap can't reach into ui-tabs' projected slot, so every tab
-         needs its own wrapper to space sections evenly. */
-      .tab-content {
-        display: flex;
-        flex-direction: column;
         gap: var(--space-3);
-        padding-top: var(--space-3);
       }
-      .card {
+
+      /* ── KPI strip ── */
+      .kpi-strip {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        gap: var(--space-2);
+        margin-top: var(--space-3);
+      }
+      @media (max-width: 1400px) {
+        .kpi-strip {
+          grid-template-columns: repeat(4, 1fr);
+        }
+      }
+      @media (max-width: 720px) {
+        .kpi-strip {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      /* ── Insights ── */
+      .insights-section {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         overflow: hidden;
       }
-      .card-head {
+      .insights-head {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-3);
         padding: var(--space-3) var(--space-4);
         border-bottom: 1px solid var(--border);
       }
-      .card-head h3 {
+      .insights-head h3 {
         margin: 0;
         font-size: var(--text-sm);
         font-weight: var(--font-semibold);
       }
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: var(--space-3);
+      .insights-head .muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
       }
-      @media (max-width: 1024px) {
-        .grid {
+      .insights-grid {
+        display: grid;
+        gap: 1px;
+        background: var(--border);
+      }
+      .insights-grid.two-col {
+        grid-template-columns: 1fr 1fr;
+      }
+      @media (max-width: 900px) {
+        .insights-grid.two-col {
           grid-template-columns: 1fr;
         }
       }
-      .kv {
+      .insight-card {
+        background: var(--bg-secondary);
+        padding: var(--space-3) var(--space-4);
         display: flex;
         flex-direction: column;
-        gap: 0;
-        margin: 0;
+        gap: var(--space-2);
+        min-height: 160px;
       }
-      .kv > div {
+      .insight-head {
         display: flex;
         justify-content: space-between;
-        align-items: center;
-        padding: var(--space-2) var(--space-4);
-        border-bottom: 1px solid var(--border);
+        align-items: baseline;
+        gap: var(--space-2);
       }
-      .kv > div:last-child {
-        border-bottom: none;
-      }
-      .kv dt {
+      .insight-title {
         font-size: var(--text-xs);
-        color: var(--text-tertiary);
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
         text-transform: uppercase;
-        letter-spacing: 0.05em;
-        font-weight: var(--font-medium);
-        margin: 0;
+        letter-spacing: 0.06em;
       }
-      .kv dd {
+      .insight-status {
+        font-size: 10.5px;
+      }
+      .empty-line {
+        margin: 0;
+        font-size: var(--text-xs);
+      }
+      .recommendation {
         margin: 0;
         font-size: var(--text-sm);
-        font-weight: var(--font-medium);
+        line-height: 1.5;
         color: var(--text-primary);
       }
-      .kv dd.mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        font-size: var(--text-xs);
-      }
+
+      /* ── Anomaly list (Trend tab) ── */
       .anomaly-list {
+        list-style: none;
         margin: 0;
         padding: 0;
-        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
       }
       .anomaly {
-        display: grid;
-        grid-template-columns: 1fr auto auto 2fr;
-        gap: var(--space-3);
+        display: flex;
         align-items: center;
-        padding: var(--space-2) var(--space-4);
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-      }
-      .anomaly:last-child {
-        border-bottom: none;
-      }
-      .anomaly .metric {
-        font-weight: var(--font-semibold);
-      }
-      .anomaly .delta {
-        font-variant-numeric: tabular-nums;
-        font-weight: var(--font-semibold);
-      }
-      .anomaly .delta.up {
-        color: var(--profit);
-      }
-      .anomaly .delta.down {
-        color: var(--loss);
-      }
-      .anomaly .sev {
-        padding: 2px 10px;
-        border-radius: var(--radius-full);
-        font-size: 11px;
-        font-weight: var(--font-semibold);
+        gap: var(--space-2);
+        padding: 4px 6px;
         background: var(--bg-tertiary);
-        color: var(--text-secondary);
-      }
-      .anomaly[data-sev='Critical'] .sev {
-        background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
-      }
-      .anomaly[data-sev='Warning'] .sev {
-        background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
-      }
-      .anomaly .note {
-        color: var(--text-tertiary);
+        border-radius: var(--radius-sm);
         font-size: var(--text-xs);
       }
-      .muted {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-        padding: var(--space-4);
+      .anomaly[data-sign='up'] {
+        background: rgba(239, 68, 68, 0.08);
+      }
+      .anomaly[data-sign='down'] {
+        background: rgba(59, 130, 246, 0.08);
+      }
+      .anomaly-tag {
+        font-size: 10px;
+        font-weight: var(--font-bold);
+        padding: 2px 6px;
+        border-radius: 3px;
+        background: var(--bg-secondary);
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ── Breakdown ── */
+      .breakdown {
+        list-style: none;
         margin: 0;
-      }
-      .head-meta.muted {
         padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
       }
-      .table {
+      .bd-row {
+        display: grid;
+        grid-template-columns: 1fr 60px 36px 36px;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-xs);
+      }
+      .bd-row.delta {
+        grid-template-columns: 1fr 80px 56px;
+      }
+      .bd-bar {
+        display: inline-block;
+        position: relative;
+        height: 6px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        overflow: hidden;
+      }
+      .bd-fill {
+        display: block;
+        height: 100%;
+        background: #ff9500;
+      }
+      .bd-fill.amber {
+        background: #ff9500;
+      }
+      .bd-fill.up {
+        background: #ef4444;
+      }
+      .bd-fill.down {
+        background: #3b82f6;
+      }
+      .bd-row .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ── Board tables ── */
+      .data-table-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+      }
+      .board-head {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .board-head h3 {
+        margin: 0;
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .board-head .muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+      .board-table {
         width: 100%;
         border-collapse: collapse;
       }
-      .table th,
-      .table td {
-        padding: 8px var(--space-3);
+      .board-table th,
+      .board-table td {
+        padding: 6px var(--space-3);
         text-align: left;
         border-bottom: 1px solid var(--border);
         font-size: var(--text-xs);
+        vertical-align: middle;
       }
-      .table tbody tr:last-child td {
+      .board-table tbody tr:last-child td {
         border-bottom: none;
       }
-      .table th {
+      .board-table th {
         background: var(--bg-tertiary);
         color: var(--text-secondary);
         font-size: 10.5px;
@@ -617,128 +782,200 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         text-transform: uppercase;
         letter-spacing: 0.04em;
       }
-      .table th.num,
-      .table td.num {
+      .board-table td.num,
+      .board-table th.num {
         text-align: right;
         font-variant-numeric: tabular-nums;
+        white-space: nowrap;
       }
-      .table td.mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        font-size: var(--text-xs);
+      .row-anomaly {
+        background: rgba(255, 149, 0, 0.05);
       }
-
-      /* KPI strips */
-      .kpis {
-        display: grid;
-        gap: var(--space-2);
+      .row-binding {
+        background: rgba(239, 68, 68, 0.05);
       }
-      .kpis.kpis-4 {
-        grid-template-columns: repeat(4, 1fr);
-      }
-      .kpis.kpis-6 {
-        grid-template-columns: repeat(6, 1fr);
-      }
-      @media (max-width: 1100px) {
-        .kpis.kpis-4 {
-          grid-template-columns: repeat(2, 1fr);
-        }
-        .kpis.kpis-6 {
-          grid-template-columns: repeat(3, 1fr);
-        }
-      }
-      @media (max-width: 720px) {
-        .kpis.kpis-4,
-        .kpis.kpis-6 {
-          grid-template-columns: repeat(2, 1fr);
-        }
-      }
-
-      /* Side-by-side row of anomalies + chart on the trend tab */
-      .trend-row {
-        display: grid;
-        grid-template-columns: 1.4fr 1fr;
-        gap: var(--space-3);
-      }
-      @media (max-width: 1100px) {
-        .trend-row {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      /* Gates row + rejections row */
-      .gates-row,
-      .rej-row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: var(--space-3);
-      }
-      @media (max-width: 1100px) {
-        .gates-row,
-        .rej-row {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      .head-meta {
-        margin-left: auto;
-        font-size: 11px;
-      }
-      .card-head {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-3);
-      }
-
-      /* Comparison table — bounded scroll, sticky header */
-      .cmp-scroll {
-        max-height: 480px;
-        overflow-y: auto;
-      }
-      .table.sticky thead th {
-        position: sticky;
-        top: 0;
-        z-index: 1;
-      }
-      .table .up {
-        color: var(--profit);
-      }
-      .table .down {
-        color: var(--loss);
-      }
-      .table .warn {
-        color: #c93400;
-      }
-      .table .bad {
-        color: var(--loss);
+      .delta-up {
+        color: rgb(220, 38, 38);
         font-weight: var(--font-semibold);
       }
+      .delta-down {
+        color: rgb(37, 99, 235);
+      }
+      .mono {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+      }
+      .small {
+        font-size: var(--text-xs);
+      }
+      .muted {
+        color: var(--text-secondary);
+      }
+      .sev-pill {
+        font-size: 10px;
+        font-weight: var(--font-bold);
+        padding: 1px 6px;
+        border-radius: var(--radius-pill);
+        background: var(--bg-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .sev-pill[data-sev='Critical'] {
+        background: rgba(239, 68, 68, 0.15);
+        color: rgb(220, 38, 38);
+      }
+      .sev-pill[data-sev='High'] {
+        background: rgba(255, 149, 0, 0.15);
+        color: rgb(217, 119, 6);
+      }
+      .sev-pill[data-sev='Medium'] {
+        background: rgba(59, 130, 246, 0.15);
+        color: rgb(37, 99, 235);
+      }
+      .sev-pill[data-sev='Info'] {
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+      }
 
-      /* Inline share-bar for gates table */
-      .bar-cell {
-        width: 200px;
-        padding: 0 var(--space-3);
+      /* ── Recommended Defaults cards ── */
+      .defaults-list {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
       }
-      .share-bar {
+      .default-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
+      }
+      .default-card[data-trend='Tighten'] {
+        border-left: 3px solid #ff9500;
+      }
+      .default-card[data-trend='Loosen'] {
+        border-left: 3px solid #0071e3;
+      }
+      .default-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        flex-wrap: wrap;
+        margin-bottom: var(--space-2);
+      }
+      .default-title {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .default-title .key {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .default-numbers {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+      }
+      .num-cell {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 1px;
+      }
+      .num-label {
+        font-size: 9px;
+        font-weight: var(--font-bold);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .num-val {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+      }
+      .arrow {
+        color: var(--text-tertiary);
+        font-size: var(--text-base);
+      }
+      .default-desc {
+        margin: 0;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .default-rationale {
+        margin: var(--space-2) 0 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        line-height: 1.5;
+      }
+
+      .distribution {
+        margin-top: var(--space-3);
+      }
+      .dist-label {
         display: block;
-        height: 8px;
-        border-radius: 4px;
-        background: rgba(0, 113, 227, 0.6);
-        min-width: 2px;
+        margin-bottom: var(--space-2);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
       }
-      .share-bar.warn {
+      .dist-bar {
+        position: relative;
+        height: 56px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-sm);
+      }
+      .dist-tick {
+        position: absolute;
+        top: 0;
+        height: 100%;
+        transform: translateX(-50%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 0;
+      }
+      .dist-tick-bar {
+        width: 1px;
+        height: 12px;
+        background: var(--text-tertiary);
+      }
+      .dist-tick-label {
+        font-size: 9px;
+        color: var(--text-tertiary);
+        font-weight: var(--font-semibold);
+      }
+      .dist-tick-val {
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
+        color: var(--text-secondary);
+      }
+      .dist-marker {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        transform: translateX(-50%);
+        z-index: 2;
+      }
+      .dist-marker.current {
         background: #ff9500;
+        box-shadow: 0 0 0 1px var(--bg-secondary);
       }
-      .share-bar.bad {
-        background: #ff3b30;
+      .dist-marker.recommended {
+        background: #0071e3;
+        box-shadow: 0 0 0 1px var(--bg-secondary);
       }
     `,
   ],
+  providers: [DatePipe],
 })
 export class CalibrationPageComponent {
   private readonly service = inject(CalibrationService);
-  private readonly datePipe = new DatePipe('en-US');
 
-  @ViewChild('rejectionsTable') rejectionsTable?: DataTableComponent<SignalRejectionEntryDto>;
+  @ViewChild('rejectionsTable')
+  rejectionsTable?: DataTableComponent<SignalRejectionEntryDto>;
 
   readonly tabs: TabItem[] = [
     { label: 'Trend', value: 'trend' },
@@ -757,16 +994,13 @@ export class CalibrationPageComponent {
 
   readonly rejectionColumns: ColDef<SignalRejectionEntryDto>[] = [
     { headerName: 'Signal', field: 'tradeSignalId', width: 110 },
-    { headerName: 'Rule', field: 'ruleId', width: 180 },
-    { headerName: 'Reason', field: 'reason', flex: 2, minWidth: 260 },
+    { headerName: 'Stage', field: 'stage', width: 160 },
+    { headerName: 'Reason', field: 'reason', flex: 1, minWidth: 220 },
+    { headerName: 'Detail', field: 'detail', flex: 2, minWidth: 320 },
     { headerName: 'Strategy', field: 'strategyId', width: 110 },
-    { headerName: 'Symbol', field: 'symbol', width: 110 },
-    {
-      headerName: 'Rejected',
-      field: 'rejectedAt',
-      width: 180,
-      valueFormatter: (p) => this.datePipe.transform(p.value as string, 'MMM d, HH:mm:ss') ?? '-',
-    },
+    { headerName: 'Symbol', field: 'symbol', width: 100 },
+    { headerName: 'Source', field: 'source', width: 160 },
+    { headerName: 'Rejected', field: 'rejectedAt', width: 180 },
   ];
 
   readonly fetchRejections = (
@@ -774,7 +1008,7 @@ export class CalibrationPageComponent {
   ): Observable<PagedData<SignalRejectionEntryDto>> =>
     this.service
       .listSignalRejections(params)
-      .pipe(map((r) => r.data ?? { pager: emptyPager(), data: [] }));
+      .pipe(map((r) => r.data ?? emptyPaged<SignalRejectionEntryDto>()));
 
   constructor() {
     this.service
@@ -811,469 +1045,125 @@ export class CalibrationPageComponent {
       });
   }
 
-  kv(
-    record: Record<string, number | string | null> | null | undefined,
-  ): Array<{ key: string; value: string }> {
-    if (!record) return [];
-    return Object.entries(record).map(([key, value]) => ({
-      key,
-      value: value == null ? '—' : typeof value === 'number' ? String(value) : value,
-    }));
+  // ── Trend computeds ────────────────────────────────────────────────
+
+  readonly anomalyRows = computed(() => (this.trend()?.rows ?? []).filter((r) => r.isAnomaly));
+  readonly anomalyCount = computed(() => this.anomalyRows().length);
+  readonly distinctStages = computed(
+    () => new Set((this.trend()?.rows ?? []).map((r) => r.stage)).size,
+  );
+  readonly largestDeltaPct = computed(() => {
+    const rows = this.trend()?.rows ?? [];
+    if (rows.length === 0) return 0;
+    return Math.max(...rows.map((r) => Math.abs(r.deltaPct) * 100));
+  });
+  readonly topDeltaRows = computed<CalibrationTrendRowDto[]>(() =>
+    [...(this.trend()?.rows ?? [])]
+      .sort((a, b) => Math.abs(b.deltaPct) - Math.abs(a.deltaPct))
+      .slice(0, 6),
+  );
+  /** Map a deltaPct into a 0-100% bar width — bar maxes out at 50% delta. */
+  deltaBarPct(deltaPct: number): number {
+    return Math.min(100, (Math.abs(deltaPct) / 0.5) * 100);
   }
 
-  // ---------- Trend tab computeds ----------
+  // ── Gates computeds ────────────────────────────────────────────────
 
-  readonly anomalyCounts = computed<{ Critical: number; Warning: number; Info: number }>(() => {
-    let critical = 0;
-    let warning = 0;
-    let info = 0;
-    for (const a of this.trend()?.anomalies ?? []) {
-      const sev = a.severity ?? 'Info';
-      if (sev === 'Critical') critical++;
-      else if (sev === 'Warning') warning++;
-      else info++;
-    }
-    return { Critical: critical, Warning: warning, Info: info };
+  readonly distinctTopTypes = computed(() => {
+    const types = new Set(
+      (this.gates()?.rows ?? []).map((r) => r.topStrategyType).filter((t): t is string => !!t),
+    );
+    return types.size;
   });
-
-  readonly metricsTrackedCount = computed(() => {
-    const t = this.trend();
-    if (!t) return 0;
-    const set = new Set<string>([
-      ...Object.keys(t.latestMonthMetrics ?? {}),
-      ...Object.keys(t.baselineMetrics ?? {}),
-    ]);
-    return set.size;
-  });
-
-  readonly largestAnomalyDelta = computed(() => {
-    const anomalies = this.trend()?.anomalies ?? [];
-    let largest = 0;
-    for (const a of anomalies) {
-      if (Math.abs(a.delta) > Math.abs(largest)) largest = a.delta;
-    }
-    return largest;
-  });
-
-  // Anomalies sorted Critical → Warning → Info, then by |delta| descending so
-  // the most operationally-relevant anomalies surface at the top.
-  readonly sortedAnomalies = computed(() => {
-    const anomalies = this.trend()?.anomalies ?? [];
-    const rank: Record<string, number> = { Critical: 0, Warning: 1, Info: 2 };
-    return [...anomalies].sort((a, b) => {
-      const sa = rank[a.severity ?? 'Info'] ?? 99;
-      const sb = rank[b.severity ?? 'Info'] ?? 99;
-      if (sa !== sb) return sa - sb;
-      return Math.abs(b.delta) - Math.abs(a.delta);
-    });
-  });
-
-  // Side-by-side metric comparison table — full union of latest + baseline
-  // keys, with absolute and percent deltas where both are numeric.
-  readonly comparisonRows = computed(() => {
-    const t = this.trend();
-    if (!t) return [];
-    const keys = new Set<string>([
-      ...Object.keys(t.latestMonthMetrics ?? {}),
-      ...Object.keys(t.baselineMetrics ?? {}),
-    ]);
-    return Array.from(keys)
-      .map((key) => {
-        const latest = t.latestMonthMetrics?.[key] ?? null;
-        const baseline = t.baselineMetrics?.[key] ?? null;
-        const latestNum = typeof latest === 'number' ? latest : null;
-        const baselineNum = typeof baseline === 'number' ? baseline : null;
-        const deltaAbs =
-          latestNum !== null && baselineNum !== null ? latestNum - baselineNum : null;
-        const deltaPct =
-          latestNum !== null && baselineNum !== null && baselineNum !== 0
-            ? ((latestNum - baselineNum) / Math.abs(baselineNum)) * 100
-            : null;
-        return {
-          key,
-          latestStr: latest == null ? '—' : String(latest),
-          baselineStr: baseline == null ? '—' : String(baseline),
-          deltaAbs,
-          deltaPct,
-        };
-      })
-      .sort((a, b) => {
-        // Rows with the largest |Δ %| float to the top — that's where the
-        // calibration drift is most pronounced. Non-numeric rows fall to the
-        // bottom so they don't crowd out the actionable signal.
-        const ax = a.deltaPct === null ? -1 : Math.abs(a.deltaPct);
-        const bx = b.deltaPct === null ? -1 : Math.abs(b.deltaPct);
-        if (bx !== ax) return bx - ax;
-        return a.key.localeCompare(b.key);
-      });
-  });
-
-  readonly topDeltasCount = computed(() =>
-    Math.min(10, this.comparisonRows().filter((r) => r.deltaPct !== null).length),
+  readonly underfitCount = computed(
+    () => (this.gates()?.rows ?? []).filter((r) => r.class === 'Underfit').length,
+  );
+  readonly overfitCount = computed(
+    () => (this.gates()?.rows ?? []).filter((r) => r.class === 'Overfit').length,
   );
 
-  readonly topDeltasOptions = computed<EChartsOption>(() => {
-    const rows = this.comparisonRows()
-      .filter((r) => r.deltaPct !== null)
-      .slice(0, 10);
-    if (rows.length === 0) {
-      return {
-        title: {
-          text: 'No numeric metrics to compare',
-          left: 'center',
-          top: 'middle',
-          textStyle: { fontSize: 12, color: '#8E8E93', fontWeight: 'normal' },
-        },
-      };
-    }
-    return {
-      tooltip: {
-        trigger: 'axis',
-        axisPointer: { type: 'shadow' },
-        formatter: (params: any) => {
-          const p = Array.isArray(params) ? params[0] : params;
-          return `${p.name}<br/>Δ ${p.value > 0 ? '+' : ''}${p.value.toFixed(2)}%`;
-        },
-      },
-      grid: { top: 10, right: 50, bottom: 30, left: 140 },
-      xAxis: {
-        type: 'value',
-        axisLabel: { fontSize: 10, color: '#6E6E73', formatter: '{value}%' },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-      },
-      yAxis: {
-        type: 'category',
-        data: rows.map((r) => r.key).reverse(),
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
-      },
-      series: [
-        {
-          type: 'bar',
-          data: rows
-            .map((r) => ({
-              value: Number(((r.deltaPct ?? 0) as number).toFixed(2)),
-              itemStyle: {
-                color: (r.deltaPct ?? 0) >= 0 ? '#34C759' : '#FF3B30',
-                borderRadius: [0, 4, 4, 0],
-              },
-            }))
-            .reverse(),
-          barWidth: 12,
-          label: {
-            show: true,
-            position: 'right',
-            fontSize: 10,
-            color: '#6E6E73',
-            formatter: (params: any) => `${params.value > 0 ? '+' : ''}${params.value.toFixed(1)}%`,
-          },
-        },
-      ],
-    };
+  // ── Defaults computeds ────────────────────────────────────────────
+
+  readonly tightenCount = computed(
+    () => (this.defaults()?.defaults ?? []).filter((d) => this.trendOf(d) === 'Tighten').length,
+  );
+  readonly loosenCount = computed(
+    () => (this.defaults()?.defaults ?? []).filter((d) => this.trendOf(d) === 'Loosen').length,
+  );
+  readonly unchangedCount = computed(
+    () => (this.defaults()?.defaults ?? []).filter((d) => this.trendOf(d) === 'Unchanged').length,
+  );
+  readonly totalSamples = computed(() =>
+    (this.defaults()?.defaults ?? []).reduce((sum, d) => sum + d.sampleCount, 0),
+  );
+  readonly avgExclusion = computed(() => {
+    const items = this.defaults()?.defaults ?? [];
+    if (items.length === 0) return 0;
+    return items.reduce((sum, d) => sum + d.exclusionRatePct, 0) / items.length;
+  });
+  readonly generatedMinutesAgo = computed(() => {
+    const d = this.defaults();
+    if (!d) return 0;
+    return Math.floor((Date.now() - new Date(d.generatedAtUtc).getTime()) / 60_000);
+  });
+  readonly analysisDays = computed(() => {
+    const d = this.defaults();
+    if (!d) return 0;
+    const from = new Date(d.analysisFromUtc).getTime();
+    const to = new Date(d.analysisToUtc).getTime();
+    return Math.round((to - from) / (24 * 60 * 60 * 1000));
   });
 
-  // ---------- Gates tab computeds ----------
+  trendOf(entry: DefaultsCalibrationEntryDto): 'Tighten' | 'Loosen' | 'Unchanged' {
+    if (entry.recommendedFloor > entry.currentFloor) return 'Tighten';
+    if (entry.recommendedFloor < entry.currentFloor) return 'Loosen';
+    return 'Unchanged';
+  }
 
-  readonly totalGateRejections = computed(() =>
-    (this.gates()?.gates ?? []).reduce((s, g) => s + (g.rejectionCount ?? 0), 0),
-  );
+  severityOf(entry: DefaultsCalibrationEntryDto): 'High' | 'Medium' | 'Info' {
+    const t = this.trendOf(entry);
+    if (t === 'Tighten') return 'High';
+    if (t === 'Loosen') return 'Medium';
+    return 'Info';
+  }
 
-  readonly topGateShare = computed(() => {
-    const gates = this.gates()?.gates ?? [];
-    if (gates.length === 0) return 0;
-    return Math.max(...gates.map((g) => g.sharePct ?? 0));
-  });
+  /**
+   * Map an absolute value into a percentage position along the distribution
+   * bar (min → 0%, max → 100%). Used to plot the current / recommended
+   * floor markers and the percentile ticks.
+   */
+  markerPct(entry: DefaultsCalibrationEntryDto, value: number): number {
+    const { min, max } = entry.distribution;
+    if (max <= min) return 50;
+    const pct = ((value - min) / (max - min)) * 100;
+    return Math.max(0, Math.min(100, pct));
+  }
 
-  readonly gatesWithNotesCount = computed(
-    () => (this.gates()?.gates ?? []).filter((g) => !!g.notes).length,
-  );
-
-  readonly gateDonutOptions = computed<EChartsOption>(() => {
-    const gates = (this.gates()?.gates ?? []).filter((g) => g.rejectionCount > 0);
-    if (gates.length === 0) {
-      return {
-        title: {
-          text: 'No rejections recorded',
-          left: 'center',
-          top: 'middle',
-          textStyle: { fontSize: 12, color: '#34C759', fontWeight: 'normal' },
-        },
-      };
-    }
-    const palette = [
-      '#0071E3',
-      '#5AC8FA',
-      '#34C759',
-      '#FF9500',
-      '#FF3B30',
-      '#AF52DE',
-      '#FFCC00',
-      '#8E8E93',
+  percentilePoints(
+    entry: DefaultsCalibrationEntryDto,
+  ): Array<{ label: string; pct: number; value: number }> {
+    const d = entry.distribution;
+    const points: Array<{ label: string; value: number }> = [
+      { label: 'P5', value: d.p5 },
+      { label: 'P25', value: d.p25 },
+      { label: 'P50', value: d.p50 },
+      { label: 'P75', value: d.p75 },
+      { label: 'P95', value: d.p90 },
     ];
-    return {
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: {
-        bottom: 0,
-        type: 'scroll',
-        textStyle: { fontSize: 10, color: '#6E6E73' },
-      },
-      series: [
-        {
-          type: 'pie',
-          radius: ['45%', '70%'],
-          center: ['50%', '45%'],
-          label: { show: false },
-          data: gates.map((g, i) => ({
-            name: g.gate,
-            value: g.rejectionCount,
-            itemStyle: { color: palette[i % palette.length] },
-          })),
-        },
-      ],
-    };
-  });
-
-  readonly gateBarOptions = computed<EChartsOption>(() => {
-    const gates = [...(this.gates()?.gates ?? [])]
-      .sort((a, b) => (b.rejectionCount ?? 0) - (a.rejectionCount ?? 0))
-      .slice(0, 10);
-    if (gates.length === 0) return {};
-    return {
-      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      grid: { top: 10, right: 50, bottom: 30, left: 130 },
-      xAxis: {
-        type: 'value',
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-      },
-      yAxis: {
-        type: 'category',
-        data: gates.map((g) => g.gate).reverse(),
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
-      },
-      series: [
-        {
-          type: 'bar',
-          data: gates
-            .map((g) => ({
-              value: g.rejectionCount,
-              itemStyle: { color: '#0071E3', borderRadius: [0, 4, 4, 0] },
-            }))
-            .reverse(),
-          barWidth: 12,
-          label: { show: true, position: 'right', fontSize: 10, color: '#6E6E73' },
-        },
-      ],
-    };
-  });
-
-  // ---------- Rejections tab analytics ----------
-  // Probe-and-fetch up to 1000 most-recent rejections so the KPIs and top-N
-  // charts reflect the live engine, not just whatever page the user happens
-  // to be viewing in the data table. Polled every 60s.
-  private readonly rejectionAnalyticsResource = createPolledResource(
-    () =>
-      this.service.listSignalRejections({ currentPage: 1, itemCountPerPage: 1, filter: null }).pipe(
-        switchMap((probe) => {
-          const total = probe.data?.pager?.totalItemCount ?? 0;
-          const limit = Math.min(total, 1000);
-          if (limit === 0) return of({ rows: [] as SignalRejectionEntryDto[], total });
-          return this.service
-            .listSignalRejections({ currentPage: 1, itemCountPerPage: limit, filter: null })
-            .pipe(map((r) => ({ rows: r.data?.data ?? [], total })));
-        }),
-        catchError(() => of({ rows: [] as SignalRejectionEntryDto[], total: 0 })),
-      ),
-    { intervalMs: 60_000 },
-  );
-
-  readonly rejectionAnalyticsRows = computed(
-    () => this.rejectionAnalyticsResource.value()?.rows ?? [],
-  );
-  readonly rejectionTotalEver = computed(() => this.rejectionAnalyticsResource.value()?.total ?? 0);
-
-  readonly distinctRules = computed(() => {
-    const counts = new Map<string, number>();
-    for (const r of this.rejectionAnalyticsRows()) {
-      if (!r.ruleId) continue;
-      counts.set(r.ruleId, (counts.get(r.ruleId) ?? 0) + 1);
-    }
-    return Array.from(counts.entries())
-      .map(([rule, count]) => ({ rule, count }))
-      .sort((a, b) => b.count - a.count);
-  });
-
-  readonly distinctSymbols = computed(() => {
-    const counts = new Map<string, number>();
-    for (const r of this.rejectionAnalyticsRows()) {
-      if (!r.symbol) continue;
-      counts.set(r.symbol, (counts.get(r.symbol) ?? 0) + 1);
-    }
-    return Array.from(counts.entries())
-      .map(([symbol, count]) => ({ symbol, count }))
-      .sort((a, b) => b.count - a.count);
-  });
-
-  readonly distinctStrategies = computed(() => {
-    const set = new Set<number>();
-    for (const r of this.rejectionAnalyticsRows()) {
-      if (r.strategyId != null) set.add(r.strategyId);
-    }
-    return set.size;
-  });
-
-  readonly rejectionsLast24h = computed(() => {
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    return this.rejectionAnalyticsRows().filter((r) => new Date(r.rejectedAt).getTime() > cutoff)
-      .length;
-  });
-
-  readonly topRulesOptions = computed<EChartsOption>(() => {
-    const rows = this.distinctRules().slice(0, 10);
-    if (rows.length === 0) {
-      return {
-        title: {
-          text: 'No rejections in sample',
-          left: 'center',
-          top: 'middle',
-          textStyle: { fontSize: 12, color: '#34C759', fontWeight: 'normal' },
-        },
-      };
-    }
-    return {
-      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      grid: { top: 10, right: 50, bottom: 30, left: 150 },
-      xAxis: {
-        type: 'value',
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-      },
-      yAxis: {
-        type: 'category',
-        data: rows.map((r) => r.rule).reverse(),
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
-      },
-      series: [
-        {
-          type: 'bar',
-          data: rows
-            .map((r) => ({
-              value: r.count,
-              itemStyle: { color: '#FF3B30', borderRadius: [0, 4, 4, 0] },
-            }))
-            .reverse(),
-          barWidth: 12,
-          label: { show: true, position: 'right', fontSize: 10, color: '#6E6E73' },
-        },
-      ],
-    };
-  });
-
-  readonly topSymbolsOptions = computed<EChartsOption>(() => {
-    const rows = this.distinctSymbols().slice(0, 10);
-    if (rows.length === 0) {
-      return {
-        title: {
-          text: 'No rejections in sample',
-          left: 'center',
-          top: 'middle',
-          textStyle: { fontSize: 12, color: '#8E8E93', fontWeight: 'normal' },
-        },
-      };
-    }
-    return {
-      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      grid: { top: 10, right: 50, bottom: 30, left: 80 },
-      xAxis: {
-        type: 'value',
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-      },
-      yAxis: {
-        type: 'category',
-        data: rows.map((r) => r.symbol).reverse(),
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
-      },
-      series: [
-        {
-          type: 'bar',
-          data: rows
-            .map((r) => ({
-              value: r.count,
-              itemStyle: { color: '#FF9500', borderRadius: [0, 4, 4, 0] },
-            }))
-            .reverse(),
-          barWidth: 12,
-          label: { show: true, position: 'right', fontSize: 10, color: '#6E6E73' },
-        },
-      ],
-    };
-  });
-
-  // ---------- Defaults tab computeds ----------
-
-  readonly recommendationRows = computed(() => {
-    const recs = this.defaults()?.recommendations ?? [];
-    return recs.map((r) => {
-      const cur = typeof r.current === 'number' ? r.current : null;
-      const sug = typeof r.suggested === 'number' ? r.suggested : null;
-      const delta = cur !== null && sug !== null ? sug - cur : null;
-      const deltaPct =
-        cur !== null && sug !== null && cur !== 0 ? ((sug - cur) / Math.abs(cur)) * 100 : null;
-      return {
-        key: r.key,
-        currentStr: r.current == null ? '—' : String(r.current),
-        suggestedStr: r.suggested == null ? '—' : String(r.suggested),
-        delta,
-        deltaPct,
-        rationale: r.rationale,
-      };
-    });
-  });
-
-  readonly numericRecommendations = computed(
-    () => this.recommendationRows().filter((r) => r.delta !== null).length,
-  );
-
-  readonly avgRecommendationDeltaPct = computed(() => {
-    const pcts = this.recommendationRows()
-      .map((r) => r.deltaPct)
-      .filter((v): v is number => v !== null && Number.isFinite(v))
-      .map((v) => Math.abs(v));
-    if (pcts.length === 0) return 0;
-    return pcts.reduce((s, v) => s + v, 0) / pcts.length;
-  });
-
-  readonly largestRecommendationDeltaPct = computed(() => {
-    const pcts = this.recommendationRows()
-      .map((r) => r.deltaPct)
-      .filter((v): v is number => v !== null && Number.isFinite(v))
-      .map((v) => Math.abs(v));
-    if (pcts.length === 0) return 0;
-    return Math.max(...pcts);
-  });
-
-  // ---------- Shared formatting helpers ----------
-
-  formatDelta(v: number | null): string {
-    if (v === null) return '—';
-    const sign = v > 0 ? '+' : '';
-    return `${sign}${v.toFixed(2)}`;
-  }
-
-  formatDeltaPct(v: number | null): string {
-    if (v === null) return '—';
-    const sign = v > 0 ? '+' : '';
-    return `${sign}${v.toFixed(2)}%`;
+    return points.map((p) => ({ ...p, pct: this.markerPct(entry, p.value) }));
   }
 }
 
-function emptyPager() {
+function emptyPaged<T>(): PagedData<T> {
   return {
-    totalItemCount: 0,
-    filter: null,
-    currentPage: 1,
-    itemCountPerPage: 25,
-    pageNo: 1,
-    pageSize: 25,
+    pager: {
+      totalItemCount: 0,
+      filter: null,
+      currentPage: 1,
+      itemCountPerPage: 25,
+      pageNo: 1,
+      pageSize: 25,
+    },
+    data: [] as T[],
   };
 }

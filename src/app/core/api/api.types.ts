@@ -1419,39 +1419,105 @@ export interface DeadLetterDto {
   resolvedAt: string | null;
 }
 
-/** Structured but permissive — calibration endpoints return whatever the backend decides today. */
+/**
+ * Calibration / trend-report response. The engine compares the latest
+ * month's rejection mix against a multi-month baseline and flags any
+ * (stage, reason) bucket whose share moved by more than the threshold.
+ */
+export interface CalibrationTrendRowDto {
+  stage: string;
+  reason: string;
+  latestMonthCount: number;
+  baselineCount: number;
+  latestMonthSharePct: number;
+  baselineSharePct: number;
+  deltaPct: number;
+  isAnomaly: boolean;
+  hint: string | null;
+}
 export interface CalibrationTrendReportDto {
-  baselineMonths: number;
-  latestMonthMetrics: Record<string, number | string | null>;
-  baselineMetrics: Record<string, number | string | null>;
-  anomalies: Array<{
-    metric: string;
-    delta: number;
-    severity: string | null;
-    note?: string | null;
-  }>;
+  latestMonthStart: string;
+  latestMonthEnd: string;
+  baselineStart: string;
+  baselineEnd: string;
+  latestMonthTotal: number;
+  baselineTotal: number;
+  anomalyThresholdPct: number;
+  minBaselineCount: number;
+  rows: CalibrationTrendRowDto[];
 }
 
+/**
+ * Which screening gate is bindingly tight on candidate qualification —
+ * informs the operator-side decision to loosen IS / OOS / MonteCarlo
+ * thresholds. The engine groups recent failures by reason+class and
+ * picks the dominant one.
+ */
+export interface ScreeningGateBindingRowDto {
+  reason: string;
+  count: number;
+  sharePct: number;
+  class: string;
+  topStrategyType: string | null;
+  topStrategyTypeCount: number;
+}
 export interface ScreeningGateBindingReportDto {
-  gates: Array<{ gate: string; rejectionCount: number; sharePct: number; notes?: string | null }>;
+  windowStart: string;
+  windowEnd: string;
+  lookbackDays: number;
+  totalFailures: number;
+  isReliable: boolean;
+  overallClass: string;
+  bindingReason: string;
+  bindingReasonShare: number;
+  bindingClass: string;
+  recommendation: string;
+  rows: ScreeningGateBindingRowDto[];
 }
 
 export interface SignalRejectionEntryDto {
-  tradeSignalId: number;
-  ruleId: string | null;
-  reason: string | null;
-  symbol: string | null;
+  id: number;
+  tradeSignalId: number | null;
   strategyId: number | null;
+  symbol: string | null;
+  stage: string;
+  reason: string;
+  detail: string | null;
+  source: string | null;
   rejectedAt: string;
 }
 
+/**
+ * Engine-computed floor recommendations — pulls percentile distributions
+ * of recent observations and suggests floors that exclude the bottom N%.
+ */
+export interface DefaultsCalibrationDistributionDto {
+  min: number;
+  p5: number;
+  p10: number;
+  p25: number;
+  p50: number;
+  p75: number;
+  p90: number;
+  max: number;
+  mean: number;
+}
+export interface DefaultsCalibrationEntryDto {
+  configKey: string;
+  floorDescription: string;
+  dataSource: string;
+  sampleCount: number;
+  currentFloor: number;
+  distribution: DefaultsCalibrationDistributionDto;
+  exclusionRatePct: number;
+  recommendedFloor: number;
+  recommendationRationale: string;
+}
 export interface DefaultsCalibrationDto {
-  recommendations: Array<{
-    key: string;
-    current: number | string | null;
-    suggested: number | string | null;
-    rationale: string | null;
-  }>;
+  generatedAtUtc: string;
+  analysisFromUtc: string;
+  analysisToUtc: string;
+  defaults: DefaultsCalibrationEntryDto[];
 }
 
 // ============================================================
