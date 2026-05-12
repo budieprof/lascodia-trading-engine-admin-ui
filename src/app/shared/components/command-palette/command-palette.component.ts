@@ -253,9 +253,9 @@ export class CommandPaletteComponent implements OnInit {
     },
     {
       group: 'Trading',
-      label: 'EA Signal Feedback',
+      label: 'Signal Exits',
       route: '/trade-signals/feedback',
-      keywords: 'ea expert advisor rejection expired dropped spread feedback feed',
+      keywords: 'ea expert advisor rejection expired dropped spread feedback exit feed strategy',
     },
     {
       group: 'Trading',

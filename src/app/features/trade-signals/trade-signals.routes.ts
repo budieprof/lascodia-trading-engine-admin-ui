@@ -6,7 +6,7 @@ export const TRADE_SIGNALS_ROUTES: Routes = [
   { path: '', component: SignalsPageComponent },
   {
     path: 'feedback',
-    data: { breadcrumb: 'EA Feedback' },
+    data: { breadcrumb: 'Signal Exits' },
     loadComponent: () =>
       import('./pages/signal-feedback-page/signal-feedback-page.component').then(
         (m) => m.SignalFeedbackPageComponent,
