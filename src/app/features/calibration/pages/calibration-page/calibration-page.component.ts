@@ -524,9 +524,19 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
                   @if (hasDistribution(entry)) {
                     <div class="distribution">
-                      <span class="dist-label small muted"
-                        >DISTRIBUTION ({{ entry.sampleCount }} samples)</span
-                      >
+                      <div class="dist-label">
+                        <span class="small muted"
+                          >DISTRIBUTION ({{ entry.sampleCount }} samples)</span
+                        >
+                        <span class="dist-legend">
+                          <span class="dist-legend-dot current"></span>
+                          current
+                        </span>
+                        <span class="dist-legend">
+                          <span class="dist-legend-dot recommended"></span>
+                          recommended
+                        </span>
+                      </div>
                       <div class="dist-bar">
                         @for (p of percentilePoints(entry); track p.label) {
                           <span
@@ -535,19 +545,19 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                             [title]="p.label + ': ' + p.value"
                           >
                             <span class="dist-tick-bar"></span>
-                            <span class="dist-tick-label small">{{ p.label }}</span>
-                            <span class="dist-tick-val mono small">{{ p.value }}</span>
+                            <span class="dist-tick-label">{{ p.label }}</span>
+                            <span class="dist-tick-val mono">{{ formatDistValue(p.value) }}</span>
                           </span>
                         }
                         <span
                           class="dist-marker current"
                           [style.left.%]="markerPct(entry, entry.currentFloor)"
-                          [title]="'Current: ' + entry.currentFloor"
+                          [title]="'Current: ' + formatDistValue(entry.currentFloor)"
                         ></span>
                         <span
                           class="dist-marker recommended"
                           [style.left.%]="markerPct(entry, entry.recommendedFloor)"
-                          [title]="'Recommended: ' + entry.recommendedFloor"
+                          [title]="'Recommended: ' + formatDistValue(entry.recommendedFloor)"
                         ></span>
                       </div>
                     </div>
@@ -578,7 +588,8 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         display: grid;
         grid-template-columns: repeat(8, 1fr);
         gap: var(--space-2);
-        margin-top: var(--space-3);
+        margin-top: var(--space-4);
+        margin-bottom: var(--space-1);
       }
       @media (max-width: 1400px) {
         .kpi-strip {
@@ -846,13 +857,14 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       .defaults-list {
         display: flex;
         flex-direction: column;
-        gap: var(--space-3);
+        gap: var(--space-4);
       }
       .default-card {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        padding: var(--space-3) var(--space-4);
+        padding: var(--space-4) var(--space-4) var(--space-5);
+        box-shadow: var(--shadow-sm);
       }
       .default-card[data-trend='Tighten'] {
         border-left: 3px solid #ff9500;
@@ -866,7 +878,9 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         justify-content: space-between;
         gap: var(--space-3);
         flex-wrap: wrap;
-        margin-bottom: var(--space-2);
+        margin-bottom: var(--space-3);
+        padding-bottom: var(--space-3);
+        border-bottom: 1px solid var(--border);
       }
       .default-title {
         display: flex;
@@ -910,26 +924,55 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         color: var(--text-tertiary);
       }
       .default-rationale {
-        margin: var(--space-2) 0 0;
-        font-size: var(--text-xs);
+        margin: var(--space-3) 0 0;
+        font-size: var(--text-sm);
         color: var(--text-secondary);
         line-height: 1.5;
       }
 
       .distribution {
-        margin-top: var(--space-3);
+        margin-top: var(--space-4);
+        padding-top: var(--space-3);
+        border-top: 1px dashed var(--border);
       }
       .dist-label {
-        display: block;
-        margin-bottom: var(--space-2);
+        display: flex;
+        gap: var(--space-3);
+        align-items: center;
+        margin-bottom: var(--space-3);
         text-transform: uppercase;
         letter-spacing: 0.05em;
       }
+      .dist-legend {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 10px;
+        color: var(--text-tertiary);
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .dist-legend-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+      .dist-legend-dot.current {
+        background: #ff9500;
+      }
+      .dist-legend-dot.recommended {
+        background: #0071e3;
+      }
+      /* Pad the bar horizontally so ticks at the extreme min/max edges
+         don't clip against the rounded corners and have room to render
+         their labels without being cut off. */
       .dist-bar {
         position: relative;
-        height: 56px;
+        height: 72px;
         background: var(--bg-tertiary);
         border-radius: var(--radius-sm);
+        margin: 0 var(--space-3);
       }
       .dist-tick {
         position: absolute;
@@ -940,22 +983,31 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         flex-direction: column;
         align-items: center;
         justify-content: space-between;
-        padding: 4px 0;
+        padding: 6px 0;
+        min-width: 0;
       }
       .dist-tick-bar {
         width: 1px;
-        height: 12px;
+        height: 14px;
         background: var(--text-tertiary);
+        flex-shrink: 0;
       }
       .dist-tick-label {
         font-size: 9px;
         color: var(--text-tertiary);
-        font-weight: var(--font-semibold);
+        font-weight: var(--font-bold);
+        letter-spacing: 0.04em;
+        white-space: nowrap;
       }
       .dist-tick-val {
         font-size: 10px;
         font-variant-numeric: tabular-nums;
         color: var(--text-secondary);
+        font-weight: var(--font-medium);
+        white-space: nowrap;
+        padding: 1px 4px;
+        background: var(--bg-tertiary);
+        border-radius: 2px;
       }
       .dist-marker {
         position: absolute;
@@ -974,10 +1026,11 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         box-shadow: 0 0 0 1px var(--bg-secondary);
       }
       .dist-empty {
-        margin: var(--space-3) 0 0;
-        padding: var(--space-2) var(--space-3);
+        margin: var(--space-4) 0 0;
+        padding: var(--space-3) var(--space-4);
         background: var(--bg-tertiary);
         border-radius: var(--radius-sm);
+        border-top: 1px dashed var(--border);
       }
     `,
   ],
@@ -1159,18 +1212,49 @@ export class CalibrationPageComponent {
   ): Array<{ label: string; pct: number; value: number }> {
     if (!entry.distribution) return [];
     const d = entry.distribution;
-    const points: Array<{ label: string; value: number }> = [
+    const raw = [
       { label: 'P5', value: d.p5 },
       { label: 'P25', value: d.p25 },
       { label: 'P50', value: d.p50 },
       { label: 'P75', value: d.p75 },
       { label: 'P95', value: d.p90 },
-    ];
-    return points.map((p) => ({ ...p, pct: this.markerPct(entry, p.value) }));
+    ].map((p) => ({ ...p, pct: this.markerPct(entry, p.value) }));
+
+    // Merge ticks that land within 6% of each other so labels never overlap.
+    // Common pattern: P5/P10/P25 collapsing to the same value at low-spread
+    // distributions (e.g. WalkForward:MinInSampleDays where p5=p10=p25=67).
+    // Without this dedupe, the labels stack on top of each other and read
+    // as a garbled mash.
+    const merged: Array<{ label: string; pct: number; value: number }> = [];
+    for (const p of raw) {
+      const last = merged[merged.length - 1];
+      if (last && Math.abs(last.pct - p.pct) < 6) {
+        last.label = `${last.label}/${p.label}`;
+      } else {
+        merged.push({ ...p });
+      }
+    }
+    return merged;
   }
 
   hasDistribution(entry: DefaultsCalibrationEntryDto): boolean {
     return !!entry.distribution;
+  }
+
+  /**
+   * Compact value formatting for distribution ticks — keeps the rendering
+   * legible when values are either huge integers (sample sizes) or very
+   * precise floats (e.g. MinDeflatedSharpe at -17.7675681222764). Fixes the
+   * label-overflow bug where long decimals bled into the next tick.
+   */
+  formatDistValue(v: number): string {
+    if (!Number.isFinite(v)) return '—';
+    const abs = Math.abs(v);
+    if (abs >= 1000) return v.toFixed(0);
+    if (abs >= 100) return v.toFixed(0);
+    if (abs >= 10) return v.toFixed(1);
+    if (abs >= 1) return v.toFixed(2);
+    return v.toFixed(3);
   }
 }
 
