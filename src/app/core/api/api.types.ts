@@ -407,6 +407,10 @@ export interface PositionDto {
  * them at render-time. Common eventType values: Opened, Modified,
  * PartialClose, Closed, ForceClosed, Reconciled, StaleClose. Common source
  * values: EA, PositionWorker, ReconciliationWorker, Broker, Manual.
+ *
+ * Position-side fields (symbol/direction/status/etc.) are joined in the
+ * engine query and denormalised onto the DTO so the fleet-view feed can
+ * render every row without an N+1 lookup to GET /position/{id}.
  */
 export interface PositionLifecycleEventDto {
   id: number;
@@ -419,6 +423,15 @@ export interface PositionLifecycleEventDto {
   commissionAccumulated: number | null;
   description: string | null;
   occurredAt: string;
+  // Joined from the parent Position. May be null/default when the parent
+  // is soft-deleted; the UI falls back to the bare positionId in that case.
+  symbol: string | null;
+  direction: PositionDirection;
+  positionStatus: PositionStatus;
+  openLots: number;
+  unrealizedPnL: number;
+  realizedPnL: number;
+  brokerPositionId: string | null;
 }
 
 export interface StrategyDto {
