@@ -16,8 +16,10 @@ import type { TradeSignalDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
+import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 /**
@@ -26,19 +28,16 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
  * Originally scoped narrowly to EA-sourced rejections via the "EA:"
  * RejectionReason prefix, but the engine also expires signals on its own
  * (TTL / strategy decision), and those are equally important to operators.
- * This page now surfaces ALL Rejected + Expired signals in the window and
+ * This page surfaces ALL Rejected + Expired signals in the window and
  * classifies them by parsed source — EA / Strategy / Engine / Unknown —
- * so the EA-specific feed is still recoverable via the source filter
- * while the broader picture is the default.
+ * with the EA-only feed still recoverable via the source filter.
  *
- * Layout matches the position-deltas operator-console style:
- *   - 8-tile compact KPI strip always rendered (zero counts visible)
- *   - Hourly activity histogram for burst detection
- *   - Notable patterns panel (rejection bursts, single-strategy dominance,
- *     symbol concentration)
- *   - By source / By reason / By symbol breakdowns
- *   - Per-strategy rollup
- *   - Recent events table enriched with strategy / direction / age
+ * Layout follows the market-data page's design language:
+ *   - <app-metric-card> tiles in a .kpi-strip for the top metrics row
+ *   - .insights-section + .insights-grid + .insight-card panels for the
+ *     histogram + notable patterns + breakdowns block
+ *   - .data-table-card + .board-head + .board-table for the strategy
+ *     rollup and recent events tables
  */
 type ExitSource = 'EA' | 'Strategy' | 'Engine' | 'Unknown';
 
@@ -85,8 +84,10 @@ interface AnomalyFlag {
     FormsModule,
     RouterLink,
     PageHeaderComponent,
+    MetricCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
+    EmptyStateComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -106,9 +107,9 @@ interface AnomalyFlag {
         </button>
       </app-page-header>
 
-      <section class="controls">
-        <div class="control-group">
-          <label for="window">Window</label>
+      <section class="filter-bar">
+        <div class="fb-field">
+          <label class="fb-label">Window</label>
           <div class="window-presets">
             @for (p of windowPresets; track p) {
               <button
@@ -122,37 +123,49 @@ interface AnomalyFlag {
             }
           </div>
         </div>
-        <div class="control-group">
-          <label for="symbol">Symbol</label>
+        <div class="fb-field">
+          <label for="symbol" class="fb-label">Symbol</label>
           <input
             id="symbol"
+            class="filter-input"
             type="search"
             placeholder="e.g. EURUSD"
             [ngModel]="symbolFilter()"
             (ngModelChange)="symbolFilter.set($event)"
           />
         </div>
-        <div class="control-group">
-          <label for="strategy">Strategy #</label>
+        <div class="fb-field">
+          <label for="strategy" class="fb-label">Strategy #</label>
           <input
             id="strategy"
+            class="filter-input"
             type="search"
             placeholder="id"
             [ngModel]="strategyFilter()"
             (ngModelChange)="strategyFilter.set($event)"
           />
         </div>
-        <div class="control-group">
-          <label for="status">Status</label>
-          <select id="status" [ngModel]="statusFilter()" (ngModelChange)="statusFilter.set($event)">
+        <div class="fb-field">
+          <label for="status" class="fb-label">Status</label>
+          <select
+            id="status"
+            class="filter-select"
+            [ngModel]="statusFilter()"
+            (ngModelChange)="statusFilter.set($event)"
+          >
             <option value="">all</option>
             <option value="Rejected">Rejected only</option>
             <option value="Expired">Expired only</option>
           </select>
         </div>
-        <div class="control-group">
-          <label for="source">Source</label>
-          <select id="source" [ngModel]="sourceFilter()" (ngModelChange)="sourceFilter.set($event)">
+        <div class="fb-field">
+          <label for="source" class="fb-label">Source</label>
+          <select
+            id="source"
+            class="filter-select"
+            [ngModel]="sourceFilter()"
+            (ngModelChange)="sourceFilter.set($event)"
+          >
             <option value="">all</option>
             <option value="EA">EA</option>
             <option value="Strategy">Strategy</option>
@@ -171,221 +184,179 @@ interface AnomalyFlag {
           (retry)="resource.refresh()"
         />
       } @else {
-        <!-- KPI strip — always rendered, zero counts visible -->
-        <section class="kpi-strip" aria-label="Summary metrics">
-          <div class="kpi">
-            <span class="kpi-label">Events</span>
-            <span class="kpi-value">{{ filteredRows().length }}</span>
-          </div>
-          <div class="kpi">
-            <span class="kpi-label">Rejected</span>
-            <span class="kpi-value">{{ rejectedCount() }}</span>
-            @if (filteredRows().length > 0) {
-              <span class="kpi-trend">
-                {{ (rejectedCount() / filteredRows().length) * 100 | number: '1.0-0' }}%
-              </span>
-            }
-          </div>
-          <div class="kpi">
-            <span class="kpi-label">Expired</span>
-            <span class="kpi-value">{{ expiredCount() }}</span>
-            @if (filteredRows().length > 0) {
-              <span class="kpi-trend">
-                {{ (expiredCount() / filteredRows().length) * 100 | number: '1.0-0' }}%
-              </span>
-            }
-          </div>
-          <div class="kpi" [class.muted-kpi]="eaCount() === 0">
-            <span class="kpi-label">EA-sourced</span>
-            <span class="kpi-value">{{ eaCount() }}</span>
-            @if (filteredRows().length > 0) {
-              <span class="kpi-trend">
-                {{ (eaCount() / filteredRows().length) * 100 | number: '1.0-0' }}%
-              </span>
-            }
-          </div>
-          <div class="kpi">
-            <span class="kpi-label">Strategies</span>
-            <span class="kpi-value">{{ distinctStrategies() }}</span>
-          </div>
-          <div class="kpi">
-            <span class="kpi-label">Symbols</span>
-            <span class="kpi-value">{{ distinctSymbols() }}</span>
-          </div>
-          <div class="kpi">
-            <span class="kpi-label">Reasons</span>
-            <span class="kpi-value">{{ reasonBuckets().length }}</span>
-          </div>
-          <div class="kpi">
-            <span class="kpi-label">Last exit</span>
-            <span class="kpi-value-sm">
-              @if (lastEventAt()) {
-                {{ lastEventAt()! | relativeTime }}
-              } @else {
-                —
-              }
-            </span>
-          </div>
-        </section>
-
-        <!-- Activity histogram + Notable patterns side-by-side -->
-        <div class="row-2">
-          <section class="card activity-card">
-            <header class="card-head">
-              <h3>Activity</h3>
-              <span class="muted small">exits / hour, last {{ windowHours() }}h</span>
-            </header>
-            @if (filteredRows().length === 0) {
-              <p class="empty-inline muted small">
-                No signal exits in this window. Widen the window above or check that strategies are
-                producing signals.
-              </p>
-            } @else {
-              <div class="histogram">
-                @for (h of hourBuckets(); track h.label) {
-                  <div class="hist-col" [title]="h.label + ': ' + h.count + ' exits'">
-                    <span
-                      class="hist-bar"
-                      [style.height.%]="hourBarHeight(h.count)"
-                      [class.zero]="h.count === 0"
-                    ></span>
-                  </div>
-                }
-              </div>
-              <footer class="hist-axis">
-                <span>{{ hourBuckets()[0]?.label ?? '' }}</span>
-                <span class="muted small">
-                  peak {{ peakHour() }} • avg {{ avgHour() | number: '1.1-1' }}/h
-                </span>
-                <span>now</span>
-              </footer>
-            }
-          </section>
-
-          <section class="card patterns-card">
-            <header class="card-head">
-              <h3>Notable patterns</h3>
-              <span class="muted small">{{ anomalies().length }} flagged</span>
-            </header>
-            @if (anomalies().length === 0) {
-              <p class="empty-inline muted small">
-                No bursts, dominance, or concentration in window.
-              </p>
-            } @else {
-              <ul class="anomaly-list">
-                @for (a of anomalies(); track $index) {
-                  <li class="anomaly" [attr.data-kind]="a.kind">
-                    <span class="anomaly-tag">{{ anomalyLabel(a.kind) }}</span>
-                    <span class="small">{{ a.detail }}</span>
-                  </li>
-                }
-              </ul>
-            }
-          </section>
+        <!-- KPI strip — canonical metric-cards, always rendered -->
+        <div class="kpi-strip">
+          <app-metric-card
+            label="Events"
+            [value]="filteredRows().length"
+            format="number"
+            dotColor="#0071E3"
+          />
+          <app-metric-card
+            label="Rejected"
+            [value]="rejectedCount()"
+            format="number"
+            [dotColor]="rejectedCount() > 0 ? '#FF3B30' : '#34C759'"
+          />
+          <app-metric-card
+            label="Expired"
+            [value]="expiredCount()"
+            format="number"
+            [dotColor]="expiredCount() > 0 ? '#FF9500' : '#34C759'"
+          />
+          <app-metric-card
+            label="EA-sourced"
+            [value]="eaCount()"
+            format="number"
+            [dotColor]="eaCount() > 0 ? '#34C759' : '#8E8E93'"
+          />
+          <app-metric-card
+            label="Strategies"
+            [value]="distinctStrategies()"
+            format="number"
+            dotColor="#AF52DE"
+          />
+          <app-metric-card
+            label="Symbols"
+            [value]="distinctSymbols()"
+            format="number"
+            dotColor="#AF52DE"
+          />
+          <app-metric-card
+            label="Reasons"
+            [value]="reasonBuckets().length"
+            format="number"
+            dotColor="#0071E3"
+          />
+          <app-metric-card
+            label="Last exit (min ago)"
+            [value]="lastExitMinutes()"
+            format="number"
+            dotColor="#AF52DE"
+          />
         </div>
 
-        <!-- By source + By reason side-by-side -->
-        <div class="row-2">
-          <section class="card">
-            <header class="card-head">
-              <h3>By source</h3>
-              <span class="muted small">{{ sourceBuckets().length }} distinct</span>
+        @if (filteredRows().length === 0) {
+          <app-empty-state
+            title="No signal exits in this window"
+            message="Either no signals were rejected or expired in the chosen window, or the active filters exclude everything. Widen the window via the presets above or clear filters."
+          />
+        } @else {
+          <!-- Insights row — histogram + notable patterns + breakdowns -->
+          <section class="insights-section">
+            <header class="insights-head">
+              <h3>Exit insights</h3>
+              <span class="muted">
+                {{ filteredRows().length }} exit{{ filteredRows().length === 1 ? '' : 's' }} · last
+                {{ windowHours() }}h
+              </span>
             </header>
-            <table class="deltas-table compact">
-              <thead>
-                <tr>
-                  <th>Source</th>
-                  <th class="num">N</th>
-                  <th class="num">Share</th>
-                  <th>Latest</th>
-                </tr>
-              </thead>
-              <tbody>
-                @if (sourceBuckets().length === 0) {
-                  <tr class="empty-row">
-                    <td colspan="4" class="muted small">—</td>
-                  </tr>
+            <div class="insights-grid">
+              <!-- Activity histogram -->
+              <article class="insight-card">
+                <header class="insight-head">
+                  <span class="insight-title">Activity</span>
+                  <span class="muted insight-status">
+                    peak {{ peakHour() }} · avg {{ avgHour() | number: '1.1-1' }}/h
+                  </span>
+                </header>
+                <div class="histogram">
+                  @for (h of hourBuckets(); track h.label) {
+                    <div class="hist-col" [title]="h.label + ': ' + h.count + ' exits'">
+                      <span
+                        class="hist-bar"
+                        [style.height.%]="hourBarHeight(h.count)"
+                        [class.zero]="h.count === 0"
+                      ></span>
+                    </div>
+                  }
+                </div>
+                <footer class="hist-axis">
+                  <span>{{ hourBuckets()[0]?.label ?? '' }}</span>
+                  <span>now</span>
+                </footer>
+              </article>
+
+              <!-- Notable patterns -->
+              <article class="insight-card">
+                <header class="insight-head">
+                  <span class="insight-title">Notable patterns</span>
+                  <span class="muted insight-status">{{ anomalies().length }} flagged</span>
+                </header>
+                @if (anomalies().length === 0) {
+                  <p class="empty-line muted">
+                    No bursts, dominance, or concentration patterns in window.
+                  </p>
                 } @else {
+                  <ul class="anomaly-list">
+                    @for (a of anomalies(); track $index) {
+                      <li class="anomaly" [attr.data-kind]="a.kind">
+                        <span class="anomaly-tag">{{ anomalyLabel(a.kind) }}</span>
+                        <span class="small">{{ a.detail }}</span>
+                      </li>
+                    }
+                  </ul>
+                }
+              </article>
+
+              <!-- By source -->
+              <article class="insight-card">
+                <header class="insight-head">
+                  <span class="insight-title">By source</span>
+                  <span class="muted insight-status">{{ sourceBuckets().length }} distinct</span>
+                </header>
+                <ul class="breakdown">
                   @for (b of sourceBuckets(); track b.key) {
-                    <tr>
-                      <td>
-                        <span class="src-pill" [attr.data-source]="b.key">{{ b.key }}</span>
-                      </td>
-                      <td class="num">{{ b.count }}</td>
-                      <td class="num">
-                        <span class="bar-track">
-                          <span class="bar-fill" [style.width.%]="b.share * 100"></span>
-                        </span>
-                        <span class="small muted">{{ b.share * 100 | number: '1.0-0' }}%</span>
-                      </td>
-                      <td class="time">{{ b.recentAt | relativeTime }}</td>
-                    </tr>
+                    <li class="bd-row">
+                      <span class="src-pill" [attr.data-source]="b.key">{{ b.key }}</span>
+                      <span class="bd-bar">
+                        <span class="bd-fill" [style.width.%]="b.share * 100"></span>
+                      </span>
+                      <span class="mono num">{{ b.count }}</span>
+                      <span class="muted small">{{ b.share * 100 | number: '1.0-0' }}%</span>
+                    </li>
                   }
-                }
-              </tbody>
-            </table>
+                </ul>
+              </article>
+
+              <!-- By reason -->
+              <article class="insight-card">
+                <header class="insight-head">
+                  <span class="insight-title">By reason</span>
+                  <span class="muted insight-status">{{ reasonBuckets().length }} distinct</span>
+                </header>
+                <ul class="breakdown">
+                  @for (b of reasonBuckets(); track b.key) {
+                    <li class="bd-row">
+                      <span class="small mono">{{ b.key }}</span>
+                      <span class="bd-bar">
+                        <span class="bd-fill amber" [style.width.%]="b.share * 100"></span>
+                      </span>
+                      <span class="mono num">{{ b.count }}</span>
+                      <span class="muted small">{{ b.share * 100 | number: '1.0-0' }}%</span>
+                    </li>
+                  }
+                </ul>
+              </article>
+            </div>
           </section>
 
-          <section class="card">
-            <header class="card-head">
-              <h3>By reason</h3>
-              <span class="muted small">{{ reasonBuckets().length }} distinct</span>
+          <!-- By symbol -->
+          <section class="data-table-card">
+            <header class="board-head">
+              <h3>By symbol</h3>
+              <span class="muted">{{ symbolBuckets().length }} touched</span>
             </header>
-            <table class="deltas-table compact">
+            <table class="board-table">
               <thead>
                 <tr>
-                  <th>Reason</th>
+                  <th>Symbol</th>
                   <th class="num">N</th>
                   <th class="num">Share</th>
                   <th>Latest</th>
                 </tr>
               </thead>
               <tbody>
-                @if (reasonBuckets().length === 0) {
-                  <tr class="empty-row">
-                    <td colspan="4" class="muted small">—</td>
-                  </tr>
-                } @else {
-                  @for (b of reasonBuckets(); track b.key) {
-                    <tr>
-                      <td class="mono small">{{ b.key }}</td>
-                      <td class="num">{{ b.count }}</td>
-                      <td class="num">
-                        <span class="bar-track">
-                          <span class="bar-fill amber" [style.width.%]="b.share * 100"></span>
-                        </span>
-                        <span class="small muted">{{ b.share * 100 | number: '1.0-0' }}%</span>
-                      </td>
-                      <td class="time">{{ b.recentAt | relativeTime }}</td>
-                    </tr>
-                  }
-                }
-              </tbody>
-            </table>
-          </section>
-        </div>
-
-        <!-- By symbol breakdown -->
-        <section class="card">
-          <header class="card-head">
-            <h3>By symbol</h3>
-            <span class="muted small">{{ symbolBuckets().length }} touched</span>
-          </header>
-          <table class="deltas-table compact">
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th class="num">N</th>
-                <th class="num">Share</th>
-                <th>Latest</th>
-              </tr>
-            </thead>
-            <tbody>
-              @if (symbolBuckets().length === 0) {
-                <tr class="empty-row">
-                  <td colspan="4" class="muted small">—</td>
-                </tr>
-              } @else {
                 @for (b of symbolBuckets(); track b.key) {
                   <tr>
                     <td class="mono">{{ b.key }}</td>
@@ -399,35 +370,29 @@ interface AnomalyFlag {
                     <td class="time">{{ b.recentAt | relativeTime }}</td>
                   </tr>
                 }
-              }
-            </tbody>
-          </table>
-        </section>
+              </tbody>
+            </table>
+          </section>
 
-        <!-- By strategy rollup -->
-        <section class="card">
-          <header class="card-head">
-            <h3>By strategy</h3>
-            <span class="muted small">{{ strategyRollups().length }} touched</span>
-          </header>
-          <table class="deltas-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Symbols</th>
-                <th class="num">Rejected</th>
-                <th class="num">Expired</th>
-                <th class="num">Total</th>
-                <th>Top reason</th>
-                <th>Latest</th>
-              </tr>
-            </thead>
-            <tbody>
-              @if (strategyRollups().length === 0) {
-                <tr class="empty-row">
-                  <td colspan="7" class="muted small">—</td>
+          <!-- By strategy rollup -->
+          <section class="data-table-card">
+            <header class="board-head">
+              <h3>By strategy</h3>
+              <span class="muted">{{ strategyRollups().length }} touched</span>
+            </header>
+            <table class="board-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Symbols</th>
+                  <th class="num">Rejected</th>
+                  <th class="num">Expired</th>
+                  <th class="num">Total</th>
+                  <th>Top reason</th>
+                  <th>Latest</th>
                 </tr>
-              } @else {
+              </thead>
+              <tbody>
                 @for (r of strategyRollups(); track r.strategyId) {
                   <tr>
                     <td>
@@ -449,38 +414,30 @@ interface AnomalyFlag {
                     <td class="time">{{ r.recentAt | relativeTime }}</td>
                   </tr>
                 }
-              }
-            </tbody>
-          </table>
-        </section>
+              </tbody>
+            </table>
+          </section>
 
-        <!-- Recent events table -->
-        <section class="card">
-          <header class="card-head">
-            <h3>Recent events</h3>
-            <span class="muted small">{{ filteredRows().length }} shown</span>
-          </header>
-          <table class="deltas-table compact">
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>Signal</th>
-                <th>Symbol</th>
-                <th>Dir</th>
-                <th>Strategy</th>
-                <th>Status</th>
-                <th>Source</th>
-                <th>Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              @if (filteredRows().length === 0) {
-                <tr class="empty-row">
-                  <td colspan="8" class="muted small">
-                    No exits in window — adjust filters or widen the window.
-                  </td>
+          <!-- Recent events table -->
+          <section class="data-table-card">
+            <header class="board-head">
+              <h3>Recent events</h3>
+              <span class="muted">{{ filteredRows().length }} shown</span>
+            </header>
+            <table class="board-table">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Signal</th>
+                  <th>Symbol</th>
+                  <th>Dir</th>
+                  <th>Strategy</th>
+                  <th>Status</th>
+                  <th>Source</th>
+                  <th>Reason</th>
                 </tr>
-              } @else {
+              </thead>
+              <tbody>
                 @for (s of filteredRows(); track s.id) {
                   <tr>
                     <td class="time" [title]="s.generatedAt">
@@ -507,54 +464,62 @@ interface AnomalyFlag {
                     <td class="reason small">{{ s.reasonDetail || s.reasonCategory }}</td>
                   </tr>
                 }
-              }
-            </tbody>
-          </table>
-        </section>
+              </tbody>
+            </table>
+          </section>
+        }
       }
     </div>
   `,
   styles: [
     `
       .page {
+        padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
         gap: var(--space-3);
       }
-      .controls {
+
+      /* ── Filter bar — matches market-data trading-sessions toolbar ── */
+      .filter-bar {
         display: flex;
+        align-items: flex-end;
         gap: var(--space-3);
         flex-wrap: wrap;
-        padding: var(--space-2) 0;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
       }
-      .control-group {
+      .fb-field {
         display: flex;
         flex-direction: column;
-        gap: 2px;
+        gap: 4px;
       }
-      .control-group label {
+      .fb-label {
         font-size: 10px;
+        font-weight: var(--font-semibold);
         color: var(--text-tertiary);
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        font-weight: var(--font-semibold);
       }
-      .control-group input,
-      .control-group select {
-        padding: 4px 8px;
+      .filter-input,
+      .filter-select {
+        height: 32px;
+        padding: 0 var(--space-3);
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
         background: var(--bg-primary);
         color: var(--text-primary);
-        min-width: 140px;
         font-size: var(--text-sm);
+        min-width: 160px;
       }
       .window-presets {
         display: flex;
-        gap: 2px;
+        height: 32px;
       }
       .preset {
-        padding: 4px 10px;
+        padding: 0 12px;
         border: 1px solid var(--border);
         background: var(--bg-primary);
         color: var(--text-primary);
@@ -580,13 +545,13 @@ interface AnomalyFlag {
         border-left: none;
       }
 
-      /* ── KPI strip ───────────────────────────────────────────────── */
+      /* ── KPI strip ── */
       .kpi-strip {
         display: grid;
         grid-template-columns: repeat(8, 1fr);
         gap: var(--space-2);
       }
-      @media (max-width: 1280px) {
+      @media (max-width: 1400px) {
         .kpi-strip {
           grid-template-columns: repeat(4, 1fr);
         }
@@ -596,93 +561,83 @@ interface AnomalyFlag {
           grid-template-columns: repeat(2, 1fr);
         }
       }
-      .kpi {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        padding: 8px 10px;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        box-shadow: var(--shadow-sm);
-      }
-      .kpi.muted-kpi {
-        opacity: 0.55;
-      }
-      .kpi-label {
-        font-size: 9px;
-        font-weight: var(--font-bold);
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-      }
-      .kpi-value {
-        font-size: 18px;
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        font-variant-numeric: tabular-nums;
-        line-height: 1.2;
-      }
-      .kpi-value-sm {
-        font-size: 12px;
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        line-height: 1.4;
-      }
-      .kpi-trend {
-        font-size: 10px;
-        color: var(--text-secondary);
-      }
 
-      /* ── Layout rows ───────────────────────────────────────────── */
-      .row-2 {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: var(--space-3);
-      }
-      @media (max-width: 1100px) {
-        .row-2 {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      /* ── Cards ────────────────────────────────────────────────── */
-      .card {
+      /* ── Insights section ── */
+      .insights-section {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        padding: var(--space-3);
-        box-shadow: var(--shadow-sm);
-        overflow-x: auto;
+        overflow: hidden;
       }
-      .card-head {
+      .insights-head {
         display: flex;
-        justify-content: space-between;
         align-items: baseline;
-        margin-bottom: var(--space-2);
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
       }
-      .card-head h3 {
+      .insights-head h3 {
         margin: 0;
         font-size: var(--text-sm);
         font-weight: var(--font-semibold);
       }
-      .empty-inline {
-        margin: 0;
-        padding: var(--space-2) 0;
+      .insights-head .muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
       }
-
-      /* ── Histogram ────────────────────────────────────────────── */
-      .activity-card {
+      .insights-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr 1fr;
+        gap: 1px;
+        background: var(--border);
+      }
+      @media (max-width: 1100px) {
+        .insights-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      @media (max-width: 720px) {
+        .insights-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .insight-card {
+        background: var(--bg-secondary);
+        padding: var(--space-3) var(--space-4);
         display: flex;
         flex-direction: column;
+        gap: var(--space-2);
+        min-height: 160px;
       }
+      .insight-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: var(--space-2);
+      }
+      .insight-title {
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .insight-status {
+        font-size: 10.5px;
+      }
+      .empty-line {
+        margin: 0;
+        font-size: var(--text-xs);
+      }
+
+      /* ── Histogram ── */
       .histogram {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(6px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(4px, 1fr));
         gap: 1px;
         height: 60px;
         align-items: end;
-        margin: var(--space-2) 0 4px;
+        flex: 1;
       }
       .hist-col {
         height: 100%;
@@ -708,7 +663,7 @@ interface AnomalyFlag {
         color: var(--text-tertiary);
       }
 
-      /* ── Anomaly list ─────────────────────────────────────────── */
+      /* ── Notable patterns ── */
       .anomaly-list {
         list-style: none;
         margin: 0;
@@ -724,7 +679,7 @@ interface AnomalyFlag {
         padding: 4px 6px;
         background: var(--bg-tertiary);
         border-radius: var(--radius-sm);
-        font-size: var(--text-sm);
+        font-size: var(--text-xs);
       }
       .anomaly[data-kind='burst'] {
         background: rgba(239, 68, 68, 0.08);
@@ -747,46 +702,96 @@ interface AnomalyFlag {
         white-space: nowrap;
       }
 
-      /* ── Tables ────────────────────────────────────────────────── */
-      .deltas-table {
+      /* ── Breakdown list ── */
+      .breakdown {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .bd-row {
+        display: grid;
+        grid-template-columns: 1fr 60px 32px 32px;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-xs);
+      }
+      .bd-bar {
+        display: inline-block;
+        height: 6px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        overflow: hidden;
+      }
+      .bd-fill {
+        display: block;
+        height: 100%;
+        background: #9b59b6;
+      }
+      .bd-fill.amber {
+        background: #ff9500;
+      }
+      .bd-row .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ── Board-pattern tables ── */
+      .data-table-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+      }
+      .board-head {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .board-head h3 {
+        margin: 0;
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .board-head .muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+      .board-table {
         width: 100%;
         border-collapse: collapse;
-        font-size: var(--text-sm);
       }
-      .deltas-table th,
-      .deltas-table td {
-        padding: 5px 8px;
+      .board-table th,
+      .board-table td {
+        padding: 6px var(--space-3);
         text-align: left;
         border-bottom: 1px solid var(--border);
+        font-size: var(--text-xs);
         vertical-align: middle;
       }
-      .deltas-table.compact th,
-      .deltas-table.compact td {
-        padding: 3px 8px;
-      }
-      .deltas-table tbody tr:last-child td {
+      .board-table tbody tr:last-child td {
         border-bottom: none;
       }
-      .deltas-table th {
+      .board-table th {
+        background: var(--bg-tertiary);
         color: var(--text-secondary);
-        font-weight: var(--font-medium);
-        font-size: 10px;
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        background: var(--bg-tertiary);
       }
-      .deltas-table td.num,
-      .deltas-table th.num {
+      .board-table td.num,
+      .board-table th.num {
         text-align: right;
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
       }
-      .empty-row td {
-        text-align: center;
-        padding: var(--space-3) !important;
-      }
       .mono {
-        font-family: var(--font-mono);
+        font-family: 'SF Mono', 'Fira Code', monospace;
       }
       .small {
         font-size: var(--text-xs);
@@ -808,7 +813,7 @@ interface AnomalyFlag {
         text-decoration: underline;
       }
       .time {
-        color: var(--text-secondary);
+        color: var(--text-tertiary);
         font-size: 11px;
         white-space: nowrap;
       }
@@ -823,8 +828,27 @@ interface AnomalyFlag {
         border-radius: 3px;
         color: var(--text-secondary);
       }
+      .bar-track {
+        display: inline-block;
+        width: 60px;
+        height: 6px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        overflow: hidden;
+        vertical-align: middle;
+        margin-right: 6px;
+      }
+      .bar-fill {
+        display: block;
+        height: 100%;
+        background: #9b59b6;
+        border-radius: var(--radius-full);
+      }
+      .bar-fill.green {
+        background: #22c55e;
+      }
 
-      /* ── Pills ─────────────────────────────────────────────────── */
+      /* ── Pills ── */
       .status {
         font-size: 10px;
         font-weight: var(--font-semibold);
@@ -878,37 +902,12 @@ interface AnomalyFlag {
         background: var(--bg-tertiary);
         color: var(--text-tertiary);
       }
-
-      /* ── Share bars ───────────────────────────────────────────── */
-      .bar-track {
-        display: inline-block;
-        width: 60px;
-        height: 6px;
-        background: var(--bg-primary);
-        border-radius: var(--radius-full);
-        overflow: hidden;
-        vertical-align: middle;
-        margin-right: 6px;
-      }
-      .bar-fill {
-        display: block;
-        height: 100%;
-        background: #9b59b6;
-        border-radius: var(--radius-full);
-      }
-      .bar-fill.amber {
-        background: #ff9500;
-      }
-      .bar-fill.green {
-        background: #22c55e;
-      }
     `,
   ],
 })
 export class SignalFeedbackPageComponent {
   private readonly signals = inject(TradeSignalsService);
 
-  // Preset windows that double as quick switches (1h / 6h / 24h / 3d / 7d).
   protected readonly windowPresets = [1, 6, 24, 72, 168];
   protected readonly windowHours = signal(24);
   protected readonly symbolFilter = signal('');
@@ -919,18 +918,13 @@ export class SignalFeedbackPageComponent {
   protected readonly resource = createPolledResource(
     () => {
       const since = new Date(Date.now() - this.windowHours() * 60 * 60 * 1000).toISOString();
-      // Status filter is engine-side when the operator picks one specific
-      // status, otherwise we ask for both Rejected and Expired in one shot.
       const status = this.statusFilter();
       const statusFilter = status ? { status } : { statuses: ['Rejected', 'Expired'] };
       return this.signals
         .list({
           currentPage: 1,
           itemCountPerPage: 200,
-          filter: {
-            ...statusFilter,
-            from: since,
-          },
+          filter: { ...statusFilter, from: since },
         })
         .pipe(
           map((res) => res.data?.data ?? []),
@@ -950,7 +944,6 @@ export class SignalFeedbackPageComponent {
 
   protected readonly rawRows = computed(() => this.resource.value() ?? []);
 
-  // Parse RejectionReason once per row into source + category + detail.
   protected readonly parsedRows = computed<ParsedRow[]>(() =>
     this.rawRows().map((r) => {
       const { source, category, detail } = this.classify(r);
@@ -991,13 +984,14 @@ export class SignalFeedbackPageComponent {
     () => new Set(this.filteredRows().map((r) => r.symbol ?? '—')).size,
   );
 
-  protected readonly lastEventAt = computed(() => {
+  protected readonly lastExitMinutes = computed(() => {
     const rows = this.filteredRows();
-    if (rows.length === 0) return null;
-    return rows.reduce(
+    if (rows.length === 0) return 0;
+    const latest = rows.reduce(
       (max, r) => (r.generatedAt > max ? r.generatedAt : max),
       rows[0].generatedAt,
     );
+    return Math.floor((Date.now() - new Date(latest).getTime()) / 60_000);
   });
 
   protected readonly sourceBuckets = computed<KvBucket[]>(() =>
@@ -1081,7 +1075,6 @@ export class SignalFeedbackPageComponent {
     const rows = this.filteredRows();
     if (rows.length === 0) return flags;
 
-    // Burst: any hour with more than 3× the average.
     const buckets = this.hourBuckets();
     const avg = this.avgHour();
     if (avg > 0) {
@@ -1094,8 +1087,6 @@ export class SignalFeedbackPageComponent {
       }
     }
 
-    // Strategy dominance: one strategy responsible for ≥ 60% of all exits
-    // when there's enough data (≥ 5 events total) for the signal to matter.
     if (rows.length >= 5) {
       const top = this.strategyRollups()[0];
       if (top && top.count / rows.length >= 0.6) {
@@ -1106,7 +1097,6 @@ export class SignalFeedbackPageComponent {
       }
     }
 
-    // Symbol concentration: one symbol with ≥ 70% of exits.
     if (rows.length >= 5) {
       const topSym = this.symbolBuckets()[0];
       if (topSym && topSym.share >= 0.7) {
@@ -1131,9 +1121,6 @@ export class SignalFeedbackPageComponent {
     }
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────
-
-  // Bucket rows by a key extractor → KvBucket[]. Reused for source/reason/symbol.
   private bucketize<T>(rows: T[], getKey: (r: T) => string): KvBucket[] {
     const total = rows.length;
     const recentByRow = (r: T) => (r as unknown as { generatedAt: string }).generatedAt;
@@ -1159,12 +1146,6 @@ export class SignalFeedbackPageComponent {
       .sort((a, b) => b.count - a.count);
   }
 
-  // Classify a TradeSignal into source + reason category + detail. RejectionReason
-  // formats observed in the wild:
-  //   "EA: <Reason> - <Detail>"          → source=EA
-  //   "Strategy: <Reason>"               → source=Strategy
-  //   ""                                  → engine-internal expiration (status=Expired)
-  //   "<anything else>"                   → engine internal w/ reason
   private classify(r: TradeSignalDto): {
     source: ExitSource;
     category: string;
@@ -1187,8 +1168,6 @@ export class SignalFeedbackPageComponent {
       return { source: 'Strategy', category: raw.slice(9).trim() || 'unspecified', detail: null };
     }
     if (raw === '') {
-      // Empty reason on an Expired signal = engine TTL / scheduled cleanup.
-      // Empty on a Rejected signal = something rejected it without leaving a note (rare).
       return {
         source: 'Engine',
         category: r.status === 'Expired' ? 'TTL expiration' : 'no reason recorded',

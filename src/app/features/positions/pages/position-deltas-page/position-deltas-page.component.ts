@@ -18,6 +18,7 @@ import type { PositionLifecycleEventDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
@@ -26,22 +27,15 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 /**
  * Fleet-wide position-delta feed (PRD-V2 FR-5.8 operator overview).
  *
- * Dense operator-console layout — built to surface the diagnostic
- * patterns operators reach for first:
- *
- *   - 8-tile compact KPI strip across the top (events, types, sources,
- *     positions touched, symbols touched, stale-close rate, in-flight
- *     closes, last-event-age)
- *   - Per-hour activity histogram so bursts (broker outages, EA restart
- *     storms) jump out without needing to read the table
- *   - Notable patterns panel that auto-flags Closing-without-Closed,
- *     StaleClose clusters, and reconcile churn
- *   - Side-by-side By-type + By-source aggregations
- *   - By-position rollup with mini timeline so one row tells the whole
- *     story per position
- *   - Recent events table enriched with symbol / direction / open lots /
- *     unrealised PnL — joined server-side, so 200 rows render without
- *     N+1 lookups
+ * Follows the market-data page's design language:
+ *   - <app-metric-card> tiles in a .kpi-strip for the top metrics row
+ *   - .insights-section + .insights-grid + .insight-card panels for the
+ *     multi-panel analytics block (histogram, notable patterns, type/source
+ *     breakdowns)
+ *   - .data-table-card + .board-head + .board-table for the per-position
+ *     rollup and recent-events tables
+ *   - Page-level filter row stays flat across the top, like the market-data
+ *     trading-sessions toolbar
  */
 interface TypeBucket {
   eventType: string;
@@ -95,6 +89,7 @@ interface AnomalyFlag {
     FormsModule,
     RouterLink,
     PageHeaderComponent,
+    MetricCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
@@ -117,60 +112,71 @@ interface AnomalyFlag {
         </button>
       </app-page-header>
 
-      <section class="controls">
-        <div class="control-group">
-          <label for="window">Window (hours)</label>
-          <input
-            id="window"
-            type="number"
-            min="1"
-            max="168"
-            step="1"
-            [ngModel]="windowHours()"
-            (ngModelChange)="setWindow($event)"
-          />
+      <section class="filter-bar">
+        <div class="fb-field">
+          <label for="window" class="fb-label">Window</label>
+          <div class="window-presets">
+            @for (p of windowPresets; track p) {
+              <button
+                type="button"
+                class="preset"
+                [class.active]="windowHours() === p"
+                (click)="windowHours.set(p)"
+              >
+                {{ p < 24 ? p + 'h' : p / 24 + 'd' }}
+              </button>
+            }
+          </div>
         </div>
-        <div class="control-group">
-          <label for="symbol">Symbol</label>
+        <div class="fb-field">
+          <label for="symbol" class="fb-label">Symbol</label>
           <input
             id="symbol"
+            class="filter-input"
             type="search"
             placeholder="e.g. EURUSD"
             [ngModel]="symbolFilter()"
             (ngModelChange)="symbolFilter.set($event)"
           />
         </div>
-        <div class="control-group">
-          <label for="position">Position #</label>
+        <div class="fb-field">
+          <label for="position" class="fb-label">Position #</label>
           <input
             id="position"
+            class="filter-input"
             type="search"
             placeholder="id"
             [ngModel]="positionFilter()"
             (ngModelChange)="positionFilter.set($event)"
           />
         </div>
-        <div class="control-group">
-          <label for="source">Source</label>
-          <select id="source" [ngModel]="sourceFilter()" (ngModelChange)="sourceFilter.set($event)">
-            <option value="">(all sources)</option>
+        <div class="fb-field">
+          <label for="source" class="fb-label">Source</label>
+          <select
+            id="source"
+            class="filter-select"
+            [ngModel]="sourceFilter()"
+            (ngModelChange)="sourceFilter.set($event)"
+          >
+            <option value="">all sources</option>
             <option value="EA">EA (delta)</option>
             <option value="EASnapshot">EASnapshot</option>
             <option value="OrderFilled">OrderFilled</option>
             <option value="OrderFilledEventHandler">OrderFilledEventHandler</option>
-            <option value="PositionWorker">PositionWorker (any reason)</option>
+            <option value="PositionWorker">PositionWorker</option>
             <option value="Manual">Manual</option>
             <option value="ReceivePositionSnapshot">ReceivePositionSnapshot</option>
           </select>
         </div>
-        <div class="control-group">
-          <label for="eventType">Type</label>
+        <div class="fb-field">
+          <label for="eventType" class="fb-label">Type</label>
           <select
             id="eventType"
+            class="filter-select"
             [ngModel]="eventTypeFilter()"
             (ngModelChange)="eventTypeFilter.set($event)"
           >
-            <option value="">(all types)</option>
+            <option value="">all types</option>
             <option value="Opened">Opened</option>
             <option value="Closed">Closed</option>
             <option value="Closing">Closing</option>
@@ -187,380 +193,409 @@ interface AnomalyFlag {
       } @else if (resource.error()) {
         <app-error-state
           title="Could not load position deltas"
-          message="Engine returned an error. The lifecycle audit table may be empty if the writer-side wiring hasn't shipped yet."
+          message="Engine returned an error. The lifecycle audit may be empty if the writer-side wiring hasn't shipped."
           (retry)="resource.refresh()"
         />
-      } @else if (filteredRows().length === 0) {
-        <app-empty-state
-          title="No position deltas in this window"
-          message="Either no positions changed in the chosen window, or the active filters exclude everything. Widen the window or clear filters."
-        />
       } @else {
-        <!-- Compact KPI strip — 8 tight tiles instead of 4 huge cards -->
-        <section class="kpi-strip" aria-label="Summary metrics">
-          <div class="kpi">
-            <span class="kpi-label">Events</span>
-            <span class="kpi-value">{{ filteredRows().length }}</span>
-          </div>
-          <div class="kpi">
-            <span class="kpi-label">Types</span>
-            <span class="kpi-value">{{ typeBuckets().length }}</span>
-          </div>
-          <div class="kpi">
-            <span class="kpi-label">Sources</span>
-            <span class="kpi-value">{{ sourceBuckets().length }}</span>
-          </div>
-          <div class="kpi">
-            <span class="kpi-label">Positions</span>
-            <span class="kpi-value">{{ positionRollups().length }}</span>
-          </div>
-          <div class="kpi">
-            <span class="kpi-label">Symbols</span>
-            <span class="kpi-value">{{ distinctSymbols() }}</span>
-          </div>
-          <div class="kpi" [class.alert]="staleCloseCount() > 0">
-            <span class="kpi-label">StaleCloses</span>
-            <span class="kpi-value">{{ staleCloseCount() }}</span>
-            @if (filteredRows().length > 0) {
-              <span class="kpi-trend">
-                {{ (staleCloseCount() / filteredRows().length) * 100 | number: '1.0-0' }}%
-              </span>
-            }
-          </div>
-          <div class="kpi" [class.alert]="closingPendingCount() > 0">
-            <span class="kpi-label">Closing pending</span>
-            <span class="kpi-value">{{ closingPendingCount() }}</span>
-          </div>
-          <div class="kpi">
-            <span class="kpi-label">Last event</span>
-            <span class="kpi-value-sm">
-              @if (lastEventAt()) {
-                {{ lastEventAt()! | relativeTime }}
-              } @else {
-                —
-              }
-            </span>
-          </div>
-        </section>
-
-        <!-- Per-hour activity histogram + Notable patterns side-by-side -->
-        <div class="row-2">
-          <section class="card activity-card">
-            <header class="card-head">
-              <h3>Activity</h3>
-              <span class="muted small">events / hour, last {{ windowHours() }}h</span>
-            </header>
-            <div class="histogram" [attr.aria-label]="'Per-hour event histogram'">
-              @for (h of hourBuckets(); track h.label) {
-                <div class="hist-col" [title]="h.label + ': ' + h.count + ' events'">
-                  <span
-                    class="hist-bar"
-                    [style.height.%]="hourBarHeight(h.count)"
-                    [class.zero]="h.count === 0"
-                  ></span>
-                </div>
-              }
-            </div>
-            <footer class="hist-axis">
-              <span>{{ hourBuckets()[0]?.label ?? '' }}</span>
-              <span class="muted small">
-                peak {{ peakHour() }} • avg {{ avgHour() | number: '1.1-1' }}/h
-              </span>
-              <span>now</span>
-            </footer>
-          </section>
-
-          <section class="card patterns-card">
-            <header class="card-head">
-              <h3>Notable patterns</h3>
-              <span class="muted small">{{ anomalies().length }} flagged</span>
-            </header>
-            @if (anomalies().length === 0) {
-              <p class="muted small empty-line">
-                No closing-pending positions, stale-close clusters, or reconcile churn in window.
-              </p>
-            } @else {
-              <ul class="anomaly-list">
-                @for (a of anomalies(); track $index) {
-                  <li class="anomaly" [attr.data-kind]="a.kind">
-                    <span class="anomaly-tag">{{ anomalyLabel(a.kind) }}</span>
-                    @if (a.positionId !== undefined) {
-                      <a class="link mono" [routerLink]="['/positions', a.positionId]"
-                        >#{{ a.positionId }}</a
-                      >
-                    }
-                    @if (a.symbol) {
-                      <span class="mono small">{{ a.symbol }}</span>
-                    }
-                    <span class="small">{{ a.detail }}</span>
-                  </li>
-                }
-              </ul>
-            }
-          </section>
+        <!-- KPI strip — canonical metric-cards, always rendered. -->
+        <div class="kpi-strip">
+          <app-metric-card
+            label="Events"
+            [value]="filteredRows().length"
+            format="number"
+            dotColor="#0071E3"
+          />
+          <app-metric-card
+            label="Types"
+            [value]="typeBuckets().length"
+            format="number"
+            dotColor="#0071E3"
+          />
+          <app-metric-card
+            label="Sources"
+            [value]="sourceBuckets().length"
+            format="number"
+            dotColor="#0071E3"
+          />
+          <app-metric-card
+            label="Positions"
+            [value]="positionRollups().length"
+            format="number"
+            dotColor="#0071E3"
+          />
+          <app-metric-card
+            label="Symbols"
+            [value]="distinctSymbols()"
+            format="number"
+            dotColor="#0071E3"
+          />
+          <app-metric-card
+            label="StaleCloses"
+            [value]="staleCloseCount()"
+            format="number"
+            [dotColor]="staleCloseCount() > 0 ? '#FF3B30' : '#34C759'"
+          />
+          <app-metric-card
+            label="Closing pending"
+            [value]="closingPendingCount()"
+            format="number"
+            [dotColor]="closingPendingCount() > 0 ? '#FF9500' : '#34C759'"
+          />
+          <app-metric-card
+            label="Last event (min ago)"
+            [value]="lastEventMinutes()"
+            format="number"
+            dotColor="#AF52DE"
+          />
         </div>
 
-        <!-- By type + By source side-by-side -->
-        <div class="row-2">
-          <section class="card">
-            <header class="card-head">
-              <h3>By type</h3>
-              <span class="muted small">{{ typeBuckets().length }} distinct</span>
+        @if (filteredRows().length === 0) {
+          <app-empty-state
+            title="No position deltas in this window"
+            message="Either no positions changed in the chosen window, or the active filters exclude everything. Widen the window or clear filters."
+          />
+        } @else {
+          <!-- Insights row — histogram + notable patterns + breakdowns -->
+          <section class="insights-section">
+            <header class="insights-head">
+              <h3>Lifecycle insights</h3>
+              <span class="muted">
+                {{ filteredRows().length }} event{{ filteredRows().length === 1 ? '' : 's' }} · last
+                {{ windowHours() }}h
+              </span>
             </header>
-            <table class="deltas-table compact">
-              <thead>
-                <tr>
-                  <th>Type</th>
-                  <th class="num">N</th>
-                  <th class="num">Share</th>
-                  <th>Latest</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (b of typeBuckets(); track b.eventType) {
-                  <tr>
-                    <td>
+            <div class="insights-grid">
+              <!-- Activity histogram -->
+              <article class="insight-card">
+                <header class="insight-head">
+                  <span class="insight-title">Activity</span>
+                  <span class="muted insight-status">
+                    peak {{ peakHour() }} · avg {{ avgHour() | number: '1.1-1' }}/h
+                  </span>
+                </header>
+                <div class="histogram" [attr.aria-label]="'Per-hour event histogram'">
+                  @for (h of hourBuckets(); track h.label) {
+                    <div class="hist-col" [title]="h.label + ': ' + h.count + ' events'">
+                      <span
+                        class="hist-bar"
+                        [style.height.%]="hourBarHeight(h.count)"
+                        [class.zero]="h.count === 0"
+                      ></span>
+                    </div>
+                  }
+                </div>
+                <footer class="hist-axis">
+                  <span>{{ hourBuckets()[0]?.label ?? '' }}</span>
+                  <span>now</span>
+                </footer>
+              </article>
+
+              <!-- Notable patterns -->
+              <article class="insight-card">
+                <header class="insight-head">
+                  <span class="insight-title">Notable patterns</span>
+                  <span class="muted insight-status">{{ anomalies().length }} flagged</span>
+                </header>
+                @if (anomalies().length === 0) {
+                  <p class="empty-line muted">
+                    No closing-pending, stale-close, or reconcile-churn patterns in window.
+                  </p>
+                } @else {
+                  <ul class="anomaly-list">
+                    @for (a of anomalies(); track $index) {
+                      <li class="anomaly" [attr.data-kind]="a.kind">
+                        <span class="anomaly-tag">{{ anomalyLabel(a.kind) }}</span>
+                        @if (a.positionId !== undefined) {
+                          <a class="link mono" [routerLink]="['/positions', a.positionId]"
+                            >#{{ a.positionId }}</a
+                          >
+                        }
+                        @if (a.symbol) {
+                          <span class="mono small">{{ a.symbol }}</span>
+                        }
+                        <span class="small">{{ a.detail }}</span>
+                      </li>
+                    }
+                  </ul>
+                }
+              </article>
+
+              <!-- By type -->
+              <article class="insight-card">
+                <header class="insight-head">
+                  <span class="insight-title">By type</span>
+                  <span class="muted insight-status">{{ typeBuckets().length }} distinct</span>
+                </header>
+                <ul class="breakdown">
+                  @for (b of typeBuckets(); track b.eventType) {
+                    <li class="bd-row">
                       <span class="badge" [attr.data-type]="eventBucket(b.eventType)">
                         {{ b.eventType }}
                       </span>
-                    </td>
-                    <td class="num">{{ b.count }}</td>
-                    <td class="num">
-                      <span class="bar-track">
-                        <span class="bar-fill" [style.width.%]="b.share * 100"></span>
+                      <span class="bd-bar">
+                        <span class="bd-fill" [style.width.%]="b.share * 100"></span>
                       </span>
-                      <span class="small muted">{{ b.share * 100 | number: '1.0-0' }}%</span>
-                    </td>
-                    <td class="time">{{ b.recentAt | relativeTime }}</td>
-                  </tr>
-                }
-              </tbody>
-            </table>
+                      <span class="mono num">{{ b.count }}</span>
+                      <span class="muted small">{{ b.share * 100 | number: '1.0-0' }}%</span>
+                    </li>
+                  }
+                </ul>
+              </article>
+
+              <!-- By source -->
+              <article class="insight-card">
+                <header class="insight-head">
+                  <span class="insight-title">By source</span>
+                  <span class="muted insight-status">{{ sourceBuckets().length }} distinct</span>
+                </header>
+                <ul class="breakdown">
+                  @for (b of sourceBuckets(); track b.source) {
+                    <li class="bd-row">
+                      <span class="small mono">{{ b.source }}</span>
+                      <span class="bd-bar">
+                        <span class="bd-fill purple" [style.width.%]="b.share * 100"></span>
+                      </span>
+                      <span class="mono num">{{ b.count }}</span>
+                      <span class="muted small">{{ b.share * 100 | number: '1.0-0' }}%</span>
+                    </li>
+                  }
+                </ul>
+              </article>
+            </div>
           </section>
 
-          <section class="card">
-            <header class="card-head">
-              <h3>By source</h3>
-              <span class="muted small">{{ sourceBuckets().length }} distinct</span>
+          <!-- By position rollup — board pattern -->
+          <section class="data-table-card">
+            <header class="board-head">
+              <h3>By position</h3>
+              <span class="muted">{{ positionRollups().length }} touched</span>
             </header>
-            <table class="deltas-table compact">
+            <table class="board-table">
               <thead>
                 <tr>
-                  <th>Source</th>
+                  <th>#</th>
+                  <th>Symbol</th>
+                  <th>Dir</th>
+                  <th>State</th>
+                  <th class="num">Lots</th>
+                  <th class="num">U-PnL</th>
+                  <th class="num">R-PnL</th>
+                  <th>Sequence</th>
                   <th class="num">N</th>
-                  <th class="num">Share</th>
                   <th>Latest</th>
                 </tr>
               </thead>
               <tbody>
-                @for (b of sourceBuckets(); track b.source) {
-                  <tr>
-                    <td class="small mono">{{ b.source }}</td>
-                    <td class="num">{{ b.count }}</td>
-                    <td class="num">
-                      <span class="bar-track">
-                        <span class="bar-fill purple" [style.width.%]="b.share * 100"></span>
-                      </span>
-                      <span class="small muted">{{ b.share * 100 | number: '1.0-0' }}%</span>
+                @for (r of positionRollups(); track r.positionId) {
+                  <tr
+                    [class.row-warn]="r.hasStaleClose"
+                    [class.row-pending]="r.hasClosingPending && !r.hasStaleClose"
+                  >
+                    <td>
+                      <a class="link mono" [routerLink]="['/positions', r.positionId]"
+                        >#{{ r.positionId }}</a
+                      >
                     </td>
-                    <td class="time">{{ b.recentAt | relativeTime }}</td>
+                    <td class="mono">{{ r.symbol ?? '—' }}</td>
+                    <td>
+                      @if (r.direction) {
+                        <span class="dir-pill" [attr.data-dir]="r.direction">{{
+                          r.direction
+                        }}</span>
+                      } @else {
+                        <span class="muted small">—</span>
+                      }
+                    </td>
+                    <td class="small muted">{{ r.status ?? '—' }}</td>
+                    <td class="num mono">{{ r.openLots | number: '1.2-2' }}</td>
+                    <td
+                      class="num mono"
+                      [class.profit]="r.unrealizedPnL > 0"
+                      [class.loss]="r.unrealizedPnL < 0"
+                    >
+                      {{ r.unrealizedPnL | number: '1.2-2' }}
+                    </td>
+                    <td
+                      class="num mono"
+                      [class.profit]="r.realizedPnL > 0"
+                      [class.loss]="r.realizedPnL < 0"
+                    >
+                      {{ r.realizedPnL | number: '1.2-2' }}
+                    </td>
+                    <td class="sequence">
+                      @for (et of r.eventTypes; track $index) {
+                        <span class="mini-badge" [attr.data-type]="eventBucket(et)">{{
+                          shortType(et)
+                        }}</span>
+                      }
+                    </td>
+                    <td class="num">{{ r.events.length }}</td>
+                    <td class="time">{{ r.lastAt | relativeTime }}</td>
                   </tr>
                 }
               </tbody>
             </table>
           </section>
-        </div>
 
-        <!-- By position rollup — one row per position with a mini timeline -->
-        <section class="card">
-          <header class="card-head">
-            <h3>By position</h3>
-            <span class="muted small">{{ positionRollups().length }} touched</span>
-          </header>
-          <table class="deltas-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Symbol</th>
-                <th>Dir</th>
-                <th>State</th>
-                <th class="num">Lots</th>
-                <th class="num">U-PnL</th>
-                <th class="num">R-PnL</th>
-                <th>Sequence</th>
-                <th class="num">N</th>
-                <th>Latest</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (r of positionRollups(); track r.positionId) {
-                <tr
-                  [class.row-warn]="r.hasStaleClose"
-                  [class.row-pending]="r.hasClosingPending && !r.hasStaleClose"
-                >
-                  <td>
-                    <a class="link mono" [routerLink]="['/positions', r.positionId]"
-                      >#{{ r.positionId }}</a
-                    >
-                  </td>
-                  <td class="mono">{{ r.symbol ?? '—' }}</td>
-                  <td>
-                    @if (r.direction) {
-                      <span class="dir-pill" [attr.data-dir]="r.direction">{{ r.direction }}</span>
-                    } @else {
-                      <span class="muted small">—</span>
-                    }
-                  </td>
-                  <td>
-                    <span class="small muted">{{ r.status ?? '—' }}</span>
-                  </td>
-                  <td class="num mono">{{ r.openLots | number: '1.2-2' }}</td>
-                  <td
-                    class="num mono"
-                    [class.profit]="r.unrealizedPnL > 0"
-                    [class.loss]="r.unrealizedPnL < 0"
-                  >
-                    {{ r.unrealizedPnL | number: '1.2-2' }}
-                  </td>
-                  <td
-                    class="num mono"
-                    [class.profit]="r.realizedPnL > 0"
-                    [class.loss]="r.realizedPnL < 0"
-                  >
-                    {{ r.realizedPnL | number: '1.2-2' }}
-                  </td>
-                  <td class="sequence">
-                    @for (et of r.eventTypes; track $index) {
-                      <span class="mini-badge" [attr.data-type]="eventBucket(et)">{{
-                        shortType(et)
-                      }}</span>
-                    }
-                  </td>
-                  <td class="num">{{ r.events.length }}</td>
-                  <td class="time">{{ r.lastAt | relativeTime }}</td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        </section>
-
-        <!-- Recent events table — enriched with joined Position columns -->
-        <section class="card">
-          <header class="card-head">
-            <h3>Recent events</h3>
-            <span class="muted small">{{ filteredRows().length }} shown</span>
-          </header>
-          <table class="deltas-table compact">
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>#</th>
-                <th>Symbol</th>
-                <th>Dir</th>
-                <th>Type</th>
-                <th>Source</th>
-                <th class="num">Lots Δ</th>
-                <th class="num">U-PnL</th>
-                <th>Note</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (s of filteredRows(); track s.id) {
+          <!-- Recent events table -->
+          <section class="data-table-card">
+            <header class="board-head">
+              <h3>Recent events</h3>
+              <span class="muted">{{ filteredRows().length }} shown</span>
+            </header>
+            <table class="board-table">
+              <thead>
                 <tr>
-                  <td class="time" [title]="s.occurredAt">
-                    {{ s.occurredAt | date: 'HH:mm:ss' }}
-                  </td>
-                  <td>
-                    <a class="link mono" [routerLink]="['/positions', s.positionId]"
-                      >#{{ s.positionId }}</a
-                    >
-                  </td>
-                  <td class="mono">{{ s.symbol ?? '—' }}</td>
-                  <td>
-                    @if (s.direction) {
-                      <span class="dir-pill" [attr.data-dir]="s.direction">{{ s.direction }}</span>
-                    } @else {
-                      <span class="muted small">—</span>
-                    }
-                  </td>
-                  <td>
-                    <span class="badge" [attr.data-type]="eventBucket(s.eventType)">
-                      {{ s.eventType }}
-                    </span>
-                  </td>
-                  <td class="small mono">{{ s.source }}</td>
-                  <td class="num mono">
-                    @if (s.previousLots !== null) {
-                      {{ s.previousLots | number: '1.2-2' }}
-                    } @else {
-                      —
-                    }
-                    <span class="arrow">→</span>
-                    @if (s.newLots !== null) {
-                      {{ s.newLots | number: '1.2-2' }}
-                    } @else {
-                      —
-                    }
-                  </td>
-                  <td
-                    class="num mono"
-                    [class.profit]="s.unrealizedPnL > 0"
-                    [class.loss]="s.unrealizedPnL < 0"
-                  >
-                    {{ s.unrealizedPnL | number: '1.2-2' }}
-                  </td>
-                  <td class="desc small">{{ s.description }}</td>
+                  <th>When</th>
+                  <th>#</th>
+                  <th>Symbol</th>
+                  <th>Dir</th>
+                  <th>Type</th>
+                  <th>Source</th>
+                  <th class="num">Lots Δ</th>
+                  <th class="num">U-PnL</th>
+                  <th>Note</th>
                 </tr>
-              }
-            </tbody>
-          </table>
-        </section>
+              </thead>
+              <tbody>
+                @for (s of filteredRows(); track s.id) {
+                  <tr>
+                    <td class="time" [title]="s.occurredAt">
+                      {{ s.occurredAt | date: 'HH:mm:ss' }}
+                    </td>
+                    <td>
+                      <a class="link mono" [routerLink]="['/positions', s.positionId]"
+                        >#{{ s.positionId }}</a
+                      >
+                    </td>
+                    <td class="mono">{{ s.symbol ?? '—' }}</td>
+                    <td>
+                      @if (s.direction) {
+                        <span class="dir-pill" [attr.data-dir]="s.direction">{{
+                          s.direction
+                        }}</span>
+                      } @else {
+                        <span class="muted small">—</span>
+                      }
+                    </td>
+                    <td>
+                      <span class="badge" [attr.data-type]="eventBucket(s.eventType)">
+                        {{ s.eventType }}
+                      </span>
+                    </td>
+                    <td class="small mono">{{ s.source }}</td>
+                    <td class="num mono">
+                      @if (s.previousLots !== null) {
+                        {{ s.previousLots | number: '1.2-2' }}
+                      } @else {
+                        —
+                      }
+                      <span class="arrow">→</span>
+                      @if (s.newLots !== null) {
+                        {{ s.newLots | number: '1.2-2' }}
+                      } @else {
+                        —
+                      }
+                    </td>
+                    <td
+                      class="num mono"
+                      [class.profit]="s.unrealizedPnL > 0"
+                      [class.loss]="s.unrealizedPnL < 0"
+                    >
+                      {{ s.unrealizedPnL | number: '1.2-2' }}
+                    </td>
+                    <td class="desc">{{ s.description }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </section>
+        }
       }
     </div>
   `,
   styles: [
     `
       .page {
+        padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
         gap: var(--space-3);
       }
-      .controls {
+
+      /* ── Filter bar — matches the ml-models / market-data toolbar ── */
+      .filter-bar {
         display: flex;
+        align-items: flex-end;
         gap: var(--space-3);
         flex-wrap: wrap;
-        padding: var(--space-2) 0;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
       }
-      .control-group {
+      .fb-field {
         display: flex;
         flex-direction: column;
-        gap: 2px;
+        gap: 4px;
       }
-      .control-group label {
+      .fb-label {
         font-size: 10px;
+        font-weight: var(--font-semibold);
         color: var(--text-tertiary);
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        font-weight: var(--font-semibold);
       }
-      .control-group input,
-      .control-group select {
-        padding: 4px 8px;
+      .filter-input,
+      .filter-select {
+        height: 32px;
+        padding: 0 var(--space-3);
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
         background: var(--bg-primary);
         color: var(--text-primary);
-        min-width: 140px;
         font-size: var(--text-sm);
+        min-width: 160px;
       }
 
-      /* ── Compact KPI strip ───────────────────────────────────────── */
+      .window-presets {
+        display: flex;
+        height: 32px;
+      }
+      .preset {
+        padding: 0 12px;
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        cursor: pointer;
+        font-variant-numeric: tabular-nums;
+      }
+      .preset:hover {
+        background: var(--bg-tertiary);
+      }
+      .preset.active {
+        background: var(--accent);
+        color: white;
+        border-color: var(--accent);
+      }
+      .preset:first-child {
+        border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+      }
+      .preset:last-child {
+        border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      }
+      .preset + .preset {
+        border-left: none;
+      }
+
+      /* ── KPI strip — canonical 8-col grid (matches market-data) ── */
       .kpi-strip {
         display: grid;
         grid-template-columns: repeat(8, 1fr);
         gap: var(--space-2);
       }
-      @media (max-width: 1280px) {
+      @media (max-width: 1400px) {
         .kpi-strip {
           grid-template-columns: repeat(4, 1fr);
         }
@@ -570,101 +605,89 @@ interface AnomalyFlag {
           grid-template-columns: repeat(2, 1fr);
         }
       }
-      .kpi {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        padding: 8px 10px;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        box-shadow: var(--shadow-sm);
-      }
-      .kpi.alert {
-        border-color: #ff9500;
-        background: rgba(255, 149, 0, 0.06);
-      }
-      .kpi-label {
-        font-size: 9px;
-        font-weight: var(--font-bold);
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-      }
-      .kpi-value {
-        font-size: 18px;
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        font-variant-numeric: tabular-nums;
-        line-height: 1.2;
-      }
-      .kpi-value-sm {
-        font-size: 12px;
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        line-height: 1.4;
-      }
-      .kpi-trend {
-        font-size: 10px;
-        color: var(--text-secondary);
-      }
 
-      /* ── Two-column rows ───────────────────────────────────── */
-      .row-2 {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: var(--space-3);
-      }
-      @media (max-width: 1100px) {
-        .row-2 {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      /* ── Cards ───────────────────────────────────── */
-      .card {
+      /* ── Insights section — board-style wrapper + 1px-border grid trick ── */
+      .insights-section {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        padding: var(--space-3) var(--space-3);
-        box-shadow: var(--shadow-sm);
-        overflow-x: auto;
+        overflow: hidden;
       }
-      .card-head {
+      .insights-head {
         display: flex;
-        justify-content: space-between;
         align-items: baseline;
-        margin-bottom: var(--space-2);
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
       }
-      .card-head h3 {
+      .insights-head h3 {
         margin: 0;
         font-size: var(--text-sm);
         font-weight: var(--font-semibold);
       }
-      .empty-line {
-        margin: 0;
-        padding: var(--space-2) 0;
+      .insights-head .muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
       }
-
-      /* ── Histogram ───────────────────────────────────── */
-      .activity-card {
+      .insights-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr 1fr;
+        gap: 1px;
+        background: var(--border);
+      }
+      @media (max-width: 1100px) {
+        .insights-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      @media (max-width: 720px) {
+        .insights-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .insight-card {
+        background: var(--bg-secondary);
+        padding: var(--space-3) var(--space-4);
         display: flex;
         flex-direction: column;
+        gap: var(--space-2);
+        min-height: 160px;
       }
+      .insight-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: var(--space-2);
+      }
+      .insight-title {
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .insight-status {
+        font-size: 10.5px;
+      }
+      .empty-line {
+        margin: 0;
+        font-size: var(--text-xs);
+      }
+
+      /* ── Histogram (inside insight-card) ── */
       .histogram {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(6px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(4px, 1fr));
         gap: 1px;
         height: 60px;
         align-items: end;
-        margin: var(--space-2) 0 4px;
+        flex: 1;
       }
       .hist-col {
         height: 100%;
         display: flex;
         flex-direction: column;
         justify-content: flex-end;
-        min-width: 0;
       }
       .hist-bar {
         display: block;
@@ -680,12 +703,11 @@ interface AnomalyFlag {
       .hist-axis {
         display: flex;
         justify-content: space-between;
-        align-items: center;
         font-size: 10px;
         color: var(--text-tertiary);
       }
 
-      /* ── Anomaly list ───────────────────────────────────── */
+      /* ── Notable patterns list (inside insight-card) ── */
       .anomaly-list {
         list-style: none;
         margin: 0;
@@ -701,7 +723,7 @@ interface AnomalyFlag {
         padding: 4px 6px;
         background: var(--bg-tertiary);
         border-radius: var(--radius-sm);
-        font-size: var(--text-sm);
+        font-size: var(--text-xs);
       }
       .anomaly[data-kind='stale-burst'] {
         background: rgba(239, 68, 68, 0.08);
@@ -724,36 +746,90 @@ interface AnomalyFlag {
         white-space: nowrap;
       }
 
-      /* ── Tables ───────────────────────────────────── */
-      .deltas-table {
+      /* ── Breakdown list (in-card) ── */
+      .breakdown {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .bd-row {
+        display: grid;
+        grid-template-columns: 1fr 60px 32px 32px;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-xs);
+      }
+      .bd-bar {
+        display: inline-block;
+        height: 6px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        overflow: hidden;
+      }
+      .bd-fill {
+        display: block;
+        height: 100%;
+        background: #ff9500;
+      }
+      .bd-fill.purple {
+        background: #9b59b6;
+      }
+      .bd-row .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ── Board-pattern data tables — match market-data ── */
+      .data-table-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+      }
+      .board-head {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .board-head h3 {
+        margin: 0;
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .board-head .muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+      .board-table {
         width: 100%;
         border-collapse: collapse;
-        font-size: var(--text-sm);
       }
-      .deltas-table th,
-      .deltas-table td {
-        padding: 5px 8px;
+      .board-table th,
+      .board-table td {
+        padding: 6px var(--space-3);
         text-align: left;
         border-bottom: 1px solid var(--border);
+        font-size: var(--text-xs);
         vertical-align: middle;
       }
-      .deltas-table.compact th,
-      .deltas-table.compact td {
-        padding: 3px 8px;
-      }
-      .deltas-table tbody tr:last-child td {
+      .board-table tbody tr:last-child td {
         border-bottom: none;
       }
-      .deltas-table th {
+      .board-table th {
+        background: var(--bg-tertiary);
         color: var(--text-secondary);
-        font-weight: var(--font-medium);
-        font-size: 10px;
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        background: var(--bg-tertiary);
       }
-      .deltas-table td.num,
-      .deltas-table th.num {
+      .board-table td.num,
+      .board-table th.num {
         text-align: right;
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
@@ -765,7 +841,7 @@ interface AnomalyFlag {
         background: rgba(255, 149, 0, 0.04);
       }
       .mono {
-        font-family: var(--font-mono);
+        font-family: 'SF Mono', 'Fira Code', monospace;
       }
       .small {
         font-size: var(--text-xs);
@@ -793,7 +869,7 @@ interface AnomalyFlag {
         text-decoration: underline;
       }
       .time {
-        color: var(--text-secondary);
+        color: var(--text-tertiary);
         font-size: 11px;
         white-space: nowrap;
       }
@@ -802,7 +878,7 @@ interface AnomalyFlag {
         color: var(--text-tertiary);
       }
 
-      /* ── Badges ───────────────────────────────────── */
+      /* ── Badges & pills ── */
       .badge {
         font-size: 10px;
         font-weight: var(--font-semibold);
@@ -842,8 +918,6 @@ interface AnomalyFlag {
         background: rgba(239, 68, 68, 0.15);
         color: rgb(220, 38, 38);
       }
-
-      /* ── Mini timeline (sequence chips) ───────────────────────────────────── */
       .sequence {
         display: flex;
         gap: 2px;
@@ -857,7 +931,6 @@ interface AnomalyFlag {
         border-radius: 2px;
         background: var(--bg-tertiary);
         color: var(--text-secondary);
-        white-space: nowrap;
       }
       .mini-badge[data-type='open'] {
         background: rgba(34, 197, 94, 0.18);
@@ -875,26 +948,6 @@ interface AnomalyFlag {
         background: rgba(59, 130, 246, 0.18);
         color: rgb(37, 99, 235);
       }
-
-      .bar-track {
-        display: inline-block;
-        width: 60px;
-        height: 6px;
-        background: var(--bg-primary);
-        border-radius: var(--radius-full);
-        overflow: hidden;
-        vertical-align: middle;
-        margin-right: 6px;
-      }
-      .bar-fill {
-        display: block;
-        height: 100%;
-        background: #ff9500;
-        border-radius: var(--radius-full);
-      }
-      .bar-fill.purple {
-        background: #9b59b6;
-      }
     `,
   ],
 })
@@ -902,14 +955,13 @@ export class PositionDeltasPageComponent {
   private readonly positions = inject(PositionsService);
   private readonly realtime = inject(RealtimeService);
 
+  protected readonly windowPresets = [1, 6, 24, 72, 168];
   protected readonly windowHours = signal(24);
   protected readonly symbolFilter = signal('');
   protected readonly positionFilter = signal('');
   protected readonly sourceFilter = signal('');
   protected readonly eventTypeFilter = signal('');
 
-  // Push events arriving via SignalR — merged with polled rows in `rows()` and
-  // deduped by id. Capped so a runaway stream can't grow this unboundedly.
   private readonly livePrepend = signal<PositionLifecycleEventDto[]>([]);
   private static readonly LIVE_PREPEND_MAX = 200;
 
@@ -939,8 +991,6 @@ export class PositionDeltasPageComponent {
       this.windowHours();
       this.sourceFilter();
       this.eventTypeFilter();
-      // Engine-side filters changed — discard the live buffer too so the
-      // merged view matches the resulting polled refetch.
       this.livePrepend.set([]);
       this.resource.refresh();
     });
@@ -966,8 +1016,6 @@ export class PositionDeltasPageComponent {
     return [...merged, ...polled];
   });
 
-  // Client-side filters (symbol + position id) applied on top of the
-  // engine-side filters (source / eventType / time window).
   protected readonly filteredRows = computed(() => {
     const sym = this.symbolFilter().trim().toUpperCase();
     const posStr = this.positionFilter().trim();
@@ -983,10 +1031,14 @@ export class PositionDeltasPageComponent {
     () => this.resource.loading() && this.rawRows().length === 0,
   );
 
-  protected readonly lastEventAt = computed(() => {
+  protected readonly lastEventMinutes = computed(() => {
     const rows = this.filteredRows();
-    if (rows.length === 0) return null;
-    return rows.reduce((max, r) => (r.occurredAt > max ? r.occurredAt : max), rows[0].occurredAt);
+    if (rows.length === 0) return 0;
+    const latest = rows.reduce(
+      (max, r) => (r.occurredAt > max ? r.occurredAt : max),
+      rows[0].occurredAt,
+    );
+    return Math.floor((Date.now() - new Date(latest).getTime()) / 60_000);
   });
 
   protected readonly distinctSymbols = computed(
@@ -998,8 +1050,6 @@ export class PositionDeltasPageComponent {
   );
 
   protected readonly closingPendingCount = computed(() => {
-    // A "Closing" event that isn't paired with a later Closed/StaleClose on
-    // the same position is in-flight — broker confirmation pending.
     const rows = this.filteredRows();
     const byPos = new Map<number, PositionLifecycleEventDto[]>();
     for (const r of rows) {
@@ -1042,8 +1092,6 @@ export class PositionDeltasPageComponent {
   protected readonly sourceBuckets = computed<SourceBucket[]>(() => {
     const rows = this.filteredRows();
     const total = rows.length;
-    // Strip "PositionWorker:<reason>" colon-suffixes for a cleaner bucket;
-    // the worker auto-close variants all roll up under "PositionWorker".
     const normalize = (s: string) => (s.includes(':') ? s.split(':')[0] : s);
     const map = new Map<string, { count: number; recentAt: string }>();
     for (const row of rows) {
@@ -1100,7 +1148,6 @@ export class PositionDeltasPageComponent {
   protected readonly hourBuckets = computed<HourBucket[]>(() => {
     const rows = this.filteredRows();
     const hours = Math.max(1, Math.min(168, this.windowHours()));
-    // Anchor buckets to whole UTC hours starting from `now - windowHours`.
     const nowMs = Date.now();
     const buckets: HourBucket[] = [];
     for (let i = hours - 1; i >= 0; i--) {
@@ -1117,22 +1164,17 @@ export class PositionDeltasPageComponent {
     return buckets;
   });
 
-  protected readonly peakHour = computed(() => {
-    const buckets = this.hourBuckets();
-    if (buckets.length === 0) return 0;
-    return buckets.reduce((m, b) => Math.max(m, b.count), 0);
-  });
-
+  protected readonly peakHour = computed(() =>
+    this.hourBuckets().reduce((m, b) => Math.max(m, b.count), 0),
+  );
   protected readonly avgHour = computed(() => {
-    const buckets = this.hourBuckets();
-    if (buckets.length === 0) return 0;
-    return buckets.reduce((s, b) => s + b.count, 0) / buckets.length;
+    const b = this.hourBuckets();
+    return b.length === 0 ? 0 : b.reduce((s, x) => s + x.count, 0) / b.length;
   });
 
   protected hourBarHeight(count: number): number {
     const peak = this.peakHour();
     if (peak === 0) return 0;
-    // Min 4% so non-zero hours stay visible even next to a tall peak.
     return Math.max(4, (count / peak) * 100);
   }
 
@@ -1140,8 +1182,6 @@ export class PositionDeltasPageComponent {
     const flags: AnomalyFlag[] = [];
     const rollups = this.positionRollups();
 
-    // 1. Closing-pending: last event on a position is "Closing" (no Closed/
-    //    StaleClose follow-up). Broker confirmation never arrived in window.
     for (const r of rollups) {
       if (r.hasClosingPending) {
         flags.push({
@@ -1154,9 +1194,6 @@ export class PositionDeltasPageComponent {
       }
     }
 
-    // 2. Stale-close burst: any position with >= 1 StaleClose. Single events
-    //    are usually noise (one missed OnTradeTransaction), but the page
-    //    surfaces every one because operators tend to investigate them.
     for (const r of rollups) {
       if (r.hasStaleClose) {
         const staleN = r.events.filter((e) => e.eventType === 'StaleClose').length;
@@ -1170,8 +1207,6 @@ export class PositionDeltasPageComponent {
       }
     }
 
-    // 3. Reconcile churn: > 3 Reconciled events on the same position in
-    //    window. Suggests the broker-side identity is bouncing.
     for (const r of rollups) {
       const reconciles = r.events.filter((e) => e.eventType === 'Reconciled').length;
       if (reconciles > 3) {
@@ -1193,9 +1228,6 @@ export class PositionDeltasPageComponent {
     if (Number.isFinite(n) && n >= 1 && n <= 168) this.windowHours.set(n);
   }
 
-  // Mirrors the per-position card's bucketer so colour coding is consistent
-  // across both surfaces. Unknown EventType strings fall through to the
-  // neutral default.
   eventBucket(type: string): 'open' | 'close' | 'modify' | 'reconcile' | 'other' {
     const t = (type ?? '').toLowerCase();
     if (t === 'opened') return 'open';
@@ -1205,7 +1237,6 @@ export class PositionDeltasPageComponent {
     return 'other';
   }
 
-  // 2-3 char compact form for the sequence chips in the By-position rollup.
   shortType(t: string): string {
     switch (t) {
       case 'Opened':
@@ -1238,10 +1269,6 @@ export class PositionDeltasPageComponent {
     }
   }
 
-  // Client-side mirror of the engine's filter logic so push events arriving
-  // in the SignalR stream don't bypass the active selector state. Substring
-  // match on source matches the engine's ILIKE semantics
-  // (PositionWorker matches "PositionWorker:StopLoss" etc.).
   private matchesActiveFilters(evt: PositionLifecycleEventDto): boolean {
     const src = this.sourceFilter();
     if (src && !evt.source.toLowerCase().includes(src.toLowerCase())) return false;
@@ -1253,8 +1280,6 @@ export class PositionDeltasPageComponent {
   }
 
   private normaliseDirection(d: PositionLifecycleEventDto['direction']): 'Long' | 'Short' | null {
-    // The engine may serialise the enum as either a string ("Long" / "Short")
-    // or its numeric ordinal (0 / 1) depending on JSON converter config; handle both.
     const raw = d as unknown;
     if (raw === 'Long' || raw === 0 || raw === '0') return 'Long';
     if (raw === 'Short' || raw === 1 || raw === '1') return 'Short';
@@ -1262,8 +1287,6 @@ export class PositionDeltasPageComponent {
   }
 
   private normaliseStatus(s: PositionLifecycleEventDto['positionStatus']): string | null {
-    // The engine serialises enums as strings by default in this codebase;
-    // handle the numeric-fallback path too.
     if (typeof s === 'string') return s;
     return null;
   }
