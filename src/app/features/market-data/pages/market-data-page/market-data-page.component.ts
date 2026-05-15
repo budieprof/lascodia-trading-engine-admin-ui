@@ -182,6 +182,7 @@ interface PriceEntry extends LivePriceDto {
           (symbolChange)="chartSymbol.set($event)"
           (timeframeChange)="chartTimeframe.set($event)"
           (candlesChange)="chartCandles.set($event)"
+          (slTpModified)="loadInsights()"
         />
 
         <!--
@@ -3887,7 +3888,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
    *    recent row's ML scoring fields. Signals are persisted in
    *    `GeneratedAt DESC` order, so page 1 row 0 is the most recent.
    */
-  private loadInsights(): void {
+  loadInsights(): void {
     const symSlash = this.chartSymbol();
     if (!symSlash) return;
     const symJoined = symSlash.replace(/\//g, '');

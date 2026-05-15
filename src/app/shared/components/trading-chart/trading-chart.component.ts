@@ -15,6 +15,8 @@ import { NgxEchartsDirective } from 'ngx-echarts';
 import type { EChartsOption } from 'echarts';
 import { Subject, timer, switchMap, takeUntil, catchError, of } from 'rxjs';
 import { MarketDataService } from '@core/services/market-data.service';
+import { PositionsService } from '@core/services/positions.service';
+import { NotificationService } from '@core/notifications/notification.service';
 import { CandleDto, LivePriceDto, PositionDto } from '@core/api/api.types';
 
 // ── Indicator catalog ────────────────────────────────────────────────
@@ -844,7 +846,15 @@ const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.showPositions';
 })
 export class TradingChartComponent implements OnInit, OnDestroy {
   private marketData = inject(MarketDataService);
+  private positionsService = inject(PositionsService);
+  private notifications = inject(NotificationService);
   private destroy$ = new Subject<void>();
+  /** Position id currently being SL/TP-modified — prevents stacking concurrent drags. */
+  private modifyingPosId: number | null = null;
+  /** True from `ondragstart` until either the API resolves or the user cancels.
+   *  Live-price ticks skip `buildChartMerge` while this is true so a setOption
+   *  with notMerge:true doesn't snap the dragged line back mid-gesture. */
+  private dragInProgress = false;
 
   symbols = [
     'EUR/USD',
@@ -886,6 +896,13 @@ export class TradingChartComponent implements OnInit, OnDestroy {
    * second round-trip for the same data.
    */
   readonly candlesChange = output<CandleDto[]>();
+
+  /**
+   * Fires after the engine accepts a drag-initiated SL/TP modification.
+   * Parent pages should refresh their positions feed in response (the
+   * engine has already updated the row and queued the EA command).
+   */
+  readonly slTpModified = output<{ positionId: number; kind: 'SL' | 'TP'; newPrice: number }>();
 
   /**
    * Open positions to overlay on the chart. Each position contributes up
@@ -1159,6 +1176,31 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     // haven't loaded yet, in which case the next loadCandles tick will
     // fire it via the constructor effect.
     this.buildChartMerge();
+    // Reposition the draggable SL/TP handles when the operator pans /
+    // zooms — the chart's pixel→price mapping changes and the existing
+    // graphic.position values go stale. We deliberately do NOT listen
+    // to `finished`: `updateSlTpHandles` itself calls `setOption`,
+    // which fires `finished` again, which would call setOption again
+    // → infinite loop (ECharts logs "setOption should not be called
+    // during main process" hundreds of times). The handles get
+    // refreshed at the end of every `buildChartMerge`, which is the
+    // only other place the chart redraws.
+    instance.on?.('dataZoom', this.onDataZoom);
+  }
+
+  // Pre-bound so `off` can detach the same reference on destroy.
+  private onDataZoom = () => this.updateSlTpHandles();
+
+  /** Returns true when the chart instance is live (non-null and not yet
+   *  disposed by ngx-echarts). Every setOption / convert* call should
+   *  go through this guard so post-teardown callbacks (dataZoom fired
+   *  during dispose, late-resolving observables) don't write into a
+   *  half-destroyed ECharts instance and produce
+   *  "Instance ec_… has been disposed" / "Cannot set properties of
+   *  null (setting 'innerHTML')" floods. */
+  private isChartLive(): boolean {
+    const c = this.echartsInstance;
+    return !!c && typeof c.setOption === 'function' && !c.isDisposed?.();
   }
 
   // Tracks the candle count of the last merge that wrote dataZoom. On live
@@ -1204,6 +1246,16 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy() {
+    // Detach the dataZoom listener BEFORE clearing the instance ref so
+    // ECharts doesn't fire it against a disposed instance after teardown
+    // (the source of the "Instance ec_… has been disposed" + "Cannot set
+    // properties of null (setting 'innerHTML')" floods in the console).
+    try {
+      this.echartsInstance?.off?.('dataZoom', this.onDataZoom);
+    } catch {
+      /* ignore */
+    }
+    this.echartsInstance = null;
     this.destroy$.next();
     this.destroy$.complete();
   }
@@ -1833,13 +1885,268 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     // init options with the per-tick merge so the chart still has its
     // type/style config, and we preserve the user's pan/zoom state by
     // reading the current `dataZoom` before the replace.
-    if (this.echartsInstance) {
+    if (this.isChartLive()) {
+      // Skip the full notMerge:true rebuild while an SL/TP drag is in
+      // flight — it would clobber the live line preview and snap the
+      // grip back to the engine-side level mid-gesture. The next tick
+      // after drag completion rebuilds normally.
+      if (this.dragInProgress) return;
       try {
         this.echartsInstance.setOption(this.buildFullOption(merge), true);
+        // Draggable SL/TP grips live in the `graphic` array. `setOption`
+        // with `notMerge: true` clears any previously-set graphics, so
+        // we have to re-emit them after every full replace. The handles
+        // compute their pixel positions from the freshly-applied price
+        // grid so they sit exactly on the SL/TP line.
+        this.updateSlTpHandles();
       } catch {
         // ignore — the [merge] binding will retry on the next tick
       }
     }
+  }
+
+  // ── Draggable SL/TP grips ─────────────────────────────────────────────
+  // Renders a small filled circle on the right edge of each open
+  // position's SL and TP line. Operator drags the circle vertically; on
+  // mouse-up we confirm with a native dialog and POST
+  // /position/{id}/modify-sl-tp. Success → emit `slTpModified` so the
+  // parent can refresh; failure or cancel → snap the handle back by
+  // re-running this method.
+  private updateSlTpHandles(): void {
+    if (!this.isChartLive()) return;
+    if (!this.showPositions()) {
+      try {
+        this.echartsInstance.setOption({ graphic: [] });
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    const symJoined = (this.selectedSymbol() ?? '').replace(/\//g, '').toUpperCase();
+    const positions = (this.positions() ?? []).filter(
+      (p) => p?.symbol && p.symbol.replace(/\//g, '').toUpperCase() === symJoined,
+    );
+
+    const handles: any[] = [];
+    for (const pos of positions) {
+      if (pos.stopLoss !== null && pos.stopLoss !== undefined && Number.isFinite(pos.stopLoss)) {
+        const h = this.makeSlTpHandle(pos.id, 'SL', pos.stopLoss, '#FF3B30');
+        if (h) handles.push(h);
+      }
+      if (
+        pos.takeProfit !== null &&
+        pos.takeProfit !== undefined &&
+        Number.isFinite(pos.takeProfit)
+      ) {
+        const h = this.makeSlTpHandle(pos.id, 'TP', pos.takeProfit, '#34C759');
+        if (h) handles.push(h);
+      }
+    }
+    try {
+      this.echartsInstance.setOption({ graphic: handles });
+    } catch {
+      /* ignore — next tick rebuild will retry */
+    }
+  }
+
+  private makeSlTpHandle(
+    positionId: number,
+    kind: 'SL' | 'TP',
+    price: number,
+    color: string,
+  ): any | null {
+    if (!this.isChartLive()) return null;
+    try {
+      // Price → pixel for the price grid (gridIndex 0). ECharts returns
+      // `[pixelX, pixelY]`; we only care about the Y component because
+      // the handle is pinned to a fixed X (the grid's right edge).
+      const pixel = this.echartsInstance.convertToPixel({ gridIndex: 0 }, [0, price]);
+      const pixelY = Array.isArray(pixel) ? pixel[1] : NaN;
+      if (!Number.isFinite(pixelY)) return null;
+
+      const gridModel = this.echartsInstance.getModel?.()?.getComponent?.('grid', 0);
+      const rect = gridModel?.coordinateSystem?.getRect?.() ?? gridModel?.getRect?.();
+      if (!rect) return null;
+      // Pin the grip ~10px to the LEFT of the right axis tick zone so it
+      // sits between the dashed price line and its label badge.
+      const handleX = rect.x + rect.width - 18;
+      const yMin = rect.y;
+      const yMax = rect.y + rect.height;
+
+      return {
+        id: `sltp-${kind}-${positionId}`,
+        type: 'circle',
+        shape: { r: 6 },
+        position: [handleX, pixelY],
+        draggable: 'vertical',
+        cursor: 'ns-resize',
+        z: 100,
+        invisible: false,
+        style: {
+          fill: color,
+          stroke: '#ffffff',
+          lineWidth: 2,
+          shadowBlur: 4,
+          shadowColor: 'rgba(0,0,0,0.25)',
+        },
+        // Latch the drag flag so live-price ticks don't fight the
+        // preview. Cleared in `confirmAndSubmitSlTp` once the API
+        // resolves (or the user cancels).
+        ondragstart: () => {
+          this.dragInProgress = true;
+        },
+        // Constrain drag to the price grid bounds — letting the operator
+        // drop the handle outside the visible price range produces a
+        // nonsense price. As the grip moves, push the new price into the
+        // matching SL/TP line series so the dashed price line tracks the
+        // grip in real time.
+        ondrag: (params: any) => {
+          if (!this.isChartLive()) return;
+          const t = params?.target;
+          if (!t) return;
+          if (t.y < yMin) t.y = yMin;
+          else if (t.y > yMax) t.y = yMax;
+          const converted = this.echartsInstance.convertFromPixel({ gridIndex: 0 }, [0, t.y]);
+          const dragPrice = Array.isArray(converted) ? converted[1] : NaN;
+          if (!Number.isFinite(dragPrice) || dragPrice <= 0) return;
+          this.previewSlTpLine(positionId, kind, dragPrice, color);
+        },
+        ondragend: (params: any) => {
+          if (!this.isChartLive()) {
+            this.dragInProgress = false;
+            return;
+          }
+          const newPixelY = params?.target?.y;
+          if (!Number.isFinite(newPixelY)) {
+            this.dragInProgress = false;
+            this.buildChartMerge();
+            return;
+          }
+          const converted = this.echartsInstance.convertFromPixel({ gridIndex: 0 }, [0, newPixelY]);
+          const newPrice = Array.isArray(converted) ? converted[1] : NaN;
+          if (!Number.isFinite(newPrice) || newPrice <= 0) {
+            this.dragInProgress = false;
+            this.buildChartMerge();
+            return;
+          }
+          this.confirmAndSubmitSlTp(positionId, kind, price, newPrice);
+        },
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Live-preview helper called from each `ondrag` tick. Updates the
+   * SL/TP line series so the dashed price line tracks the grip without
+   * waiting for a server round-trip. Matches the series by name —
+   * ECharts' default merge mode preserves every other series so this
+   * touches only the one being dragged.
+   */
+  private previewSlTpLine(
+    positionId: number,
+    kind: 'SL' | 'TP',
+    price: number,
+    color: string,
+  ): void {
+    if (!this.isChartLive()) return;
+    const candleCount = this.candles().length;
+    if (candleCount === 0) return;
+    const precision = this.pricePrecision();
+    const seriesName = `${kind} #${positionId}`;
+    const data = new Array(candleCount).fill(price);
+    try {
+      this.echartsInstance.setOption({
+        series: [
+          {
+            name: seriesName,
+            type: 'line',
+            data,
+            endLabel: {
+              show: true,
+              formatter: `${kind} ${price.toFixed(precision)}`,
+              backgroundColor: color,
+              color: '#fff',
+              padding: [2, 6],
+              borderRadius: 3,
+              fontSize: 9,
+              fontWeight: 600,
+              offset: [0, 0],
+            },
+          },
+        ],
+      });
+    } catch {
+      /* ignore — next ondrag tick will retry */
+    }
+  }
+
+  private confirmAndSubmitSlTp(
+    positionId: number,
+    kind: 'SL' | 'TP',
+    oldPrice: number,
+    newPrice: number,
+  ): void {
+    const precision = this.pricePrecision();
+    const rounded = +newPrice.toFixed(precision);
+    if (rounded === +oldPrice.toFixed(precision)) {
+      // No-op drag — snap back without bothering the operator.
+      this.dragInProgress = false;
+      this.buildChartMerge();
+      return;
+    }
+    if (this.modifyingPosId === positionId) {
+      // A previous modification is still in-flight — refuse and snap back.
+      this.dragInProgress = false;
+      this.buildChartMerge();
+      return;
+    }
+    const verb = kind === 'SL' ? 'Stop-Loss' : 'Take-Profit';
+    const ok = window.confirm(
+      `Move ${verb} on position #${positionId}\n` +
+        `from ${oldPrice.toFixed(precision)} to ${rounded.toFixed(precision)}?\n\n` +
+        `The engine will queue an EA command so MT5 applies the new level broker-side.`,
+    );
+    if (!ok) {
+      this.dragInProgress = false;
+      this.buildChartMerge();
+      return;
+    }
+
+    this.modifyingPosId = positionId;
+    const payload = {
+      stopLoss: kind === 'SL' ? rounded : null,
+      takeProfit: kind === 'TP' ? rounded : null,
+    };
+    this.positionsService
+      .modifySlTp(positionId, payload.stopLoss, payload.takeProfit)
+      .pipe(
+        catchError((err) => {
+          const msg = (err?.error?.message as string | undefined) ?? err?.message ?? String(err);
+          this.notifications.error?.(`${verb} update failed: ${msg}`);
+          return of(null);
+        }),
+        takeUntil(this.destroy$),
+      )
+      .subscribe((res) => {
+        this.modifyingPosId = null;
+        this.dragInProgress = false;
+        if (res?.status) {
+          this.notifications.success?.(
+            `${verb} on #${positionId} → ${rounded.toFixed(precision)} queued for MT5.`,
+          );
+          this.slTpModified.emit({ positionId, kind, newPrice: rounded });
+          // The parent's refresh will push a new positions input, which
+          // re-runs buildChartMerge with the authoritative engine-side
+          // price. No manual rebuild needed.
+        } else {
+          if (res) this.notifications.error?.(res.message ?? `${verb} update refused.`);
+          // Refused or errored — full rebuild so the line snaps back to
+          // the engine-side level (not just the grip).
+          this.buildChartMerge();
+        }
+      });
   }
 
   /**

@@ -36,6 +36,24 @@ export class PositionsService {
   }
 
   /**
+   * Modify SL and/or TP on an open position. At least one of `stopLoss`,
+   * `takeProfit` must be a number; pass `null` to leave a level unchanged.
+   * The engine updates the position row and queues a ModifySLTP EACommand
+   * so MT5 applies the new levels broker-side. Operator entry point: drag
+   * the SL/TP horizontal line on the trading chart.
+   */
+  modifySlTp(
+    id: number,
+    stopLoss: number | null,
+    takeProfit: number | null,
+  ): Observable<ResponseData<string>> {
+    return this.api.post(`/position/${id}/modify-sl-tp`, {
+      stopLoss,
+      takeProfit,
+    });
+  }
+
+  /**
    * GET /position/{id}/lifecycle — chronological lifecycle / delta timeline.
    * Returns an empty list until the writer-side wiring lands across the
    * position-management command handlers (see engine commit 3fb257d).
