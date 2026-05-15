@@ -19,6 +19,31 @@ import { PositionsService } from '@core/services/positions.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { CandleDto, LivePriceDto, PositionDto } from '@core/api/api.types';
 
+// ── Candle countdown helpers ─────────────────────────────────────────────
+// Timeframes align to the UTC grid (M1 → top of each minute, H1 → top of
+// each hour, H4 → 00/04/…/20 UTC, D1 → 00:00 UTC) so `now % tfMs` is the
+// elapsed time inside the current candle and `tfMs - that` is the close
+// countdown. The brokers we target (MT5) all emit candles on this grid;
+// if a future broker uses a different anchor we'd need to read the latest
+// candle's open timestamp instead.
+const TIMEFRAME_MINUTES_MAP: Record<string, number> = {
+  M1: 1,
+  M5: 5,
+  M15: 15,
+  H1: 60,
+  H4: 240,
+  D1: 1440,
+};
+
+function formatRemainingMs(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const hh = Math.floor(total / 3600);
+  const mm = Math.floor((total % 3600) / 60);
+  const ss = total % 60;
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return hh > 0 ? `${hh}:${pad(mm)}:${pad(ss)}` : `${pad(mm)}:${pad(ss)}`;
+}
+
 // ── Indicator catalog ────────────────────────────────────────────────
 // Adding a new indicator: extend `IndicatorType`, add a row to
 // `INDICATOR_DEFS`, write the math in `calc<Type>`, and add the series
@@ -263,6 +288,30 @@ const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.showPositions';
               <span class="live-separator">/</span>
               <span class="live-ask">{{ livePrice()!.ask.toFixed(pricePrecision()) }}</span>
               <span class="live-spread">{{ livePrice()!.spread.toFixed(1) }} sp</span>
+            </div>
+          }
+          <div
+            class="candle-countdown"
+            [class.imminent]="candleCountdown().startsWith('00:0')"
+            [title]="'Time until ' + selectedTimeframe() + ' candle closes'"
+          >
+            <span class="countdown-label">Next {{ selectedTimeframe() }}</span>
+            <span class="countdown-value">{{ candleCountdown() }}</span>
+          </div>
+          @if (openPositionsPnL(); as pnl) {
+            <div
+              class="open-pnl"
+              [class.gain]="pnl.sign > 0"
+              [class.loss]="pnl.sign < 0"
+              [title]="
+                'Live unrealised P&L summed across ' +
+                pnl.count +
+                ' open position(s) on ' +
+                selectedSymbol()
+              "
+            >
+              <span class="countdown-label">Open P&L · {{ pnl.count }} pos</span>
+              <span class="countdown-value">{{ pnl.display }}</span>
             </div>
           }
           <div class="chart-toggles">
@@ -555,6 +604,78 @@ const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.showPositions';
         padding: 1px 6px;
         background: var(--bg-tertiary);
         border-radius: 4px;
+      }
+
+      /* Candle-close countdown badge — pinned next to the live-price box
+         so the operator can read both the current bid/ask and how long
+         until the next bar without taking their eyes off the chrome. */
+      .candle-countdown {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border);
+        font-size: 11px;
+        line-height: 1;
+        white-space: nowrap;
+        transition:
+          background 0.2s,
+          color 0.2s,
+          border-color 0.2s;
+      }
+      .countdown-label {
+        color: var(--text-tertiary);
+        font-weight: var(--font-medium);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .countdown-value {
+        color: var(--text-primary);
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+      }
+      /* Under 10 seconds, flag the imminent close in orange so operators
+         can defer manual entries past the bar boundary. */
+      .candle-countdown.imminent {
+        background: rgba(255, 149, 0, 0.12);
+        border-color: rgba(255, 149, 0, 0.4);
+      }
+      .candle-countdown.imminent .countdown-value {
+        color: #ff9500;
+      }
+
+      /* Open positions cumulative P&L badge — same shell as the candle
+         countdown so the two read as a paired row. Sign tints the
+         background and the value so the operator can pick up gain/loss
+         from peripheral vision without parsing the digits. */
+      .open-pnl {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border);
+        font-size: 11px;
+        line-height: 1;
+        white-space: nowrap;
+      }
+      .open-pnl.gain {
+        background: rgba(52, 199, 89, 0.1);
+        border-color: rgba(52, 199, 89, 0.35);
+      }
+      .open-pnl.gain .countdown-value {
+        color: #34c759;
+      }
+      .open-pnl.loss {
+        background: rgba(255, 59, 48, 0.1);
+        border-color: rgba(255, 59, 48, 0.35);
+      }
+      .open-pnl.loss .countdown-value {
+        color: #ff3b30;
       }
 
       .chart-toggles {
@@ -923,6 +1044,84 @@ export class TradingChartComponent implements OnInit, OnDestroy {
    *  when reading raw price action. */
   showPositions = signal(true);
 
+  /** Wall-clock signal updated every second by a setInterval started in
+   *  ngOnInit. Drives the candle-close countdown without leaking the
+   *  interval (cleaned up in ngOnDestroy). */
+  private nowMs = signal<number>(Date.now());
+  private countdownTickId: ReturnType<typeof setInterval> | null = null;
+
+  /** Time remaining until the current candle closes, formatted hh:mm:ss
+   *  (or mm:ss when under an hour). The candle boundary aligns to the
+   *  timeframe's UTC grid — M1 ticks every minute on the dot, H1 at the
+   *  top of the hour, H4 at 00/04/08/12/16/20 UTC, D1 at UTC midnight —
+   *  so `tfMs - (now % tfMs)` gives the exact remaining ms.
+   *
+   *  Recomputes on every nowMs tick + every timeframe change. */
+  readonly candleCountdown = computed(() => {
+    const tfMin = TIMEFRAME_MINUTES_MAP[this.selectedTimeframe()] ?? 60;
+    const tfMs = tfMin * 60_000;
+    const remaining = tfMs - (this.nowMs() % tfMs);
+    return formatRemainingMs(remaining);
+  });
+
+  /** Cumulative live unrealised P&L (USD) for every open position whose
+   *  symbol matches the focused chart. Mirrors the engine's
+   *  PnLConverter so the chart number matches the position table:
+   *
+   *    raw P&L = priceΔ × lots × contractSize  (in QUOTE currency)
+   *    - quote = USD (*USD pairs): raw is already USD
+   *    - base  = USD (USDJPY/USDCHF/USDCAD): divide by current price
+   *    - cross-rate  (EURJPY, EURGBP): no FX-rate service yet — fall
+   *      back to the engine's last-persisted unrealizedPnL so we don't
+   *      display a misleadingly large quote-currency number.
+   *
+   *  Returns null when there are no positions on the focused symbol so
+   *  the template hides the badge entirely (instead of showing $0.00). */
+  readonly openPositionsPnL = computed<{
+    usd: number;
+    count: number;
+    display: string;
+    sign: 1 | 0 | -1;
+  } | null>(() => {
+    const symJoined = (this.selectedSymbol() ?? '').replace(/\//g, '').toUpperCase();
+    const positions = (this.positions() ?? []).filter(
+      (p) => p?.symbol && p.symbol.replace(/\//g, '').toUpperCase() === symJoined,
+    );
+    if (positions.length === 0) return null;
+
+    const lp = this.livePrice();
+    const haveLive = !!lp?.bid && Number.isFinite(lp.bid) && !!lp?.ask && Number.isFinite(lp.ask);
+    const baseCcy = symJoined.slice(0, 3);
+    const quoteCcy = symJoined.slice(3, 6);
+    const contractSize = 100_000;
+    let totalUsd = 0;
+
+    for (const pos of positions) {
+      const isLong = pos.direction === 'Long';
+      const refPrice = haveLive ? (isLong ? lp!.bid : lp!.ask) : Number.NaN;
+      if (!Number.isFinite(refPrice)) {
+        // No live tick yet — engine's last persisted figure is closer than nothing.
+        if (Number.isFinite(pos.unrealizedPnL)) totalUsd += Number(pos.unrealizedPnL);
+        continue;
+      }
+      const entry = Number(pos.averageEntryPrice);
+      const rawPnL = isLong
+        ? (refPrice - entry) * Number(pos.openLots) * contractSize
+        : (entry - refPrice) * Number(pos.openLots) * contractSize;
+      if (quoteCcy === 'USD') {
+        totalUsd += rawPnL;
+      } else if (baseCcy === 'USD' && refPrice !== 0) {
+        totalUsd += rawPnL / refPrice;
+      } else {
+        // Cross-rate fallback — engine value if present.
+        totalUsd += Number.isFinite(pos.unrealizedPnL) ? Number(pos.unrealizedPnL) : 0;
+      }
+    }
+    const sign: 1 | 0 | -1 = totalUsd > 0 ? 1 : totalUsd < 0 ? -1 : 0;
+    const display = `${sign >= 0 ? '+' : '−'}$${Math.abs(totalUsd).toFixed(2)}`;
+    return { usd: totalUsd, count: positions.length, display, sign };
+  });
+
   /** Active indicators for the current (symbol, timeframe). Loaded from
    *  localStorage on construction; persisted on every mutation. */
   indicators = signal<IndicatorConfig[]>([]);
@@ -1243,6 +1442,10 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     this.loadChartConfig();
     this.loadCandles();
     this.startLivePricePolling();
+    // 1 s tick drives the candle-close countdown shown in the toolbar.
+    // setInterval is enough — sub-second precision isn't useful when the
+    // displayed value rounds to whole seconds.
+    this.countdownTickId = setInterval(() => this.nowMs.set(Date.now()), 1000);
   }
 
   ngOnDestroy() {
@@ -1256,6 +1459,10 @@ export class TradingChartComponent implements OnInit, OnDestroy {
       /* ignore */
     }
     this.echartsInstance = null;
+    if (this.countdownTickId !== null) {
+      clearInterval(this.countdownTickId);
+      this.countdownTickId = null;
+    }
     this.destroy$.next();
     this.destroy$.complete();
   }
