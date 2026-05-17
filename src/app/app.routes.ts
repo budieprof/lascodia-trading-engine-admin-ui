@@ -92,6 +92,11 @@ export const routes: Routes = [
           import('@features/composite-ml/composite-ml.routes').then((m) => m.COMPOSITE_ML_ROUTES),
       },
       {
+        path: 'llm',
+        data: { breadcrumb: 'LLM' },
+        loadChildren: () => import('@features/llm/llm.routes').then((m) => m.LLM_ROUTES),
+      },
+      {
         path: 'backtests',
         data: { breadcrumb: 'Backtesting' },
         loadChildren: () =>

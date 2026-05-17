@@ -50,6 +50,7 @@ import { StrategyVariantsTabComponent } from '../../components/strategy-variants
 import { StrategyCapacityCardComponent } from '../../components/strategy-capacity-card/strategy-capacity-card.component';
 import { StrategyPromotionReviewsTabComponent } from '../../components/strategy-promotion-reviews-tab/strategy-promotion-reviews-tab.component';
 import { RejectionDistributionDrawerComponent } from '../../components/rejection-distribution-drawer/rejection-distribution-drawer.component';
+import { RationaleInlineComponent } from '@features/llm/components/rationale-inline/rationale-inline.component';
 
 @Component({
   selector: 'app-strategy-detail-page',
@@ -70,6 +71,7 @@ import { RejectionDistributionDrawerComponent } from '../../components/rejection
     StrategyCapacityCardComponent,
     StrategyPromotionReviewsTabComponent,
     RejectionDistributionDrawerComponent,
+    RationaleInlineComponent,
     RouterLink,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -92,6 +94,14 @@ import { RejectionDistributionDrawerComponent } from '../../components/rejection
           </button>
           <button class="btn btn-ghost" (click)="goBack()">Back</button>
         </app-page-header>
+
+        <!--
+          LLM-authored rationale for the strategy's most recent activation
+          event. Hides itself when no rationale is attached. Operators
+          looking for older / different event-type rationales can click
+          through to /llm/rationales filtered by EventId=strategyId.
+        -->
+        <app-rationale-inline eventType="StrategyActivated" [eventId]="strategyId" />
 
         @if (latestSnapshot(); as s) {
           <div class="health-strip">

@@ -428,6 +428,12 @@ export class SidebarComponent {
       label: 'Configuration',
       items: [
         { label: 'Strategies', route: '/strategies', icon: '🎯' },
+        {
+          label: 'Strategy Settings',
+          route: '/strategies/settings',
+          icon: '⚙',
+          policy: 'Operator',
+        },
         { label: 'Accounts', route: '/trading-accounts', icon: '🏦' },
         { label: 'Brokers', route: '/brokers', icon: '🔗' },
         { label: 'Risk Profiles', route: '/risk-profiles', icon: '🛡' },
@@ -444,6 +450,15 @@ export class SidebarComponent {
         { label: 'Optimizations', route: '/optimizations', icon: '🧪', policy: 'Analyst' },
         { label: 'Backtesting', route: '/backtests', icon: '📈', policy: 'Analyst' },
         { label: 'Walk-Forward', route: '/walk-forward', icon: '🔄', policy: 'Analyst' },
+      ],
+    },
+    {
+      label: 'LLM',
+      items: [
+        { label: 'Proposals', route: '/strategies/llm-proposals', icon: '💡' },
+        { label: 'Invocations', route: '/llm/invocations', icon: '📡' },
+        { label: 'Rationales', route: '/llm/rationales', icon: '🗒' },
+        { label: 'Settings', route: '/llm/settings', icon: '🔑', policy: 'Operator' },
       ],
     },
     {

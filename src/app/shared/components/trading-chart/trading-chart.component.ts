@@ -7,17 +7,26 @@ import {
   effect,
   input,
   output,
+  viewChild,
+  ElementRef,
   OnInit,
   OnDestroy,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { DatePipe } from '@angular/common';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import type { EChartsOption } from 'echarts';
 import { Subject, timer, switchMap, takeUntil, catchError, of } from 'rxjs';
 import { MarketDataService } from '@core/services/market-data.service';
 import { PositionsService } from '@core/services/positions.service';
 import { NotificationService } from '@core/notifications/notification.service';
-import { CandleDto, LivePriceDto, PositionDto } from '@core/api/api.types';
+import {
+  CandleDto,
+  LivePriceDto,
+  MarketAnalysisRecommendationDto,
+  MarketAnalysisResultDto,
+  PositionDto,
+} from '@core/api/api.types';
 
 // ── Candle countdown helpers ─────────────────────────────────────────────
 // Timeframes align to the UTC grid (M1 → top of each minute, H1 → top of
@@ -246,7 +255,7 @@ const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.showPositions';
   selector: 'app-trading-chart',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgxEchartsDirective, FormsModule],
+  imports: [NgxEchartsDirective, FormsModule, DatePipe],
   template: `
     <div class="trading-chart">
       <!-- Toolbar -->
@@ -314,6 +323,27 @@ const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.showPositions';
               <span class="countdown-value">{{ pnl.display }}</span>
             </div>
           }
+          <!--
+            Spot LLM analysis trigger. Disabled while a previous call is
+            in flight (these typically take 15-60s on the deep-tier model)
+            so the operator can't queue duplicate analyses.
+          -->
+          <button
+            type="button"
+            class="analyze-btn"
+            [disabled]="analyzing()"
+            [title]="
+              analyzing()
+                ? 'Analysis in flight — wait for the current call to complete.'
+                : 'Run an LLM spot analysis of the current market for ' +
+                  selectedSymbol() +
+                  ' ' +
+                  selectedTimeframe()
+            "
+            (click)="runMarketAnalysis()"
+          >
+            {{ analyzing() ? '⏳ Analysing…' : '🔍 Analyse' }}
+          </button>
           <div class="chart-toggles">
             @for (cfg of indicators(); track cfg.id) {
               <div class="indicator-chip" [class.editing]="editingIndicatorId() === cfg.id">
@@ -469,11 +499,110 @@ const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.showPositions';
           <span class="info-value muted">{{ candles().length }} candles</span>
         </div>
       </div>
+
+      <!-- ── LLM market-analysis result overlay ─────────────────────────
+           Native <dialog> opened via showModal() so the brief renders in
+           the browser's top layer above the chart's overflow:hidden box.
+           The previous CSS-only backdrop clipped the body when the chart
+           container was shorter than 80vh. -->
+      <dialog
+        #analysisDialog
+        class="analysis-dialog"
+        [class.error]="!analysisResult() && analysisError()"
+        aria-labelledby="analysis-title"
+        (close)="onAnalysisDialogClose()"
+        (click)="onAnalysisBackdropClick($event)"
+      >
+        <article class="analysis-card" (click)="$event.stopPropagation()">
+          @if (analysisResult(); as ar) {
+            <header class="analysis-head">
+              <div class="analysis-title-wrap">
+                <h3 id="analysis-title">Spot analysis · {{ ar.symbol }} · {{ ar.timeframe }}</h3>
+                <div class="analysis-meta">
+                  <span class="tag mono">{{ ar.provider }} / {{ ar.model }}</span>
+                  <span class="muted">·</span>
+                  <span class="muted">{{ ar.latencyMs }} ms</span>
+                  <span class="muted">·</span>
+                  <span class="muted">{{ ar.completedAt | date: 'MMM d, HH:mm:ss' }}</span>
+                  <span class="muted">·</span>
+                  <span class="muted">audit #{{ ar.llmInvocationId }}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="analysis-close"
+                aria-label="Close analysis"
+                (click)="closeAnalysis()"
+              >
+                ×
+              </button>
+            </header>
+            @if (ar.recommendation; as rec) {
+              <section
+                class="rec-card"
+                [class.rec-buy]="rec.action === 'Buy'"
+                [class.rec-sell]="rec.action === 'Sell'"
+                [class.rec-hold]="rec.action === 'Hold'"
+              >
+                <div class="rec-row">
+                  <span class="rec-action">{{ rec.action }}</span>
+                  <span class="rec-confidence">
+                    confidence
+                    <strong>{{ (rec.confidence * 100).toFixed(0) }}%</strong>
+                  </span>
+                </div>
+                @if (rec.action !== 'Hold' && rec.entryPrice !== null) {
+                  <div class="rec-levels">
+                    <div class="rec-level">
+                      <span class="rec-label">Entry</span>
+                      <span class="rec-value">{{ rec.entryPrice }}</span>
+                    </div>
+                    <div class="rec-level">
+                      <span class="rec-label">Stop</span>
+                      <span class="rec-value">{{ rec.stopLoss }}</span>
+                    </div>
+                    <div class="rec-level">
+                      <span class="rec-label">Target</span>
+                      <span class="rec-value">{{ rec.takeProfit }}</span>
+                    </div>
+                    @if (recRiskReward(rec); as rr) {
+                      <div class="rec-level">
+                        <span class="rec-label">R:R</span>
+                        <span class="rec-value">{{ rr }}</span>
+                      </div>
+                    }
+                  </div>
+                }
+                @if (rec.rationale) {
+                  <p class="rec-rationale">{{ rec.rationale }}</p>
+                }
+              </section>
+            } @else {
+              <section class="rec-card rec-missing">
+                <div class="rec-row">
+                  <span class="rec-action">No recommendation</span>
+                </div>
+                <p class="rec-rationale">
+                  The model didn't emit a structured trade block — review the prose below.
+                </p>
+              </section>
+            }
+            <div class="analysis-body">{{ ar.analysis }}</div>
+          } @else if (analysisError(); as err) {
+            <header class="analysis-head">
+              <h3 id="analysis-title">Analysis failed</h3>
+              <button type="button" class="analysis-close" (click)="closeAnalysis()">×</button>
+            </header>
+            <div class="analysis-body">{{ err }}</div>
+          }
+        </article>
+      </dialog>
     </div>
   `,
   styles: [
     `
       .trading-chart {
+        position: relative;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
@@ -676,6 +805,213 @@ const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.showPositions';
       }
       .open-pnl.loss .countdown-value {
         color: #ff3b30;
+      }
+
+      /* Spot-analysis trigger — primary-styled so it stands out in the
+         countdown row + signals "this costs an LLM call". */
+      .analyze-btn {
+        height: 28px;
+        padding: 0 var(--space-3);
+        border-radius: var(--radius-sm);
+        border: 1px solid #0071e3;
+        background: #0071e3;
+        color: #fff;
+        font-size: 11px;
+        font-weight: var(--font-semibold);
+        letter-spacing: 0.02em;
+        cursor: pointer;
+        white-space: nowrap;
+        transition:
+          background 0.15s,
+          opacity 0.15s;
+      }
+      .analyze-btn:hover:not(:disabled) {
+        background: #005bb5;
+      }
+      .analyze-btn:disabled {
+        opacity: 0.6;
+        cursor: progress;
+      }
+
+      /* Modal-style overlay for the analysis result. Anchored inside the
+         trading-chart component so the backdrop covers just the chart
+         area; mounting it at the page root would require an event bus. */
+      /* Native <dialog> sits in the browser's top layer when opened via
+         showModal(), so it ignores the chart container's overflow:hidden
+         and any ancestor stacking context / transform. UA centers via
+         margin:auto on :modal. */
+      dialog.analysis-dialog {
+        padding: 0;
+        background: transparent;
+        border: none;
+        max-width: none;
+        max-height: none;
+        color: var(--text-primary);
+      }
+      dialog.analysis-dialog:modal {
+        position: fixed;
+        inset: 0;
+        margin: auto;
+      }
+      dialog.analysis-dialog::backdrop {
+        background: rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(2px);
+      }
+      .analysis-card {
+        width: min(760px, 92vw);
+        max-height: 86vh;
+        overflow: auto;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+        display: flex;
+        flex-direction: column;
+      }
+      dialog.analysis-dialog.error .analysis-card {
+        border-color: rgba(255, 59, 48, 0.4);
+      }
+      .analysis-head {
+        padding: var(--space-3) var(--space-5);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: var(--space-3);
+      }
+      .analysis-title-wrap h3 {
+        margin: 0;
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+      }
+      .analysis-meta {
+        margin-top: 2px;
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-xs);
+        flex-wrap: wrap;
+      }
+      .analysis-meta .tag {
+        padding: 2px 6px;
+        border-radius: 3px;
+        background: var(--bg-tertiary);
+        color: var(--text-tertiary);
+      }
+      .analysis-meta .muted {
+        color: var(--text-tertiary);
+      }
+      .mono {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+      }
+      .analysis-close {
+        width: 28px;
+        height: 28px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--text-tertiary);
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .analysis-close:hover {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+      .analysis-body {
+        padding: var(--space-4) var(--space-5);
+        font-size: var(--text-sm);
+        line-height: 1.6;
+        color: var(--text-primary);
+        white-space: pre-wrap;
+      }
+      dialog.analysis-dialog.error .analysis-body {
+        color: #ff3b30;
+      }
+
+      /* Trade recommendation card — renders between the head and the prose
+         body. Action colour-codes the left border so the operator can
+         eyeball Buy / Sell / Hold instantly. */
+      .rec-card {
+        margin: var(--space-3) var(--space-5) 0;
+        padding: var(--space-3) var(--space-4);
+        border: 1px solid var(--border);
+        border-left-width: 4px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .rec-card.rec-buy {
+        border-left-color: #16a34a;
+      }
+      .rec-card.rec-sell {
+        border-left-color: #dc2626;
+      }
+      .rec-card.rec-hold,
+      .rec-card.rec-missing {
+        border-left-color: var(--text-tertiary);
+      }
+      .rec-row {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--space-3);
+      }
+      .rec-action {
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+        letter-spacing: 0.02em;
+      }
+      .rec-card.rec-buy .rec-action {
+        color: #16a34a;
+      }
+      .rec-card.rec-sell .rec-action {
+        color: #dc2626;
+      }
+      .rec-card.rec-hold .rec-action,
+      .rec-card.rec-missing .rec-action {
+        color: var(--text-tertiary);
+      }
+      .rec-confidence {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .rec-confidence strong {
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+        margin-left: 4px;
+      }
+      .rec-levels {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--space-3);
+      }
+      .rec-level {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .rec-label {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .rec-value {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: var(--text-sm);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-primary);
+      }
+      .rec-rationale {
+        margin: 0;
+        font-size: var(--text-xs);
+        line-height: 1.5;
+        color: var(--text-secondary);
+        font-style: italic;
       }
 
       .chart-toggles {
@@ -1043,6 +1379,19 @@ export class TradingChartComponent implements OnInit, OnDestroy {
    *  on; toggleable via the toolbar so the operator can declutter the chart
    *  when reading raw price action. */
   showPositions = signal(true);
+
+  // ── Spot LLM analysis ──────────────────────────────────────────────
+  /** True while a /market-data/analyze call is in flight. */
+  readonly analyzing = signal(false);
+  /** Most recent successful analysis result; non-null renders the modal. */
+  readonly analysisResult = signal<MarketAnalysisResultDto | null>(null);
+  /** Error string when the most recent call failed; non-null renders the
+   *  error modal. Mutually exclusive with `analysisResult`. */
+  readonly analysisError = signal<string | null>(null);
+
+  /** Native <dialog> wrapping the analysis brief. Opened via showModal()
+   *  so it renders in the top layer above the chart's overflow:hidden box. */
+  private readonly analysisDialog = viewChild<ElementRef<HTMLDialogElement>>('analysisDialog');
 
   /** Wall-clock signal updated every second by a setInterval started in
    *  ngOnInit. Drives the candle-close countdown without leaking the
@@ -1436,6 +1785,21 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     // Re-emit the candle series whenever it changes — parents wire price
     // action analytics off this stream.
     effect(() => this.candlesChange.emit(this.candles()));
+
+    // Drive the native <dialog> off the result/error signals so callers
+    // don't need to call showModal/close directly. viewChild resolves
+    // post-render — `el` is undefined on the first run, which is fine
+    // (signals start null so no open is attempted).
+    effect(() => {
+      const open = !!this.analysisResult() || !!this.analysisError();
+      const el = this.analysisDialog()?.nativeElement;
+      if (!el) return;
+      if (open && !el.open && typeof el.showModal === 'function') {
+        el.showModal();
+      } else if (!open && el.open) {
+        el.close();
+      }
+    });
   }
 
   ngOnInit() {
@@ -1491,6 +1855,78 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     this.showPositions.set(!this.showPositions());
     this.persistGlobalToggle(SHOW_POSITIONS_STORAGE_KEY, this.showPositions());
     this.buildChartMerge();
+  }
+
+  /**
+   * Fires a one-shot LLM spot analysis for the focused (symbol, timeframe).
+   * The engine gathers candles / regime / order book / liquidity history /
+   * economic events / sentiment server-side, builds a structured prompt,
+   * and calls the configured deep-tier LLM. Renders the result in the
+   * overlay modal at the bottom of the chart container.
+   */
+  runMarketAnalysis(): void {
+    if (this.analyzing()) return;
+    this.analyzing.set(true);
+    this.analysisResult.set(null);
+    this.analysisError.set(null);
+    this.marketData
+      .analyzeMarket(this.selectedSymbol(), this.selectedTimeframe())
+      .pipe(
+        catchError((err) => {
+          const msg = err?.error?.message ?? err?.message ?? String(err);
+          this.analysisError.set(`Analysis request failed: ${msg}`);
+          return of(null);
+        }),
+        takeUntil(this.destroy$),
+      )
+      .subscribe((res) => {
+        this.analyzing.set(false);
+        if (res?.status && res.data) {
+          this.analysisResult.set(res.data);
+        } else if (res) {
+          this.analysisError.set(res.message ?? 'Analysis refused by the engine.');
+        }
+      });
+  }
+
+  /** Dismiss whichever overlay is currently visible (success or error). */
+  closeAnalysis(): void {
+    this.analysisResult.set(null);
+    this.analysisError.set(null);
+  }
+
+  /** Native <dialog> emits `close` on Escape and programmatic .close().
+   *  Clear signals so the effect doesn't try to reopen on the next tick. */
+  onAnalysisDialogClose(): void {
+    this.analysisResult.set(null);
+    this.analysisError.set(null);
+  }
+
+  /**
+   * Reward-to-risk ratio for the LLM's proposed trade — |TP - entry| / |entry - SL|.
+   * Returns null when any field is missing or the math would divide by zero.
+   * Surfaced as a 4th column on the levels grid so the operator can sanity-
+   * check the setup at a glance (we want ≥ 1.5 typically; ≪ 1 means the
+   * model has cited a high-probability low-payout setup that probably isn't
+   * worth taking).
+   */
+  recRiskReward(rec: MarketAnalysisRecommendationDto): string | null {
+    const e = rec.entryPrice;
+    const s = rec.stopLoss;
+    const t = rec.takeProfit;
+    if (e === null || s === null || t === null) return null;
+    const risk = Math.abs(e - s);
+    if (risk === 0) return null;
+    const reward = Math.abs(t - e);
+    return `${(reward / risk).toFixed(2)} : 1`;
+  }
+
+  /** Native <dialog> backdrop clicks land on the dialog element itself
+   *  (not on the inner card, which stops propagation). Treat that as dismiss. */
+  onAnalysisBackdropClick(event: MouseEvent): void {
+    if (event.target === this.analysisDialog()?.nativeElement) {
+      this.closeAnalysis();
+    }
   }
 
   /** Open / close the "+ Indicator" picker dropdown. */

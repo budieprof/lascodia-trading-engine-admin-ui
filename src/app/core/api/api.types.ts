@@ -1853,6 +1853,234 @@ export interface LlmProposalDto {
 }
 
 /**
+ * Per-cycle outcome of the strategy-proposal generator. Mirrors the
+ * engine `StrategyProposalCycleResult` returned by the manual-trigger
+ * endpoint + the scheduled worker.
+ */
+export interface StrategyProposalCycleResult {
+  pendingWritten: number;
+  dslInvalidWritten: number;
+  duplicateWritten: number;
+  autoPromotedCount: number;
+  sourcesAttempted: number;
+  completedAt: string;
+  totalWritten: number;
+}
+
+export interface StrategyPromotionConfigEntryDto {
+  key: string;
+  value: string;
+  description: string | null;
+  dataType: ConfigDataType;
+  isHotReloadable: boolean;
+  group: string;
+  lastUpdatedAt: string;
+}
+
+export interface StrategyPromotionConfigUpdateEntry {
+  key: string;
+  value: string;
+}
+
+/**
+ * Worker-status snapshot for the LLM strategy-proposal page header.
+ * Mirrors the engine `LlmProposalStatusDto`.
+ */
+export interface LlmProposalStatusDto {
+  workerEnabled: boolean;
+  apiKeyConfigured: boolean;
+  model: string;
+  pollIntervalHours: number;
+  proposalsPerCycle: number;
+  totalProposalsAllTime: number;
+  pendingCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  dslInvalidCount: number;
+  duplicateCount: number;
+  approvalRateAllTime: number | null;
+  lastProposalAt: string | null;
+  nextScheduledRunAt: string | null;
+  recentActivity: LlmProposalDto[];
+}
+
+// ── LLM observability (PRD-0001 narrative layer) ─────────────────────────
+// Mirrors LlmInvocation / LifecycleEventRationale wire shapes from the
+// engine's new /llm/* endpoints. Outcome and DataType numbers come from
+// the C# enums LlmOutcome / ConfigDataType respectively.
+
+/**
+ * Terminal outcome of a single LLM API call. Mirrors engine LlmOutcome.
+ * Wire format is the C# enum name (string) because the engine registers
+ * `JsonStringEnumConverter` globally.
+ */
+export type LlmOutcome = 'Ok' | 'Retry' | 'Failed' | 'BudgetExceeded' | 'SchemaFallback';
+
+export const LlmOutcomeLabel: Record<LlmOutcome, string> = {
+  Ok: 'Ok',
+  Retry: 'Retry',
+  Failed: 'Failed',
+  BudgetExceeded: 'Budget exceeded',
+  SchemaFallback: 'Schema fallback',
+};
+
+export interface LlmInvocationDto {
+  id: number;
+  provider: string;
+  model: string;
+  purpose: string;
+  promptHash: string;
+  tokensInput: number;
+  tokensOutput: number;
+  latencyMs: number;
+  costUsd: number;
+  outcome: LlmOutcome;
+  invokedAt: string;
+  errorMessage: string | null;
+}
+
+/** Detail view returned from GET /llm/invocations/{id} — list metadata plus
+ *  the full request + response bodies. The list endpoint omits the bodies to
+ *  keep the ledger query light; only the row-click drilldown fetches them. */
+export interface LlmInvocationDetailDto extends LlmInvocationDto {
+  /** "<systemPrompt>\n<userPrompt>" — the literal bytes hashed into promptHash. */
+  requestBody: string | null;
+  /** Raw response content returned by the provider. Null on failed / budget rows. */
+  responseBody: string | null;
+}
+
+export interface LlmInvocationsBucketDto {
+  label: string;
+  calls: number;
+  costUsd: number;
+  tokensInput: number;
+  tokensOutput: number;
+}
+
+export interface LlmInvocationsSummaryDto {
+  totalCalls: number;
+  totalCostUsd: number;
+  totalTokensInput: number;
+  totalTokensOutput: number;
+  averageLatencyMs: number;
+  okCount: number;
+  retryCount: number;
+  failedCount: number;
+  budgetExceededCount: number;
+  schemaFallbackCount: number;
+  byProvider: LlmInvocationsBucketDto[];
+  byModel: LlmInvocationsBucketDto[];
+  byPurpose: LlmInvocationsBucketDto[];
+}
+
+export interface LifecycleRationaleDto {
+  id: number;
+  eventType: string;
+  eventId: number;
+  eventCorrelationId: string;
+  rationaleText: string;
+  keyMetricReferenced: string;
+  confidence: number;
+  llmInvocationId: number;
+  llmProvider: string | null;
+  llmModel: string | null;
+  createdAt: string;
+}
+
+export interface LlmInvocationQueryFilter {
+  provider?: string | null;
+  model?: string | null;
+  purpose?: string | null;
+  outcome?: LlmOutcome | null;
+  from?: string | null;
+  to?: string | null;
+}
+
+export interface LifecycleRationaleQueryFilter {
+  eventType?: string | null;
+  eventId?: number | null;
+  minConfidence?: number | null;
+  from?: string | null;
+  to?: string | null;
+}
+
+export interface LlmConfigEntryDto {
+  key: string;
+  value: string;
+  description: string | null;
+  dataType: ConfigDataType;
+  isHotReloadable: boolean;
+  isSecret: boolean;
+  lastUpdatedAt: string;
+}
+
+export interface LlmConfigUpdateEntry {
+  key: string;
+  value: string;
+}
+
+export interface TestLlmProviderTierResult {
+  tier: 'Deep' | 'Quick';
+  provider: string;
+  model: string;
+  ok: boolean;
+  latencyMs: number;
+  llmInvocationId: number | null;
+  responseSnippet: string | null;
+  errorMessage: string | null;
+}
+
+export interface TestLlmProviderResult {
+  tiers: TestLlmProviderTierResult[];
+}
+
+export interface RationaleCoverageEntryDto {
+  eventType: string;
+  description: string;
+  count: number;
+  averageConfidence: number | null;
+  latestAt: string | null;
+  latestRationaleId: number | null;
+}
+
+export interface RationaleCoverageDto {
+  windowHours: number;
+  totalRationales: number;
+  averageConfidence: number;
+  lowConfidenceCount: number;
+  totalCostUsd: number;
+  byEventType: RationaleCoverageEntryDto[];
+}
+
+/** One-shot market-analysis result from POST /market-data/analyze. */
+export interface MarketAnalysisResultDto {
+  symbol: string;
+  timeframe: string;
+  provider: string;
+  model: string;
+  llmInvocationId: number;
+  latencyMs: number;
+  analysis: string;
+  completedAt: string;
+  /** Structured trade recommendation extracted from the LLM tail block. Null
+   *  when the LLM omitted the block, emitted malformed JSON, or proposed an
+   *  inconsistent Buy/Sell side (SL/TP on the wrong side of entry). */
+  recommendation: MarketAnalysisRecommendationDto | null;
+}
+
+/** Operator-actionable trade decision parsed from the analysis. Price fields
+ *  are null when action = Hold. */
+export interface MarketAnalysisRecommendationDto {
+  action: 'Buy' | 'Sell' | 'Hold';
+  entryPrice: number | null;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  /** Self-reported probability the trade plays out, [0, 1]. */
+  confidence: number;
+  rationale: string;
+}
+
+/**
  * Auto-tune proposal emitted by CompositeMLAutoTuningWorker. Awaits operator
  * Apply or Reject. Apply transactionally upserts the EngineConfig row.
  */

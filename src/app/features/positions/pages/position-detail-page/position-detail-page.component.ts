@@ -21,6 +21,7 @@ import {
   FormFieldControlDirective,
 } from '@shared/components/form-field/form-field.component';
 import { PositionLifecycleCardComponent } from '../../components/position-lifecycle-card/position-lifecycle-card.component';
+import { RationaleInlineComponent } from '@features/llm/components/rationale-inline/rationale-inline.component';
 
 @Component({
   selector: 'app-position-detail-page',
@@ -36,6 +37,7 @@ import { PositionLifecycleCardComponent } from '../../components/position-lifecy
     FormFieldControlDirective,
     CardSkeletonComponent,
     PositionLifecycleCardComponent,
+    RationaleInlineComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -76,6 +78,9 @@ import { PositionLifecycleCardComponent } from '../../components/position-lifecy
               </div>
             }
           </div>
+
+          <!-- LLM-authored rationale for the position-open event (when present). -->
+          <app-rationale-inline eventType="PositionOpened" [eventId]="p.id" />
 
           @if (showTrailingPanel()) {
             <form class="panel" [formGroup]="trailingForm" (ngSubmit)="submitTrailing()">

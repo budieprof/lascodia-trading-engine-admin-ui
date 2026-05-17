@@ -35,6 +35,10 @@ import {
   SaveBacktestPreviewSnapshotRequest,
   PromotionGatesDto,
   LlmProposalDto,
+  LlmProposalStatusDto,
+  StrategyProposalCycleResult,
+  StrategyPromotionConfigEntryDto,
+  StrategyPromotionConfigUpdateEntry,
   PromotionReviewSnapshotDto,
   PromotionReviewRecommendation,
   PromotionReviewOutcome,
@@ -292,6 +296,41 @@ export class StrategiesService {
   /** POST /strategy/llm-proposals/{id}/promote — creates a Paused Strategy + returns its id. */
   promoteLlmProposal(id: number): Observable<ResponseData<number>> {
     return this.api.post(`/strategy/llm-proposals/${id}/promote`, {});
+  }
+
+  /**
+   * GET /strategy/llm-proposals/status — worker-config + all-time
+   * aggregates + recent-activity snapshot. Feeds the proposals page
+   * header so operators can self-diagnose "why no proposals?" without
+   * trawling logs.
+   */
+  getLlmProposalStatus(): Observable<ResponseData<LlmProposalStatusDto>> {
+    return this.api.get(`/strategy/llm-proposals/status`);
+  }
+
+  /**
+   * POST /strategy/llm-proposals/run — operator-initiated cycle. Same
+   * pipeline the scheduled worker uses (generate / validate / dedup /
+   * persist), just on demand. Returns per-status counts the page can
+   * surface inline.
+   */
+  triggerLlmProposalRun(): Observable<ResponseData<StrategyProposalCycleResult>> {
+    return this.api.post(`/strategy/llm-proposals/run`, {});
+  }
+
+  /**
+   * GET /strategy/promotion-settings — catalog-merged StrategyPromotion:*
+   * EngineConfig rows. Drives the Strategy Settings page.
+   */
+  getPromotionSettings(): Observable<ResponseData<StrategyPromotionConfigEntryDto[]>> {
+    return this.api.get(`/strategy/promotion-settings`);
+  }
+
+  /** PUT /strategy/promotion-settings — bulk upsert. */
+  updatePromotionSettings(
+    entries: StrategyPromotionConfigUpdateEntry[],
+  ): Observable<ResponseData<number>> {
+    return this.api.put(`/strategy/promotion-settings`, { entries });
   }
 
   /** GET /promotion-review/{id} — single bull/bear/judge advisory review. */

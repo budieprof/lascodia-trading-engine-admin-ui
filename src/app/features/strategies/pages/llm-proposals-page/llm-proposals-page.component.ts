@@ -13,7 +13,12 @@ import { catchError, finalize, map, of } from 'rxjs';
 
 import { StrategiesService } from '@core/services/strategies.service';
 import { AuditTrailService } from '@core/services/audit-trail.service';
-import type { LlmProposalDto } from '@core/api/api.types';
+import { NotificationService } from '@core/notifications/notification.service';
+import type {
+  LlmProposalDto,
+  LlmProposalStatusDto,
+  StrategyProposalCycleResult,
+} from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -55,7 +60,84 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
         >
           Refresh
         </button>
+        <button
+          type="button"
+          class="btn btn-primary"
+          [disabled]="triggering() || readiness() !== 'ready'"
+          [title]="
+            readiness() === 'ready'
+              ? 'Run one cycle now — bypasses the worker poll schedule.'
+              : 'Worker not ready. Fix the status banner below first.'
+          "
+          (click)="triggerRunNow()"
+        >
+          {{ triggering() ? '⏳ Running…' : '▶ Run now' }}
+        </button>
       </app-page-header>
+
+      <!-- ── Last manual-run result banner ──────────────────────────── -->
+      @if (lastRunResult(); as r) {
+        <section class="run-result" [class.empty]="r.totalWritten === 0">
+          <header class="run-result-head">
+            <strong>
+              Manual run completed
+              @if (r.totalWritten > 0) {
+                — wrote {{ r.totalWritten }} row(s)
+              } @else {
+                — no rows written
+              }
+            </strong>
+            <button
+              type="button"
+              class="btn-dismiss"
+              (click)="lastRunResult.set(null)"
+              aria-label="Dismiss"
+            >
+              ×
+            </button>
+          </header>
+          <dl class="run-result-grid">
+            <div>
+              <dt>Pending</dt>
+              <dd class="num">{{ r.pendingWritten }}</dd>
+            </div>
+            <div>
+              <dt>DSL invalid</dt>
+              <dd class="num">{{ r.dslInvalidWritten }}</dd>
+            </div>
+            <div>
+              <dt>Duplicate</dt>
+              <dd class="num">{{ r.duplicateWritten }}</dd>
+            </div>
+            <div>
+              <dt>Auto-promoted</dt>
+              <dd
+                class="num"
+                [class.gain]="r.autoPromotedCount > 0"
+                [class.muted]="r.autoPromotedCount === 0"
+              >
+                {{ r.autoPromotedCount }}
+              </dd>
+            </div>
+            <div>
+              <dt>Sources attempted</dt>
+              <dd class="num">{{ r.sourcesAttempted }}</dd>
+            </div>
+            <div>
+              <dt>Completed at</dt>
+              <dd class="num">{{ r.completedAt | date: 'MMM d, HH:mm:ss' }}</dd>
+            </div>
+          </dl>
+          @if (r.totalWritten === 0) {
+            <footer class="run-result-foot">
+              Possible reasons: the LLM returned malformed JSON (check /llm/invocations for the
+              matching <code>strategy_proposal.generate</code> row + its error), every candidate was
+              a duplicate of an existing row, the budget circuit-breaker was tripped, or
+              <code>ProposalsPerCycle</code> is set to 0.
+            </footer>
+          }
+        </section>
+      }
 
       <section class="controls">
         <div class="control-group">
@@ -86,37 +168,158 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
           (retry)="resource.refresh()"
         />
       } @else {
-        <section class="kpis">
-          <app-metric-card
-            label="Loaded"
-            [value]="proposals().length"
-            format="number"
-            dotColor="#0071E3"
-          />
-          <app-metric-card
-            label="Pending review"
-            [value]="countOf('Pending')"
-            format="number"
-            [dotColor]="countOf('Pending') > 0 ? '#FF9500' : '#34C759'"
-          />
-          <app-metric-card
-            label="DSL invalid"
-            [value]="countOf('DslInvalid')"
-            format="number"
-            [dotColor]="countOf('DslInvalid') > 0 ? '#FF3B30' : '#34C759'"
-          />
-          <app-metric-card
-            label="Promoted (this batch)"
-            [value]="countOf('Approved')"
-            format="number"
-            dotColor="#34C759"
-          />
-        </section>
+        <!-- ── All-time KPI strip (status-snapshot driven) ──────────── -->
+        @if (status(); as st) {
+          <section class="kpis">
+            <app-metric-card
+              label="Total proposals"
+              [value]="st.totalProposalsAllTime"
+              format="number"
+              dotColor="#0071E3"
+            />
+            <app-metric-card
+              label="Pending review"
+              [value]="st.pendingCount"
+              format="number"
+              [dotColor]="st.pendingCount > 0 ? '#FF9500' : '#34C759'"
+            />
+            <app-metric-card
+              label="Promoted"
+              [value]="st.approvedCount"
+              format="number"
+              dotColor="#34C759"
+            />
+            <app-metric-card
+              label="Rejected"
+              [value]="st.rejectedCount"
+              format="number"
+              dotColor="#FF3B30"
+            />
+            <app-metric-card
+              label="DSL invalid"
+              [value]="st.dslInvalidCount"
+              format="number"
+              [dotColor]="st.dslInvalidCount > 0 ? '#FF3B30' : '#8E8E93'"
+            />
+            <app-metric-card
+              label="Approval rate"
+              [value]="percent(st.approvalRateAllTime)"
+              format="percent"
+              [colorByValue]="true"
+            />
+          </section>
+
+          <!-- ── Worker status card ─────────────────────────────────── -->
+          <section class="card status-card" [attr.data-readiness]="readiness()">
+            <header class="card-head">
+              <h3>Worker Status</h3>
+              <span class="readiness-badge" [class]="readiness()">
+                <span class="dot"></span>
+                {{ readinessLabel(readiness()) }}
+              </span>
+            </header>
+            <dl class="status-grid">
+              <div>
+                <dt>Enabled</dt>
+                <dd>{{ st.workerEnabled ? 'true' : 'false' }}</dd>
+              </div>
+              <div>
+                <dt>API key</dt>
+                <dd>{{ st.apiKeyConfigured ? 'configured' : 'missing' }}</dd>
+              </div>
+              <div>
+                <dt>Model</dt>
+                <dd class="mono">{{ st.model }}</dd>
+              </div>
+              <div>
+                <dt>Poll interval</dt>
+                <dd>{{ st.pollIntervalHours }} h</dd>
+              </div>
+              <div>
+                <dt>Proposals / cycle</dt>
+                <dd>{{ st.proposalsPerCycle }}</dd>
+              </div>
+              <div>
+                <dt>Last attempt</dt>
+                <dd>
+                  {{ st.lastProposalAt ? (st.lastProposalAt | date: 'MMM d, HH:mm') : 'never' }}
+                </dd>
+              </div>
+              <div>
+                <dt>Next scheduled</dt>
+                <dd>
+                  {{
+                    st.nextScheduledRunAt
+                      ? (st.nextScheduledRunAt | date: 'MMM d, HH:mm') +
+                        ' (' +
+                        formatNextRun(st.nextScheduledRunAt) +
+                        ')'
+                      : '—'
+                  }}
+                </dd>
+              </div>
+              <div>
+                <dt>Duplicates</dt>
+                <dd>{{ st.duplicateCount }}</dd>
+              </div>
+            </dl>
+            @if (readiness() !== 'ready') {
+              <footer class="readiness-help">
+                @if (readiness() === 'disabled') {
+                  Master kill-switch is engaged. Set
+                  <code>LlmStrategyProposal:Enabled</code> = <code>true</code> on the
+                  <a routerLink="/llm/settings">LLM Settings</a> page to resume the worker.
+                } @else if (readiness() === 'no-key') {
+                  The proposer routes through the shared LLM client factory, so it uses the same API
+                  key as the rest of the narrative layer. Set
+                  <code>Llm:&lt;Provider&gt;:ApiKey</code> for whichever provider
+                  <code>Llm:DeepProvider</code> currently points at on the
+                  <a routerLink="/llm/settings">LLM Settings</a> page — the worker will pick it up
+                  on its next poll tick.
+                }
+              </footer>
+            }
+          </section>
+
+          <!-- ── Recent activity (all statuses) ─────────────────────── -->
+          @if (st.recentActivity.length > 0) {
+            <section class="card">
+              <header class="card-head">
+                <h3>Recent activity</h3>
+                <span class="muted">last {{ st.recentActivity.length }} proposal(s)</span>
+              </header>
+              <table class="recent-table">
+                <thead>
+                  <tr>
+                    <th>Proposed</th>
+                    <th>Name</th>
+                    <th>Pair</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (r of st.recentActivity; track r.id) {
+                    <tr>
+                      <td class="time">{{ r.proposedAt | date: 'MMM d, HH:mm' }}</td>
+                      <td class="mono">{{ r.name }}</td>
+                      <td class="mono">{{ r.symbol }}</td>
+                      <td>
+                        <span class="status-pill" [attr.data-status]="r.status">{{
+                          r.status
+                        }}</span>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </section>
+          }
+        }
 
         @if (proposals().length === 0) {
           <app-empty-state
-            title="No LLM proposals match"
-            description="No proposals match the current status filter. The LLM proposal worker emits new candidates on its own schedule."
+            title="No proposals match the current filter"
+            description="The status filter above is hiding nothing — the table is genuinely empty at this status. Switch to All / Pending to confirm. New proposals land on the worker's poll schedule (see Worker Status above) and are visible immediately once written."
           />
         } @else {
           <section class="card">
@@ -178,6 +381,17 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
                       <td colspan="6">
                         <div class="detail-grid">
                           <div>
+                            <h4>Plain-English summary</h4>
+                            @if (summaryFor(p.id) === 'loading') {
+                              <p class="summary muted">Summarising DSL…</p>
+                            } @else if (summaryFor(p.id) === 'error') {
+                              <p class="summary muted">
+                                Summary unavailable — DSL summariser refused or the proposal is
+                                malformed. Inspect the raw JSON below.
+                              </p>
+                            } @else if (summaryFor(p.id); as text) {
+                              <p class="summary">{{ text }}</p>
+                            }
                             <h4>Proposal JSON</h4>
                             <pre class="json">{{ formatJson(p.proposalJson) }}</pre>
                           </div>
@@ -313,6 +527,214 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
         gap: var(--space-3);
+      }
+      .status-card {
+        padding: 0;
+      }
+      .status-card .card-head {
+        padding: var(--space-3) var(--space-5);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+      }
+      .status-card .card-head h3 {
+        margin: 0;
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+      }
+      .readiness-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-family: 'SF Mono', 'Fira Code', monospace;
+      }
+      .readiness-badge .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+      }
+      .readiness-badge.ready {
+        background: rgba(52, 199, 89, 0.14);
+        color: #34c759;
+      }
+      .readiness-badge.ready .dot {
+        background: #34c759;
+      }
+      .readiness-badge.disabled {
+        background: rgba(142, 142, 147, 0.18);
+        color: #6e6e73;
+      }
+      .readiness-badge.disabled .dot {
+        background: #6e6e73;
+      }
+      .readiness-badge.no-key {
+        background: rgba(255, 59, 48, 0.14);
+        color: #ff3b30;
+      }
+      .readiness-badge.no-key .dot {
+        background: #ff3b30;
+      }
+      .status-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        margin: 0;
+      }
+      .status-grid div {
+        padding: var(--space-3) var(--space-5);
+        border-bottom: 1px solid var(--border);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .status-grid div:nth-child(4n) {
+        border-right: none;
+      }
+      .status-grid dt {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin: 0;
+      }
+      .status-grid dd {
+        margin: 0;
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+        font-weight: var(--font-medium);
+      }
+      .status-grid dd.mono {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: var(--text-xs);
+      }
+      .readiness-help {
+        padding: var(--space-3) var(--space-5);
+        background: rgba(255, 149, 0, 0.06);
+        border-top: 1px solid rgba(255, 149, 0, 0.2);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+      .readiness-help code {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: var(--text-xs);
+        padding: 1px 4px;
+        background: var(--bg-tertiary);
+        border-radius: 3px;
+      }
+      .run-result {
+        background: rgba(52, 199, 89, 0.06);
+        border: 1px solid rgba(52, 199, 89, 0.3);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+      }
+      .run-result.empty {
+        background: rgba(255, 149, 0, 0.06);
+        border-color: rgba(255, 149, 0, 0.3);
+      }
+      .run-result-head {
+        padding: var(--space-3) var(--space-5);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: var(--text-sm);
+        border-bottom: 1px solid var(--border);
+      }
+      .btn-dismiss {
+        width: 28px;
+        height: 28px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--text-tertiary);
+        font-size: 16px;
+        cursor: pointer;
+      }
+      .btn-dismiss:hover {
+        color: var(--text-primary);
+        background: var(--bg-tertiary);
+      }
+      .run-result-grid {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        margin: 0;
+      }
+      .run-result-grid div {
+        padding: var(--space-3) var(--space-5);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .run-result-grid div:nth-child(6n) {
+        border-right: none;
+      }
+      .run-result-grid dd.gain {
+        color: var(--color-success, #34c759);
+      }
+      .run-result-grid dd.muted {
+        color: var(--text-tertiary);
+      }
+      .run-result-grid dt {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin: 0;
+      }
+      .run-result-grid dd {
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        margin: 0;
+      }
+      .run-result-grid dd.num {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+      }
+      .run-result-foot {
+        padding: var(--space-3) var(--space-5);
+        border-top: 1px solid var(--border);
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+      }
+      .run-result-foot code {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: var(--text-xs);
+        padding: 1px 4px;
+        background: var(--bg-tertiary);
+        border-radius: 3px;
+      }
+      .recent-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .recent-table th,
+      .recent-table td {
+        padding: var(--space-2) var(--space-5);
+        font-size: var(--text-sm);
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+      }
+      .recent-table th {
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+      }
+      .recent-table td.time {
+        white-space: nowrap;
+      }
+      .recent-table td.mono {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: var(--text-xs);
       }
       .card {
         background: var(--bg-secondary);
@@ -451,6 +873,21 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
         font-size: var(--text-sm);
         font-weight: var(--font-semibold);
       }
+      .summary {
+        margin: 0 0 var(--space-3) 0;
+        padding: var(--space-3) var(--space-4);
+        background: rgba(0, 113, 227, 0.06);
+        border: 1px solid rgba(0, 113, 227, 0.2);
+        border-radius: var(--radius-sm);
+        font-size: var(--text-sm);
+        line-height: 1.5;
+        color: var(--text-primary);
+      }
+      .summary.muted {
+        background: var(--bg-tertiary);
+        border-color: var(--border);
+        color: var(--text-tertiary);
+      }
       .json {
         background: var(--bg-secondary);
         padding: var(--space-3);
@@ -571,6 +1008,7 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
 export class LlmProposalsPageComponent {
   private readonly strategies = inject(StrategiesService);
   private readonly auditTrail = inject(AuditTrailService);
+  private readonly notifications = inject(NotificationService);
   private readonly router = inject(Router);
 
   protected readonly STATUS_TABS = STATUS_TABS;
@@ -588,11 +1026,112 @@ export class LlmProposalsPageComponent {
     { intervalMs: 60_000 },
   );
 
+  /** Worker-status snapshot — config, all-time aggregates, recent activity.
+   *  Loaded once at construction and on every refresh-button click so the
+   *  page header isn't a forever-zero ghost when the table is empty. */
+  protected readonly status = signal<LlmProposalStatusDto | null>(null);
+
+  /** True while the manual-trigger POST is in flight. */
+  protected readonly triggering = signal(false);
+
+  /** Result of the most recent manual run; rendered in a dismissible
+   *  banner. `null` hides the banner. */
+  protected readonly lastRunResult = signal<StrategyProposalCycleResult | null>(null);
+
   constructor() {
     effect(() => {
       this.statusFilter();
       this.resource.refresh();
     });
+    // Initial status load + refresh whenever proposals reload.
+    this.refreshStatus();
+    effect(() => {
+      this.resource.value();
+      this.refreshStatus();
+    });
+  }
+
+  private refreshStatus(): void {
+    this.strategies
+      .getLlmProposalStatus()
+      .pipe(
+        map((res) => res?.data ?? null),
+        catchError(() => of(null as LlmProposalStatusDto | null)),
+      )
+      .subscribe((s) => this.status.set(s));
+  }
+
+  protected triggerRunNow(): void {
+    if (this.triggering()) return;
+    this.triggering.set(true);
+    this.lastRunResult.set(null);
+    this.strategies
+      .triggerLlmProposalRun()
+      .pipe(
+        catchError((err) => {
+          this.notifications.error?.(
+            `Run failed: ${err?.error?.message ?? err?.message ?? String(err)}`,
+          );
+          return of(null);
+        }),
+        finalize(() => this.triggering.set(false)),
+      )
+      .subscribe((res) => {
+        if (res?.status && res.data) {
+          this.lastRunResult.set(res.data);
+          if (res.data.totalWritten > 0) {
+            const promoted = res.data.autoPromotedCount;
+            const promoteSuffix =
+              promoted > 0 ? ` · ${promoted} auto-promoted to Paused strategies` : '';
+            this.notifications.success?.(
+              `Wrote ${res.data.totalWritten} proposal(s): ${res.data.pendingWritten} pending, ${res.data.dslInvalidWritten} invalid, ${res.data.duplicateWritten} duplicate${promoteSuffix}.`,
+            );
+          } else {
+            this.notifications.error?.(
+              'Run completed but no rows were written. See the banner for likely causes.',
+            );
+          }
+          // Refresh the list + status so the new rows show up immediately.
+          this.resource.refresh();
+          this.refreshStatus();
+        } else if (res) {
+          this.notifications.error?.(res.message ?? 'Run refused.');
+        }
+      });
+  }
+
+  // Helpers used by the dense header below ----------------------------------
+  protected readonly readiness = computed<'ready' | 'disabled' | 'no-key'>(() => {
+    const s = this.status();
+    if (!s) return 'no-key';
+    if (!s.workerEnabled) return 'disabled';
+    if (!s.apiKeyConfigured) return 'no-key';
+    return 'ready';
+  });
+
+  protected readinessLabel(r: 'ready' | 'disabled' | 'no-key'): string {
+    return r === 'ready'
+      ? 'Worker ready'
+      : r === 'disabled'
+        ? 'Worker disabled'
+        : 'API key missing';
+  }
+
+  protected formatNextRun(iso: string | null): string {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '—';
+    const deltaMs = d.getTime() - Date.now();
+    if (deltaMs <= 0) return 'overdue';
+    const mins = Math.round(deltaMs / 60_000);
+    if (mins < 60) return `in ${mins} min`;
+    const hours = Math.round(mins / 60);
+    if (hours < 48) return `in ${hours} h`;
+    return `in ${Math.round(hours / 24)} d`;
+  }
+
+  protected percent(x: number | null): number {
+    return x == null ? 0 : Math.round(x * 1000) / 10;
   }
 
   protected readonly proposals = computed(() => this.resource.value() ?? []);
@@ -606,9 +1145,41 @@ export class LlmProposalsPageComponent {
 
   // Inspect / expand --------------------------------------------------------
   protected readonly expandedId = signal<number | null>(null);
+  /** Plain-English DSL summary of the currently-expanded proposal. Keyed by
+   *  proposal id so re-expanding a previously-seen row doesn't re-fetch. */
+  protected readonly summaries = signal<Record<number, string | 'loading' | 'error'>>({});
 
   protected toggleExpand(id: number): void {
-    this.expandedId.set(this.expandedId() === id ? null : id);
+    const next = this.expandedId() === id ? null : id;
+    this.expandedId.set(next);
+    if (next != null) this.loadSummary(id);
+  }
+
+  private loadSummary(id: number): void {
+    const cache = this.summaries();
+    if (cache[id] !== undefined && cache[id] !== 'error') return;
+    const proposal = this.proposals().find((p) => p.id === id);
+    if (!proposal) return;
+    this.summaries.set({ ...cache, [id]: 'loading' });
+    this.strategies
+      .summariseDsl(proposal.proposalJson)
+      .pipe(
+        map((res) => res?.data ?? null),
+        catchError(() => of(null as string | null)),
+      )
+      .subscribe((text: string | null) => {
+        this.summaries.update((s) => ({
+          ...s,
+          [id]: text && text.trim().length > 0 ? text : 'error',
+        }));
+      });
+  }
+
+  /** Resolves the cached summary for a proposal — used by the template to
+   *  render "Loading…" / the prose / a fallback chip without leaking the
+   *  cache shape into the .html. */
+  protected summaryFor(id: number): string | 'loading' | 'error' | undefined {
+    return this.summaries()[id];
   }
 
   protected formatJson(json: string): string {

@@ -41,6 +41,14 @@ export const STRATEGIES_ROUTES: Routes = [
       ),
   },
   {
+    path: 'settings',
+    data: { breadcrumb: 'Settings' },
+    loadComponent: () =>
+      import('./pages/strategies-settings-page/strategies-settings-page.component').then(
+        (m) => m.StrategiesSettingsPageComponent,
+      ),
+  },
+  {
     path: ':id/analytics',
     component: StrategyAnalyticsPageComponent,
     data: { breadcrumb: 'Analytics' },

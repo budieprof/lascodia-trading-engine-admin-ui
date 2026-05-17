@@ -9,6 +9,7 @@ import {
   CandleDto,
   CandleCoverageDto,
   OrderBookSnapshotDto,
+  MarketAnalysisResultDto,
 } from '@core/api/api.types';
 
 @Injectable({ providedIn: 'root' })
@@ -55,6 +56,23 @@ export class MarketDataService {
     return this.api.get(
       `/market-data/order-book/recent?symbol=${this.formatSymbol(symbol)}&limit=${limit}`,
     );
+  }
+
+  /**
+   * POST /market-data/analyze — gathers the engine's canonical view
+   * (candles + regime + order book + liquidity history + economic
+   * events + sentiment) and asks the active deep-tier LLM for a
+   * structured spot analysis. Writes an LlmInvocation audit row
+   * tagged `market_analysis.spot`.
+   */
+  analyzeMarket(
+    symbol: string,
+    timeframe: string,
+  ): Observable<ResponseData<MarketAnalysisResultDto>> {
+    return this.api.post(`/market-data/analyze`, {
+      symbol: this.formatSymbol(symbol),
+      timeframe,
+    });
   }
 
   private formatSymbol(symbol: string): string {
