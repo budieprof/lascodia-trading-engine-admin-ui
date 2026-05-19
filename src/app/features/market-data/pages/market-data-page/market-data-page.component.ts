@@ -11,12 +11,15 @@ import {
 import {
   Subject,
   forkJoin,
+  from,
   timer,
   takeUntil,
   catchError,
   of,
   Observable,
   map,
+  concatMap,
+  first,
   switchMap,
 } from 'rxjs';
 import { DatePipe } from '@angular/common';
@@ -2494,6 +2497,35 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   // Price history for analytics (stores last 100 ticks per symbol)
   private priceHistory: Record<string, number[]> = {};
   private spreadHistory: Record<string, number[]> = {};
+  // Timeframe the spark buffers were last seeded from. The seed re-runs
+  // whenever the chart's selected timeframe changes so the watch-card /
+  // matrix sparklines stay aligned with what the operator is looking at
+  // on the main chart. Guards against redundant re-seeds for the same TF.
+  private lastSeededTf: string | null = null;
+
+  // Spark series, DECOUPLED from priceHistory. priceHistory accumulates a
+  // live bid every 3s poll (it feeds correlation / range / volatility
+  // analytics that genuinely want tick granularity). Binding the sparkline
+  // to that made it churn every 3s — far faster than the selected
+  // timeframe. sparkSeries instead holds only timeframe-aligned candle
+  // closes: seeded on TF change, and extended by exactly one point each
+  // time a candle of the selected timeframe closes. Static between closes.
+  private sparkSeries: Record<string, number[]> = {};
+  // Candle-boundary index (floor(now / tfMs)) at the last close check.
+  // Reset to null on TF change so the baseline re-establishes for the new
+  // period without a spurious immediate re-seed.
+  private lastSparkBoundary: number | null = null;
+  // Minutes per timeframe — mirrors the chart's own grid. Used to detect
+  // when a candle of the selected timeframe has closed.
+  private static readonly TF_MINUTES: Record<string, number> = {
+    M1: 1,
+    M5: 5,
+    M15: 15,
+    M30: 30,
+    H1: 60,
+    H4: 240,
+    D1: 1440,
+  };
 
   // Append-only buffer for the Live Prices "Activity feed". Holds the last
   // 200 direction-change events across all symbols. Without this, the feed
@@ -3034,7 +3066,10 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     const live = this.livePrices();
     return this.displaySymbols.map((sym, i) => {
       const apiSym = this.watchedSymbols[i];
+      // rangePips stays on the live-tick buffer (it's a live range read);
+      // the spark uses the timeframe-aligned series so it doesn't churn.
       const hist = this.priceHistory[apiSym] ?? [];
+      const sparkHist = this.sparkSeries[apiSym] ?? hist;
       const liveEntry = live.find((p) => p.symbol === sym) ?? null;
       const isJPY = sym.includes('JPY');
       const pipFactor = isJPY ? 100 : 10000;
@@ -3043,7 +3078,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
       return {
         symbol: sym,
         live: liveEntry,
-        spark: hist.slice(-30),
+        spark: sparkHist.slice(-30),
         rangePips,
       };
     });
@@ -3712,13 +3747,65 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
       this.chartTimeframe();
       this.loadInsights();
     });
+
+    // Re-seed the spark buffers whenever the chart's selected timeframe
+    // changes so the watch-card / matrix sparklines always depict the same
+    // timeframe the operator is looking at on the main chart. This effect
+    // also fires on initial settle (chart emits its persisted/default TF),
+    // which is what performs the first seed — so ngOnInit no longer needs
+    // an explicit call. The lastSeededTf guard collapses redundant fires.
+    effect(() => {
+      const tf = this.chartTimeframe();
+      if (tf && tf !== this.lastSeededTf) {
+        this.lastSeededTf = tf;
+        // New period length — re-baseline the close detector so the next
+        // poll doesn't immediately re-seed on top of this one.
+        this.lastSparkBoundary = null;
+        this.seedSparkHistory(tf);
+      }
+    });
+  }
+
+  /**
+   * Re-seeds the spark series only when a candle of the currently-selected
+   * timeframe has closed since the last check. Called on the existing 3s
+   * poll cadence (no extra timer). Between closes the spark is untouched,
+   * so it advances at the timeframe's pace rather than every poll — which
+   * is what makes it "aligned to the selected timeframe."
+   */
+  private maybeRefreshSparkOnClose(): void {
+    const tf = this.chartTimeframe();
+    if (!tf) return;
+    const tfMin = MarketDataPageComponent.TF_MINUTES[tf] ?? 60;
+    const tfMs = tfMin * 60_000;
+    const boundary = Math.floor(Date.now() / tfMs);
+    if (this.lastSparkBoundary === null) {
+      // First observation (or just after a TF switch) — set the baseline
+      // and wait for the NEXT close before refreshing.
+      this.lastSparkBoundary = boundary;
+      return;
+    }
+    if (boundary > this.lastSparkBoundary) {
+      this.lastSparkBoundary = boundary;
+      this.seedSparkHistory(tf);
+    }
   }
 
   ngOnInit() {
+    // Spark seeding is driven by the chartTimeframe effect in the
+    // constructor (it fires on initial settle and on every TF change), so
+    // there's no explicit seed call here — that would double-seed and
+    // could race the effect on the initial timeframe.
     this.loadPrices();
     timer(3000, 3000)
       .pipe(takeUntil(this.destroy$))
-      .subscribe(() => this.loadPrices());
+      .subscribe(() => {
+        this.loadPrices();
+        // Cheap local check on the same cadence — re-seeds the spark series
+        // only when a candle of the selected timeframe has actually closed,
+        // so the sparkline advances at the timeframe's pace, not per poll.
+        this.maybeRefreshSparkOnClose();
+      });
 
     // Wall-clock signal for the sessions track + feed-age. 30s cadence is
     // enough — the now-marker on the sessions bar moves at 1px every ~10
@@ -3740,6 +3827,74 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   ngOnDestroy() {
     this.destroy$.next();
     this.destroy$.complete();
+  }
+
+  /**
+   * Seed every watched symbol's spark buffer from real recent candle closes
+   * at `preferredTf` — the timeframe currently selected on the main chart —
+   * so the watch-card / matrix sparklines depict the same timeframe the
+   * operator is analysing. Re-run whenever the chart timeframe changes.
+   *
+   * The chosen TF is tried first per symbol; the remaining timeframes are a
+   * defensive fallback in case this engine instance didn't ingest the
+   * selected one for some pair. The chain is SEQUENTIAL and stops at the
+   * first TF that returns data (`first(...)` unsubscribes upstream), so the
+   * common case is exactly one light request per symbol.
+   */
+  private seedSparkHistory(preferredTf: string): void {
+    const FALLBACK = ['M15', 'H1', 'H4', 'M5', 'D1'];
+    const TF_PRIORITY = [preferredTf, ...FALLBACK.filter((t) => t !== preferredTf)];
+    const BARS = 60;
+
+    const seedOne = (sym: string) =>
+      from(TF_PRIORITY).pipe(
+        concatMap((tf) =>
+          this.marketDataService
+            .listCandles({
+              currentPage: 1,
+              itemCountPerPage: BARS,
+              filter: { symbol: sym, timeframe: tf },
+            })
+            .pipe(
+              map((res) => res?.data?.data ?? []),
+              catchError(() => of([] as CandleDto[])),
+            ),
+        ),
+        // First TF (in priority order) that came back with usable data;
+        // default [] if every TF was empty so the stream still completes.
+        first((rows) => rows.length >= 2, [] as CandleDto[]),
+        map((candles) => ({ sym, candles })),
+      );
+
+    forkJoin(this.watchedSymbols.map(seedOne))
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((results) => {
+        let seeded = 0;
+        for (const { sym, candles } of results) {
+          if (candles.length < 2) continue;
+          // listCandles returns DESC (newest first) — reverse to chronological.
+          const closes = candles
+            .map((c) => c.close)
+            .filter((v) => Number.isFinite(v) && v > 0)
+            .reverse();
+          if (closes.length < 2) continue;
+          // Write the dedicated spark series, NOT priceHistory. Replace
+          // wholesale: closes from a previous timeframe must not bleed into
+          // the new one, and the spark must reflect exactly the selected
+          // timeframe's candle closes — nothing tick-grained.
+          this.sparkSeries[sym] = closes.slice(-60);
+          seeded++;
+        }
+        if (seeded === 0) {
+          console.warn(
+            '[market-data] spark seed got no candles for any watched symbol — ' +
+              'watch-card sparklines will stay flat until live ticks accrue.',
+          );
+        }
+        // Repaint the cards now that the buffers carry real structure,
+        // instead of waiting up to 3s for the next poll tick.
+        this.loadPrices();
+      });
   }
 
   loadPrices() {
@@ -3823,7 +3978,11 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
               this.lastLiveSpread[sym] = spreadPips;
             }
 
-            const sparkData = this.priceHistory[sym].slice(-30);
+            // Timeframe-aligned candle closes — NOT the live-tick buffer.
+            // Stays put between candle closes so the spark doesn't churn
+            // every poll. Falls back to the live slice only until the first
+            // seed lands (avoids an empty spark on the very first paint).
+            const sparkData = this.sparkSeries[sym] ?? this.priceHistory[sym].slice(-30);
 
             return {
               ...data,

@@ -2080,6 +2080,37 @@ export interface MarketAnalysisRecommendationDto {
   rationale: string;
 }
 
+/** Structured multi-week → multi-month posture parsed from the macro
+ *  analysis tail block. NOT a tactical trade (no entry/SL/TP) — a directional
+ *  bias plus the D1 levels that confirm or invalidate it. */
+export interface LongerHorizonViewDto {
+  bias: 'Bullish' | 'Bearish' | 'Neutral';
+  /** Conviction in the posture, [0, 1]. */
+  confidence: number;
+  structure: string;
+  positioning: string;
+  catalysts: string;
+  keyLevels: string;
+}
+
+/** Longer-horizon macro-analysis result from POST /market-data/analyze-macro.
+ *  Sibling of {@link MarketAnalysisResultDto}; D1-anchored, positioning-aware,
+ *  no tactical trade chip. `longerHorizon` is null when the LLM omitted /
+ *  mangled the structured block (prose still returned). */
+export interface MarketMacroAnalysisResultDto {
+  symbol: string;
+  /** The operator's working timeframe at trigger time. Echoed for context /
+   *  per-pair keying only — the analysis itself is always D1-anchored. */
+  timeframe: string;
+  provider: string;
+  model: string;
+  llmInvocationId: number;
+  latencyMs: number;
+  analysis: string;
+  completedAt: string;
+  longerHorizon: LongerHorizonViewDto | null;
+}
+
 /**
  * Auto-tune proposal emitted by CompositeMLAutoTuningWorker. Awaits operator
  * Apply or Reject. Apply transactionally upserts the EngineConfig row.

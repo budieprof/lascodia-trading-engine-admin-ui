@@ -5,6 +5,7 @@ import {
   computed,
   inject,
   effect,
+  untracked,
   input,
   output,
   viewChild,
@@ -25,6 +26,7 @@ import {
   LivePriceDto,
   MarketAnalysisRecommendationDto,
   MarketAnalysisResultDto,
+  MarketMacroAnalysisResultDto,
   PositionDto,
 } from '@core/api/api.types';
 
@@ -250,6 +252,18 @@ const INDICATOR_STORAGE_PREFIX = 'tradingChart.indicators.v1';
 // leaving every other symbol unchanged.
 const SHOW_VOLUME_STORAGE_KEY = 'tradingChart.showVolume';
 const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.showPositions';
+// Live-analysis is a global preference like the other toggles — when on,
+// a silent spot-analysis fires on every candle close for the focused pair.
+const LIVE_ANALYSIS_STORAGE_KEY = 'tradingChart.liveAnalysis';
+// The most recent completed analysis is persisted PER (symbol, timeframe)
+// so the on-chart bubble defaults to that exact pair's last run after a
+// reload or a pair/TF switch — WITHOUT re-running an analysis on load
+// (auto-runs only ever fire on candle close). Suffixed with `.<sym>.<tf>`
+// just like INDICATOR_STORAGE_PREFIX.
+const LAST_ANALYSIS_STORAGE_PREFIX = 'tradingChart.lastAnalysis.v2';
+// Pre-per-pair single-slot key. Migrated into the per-pair store on first
+// load of the pair it belonged to, then deleted. Kept only for that bridge.
+const LEGACY_LAST_ANALYSIS_KEY = 'tradingChart.lastAnalysis.v1';
 
 @Component({
   selector: 'app-trading-chart',
@@ -343,6 +357,45 @@ const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.showPositions';
             (click)="runMarketAnalysis()"
           >
             {{ analyzing() ? '⏳ Analysing…' : '🔍 Analyse' }}
+          </button>
+          <!--
+            Longer-horizon macro analysis. D1-anchored, materially costlier
+            than spot per call (≈12mo of D1 + COT + 14d catalysts) — a
+            deliberate, separate action, never auto-fired on candle close.
+          -->
+          <button
+            type="button"
+            class="analyze-btn"
+            [disabled]="macroAnalyzing()"
+            [title]="
+              macroAnalyzing()
+                ? 'Macro analysis in flight — wait for it to complete.'
+                : 'Run a longer-horizon (multi-week → multi-month) macro analysis for ' +
+                  selectedSymbol() +
+                  ' (D1-anchored)'
+            "
+            (click)="runMacroAnalysis()"
+          >
+            {{ macroAnalyzing() ? '⏳ Macro…' : '🌐 Macro' }}
+          </button>
+          <button
+            type="button"
+            class="live-toggle"
+            [class.on]="liveAnalysisEnabled()"
+            [attr.aria-pressed]="liveAnalysisEnabled()"
+            [title]="
+              liveAnalysisEnabled()
+                ? 'Live analysis ON — a spot analysis runs automatically on every ' +
+                  selectedTimeframe() +
+                  ' candle close. Click to disable.'
+                : 'Enable live analysis — auto-run a spot analysis on every ' +
+                  selectedTimeframe() +
+                  ' candle close.'
+            "
+            (click)="toggleLiveAnalysis()"
+          >
+            <span class="live-dot" [class.pulsing]="liveAnalysisEnabled()"></span>
+            Live
           </button>
           <div class="chart-toggles">
             @for (cfg of indicators(); track cfg.id) {
@@ -467,6 +520,50 @@ const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.showPositions';
             class="echart-instance"
           ></div>
         }
+
+        <!-- ── Live recommendation bubble ─────────────────────────────
+             ALWAYS shown. Defaults to the last completed analysis (restored
+             from storage on load, refreshed by manual + live runs). Colour-
+             coded by that recommendation's action; click opens the full
+             brief. Empty state until the first analysis ever runs. -->
+        @let lastA = lastAnalysis();
+        @let rec = lastA?.recommendation ?? null;
+        <button
+          type="button"
+          class="rec-bubble"
+          [class.rec-buy]="rec?.action === 'Buy'"
+          [class.rec-sell]="rec?.action === 'Sell'"
+          [class.rec-hold]="rec?.action === 'Hold'"
+          [class.rec-pending]="!lastA"
+          [disabled]="!lastA"
+          [title]="
+            lastA
+              ? 'Last analysis · ' +
+                lastA.symbol +
+                ' ' +
+                lastA.timeframe +
+                ' · click for the full brief'
+              : 'No analysis yet — run Analyse or wait for a candle close'
+          "
+          (click)="openLastAnalysis()"
+        >
+          <span class="rec-bubble-dot" [class.pulsing]="analyzing()"></span>
+          @if (lastA) {
+            <span class="rec-bubble-action">{{ rec?.action ?? 'No call' }}</span>
+            @if (rec && rec.action !== 'Hold' && rec.entryPrice !== null) {
+              <span class="rec-bubble-levels">
+                @ {{ rec.entryPrice }} · SL {{ rec.stopLoss }} · TP {{ rec.takeProfit }}
+              </span>
+            }
+            @if (rec) {
+              <span class="rec-bubble-conf">{{ (rec.confidence * 100).toFixed(0) }}%</span>
+            }
+          } @else {
+            <span class="rec-bubble-action">{{
+              analyzing() ? 'Analysing…' : 'No analysis yet'
+            }}</span>
+          }
+        </button>
       </div>
 
       <!-- Info Bar -->
@@ -594,6 +691,97 @@ const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.showPositions';
               <button type="button" class="analysis-close" (click)="closeAnalysis()">×</button>
             </header>
             <div class="analysis-body">{{ err }}</div>
+          }
+        </article>
+      </dialog>
+
+      <!-- Longer-horizon macro analysis modal. Self-contained sibling of the
+           spot dialog above; reuses the same .analysis-* / .rec-* styles. The
+           bias chip maps Bullish→buy(green), Bearish→sell(red), Neutral→hold. -->
+      <dialog
+        #macroAnalysisDialog
+        class="analysis-dialog"
+        [class.error]="!macroAnalysisResult() && macroAnalysisError()"
+        aria-labelledby="macro-analysis-title"
+        (close)="onMacroAnalysisDialogClose()"
+        (click)="onMacroAnalysisBackdropClick($event)"
+      >
+        <article class="analysis-card" (click)="$event.stopPropagation()">
+          @if (macroAnalysisResult(); as mr) {
+            <header class="analysis-head">
+              <div class="analysis-title-wrap">
+                <h3 id="macro-analysis-title">
+                  Macro analysis · {{ mr.symbol }} · {{ mr.timeframe }} (D1-anchored)
+                </h3>
+                <div class="analysis-meta">
+                  <span class="tag mono">{{ mr.provider }} / {{ mr.model }}</span>
+                  <span class="muted">·</span>
+                  <span class="muted">{{ mr.latencyMs }} ms</span>
+                  <span class="muted">·</span>
+                  <span class="muted">{{ mr.completedAt | date: 'MMM d, HH:mm:ss' }}</span>
+                  <span class="muted">·</span>
+                  <span class="muted">audit #{{ mr.llmInvocationId }}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="analysis-close"
+                aria-label="Close macro analysis"
+                (click)="closeMacroAnalysis()"
+              >
+                ×
+              </button>
+            </header>
+            @if (mr.longerHorizon; as lh) {
+              <section
+                class="rec-card"
+                [class.rec-buy]="lh.bias === 'Bullish'"
+                [class.rec-sell]="lh.bias === 'Bearish'"
+                [class.rec-hold]="lh.bias === 'Neutral'"
+              >
+                <div class="rec-row">
+                  <span class="rec-action">{{ lh.bias }} · weeks–months</span>
+                  <span class="rec-confidence">
+                    conviction
+                    <strong>{{ (lh.confidence * 100).toFixed(0) }}%</strong>
+                  </span>
+                </div>
+                <div class="rec-levels">
+                  <div class="rec-level">
+                    <span class="rec-label">Structure</span>
+                    <span class="rec-value">{{ lh.structure }}</span>
+                  </div>
+                  <div class="rec-level">
+                    <span class="rec-label">Positioning</span>
+                    <span class="rec-value">{{ lh.positioning }}</span>
+                  </div>
+                  <div class="rec-level">
+                    <span class="rec-label">Catalysts</span>
+                    <span class="rec-value">{{ lh.catalysts }}</span>
+                  </div>
+                  <div class="rec-level">
+                    <span class="rec-label">Key levels</span>
+                    <span class="rec-value">{{ lh.keyLevels }}</span>
+                  </div>
+                </div>
+              </section>
+            } @else {
+              <section class="rec-card rec-missing">
+                <div class="rec-row">
+                  <span class="rec-action">No structured view</span>
+                </div>
+                <p class="rec-rationale">
+                  The model didn't emit a structured longer-horizon block — review the prose below.
+                </p>
+              </section>
+            }
+            <div class="analysis-body">{{ mr.analysis }}</div>
+          } @else if (macroAnalysisError(); as merr) {
+            <header class="analysis-head">
+              <h3 id="macro-analysis-title">Macro analysis failed</h3>
+              <button type="button" class="analysis-close" (click)="closeMacroAnalysis()">×</button>
+            </header>
+            <div class="analysis-body">{{ merr }}</div>
           }
         </article>
       </dialog>
@@ -831,6 +1019,148 @@ const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.showPositions';
       .analyze-btn:disabled {
         opacity: 0.6;
         cursor: progress;
+      }
+
+      /* Live-analysis toggle — sits next to the Analyse button. Off state
+         is a quiet ghost button; on state goes accent + the dot pulses. */
+      .live-toggle {
+        height: 28px;
+        padding: 0 var(--space-3);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        font-size: 11px;
+        font-weight: var(--font-semibold);
+        letter-spacing: 0.02em;
+        cursor: pointer;
+        white-space: nowrap;
+        transition:
+          background 0.15s,
+          border-color 0.15s,
+          color 0.15s;
+      }
+      .live-toggle:hover {
+        border-color: var(--text-tertiary);
+        color: var(--text-primary);
+      }
+      .live-toggle.on {
+        border-color: #16a34a;
+        color: #16a34a;
+        background: rgba(22, 163, 74, 0.08);
+      }
+      .live-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--text-tertiary);
+      }
+      .live-toggle.on .live-dot {
+        background: #16a34a;
+      }
+      .live-dot.pulsing {
+        animation: live-pulse 1.6s ease-in-out infinite;
+      }
+      @keyframes live-pulse {
+        0%,
+        100% {
+          opacity: 1;
+          box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.5);
+        }
+        50% {
+          opacity: 0.55;
+          box-shadow: 0 0 0 4px rgba(22, 163, 74, 0);
+        }
+      }
+
+      /* On-chart recommendation bubble — floats over the chart's top-left.
+         Colour-coded by the last analysis's action. */
+      .rec-bubble {
+        position: absolute;
+        top: var(--space-3);
+        left: var(--space-3);
+        z-index: 6;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 30px;
+        padding: 0 var(--space-3);
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--bg-secondary);
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+        color: var(--text-primary);
+        font-size: 12px;
+        font-weight: var(--font-semibold);
+        cursor: pointer;
+        white-space: nowrap;
+        transition:
+          border-color 0.15s,
+          transform 0.1s;
+      }
+      .rec-bubble:hover:not(:disabled) {
+        transform: translateY(-1px);
+      }
+      .rec-bubble:disabled {
+        cursor: default;
+        opacity: 0.85;
+      }
+      .rec-bubble-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--text-tertiary);
+        flex: none;
+      }
+      .rec-bubble-dot.pulsing {
+        animation: live-pulse 1.6s ease-in-out infinite;
+      }
+      .rec-bubble-action {
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .rec-bubble-levels,
+      .rec-bubble-conf {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-weight: var(--font-medium);
+        color: var(--text-secondary);
+      }
+      .rec-bubble-conf {
+        padding-left: 6px;
+        border-left: 1px solid var(--border);
+      }
+      .rec-bubble.rec-buy {
+        border-color: #16a34a;
+      }
+      .rec-bubble.rec-buy .rec-bubble-dot,
+      .rec-bubble.rec-buy .rec-bubble-action {
+        color: #16a34a;
+        background: #16a34a;
+      }
+      .rec-bubble.rec-buy .rec-bubble-action {
+        background: none;
+        color: #16a34a;
+      }
+      .rec-bubble.rec-sell {
+        border-color: #dc2626;
+      }
+      .rec-bubble.rec-sell .rec-bubble-dot {
+        background: #dc2626;
+      }
+      .rec-bubble.rec-sell .rec-bubble-action {
+        color: #dc2626;
+      }
+      .rec-bubble.rec-hold .rec-bubble-dot {
+        background: #d97706;
+      }
+      .rec-bubble.rec-hold .rec-bubble-action {
+        color: #d97706;
+      }
+      .rec-bubble.rec-pending {
+        color: var(--text-tertiary);
       }
 
       /* Modal-style overlay for the analysis result. Anchored inside the
@@ -1389,9 +1719,49 @@ export class TradingChartComponent implements OnInit, OnDestroy {
    *  error modal. Mutually exclusive with `analysisResult`. */
   readonly analysisError = signal<string | null>(null);
 
+  // ── Live analysis ──────────────────────────────────────────────────
+  /** When on, a silent spot-analysis fires on every candle close for the
+   *  focused (symbol, timeframe). Global preference, persisted. */
+  readonly liveAnalysisEnabled = signal(false);
+  /** Last COMPLETED analysis (manual or live) keyed by "symbol|timeframe".
+   *  In-memory cache; each pair's entry is also persisted per-pair and
+   *  restored lazily by loadChartConfig() on load and on every pair/TF
+   *  switch. Use {@link lastAnalysis} for the selected pair's entry. */
+  private readonly lastAnalysisByPair = signal<Record<string, MarketAnalysisResultDto>>({});
+  /** The last analysis for the CURRENTLY selected (symbol, timeframe) —
+   *  what the on-chart bubble shows and what the bubble click opens.
+   *  Recomputes when the selection OR the per-pair cache changes, so
+   *  switching pair/TF flips the bubble to that pair's last run. */
+  readonly lastAnalysis = computed<MarketAnalysisResultDto | null>(
+    () =>
+      this.lastAnalysisByPair()[this.pairKey(this.selectedSymbol(), this.selectedTimeframe())] ??
+      null,
+  );
+  /** Candle-boundary index (floor(now / tfMs)) at the last live tick.
+   *  Plain field, NOT a signal — mutating it inside the candle-close
+   *  effect must not retrigger the effect. */
+  private lastCandleBoundary: number | null = null;
+  /** Symbol|timeframe key at the last live tick. When it changes we
+   *  re-baseline the boundary so a pair/TF switch doesn't spuriously
+   *  fire an analysis on the very next second. */
+  private lastAnalysisContextKey: string | null = null;
+
   /** Native <dialog> wrapping the analysis brief. Opened via showModal()
    *  so it renders in the top layer above the chart's overflow:hidden box. */
   private readonly analysisDialog = viewChild<ElementRef<HTMLDialogElement>>('analysisDialog');
+
+  // ── Longer-horizon macro analysis ──────────────────────────────────
+  /** True while a /market-data/analyze-macro call is in flight. */
+  readonly macroAnalyzing = signal(false);
+  /** Most recent successful macro result; non-null renders the macro modal. */
+  readonly macroAnalysisResult = signal<MarketMacroAnalysisResultDto | null>(null);
+  /** Error string when the most recent macro call failed; non-null renders
+   *  the macro error modal. Mutually exclusive with `macroAnalysisResult`. */
+  readonly macroAnalysisError = signal<string | null>(null);
+  /** Native <dialog> wrapping the macro brief — separate element from the
+   *  spot dialog so the two modals never collide. */
+  private readonly macroAnalysisDialog =
+    viewChild<ElementRef<HTMLDialogElement>>('macroAnalysisDialog');
 
   /** Wall-clock signal updated every second by a setInterval started in
    *  ngOnInit. Drives the candle-close countdown without leaking the
@@ -1800,6 +2170,54 @@ export class TradingChartComponent implements OnInit, OnDestroy {
         el.close();
       }
     });
+
+    // Same modal driver for the separate macro dialog.
+    effect(() => {
+      const open = !!this.macroAnalysisResult() || !!this.macroAnalysisError();
+      const el = this.macroAnalysisDialog()?.nativeElement;
+      if (!el) return;
+      if (open && !el.open && typeof el.showModal === 'function') {
+        el.showModal();
+      } else if (!open && el.open) {
+        el.close();
+      }
+    });
+
+    // Live-analysis candle-close trigger. The 1 s nowMs tick is the only
+    // tracked dependency that changes second-to-second; symbol/timeframe/
+    // enabled are tracked so flipping any of them re-evaluates. Everything
+    // that mutates state (boundary bookkeeping, the analysis kick-off) runs
+    // untracked so this effect never feeds back into itself.
+    effect(() => {
+      const now = this.nowMs();
+      const enabled = this.liveAnalysisEnabled();
+      const sym = this.selectedSymbol();
+      const tf = this.selectedTimeframe();
+      if (!enabled) return;
+
+      untracked(() => {
+        const tfMin = TIMEFRAME_MINUTES_MAP[tf] ?? 60;
+        const tfMs = tfMin * 60_000;
+        const boundary = Math.floor(now / tfMs);
+        const ctxKey = `${sym}|${tf}`;
+
+        // Pair/timeframe switch (or first run) — adopt the current boundary
+        // as the baseline and wait for the NEXT close before firing.
+        if (this.lastAnalysisContextKey !== ctxKey || this.lastCandleBoundary === null) {
+          this.lastAnalysisContextKey = ctxKey;
+          this.lastCandleBoundary = boundary;
+          return;
+        }
+
+        if (boundary > this.lastCandleBoundary) {
+          this.lastCandleBoundary = boundary;
+          // Skip if a call (manual or prior live) is still in flight — the
+          // deep model takes 60-250s, longer than some timeframes; we'd
+          // rather miss a close than queue overlapping calls.
+          if (!this.analyzing()) this.runMarketAnalysis(true);
+        }
+      });
+    });
   }
 
   ngOnInit() {
@@ -1810,6 +2228,10 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     // setInterval is enough — sub-second precision isn't useful when the
     // displayed value rounds to whole seconds.
     this.countdownTickId = setInterval(() => this.nowMs.set(Date.now()), 1000);
+    // NOTE: deliberately NO analysis run on load/reload, even if live
+    // analysis was left on. Auto-runs fire ONLY on candle close (see the
+    // candle-close effect). The bubble isn't blank on load because the last
+    // completed analysis was restored from storage in loadChartConfig().
   }
 
   ngOnDestroy() {
@@ -1861,20 +2283,35 @@ export class TradingChartComponent implements OnInit, OnDestroy {
    * Fires a one-shot LLM spot analysis for the focused (symbol, timeframe).
    * The engine gathers candles / regime / order book / liquidity history /
    * economic events / sentiment server-side, builds a structured prompt,
-   * and calls the configured deep-tier LLM. Renders the result in the
-   * overlay modal at the bottom of the chart container.
+   * and calls the configured deep-tier LLM.
+   *
+   * @param silent when true (live-mode background run) the result only
+   *   updates `lastAnalysis` (the on-chart bubble) and does NOT pop the
+   *   modal or surface errors as a blocking overlay — a flaky background
+   *   call shouldn't interrupt the operator. When false (manual button)
+   *   the modal opens as before.
    */
-  runMarketAnalysis(): void {
+  runMarketAnalysis(silent = false): void {
     if (this.analyzing()) return;
     this.analyzing.set(true);
-    this.analysisResult.set(null);
-    this.analysisError.set(null);
+    if (!silent) {
+      this.analysisResult.set(null);
+      this.analysisError.set(null);
+    }
+    // Snapshot the pair NOW: the call takes 60-250s and the operator may
+    // switch symbol/TF while it runs — the result must be filed under the
+    // pair it was actually requested for, not whatever's selected on return.
+    const reqSym = this.selectedSymbol();
+    const reqTf = this.selectedTimeframe();
+    const reqKey = this.pairKey(reqSym, reqTf);
     this.marketData
-      .analyzeMarket(this.selectedSymbol(), this.selectedTimeframe())
+      .analyzeMarket(reqSym, reqTf)
       .pipe(
         catchError((err) => {
-          const msg = err?.error?.message ?? err?.message ?? String(err);
-          this.analysisError.set(`Analysis request failed: ${msg}`);
+          if (!silent) {
+            const msg = err?.error?.message ?? err?.message ?? String(err);
+            this.analysisError.set(`Analysis request failed: ${msg}`);
+          }
           return of(null);
         }),
         takeUntil(this.destroy$),
@@ -1882,11 +2319,40 @@ export class TradingChartComponent implements OnInit, OnDestroy {
       .subscribe((res) => {
         this.analyzing.set(false);
         if (res?.status && res.data) {
-          this.analysisResult.set(res.data);
-        } else if (res) {
+          // File under the REQUESTED pair (manual + live both feed this) and
+          // persist per-pair so the bubble defaults to it after a reload.
+          // If the operator already switched pair the bubble won't flip to
+          // this — it stays scoped to whatever pair is now selected.
+          const data = res.data;
+          this.lastAnalysisByPair.update((m) => ({ ...m, [reqKey]: data }));
+          this.persistLastAnalysis(reqSym, reqTf, data);
+          if (!silent) this.analysisResult.set(data);
+        } else if (res && !silent) {
           this.analysisError.set(res.message ?? 'Analysis refused by the engine.');
         }
       });
+  }
+
+  /** Toggle live analysis. Persisted globally. Enabling does NOT run an
+   *  analysis immediately — auto-runs fire only on candle close. The bubble
+   *  meanwhile shows the last completed run (restored from storage). */
+  toggleLiveAnalysis(): void {
+    const next = !this.liveAnalysisEnabled();
+    this.liveAnalysisEnabled.set(next);
+    this.persistGlobalToggle(LIVE_ANALYSIS_STORAGE_KEY, next);
+    if (next) {
+      // Re-baseline the candle-close detector so the FIRST auto-run is the
+      // next close after enabling — not an immediate fire on the current,
+      // already-open candle.
+      this.lastCandleBoundary = null;
+      this.lastAnalysisContextKey = null;
+    }
+  }
+
+  /** Bubble click → open the last completed analysis in the modal. */
+  openLastAnalysis(): void {
+    const last = this.lastAnalysis();
+    if (last) this.analysisResult.set(last);
   }
 
   /** Dismiss whichever overlay is currently visible (success or error). */
@@ -1926,6 +2392,58 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   onAnalysisBackdropClick(event: MouseEvent): void {
     if (event.target === this.analysisDialog()?.nativeElement) {
       this.closeAnalysis();
+    }
+  }
+
+  /**
+   * Run the longer-horizon macro analysis for the selected pair. Deliberately
+   * NOT silent, NOT live-fired, and NOT cached per-pair: it's a costly,
+   * operator-initiated one-shot (the cost trade-off the separate command was
+   * chosen for). The result opens its own modal; spot state is untouched.
+   */
+  runMacroAnalysis(): void {
+    if (this.macroAnalyzing()) return;
+    this.macroAnalyzing.set(true);
+    this.macroAnalysisResult.set(null);
+    this.macroAnalysisError.set(null);
+    const reqSym = this.selectedSymbol();
+    const reqTf = this.selectedTimeframe();
+    this.marketData
+      .analyzeMacro(reqSym, reqTf)
+      .pipe(
+        catchError((err) => {
+          const msg = err?.error?.message ?? err?.message ?? String(err);
+          this.macroAnalysisError.set(`Macro analysis request failed: ${msg}`);
+          return of(null);
+        }),
+        takeUntil(this.destroy$),
+      )
+      .subscribe((res) => {
+        this.macroAnalyzing.set(false);
+        if (res?.status && res.data) {
+          this.macroAnalysisResult.set(res.data);
+        } else if (res) {
+          this.macroAnalysisError.set(res.message ?? 'Macro analysis refused by the engine.');
+        }
+      });
+  }
+
+  /** Dismiss the macro overlay (success or error). */
+  closeMacroAnalysis(): void {
+    this.macroAnalysisResult.set(null);
+    this.macroAnalysisError.set(null);
+  }
+
+  /** <dialog> close (Escape / programmatic) → clear macro signals. */
+  onMacroAnalysisDialogClose(): void {
+    this.macroAnalysisResult.set(null);
+    this.macroAnalysisError.set(null);
+  }
+
+  /** Macro backdrop click (outside the inner card) → dismiss. */
+  onMacroAnalysisBackdropClick(event: MouseEvent): void {
+    if (event.target === this.macroAnalysisDialog()?.nativeElement) {
+      this.closeMacroAnalysis();
     }
   }
 
@@ -2002,6 +2520,16 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     return `${INDICATOR_STORAGE_PREFIX}.${this.selectedSymbol()}.${this.selectedTimeframe()}`;
   }
 
+  /** In-memory cache key for a (symbol, timeframe) pair. */
+  private pairKey(symbol: string, timeframe: string): string {
+    return `${symbol}|${timeframe}`;
+  }
+
+  /** localStorage key holding the last analysis for one (symbol, timeframe). */
+  private lastAnalysisStorageKey(symbol: string, timeframe: string): string {
+    return `${LAST_ANALYSIS_STORAGE_PREFIX}.${symbol}.${timeframe}`;
+  }
+
   private loadChartConfig(): void {
     if (typeof localStorage === 'undefined') return;
 
@@ -2030,6 +2558,98 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     if (vol === 'true' || vol === 'false') this.showVolume.set(vol === 'true');
     const pos = localStorage.getItem(SHOW_POSITIONS_STORAGE_KEY);
     if (pos === 'true' || pos === 'false') this.showPositions.set(pos === 'true');
+    const live = localStorage.getItem(LIVE_ANALYSIS_STORAGE_KEY);
+    if (live === 'true' || live === 'false') this.liveAnalysisEnabled.set(live === 'true');
+
+    // Default the bubble to the SELECTED pair's last completed analysis.
+    // loadChartConfig() runs on init and after every symbol/TF switch (with
+    // the new selection already applied), so this lazily warms the cache for
+    // exactly the pair on screen. RESTORE only — it never triggers a run, so
+    // a reload/switch shows that pair's last recommendation without
+    // re-analysing. Skip if the cache already holds a (fresher) entry for
+    // this pair so an in-flight result isn't clobbered by a stale disk copy.
+    const sym = this.selectedSymbol();
+    const tf = this.selectedTimeframe();
+    const key = this.pairKey(sym, tf);
+    if (!this.lastAnalysisByPair()[key]) {
+      let restored: MarketAnalysisResultDto | null = null;
+
+      const lastRaw = localStorage.getItem(this.lastAnalysisStorageKey(sym, tf));
+      if (lastRaw) {
+        try {
+          const parsed = JSON.parse(lastRaw) as MarketAnalysisResultDto;
+          if (parsed && typeof parsed === 'object' && parsed.completedAt) {
+            restored = parsed;
+          }
+        } catch {
+          // corrupt cache — ignore; bubble falls back to its empty state
+        }
+      }
+
+      // One-time bridge from the old single-slot v1 key. v1 held exactly one
+      // DTO; adopt it ONLY for the pair it actually belonged to (slash-
+      // insensitive symbol match, since the DTO's echoed symbol may be
+      // 'EURUSD' while the selector uses 'EUR/USD'), re-file it under the
+      // new per-pair key, and delete v1 so this runs at most once.
+      if (!restored) {
+        const legacyRaw = localStorage.getItem(LEGACY_LAST_ANALYSIS_KEY);
+        if (legacyRaw) {
+          try {
+            const legacy = JSON.parse(legacyRaw) as MarketAnalysisResultDto;
+            const norm = (s: string) => (s ?? '').replace(/\//g, '').toUpperCase();
+            if (
+              legacy?.completedAt &&
+              norm(legacy.symbol) === norm(sym) &&
+              legacy.timeframe === tf
+            ) {
+              restored = legacy;
+              this.persistLastAnalysis(sym, tf, legacy);
+              localStorage.removeItem(LEGACY_LAST_ANALYSIS_KEY);
+            }
+          } catch {
+            // corrupt legacy blob — drop it so it can't wedge the bridge
+            localStorage.removeItem(LEGACY_LAST_ANALYSIS_KEY);
+          }
+        }
+      }
+
+      if (restored) {
+        const r = restored;
+        this.lastAnalysisByPair.update((m) => ({ ...m, [key]: r }));
+      }
+    }
+
+    // localStorage above is only an INSTANT (possibly stale / browser-local)
+    // paint. The engine is the source of truth — replay the real last
+    // analysis for this pair from the audit ledger and let it override.
+    // Runs unconditionally (even when the cache had an entry) so a run made
+    // in another browser/device/session is reflected here too.
+    this.hydrateLastAnalysisFromEngine(sym, tf);
+  }
+
+  /**
+   * Pull the authoritative last analysis for (sym, tf) from the engine's
+   * stored audit row (no new LLM call) and fold it into the per-pair cache,
+   * also refreshing the localStorage paint-cache. Silent: a -14 (pair never
+   * analysed) or any transport error leaves whatever the cache already had.
+   * Keyed by the REQUESTED pair so a mid-flight pair switch can't cross-file
+   * the result onto the wrong bubble.
+   */
+  private hydrateLastAnalysisFromEngine(sym: string, tf: string): void {
+    const key = this.pairKey(sym, tf);
+    this.marketData
+      .getLatestAnalysis(sym, tf)
+      .pipe(
+        catchError(() => of(null)),
+        takeUntil(this.destroy$),
+      )
+      .subscribe((res) => {
+        if (res?.status && res.data) {
+          const data = res.data;
+          this.lastAnalysisByPair.update((m) => ({ ...m, [key]: data }));
+          this.persistLastAnalysis(sym, tf, data);
+        }
+      });
   }
 
   private applyDefaultIndicators(): void {
@@ -2073,6 +2693,22 @@ export class TradingChartComponent implements OnInit, OnDestroy {
       localStorage.setItem(key, String(value));
     } catch {
       // storage full / disabled — operator just won't get persistence
+    }
+  }
+
+  /** Persist the latest completed analysis under its (symbol, timeframe) so
+   *  the bubble defaults to that pair's recommendation after a reload,
+   *  without re-running. */
+  private persistLastAnalysis(
+    symbol: string,
+    timeframe: string,
+    result: MarketAnalysisResultDto,
+  ): void {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem(this.lastAnalysisStorageKey(symbol, timeframe), JSON.stringify(result));
+    } catch {
+      // storage full / disabled — bubble just won't survive a reload
     }
   }
 

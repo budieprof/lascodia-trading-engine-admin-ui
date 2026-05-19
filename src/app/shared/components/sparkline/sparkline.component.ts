@@ -26,7 +26,11 @@ export class SparklineComponent {
   chartOptions = computed<EChartsOption>(() => ({
     grid: { top: 0, right: 0, bottom: 0, left: 0 },
     xAxis: { type: 'category', show: false, data: this.data().map((_, i) => i) },
-    yAxis: { type: 'value', show: false },
+    // scale:true is essential — ECharts' value axis defaults to scale:false,
+    // which forces 0 onto the axis. For FX prices (~1.16) a real 20-pip move
+    // is a 0.002 band on a 0→1.16 axis and collapses to a flat line. With
+    // scale:true the axis fits the data's own min/max so structure shows.
+    yAxis: { type: 'value', show: false, scale: true },
     series: [
       {
         type: 'line',

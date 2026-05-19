@@ -79,10 +79,18 @@ export interface OperatorAuthEnvelope {
  *     PRD §14 "JWT not in localStorage" bar while fixing the reload UX.
  *   - An idle-timeout watcher logs out after N minutes of no user activity
  *     (pointerdown, keydown, visibilitychange). Tunable via IDLE_TIMEOUT_MS.
+ *     Currently DISABLED via IDLE_LOGOUT_ENABLED so the console can be left
+ *     open and unattended for long stretches without self-logging-out; flip
+ *     the flag back to `true` to restore the idle timeout.
  */
 const TOKEN_KEY = 'lascodia.auth.token';
 const USER_KEY = 'lascodia.auth.user';
 const LAST_ACTIVITY_KEY = 'lascodia.auth.lastActivity';
+// Master switch for the client-side idle auto-logout. When false, neither
+// the restored-session staleness check nor the periodic watcher will ever
+// log the operator out for inactivity (the JWT's own server-side expiry
+// still applies and is out of this layer's control).
+const IDLE_LOGOUT_ENABLED = false;
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 const ACTIVITY_THROTTLE_MS = 30 * 1000;
 const IDLE_CHECK_INTERVAL_MS = 60 * 1000;
@@ -314,10 +322,17 @@ export class AuthService {
   }
 
   private isIdleExpired(): boolean {
+    // Gated off: with idle-logout disabled the session is never considered
+    // stale, so the constructor's restored-session check keeps the operator
+    // signed in no matter how long the tab sat idle.
+    if (!IDLE_LOGOUT_ENABLED) return false;
     return Date.now() - this.lastActivity > IDLE_TIMEOUT_MS;
   }
 
   private startIdleWatch(): void {
+    // Idle auto-logout disabled — don't bind activity listeners or arm the
+    // periodic watcher at all (isIdleExpired() is also gated as a backstop).
+    if (!IDLE_LOGOUT_ENABLED) return;
     if (!this.activityListenersBound && typeof window !== 'undefined') {
       const onActivity = () => this.touchActivity();
       window.addEventListener('pointerdown', onActivity, { passive: true });
