@@ -344,25 +344,33 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
               </div>
               <div>
                 <dt>Risk profile (per-account)</dt>
-                <dd class="mono">
+                <dd>
                   <select
+                    class="account-risk-select"
                     [disabled]="savingRiskProfile()"
                     (change)="onAssignRiskProfile($any($event.target).value)"
                   >
                     <option value="" [selected]="a.riskProfileId === null">
-                      None — strategy / default
+                      None — use strategy / default risk
                     </option>
                     @for (p of riskProfiles(); track p.id) {
                       <option [value]="p.id" [selected]="a.riskProfileId === p.id">
-                        {{ p.name }} · {{ p.maxRiskPerTradePct }}% risk/trade
+                        {{ p.name }} · risk {{ p.maxRiskPerTradePct }}% / trade
                       </option>
                     }
                   </select>
-                  @if (a.riskProfileId !== null) {
-                    <span class="muted"
-                      >&nbsp;— trades on this account size to this % of equity</span
-                    >
-                  }
+                  <span class="account-risk-hint muted">
+                    @if (savingRiskProfile()) {
+                      Saving…
+                    } @else if (a.riskProfileId !== null) {
+                      Active — every trade on this account is sized to this % of equity (overrides
+                      the strategy profile).
+                    } @else {
+                      Pick a profile to size every trade on this account to a fixed % of equity.
+                      Manage profiles under
+                      <strong>Risk Profiles</strong>.
+                    }
+                  </span>
                 </dd>
               </div>
               <div>
@@ -545,6 +553,33 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       }
 
       /* ── Risk banner ──────────────────────────────────────────── */
+      .account-risk-select {
+        appearance: auto;
+        width: 100%;
+        max-width: 320px;
+        margin-top: var(--space-1);
+        padding: var(--space-2) var(--space-3);
+        border: 1px solid var(--border-strong, var(--border, #c9ccd6));
+        border-radius: var(--radius-2, 6px);
+        background: var(--bg-primary, #fff);
+        color: var(--text-primary, inherit);
+        font: inherit;
+        cursor: pointer;
+      }
+      .account-risk-select:focus-visible {
+        outline: 2px solid var(--accent, #2563eb);
+        outline-offset: 1px;
+      }
+      .account-risk-select:disabled {
+        opacity: 0.6;
+        cursor: progress;
+      }
+      .account-risk-hint {
+        display: block;
+        margin-top: var(--space-1);
+        font-size: 0.8rem;
+      }
+
       .risk-banner {
         display: flex;
         align-items: flex-start;
