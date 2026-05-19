@@ -41,11 +41,14 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
  */
 type ExitSource = 'EA' | 'Strategy' | 'Engine' | 'Unknown';
 
-interface ParsedRow extends TradeSignalDto {
+// This page repurposes `source` for the EXIT/feedback context (ExitSource),
+// which is unrelated to TradeSignalDto.source (signal provenance). Omit the
+// inherited field so the page-local meaning wins without a type clash.
+type ParsedRow = Omit<TradeSignalDto, 'source'> & {
   source: ExitSource;
   reasonCategory: string;
   reasonDetail: string | null;
-}
+};
 
 interface KvBucket {
   key: string;

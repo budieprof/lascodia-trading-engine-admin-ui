@@ -481,7 +481,13 @@ export interface TradeSignalDto {
   generatedAt: string;
   expiresAt: string;
   isManual: boolean;
+  /** Provenance of the signal. SpotAnalysis = auto-generated from an LLM
+   *  spot analysis (owned by the seeded sentinel strategy). */
+  source: TradeSignalSource;
 }
+
+/** Trade-signal provenance. Mirrors the backend TradeSignalSource enum. */
+export type TradeSignalSource = 'Strategy' | 'Manual' | 'SpotAnalysis';
 
 export type AccountType = 'Demo' | 'Real' | 'Contest';
 export type MarginMode = 'Hedging' | 'Netting';
@@ -2062,10 +2068,15 @@ export interface MarketAnalysisResultDto {
   latencyMs: number;
   analysis: string;
   completedAt: string;
-  /** Structured trade recommendation extracted from the LLM tail block. Null
-   *  when the LLM omitted the block, emitted malformed JSON, or proposed an
-   *  inconsistent Buy/Sell side (SL/TP on the wrong side of entry). */
+  /** Primary (best) recommendation — mirrors recommendations[0] for
+   *  back-compat with the single-recommendation bubble/replay. Null when the
+   *  LLM emitted no parseable block. */
   recommendation: MarketAnalysisRecommendationDto | null;
+  /** Full ranked set the LLM produced (primary first). */
+  recommendations?: MarketAnalysisRecommendationDto[] | null;
+  /** Ids of trade signals persisted from the viable subset when the
+   *  auto-generate-signals toggle was on. Empty/absent otherwise. */
+  generatedSignalIds?: number[] | null;
 }
 
 /** Operator-actionable trade decision parsed from the analysis. Price fields

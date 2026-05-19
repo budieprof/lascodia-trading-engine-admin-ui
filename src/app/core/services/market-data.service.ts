@@ -69,10 +69,14 @@ export class MarketDataService {
   analyzeMarket(
     symbol: string,
     timeframe: string,
+    generateSignals = false,
   ): Observable<ResponseData<MarketAnalysisResultDto>> {
     return this.api.post(`/market-data/analyze`, {
       symbol: this.formatSymbol(symbol),
       timeframe,
+      // When true the engine persists every viable recommendation as a live
+      // trade signal (sentinel-owned, SpotAnalysis source). Default false.
+      generateSignals,
     });
   }
 

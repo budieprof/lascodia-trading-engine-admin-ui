@@ -255,6 +255,10 @@ const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.showPositions';
 // Live-analysis is a global preference like the other toggles — when on,
 // a silent spot-analysis fires on every candle close for the focused pair.
 const LIVE_ANALYSIS_STORAGE_KEY = 'tradingChart.liveAnalysis';
+// Auto-signal generation — when on, each completed spot analysis also asks
+// the engine to persist every VIABLE setup as a live trade signal. Global
+// preference; OFF by default because these enter the live execution pipeline.
+const SIGNAL_AUTOGEN_STORAGE_KEY = 'tradingChart.signalAutoGen';
 // The most recent completed analysis is persisted PER (symbol, timeframe)
 // so the on-chart bubble defaults to that exact pair's last run after a
 // reload or a pair/TF switch — WITHOUT re-running an analysis on load
@@ -396,6 +400,21 @@ const LEGACY_LAST_ANALYSIS_KEY = 'tradingChart.lastAnalysis.v1';
           >
             <span class="live-dot" [class.pulsing]="liveAnalysisEnabled()"></span>
             Live
+          </button>
+          <button
+            type="button"
+            class="live-toggle"
+            [class.on]="signalAutoGenEnabled()"
+            [attr.aria-pressed]="signalAutoGenEnabled()"
+            [title]="
+              signalAutoGenEnabled()
+                ? 'Auto-signal ON — every analysis run also persists each VIABLE setup as a LIVE trade signal (auto-executes via the normal risk pipeline). Click to disable.'
+                : 'Enable auto-signal — each spot analysis also generates live trade signals from every viable setup (timeframe-scaled SL/TP, R:R & confidence gated). Off by default; these can place real trades.'
+            "
+            (click)="toggleSignalAutoGen()"
+          >
+            <span class="live-dot" [class.pulsing]="signalAutoGenEnabled()"></span>
+            Signals
           </button>
           <div class="chart-toggles">
             @for (cfg of indicators(); track cfg.id) {
@@ -1723,6 +1742,10 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   /** When on, a silent spot-analysis fires on every candle close for the
    *  focused (symbol, timeframe). Global preference, persisted. */
   readonly liveAnalysisEnabled = signal(false);
+  /** When on, each completed spot analysis (manual OR live) also asks the
+   *  engine to persist every viable setup as a LIVE trade signal. Global
+   *  preference, persisted. OFF by default — these auto-execute. */
+  readonly signalAutoGenEnabled = signal(false);
   /** Last COMPLETED analysis (manual or live) keyed by "symbol|timeframe".
    *  In-memory cache; each pair's entry is also persisted per-pair and
    *  restored lazily by loadChartConfig() on load and on every pair/TF
@@ -2305,7 +2328,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     const reqTf = this.selectedTimeframe();
     const reqKey = this.pairKey(reqSym, reqTf);
     this.marketData
-      .analyzeMarket(reqSym, reqTf)
+      .analyzeMarket(reqSym, reqTf, this.signalAutoGenEnabled())
       .pipe(
         catchError((err) => {
           if (!silent) {
@@ -2347,6 +2370,16 @@ export class TradingChartComponent implements OnInit, OnDestroy {
       this.lastCandleBoundary = null;
       this.lastAnalysisContextKey = null;
     }
+  }
+
+  /** Toggle auto-signal generation. Persisted globally. When ON, the
+   *  generateSignals flag is sent on every spot-analysis call (manual + live);
+   *  the engine persists each viable setup as a live, auto-executing trade
+   *  signal. Enabling does NOT run anything immediately. */
+  toggleSignalAutoGen(): void {
+    const next = !this.signalAutoGenEnabled();
+    this.signalAutoGenEnabled.set(next);
+    this.persistGlobalToggle(SIGNAL_AUTOGEN_STORAGE_KEY, next);
   }
 
   /** Bubble click → open the last completed analysis in the modal. */
@@ -2560,6 +2593,10 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     if (pos === 'true' || pos === 'false') this.showPositions.set(pos === 'true');
     const live = localStorage.getItem(LIVE_ANALYSIS_STORAGE_KEY);
     if (live === 'true' || live === 'false') this.liveAnalysisEnabled.set(live === 'true');
+
+    const autoGen = localStorage.getItem(SIGNAL_AUTOGEN_STORAGE_KEY);
+    if (autoGen === 'true' || autoGen === 'false')
+      this.signalAutoGenEnabled.set(autoGen === 'true');
 
     // Default the bubble to the SELECTED pair's last completed analysis.
     // loadChartConfig() runs on init and after every symbol/TF switch (with
