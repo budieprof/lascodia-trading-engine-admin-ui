@@ -45,6 +45,16 @@ export class TradingAccountsService {
     return this.api.put(`/trading-account/${id}/sync`);
   }
 
+  /**
+   * Assign (or clear) a per-account risk profile. riskProfileId = null clears
+   * it (account reverts to strategy/default). When set, the engine sizes
+   * every trade for this account to the profile's maxRiskPerTradePct of
+   * account equity and that profile overrides the signal's strategy profile.
+   */
+  assignRiskProfile(id: number, riskProfileId: number | null): Observable<ResponseData<string>> {
+    return this.api.put(`/trading-account/${id}/risk-profile`, { riskProfileId });
+  }
+
   getActive(brokerId: number): Observable<ResponseData<TradingAccountDto[]>> {
     return this.api.get(`/trading-account/active/${brokerId}`);
   }

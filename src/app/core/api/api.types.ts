@@ -523,6 +523,10 @@ export interface TradingAccountDto {
   isActive: boolean;
   isPaper: boolean;
   lastSyncedAt: string;
+  /** Per-account risk profile (null = strategy/default applies). When set it
+   *  overrides the signal's strategy profile for this account and actively
+   *  sizes trades to its maxRiskPerTradePct of account equity. */
+  riskProfileId: number | null;
 }
 
 export interface RiskProfileDto {

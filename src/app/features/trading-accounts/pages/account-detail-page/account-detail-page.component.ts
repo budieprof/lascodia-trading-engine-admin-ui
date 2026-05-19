@@ -15,8 +15,14 @@ import { Subject, catchError, forkJoin, of, takeUntil, timer } from 'rxjs';
 import { TradingAccountsService } from '@core/services/trading-accounts.service';
 import { EAInstancesService } from '@core/services/ea-instances.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
+import { RiskProfilesService } from '@core/services/risk-profiles.service';
 import { NotificationService } from '@core/notifications/notification.service';
-import type { CurrencyPairDto, EAInstanceDto, TradingAccountDto } from '@core/api/api.types';
+import type {
+  CurrencyPairDto,
+  EAInstanceDto,
+  RiskProfileDto,
+  TradingAccountDto,
+} from '@core/api/api.types';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
@@ -334,6 +340,29 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                         | currency: a.currency ?? 'USD' : 'symbol' : '1.2-2')
                       : 'unbounded'
                   }}
+                </dd>
+              </div>
+              <div>
+                <dt>Risk profile (per-account)</dt>
+                <dd class="mono">
+                  <select
+                    [disabled]="savingRiskProfile()"
+                    (change)="onAssignRiskProfile($any($event.target).value)"
+                  >
+                    <option value="" [selected]="a.riskProfileId === null">
+                      None — strategy / default
+                    </option>
+                    @for (p of riskProfiles(); track p.id) {
+                      <option [value]="p.id" [selected]="a.riskProfileId === p.id">
+                        {{ p.name }} · {{ p.maxRiskPerTradePct }}% risk/trade
+                      </option>
+                    }
+                  </select>
+                  @if (a.riskProfileId !== null) {
+                    <span class="muted"
+                      >&nbsp;— trades on this account size to this % of equity</span
+                    >
+                  }
                 </dd>
               </div>
               <div>
@@ -899,6 +928,7 @@ export class AccountDetailPageComponent implements OnInit, OnDestroy {
   private readonly accountsService = inject(TradingAccountsService);
   private readonly eaService = inject(EAInstancesService);
   private readonly pairsService = inject(CurrencyPairsService);
+  private readonly riskProfilesService = inject(RiskProfilesService);
   private readonly notifications = inject(NotificationService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly destroy$ = new Subject<void>();
@@ -907,6 +937,8 @@ export class AccountDetailPageComponent implements OnInit, OnDestroy {
   readonly account = signal<TradingAccountDto | null>(null);
   readonly eaInstances = signal<EAInstanceDto[]>([]);
   readonly currencyPairs = signal<CurrencyPairDto[]>([]);
+  readonly riskProfiles = signal<RiskProfileDto[]>([]);
+  readonly savingRiskProfile = signal(false);
   readonly loading = signal(true);
   readonly nowMs = signal(Date.now());
 
@@ -1067,6 +1099,14 @@ export class AccountDetailPageComponent implements OnInit, OnDestroy {
     this.accountId.set(id);
     this.loadAll();
 
+    // Risk-profile options for the per-account selector (one-shot).
+    this.riskProfilesService
+      .list({ currentPage: 1, itemCountPerPage: 200 })
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((r) => {
+        if (r?.data?.data) this.riskProfiles.set(r.data.data);
+      });
+
     // 10s data refresh — accounts/EAs change as the broker syncs;
     // dashboard cadence is fine for a detail view.
     timer(10_000, 10_000)
@@ -1102,6 +1142,31 @@ export class AccountDetailPageComponent implements OnInit, OnDestroy {
         if (account?.data) this.account.set(account.data);
         if (eas?.data) this.eaInstances.set(eas.data);
         if (pairs?.data?.data) this.currencyPairs.set(pairs.data.data);
+      });
+  }
+
+  /** Assign (or clear when raw === '') the per-account risk profile, then
+   *  refresh so the displayed binding + sizing implication update. */
+  onAssignRiskProfile(raw: string): void {
+    const id = this.accountId();
+    if (id === null || this.savingRiskProfile()) return;
+    const profileId = raw === '' ? null : Number(raw);
+    this.savingRiskProfile.set(true);
+    this.accountsService
+      .assignRiskProfile(id, profileId)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((res) => {
+        this.savingRiskProfile.set(false);
+        if (res?.status) {
+          this.notifications.success(
+            profileId === null
+              ? 'Risk profile cleared — account reverts to strategy/default.'
+              : 'Risk profile assigned — trades on this account now size to its risk %.',
+          );
+          this.loadAll();
+        } else {
+          this.notifications.error(res?.message ?? 'Failed to assign risk profile.');
+        }
       });
   }
 
