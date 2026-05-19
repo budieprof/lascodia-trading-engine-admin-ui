@@ -821,6 +821,17 @@ import {
                     >
                       {{ loadingDiagnostics() ? 'Refreshing…' : 'Refresh' }}
                     </button>
+                    @if (isInFlight()) {
+                      <button
+                        type="button"
+                        class="btn btn-danger btn-xs"
+                        (click)="cancelSelectedRun()"
+                        [disabled]="cancellingRun()"
+                        title="Cancel this training run"
+                      >
+                        {{ cancellingRun() ? 'Cancelling…' : 'Cancel run' }}
+                      </button>
+                    }
                     <button
                       type="button"
                       class="btn btn-link btn-xs"
@@ -2328,6 +2339,19 @@ import {
       }
       .btn-secondary:hover {
         background: var(--bg-secondary);
+      }
+      .btn-danger {
+        background: transparent;
+        color: var(--loss);
+        border: 1px solid var(--loss);
+      }
+      .btn-danger:hover:not(:disabled) {
+        background: var(--loss);
+        color: #fff;
+      }
+      .btn-danger:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
       }
 
       /* Modal */
@@ -4552,6 +4576,7 @@ export class MlModelsPageComponent implements OnInit {
   selectedTrainingRun = signal<MLTrainingRunDto | null>(null);
   diagnostics = signal<MLTrainingRunDiagnosticsDto | null>(null);
   loadingDiagnostics = signal(false);
+  cancellingRun = signal(false);
   isPolling = signal(false);
   // Wall-clock signal that ticks every second while a non-terminal run is open. Drives
   // the live elapsed-time / queue-wait readouts; updating a signal at 1Hz is far cheaper
@@ -5446,6 +5471,32 @@ export class MlModelsPageComponent implements OnInit {
     const run = this.selectedTrainingRun();
     if (!run) return;
     this.refetchRunAndDiagnostics(run.id);
+  }
+
+  cancelSelectedRun(): void {
+    const run = this.selectedTrainingRun();
+    if (!run || this.cancellingRun()) return;
+    if (!confirm(`Cancel training run #${run.id} (${run.symbol} / ${run.timeframe})?`)) return;
+
+    this.cancellingRun.set(true);
+    this.mlModelsService.cancelTraining(run.id).subscribe({
+      next: (res) => {
+        this.cancellingRun.set(false);
+        if (res?.status) {
+          // Queued → Cancelled immediately; Running → cancel requested, the
+          // worker finalises within ~10s. Re-pull so the panel reflects it,
+          // and the existing poll loop will catch the Running→Cancelled flip.
+          this.notifications.success(res?.data ?? 'Cancellation requested');
+          this.refetchRunAndDiagnostics(run.id);
+        } else {
+          this.notifications.error(res?.message ?? 'Could not cancel the run');
+        }
+      },
+      error: () => {
+        this.cancellingRun.set(false);
+        this.notifications.error('Failed to cancel the training run');
+      },
+    });
   }
 
   private loadDiagnostics(id: number): void {

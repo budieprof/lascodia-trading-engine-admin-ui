@@ -73,6 +73,15 @@ export class MLModelsService {
     return this.api.get(`/ml-model/training/${id}`);
   }
 
+  /**
+   * Cancel a queued or running training run. Queued runs are cancelled
+   * immediately; running runs are cooperatively cancelled by the worker
+   * (status transitions to Cancelled within ~10s of the next checkpoint).
+   */
+  cancelTraining(id: number): Observable<ResponseData<string>> {
+    return this.api.post(`/ml-model/training/${id}/cancel`, {});
+  }
+
   getOverfitWatchlist(
     ratioThreshold?: number,
     minResolvedSignals?: number,
