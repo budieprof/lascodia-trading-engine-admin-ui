@@ -259,6 +259,43 @@ const LIVE_ANALYSIS_STORAGE_KEY = 'tradingChart.liveAnalysis';
 // the engine to persist every VIABLE setup as a live trade signal. Global
 // preference; OFF by default because these enter the live execution pipeline.
 const SIGNAL_AUTOGEN_STORAGE_KEY = 'tradingChart.signalAutoGen';
+
+/**
+ * How often the live spot analysis fires within each bar.
+ *   - `close` (default): one fire per candle close — the historical behaviour.
+ *   - `close+mid`: two fires per bar — close + 50% point of the next bar.
+ *   - `quarters`: four fires per bar — close + 25/50/75% points.
+ *
+ * Higher cadences double or quadruple LLM spend and only make sense on
+ * timeframes where the bar is long enough to merit a mid-bar read. The UI
+ * silently downgrades to `close` on sub-H1 timeframes (see livePlanForTimeframe).
+ */
+type LiveAnalysisCadence = 'close' | 'close+mid' | 'quarters';
+const LIVE_CADENCE_STORAGE_KEY = 'tradingChart.liveCadence';
+// Minimum timeframe (in minutes) where the cadence dropdown is honored beyond
+// 'close'. H1+ only: sub-H1 bars are short enough that mid-bar fires either
+// overlap (a 3-min p95 LLM call on M5 finishes after the next close) or
+// produce noisy partial-bar setups. Silent downgrade — no warning toast.
+const MIN_MIDBAR_TIMEFRAME_MIN = 60;
+/** How many fires per bar each cadence produces. */
+const CADENCE_SEGMENT_COUNT: Record<LiveAnalysisCadence, number> = {
+  close: 1,
+  'close+mid': 2,
+  quarters: 4,
+};
+/** Maps (cadenceCount, segmentIdx) → the `barPosition` string the engine
+ *  expects. Segment 0 always = just-after-close. Higher indices encode how
+ *  far into the new bar we are. The engine treats unknown values as
+ *  `closed`, so adding a future cadence (e.g. eighths) won't break callers
+ *  built against an older engine. */
+function barPositionFor(cadenceCount: number, segmentIdx: number): string {
+  if (segmentIdx === 0 || cadenceCount <= 1) return 'closed';
+  if (cadenceCount === 2) return 'mid_50'; // 0=closed, 1=mid
+  if (cadenceCount === 4) {
+    return segmentIdx === 1 ? 'mid_25' : segmentIdx === 2 ? 'mid_50' : 'mid_75';
+  }
+  return 'closed';
+}
 // The most recent completed analysis is persisted PER (symbol, timeframe)
 // so the on-chart bubble defaults to that exact pair's last run after a
 // reload or a pair/TF switch — WITHOUT re-running an analysis on load
@@ -401,6 +438,24 @@ const LEGACY_LAST_ANALYSIS_KEY = 'tradingChart.lastAnalysis.v1';
             <span class="live-dot" [class.pulsing]="liveAnalysisEnabled()"></span>
             Live
           </button>
+          <!-- Cadence picker. Disabled when Live is off (the value is moot)
+               and shows a downgrade hint when the current timeframe is sub-H1
+               (the higher-cadence options are silently forced to 'close'). -->
+          <select
+            class="live-cadence"
+            [disabled]="!liveAnalysisEnabled()"
+            [value]="liveCadence()"
+            (change)="onCadenceChange($event)"
+            [title]="
+              effectiveCadence() !== liveCadence()
+                ? 'Cadence forced to On close on sub-H1 timeframes; pick H1 or higher to enable mid-bar fires.'
+                : 'How often a live spot analysis fires within each bar. Higher cadences multiply LLM spend.'
+            "
+          >
+            <option value="close">On close</option>
+            <option value="close+mid">On close + mid-bar</option>
+            <option value="quarters">Every quarter-bar</option>
+          </select>
           <button
             type="button"
             class="live-toggle"
@@ -1117,6 +1172,35 @@ const LEGACY_LAST_ANALYSIS_KEY = 'tradingChart.lastAnalysis.v1';
           box-shadow: 0 0 0 4px rgba(22, 163, 74, 0);
         }
       }
+      /* Cadence dropdown — sibling of the Live toggle. Stays muted when the
+         feature is disabled or downgraded to 'close' (sub-H1) so the
+         operator sees that the higher-cadence option isn't currently
+         honored. */
+      .live-cadence {
+        height: 28px;
+        padding: 0 var(--space-2);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        font-size: 11px;
+        font-weight: var(--font-medium);
+        letter-spacing: 0.02em;
+        cursor: pointer;
+        white-space: nowrap;
+        transition:
+          background 0.15s,
+          border-color 0.15s,
+          color 0.15s;
+      }
+      .live-cadence:hover:not(:disabled) {
+        border-color: var(--text-tertiary);
+        color: var(--text-primary);
+      }
+      .live-cadence:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
 
       /* On-chart recommendation bubble — floats over the chart's top-left.
          Colour-coded by the last analysis's action. */
@@ -1827,6 +1911,19 @@ export class TradingChartComponent implements OnInit, OnDestroy {
    *  engine to persist every viable setup as a LIVE trade signal. Global
    *  preference, persisted. OFF by default — these auto-execute. */
   readonly signalAutoGenEnabled = signal(false);
+  /** Cadence dropdown next to the Live toggle: one fire per bar (close), two
+   *  (close + mid), or four (quarters). Silently downgraded to `close` on
+   *  sub-H1 timeframes by {@link effectiveCadence}. */
+  readonly liveCadence = signal<LiveAnalysisCadence>('close');
+  /** What cadence is actually in effect for the currently selected timeframe:
+   *  the user's choice when the timeframe ≥ H1, else forced back to `close`.
+   *  Templates and the candle-close effect both read this — not liveCadence
+   *  directly — so the UI never shows a "mid-bar fire" promise on a TF where
+   *  it's been downgraded. */
+  readonly effectiveCadence = computed<LiveAnalysisCadence>(() => {
+    const tfMin = TIMEFRAME_MINUTES_MAP[this.selectedTimeframe()] ?? 60;
+    return tfMin >= MIN_MIDBAR_TIMEFRAME_MIN ? this.liveCadence() : 'close';
+  });
   /** Last COMPLETED analysis (manual or live) keyed by "symbol|timeframe".
    *  In-memory cache; each pair's entry is also persisted per-pair and
    *  restored lazily by loadChartConfig() on load and on every pair/TF
@@ -1841,10 +1938,13 @@ export class TradingChartComponent implements OnInit, OnDestroy {
       this.lastAnalysisByPair()[this.pairKey(this.selectedSymbol(), this.selectedTimeframe())] ??
       null,
   );
-  /** Candle-boundary index (floor(now / tfMs)) at the last live tick.
-   *  Plain field, NOT a signal — mutating it inside the candle-close
-   *  effect must not retrigger the effect. */
-  private lastCandleBoundary: number | null = null;
+  /** Absolute slice index (floor(now / segmentMs), where segmentMs depends
+   *  on the active cadence) at the last live tick. We fire when this advances.
+   *  Plain field, NOT a signal — mutating it inside the live-fire effect
+   *  must not retrigger the effect. The `lastCandleBoundary` legacy name
+   *  ambiguously referenced the bar-level index; the slice-level rename
+   *  matches the segmented-fire model introduced for the cadence dropdown. */
+  private lastAnalysisSlice: number | null = null;
   /** Symbol|timeframe key at the last live tick. When it changes we
    *  re-baseline the boundary so a pair/TF switch doesn't spuriously
    *  fire an analysis on the very next second. */
@@ -2287,38 +2387,55 @@ export class TradingChartComponent implements OnInit, OnDestroy {
       }
     });
 
-    // Live-analysis candle-close trigger. The 1 s nowMs tick is the only
-    // tracked dependency that changes second-to-second; symbol/timeframe/
-    // enabled are tracked so flipping any of them re-evaluates. Everything
-    // that mutates state (boundary bookkeeping, the analysis kick-off) runs
-    // untracked so this effect never feeds back into itself.
+    // Live-analysis fire trigger. The 1 s nowMs tick is the only tracked
+    // dependency that changes second-to-second; symbol / timeframe / enabled /
+    // cadence are tracked so flipping any of them re-evaluates. Everything
+    // that mutates state runs untracked so this effect never feeds back into
+    // itself.
+    //
+    // Segment math: a bar is divided into `cadenceCount` equal slices
+    // (1 / 2 / 4 for close / close+mid / quarters). We fire whenever the
+    // current slice index advances past the last one we fired, then tag the
+    // call with a barPosition string the engine reads to frame the prompt.
     effect(() => {
       const now = this.nowMs();
       const enabled = this.liveAnalysisEnabled();
       const sym = this.selectedSymbol();
       const tf = this.selectedTimeframe();
+      const cadence = this.effectiveCadence();
       if (!enabled) return;
 
       untracked(() => {
         const tfMin = TIMEFRAME_MINUTES_MAP[tf] ?? 60;
         const tfMs = tfMin * 60_000;
-        const boundary = Math.floor(now / tfMs);
-        const ctxKey = `${sym}|${tf}`;
+        const cadenceCount = CADENCE_SEGMENT_COUNT[cadence];
+        const segmentMs = tfMs / cadenceCount;
 
-        // Pair/timeframe switch (or first run) — adopt the current boundary
-        // as the baseline and wait for the NEXT close before firing.
-        if (this.lastAnalysisContextKey !== ctxKey || this.lastCandleBoundary === null) {
+        // Absolute slice index across the wall clock. Encodes both the bar
+        // boundary AND the position within it: floor(slice / cadenceCount)
+        // is the bar number; slice % cadenceCount is the segment within.
+        const slice = Math.floor(now / segmentMs);
+        const ctxKey = `${sym}|${tf}|${cadence}`;
+
+        // Pair / TF / cadence switch (or first run) — adopt the current
+        // slice as the baseline and wait for the NEXT segment boundary
+        // before firing. Avoids a spurious immediate fire mid-bar after
+        // flipping cadence dropdown from close→close+mid.
+        if (this.lastAnalysisContextKey !== ctxKey || this.lastAnalysisSlice === null) {
           this.lastAnalysisContextKey = ctxKey;
-          this.lastCandleBoundary = boundary;
+          this.lastAnalysisSlice = slice;
           return;
         }
 
-        if (boundary > this.lastCandleBoundary) {
-          this.lastCandleBoundary = boundary;
+        if (slice > this.lastAnalysisSlice) {
+          this.lastAnalysisSlice = slice;
           // Skip if a call (manual or prior live) is still in flight — the
-          // deep model takes 60-250s, longer than some timeframes; we'd
-          // rather miss a close than queue overlapping calls.
-          if (!this.analyzing()) this.runMarketAnalysis(true);
+          // deep model takes 60-250s, longer than some segments; we'd
+          // rather miss a fire than queue overlapping calls.
+          if (!this.analyzing()) {
+            const segmentIdx = ((slice % cadenceCount) + cadenceCount) % cadenceCount;
+            this.runMarketAnalysis(true, barPositionFor(cadenceCount, segmentIdx));
+          }
         }
       });
     });
@@ -2395,7 +2512,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
    *   call shouldn't interrupt the operator. When false (manual button)
    *   the modal opens as before.
    */
-  runMarketAnalysis(silent = false): void {
+  runMarketAnalysis(silent = false, barPosition: string = 'closed'): void {
     if (this.analyzing()) return;
     this.analyzing.set(true);
     if (!silent) {
@@ -2409,7 +2526,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     const reqTf = this.selectedTimeframe();
     const reqKey = this.pairKey(reqSym, reqTf);
     this.marketData
-      .analyzeMarket(reqSym, reqTf, this.signalAutoGenEnabled())
+      .analyzeMarket(reqSym, reqTf, this.signalAutoGenEnabled(), barPosition)
       .pipe(
         catchError((err) => {
           if (!silent) {
@@ -2445,11 +2562,40 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     this.liveAnalysisEnabled.set(next);
     this.persistGlobalToggle(LIVE_ANALYSIS_STORAGE_KEY, next);
     if (next) {
-      // Re-baseline the candle-close detector so the FIRST auto-run is the
-      // next close after enabling — not an immediate fire on the current,
-      // already-open candle.
-      this.lastCandleBoundary = null;
+      // Re-baseline the live-fire detector so the FIRST auto-run is the
+      // next segment boundary after enabling — not an immediate fire on
+      // the current, already-open segment.
+      this.lastAnalysisSlice = null;
       this.lastAnalysisContextKey = null;
+    }
+  }
+
+  /** Cadence dropdown change handler — persists the new choice and
+   *  re-baselines the slice tracker so the first fire under the new cadence
+   *  waits for its NEXT segment boundary (no surprise immediate fire on the
+   *  currently-open segment). */
+  setLiveCadence(next: LiveAnalysisCadence): void {
+    if (next === this.liveCadence()) return;
+    this.liveCadence.set(next);
+    try {
+      // persistGlobalToggle accepts booleans only — the cadence is a string
+      // enum so it's persisted directly. Same SSR / private-browser guard
+      // as the helper.
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(LIVE_CADENCE_STORAGE_KEY, next);
+      }
+    } catch {
+      /* storage full / disabled — operator just won't get persistence */
+    }
+    this.lastAnalysisSlice = null;
+    this.lastAnalysisContextKey = null;
+  }
+
+  /** Wraps {@link setLiveCadence} for the native `<select>` change event. */
+  onCadenceChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement | null)?.value;
+    if (value === 'close' || value === 'close+mid' || value === 'quarters') {
+      this.setLiveCadence(value);
     }
   }
 
@@ -2466,7 +2612,6 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     // toolbar pill kills auto-gen, the operator's only retrospective trail
     // (until they hit the modal warning next run) is this one-liner.
     if (!next) {
-       
       console.warn(
         '[trading-chart] Auto-gen signals turned OFF — subsequent spot analyses will not auto-create trade signals until you toggle it back on.',
       );
@@ -2706,6 +2851,14 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     const autoGen = localStorage.getItem(SIGNAL_AUTOGEN_STORAGE_KEY);
     if (autoGen === 'true' || autoGen === 'false')
       this.signalAutoGenEnabled.set(autoGen === 'true');
+
+    // Cadence dropdown — only accept the three known wire values. Anything
+    // else (including the legacy unset state) leaves the signal at its
+    // default `close` so existing sessions are unchanged by the upgrade.
+    const cadence = localStorage.getItem(LIVE_CADENCE_STORAGE_KEY);
+    if (cadence === 'close' || cadence === 'close+mid' || cadence === 'quarters') {
+      this.liveCadence.set(cadence);
+    }
 
     // Default the bubble to the SELECTED pair's last completed analysis.
     // loadChartConfig() runs on init and after every symbol/TF switch (with

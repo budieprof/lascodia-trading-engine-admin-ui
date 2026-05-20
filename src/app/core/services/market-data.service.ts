@@ -70,6 +70,7 @@ export class MarketDataService {
     symbol: string,
     timeframe: string,
     generateSignals = false,
+    barPosition = 'closed',
   ): Observable<ResponseData<MarketAnalysisResultDto>> {
     return this.api.post(`/market-data/analyze`, {
       symbol: this.formatSymbol(symbol),
@@ -77,6 +78,10 @@ export class MarketDataService {
       // When true the engine persists every viable recommendation as a live
       // trade signal (sentinel-owned, SpotAnalysis source). Default false.
       generateSignals,
+      // Where in the current bar we're firing — `closed` (just after close,
+      // default), `mid_25`, `mid_50`, `mid_75`. The engine reads this to
+      // frame the prompt so the model treats partial-bar OHLC correctly.
+      barPosition,
     });
   }
 
