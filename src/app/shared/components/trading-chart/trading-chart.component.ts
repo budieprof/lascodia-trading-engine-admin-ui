@@ -781,6 +781,59 @@ const LEGACY_LAST_ANALYSIS_KEY = 'tradingChart.lastAnalysis.v1';
                 </p>
               </section>
             }
+            <!-- Position management — LLM exit instructions, including
+                 server-rejected ones so the operator sees the model's full
+                 intent. Outcome chip is the source of truth (green = acted,
+                 amber = rate-limited / below-confidence, grey = position
+                 already closed, red = dispatch failure). -->
+            @if ((ar.exitInstructions?.length ?? 0) > 0) {
+              <section class="exit-card">
+                <header class="exit-head">
+                  <span class="exit-title">Position management</span>
+                  <span class="exit-meta">
+                    {{ ar.exitInstructions!.length }} instruction(s) ·
+                    {{ exitExecutedCount(ar) }} executed
+                  </span>
+                </header>
+                <ul class="exit-list">
+                  @for (e of ar.exitInstructions!; track e.positionId + '|' + e.action) {
+                    <li class="exit-row" [class.exit-row-rejected]="e.outcome !== 'Executed'">
+                      <span
+                        class="exit-outcome"
+                        [class.exit-outcome-ok]="e.outcome === 'Executed'"
+                        [class.exit-outcome-warn]="
+                          e.outcome === 'RateLimited' || e.outcome === 'BelowConfidence'
+                        "
+                        [class.exit-outcome-muted]="e.outcome === 'PositionClosed'"
+                        [class.exit-outcome-bad]="e.outcome === 'Failed'"
+                      >
+                        {{ exitOutcomeLabel(e.outcome) }}
+                      </span>
+                      <span class="exit-action">
+                        @if (e.action === 'close') {
+                          Close
+                          {{
+                            e.executedCloseLots !== null
+                              ? e.executedCloseLots + ' lots'
+                              : e.closeFractionPct + '%'
+                          }}
+                          of #{{ e.positionId }}
+                        } @else {
+                          Move stop on #{{ e.positionId }} to {{ e.newStopLoss }}
+                        }
+                      </span>
+                      <span class="exit-confidence">
+                        {{ (e.confidence * 100).toFixed(0) }}% confidence
+                      </span>
+                      <p class="exit-reason">{{ e.reason }}</p>
+                      @if (e.failureMessage; as fm) {
+                        <p class="exit-failure">{{ fm }}</p>
+                      }
+                    </li>
+                  }
+                </ul>
+              </section>
+            }
             <div class="analysis-body">{{ ar.analysis }}</div>
           } @else if (analysisError(); as err) {
             <header class="analysis-head">
@@ -1526,6 +1579,116 @@ const LEGACY_LAST_ANALYSIS_KEY = 'tradingChart.lastAnalysis.v1';
         line-height: 1.5;
         color: var(--text-secondary);
         font-style: italic;
+      }
+
+      /* Exit-instructions card — sits between the recommendation and the
+         prose body. One row per instruction; the outcome chip on the left
+         colour-codes whether the engine acted on it or rejected it. */
+      .exit-card {
+        margin: var(--space-3) var(--space-5) 0;
+        padding: var(--space-3) var(--space-4);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .exit-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--space-3);
+      }
+      .exit-title {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      .exit-meta {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .exit-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .exit-row {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: var(--space-2) var(--space-3);
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+      }
+      .exit-row-rejected {
+        opacity: 0.85;
+      }
+      .exit-outcome {
+        grid-column: 1;
+        align-self: center;
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        letter-spacing: 0.05em;
+        padding: 2px 6px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        color: var(--text-tertiary);
+        white-space: nowrap;
+      }
+      .exit-outcome-ok {
+        background: rgba(22, 163, 74, 0.12);
+        border-color: #16a34a;
+        color: #16a34a;
+      }
+      .exit-outcome-warn {
+        background: rgba(245, 158, 11, 0.1);
+        border-color: #f59e0b;
+        color: #f59e0b;
+      }
+      .exit-outcome-muted {
+        background: var(--bg-tertiary);
+        color: var(--text-tertiary);
+      }
+      .exit-outcome-bad {
+        background: rgba(220, 38, 38, 0.1);
+        border-color: #dc2626;
+        color: #dc2626;
+      }
+      .exit-action {
+        grid-column: 2;
+        align-self: center;
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+      }
+      .exit-confidence {
+        grid-column: 3;
+        align-self: center;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .exit-reason {
+        grid-column: 1 / -1;
+        margin: 0;
+        font-size: var(--text-xs);
+        line-height: 1.5;
+        color: var(--text-secondary);
+        font-style: italic;
+      }
+      .exit-failure {
+        grid-column: 1 / -1;
+        margin: 0;
+        font-size: var(--text-xs);
+        line-height: 1.5;
+        color: #dc2626;
       }
 
       .chart-toggles {
@@ -2634,6 +2797,32 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     if (recs.length === 0) return false;
     const generated = ar.generatedSignalIds ?? [];
     return generated.length === 0;
+  }
+
+  /** Count of exit instructions on a result that actually executed (vs.
+   *  rate-limited / below-confidence / failed). Surfaced in the section
+   *  header so the operator sees the executed-to-emitted ratio at a glance. */
+  exitExecutedCount(ar: MarketAnalysisResultDto): number {
+    return (ar.exitInstructions ?? []).filter((e) => e.outcome === 'Executed').length;
+  }
+
+  /** Friendly label for an exit-instruction outcome — the wire codes are
+   *  PascalCase compact identifiers; the UI shows a hyphenated form. */
+  exitOutcomeLabel(outcome: string): string {
+    switch (outcome) {
+      case 'Executed':
+        return 'EXECUTED';
+      case 'RateLimited':
+        return 'RATE-LIMITED';
+      case 'BelowConfidence':
+        return 'LOW CONFIDENCE';
+      case 'PositionClosed':
+        return 'POSITION CLOSED';
+      case 'Failed':
+        return 'FAILED';
+      default:
+        return outcome.toUpperCase();
+    }
   }
 
   /** Bubble click → open the last completed analysis in the modal. */

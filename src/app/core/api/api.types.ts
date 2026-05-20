@@ -2081,6 +2081,44 @@ export interface MarketAnalysisResultDto {
   /** Ids of trade signals persisted from the viable subset when the
    *  auto-generate-signals toggle was on. Empty/absent otherwise. */
   generatedSignalIds?: number[] | null;
+  /** LLM-emitted position-management instructions for any open
+   *  SpotAnalysis-source positions on this symbol. Every instruction the
+   *  model emitted is mirrored here, including ones the server rejected
+   *  (RateLimited / BelowConfidence / PositionClosed / Failed), so the UI
+   *  can show the LLM's full intent and explain rejections. Empty/absent
+   *  when the model chose not to act on any open positions. */
+  exitInstructions?: MarketAnalysisExitInstructionDto[] | null;
+}
+
+/** Position-management instruction the LLM emitted in its
+ *  <<<EXIT_INSTRUCTIONS_JSON>>> block, mirrored back to the UI with the
+ *  server's dispatch outcome. */
+export interface MarketAnalysisExitInstructionDto {
+  /** Target position id. Matches the openPositions entry the LLM was shown. */
+  positionId: number;
+  /** "close" — partial or full close. "moveStop" — move SL to lock in profit. */
+  action: 'close' | 'moveStop';
+  /** For action = "close": the LLM-requested fraction in [1, 100]. */
+  closeFractionPct: number | null;
+  /** For action = "moveStop": the new SL price. */
+  newStopLoss: number | null;
+  /** LLM-reported confidence [0, 1]. Server floor: 0.60. */
+  confidence: number;
+  /** One-sentence rationale (max 200 chars on the wire). */
+  reason: string;
+  /** Dispatch outcome — one of:
+   *   - "Executed"        — close / modify command dispatched successfully.
+   *   - "RateLimited"     — 30-min per-position cooldown not elapsed.
+   *   - "BelowConfidence" — below the 0.60 confidence floor.
+   *   - "PositionClosed"  — position closed between snapshot and dispatch.
+   *   - "Failed"          — validation / dispatch error (see failureMessage). */
+  outcome: 'Executed' | 'RateLimited' | 'BelowConfidence' | 'PositionClosed' | 'Failed';
+  /** For action = "close" + outcome = "Executed": the actual lots closed
+   *  after broker-lot-step snap (may differ slightly from the LLM's intent). */
+  executedCloseLots: number | null;
+  /** Populated when outcome ≠ "Executed" with a reason the operator can
+   *  surface — e.g. "Cooldown active — last executed action 12 min ago…". */
+  failureMessage: string | null;
 }
 
 /** Operator-actionable trade decision parsed from the analysis. Price fields
