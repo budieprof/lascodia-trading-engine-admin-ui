@@ -653,6 +653,29 @@ const LEGACY_LAST_ANALYSIS_KEY = 'tradingChart.lastAnalysis.v1';
                 ×
               </button>
             </header>
+            <!-- Auto-gen explainer: when the analysis returned viable
+                 setups but the toggle was OFF at request time, no signal
+                 was persisted. Fail loud so the operator doesn't assume the
+                 engine silently skipped — and give them the one-click way to
+                 turn it on for next time. Visibility is purely client-side:
+                 generatedSignalIds is server-truth, signalAutoGenEnabled() is
+                 the toolbar's current state. -->
+            @if (showAutoGenWarning(ar)) {
+              <section class="rec-autogen-warn" role="status">
+                <span class="warn-icon" aria-hidden="true">⚠</span>
+                <div class="warn-body">
+                  <strong>Auto-gen was off — no signal was created.</strong>
+                  <span class="warn-muted">
+                    Toggle <em>Auto-gen signals</em> on the toolbar to have the engine persist
+                    viable setups automatically next time, or use <em>Create Signal</em> below to
+                    file this one manually.
+                  </span>
+                </div>
+                <button type="button" class="warn-action" (click)="toggleSignalAutoGen()">
+                  Turn on
+                </button>
+              </section>
+            }
             @if (ar.recommendation; as rec) {
               <section
                 class="rec-card"
@@ -1277,6 +1300,64 @@ const LEGACY_LAST_ANALYSIS_KEY = 'tradingChart.lastAnalysis.v1';
       }
       dialog.analysis-dialog.error .analysis-body {
         color: #ff3b30;
+      }
+
+      /* Auto-gen-off warning ribbon. Slots between the header and the
+         recommendation card. Amber accent so it reads as guidance, not
+         failure — the analysis itself succeeded; only the persistence step
+         was skipped by operator-controlled state. */
+      .rec-autogen-warn {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--space-3);
+        margin: var(--space-3) var(--space-5) 0;
+        padding: var(--space-3) var(--space-4);
+        border: 1px solid #f59e0b;
+        border-left-width: 4px;
+        border-radius: var(--radius-sm);
+        background: rgba(245, 158, 11, 0.08);
+        color: var(--text-primary);
+      }
+      .rec-autogen-warn .warn-icon {
+        font-size: var(--text-base);
+        line-height: 1.4;
+        color: #f59e0b;
+      }
+      .rec-autogen-warn .warn-body {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        flex: 1 1 auto;
+        font-size: var(--text-xs);
+        line-height: 1.5;
+      }
+      .rec-autogen-warn .warn-body strong {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .rec-autogen-warn .warn-muted {
+        color: var(--text-tertiary);
+      }
+      .rec-autogen-warn .warn-muted em {
+        font-style: normal;
+        color: var(--text-primary);
+        font-weight: var(--font-medium);
+      }
+      .rec-autogen-warn .warn-action {
+        flex: 0 0 auto;
+        align-self: center;
+        padding: 4px var(--space-3);
+        border: 1px solid #f59e0b;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: #f59e0b;
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .rec-autogen-warn .warn-action:hover {
+        background: rgba(245, 158, 11, 0.12);
       }
 
       /* Trade recommendation card — renders between the head and the prose
@@ -2380,6 +2461,34 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     const next = !this.signalAutoGenEnabled();
     this.signalAutoGenEnabled.set(next);
     this.persistGlobalToggle(SIGNAL_AUTOGEN_STORAGE_KEY, next);
+    // Console breadcrumb when the toggle flips OFF. The state lives in
+    // localStorage and is silent everywhere else; if a stray click on the
+    // toolbar pill kills auto-gen, the operator's only retrospective trail
+    // (until they hit the modal warning next run) is this one-liner.
+    if (!next) {
+       
+      console.warn(
+        '[trading-chart] Auto-gen signals turned OFF — subsequent spot analyses will not auto-create trade signals until you toggle it back on.',
+      );
+    }
+  }
+
+  /**
+   * Should the "auto-gen was off" warning ribbon show on the analysis modal?
+   * Fires when ALL of:
+   *   - the analysis produced at least one recommendation, AND
+   *   - the server persisted no signal from it (generatedSignalIds empty), AND
+   *   - the toolbar toggle is currently OFF (the proximate cause).
+   * Doesn't fire when generatedSignalIds is non-empty (success) or when the
+   * toggle is ON but the viability gate filtered everything (genuine engine-
+   * side rejection — the operator should investigate the setup, not the UI).
+   */
+  showAutoGenWarning(ar: MarketAnalysisResultDto): boolean {
+    if (this.signalAutoGenEnabled()) return false;
+    const recs = ar.recommendations ?? (ar.recommendation ? [ar.recommendation] : []);
+    if (recs.length === 0) return false;
+    const generated = ar.generatedSignalIds ?? [];
+    return generated.length === 0;
   }
 
   /** Bubble click → open the last completed analysis in the modal. */
