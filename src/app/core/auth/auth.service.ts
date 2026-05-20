@@ -1,6 +1,6 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { Observable, catchError, map, of, tap } from 'rxjs';
+import { Observable, catchError, defer, map, of, shareReplay, tap } from 'rxjs';
 import { ApiService } from '../api/api.service';
 import { TokenResponseDto } from '../api/api.types';
 import { decodeJwt, rolesFromPayload } from './jwt';
@@ -95,6 +95,23 @@ const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 const ACTIVITY_THROTTLE_MS = 30 * 1000;
 const IDLE_CHECK_INTERVAL_MS = 60 * 1000;
 
+// ── Token-refresh tunables ────────────────────────────────────────────
+// Schedule the proactive refresh this far ahead of the JWT's `exp`. Keep it
+// generous enough to absorb a slow round-trip + network blip yet not so wide
+// that the new token is itself ~ as old as the one it replaced.
+const REFRESH_LEAD_MS = 5 * 60 * 1000; // 5 minutes
+// Floor on the timer — never schedule under 30s so a token issued with an
+// implausibly tight exp (clock skew, dev shorts) still gives the app room to
+// breathe before re-firing.
+const REFRESH_MIN_DELAY_MS = 30 * 1000;
+// Cookie-session fallback cadence: when the JWT lives in an HttpOnly cookie
+// we can't read `exp`. The engine default exp is 8h; refreshing every hour
+// keeps the session indefinitely fresh with minimal extra traffic.
+const REFRESH_COOKIE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+// Sentinel used when the JWT lives only in the HttpOnly cookie (the JS layer
+// has no readable token string). Kept in sync with `probeCookieSession()`.
+const COOKIE_SESSION_SENTINEL = 'cookie-session';
+
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly api = inject(ApiService);
@@ -132,6 +149,20 @@ export class AuthService {
   private activityListenersBound = false;
   private idleIntervalId: ReturnType<typeof setInterval> | null = null;
 
+  /**
+   * Pending pro-active token-refresh handle. Scheduled by `scheduleRefresh()`
+   * to fire ~5 min before the JWT's `exp` so the operator never sees their
+   * session blink — and re-armed by the refresh response. Cleared on logout
+   * and on every reschedule.
+   */
+  private refreshTimerId: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * De-duped in-flight refresh. The 401-fallback interceptor and the
+   * proactive timer can race; sharing the same observable means concurrent
+   * callers all see the same outcome and the engine only sees one POST.
+   */
+  private refreshInFlight$: Observable<string | null> | null = null;
+
   constructor() {
     // Mirror signal state to sessionStorage whenever it changes.
     effect(() => {
@@ -156,6 +187,12 @@ export class AuthService {
       this.clearSession();
     } else if (this.isAuthenticated()) {
       this.startIdleWatch();
+      // Arm the proactive refresh from the restored token's `exp`. If the
+      // token is already past expiry (laptop slept overnight), schedule
+      // immediately — the handler grants up to RefreshGraceDays of headroom
+      // on the server side. If we can't read `exp` (cookie session), the
+      // fallback interval still keeps the cookie alive.
+      this.scheduleRefresh();
     }
   }
 
@@ -180,6 +217,7 @@ export class AuthService {
             });
             this.touchActivity();
             this.startIdleWatch();
+            this.scheduleRefresh();
           }
         }),
       );
@@ -203,7 +241,7 @@ export class AuthService {
             // Sentinel token — the real JWT lives in the HttpOnly cookie,
             // unreadable from JS. `isAuthenticated` flips true; HTTP calls
             // ride the cookie via `withCredentials`.
-            if (!this._token()) this._token.set('cookie-session');
+            if (!this._token()) this._token.set(COOKIE_SESSION_SENTINEL);
             this._cookieRoles.set(res.data.roles);
             this._user.set({
               passportId: String(res.data.tradingAccountId),
@@ -213,6 +251,7 @@ export class AuthService {
             });
             this.touchActivity();
             this.startIdleWatch();
+            this.scheduleRefresh();
           }
         }),
         map((res) => res?.data ?? null),
@@ -263,6 +302,7 @@ export class AuthService {
             });
             this.touchActivity();
             this.startIdleWatch();
+            this.scheduleRefresh();
           }
         }),
       );
@@ -312,6 +352,99 @@ export class AuthService {
     return roles.some((r) => mine.includes(r));
   }
 
+  // ── Token-refresh plumbing ─────────────────────────────────────────
+
+  /**
+   * Force a token refresh now. De-duped: concurrent callers share the same
+   * in-flight observable so the engine only sees one POST per cycle. Emits
+   * the new token string on success (or the cookie sentinel for cookie
+   * sessions) and `null` on any failure — the 401-fallback interceptor uses
+   * the null branch as its signal to actually log out.
+   */
+  refreshToken(): Observable<string | null> {
+    if (this.refreshInFlight$) return this.refreshInFlight$;
+
+    const current = this._token();
+    // Cookie-only sessions: don't send a sentinel up the wire. The engine's
+    // refresh endpoint will read the lascodia-auth cookie via `withCredentials`.
+    const body = current && current !== COOKIE_SESSION_SENTINEL ? { token: current } : {};
+
+    this.refreshInFlight$ = defer(() =>
+      this.api.post<{
+        data: { token: string; expiresAt: string; tokenType: string } | null;
+        status: boolean;
+        message: string | null;
+      }>('/auth/refresh', body),
+    ).pipe(
+      map((res) => {
+        if (!res?.status || !res.data?.token) return null;
+        const newToken = res.data.token;
+        this._token.set(newToken);
+        this.touchActivity();
+        this.scheduleRefresh();
+        return newToken;
+      }),
+      catchError(() => of(null)),
+      tap({
+        next: () => {
+          this.refreshInFlight$ = null;
+        },
+        error: () => {
+          this.refreshInFlight$ = null;
+        },
+      }),
+      shareReplay({ bufferSize: 1, refCount: false }),
+    );
+
+    return this.refreshInFlight$;
+  }
+
+  /**
+   * Arms a single setTimeout to fire `REFRESH_LEAD_MS` before the JWT's
+   * `exp`. Reads `exp` from the current token; for cookie sessions (no
+   * readable token), falls back to a fixed hourly cadence. Idempotent —
+   * any prior timer is cancelled before the new one is armed.
+   */
+  private scheduleRefresh(): void {
+    this.cancelRefresh();
+
+    const token = this._token();
+    if (!token) return;
+
+    // Cookie session: we can't read `exp`, so refresh on a fixed cadence.
+    if (token === COOKIE_SESSION_SENTINEL) {
+      this.refreshTimerId = setTimeout(
+        () => this.refreshToken().subscribe(),
+        REFRESH_COOKIE_INTERVAL_MS,
+      );
+      return;
+    }
+
+    const payload = decodeJwt(token);
+    const expSeconds = payload?.exp;
+    if (!expSeconds || !Number.isFinite(expSeconds)) {
+      // Token without an `exp` claim shouldn't happen for engine-issued JWTs,
+      // but fall back to the cookie cadence so we never silently stop refreshing.
+      this.refreshTimerId = setTimeout(
+        () => this.refreshToken().subscribe(),
+        REFRESH_COOKIE_INTERVAL_MS,
+      );
+      return;
+    }
+
+    const expMs = expSeconds * 1000;
+    const now = Date.now();
+    const delay = Math.max(expMs - now - REFRESH_LEAD_MS, REFRESH_MIN_DELAY_MS);
+    this.refreshTimerId = setTimeout(() => this.refreshToken().subscribe(), delay);
+  }
+
+  private cancelRefresh(): void {
+    if (this.refreshTimerId !== null) {
+      clearTimeout(this.refreshTimerId);
+      this.refreshTimerId = null;
+    }
+  }
+
   // ── Idle-timeout plumbing ──────────────────────────────────────────
 
   private clearSession(): void {
@@ -319,6 +452,8 @@ export class AuthService {
     this._user.set(null);
     this.removeSession(LAST_ACTIVITY_KEY);
     this.stopIdleWatch();
+    this.cancelRefresh();
+    this.refreshInFlight$ = null;
   }
 
   private isIdleExpired(): boolean {

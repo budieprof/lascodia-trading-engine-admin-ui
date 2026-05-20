@@ -1,9 +1,23 @@
 import { inject } from '@angular/core';
-import { HttpInterceptorFn, HttpErrorResponse } from '@angular/common/http';
-import { catchError, throwError } from 'rxjs';
+import { HttpInterceptorFn, HttpErrorResponse, HttpRequest } from '@angular/common/http';
+import { catchError, switchMap, throwError } from 'rxjs';
 import { AuthService } from './auth.service';
 import { NotificationService } from '../notifications/notification.service';
 import { ResponseData } from '../api/api.types';
+
+/**
+ * Paths we never try to silently refresh on a 401 — refreshing during login
+ * or refresh itself would loop forever, and the logout endpoint failing with
+ * 401 just means the server has already moved on (no need to fight it).
+ */
+const REFRESH_EXEMPT = ['/auth/login', '/auth/refresh', '/auth/logout', '/auth/token'];
+
+function shouldAttemptRefresh(req: HttpRequest<unknown>): boolean {
+  // Marker header set by the retried request — never refresh more than once
+  // per original call to avoid recursive loops on a genuinely-bad token.
+  if (req.headers.has('X-Skip-Auth-Retry')) return false;
+  return !REFRESH_EXEMPT.some((p) => req.url.includes(p));
+}
 
 export const errorInterceptor: HttpInterceptorFn = (req, next) => {
   const authService = inject(AuthService);
@@ -12,6 +26,37 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
   return next(req).pipe(
     catchError((error: HttpErrorResponse) => {
       if (error.status === 401) {
+        // Try to silently renew the session before giving up. The product
+        // requirement is "never log me out automatically" — every 401 first
+        // gets one refresh attempt; only if refresh ITSELF fails do we tear
+        // the session down and route to /login.
+        if (shouldAttemptRefresh(req)) {
+          return authService.refreshToken().pipe(
+            switchMap((newToken) => {
+              if (!newToken) {
+                // Refresh failed too — the token is genuinely beyond saving
+                // (jti revoked, past grace window, account deactivated).
+                // This is the only path that drops the session.
+                authService.logout();
+                notificationService.error('Session expired. Please log in again.');
+                return throwError(() => error);
+              }
+              // Re-issue the original request with the fresh bearer attached
+              // and an X-Skip-Auth-Retry marker so a *second* 401 from the
+              // retry doesn't kick off another refresh cycle.
+              const retried = req.clone({
+                setHeaders: {
+                  Authorization: `Bearer ${newToken}`,
+                  'X-Skip-Auth-Retry': '1',
+                },
+              });
+              return next(retried);
+            }),
+          );
+        }
+
+        // Refresh-exempt path (login/refresh/logout itself) hit a 401 — fall
+        // through to the legacy "session expired" toast + logout flow.
         authService.logout();
         notificationService.error('Session expired. Please log in again.');
         return throwError(() => error);
