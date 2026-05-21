@@ -468,7 +468,14 @@ export interface TradeSignalDto {
   direction: TradeDirection;
   entryPrice: number;
   stopLoss: number | null;
+  /** The EXECUTED take-profit — already shrunk if the engine's
+   *  SpotAnalysisTakeProfitShrinkage applied. Compare against
+   *  `originalTakeProfit` to see whether shrinkage moved it. */
   takeProfit: number | null;
+  /** The LLM's pre-shrinkage take-profit. Non-null only on SpotAnalysis-source
+   *  signals whose TP was shrunk before persistence; null for everything else.
+   *  When present, the detail panel shows both original and executed TP. */
+  originalTakeProfit: number | null;
   suggestedLotSize: number;
   confidence: number;
   mlPredictedDirection: TradeDirection;

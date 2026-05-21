@@ -226,6 +226,23 @@ type DirectionChip = 'all' | TradeDirection;
                   <dt>Take profit</dt>
                   <dd class="mono">
                     {{ s.takeProfit !== null ? (s.takeProfit | number: '1.4-5') : '—' }}
+                    @if (s.originalTakeProfit !== null && s.originalTakeProfit !== s.takeProfit) {
+                      <!-- Engine shrunk the LLM's TP via SpotAnalysisTakeProfitShrinkage.
+                           Show the original underneath so the operator sees the
+                           LLM's intent vs the executed plan. -->
+                      <span
+                        class="tp-original"
+                        [title]="
+                          'LLM proposed ' +
+                          (s.originalTakeProfit | number: '1.4-5') +
+                          ' — shrunk to ' +
+                          (s.takeProfit | number: '1.4-5') +
+                          ' before the signal was filed.'
+                        "
+                      >
+                        LLM original: {{ s.originalTakeProfit | number: '1.4-5' }}
+                      </span>
+                    }
                   </dd>
                 </div>
                 <div>
@@ -577,6 +594,17 @@ type DirectionChip = 'all' | TradeDirection;
       .drawer-grid dd.mono {
         font-family: 'SF Mono', 'Fira Code', monospace;
         font-size: var(--text-xs);
+      }
+      /* Pre-shrinkage TP shown under the executed Take profit value when the
+         engine's SpotAnalysisTakeProfitShrinkage moved it. Muted + smaller so
+         the executed value stays the primary read; tooltip carries the full
+         explanation. */
+      .tp-original {
+        display: block;
+        margin-top: 2px;
+        font-size: 10px;
+        color: var(--text-tertiary);
+        cursor: help;
       }
       .drawer-grid dd.buy {
         color: var(--profit);
