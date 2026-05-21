@@ -2127,10 +2127,20 @@ export interface MarketAnalysisRecommendationDto {
   action: 'Buy' | 'Sell' | 'Hold';
   entryPrice: number | null;
   stopLoss: number | null;
+  /** The TP that was actually persisted on the TradeSignal. When
+   *  `originalTakeProfit` is non-null, this is the shrunk value (the engine's
+   *  SpotAnalysisTakeProfitShrinkage knob has been applied). When
+   *  `originalTakeProfit` is null, `takeProfit` is the LLM's verbatim TP. */
   takeProfit: number | null;
   /** Self-reported probability the trade plays out, [0, 1]. */
   confidence: number;
   rationale: string;
+  /** The LLM's emitted TP before the engine's SpotAnalysisTakeProfitShrinkage
+   *  was applied. Null when shrinkage was disabled, the recommendation
+   *  was a Hold, or the signal didn't end up being persisted (e.g. dropped
+   *  by the viability gate). Surfaced on the modal as a transparency note
+   *  alongside the actual executed TP. */
+  originalTakeProfit?: number | null;
 }
 
 /** Structured multi-week → multi-month posture parsed from the macro

@@ -758,6 +758,24 @@ const LEGACY_LAST_ANALYSIS_KEY = 'tradingChart.lastAnalysis.v1';
                     <div class="rec-level">
                       <span class="rec-label">Target</span>
                       <span class="rec-value">{{ rec.takeProfit }}</span>
+                      @if (rec.originalTakeProfit && rec.originalTakeProfit !== rec.takeProfit) {
+                        <!-- Engine shrunk the LLM's TP via the
+                             SpotAnalysisTakeProfitShrinkage knob (default
+                             80% of distance) — show both so the operator
+                             sees the LLM's intent vs the executed plan. -->
+                        <span
+                          class="rec-sub"
+                          [title]="
+                            'LLM proposed ' +
+                            rec.originalTakeProfit +
+                            ' — shrunk to ' +
+                            rec.takeProfit +
+                            ' before filing the signal.'
+                          "
+                        >
+                          LLM: {{ rec.originalTakeProfit }}
+                        </span>
+                      }
                     </div>
                     @if (recRiskReward(rec); as rr) {
                       <div class="rec-level">
@@ -1572,6 +1590,17 @@ const LEGACY_LAST_ANALYSIS_KEY = 'tradingChart.lastAnalysis.v1';
         font-size: var(--text-sm);
         font-variant-numeric: tabular-nums;
         color: var(--text-primary);
+      }
+      /* Transparency note below the Target row when the engine shrunk the
+         LLM's TP. The tooltip on the chip carries the full explanation;
+         here we just label it 'LLM: <orig>' to keep the row compact. */
+      .rec-sub {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: 10px;
+        color: var(--text-tertiary);
+        margin-top: 2px;
+        font-variant-numeric: tabular-nums;
+        cursor: help;
       }
       .rec-rationale {
         margin: 0;
