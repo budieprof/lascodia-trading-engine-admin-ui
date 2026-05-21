@@ -237,10 +237,15 @@ type DirectionChip = 'all' | TradeDirection;
                           (s.originalTakeProfit | number: '1.4-5') +
                           ' — shrunk to ' +
                           (s.takeProfit | number: '1.4-5') +
-                          ' before the signal was filed.'
+                          ' (' +
+                          (tpReductionPct(s) ?? '0%') +
+                          ' reduction of the profit-target distance) before the signal was filed.'
                         "
                       >
                         LLM original: {{ s.originalTakeProfit | number: '1.4-5' }}
+                        @if (tpReductionPct(s); as pct) {
+                          <span class="tp-reduction">−{{ pct }}</span>
+                        }
                       </span>
                     }
                   </dd>
@@ -605,6 +610,16 @@ type DirectionChip = 'all' | TradeDirection;
         font-size: 10px;
         color: var(--text-tertiary);
         cursor: help;
+      }
+      /* Reduction-percentage chip next to the LLM-original price. Amber so it
+         reads as an operator-applied adjustment, not an error. */
+      .tp-reduction {
+        margin-left: 4px;
+        padding: 0 4px;
+        border-radius: var(--radius-sm);
+        background: rgba(245, 158, 11, 0.12);
+        color: #f59e0b;
+        font-weight: var(--font-semibold);
       }
       .drawer-grid dd.buy {
         color: var(--profit);
@@ -1188,6 +1203,32 @@ export class SignalsPageComponent {
     const reward = Math.abs(s.takeProfit - s.entryPrice);
     if (risk === 0) return '—';
     return `1:${(reward / risk).toFixed(2)}`;
+  }
+
+  /**
+   * Reduction percentage the engine's TP shrinkage applied to this signal,
+   * computed live from the stored prices (no dependency on the current
+   * config value — reflects what was actually applied at generation time).
+   * Returns e.g. "20%" when the executed TP distance is 80% of the LLM's
+   * original. Null when the signal wasn't shrunk (no originalTakeProfit, or
+   * it equals takeProfit) or the math is undefined.
+   */
+  tpReductionPct(s: TradeSignalDto | null): string | null {
+    if (
+      !s ||
+      s.takeProfit === null ||
+      s.originalTakeProfit === null ||
+      s.originalTakeProfit === s.takeProfit
+    ) {
+      return null;
+    }
+    const origDist = Math.abs(s.originalTakeProfit - s.entryPrice);
+    const execDist = Math.abs(s.takeProfit - s.entryPrice);
+    if (origDist === 0) return null;
+    const reductionPct = (1 - execDist / origDist) * 100;
+    // Round to a whole percent — shrinkage values are coarse (0.5 / 0.7 /
+    // 0.8) so the reduction always lands on a clean integer in practice.
+    return `${Math.round(reductionPct)}%`;
   }
 }
 
