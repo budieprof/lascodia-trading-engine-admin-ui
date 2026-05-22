@@ -2138,26 +2138,112 @@ export interface SpotAnalysisListItemDto {
 
 /** Window-wide roll-up for the Spot Analysis Report KPI strip — aggregated
  *  over the FULL filtered set (not just the current page) so the KPIs stay
- *  stable as the operator pages through. */
+ *  stable as the operator pages through. profitableAnalyses counts analyses
+ *  whose attributed total P&L is positive; combined with the other fields it
+ *  drives the funnel (analyses → signals → positions → profitable) and the
+ *  efficiency KPIs (win-rate, cost-per-signal, cost-per-profitable-trade). */
 export interface SpotAnalysisSummaryDto {
   analyses: number;
   totalCostUsd: number;
   avgLatencyMs: number;
   signalsCreated: number;
   positionsOpened: number;
+  positionsClosed: number;
+  profitableAnalyses: number;
   realizedPnl: number;
   unrealizedPnl: number;
   totalPnl: number;
 }
 
+/** One point on the cumulative-P&L time series — one entry per analysis in
+ *  the window, sorted ascending by invokedAt. The UI accumulates totalPnl
+ *  for the chart. */
+export interface SpotAnalysisTimePointDto {
+  invokedAt: string;
+  totalPnl: number;
+}
+
 /** Spot Analysis Report response — one page of rows plus the window-wide
- *  summary and pager. Returned by POST /market-data/spot-analyses/list. */
+ *  summary, pager, and a lightweight per-analysis P&L time series for the
+ *  cumulative-P&L chart. Returned by POST /market-data/spot-analyses/list. */
 export interface SpotAnalysisReportDto {
   items: SpotAnalysisListItemDto[];
   currentPage: number;
   pageSize: number;
   totalItems: number;
   summary: SpotAnalysisSummaryDto;
+  timeSeries: SpotAnalysisTimePointDto[];
+}
+
+/** Full detail of one spot analysis — replayed prose, structured
+ *  recommendations, and every artefact attributed to the analysis. Returned
+ *  by GET /market-data/spot-analyses/{id}. Drives the report drawer drill-down. */
+export interface SpotAnalysisDetailDto {
+  id: number;
+  invokedAt: string;
+  symbol: string;
+  timeframe: string;
+  barPosition: string;
+  provider: string;
+  model: string;
+  latencyMs: number;
+  costUsd: number;
+  tokensInput: number;
+  tokensOutput: number;
+  outcome: string;
+  errorMessage: string | null;
+  /** Replayed prose brief — exactly what the operator originally saw. */
+  analysis: string;
+  /** Primary (best) recommendation — mirrors recommendations[0] for back-compat. */
+  recommendation: MarketAnalysisRecommendationDto | null;
+  recommendations: MarketAnalysisRecommendationDto[];
+  signals: SpotAnalysisDetailSignalDto[];
+  positions: SpotAnalysisDetailPositionDto[];
+  exitInstructions: SpotAnalysisDetailExitDto[];
+}
+
+export interface SpotAnalysisDetailSignalDto {
+  id: number;
+  symbol: string;
+  direction: string;
+  status: string;
+  entryPrice: number;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  originalTakeProfit: number | null;
+  confidence: number;
+  generatedAt: string;
+  expiresAt: string;
+  rejectionReason: string | null;
+}
+
+export interface SpotAnalysisDetailPositionDto {
+  id: number;
+  symbol: string;
+  direction: string;
+  status: string;
+  openLots: number;
+  averageEntryPrice: number;
+  currentPrice: number | null;
+  realizedPnL: number;
+  unrealizedPnL: number;
+  openedAt: string;
+  closedAt: string | null;
+}
+
+export interface SpotAnalysisDetailExitDto {
+  id: number;
+  positionId: number;
+  decisionType: string;
+  closeFractionPct: number | null;
+  closeLots: number | null;
+  newStopLoss: number | null;
+  confidence: number;
+  reason: string;
+  status: string;
+  failureMessage: string | null;
+  decidedAt: string;
+  executedAt: string | null;
 }
 
 /** Position-management instruction the LLM emitted in its

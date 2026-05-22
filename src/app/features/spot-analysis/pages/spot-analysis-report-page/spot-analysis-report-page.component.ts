@@ -8,14 +8,21 @@ import {
 } from '@angular/core';
 import { CurrencyPipe, DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import type { EChartsOption } from 'echarts';
 import { catchError, of } from 'rxjs';
 
 import { SpotAnalysisService } from '@core/services/spot-analysis.service';
-import { SpotAnalysisListItemDto, SpotAnalysisSummaryDto } from '@core/api/api.types';
+import {
+  SpotAnalysisListItemDto,
+  SpotAnalysisSummaryDto,
+  SpotAnalysisDetailDto,
+  SpotAnalysisTimePointDto,
+} from '@core/api/api.types';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
+import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 
-/** Rolling-window options for the report. */
+/** Rolling-window options. */
 const WINDOWS: { label: string; hours: number }[] = [
   { label: '24h', hours: 24 },
   { label: '7d', hours: 168 },
@@ -32,6 +39,8 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
   avgLatencyMs: 0,
   signalsCreated: 0,
   positionsOpened: 0,
+  positionsClosed: 0,
+  profitableAnalyses: 0,
   realizedPnl: 0,
   unrealizedPnl: 0,
   totalPnl: 0,
@@ -41,7 +50,9 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
  * Spot Analysis Report — server-paginated ledger of every `market_analysis.spot`
  * run with the trade outcomes attributed to it. KPIs come from the server-side
  * window-wide summary so they stay stable across pages; the table renders one
- * page at a time and the operator pages through with the controls below it.
+ * page at a time; the cumulative-P&L chart is computed from the per-analysis
+ * time series the server returns. The drawer fetches full detail (prose +
+ * recommendations + linked signals/positions + exit instructions) on row click.
  */
 @Component({
   selector: 'app-spot-analysis-report-page',
@@ -54,6 +65,7 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
     FormsModule,
     PageHeaderComponent,
     MetricCardComponent,
+    ChartCardComponent,
   ],
   template: `
     <div class="page">
@@ -87,14 +99,24 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
         </div>
       </app-page-header>
 
+      <!-- Funnel: where setups die. Counts + conversion % between stages. -->
+      <div class="funnel" role="group" aria-label="Analysis funnel">
+        @for (s of funnelStages(); track s.label; let last = $last) {
+          <div class="funnel-stage">
+            <div class="funnel-label">{{ s.label }}</div>
+            <div class="funnel-value mono">{{ s.value | number }}</div>
+            @if (s.pct !== null) {
+              <div class="funnel-pct muted">{{ s.pct | number: '1.0-1' }}% of {{ s.pctOf }}</div>
+            }
+          </div>
+          @if (!last) {
+            <div class="funnel-arrow" aria-hidden="true">→</div>
+          }
+        }
+      </div>
+
       <!-- KPI strip — driven by the server's window-wide summary -->
       <div class="kpi-grid">
-        <app-metric-card
-          label="Analyses"
-          [value]="summary().analyses"
-          format="number"
-          dotColor="#0071E3"
-        />
         <app-metric-card
           label="LLM spend"
           [value]="summary().totalCostUsd"
@@ -108,26 +130,32 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
           dotColor="#8E8E93"
         />
         <app-metric-card
-          label="Signals created"
-          [value]="summary().signalsCreated"
-          format="number"
-          dotColor="#34C759"
+          label="Win rate"
+          [value]="kpiWinRatePct()"
+          format="percent"
+          [colorByValue]="true"
         />
         <app-metric-card
-          label="Positions opened"
-          [value]="summary().positionsOpened"
-          format="number"
-          dotColor="#5856D6"
-        />
-        <app-metric-card
-          label="Realized P&L"
-          [value]="summary().realizedPnl"
+          label="Avg P&L / analysis"
+          [value]="kpiAvgPnlPerAnalysis()"
           format="currency"
           [colorByValue]="true"
         />
         <app-metric-card
-          label="Unrealized P&L"
-          [value]="summary().unrealizedPnl"
+          label="Cost / signal"
+          [value]="kpiCostPerSignal()"
+          format="currency"
+          dotColor="#5856D6"
+        />
+        <app-metric-card
+          label="Cost / profitable trade"
+          [value]="kpiCostPerProfitable()"
+          format="currency"
+          dotColor="#AF52DE"
+        />
+        <app-metric-card
+          label="Realized P&L"
+          [value]="summary().realizedPnl"
           format="currency"
           [colorByValue]="true"
         />
@@ -139,11 +167,20 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
         />
       </div>
 
+      <!-- Cumulative P&L over the window -->
+      <app-chart-card
+        title="Cumulative P&L"
+        subtitle="Each tick is one analysis; the line accumulates attributed P&L over the window"
+        [options]="pnlChart()"
+        height="240px"
+        [loading]="loading()"
+      />
+
       @if (error(); as e) {
         <div class="error-banner">{{ e }}</div>
       }
 
-      <!-- Dense ledger — current page only; the controls below page through -->
+      <!-- Dense ledger — current page only -->
       <div class="table-wrap">
         <table class="dense">
           <thead>
@@ -168,7 +205,7 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
           </thead>
           <tbody>
             @for (r of items(); track r.id) {
-              <tr (click)="selectedDetail.set(r)" class="row">
+              <tr (click)="openDetail(r)" class="row">
                 <td class="mono">{{ r.invokedAt | date: 'MMM d, HH:mm' }}</td>
                 <td class="strong">{{ r.symbol }}</td>
                 <td>{{ r.timeframe }}</td>
@@ -229,7 +266,7 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
         </table>
       </div>
 
-      <!-- Server-side pagination controls -->
+      <!-- Pagination -->
       <div class="pager">
         <div class="pager-info muted">{{ rangeLabel() }} of {{ totalItems() }} analyses</div>
         <div class="pager-controls">
@@ -243,7 +280,6 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
               <option [ngValue]="s">{{ s }}</option>
             }
           </select>
-
           <button
             class="btn page-btn"
             type="button"
@@ -281,131 +317,231 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
       </div>
     </div>
 
-    <!-- Detail drawer -->
-    @if (selectedDetail(); as d) {
-      <div class="drawer-backdrop" (click)="selectedDetail.set(null)">
+    <!-- Detail drawer — drill-down -->
+    @if (selectedRow(); as r) {
+      <div class="drawer-backdrop" (click)="closeDetail()">
         <aside class="drawer" (click)="$event.stopPropagation()" aria-label="Analysis detail">
           <header class="drawer-head">
             <div>
-              <h3>{{ d.symbol }} · {{ d.timeframe }}</h3>
+              <h3>{{ r.symbol }} · {{ r.timeframe }}</h3>
               <span class="muted">
-                {{ d.invokedAt | date: 'MMM d, y HH:mm:ss' }} · audit #{{ d.id }}
+                {{ r.invokedAt | date: 'MMM d, y HH:mm:ss' }} · audit #{{ r.id }}
               </span>
             </div>
-            <button class="btn-close" (click)="selectedDetail.set(null)" aria-label="Close">
-              ×
-            </button>
+            <button class="btn-close" (click)="closeDetail()" aria-label="Close">×</button>
           </header>
 
+          @if (detailLoading()) {
+            <p class="muted">Loading detail…</p>
+          }
+          @if (detailError(); as e) {
+            <div class="error-banner">{{ e }}</div>
+          }
+
+          <!-- Quick facts always available from the row -->
           <section class="drawer-section">
-            <h4>Analysis</h4>
+            <h4>At a glance</h4>
             <dl class="drawer-grid">
               <div>
                 <dt>Bar position</dt>
-                <dd>{{ d.barPosition }}</dd>
+                <dd>{{ r.barPosition }}</dd>
               </div>
               <div>
                 <dt>Provider / model</dt>
-                <dd class="mono">{{ d.provider }} / {{ d.model }}</dd>
+                <dd class="mono">{{ r.provider }} / {{ r.model }}</dd>
               </div>
               <div>
                 <dt>Latency</dt>
-                <dd class="mono">{{ d.latencyMs | number }} ms</dd>
-              </div>
-              <div>
-                <dt>Outcome</dt>
-                <dd>{{ d.outcome }}</dd>
-              </div>
-              <div>
-                <dt>Tokens in / out</dt>
-                <dd class="mono">{{ d.tokensInput }} / {{ d.tokensOutput }}</dd>
+                <dd class="mono">{{ r.latencyMs | number }} ms</dd>
               </div>
               <div>
                 <dt>LLM cost</dt>
-                <dd class="mono">{{ d.costUsd | currency: 'USD' : 'symbol' : '1.4-4' }}</dd>
+                <dd class="mono">{{ r.costUsd | currency: 'USD' : 'symbol' : '1.4-4' }}</dd>
               </div>
-            </dl>
-          </section>
-
-          <section class="drawer-section">
-            <h4>Recommendations & signals</h4>
-            <dl class="drawer-grid">
               <div>
-                <dt>Recommendations emitted</dt>
-                <dd class="mono">{{ d.recommendationCount }}</dd>
+                <dt>Recommendations</dt>
+                <dd class="mono">{{ r.recommendationCount }}</dd>
               </div>
               <div>
                 <dt>Signals created</dt>
-                <dd class="mono">{{ d.signalsCreated }}</dd>
+                <dd class="mono">{{ r.signalsCreated }}</dd>
               </div>
-              <div>
-                <dt>Approved</dt>
-                <dd class="mono">{{ d.signalsApproved }}</dd>
-              </div>
-              <div>
-                <dt>Rejected</dt>
-                <dd class="mono">{{ d.signalsRejected }}</dd>
-              </div>
-            </dl>
-          </section>
-
-          <section class="drawer-section">
-            <h4>Trade outcomes</h4>
-            <dl class="drawer-grid">
               <div>
                 <dt>Positions opened</dt>
-                <dd class="mono">{{ d.positionsOpened }}</dd>
-              </div>
-              <div>
-                <dt>Positions closed</dt>
-                <dd class="mono">{{ d.positionsClosed }}</dd>
-              </div>
-              <div>
-                <dt>Realized P&L</dt>
-                <dd
-                  class="mono"
-                  [class.profit]="d.realizedPnl > 0"
-                  [class.loss]="d.realizedPnl < 0"
-                >
-                  {{ d.realizedPnl | currency: 'USD' : 'symbol' : '1.2-2' }}
-                </dd>
-              </div>
-              <div>
-                <dt>Unrealized P&L</dt>
-                <dd
-                  class="mono"
-                  [class.profit]="d.unrealizedPnl > 0"
-                  [class.loss]="d.unrealizedPnl < 0"
-                >
-                  {{ d.unrealizedPnl | currency: 'USD' : 'symbol' : '1.2-2' }}
-                </dd>
+                <dd class="mono">{{ r.positionsOpened }}</dd>
               </div>
               <div>
                 <dt>Total P&L</dt>
                 <dd
                   class="mono strong"
-                  [class.profit]="d.totalPnl > 0"
-                  [class.loss]="d.totalPnl < 0"
+                  [class.profit]="r.totalPnl > 0"
+                  [class.loss]="r.totalPnl < 0"
                 >
-                  {{ d.totalPnl | currency: 'USD' : 'symbol' : '1.2-2' }}
+                  {{ r.totalPnl | currency: 'USD' : 'symbol' : '1.2-2' }}
                 </dd>
               </div>
             </dl>
           </section>
 
-          <section class="drawer-section">
-            <h4>LLM position management</h4>
-            <dl class="drawer-grid">
-              <div>
-                <dt>Exit instructions emitted</dt>
-                <dd class="mono">{{ d.exitInstructionCount }}</dd>
-              </div>
-              <div>
-                <dt>Executed</dt>
-                <dd class="mono">{{ d.exitInstructionsExecuted }}</dd>
-              </div>
-            </dl>
-          </section>
+          <!-- Replayed prose -->
+          @if (detail(); as d) {
+            @if (d.analysis) {
+              <section class="drawer-section">
+                <h4>Analysis brief</h4>
+                <div class="prose">{{ d.analysis }}</div>
+              </section>
+            }
+
+            @if (d.recommendations.length > 0) {
+              <section class="drawer-section">
+                <h4>Recommendations ({{ d.recommendations.length }})</h4>
+                @for (rec of d.recommendations; track $index) {
+                  <div
+                    class="rec-card"
+                    [class.rec-buy]="rec.action === 'Buy'"
+                    [class.rec-sell]="rec.action === 'Sell'"
+                    [class.rec-hold]="rec.action === 'Hold'"
+                  >
+                    <div class="rec-row">
+                      <span class="rec-action">{{ rec.action }}</span>
+                      <span class="rec-confidence muted">
+                        {{ rec.confidence * 100 | number: '1.0-0' }}% conf
+                      </span>
+                    </div>
+                    @if (rec.action !== 'Hold' && rec.entryPrice !== null) {
+                      <div class="rec-levels">
+                        <div>
+                          <span class="muted">Entry</span>
+                          <span class="mono">{{ rec.entryPrice }}</span>
+                        </div>
+                        <div>
+                          <span class="muted">Stop</span>
+                          <span class="mono">{{ rec.stopLoss }}</span>
+                        </div>
+                        <div>
+                          <span class="muted">Target</span>
+                          <span class="mono">{{ rec.takeProfit }}</span>
+                          @if (
+                            rec.originalTakeProfit && rec.originalTakeProfit !== rec.takeProfit
+                          ) {
+                            <span class="tp-orig muted">(LLM: {{ rec.originalTakeProfit }})</span>
+                          }
+                        </div>
+                      </div>
+                    }
+                    @if (rec.rationale) {
+                      <p class="rec-rationale">{{ rec.rationale }}</p>
+                    }
+                  </div>
+                }
+              </section>
+            }
+
+            @if (d.signals.length > 0) {
+              <section class="drawer-section">
+                <h4>Signals ({{ d.signals.length }})</h4>
+                <table class="sub-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Sym</th>
+                      <th>Dir</th>
+                      <th>Status</th>
+                      <th class="num">Entry</th>
+                      <th class="num">Conf</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (s of d.signals; track s.id) {
+                      <tr>
+                        <td class="mono muted">{{ s.id }}</td>
+                        <td>{{ s.symbol }}</td>
+                        <td>{{ s.direction }}</td>
+                        <td>
+                          <span
+                            class="status-chip"
+                            [class.ok]="s.status === 'Approved'"
+                            [class.bad]="s.status === 'Rejected'"
+                          >
+                            {{ s.status }}
+                          </span>
+                        </td>
+                        <td class="num mono">{{ s.entryPrice }}</td>
+                        <td class="num mono">{{ s.confidence * 100 | number: '1.0-0' }}%</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </section>
+            }
+
+            @if (d.positions.length > 0) {
+              <section class="drawer-section">
+                <h4>Positions ({{ d.positions.length }})</h4>
+                <table class="sub-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Sym</th>
+                      <th>Dir</th>
+                      <th>Status</th>
+                      <th class="num">Lots</th>
+                      <th class="num">P&L</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (p of d.positions; track p.id) {
+                      @let pnl = p.realizedPnL + (p.status === 'Open' ? p.unrealizedPnL : 0);
+                      <tr>
+                        <td class="mono muted">{{ p.id }}</td>
+                        <td>{{ p.symbol }}</td>
+                        <td>{{ p.direction }}</td>
+                        <td>{{ p.status }}</td>
+                        <td class="num mono">{{ p.openLots | number: '1.2-2' }}</td>
+                        <td class="num mono" [class.profit]="pnl > 0" [class.loss]="pnl < 0">
+                          {{ pnl | currency: 'USD' : 'symbol' : '1.2-2' }}
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </section>
+            }
+
+            @if (d.exitInstructions.length > 0) {
+              <section class="drawer-section">
+                <h4>Exit instructions ({{ d.exitInstructions.length }})</h4>
+                @for (e of d.exitInstructions; track e.id) {
+                  <div class="exit-card">
+                    <div class="exit-row">
+                      <span class="strong">{{ e.decisionType }}</span>
+                      <span
+                        class="status-chip"
+                        [class.ok]="e.status === 'Executed'"
+                        [class.bad]="e.status === 'Failed'"
+                      >
+                        {{ e.status }}
+                      </span>
+                      <span class="muted">{{ e.confidence * 100 | number: '1.0-0' }}% conf</span>
+                    </div>
+                    <div class="muted sub">
+                      pos #{{ e.positionId }}
+                      @if (e.closeFractionPct !== null) {
+                        · {{ e.closeFractionPct }}%
+                      }
+                      @if (e.newStopLoss !== null) {
+                        · newSL {{ e.newStopLoss }}
+                      }
+                    </div>
+                    <p class="rec-rationale">{{ e.reason }}</p>
+                    @if (e.failureMessage) {
+                      <p class="loss sub">« {{ e.failureMessage }} »</p>
+                    }
+                  </div>
+                }
+              </section>
+            }
+          }
         </aside>
       </div>
     }
@@ -466,6 +602,43 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
       .btn:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+      }
+      /* Funnel — horizontal 4-stage strip */
+      .funnel {
+        display: flex;
+        align-items: stretch;
+        gap: var(--space-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: var(--space-3);
+        background: var(--bg-tertiary);
+      }
+      .funnel-stage {
+        flex: 1 1 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      .funnel-label {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-tertiary);
+      }
+      .funnel-value {
+        font-size: var(--text-lg);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      .funnel-pct {
+        font-size: 10px;
+      }
+      .funnel-arrow {
+        display: flex;
+        align-items: center;
+        font-size: var(--text-base);
+        color: var(--text-tertiary);
       }
       .kpi-grid {
         display: grid;
@@ -595,8 +768,8 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
         z-index: 1000;
       }
       .drawer {
-        width: 420px;
-        max-width: 90vw;
+        width: 480px;
+        max-width: 95vw;
         height: 100%;
         background: var(--bg-primary);
         border-left: 1px solid var(--border);
@@ -650,6 +823,112 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
         font-size: var(--text-sm);
         color: var(--text-primary);
       }
+      .prose {
+        white-space: pre-wrap;
+        font-size: var(--text-xs);
+        line-height: 1.5;
+        color: var(--text-primary);
+        max-height: 280px;
+        overflow-y: auto;
+        background: var(--bg-tertiary);
+        padding: var(--space-3);
+        border-radius: var(--radius-sm);
+      }
+      .rec-card {
+        margin-top: var(--space-2);
+        padding: var(--space-3);
+        border: 1px solid var(--border);
+        border-left-width: 3px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
+      }
+      .rec-card.rec-buy {
+        border-left-color: #16a34a;
+      }
+      .rec-card.rec-sell {
+        border-left-color: #dc2626;
+      }
+      .rec-card.rec-hold {
+        border-left-color: var(--text-tertiary);
+      }
+      .rec-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+      }
+      .rec-action {
+        font-weight: var(--font-semibold);
+        font-size: var(--text-sm);
+      }
+      .rec-confidence {
+        font-size: var(--text-xs);
+      }
+      .rec-levels {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--space-2);
+        margin-top: var(--space-2);
+        font-size: var(--text-xs);
+      }
+      .tp-orig {
+        font-size: 10px;
+        margin-left: 4px;
+      }
+      .rec-rationale {
+        margin: var(--space-2) 0 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        font-style: italic;
+        line-height: 1.5;
+      }
+      .sub-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--text-xs);
+      }
+      .sub-table th,
+      .sub-table td {
+        padding: 4px 8px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+      }
+      .sub-table th {
+        text-transform: uppercase;
+        font-size: 10px;
+        color: var(--text-tertiary);
+        font-weight: var(--font-semibold);
+      }
+      .sub-table th.num,
+      .sub-table td.num {
+        text-align: right;
+      }
+      .status-chip {
+        font-size: 10px;
+        padding: 1px 5px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
+      }
+      .status-chip.ok {
+        background: rgba(52, 199, 89, 0.14);
+        color: #16a34a;
+      }
+      .status-chip.bad {
+        background: rgba(255, 59, 48, 0.14);
+        color: #dc2626;
+      }
+      .exit-card {
+        margin-top: var(--space-2);
+        padding: var(--space-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
+      }
+      .exit-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-xs);
+      }
     `,
   ],
 })
@@ -663,7 +942,7 @@ export class SpotAnalysisReportPageComponent implements OnInit {
   readonly windowHours = signal(168); // 7d default
   readonly symbolFilter = signal('');
 
-  // ── Server-side paging state ─────────────────────────────────────────
+  // ── Server-side paging ───────────────────────────────────────────────
   readonly currentPage = signal(1);
   readonly pageSize = signal(25);
   readonly totalItems = signal(0);
@@ -674,22 +953,103 @@ export class SpotAnalysisReportPageComponent implements OnInit {
   // ── Server response ──────────────────────────────────────────────────
   readonly items = signal<SpotAnalysisListItemDto[]>([]);
   readonly summary = signal<SpotAnalysisSummaryDto>(EMPTY_SUMMARY);
+  readonly timeSeries = signal<SpotAnalysisTimePointDto[]>([]);
 
   // ── UI state ─────────────────────────────────────────────────────────
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
-  readonly selectedDetail = signal<SpotAnalysisListItemDto | null>(null);
 
-  /** "Showing N–M" label for the pager. */
+  // ── Drawer state ─────────────────────────────────────────────────────
+  readonly selectedRow = signal<SpotAnalysisListItemDto | null>(null);
+  readonly detail = signal<SpotAnalysisDetailDto | null>(null);
+  readonly detailLoading = signal(false);
+  readonly detailError = signal<string | null>(null);
+
+  // ── KPI derivations ──────────────────────────────────────────────────
+  readonly kpiWinRatePct = computed(() => {
+    const s = this.summary();
+    if (s.positionsClosed === 0) return 0;
+    return (s.profitableAnalyses / s.positionsClosed) * 100;
+  });
+  readonly kpiAvgPnlPerAnalysis = computed(() => {
+    const s = this.summary();
+    return s.analyses > 0 ? s.totalPnl / s.analyses : 0;
+  });
+  readonly kpiCostPerSignal = computed(() => {
+    const s = this.summary();
+    return s.signalsCreated > 0 ? s.totalCostUsd / s.signalsCreated : 0;
+  });
+  readonly kpiCostPerProfitable = computed(() => {
+    const s = this.summary();
+    return s.profitableAnalyses > 0 ? s.totalCostUsd / s.profitableAnalyses : 0;
+  });
+
+  /** Funnel stages — counts + conversion-% relative to the prior stage. */
+  readonly funnelStages = computed(() => {
+    const s = this.summary();
+    const stages = [
+      { label: 'Analyses', value: s.analyses, base: 0, pctOf: '' },
+      { label: 'Signals created', value: s.signalsCreated, base: s.analyses, pctOf: 'analyses' },
+      {
+        label: 'Positions opened',
+        value: s.positionsOpened,
+        base: s.signalsCreated,
+        pctOf: 'signals',
+      },
+      {
+        label: 'Profitable',
+        value: s.profitableAnalyses,
+        base: s.positionsClosed,
+        pctOf: 'closed',
+      },
+    ];
+    return stages.map((st) => ({
+      ...st,
+      pct: st.base > 0 ? (st.value / st.base) * 100 : null,
+    }));
+  });
+
+  /** Cumulative-P&L ECharts options. */
+  readonly pnlChart = computed<EChartsOption>(() => {
+    const series = this.timeSeries();
+    let cum = 0;
+    const points = series.map((p) => {
+      cum += p.totalPnl ?? 0;
+      return [p.invokedAt, cum] as [string, number];
+    });
+    const endPnl = cum;
+
+    return {
+      tooltip: { trigger: 'axis' },
+      grid: { left: 50, right: 20, top: 20, bottom: 30 },
+      xAxis: { type: 'time' },
+      yAxis: {
+        type: 'value',
+        axisLabel: { formatter: (v: number) => `$${v.toFixed(0)}` },
+      },
+      series: [
+        {
+          name: 'Cumulative P&L',
+          type: 'line',
+          smooth: true,
+          showSymbol: false,
+          data: points,
+          lineStyle: { color: endPnl >= 0 ? '#16a34a' : '#dc2626' },
+          areaStyle: {
+            color: endPnl >= 0 ? 'rgba(22, 163, 74, 0.12)' : 'rgba(220, 38, 38, 0.12)',
+          },
+        },
+      ],
+    };
+  });
+
   readonly rangeLabel = computed(() => {
     const n = this.items().length;
     if (n === 0) return 'Showing 0';
     const start = (this.currentPage() - 1) * this.pageSize() + 1;
-    const end = start + n - 1;
-    return `Showing ${start}–${end}`;
+    return `Showing ${start}–${start + n - 1}`;
   });
 
-  // Debounce timer for symbol-filter typing so we don't refetch on every keystroke.
   private symbolDebounce: ReturnType<typeof setTimeout> | null = null;
 
   ngOnInit(): void {
@@ -706,7 +1066,6 @@ export class SpotAnalysisReportPageComponent implements OnInit {
   onSymbolFilter(value: string): void {
     this.symbolFilter.set(value);
     if (this.symbolDebounce !== null) clearTimeout(this.symbolDebounce);
-    // Re-fetch on settle. Reset to page 1 — the filter narrows the result set.
     this.symbolDebounce = setTimeout(() => {
       this.currentPage.set(1);
       this.load();
@@ -725,6 +1084,37 @@ export class SpotAnalysisReportPageComponent implements OnInit {
     if (target === this.currentPage()) return;
     this.currentPage.set(target);
     this.load();
+  }
+
+  openDetail(row: SpotAnalysisListItemDto): void {
+    this.selectedRow.set(row);
+    this.detail.set(null);
+    this.detailError.set(null);
+    this.detailLoading.set(true);
+    this.service
+      .getDetail(row.id)
+      .pipe(
+        catchError((err) => {
+          this.detailError.set(
+            err?.error?.message ?? err?.message ?? 'Failed to load analysis detail.',
+          );
+          return of(null);
+        }),
+      )
+      .subscribe((res) => {
+        this.detailLoading.set(false);
+        if (res?.status && res.data) {
+          this.detail.set(res.data);
+        } else if (res && !res.status) {
+          this.detailError.set(res.message ?? 'Failed to load analysis detail.');
+        }
+      });
+  }
+
+  closeDetail(): void {
+    this.selectedRow.set(null);
+    this.detail.set(null);
+    this.detailError.set(null);
   }
 
   load(): void {
@@ -756,11 +1146,13 @@ export class SpotAnalysisReportPageComponent implements OnInit {
         if (res?.status && res.data) {
           this.items.set(res.data.items ?? []);
           this.summary.set(res.data.summary ?? EMPTY_SUMMARY);
+          this.timeSeries.set(res.data.timeSeries ?? []);
           this.totalItems.set(res.data.totalItems ?? 0);
         } else if (res && !res.status) {
           this.error.set(res.message ?? 'Failed to load spot analyses.');
           this.items.set([]);
           this.summary.set(EMPTY_SUMMARY);
+          this.timeSeries.set([]);
           this.totalItems.set(0);
         }
       });
