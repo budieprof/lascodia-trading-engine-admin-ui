@@ -6,7 +6,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { DatePipe, DecimalPipe } from '@angular/common';
+import { CurrencyPipe, DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { catchError, of } from 'rxjs';
 
@@ -34,7 +34,14 @@ const WINDOWS: { label: string; hours: number }[] = [
   selector: 'app-spot-analysis-report-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, FormsModule, PageHeaderComponent, MetricCardComponent],
+  imports: [
+    CurrencyPipe,
+    DatePipe,
+    DecimalPipe,
+    FormsModule,
+    PageHeaderComponent,
+    MetricCardComponent,
+  ],
   template: `
     <div class="page">
       <app-page-header
