@@ -21,6 +21,7 @@ import { Subject, timer, switchMap, takeUntil, catchError, of } from 'rxjs';
 import { MarketDataService } from '@core/services/market-data.service';
 import { PositionsService } from '@core/services/positions.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { ConfigService } from '@core/services/config.service';
 import {
   CandleDto,
   LivePriceDto,
@@ -252,13 +253,17 @@ const INDICATOR_STORAGE_PREFIX = 'tradingChart.indicators.v1';
 // leaving every other symbol unchanged.
 const SHOW_VOLUME_STORAGE_KEY = 'tradingChart.showVolume';
 const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.showPositions';
-// Live-analysis is a global preference like the other toggles — when on,
-// a silent spot-analysis fires on every candle close for the focused pair.
-const LIVE_ANALYSIS_STORAGE_KEY = 'tradingChart.liveAnalysis';
-// Auto-signal generation — when on, each completed spot analysis also asks
-// the engine to persist every VIABLE setup as a live trade signal. Global
-// preference; OFF by default because these enter the live execution pipeline.
-const SIGNAL_AUTOGEN_STORAGE_KEY = 'tradingChart.signalAutoGen';
+
+// ── Live-analysis EngineConfig keys ──────────────────────────────────────
+// The live spot-analysis loop runs server-side in the engine's
+// SpotAnalysisWorker — NOT in this component. The toolbar controls below
+// read/write these EngineConfig rows; the worker polls them. This replaces
+// the legacy browser loop, which only ran while a tab was open and
+// double-fired across tabs. See SpotAnalysisWorker.cs in the engine.
+const CFG_LIVE_ENABLED = 'SpotAnalysisWorker:Enabled';
+const CFG_LIVE_PAIRS = 'SpotAnalysisWorker:Pairs';
+const CFG_LIVE_GENERATE_SIGNALS = 'SpotAnalysisWorker:GenerateSignals';
+const CFG_LIVE_CADENCE = 'SpotAnalysisWorker:Cadence';
 
 /**
  * How often the live spot analysis fires within each bar.
@@ -267,35 +272,18 @@ const SIGNAL_AUTOGEN_STORAGE_KEY = 'tradingChart.signalAutoGen';
  *   - `quarters`: four fires per bar — close + 25/50/75% points.
  *
  * Higher cadences double or quadruple LLM spend and only make sense on
- * timeframes where the bar is long enough to merit a mid-bar read. The UI
- * silently downgrades to `close` on sub-H1 timeframes (see livePlanForTimeframe).
+ * timeframes where the bar is long enough to merit a mid-bar read. The
+ * engine worker silently downgrades to `close` on sub-H1 timeframes.
+ * Stored verbatim in the SpotAnalysisWorker:Cadence config row — the engine's
+ * CadenceToCount understands these exact strings.
  */
 type LiveAnalysisCadence = 'close' | 'close+mid' | 'quarters';
-const LIVE_CADENCE_STORAGE_KEY = 'tradingChart.liveCadence';
 // Minimum timeframe (in minutes) where the cadence dropdown is honored beyond
 // 'close'. H1+ only: sub-H1 bars are short enough that mid-bar fires either
 // overlap (a 3-min p95 LLM call on M5 finishes after the next close) or
-// produce noisy partial-bar setups. Silent downgrade — no warning toast.
+// produce noisy partial-bar setups. The engine worker enforces the same
+// downgrade server-side; this constant only drives the toolbar's hint text.
 const MIN_MIDBAR_TIMEFRAME_MIN = 60;
-/** How many fires per bar each cadence produces. */
-const CADENCE_SEGMENT_COUNT: Record<LiveAnalysisCadence, number> = {
-  close: 1,
-  'close+mid': 2,
-  quarters: 4,
-};
-/** Maps (cadenceCount, segmentIdx) → the `barPosition` string the engine
- *  expects. Segment 0 always = just-after-close. Higher indices encode how
- *  far into the new bar we are. The engine treats unknown values as
- *  `closed`, so adding a future cadence (e.g. eighths) won't break callers
- *  built against an older engine. */
-function barPositionFor(cadenceCount: number, segmentIdx: number): string {
-  if (segmentIdx === 0 || cadenceCount <= 1) return 'closed';
-  if (cadenceCount === 2) return 'mid_50'; // 0=closed, 1=mid
-  if (cadenceCount === 4) {
-    return segmentIdx === 1 ? 'mid_25' : segmentIdx === 2 ? 'mid_50' : 'mid_75';
-  }
-  return 'closed';
-}
 // The most recent completed analysis is persisted PER (symbol, timeframe)
 // so the on-chart bubble defaults to that exact pair's last run after a
 // reload or a pair/TF switch — WITHOUT re-running an analysis on load
@@ -2011,6 +1999,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   private marketData = inject(MarketDataService);
   private positionsService = inject(PositionsService);
   private notifications = inject(NotificationService);
+  private configService = inject(ConfigService);
   private destroy$ = new Subject<void>();
   /** Position id currently being SL/TP-modified — prevents stacking concurrent drags. */
   private modifyingPosId: number | null = null;
@@ -2130,17 +2119,12 @@ export class TradingChartComponent implements OnInit, OnDestroy {
       this.lastAnalysisByPair()[this.pairKey(this.selectedSymbol(), this.selectedTimeframe())] ??
       null,
   );
-  /** Absolute slice index (floor(now / segmentMs), where segmentMs depends
-   *  on the active cadence) at the last live tick. We fire when this advances.
-   *  Plain field, NOT a signal — mutating it inside the live-fire effect
-   *  must not retrigger the effect. The `lastCandleBoundary` legacy name
-   *  ambiguously referenced the bar-level index; the slice-level rename
-   *  matches the segmented-fire model introduced for the cadence dropdown. */
-  private lastAnalysisSlice: number | null = null;
-  /** Symbol|timeframe key at the last live tick. When it changes we
-   *  re-baseline the boundary so a pair/TF switch doesn't spuriously
-   *  fire an analysis on the very next second. */
-  private lastAnalysisContextKey: string | null = null;
+  /** The current live-analysis watch list, cached from the
+   *  SpotAnalysisWorker:Pairs EngineConfig row. Each entry is a `SYMBOL:TF`
+   *  token (e.g. `EURUSD:H1`). The "Live" toolbar toggle adds/removes the
+   *  current chart pair here; `liveAnalysisEnabled` reflects whether the
+   *  on-screen pair is a member. Loaded once on init via loadLiveAnalysisConfig(). */
+  private watchPairs: string[] = [];
 
   /** Native <dialog> wrapping the analysis brief. Opened via showModal()
    *  so it renders in the top layer above the chart's overflow:hidden box. */
@@ -2579,62 +2563,20 @@ export class TradingChartComponent implements OnInit, OnDestroy {
       }
     });
 
-    // Live-analysis fire trigger. The 1 s nowMs tick is the only tracked
-    // dependency that changes second-to-second; symbol / timeframe / enabled /
-    // cadence are tracked so flipping any of them re-evaluates. Everything
-    // that mutates state runs untracked so this effect never feeds back into
-    // itself.
-    //
-    // Segment math: a bar is divided into `cadenceCount` equal slices
-    // (1 / 2 / 4 for close / close+mid / quarters). We fire whenever the
-    // current slice index advances past the last one we fired, then tag the
-    // call with a barPosition string the engine reads to frame the prompt.
-    effect(() => {
-      const now = this.nowMs();
-      const enabled = this.liveAnalysisEnabled();
-      const sym = this.selectedSymbol();
-      const tf = this.selectedTimeframe();
-      const cadence = this.effectiveCadence();
-      if (!enabled) return;
-
-      untracked(() => {
-        const tfMin = TIMEFRAME_MINUTES_MAP[tf] ?? 60;
-        const tfMs = tfMin * 60_000;
-        const cadenceCount = CADENCE_SEGMENT_COUNT[cadence];
-        const segmentMs = tfMs / cadenceCount;
-
-        // Absolute slice index across the wall clock. Encodes both the bar
-        // boundary AND the position within it: floor(slice / cadenceCount)
-        // is the bar number; slice % cadenceCount is the segment within.
-        const slice = Math.floor(now / segmentMs);
-        const ctxKey = `${sym}|${tf}|${cadence}`;
-
-        // Pair / TF / cadence switch (or first run) — adopt the current
-        // slice as the baseline and wait for the NEXT segment boundary
-        // before firing. Avoids a spurious immediate fire mid-bar after
-        // flipping cadence dropdown from close→close+mid.
-        if (this.lastAnalysisContextKey !== ctxKey || this.lastAnalysisSlice === null) {
-          this.lastAnalysisContextKey = ctxKey;
-          this.lastAnalysisSlice = slice;
-          return;
-        }
-
-        if (slice > this.lastAnalysisSlice) {
-          this.lastAnalysisSlice = slice;
-          // Skip if a call (manual or prior live) is still in flight — the
-          // deep model takes 60-250s, longer than some segments; we'd
-          // rather miss a fire than queue overlapping calls.
-          if (!this.analyzing()) {
-            const segmentIdx = ((slice % cadenceCount) + cadenceCount) % cadenceCount;
-            this.runMarketAnalysis(true, barPositionFor(cadenceCount, segmentIdx));
-          }
-        }
-      });
-    });
+    // NOTE: the live spot-analysis fire loop USED to live here as a
+    // browser-side effect keyed off the 1 s nowMs tick. It now runs in the
+    // engine's SpotAnalysisWorker — see the CFG_LIVE_* keys and the toolbar
+    // handlers below. The browser loop was removed because it only ran while
+    // a tab was open and double-fired across tabs/devices. The manual
+    // "Analyze" button still calls runMarketAnalysis() directly.
   }
 
   ngOnInit() {
     this.loadChartConfig();
+    // Hydrate the live-analysis toolbar from the engine's SpotAnalysisWorker:*
+    // config rows. Runs once — loadChartConfig (which re-runs on every pair
+    // switch) recomputes the per-pair toggle from the cached watch list.
+    this.loadLiveAnalysisConfig();
     this.loadCandles();
     this.startLivePricePolling();
     // 1 s tick drives the candle-close countdown shown in the toolbar.
@@ -2746,41 +2688,46 @@ export class TradingChartComponent implements OnInit, OnDestroy {
       });
   }
 
-  /** Toggle live analysis. Persisted globally. Enabling does NOT run an
-   *  analysis immediately — auto-runs fire only on candle close. The bubble
-   *  meanwhile shows the last completed run (restored from storage). */
-  toggleLiveAnalysis(): void {
-    const next = !this.liveAnalysisEnabled();
-    this.liveAnalysisEnabled.set(next);
-    this.persistGlobalToggle(LIVE_ANALYSIS_STORAGE_KEY, next);
-    if (next) {
-      // Re-baseline the live-fire detector so the FIRST auto-run is the
-      // next segment boundary after enabling — not an immediate fire on
-      // the current, already-open segment.
-      this.lastAnalysisSlice = null;
-      this.lastAnalysisContextKey = null;
-    }
+  /** Canonical `SYMBOL:TF` token for the pair currently on the chart — the
+   *  unit the engine's SpotAnalysisWorker:Pairs watch list is built from.
+   *  Symbol is upper-cased and stripped of any separator so it matches the
+   *  worker's ParsePairs normalisation. */
+  private currentPairToken(): string {
+    const sym = this.selectedSymbol()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '');
+    return `${sym}:${this.selectedTimeframe()}`;
   }
 
-  /** Cadence dropdown change handler — persists the new choice and
-   *  re-baselines the slice tracker so the first fire under the new cadence
-   *  waits for its NEXT segment boundary (no surprise immediate fire on the
-   *  currently-open segment). */
+  /** Toggle whether the CURRENT chart pair is in the engine's live-analysis
+   *  watch list. The loop itself runs server-side (SpotAnalysisWorker); this
+   *  just edits SpotAnalysisWorker:Pairs + flips SpotAnalysisWorker:Enabled
+   *  on whenever ≥1 pair is watched. Switch the chart to another pair and
+   *  toggle again to cover it too. */
+  toggleLiveAnalysis(): void {
+    const token = this.currentPairToken();
+    const idx = this.watchPairs.indexOf(token);
+    const adding = idx < 0;
+    if (adding) this.watchPairs.push(token);
+    else this.watchPairs.splice(idx, 1);
+
+    // Optimistic UI flip — `liveAnalysisEnabled` reflects membership of the
+    // ON-SCREEN pair, so it tracks `adding`.
+    this.liveAnalysisEnabled.set(adding);
+
+    const enabled = this.watchPairs.length > 0;
+    this.writeLiveConfig(CFG_LIVE_PAIRS, this.watchPairs.join(','), 'String');
+    this.writeLiveConfig(CFG_LIVE_ENABLED, String(enabled), 'Bool');
+  }
+
+  /** Cadence dropdown change handler — writes SpotAnalysisWorker:Cadence.
+   *  The engine worker reads this verbatim (its CadenceToCount understands
+   *  the `close` / `close+mid` / `quarters` strings) and applies the
+   *  sub-H1 downgrade itself. */
   setLiveCadence(next: LiveAnalysisCadence): void {
     if (next === this.liveCadence()) return;
     this.liveCadence.set(next);
-    try {
-      // persistGlobalToggle accepts booleans only — the cadence is a string
-      // enum so it's persisted directly. Same SSR / private-browser guard
-      // as the helper.
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(LIVE_CADENCE_STORAGE_KEY, next);
-      }
-    } catch {
-      /* storage full / disabled — operator just won't get persistence */
-    }
-    this.lastAnalysisSlice = null;
-    this.lastAnalysisContextKey = null;
+    this.writeLiveConfig(CFG_LIVE_CADENCE, next, 'String');
   }
 
   /** Wraps {@link setLiveCadence} for the native `<select>` change event. */
@@ -2791,21 +2738,71 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     }
   }
 
-  /** Toggle auto-signal generation. Persisted globally. When ON, the
-   *  generateSignals flag is sent on every spot-analysis call (manual + live);
-   *  the engine persists each viable setup as a live, auto-executing trade
-   *  signal. Enabling does NOT run anything immediately. */
+  /** Upsert one SpotAnalysisWorker:* EngineConfig row. Best-effort: a write
+   *  failure surfaces a toast and rolls the toolbar back so the UI never
+   *  shows a state the engine didn't accept. */
+  private writeLiveConfig(key: string, value: string, dataType: 'Bool' | 'String'): void {
+    this.configService
+      .upsert({ key, value, dataType, isHotReloadable: true })
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        error: () => {
+          this.notifications.error(
+            `Couldn't save ${key} — the live-analysis worker may not pick up this change.`,
+          );
+          // Re-sync the toolbar from the engine so it reflects real state.
+          this.loadLiveAnalysisConfig();
+        },
+      });
+  }
+
+  /** Load the live-analysis worker config (4 SpotAnalysisWorker:* keys) and
+   *  hydrate the toolbar. Called once on init; the toolbar's per-pair
+   *  `liveAnalysisEnabled` is also recomputed on every pair/TF switch from
+   *  the cached watch list (see loadChartConfig). */
+  private loadLiveAnalysisConfig(): void {
+    this.configService
+      .getAll()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (res) => {
+          const rows = res?.data ?? [];
+          const byKey = new Map(rows.map((r) => [r.key, r.value]));
+
+          const pairsRaw = byKey.get(CFG_LIVE_PAIRS) ?? '';
+          this.watchPairs = pairsRaw
+            .split(',')
+            .map((t) => t.trim().toUpperCase())
+            .filter((t) => t.length > 0);
+          this.liveAnalysisEnabled.set(this.watchPairs.includes(this.currentPairToken()));
+
+          const cadence = byKey.get(CFG_LIVE_CADENCE);
+          if (cadence === 'close' || cadence === 'close+mid' || cadence === 'quarters') {
+            this.liveCadence.set(cadence);
+          }
+
+          const gen = (byKey.get(CFG_LIVE_GENERATE_SIGNALS) ?? '').trim().toLowerCase();
+          this.signalAutoGenEnabled.set(gen === 'true');
+        },
+        // A failed load leaves the toolbar at its defaults (off) — the worker
+        // is the source of truth, the toolbar just couldn't read it this time.
+        error: () => undefined,
+      });
+  }
+
+  /** Toggle auto-signal generation — writes the global
+   *  SpotAnalysisWorker:GenerateSignals config row. When ON, every live
+   *  spot analysis the engine worker fires also persists each viable setup
+   *  as a live, auto-executing trade signal. Global across all watched pairs. */
   toggleSignalAutoGen(): void {
     const next = !this.signalAutoGenEnabled();
     this.signalAutoGenEnabled.set(next);
-    this.persistGlobalToggle(SIGNAL_AUTOGEN_STORAGE_KEY, next);
-    // Console breadcrumb when the toggle flips OFF. The state lives in
-    // localStorage and is silent everywhere else; if a stray click on the
-    // toolbar pill kills auto-gen, the operator's only retrospective trail
-    // (until they hit the modal warning next run) is this one-liner.
+    this.writeLiveConfig(CFG_LIVE_GENERATE_SIGNALS, String(next), 'Bool');
+    // Console breadcrumb when the toggle flips OFF — a stray toolbar click
+    // disarming auto-gen is otherwise silent until the next analysis modal.
     if (!next) {
       console.warn(
-        '[trading-chart] Auto-gen signals turned OFF — subsequent spot analyses will not auto-create trade signals until you toggle it back on.',
+        '[trading-chart] Auto-gen signals turned OFF — the engine worker will not auto-create trade signals until you toggle it back on.',
       );
     }
   }
@@ -3063,20 +3060,13 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     if (vol === 'true' || vol === 'false') this.showVolume.set(vol === 'true');
     const pos = localStorage.getItem(SHOW_POSITIONS_STORAGE_KEY);
     if (pos === 'true' || pos === 'false') this.showPositions.set(pos === 'true');
-    const live = localStorage.getItem(LIVE_ANALYSIS_STORAGE_KEY);
-    if (live === 'true' || live === 'false') this.liveAnalysisEnabled.set(live === 'true');
 
-    const autoGen = localStorage.getItem(SIGNAL_AUTOGEN_STORAGE_KEY);
-    if (autoGen === 'true' || autoGen === 'false')
-      this.signalAutoGenEnabled.set(autoGen === 'true');
-
-    // Cadence dropdown — only accept the three known wire values. Anything
-    // else (including the legacy unset state) leaves the signal at its
-    // default `close` so existing sessions are unchanged by the upgrade.
-    const cadence = localStorage.getItem(LIVE_CADENCE_STORAGE_KEY);
-    if (cadence === 'close' || cadence === 'close+mid' || cadence === 'quarters') {
-      this.liveCadence.set(cadence);
-    }
+    // Live-analysis state lives in EngineConfig (the engine's SpotAnalysisWorker
+    // owns the loop). `loadChartConfig` runs on every pair/TF switch, so here we
+    // only recompute the on-screen pair's membership from the cached watch list
+    // — the cadence + auto-gen signals are global and were hydrated once on init
+    // by loadLiveAnalysisConfig().
+    this.liveAnalysisEnabled.set(this.watchPairs.includes(this.currentPairToken()));
 
     // Default the bubble to the SELECTED pair's last completed analysis.
     // loadChartConfig() runs on init and after every symbol/TF switch (with
