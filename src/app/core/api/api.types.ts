@@ -2136,6 +2136,30 @@ export interface SpotAnalysisListItemDto {
   exitInstructionsExecuted: number;
 }
 
+/** Window-wide roll-up for the Spot Analysis Report KPI strip — aggregated
+ *  over the FULL filtered set (not just the current page) so the KPIs stay
+ *  stable as the operator pages through. */
+export interface SpotAnalysisSummaryDto {
+  analyses: number;
+  totalCostUsd: number;
+  avgLatencyMs: number;
+  signalsCreated: number;
+  positionsOpened: number;
+  realizedPnl: number;
+  unrealizedPnl: number;
+  totalPnl: number;
+}
+
+/** Spot Analysis Report response — one page of rows plus the window-wide
+ *  summary and pager. Returned by POST /market-data/spot-analyses/list. */
+export interface SpotAnalysisReportDto {
+  items: SpotAnalysisListItemDto[];
+  currentPage: number;
+  pageSize: number;
+  totalItems: number;
+  summary: SpotAnalysisSummaryDto;
+}
+
 /** Position-management instruction the LLM emitted in its
  *  <<<EXIT_INSTRUCTIONS_JSON>>> block, mirrored back to the UI with the
  *  server's dispatch outcome. */

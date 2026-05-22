@@ -11,7 +11,7 @@ import { FormsModule } from '@angular/forms';
 import { catchError, of } from 'rxjs';
 
 import { SpotAnalysisService } from '@core/services/spot-analysis.service';
-import { SpotAnalysisListItemDto } from '@core/api/api.types';
+import { SpotAnalysisListItemDto, SpotAnalysisSummaryDto } from '@core/api/api.types';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 
@@ -23,12 +23,25 @@ const WINDOWS: { label: string; hours: number }[] = [
   { label: 'All', hours: 0 },
 ];
 
+/** Page-size options for the table. */
+const PAGE_SIZES = [25, 50, 100];
+
+const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
+  analyses: 0,
+  totalCostUsd: 0,
+  avgLatencyMs: 0,
+  signalsCreated: 0,
+  positionsOpened: 0,
+  realizedPnl: 0,
+  unrealizedPnl: 0,
+  totalPnl: 0,
+};
+
 /**
- * Spot Analysis Report — a dense ledger of every `market_analysis.spot` run
- * with the trade outcomes attributed to it: recommendations emitted, signals
- * generated, positions opened, and the realised/unrealised P&L of those
- * positions. One fetch of the most recent runs in the chosen window; KPIs are
- * rolled up client-side so they always match the table.
+ * Spot Analysis Report — server-paginated ledger of every `market_analysis.spot`
+ * run with the trade outcomes attributed to it. KPIs come from the server-side
+ * window-wide summary so they stay stable across pages; the table renders one
+ * page at a time and the operator pages through with the controls below it.
  */
 @Component({
   selector: 'app-spot-analysis-report-page',
@@ -74,48 +87,53 @@ const WINDOWS: { label: string; hours: number }[] = [
         </div>
       </app-page-header>
 
-      <!-- KPI strip -->
+      <!-- KPI strip — driven by the server's window-wide summary -->
       <div class="kpi-grid">
-        <app-metric-card label="Analyses" [value]="kpiCount()" format="number" dotColor="#0071E3" />
+        <app-metric-card
+          label="Analyses"
+          [value]="summary().analyses"
+          format="number"
+          dotColor="#0071E3"
+        />
         <app-metric-card
           label="LLM spend"
-          [value]="kpiCost()"
+          [value]="summary().totalCostUsd"
           format="currency"
           dotColor="#FF9500"
         />
         <app-metric-card
           label="Avg latency (s)"
-          [value]="kpiAvgLatency()"
+          [value]="summary().avgLatencyMs / 1000"
           format="number"
           dotColor="#8E8E93"
         />
         <app-metric-card
           label="Signals created"
-          [value]="kpiSignals()"
+          [value]="summary().signalsCreated"
           format="number"
           dotColor="#34C759"
         />
         <app-metric-card
           label="Positions opened"
-          [value]="kpiPositions()"
+          [value]="summary().positionsOpened"
           format="number"
           dotColor="#5856D6"
         />
         <app-metric-card
           label="Realized P&L"
-          [value]="kpiRealized()"
+          [value]="summary().realizedPnl"
           format="currency"
           [colorByValue]="true"
         />
         <app-metric-card
           label="Unrealized P&L"
-          [value]="kpiUnrealized()"
+          [value]="summary().unrealizedPnl"
           format="currency"
           [colorByValue]="true"
         />
         <app-metric-card
           label="Total P&L"
-          [value]="kpiTotal()"
+          [value]="summary().totalPnl"
           format="currency"
           [colorByValue]="true"
         />
@@ -125,7 +143,7 @@ const WINDOWS: { label: string; hours: number }[] = [
         <div class="error-banner">{{ e }}</div>
       }
 
-      <!-- Dense ledger -->
+      <!-- Dense ledger — current page only; the controls below page through -->
       <div class="table-wrap">
         <table class="dense">
           <thead>
@@ -149,7 +167,7 @@ const WINDOWS: { label: string; hours: number }[] = [
             </tr>
           </thead>
           <tbody>
-            @for (r of visibleRows(); track r.id) {
+            @for (r of items(); track r.id) {
               <tr (click)="selectedDetail.set(r)" class="row">
                 <td class="mono">{{ r.invokedAt | date: 'MMM d, HH:mm' }}</td>
                 <td class="strong">{{ r.symbol }}</td>
@@ -210,7 +228,57 @@ const WINDOWS: { label: string; hours: number }[] = [
           </tbody>
         </table>
       </div>
-      <p class="row-count muted">{{ visibleRows().length }} of {{ rows().length }} analyses</p>
+
+      <!-- Server-side pagination controls -->
+      <div class="pager">
+        <div class="pager-info muted">{{ rangeLabel() }} of {{ totalItems() }} analyses</div>
+        <div class="pager-controls">
+          <label class="size-label muted">Page size</label>
+          <select
+            class="size-select"
+            [ngModel]="pageSize()"
+            (ngModelChange)="setPageSize($any($event))"
+          >
+            @for (s of pageSizes; track s) {
+              <option [ngValue]="s">{{ s }}</option>
+            }
+          </select>
+
+          <button
+            class="btn page-btn"
+            type="button"
+            (click)="goTo(1)"
+            [disabled]="currentPage() === 1 || loading()"
+          >
+            «
+          </button>
+          <button
+            class="btn page-btn"
+            type="button"
+            (click)="goTo(currentPage() - 1)"
+            [disabled]="currentPage() === 1 || loading()"
+          >
+            ‹ Prev
+          </button>
+          <span class="pager-page">Page {{ currentPage() }} of {{ totalPages() }}</span>
+          <button
+            class="btn page-btn"
+            type="button"
+            (click)="goTo(currentPage() + 1)"
+            [disabled]="currentPage() >= totalPages() || loading()"
+          >
+            Next ›
+          </button>
+          <button
+            class="btn page-btn"
+            type="button"
+            (click)="goTo(totalPages())"
+            [disabled]="currentPage() >= totalPages() || loading()"
+          >
+            »
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Detail drawer -->
@@ -377,7 +445,8 @@ const WINDOWS: { label: string; hours: number }[] = [
         color: var(--text-primary);
         font-weight: var(--font-semibold);
       }
-      .input {
+      .input,
+      .size-select {
         padding: 5px 10px;
         font-size: var(--text-xs);
         border: 1px solid var(--border);
@@ -393,6 +462,10 @@ const WINDOWS: { label: string; hours: number }[] = [
         background: var(--bg-tertiary);
         color: var(--text-primary);
         cursor: pointer;
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
       }
       .kpi-grid {
         display: grid;
@@ -488,9 +561,29 @@ const WINDOWS: { label: string; hours: number }[] = [
         padding: var(--space-5);
         color: var(--text-tertiary);
       }
-      .row-count {
+      .pager {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-3);
+      }
+      .pager-info {
         font-size: var(--text-xs);
-        margin: 0;
+      }
+      .pager-controls {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .size-label {
+        font-size: var(--text-xs);
+      }
+      .pager-page {
+        font-size: var(--text-xs);
+        font-variant-numeric: tabular-nums;
+        min-width: 100px;
+        text-align: center;
       }
       /* Drawer */
       .drawer-backdrop {
@@ -564,37 +657,40 @@ export class SpotAnalysisReportPageComponent implements OnInit {
   private readonly service = inject(SpotAnalysisService);
 
   readonly windows = WINDOWS;
+  readonly pageSizes = PAGE_SIZES;
+
+  // ── Filter state ─────────────────────────────────────────────────────
   readonly windowHours = signal(168); // 7d default
   readonly symbolFilter = signal('');
+
+  // ── Server-side paging state ─────────────────────────────────────────
+  readonly currentPage = signal(1);
+  readonly pageSize = signal(25);
+  readonly totalItems = signal(0);
+  readonly totalPages = computed(() =>
+    Math.max(1, Math.ceil(this.totalItems() / Math.max(1, this.pageSize()))),
+  );
+
+  // ── Server response ──────────────────────────────────────────────────
+  readonly items = signal<SpotAnalysisListItemDto[]>([]);
+  readonly summary = signal<SpotAnalysisSummaryDto>(EMPTY_SUMMARY);
+
+  // ── UI state ─────────────────────────────────────────────────────────
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
-  readonly rows = signal<SpotAnalysisListItemDto[]>([]);
   readonly selectedDetail = signal<SpotAnalysisListItemDto | null>(null);
 
-  /** Client-side symbol narrowing on top of the server-fetched window. */
-  readonly visibleRows = computed(() => {
-    const q = this.symbolFilter().trim().toUpperCase();
-    const all = this.rows();
-    return q ? all.filter((r) => r.symbol.toUpperCase().includes(q)) : all;
+  /** "Showing N–M" label for the pager. */
+  readonly rangeLabel = computed(() => {
+    const n = this.items().length;
+    if (n === 0) return 'Showing 0';
+    const start = (this.currentPage() - 1) * this.pageSize() + 1;
+    const end = start + n - 1;
+    return `Showing ${start}–${end}`;
   });
 
-  // ── KPI roll-ups (over the visible rows so they always match the table) ──
-  readonly kpiCount = computed(() => this.visibleRows().length);
-  readonly kpiCost = computed(() => this.sum((r) => r.costUsd));
-  readonly kpiAvgLatency = computed(() => {
-    const rows = this.visibleRows();
-    if (rows.length === 0) return 0;
-    return this.sum((r) => r.latencyMs) / rows.length / 1000;
-  });
-  readonly kpiSignals = computed(() => this.sum((r) => r.signalsCreated));
-  readonly kpiPositions = computed(() => this.sum((r) => r.positionsOpened));
-  readonly kpiRealized = computed(() => this.sum((r) => r.realizedPnl));
-  readonly kpiUnrealized = computed(() => this.sum((r) => r.unrealizedPnl));
-  readonly kpiTotal = computed(() => this.sum((r) => r.totalPnl));
-
-  private sum(pick: (r: SpotAnalysisListItemDto) => number): number {
-    return this.visibleRows().reduce((acc, r) => acc + (pick(r) ?? 0), 0);
-  }
+  // Debounce timer for symbol-filter typing so we don't refetch on every keystroke.
+  private symbolDebounce: ReturnType<typeof setTimeout> | null = null;
 
   ngOnInit(): void {
     this.load();
@@ -603,12 +699,32 @@ export class SpotAnalysisReportPageComponent implements OnInit {
   setWindow(hours: number): void {
     if (this.windowHours() === hours) return;
     this.windowHours.set(hours);
+    this.currentPage.set(1);
     this.load();
   }
 
   onSymbolFilter(value: string): void {
-    // Pure client-side narrowing — no refetch; visibleRows recomputes.
     this.symbolFilter.set(value);
+    if (this.symbolDebounce !== null) clearTimeout(this.symbolDebounce);
+    // Re-fetch on settle. Reset to page 1 — the filter narrows the result set.
+    this.symbolDebounce = setTimeout(() => {
+      this.currentPage.set(1);
+      this.load();
+    }, 350);
+  }
+
+  setPageSize(size: number): void {
+    if (this.pageSize() === size) return;
+    this.pageSize.set(size);
+    this.currentPage.set(1);
+    this.load();
+  }
+
+  goTo(page: number): void {
+    const target = Math.max(1, Math.min(page, this.totalPages()));
+    if (target === this.currentPage()) return;
+    this.currentPage.set(target);
+    this.load();
   }
 
   load(): void {
@@ -620,9 +736,15 @@ export class SpotAnalysisReportPageComponent implements OnInit {
     if (hours > 0) {
       filter['from'] = new Date(Date.now() - hours * 3_600_000).toISOString();
     }
+    const sym = this.symbolFilter().trim();
+    if (sym.length > 0) filter['symbol'] = sym.toUpperCase();
 
     this.service
-      .list({ currentPage: 1, itemCountPerPage: 200, filter })
+      .list({
+        currentPage: this.currentPage(),
+        itemCountPerPage: this.pageSize(),
+        filter,
+      })
       .pipe(
         catchError((err) => {
           this.error.set(err?.error?.message ?? err?.message ?? 'Failed to load spot analyses.');
@@ -632,10 +754,14 @@ export class SpotAnalysisReportPageComponent implements OnInit {
       .subscribe((res) => {
         this.loading.set(false);
         if (res?.status && res.data) {
-          this.rows.set(res.data.data ?? []);
+          this.items.set(res.data.items ?? []);
+          this.summary.set(res.data.summary ?? EMPTY_SUMMARY);
+          this.totalItems.set(res.data.totalItems ?? 0);
         } else if (res && !res.status) {
           this.error.set(res.message ?? 'Failed to load spot analyses.');
-          this.rows.set([]);
+          this.items.set([]);
+          this.summary.set(EMPTY_SUMMARY);
+          this.totalItems.set(0);
         }
       });
   }
