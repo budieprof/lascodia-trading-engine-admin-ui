@@ -80,6 +80,14 @@ export const routes: Routes = [
           import('@features/market-data/market-data.routes').then((m) => m.MARKET_DATA_ROUTES),
       },
       {
+        path: 'spot-analysis',
+        data: { breadcrumb: 'Spot Analysis' },
+        loadChildren: () =>
+          import('@features/spot-analysis/spot-analysis.routes').then(
+            (m) => m.SPOT_ANALYSIS_ROUTES,
+          ),
+      },
+      {
         path: 'ml-models',
         data: { breadcrumb: 'ML Models' },
         loadChildren: () =>

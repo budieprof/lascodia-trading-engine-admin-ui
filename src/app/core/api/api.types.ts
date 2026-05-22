@@ -2097,6 +2097,45 @@ export interface MarketAnalysisResultDto {
   exitInstructions?: MarketAnalysisExitInstructionDto[] | null;
 }
 
+/** One row of the Spot Analysis Report — a single spot-analysis run enriched
+ *  with the trade outcomes attributed to it (signals it created, the positions
+ *  those signals opened, and the realised/unrealised P&L of those positions).
+ *  Returned paged by POST /market-data/spot-analyses/list. */
+export interface SpotAnalysisListItemDto {
+  /** LlmInvocation id of the analysis. */
+  id: number;
+  invokedAt: string;
+  symbol: string;
+  timeframe: string;
+  /** Where in the bar it fired: 'closed' | 'mid-bar' | '—'. */
+  barPosition: string;
+  provider: string;
+  model: string;
+  latencyMs: number;
+  costUsd: number;
+  tokensInput: number;
+  tokensOutput: number;
+  outcome: string;
+  /** Setups the LLM emitted. */
+  recommendationCount: number;
+  /** TradeSignals persisted from this analysis. */
+  signalsCreated: number;
+  signalsApproved: number;
+  signalsRejected: number;
+  /** Positions the generated signals went on to open. */
+  positionsOpened: number;
+  positionsClosed: number;
+  /** Σ realised P&L of this analysis's positions. */
+  realizedPnl: number;
+  /** Σ unrealised P&L (still-open positions). */
+  unrealizedPnl: number;
+  /** realizedPnl + unrealizedPnl. */
+  totalPnl: number;
+  /** LLM position-management calls emitted on this analysis. */
+  exitInstructionCount: number;
+  exitInstructionsExecuted: number;
+}
+
 /** Position-management instruction the LLM emitted in its
  *  <<<EXIT_INSTRUCTIONS_JSON>>> block, mirrored back to the UI with the
  *  server's dispatch outcome. */
