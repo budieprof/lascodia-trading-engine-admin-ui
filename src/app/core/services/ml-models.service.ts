@@ -11,6 +11,7 @@ import {
   MLModelOverfitFlagDto,
   MLTrainingRunDto,
   MLTrainingRunDiagnosticsDto,
+  ActiveMLTrainingRunDto,
   MLSignalAbTestResultDto,
   DriftAlertDto,
   DriftReportQueryFilter,
@@ -99,6 +100,15 @@ export class MLModelsService {
 
   listTrainingRuns(params: PagerRequest): Observable<ResponseData<PagedData<MLTrainingRunDto>>> {
     return this.api.post(`/ml-model/training/list`, params);
+  }
+
+  /**
+   * Snapshot of every Queued/Running training run — drives the Training Queue
+   * page. Returns a flat list (no pagination); the active set is small by the
+   * per-pair active-run unique index. Poll cheaply on a short interval.
+   */
+  listActiveTrainingRuns(): Observable<ResponseData<ActiveMLTrainingRunDto[]>> {
+    return this.api.get(`/ml-model/training/queue`);
   }
 
   listDriftReport(

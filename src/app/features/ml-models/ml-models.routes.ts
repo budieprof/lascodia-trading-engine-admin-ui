@@ -5,6 +5,14 @@ import { MLModelDetailPageComponent } from './pages/ml-model-detail-page/ml-mode
 export const ML_MODELS_ROUTES: Routes = [
   { path: '', component: MlModelsPageComponent, data: { breadcrumb: 'ML Models' } },
   {
+    path: 'training-queue',
+    data: { breadcrumb: 'Training Queue' },
+    loadComponent: () =>
+      import('./pages/training-queue-page/training-queue-page.component').then(
+        (m) => m.TrainingQueuePageComponent,
+      ),
+  },
+  {
     path: 'overfit-watchlist',
     data: { breadcrumb: 'Overfit Watchlist' },
     loadComponent: () =>

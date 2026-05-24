@@ -741,6 +741,32 @@ export interface MLTrainingRunDto {
   completedAt: string | null;
 }
 
+/**
+ * Snapshot of one currently-active (Queued or Running) ML training run, as
+ * served by `GET /ml-model/training/queue`. Used by the Training Queue page.
+ * Timestamps are raw UTC so the UI can compute live ages on each refresh tick
+ * without server round-trips. `pickedUpAt = null` means the run is still
+ * sitting in the queue and no worker has claimed it.
+ */
+export interface ActiveMLTrainingRunDto {
+  id: number;
+  symbol: string;
+  timeframe: string;
+  status: string; // "Queued" | "Running"
+  triggerType: string; // "Manual" | "AutoDegrading" | "AutoDeferred" | ...
+  learnerArchitecture: string;
+  fromDate: string;
+  toDate: string;
+  startedAt: string;
+  pickedUpAt: string | null;
+  workerInstanceId: string | null;
+  attemptCount: number;
+  maxAttempts: number;
+  nextRetryAt: string | null;
+  cancelRequested: boolean;
+  errorMessage: string | null;
+}
+
 export interface MLTrainingRunDiagnosticsDto {
   id: number;
   symbol: string | null;

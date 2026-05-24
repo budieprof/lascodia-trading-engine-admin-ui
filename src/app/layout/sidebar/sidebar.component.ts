@@ -445,6 +445,7 @@ export class SidebarComponent {
       label: 'ML & Optimization',
       items: [
         { label: 'ML Models', route: '/ml-models', icon: '🧠' },
+        { label: 'Training Queue', route: '/ml-models/training-queue', icon: '⏳' },
         { label: 'CompositeML', route: '/composite-ml', icon: '🧩' },
         { label: 'Drift Report', route: '/drift-report', icon: '📊' },
         { label: 'Optimizations', route: '/optimizations', icon: '🧪', policy: 'Analyst' },

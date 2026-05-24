@@ -274,6 +274,12 @@ export class CommandPaletteComponent implements OnInit {
     { group: 'ML', label: 'ML Models', route: '/ml-models', keywords: 'training shadow ab test' },
     {
       group: 'ML',
+      label: 'ML — Training Queue',
+      route: '/ml-models/training-queue',
+      keywords: 'training queue queued running pending pipeline backlog worker stuck',
+    },
+    {
+      group: 'ML',
       label: 'ML — Overfit Watchlist',
       route: '/ml-models/overfit-watchlist',
       keywords: 'overfit cv live sharpe edge collapse ratio',
