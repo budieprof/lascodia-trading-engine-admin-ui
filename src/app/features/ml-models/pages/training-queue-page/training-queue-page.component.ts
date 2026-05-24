@@ -4,7 +4,7 @@ import { RouterLink } from '@angular/router';
 import { catchError, map, of } from 'rxjs';
 
 import { MLModelsService } from '@core/services/ml-models.service';
-import type { ActiveMLTrainingRunDto } from '@core/api/api.types';
+import type { ActiveMLTrainingRunDto, AvailableArchitecturesDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 import { NotificationService } from '@core/notifications/notification.service';
 
@@ -98,6 +98,61 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             </div>
             <div class="text-metric-value">{{ oldestQueueAge() }}</div>
           </div>
+        </section>
+
+        <!-- ── Auto-pick blocklist ──────────────────────────────────────────
+             Lets the operator exclude specific architectures from every engine-
+             driven training path. Manual triggers (the trigger modal on the
+             ML Models page) ignore this list — operators can still pick blocked
+             architectures explicitly. Saves via PUT /training/blocked-architectures. -->
+        <section class="card blocklist">
+          <header class="blocklist-header">
+            <div>
+              <h3>Auto-pick blocklist</h3>
+              <p class="muted small">
+                Checked architectures are skipped by drift workers, trainer-selector fallbacks,
+                shadow rotation, and self-tuning retry. Manual training triggers still allow them.
+              </p>
+            </div>
+            <button
+              type="button"
+              class="btn btn-primary"
+              (click)="saveBlocklist()"
+              [disabled]="!archResource.value() || savingBlocklist() || !blocklistDirty()"
+              title="Persist the blocklist to EngineConfig"
+            >
+              {{ savingBlocklist() ? 'Saving…' : 'Save changes' }}
+            </button>
+          </header>
+
+          @if (archResource.loading() && !archResource.value()) {
+            <app-card-skeleton [lines]="3" />
+          } @else if (archResource.error()) {
+            <app-error-state
+              title="Could not load architectures"
+              message="Engine returned an error fetching the architecture list."
+              (retry)="archResource.refresh()"
+            />
+          } @else {
+            <div class="arch-grid">
+              @for (a of archResource.value()?.architectures ?? []; track a.value) {
+                <label class="arch-chip" [class.blocked]="blockedSet().has(a.name)">
+                  <input
+                    type="checkbox"
+                    [checked]="blockedSet().has(a.name)"
+                    (change)="toggleBlocked(a.name)"
+                  />
+                  <span class="arch-name mono">{{ a.name }}</span>
+                </label>
+              }
+            </div>
+            @if ((archResource.value()?.disabledArchitectures?.length ?? 0) > 0) {
+              <p class="muted small disabled-note">
+                Disabled by host capability ({{ archResource.value()?.disabledReason }}):
+                {{ archResource.value()!.disabledArchitectures.join(', ') }}
+              </p>
+            }
+          }
         </section>
 
         @if (runs().length === 0) {
@@ -333,6 +388,55 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         padding: 4px 10px;
         font-size: var(--text-xs);
       }
+      .blocklist-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: var(--space-3);
+        margin-bottom: var(--space-3);
+      }
+      .blocklist-header h3 {
+        margin: 0 0 4px 0;
+        font-size: var(--text-base);
+      }
+      .blocklist-header p {
+        margin: 0;
+        max-width: 520px;
+      }
+      .arch-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 8px;
+      }
+      .arch-chip {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        cursor: pointer;
+        user-select: none;
+        transition: background 0.15s ease;
+      }
+      .arch-chip:hover {
+        background: var(--bg-tertiary);
+      }
+      .arch-chip.blocked {
+        background: rgba(255, 59, 48, 0.08);
+        border-color: rgba(255, 59, 48, 0.3);
+      }
+      .arch-chip input {
+        margin: 0;
+        cursor: pointer;
+      }
+      .arch-name {
+        font-size: var(--text-sm);
+      }
+      .disabled-note {
+        margin-top: var(--space-3);
+      }
     `,
   ],
 })
@@ -380,6 +484,81 @@ export class TrainingQueuePageComponent {
   });
 
   protected readonly cancelling = signal<Set<number>>(new Set());
+
+  // ── Auto-pick blocklist state ──────────────────────────────────────────
+  // Fetched once on page load and again after a successful save. The local
+  // `blockedSet` is the editable state — initialised from the server payload
+  // and diffed against `archResource.value().blockedFromAutoPick` to drive
+  // the Save button's `disabled` state. Polling interval long (5 min) since
+  // operators rarely change the blocklist and the server-side value can also
+  // change out of band (direct EngineConfig edit, another operator session).
+  protected readonly archResource = createPolledResource(
+    () =>
+      this.ml.getAvailableArchitectures().pipe(
+        map((res) => res.data ?? null),
+        catchError(() => of<AvailableArchitecturesDto | null>(null)),
+      ),
+    { intervalMs: 5 * 60_000 },
+  );
+  protected readonly blockedSet = signal<Set<string>>(new Set());
+  protected readonly savingBlocklist = signal(false);
+  /**
+   * True when the editable set differs from the server's persisted blocklist.
+   * Compares set contents (order-independent). Empty + empty = clean.
+   */
+  protected readonly blocklistDirty = computed(() => {
+    const server = new Set(this.archResource.value()?.blockedFromAutoPick ?? []);
+    const local = this.blockedSet();
+    if (server.size !== local.size) return true;
+    for (const name of server) if (!local.has(name)) return true;
+    return false;
+  });
+
+  constructor() {
+    // Seed the editable blocklist from the server payload after the polled
+    // resource hydrates. queueMicrotask defers past the constructor so the
+    // resource's first fetch can resolve before we read it.
+    queueMicrotask(() => this.seedBlockedFromServer());
+  }
+
+  private seedBlockedFromServer(): void {
+    const server = this.archResource.value()?.blockedFromAutoPick;
+    if (server) this.blockedSet.set(new Set(server));
+    // If still loading, try again shortly. Cheap enough — fires at most a few times.
+    else if (this.archResource.loading()) setTimeout(() => this.seedBlockedFromServer(), 500);
+  }
+
+  protected toggleBlocked(name: string): void {
+    const next = new Set(this.blockedSet());
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    this.blockedSet.set(next);
+  }
+
+  protected saveBlocklist(): void {
+    if (this.savingBlocklist()) return;
+    this.savingBlocklist.set(true);
+    const payload = Array.from(this.blockedSet()).sort();
+    this.ml.setBlockedArchitectures(payload).subscribe({
+      next: (res) => {
+        this.savingBlocklist.set(false);
+        if (res?.status === true) {
+          this.notifications.success(
+            payload.length === 0
+              ? 'Auto-pick blocklist cleared'
+              : `Auto-pick blocklist updated (${payload.length} blocked)`,
+          );
+          this.archResource.refresh();
+        } else {
+          this.notifications.error(res?.message ?? 'Failed to save blocklist');
+        }
+      },
+      error: () => {
+        this.savingBlocklist.set(false);
+        this.notifications.error('Failed to save blocklist');
+      },
+    });
+  }
 
   protected cancel(run: ActiveMLTrainingRunDto): void {
     if (!confirm(`Cancel training run #${run.id} (${run.symbol} / ${run.timeframe})?`)) return;

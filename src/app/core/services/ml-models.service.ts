@@ -175,4 +175,13 @@ export class MLModelsService {
   getAvailableArchitectures(): Observable<ResponseData<AvailableArchitecturesDto>> {
     return this.api.get(`/ml-model/training/available-architectures`);
   }
+
+  /**
+   * Replace the auto-pick blocklist atomically. Send the full intended set.
+   * Blocked architectures are skipped by every engine-driven trainer-selection
+   * path; manual triggers ignore the list. Operator-policy gated.
+   */
+  setBlockedArchitectures(blocked: string[]): Observable<ResponseData<string[]>> {
+    return this.api.put(`/ml-model/training/blocked-architectures`, { blocked });
+  }
 }

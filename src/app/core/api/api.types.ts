@@ -1756,6 +1756,12 @@ export interface AvailableArchitecturesDto {
   disabledReason: string | null;
   disabledArchitectures: string[];
   architectures: ArchitectureOptionDto[];
+  /**
+   * Architectures the operator has blocked from auto-pick paths (drift workers,
+   * trainer-selector fallbacks, shadow rotation, self-tuning retry). Manual
+   * triggers ignore this list and can still pin any architecture.
+   */
+  blockedFromAutoPick: string[];
 }
 
 /**
