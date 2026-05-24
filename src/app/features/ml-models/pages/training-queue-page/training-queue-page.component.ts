@@ -384,8 +384,47 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         text-align: right;
         white-space: nowrap;
       }
+      /* Per-component button chrome. The global styles.scss only adds the
+         primary gradient overlay — every page that uses .btn is expected to
+         supply its own base (padding/height/radius) plus per-variant colours.
+         Matches the risk-profiles-page pattern so action buttons across the
+         app feel consistent. */
+      .btn {
+        height: 36px;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-full);
+        border: none;
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        line-height: 1;
+        text-decoration: none;
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: white;
+      }
+      .btn-primary:hover:not(:disabled) {
+        background: var(--accent-hover);
+      }
+      .btn-secondary {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--bg-quaternary, var(--bg-tertiary));
+      }
       .btn-xs {
-        padding: 4px 10px;
+        height: 26px;
+        padding: 0 10px;
         font-size: var(--text-xs);
       }
       .blocklist-header {
