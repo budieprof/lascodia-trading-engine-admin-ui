@@ -88,6 +88,14 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'analyser-comparison',
+        data: { breadcrumb: 'Analyser Comparison' },
+        loadChildren: () =>
+          import('@features/analyser-comparison/analyser-comparison.routes').then(
+            (m) => m.ANALYSER_COMPARISON_ROUTES,
+          ),
+      },
+      {
         path: 'ml-models',
         data: { breadcrumb: 'ML Models' },
         loadChildren: () =>

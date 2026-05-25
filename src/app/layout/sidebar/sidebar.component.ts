@@ -458,6 +458,7 @@ export class SidebarComponent {
       items: [
         { label: 'Proposals', route: '/strategies/llm-proposals', icon: '💡' },
         { label: 'Spot Analysis', route: '/spot-analysis', icon: '📊' },
+        { label: 'Analyser Comparison', route: '/analyser-comparison', icon: '🆚' },
         { label: 'Invocations', route: '/llm/invocations', icon: '📡' },
         { label: 'Rationales', route: '/llm/rationales', icon: '🗒' },
         { label: 'Settings', route: '/llm/settings', icon: '🔑', policy: 'Operator' },

@@ -3176,3 +3176,57 @@ export interface CompositeMLDonorSelectionDto {
   scoreBucket: string;
   minScoreFloor: number;
 }
+
+// ── Analyser Comparison (Phase 1e) ────────────────────────────────────────
+/** Per-analyser-source aggregate row inside AnalyserComparisonSummaryDto.
+ *  One row per source (SpotAnalysis = LLM, SyntheticAnalyser = non-LLM).
+ *  Used by the Analyser Comparison page to render side-by-side cards. */
+export interface AnalyserComparisonRowDto {
+  source: string;
+  decisions: number;
+  actionable: number;
+  executed: number;
+  buyCount: number;
+  sellCount: number;
+  holdCount: number;
+  backfilledCount: number;
+  avgConfidence: number;
+  sumCounterfactualRawPnL: number;
+  sumCounterfactualManagedPnL: number;
+  sumCounterfactualGatedPnL: number;
+  avgCounterfactualRawPnL: number | null;
+  counterfactualWins: number;
+  counterfactualLosses: number;
+}
+
+/** A/B comparison summary over AnalyserDecisionLog. Stable 2-row shape
+ *  (LLM + Synthetic) even when one source has zero rows. */
+export interface AnalyserComparisonSummaryDto {
+  fromUtc: string;
+  toUtc: string;
+  symbol: string | null;
+  timeframe: Timeframe | null;
+  sources: AnalyserComparisonRowDto[];
+}
+
+// ── Look-Ahead Audit (Phase 1e) ───────────────────────────────────────────
+/** Single T1–T5 test outcome. status is "Passed" | "Failed" | "Skipped". */
+export interface LookAheadAuditTestResult {
+  testName: string;
+  status: string;
+  detail: string;
+  diagnostics: string[] | null;
+}
+
+/** Full audit report for one (symbol, timeframe, sampleAt) invocation. */
+export interface LookAheadAuditReport {
+  symbol: string;
+  timeframe: Timeframe;
+  sampleAt: string;
+  completedAt: string;
+  passedCount: number;
+  failedCount: number;
+  skippedCount: number;
+  durationMs: number;
+  tests: LookAheadAuditTestResult[];
+}
