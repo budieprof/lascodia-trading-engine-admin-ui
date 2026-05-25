@@ -3199,6 +3199,27 @@ export interface AnalyserComparisonRowDto {
   counterfactualLosses: number;
 }
 
+/** Per-model breakdown row for the synthetic side. One row per MLModel that
+ *  produced decisions in the window; lets the comparison page segment when
+ *  the active model architecture changed mid-window. */
+export interface AnalyserComparisonModelRowDto {
+  mlModelId: number;
+  source: string;
+  architecture: string;
+  modelStatus: string;
+  trainedAt: string | null;
+  decisions: number;
+  actionable: number;
+  executed: number;
+  buyCount: number;
+  sellCount: number;
+  holdCount: number;
+  avgConfidence: number;
+  sumCounterfactualRawPnL: number;
+  sumCounterfactualManagedPnL: number;
+  sumCounterfactualGatedPnL: number;
+}
+
 /** A/B comparison summary over AnalyserDecisionLog. Stable 2-row shape
  *  (LLM + Synthetic) even when one source has zero rows. */
 export interface AnalyserComparisonSummaryDto {
@@ -3207,6 +3228,7 @@ export interface AnalyserComparisonSummaryDto {
   symbol: string | null;
   timeframe: Timeframe | null;
   sources: AnalyserComparisonRowDto[];
+  perModel: AnalyserComparisonModelRowDto[];
 }
 
 // ── Look-Ahead Audit (Phase 1e) ───────────────────────────────────────────
