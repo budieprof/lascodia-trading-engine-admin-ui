@@ -22,6 +22,7 @@ import {
   AnalyzeSignalSensitivitySignalDto,
   CandleDto,
   RiskProfileDto,
+  Timeframe,
 } from '@core/api/api.types';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 
@@ -421,14 +422,28 @@ const WINDOW_OPTIONS = [
                   </strong>
                 </p>
               </div>
-              <button
-                type="button"
-                class="modal-close"
-                (click)="closeSignalChart()"
-                aria-label="Close"
-              >
-                ×
-              </button>
+              <div class="modal-header-right">
+                <div class="tf-toolbar" role="group" aria-label="Timeframe">
+                  @for (tf of chartTimeframes; track tf) {
+                    <button
+                      type="button"
+                      class="tf-btn"
+                      [class.tf-btn--active]="selectedTimeframe() === tf"
+                      (click)="setChartTimeframe(tf)"
+                    >
+                      {{ tf }}
+                    </button>
+                  }
+                </div>
+                <button
+                  type="button"
+                  class="modal-close"
+                  (click)="closeSignalChart()"
+                  aria-label="Close"
+                >
+                  ×
+                </button>
+              </div>
             </header>
             <div class="modal-body">
               @if (chartLoading()) {
@@ -856,6 +871,41 @@ const WINDOW_OPTIONS = [
         font-size: 0.85rem;
         opacity: 0.7;
       }
+      .modal-header-right {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+      .tf-toolbar {
+        display: inline-flex;
+        gap: 2px;
+        background: var(--bg-tertiary);
+        border-radius: 6px;
+        padding: 2px;
+      }
+      .tf-btn {
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        font-size: 0.78rem;
+        font-weight: 600;
+        padding: 0.3rem 0.55rem;
+        border-radius: 4px;
+        cursor: pointer;
+        transition:
+          background 0.12s,
+          color 0.12s;
+      }
+      .tf-btn:hover {
+        color: var(--text-primary);
+      }
+      .tf-btn--active {
+        background: var(--accent);
+        color: #ffffff;
+      }
+      .tf-btn--active:hover {
+        color: #ffffff;
+      }
       .modal-close {
         background: transparent;
         border: none;
@@ -942,6 +992,13 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly chartError = signal<string | null>(null);
   readonly chartCandles = signal<CandleDto[]>([]);
   readonly echartsTheme = computed(() => (this.themeSvc.theme() === 'dark' ? 'dark' : ''));
+
+  // Timeframe the operator picks from the chart toolbar. Default H1 because
+  // SpotAnalysis writes at H1 — candles are guaranteed to exist. M5/M15 give
+  // finer granularity when investigating short-lived signals; H4/D1 widen
+  // the macro context for long-horizon signals.
+  readonly chartTimeframes: Timeframe[] = ['M5', 'M15', 'H1', 'H4', 'D1'];
+  readonly selectedTimeframe = signal<Timeframe>('H1');
 
   readonly windowDays = signal<number>(30);
   readonly symbolFilter = signal<string>('');
@@ -1062,21 +1119,53 @@ export class SignalSensitivityPageComponent implements OnInit {
   }
 
   /**
-   * Open the chart modal for a signal. Fetches H1 candles in a window
-   * spanning ~24h before GeneratedAt → ~6h after ExpiresAt so the operator
-   * sees pre-signal context + post-expiry drift. H1 is the safest default
-   * because the LLM analyser writes at H1 — candles always exist.
+   * Open the chart modal for a signal. Default timeframe is H1 (LLM/Spot
+   * analysers write at H1, candles always exist). The operator can switch
+   * granularity from the chart toolbar.
    */
   openSignalChart(s: AnalyzeSignalSensitivitySignalDto) {
     this.selectedSignal.set(s);
+    this.selectedTimeframe.set('H1');
+    this.reloadChart();
+  }
+
+  setChartTimeframe(tf: Timeframe) {
+    if (this.selectedTimeframe() === tf) return;
+    this.selectedTimeframe.set(tf);
+    if (this.selectedSignal()) this.reloadChart();
+  }
+
+  /**
+   * Fetch candles for the current signal + timeframe. Window is dynamic:
+   * we aim for ~150 bars total at the chosen timeframe, biased toward
+   * pre-context (so the "Signal fired" marker isn't pinned to the right
+   * edge). The window also expands to cover the signal's full lifespan
+   * (GeneratedAt → ExpiresAt) plus 2× duration of post-expiry drift.
+   */
+  private reloadChart() {
+    const s = this.selectedSignal();
+    if (!s) return;
+
     this.chartCandles.set([]);
     this.chartError.set(null);
     this.chartLoading.set(true);
 
+    const tf = this.selectedTimeframe();
+    const tfMin = this.timeframeMinutes(tf);
     const generated = new Date(s.generatedAt);
     const expires = new Date(s.expiresAt);
-    const from = new Date(generated.getTime() - 24 * 60 * 60 * 1000); // -24h
-    const to = new Date(expires.getTime() + 6 * 60 * 60 * 1000); // +6h
+    const durationMin = Math.max(
+      (expires.getTime() - generated.getTime()) / 60_000,
+      tfMin, // floor so duration-scaled padding is never zero
+    );
+
+    // Target ~75 bars before signal fire, 75 bars after expiry. Also expand
+    // to whichever is wider: bar-count-driven window or duration-driven window.
+    const preMin = Math.max(75 * tfMin, durationMin * 4);
+    const postMin = Math.max(75 * tfMin, durationMin * 2);
+
+    const from = new Date(generated.getTime() - preMin * 60_000);
+    const to = new Date(expires.getTime() + postMin * 60_000);
 
     this.marketDataSvc
       .listCandles({
@@ -1086,7 +1175,7 @@ export class SignalSensitivityPageComponent implements OnInit {
         sortDirection: 'asc',
         filter: {
           symbol: s.symbol,
-          timeframe: 'H1',
+          timeframe: tf,
           from: from.toISOString(),
           to: to.toISOString(),
         },
@@ -1110,10 +1199,29 @@ export class SignalSensitivityPageComponent implements OnInit {
           );
           this.chartCandles.set(sorted);
           if (sorted.length === 0) {
-            this.chartError.set('No H1 candles in the window. Signal may pre-date candle ingest.');
+            this.chartError.set(
+              `No ${tf} candles in the window. Try a different timeframe — the signal may pre-date ${tf} candle ingest.`,
+            );
           }
         }
       });
+  }
+
+  private timeframeMinutes(tf: Timeframe): number {
+    switch (tf) {
+      case 'M1':
+        return 1;
+      case 'M5':
+        return 5;
+      case 'M15':
+        return 15;
+      case 'H1':
+        return 60;
+      case 'H4':
+        return 240;
+      case 'D1':
+        return 1440;
+    }
   }
 
   closeSignalChart() {
@@ -1304,18 +1412,38 @@ export class SignalSensitivityPageComponent implements OnInit {
           type: 'line',
           data: flat(scenarioTp),
           symbol: 'none',
-          lineStyle: { color: '#1f8a3d', width: 1.5, type: 'dashed', opacity: 0.7 },
+          lineStyle: { color: '#1f8a3d', width: 2, type: 'dashed' },
           tooltip: { show: false },
           z: 9,
+          endLabel: {
+            show: true,
+            formatter: `TP×${tpMul} ${fmt(scenarioTp)}`,
+            backgroundColor: '#1f8a3d',
+            color: '#ffffff',
+            padding: [2, 6],
+            borderRadius: 3,
+            fontSize: 10,
+            offset: [0, 18],
+          },
         },
         {
           name: `SL×${slMul}`,
           type: 'line',
           data: flat(scenarioSl),
           symbol: 'none',
-          lineStyle: { color: '#c4290a', width: 1.5, type: 'dashed', opacity: 0.7 },
+          lineStyle: { color: '#c4290a', width: 2, type: 'dashed' },
           tooltip: { show: false },
           z: 9,
+          endLabel: {
+            show: true,
+            formatter: `SL×${slMul} ${fmt(scenarioSl)}`,
+            backgroundColor: '#c4290a',
+            color: '#ffffff',
+            padding: [2, 6],
+            borderRadius: 3,
+            fontSize: 10,
+            offset: [0, 18],
+          },
         },
       );
     }
