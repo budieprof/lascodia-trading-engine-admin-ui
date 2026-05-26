@@ -303,49 +303,68 @@ const WINDOW_OPTIONS = [
         background: var(--card-bg, #1a1f2b);
         border: 1px solid var(--border, #2a2f3a);
         border-radius: 8px;
-        padding: 1rem;
+        padding: 1.25rem;
         display: flex;
         flex-direction: column;
-        gap: 0.75rem;
+        gap: 1rem;
       }
       .filter-row {
         display: flex;
-        gap: 1rem;
+        gap: 1.25rem;
         flex-wrap: wrap;
         align-items: flex-end;
       }
       .field {
         display: inline-flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 6px;
         font-size: 0.85rem;
       }
+      .field > span {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        opacity: 0.7;
+        font-weight: 600;
+      }
       .field--wide {
-        flex: 1 1 240px;
+        flex: 1 1 280px;
       }
       .field input,
       .field select {
-        padding: 0.35rem 0.5rem;
-        background: transparent;
+        padding: 0.45rem 0.6rem;
+        background: rgba(255, 255, 255, 0.06);
         color: inherit;
         border: 1px solid var(--border, #2a2f3a);
         border-radius: 4px;
-        min-width: 90px;
+        min-width: 100px;
+        font-size: 0.9rem;
+      }
+      .field input:focus,
+      .field select:focus {
+        outline: none;
+        border-color: var(--accent, #4f8cff);
+        background: rgba(255, 255, 255, 0.09);
       }
       .source-chips {
         display: flex;
-        gap: 0.5rem;
+        gap: 0.4rem;
         flex-wrap: wrap;
       }
       .chip-checkbox {
         display: inline-flex;
         align-items: center;
-        gap: 0.25rem;
-        padding: 0.2rem 0.5rem;
+        gap: 0.35rem;
+        padding: 0.35rem 0.7rem;
         border: 1px solid var(--border, #2a2f3a);
         border-radius: 9999px;
         font-size: 0.8rem;
         cursor: pointer;
+        background: rgba(255, 255, 255, 0.04);
+        user-select: none;
+      }
+      .chip-checkbox:hover {
+        background: rgba(255, 255, 255, 0.08);
       }
       .run-btn {
         background: var(--accent, #4f8cff);
