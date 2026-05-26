@@ -788,10 +788,13 @@ const WINDOW_OPTIONS = [
                   class="chart-instance"
                 ></div>
                 <div class="chart-legend">
-                  <span class="legend-item"
-                    ><span class="dot dot--entry"></span>Entry
-                    {{ s.entryPrice | number: '1.5-5' }}</span
-                  >
+                  <span class="legend-item">
+                    <span class="dot dot--entry"></span>Entry
+                    {{ s.entryPrice | number: '1.5-5' }}
+                    @if (s.fillAt) {
+                      <small>· filled {{ s.fillAt | date: 'short' }}</small>
+                    }
+                  </span>
                   <span class="legend-item"
                     ><span class="dot dot--tp"></span>Original TP
                     {{ s.originalTP | number: '1.5-5' }}</span
@@ -2035,8 +2038,20 @@ export class SignalSensitivityPageComponent implements OnInit {
       ],
     ];
 
-    // Exit dot at exact (timestamp, price).
+    // Markers at exact (timestamp, price) coordinates:
+    //   * Entry dot at the FILL bar timestamp (when the limit was actually
+    //     filled). Black to match the Entry horizontal-line styling.
+    //   * Exit dot at the exit bar timestamp with outcome colour.
     const markPointData: any[] = [];
+    if (s.fillAt) {
+      markPointData.push({
+        coord: [new Date(s.fillAt).getTime(), s.entryPrice],
+        symbol: 'circle',
+        symbolSize: 10,
+        itemStyle: { color: '#000000', borderColor: '#ffffff', borderWidth: 2 },
+        label: { show: false },
+      });
+    }
     if (exitMs > 0 && s.exitPrice !== null) {
       markPointData.push({
         coord: [exitMs, s.exitPrice],

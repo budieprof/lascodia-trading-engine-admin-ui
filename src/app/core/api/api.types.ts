@@ -3349,6 +3349,8 @@ export interface AnalyzeSignalSensitivitySignalDto {
   generatedAt: string;
   expiresAt: string;
   outcome: string;
+  /** Fill timestamp = first bar whose range contained entryPrice. Null when EntryNotReached. */
+  fillAt: string | null;
   exitPrice: number | null;
   exitAt: string;
   scenarioPnL: number;
