@@ -331,7 +331,10 @@ const WINDOW_OPTIONS = [
               </thead>
               <tbody>
                 @for (s of r.signals; track s.signalId) {
-                  <tr [class.row--win]="s.scenarioPnL > 0" [class.row--loss]="s.scenarioPnL < 0">
+                  <tr
+                    [class.row--win]="s.outcome === 'HitTP'"
+                    [class.row--loss]="s.outcome === 'HitSL'"
+                  >
                     <td>{{ s.signalId }}</td>
                     <td>{{ s.generatedAt | date: 'short' }}</td>
                     <td>{{ s.symbol }}</td>
