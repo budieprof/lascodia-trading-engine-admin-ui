@@ -74,15 +74,29 @@ const WINDOW_OPTIONS = [
               }
             </select>
           </label>
-          <label class="field">
-            <span>Symbol</span>
+          <label class="field field--wide">
+            <span>Symbols <small>(comma-separated, any = blank)</small></span>
             <input
               type="text"
-              maxlength="12"
-              placeholder="any"
+              placeholder="e.g. NZDUSD, USDCAD, USDJPY"
               [(ngModel)]="symbolFilter"
               name="symbol"
             />
+          </label>
+          <label class="field">
+            <span>Direction</span>
+            <div class="source-chips">
+              @for (d of directionsAvail; track d) {
+                <label class="chip-checkbox">
+                  <input
+                    type="checkbox"
+                    [checked]="selectedDirections().includes(d)"
+                    (change)="toggleDirection(d)"
+                  />
+                  {{ d }}
+                </label>
+              }
+            </div>
           </label>
           <label class="field field--wide">
             <span>Sources</span>
@@ -1516,6 +1530,7 @@ export class SignalSensitivityPageComponent implements OnInit {
   private readonly themeSvc = inject(ThemeService);
 
   readonly sourcesAvail = SOURCES;
+  readonly directionsAvail = ['Buy', 'Sell'] as const;
   readonly windows = WINDOW_OPTIONS;
 
   // ── Signal-chart modal state ───────────────────────────────────────────
@@ -1535,6 +1550,7 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly windowDays = signal<number>(30);
   readonly symbolFilter = signal<string>('');
   readonly selectedSources = signal<string[]>(['SpotAnalysis']);
+  readonly selectedDirections = signal<string[]>([]);
   readonly tpMultiplier = signal<number>(1.0);
   readonly slMultiplier = signal<number>(1.0);
   readonly sweepInput = signal<string>('0.5, 0.75, 1.0, 1.25, 1.5');
@@ -1787,6 +1803,13 @@ export class SignalSensitivityPageComponent implements OnInit {
     );
   }
 
+  toggleDirection(d: string) {
+    const current = this.selectedDirections();
+    this.selectedDirections.set(
+      current.includes(d) ? current.filter((x) => x !== d) : [...current, d],
+    );
+  }
+
   run() {
     if (this.loading()) return;
     this.loading.set(true);
@@ -1803,10 +1826,17 @@ export class SignalSensitivityPageComponent implements OnInit {
     const riskProfileId = this.riskProfileId();
     const startingBalance = riskProfileId !== null ? this.startingBalance() : undefined;
 
+    // Parse comma-separated symbol input into a list of uppercase symbols.
+    const symbolList = this.symbolFilter()
+      .split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter((s) => s.length > 0);
+
     this.svc
       .analyze({
         sources: this.selectedSources().length ? this.selectedSources() : undefined,
-        symbol: this.symbolFilter().trim() || undefined,
+        symbols: symbolList.length ? symbolList : undefined,
+        directions: this.selectedDirections().length ? this.selectedDirections() : undefined,
         fromUtc: fromUtc.toISOString(),
         toUtc: now.toISOString(),
         tpMultiplier: this.tpMultiplier(),

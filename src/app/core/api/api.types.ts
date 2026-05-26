@@ -3416,7 +3416,12 @@ export interface AnalyzeSignalSensitivityResultDto {
 /** Request shape for POST /trade-signal/sensitivity-analysis. */
 export interface AnalyzeSignalSensitivityRequest {
   sources?: string[];
+  /** Legacy single-symbol filter. Use symbols for multi-symbol. */
   symbol?: string;
+  /** Multi-symbol filter. */
+  symbols?: string[];
+  /** Direction filter ('Buy' / 'Sell'). Empty/omitted = both. */
+  directions?: string[];
   fromUtc?: string;
   toUtc?: string;
   tpMultiplier?: number;
