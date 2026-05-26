@@ -231,6 +231,9 @@ const WINDOW_OPTIONS = [
             <div class="kpi-sub">
               {{ r.aggregate.hitTpCount }} TP / {{ r.aggregate.hitSlCount }} SL /
               {{ r.aggregate.expiredCount }} exp
+              @if (r.aggregate.entryNotReachedCount > 0) {
+                · {{ r.aggregate.entryNotReachedCount }} unfilled
+              }
               @if (r.aggregate.noCandlesCount > 0) {
                 · {{ r.aggregate.noCandlesCount }} no-data
               }
@@ -692,6 +695,7 @@ const WINDOW_OPTIONS = [
                         [class.chip--tp]="s.outcome === 'HitTP'"
                         [class.chip--sl]="s.outcome === 'HitSL'"
                         [class.chip--exp]="s.outcome === 'Expired'"
+                        [class.chip--unfilled]="s.outcome === 'EntryNotReached'"
                       >
                         {{ s.outcome }}
                       </span>
@@ -1323,6 +1327,10 @@ const WINDOW_OPTIONS = [
       .chip--exp {
         background: rgba(142, 142, 147, 0.18);
         color: var(--text-secondary);
+      }
+      .chip--unfilled {
+        background: rgba(0, 113, 227, 0.15);
+        color: #0071e3;
       }
       .profit {
         color: #1f8a3d;

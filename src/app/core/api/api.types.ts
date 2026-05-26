@@ -3265,6 +3265,8 @@ export interface AnalyzeSignalSensitivityAggregateDto {
   hitTpCount: number;
   hitSlCount: number;
   expiredCount: number;
+  /** Signals where market never touched entry price within validity window. */
+  entryNotReachedCount: number;
   noCandlesCount: number;
   winCount: number;
   lossCount: number;
