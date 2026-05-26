@@ -300,8 +300,8 @@ const WINDOW_OPTIONS = [
         gap: 1rem;
       }
       .filter-card {
-        background: var(--card-bg, #1a1f2b);
-        border: 1px solid var(--border, #2a2f3a);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
         border-radius: 8px;
         padding: 1.25rem;
         display: flex;
@@ -333,9 +333,9 @@ const WINDOW_OPTIONS = [
       .field input,
       .field select {
         padding: 0.45rem 0.6rem;
-        background: rgba(255, 255, 255, 0.06);
-        color: inherit;
-        border: 1px solid var(--border, #2a2f3a);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
         border-radius: 4px;
         min-width: 100px;
         font-size: 0.9rem;
@@ -343,8 +343,9 @@ const WINDOW_OPTIONS = [
       .field input:focus,
       .field select:focus {
         outline: none;
-        border-color: var(--accent, #4f8cff);
-        background: rgba(255, 255, 255, 0.09);
+        border-color: var(--accent);
+        background: var(--bg-primary);
+        box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
       }
       .source-chips {
         display: flex;
@@ -356,18 +357,19 @@ const WINDOW_OPTIONS = [
         align-items: center;
         gap: 0.35rem;
         padding: 0.35rem 0.7rem;
-        border: 1px solid var(--border, #2a2f3a);
+        border: 1px solid var(--border);
         border-radius: 9999px;
         font-size: 0.8rem;
         cursor: pointer;
-        background: rgba(255, 255, 255, 0.04);
+        background: var(--bg-primary);
+        color: var(--text-primary);
         user-select: none;
       }
       .chip-checkbox:hover {
-        background: rgba(255, 255, 255, 0.08);
+        background: var(--bg-tertiary);
       }
       .run-btn {
-        background: var(--accent, #4f8cff);
+        background: var(--accent);
         color: #fff;
         border: none;
         padding: 0.5rem 1.25rem;
@@ -403,8 +405,8 @@ const WINDOW_OPTIONS = [
         grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       }
       .kpi {
-        background: var(--card-bg, #1a1f2b);
-        border: 1px solid var(--border, #2a2f3a);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
         border-radius: 8px;
         padding: 0.75rem 1rem;
         display: flex;
@@ -426,17 +428,12 @@ const WINDOW_OPTIONS = [
         font-size: 0.75rem;
         opacity: 0.7;
       }
-      .profit {
-        color: #4fd1c5;
-      }
-      .loss {
-        color: #ff7a7a;
-      }
+      /* .profit / .loss colours defined below (theme-aware). */
 
       .sweep-card,
       .signals-card {
-        background: var(--card-bg, #1a1f2b);
-        border: 1px solid var(--border, #2a2f3a);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
         border-radius: 8px;
         padding: 0.75rem 1rem;
       }
@@ -461,15 +458,16 @@ const WINDOW_OPTIONS = [
       .sweep-table td {
         padding: 0.35rem 0.5rem;
         text-align: left;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        border-bottom: 1px solid var(--border);
       }
       .sweep-table th.num,
       .sweep-table td.num {
         text-align: right;
         font-variant-numeric: tabular-nums;
       }
-      .sweep-table tr.row--active {
-        background: rgba(79, 140, 255, 0.08);
+      .sweep-table tr.row--active td {
+        background: rgba(0, 113, 227, 0.1);
+        font-weight: 600;
       }
       .curve {
         width: 200px;
@@ -498,7 +496,7 @@ const WINDOW_OPTIONS = [
       .signal-table td {
         padding: 0.3rem 0.5rem;
         text-align: left;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        border-bottom: 1px solid var(--border);
         white-space: nowrap;
       }
       .signal-table th.num,
@@ -507,31 +505,51 @@ const WINDOW_OPTIONS = [
         font-variant-numeric: tabular-nums;
       }
       .signal-table tr.row--win td {
-        background: rgba(79, 209, 197, 0.04);
+        background: rgba(48, 209, 88, 0.08);
       }
       .signal-table tr.row--loss td {
-        background: rgba(255, 122, 122, 0.04);
+        background: rgba(255, 69, 58, 0.08);
       }
 
       .outcome-chip {
         font-size: 0.7rem;
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        padding: 0.1rem 0.4rem;
+        padding: 0.15rem 0.5rem;
         border-radius: 3px;
-        background: rgba(255, 255, 255, 0.06);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-weight: 600;
       }
       .chip--tp {
-        background: rgba(79, 209, 197, 0.18);
-        color: #4fd1c5;
+        background: rgba(48, 209, 88, 0.18);
+        color: #1f8a3d;
       }
       .chip--sl {
-        background: rgba(255, 122, 122, 0.18);
-        color: #ff7a7a;
+        background: rgba(255, 69, 58, 0.18);
+        color: #c4290a;
       }
       .chip--exp {
-        background: rgba(160, 160, 160, 0.18);
-        color: #aaa;
+        background: rgba(142, 142, 147, 0.18);
+        color: var(--text-secondary);
+      }
+      .profit {
+        color: #1f8a3d;
+      }
+      .loss {
+        color: #c4290a;
+      }
+      :host-context([data-theme='dark']) .chip--tp {
+        color: #5dd47e;
+      }
+      :host-context([data-theme='dark']) .chip--sl {
+        color: #ff8278;
+      }
+      :host-context([data-theme='dark']) .profit {
+        color: #5dd47e;
+      }
+      :host-context([data-theme='dark']) .loss {
+        color: #ff8278;
       }
     `,
   ],
