@@ -1952,50 +1952,46 @@ export class SignalSensitivityPageComponent implements OnInit {
       ? s.entryPrice - (s.entryPrice - s.originalSL) * slMul
       : s.entryPrice + (s.originalSL - s.entryPrice) * slMul;
 
-    // Candlestick series wants [open, close, low, high] per bar.
-    const ohlc: (number[] | (number | string)[])[] = candles.map((c) => [
+    // ── Time-axis chart ──────────────────────────────────────────────────
+    // We use a `type: 'time'` x-axis (not category) so signal-fire and exit
+    // markers land at their exact timestamps rather than snapping to the
+    // nearest candle index. This means:
+    //   * Signal fired at 9:32 lands INSIDE the 9:00 H1 bar (not at 10:00).
+    //   * Exit at 9:33 lands 1 minute after signal-fire, visually distinct
+    //     from the signal-fire vertical even though both fall in the same
+    //     H1 bar.
+    // Candlestick data on a time axis is [timestamp, open, close, low, high].
+    const tfMin = this.timeframeMinutes(this.selectedTimeframe());
+    const tfMs = tfMin * 60_000;
+    const signalMs = new Date(s.generatedAt).getTime();
+    const exitMs = s.exitAt ? new Date(s.exitAt).getTime() : 0;
+    const lastCandleMs = candles.length
+      ? new Date(candles[candles.length - 1].timestamp).getTime()
+      : signalMs;
+    // The chart's x-range must extend past the signal/exit time even when
+    // the last real candle hasn't caught up yet (fresh signal, candle
+    // ingest lag). The padding "ghost" point gives the time axis room to
+    // place the verticals without clipping them at the right edge.
+    const lastChartMs = Math.max(lastCandleMs, Math.max(signalMs, exitMs) + tfMs);
+
+    const candleData: (number | string)[][] = candles.map((c) => [
+      new Date(c.timestamp).getTime(),
       c.open,
       c.close,
       c.low,
       c.high,
     ]);
-    const xLabels: string[] = candles.map((c) => c.timestamp);
-
-    // Pad the x-axis with synthetic empty bars when the signal-fire / exit
-    // timestamps land AFTER the last available candle. Without this, the
-    // findClosestIndex search clamps both signalIdx and exitIdx to the last
-    // real candle — collapsing the Signal-fired marker against the right
-    // edge and placing the exit dot at a candle that predates the signal.
-    // The synthetic bars carry "-" for OHLC so the candlestick series
-    // renders nothing there, but the category index still resolves correctly.
-    const tfMin = this.timeframeMinutes(this.selectedTimeframe());
-    const tfMs = tfMin * 60_000;
-    const lastCandleMs = candles.length
-      ? new Date(candles[candles.length - 1].timestamp).getTime()
-      : new Date(s.generatedAt).getTime();
-    const signalMs = new Date(s.generatedAt).getTime();
-    const exitMs = s.exitAt ? new Date(s.exitAt).getTime() : 0;
-    const futureTargetMs = Math.max(signalMs, exitMs);
-    if (futureTargetMs > lastCandleMs) {
-      // Pad to one timeframe step past the latest target so the marker
-      // doesn't sit on the very last bar.
-      let t = lastCandleMs + tfMs;
-      const endMs = futureTargetMs + tfMs;
-      while (t <= endMs) {
-        xLabels.push(new Date(t).toISOString());
-        ohlc.push(['-', '-', '-', '-']); // empty bar — ECharts skips '-'
-        t += tfMs;
-      }
+    if (lastChartMs > lastCandleMs) {
+      // Add a single placeholder so the axis extends without drawing a bar.
+      candleData.push([lastChartMs, '-', '-', '-', '-']);
     }
 
     // Decimal precision: match the price's natural scale (4-digit JPY pairs,
-    // 5-digit majors). Crude but effective for the formatter labels + axis.
+    // 5-digit majors).
     const pricePrecision = s.entryPrice > 50 ? 3 : 5;
     const fmt = (n: number) => n.toFixed(pricePrecision);
 
-    // HH:mm clock format for the vertical timing labels — lets the operator
-    // distinguish entry vs exit timestamps when the verticals fall on the
-    // same or adjacent bars.
+    // HH:mm clock format for the vertical timing labels.
     const formatClockTime = (iso: string) => {
       const d = new Date(iso);
       return `${d.getHours().toString().padStart(2, '0')}:${d
@@ -2004,74 +2000,38 @@ export class SignalSensitivityPageComponent implements OnInit {
         .padStart(2, '0')}`;
     };
 
-    // Find the index whose timestamp is closest to a given ISO string —
-    // searches the EXTENDED labels (real candles + synthetic future slots)
-    // so signal-fire / exit timestamps map to legitimate slots even when
-    // they're past the last real candle.
-    const findClosestIndex = (iso: string): number => {
-      const target = new Date(iso).getTime();
-      let bestIdx = 0;
-      let bestDelta = Infinity;
-      for (let i = 0; i < xLabels.length; i++) {
-        const delta = Math.abs(new Date(xLabels[i]).getTime() - target);
-        if (delta < bestDelta) {
-          bestDelta = delta;
-          bestIdx = i;
-        }
-      }
-      return bestIdx;
-    };
+    // Exit colour from outcome.
+    const exitColour =
+      s.outcome === 'HitTP' ? '#1f8a3d' : s.outcome === 'HitSL' ? '#c4290a' : '#0071e3';
 
-    // Closest x-axis slot to GeneratedAt for the vertical "Signal fired" marker.
-    // Computed early so markArea + line series can clip to "signal onwards" —
-    // pre-signal candles are CONTEXT only, the position doesn't exist yet so
-    // reference lines/bands extending backwards would be misleading.
-    const signalIdx = findClosestIndex(s.generatedAt);
-    const lastIdx = xLabels.length - 1;
-
-    // Exit timing + color. We render exit both as a horizontal line (price
-    // level, drawn via a dedicated series below) and as a dot at the exact
-    // (timestamp, price) coordinate so the operator can read WHEN as well as
-    // WHERE the exit happened.
-    let exitColour = '#0071e3';
-    let exitIdx: number | null = null;
-    if (s.exitPrice !== null && s.exitAt) {
-      exitIdx = findClosestIndex(s.exitAt);
-      exitColour =
-        s.outcome === 'HitTP' ? '#1f8a3d' : s.outcome === 'HitSL' ? '#c4290a' : '#0071e3';
-    }
-
-    // Filled bands for the "reward zone" (entry → TP, green) and "risk zone"
-    // (entry → SL, red) — much louder than thin horizontal lines that blend
-    // into the chart's horizontal gridlines. Clipped to [signalIdx, last] so
-    // the band only spans the position's lifetime, not pre-signal context.
+    // Filled bands from signal-fire onwards (TP zone above/below entry, SL
+    // zone on the other side). Time-axis xAxis values are ms timestamps.
     const markAreaData: any[][] = [
       [
         {
           yAxis: s.entryPrice,
-          xAxis: signalIdx,
+          xAxis: signalMs,
           itemStyle: { color: 'rgba(31, 138, 61, 0.12)' },
           name: 'TP zone',
         },
-        { yAxis: s.originalTP, xAxis: lastIdx },
+        { yAxis: s.originalTP, xAxis: lastChartMs },
       ],
       [
         {
           yAxis: s.entryPrice,
-          xAxis: signalIdx,
+          xAxis: signalMs,
           itemStyle: { color: 'rgba(196, 41, 10, 0.12)' },
           name: 'SL zone',
         },
-        { yAxis: s.originalSL, xAxis: lastIdx },
+        { yAxis: s.originalSL, xAxis: lastChartMs },
       ],
     ];
 
-    // Dot at the exact exit (timestamp, price) — companion to the exit
-    // horizontal line so the operator gets WHEN + WHERE at a glance.
+    // Exit dot at exact (timestamp, price).
     const markPointData: any[] = [];
-    if (exitIdx !== null && s.exitPrice !== null) {
+    if (exitMs > 0 && s.exitPrice !== null) {
       markPointData.push({
-        coord: [exitIdx, s.exitPrice],
+        coord: [exitMs, s.exitPrice],
         symbol: 'circle',
         symbolSize: 10,
         itemStyle: { color: exitColour, borderColor: '#ffffff', borderWidth: 2 },
@@ -2079,10 +2039,8 @@ export class SignalSensitivityPageComponent implements OnInit {
       });
     }
 
-    // Y-axis bounds: ensure entry/TP/SL all visible with a 15% padding.
-    // ECharts' default scale doesn't always span our reference lines if they
-    // sit outside the candle high/low range — common when TP / SL haven't been
-    // touched yet by the visible bars.
+    // Y-axis bounds with 15% padding so reference lines that sit outside the
+    // candle range still render with margin.
     const lows = candles.map((c) => c.low);
     const highs = candles.map((c) => c.high);
     const allYs = [
@@ -2099,15 +2057,13 @@ export class SignalSensitivityPageComponent implements OnInit {
     const yMax = Math.max(...allYs);
     const yPad = (yMax - yMin) * 0.15;
 
-    // Dedicated horizontal-line series for Entry/TP/SL/Exit. We render these
-    // as real `type: 'line'` series rather than relying on markLine because
-    // markLine on a candlestick series is rendered unreliably (z-order +
-    // clipping quirks observed live). Each series carries a constant Y from
-    // signalIdx onward (null for pre-signal bars) so reference lines only
-    // appear during the position's lifetime — they shouldn't extend backwards
-    // into context candles where the position didn't yet exist.
-    const flat = (y: number): (number | null)[] =>
-      xLabels.map((_, i) => (i < signalIdx ? null : y));
+    // Reference price lines (Entry/TP/SL/scenario/Exit). With a time axis,
+    // each line is just two points: (signalMs, y) → (lastChartMs, y). The
+    // line is invisible before signalMs because it has no data there.
+    const flat = (y: number): [number, number][] => [
+      [signalMs, y],
+      [lastChartMs, y],
+    ];
     const lineSeries: any[] = [
       {
         name: 'Entry',
@@ -2233,19 +2189,21 @@ export class SignalSensitivityPageComponent implements OnInit {
       });
     }
 
+    // Default zoom: ~24 bars of pre-signal context to chart end. With time
+    // axis we use startValue/endValue (ms) instead of percentages.
+    const focusStartMs = signalMs - 24 * tfMs;
+
     return <EChartsOption>{
       animation: false,
       grid: { left: 70, right: 100, top: 32, bottom: 64 },
       xAxis: {
-        type: 'category',
-        data: xLabels,
+        type: 'time',
         axisLabel: {
-          formatter: (val: string) => {
+          formatter: (val: number) => {
             const d = new Date(val);
-            return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:00`;
+            return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
           },
         },
-        boundaryGap: true,
       },
       yAxis: {
         type: 'value',
@@ -2262,34 +2220,27 @@ export class SignalSensitivityPageComponent implements OnInit {
           const arr = Array.isArray(params) ? params : [params];
           const candle = arr.find((p: any) => p.seriesType === 'candlestick');
           if (!candle?.data) return '';
-          const [, o, cl, lo, hi] = candle.data;
-          return `<b>${candle.name}</b><br/>O ${o}<br/>H ${hi}<br/>L ${lo}<br/>C ${cl}`;
+          const [ts, o, cl, lo, hi] = candle.data;
+          const d = new Date(ts);
+          const label = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          return `<b>${label}</b><br/>O ${o}<br/>H ${hi}<br/>L ${lo}<br/>C ${cl}`;
         },
       },
-      // Default zoom: focus on ~24 bars of pre-signal context + everything
-      // after signal fire. Pre-context is fetched generously (so the operator
-      // can scroll back via the slider) but the default view zooms in on the
-      // signal region so the reference lines + bands aren't squeezed against
-      // the right edge when the signal is recent.
-      dataZoom: (() => {
-        const focusStartIdx = Math.max(0, signalIdx - 24);
-        const focusStartPct = xLabels.length > 1 ? (focusStartIdx / (xLabels.length - 1)) * 100 : 0;
-        return [
-          { type: 'inside', xAxisIndex: 0, start: focusStartPct, end: 100 },
-          {
-            type: 'slider',
-            xAxisIndex: 0,
-            height: 24,
-            bottom: 8,
-            start: focusStartPct,
-            end: 100,
-          },
-        ];
-      })(),
+      dataZoom: [
+        { type: 'inside', xAxisIndex: 0, startValue: focusStartMs, endValue: lastChartMs },
+        {
+          type: 'slider',
+          xAxisIndex: 0,
+          height: 24,
+          bottom: 8,
+          startValue: focusStartMs,
+          endValue: lastChartMs,
+        },
+      ],
       series: [
         {
           type: 'candlestick',
-          data: ohlc,
+          data: candleData,
           itemStyle: {
             color: '#1f8a3d', // bullish body fill
             color0: '#c4290a', // bearish body fill
@@ -2305,14 +2256,14 @@ export class SignalSensitivityPageComponent implements OnInit {
           markLine: {
             symbol: 'none',
             z: 12,
-            // Vertical timing markers. Naming distinct from the horizontal
-            // ENTRY/EXIT price pills so the operator doesn't confuse "the
-            // line at price 0.58530" with "the line at 7:32 AM". Solid blue
-            // for signal-fire, dashed outcome-colour for exit so even when
-            // they're 1 bar apart (fast resolution) they read distinctly.
+            // Vertical timing markers placed by exact timestamp (time axis),
+            // not by category index. Signal-fire at 9:32 and exit at 9:33
+            // sit 1 minute apart visually rather than collapsing onto the
+            // same bar. Solid blue for signal-fire, dashed outcome-colour
+            // for exit.
             data: [
               {
-                xAxis: signalIdx,
+                xAxis: signalMs,
                 lineStyle: { color: '#0071e3', type: 'solid', width: 2, opacity: 0.9 },
                 label: {
                   show: true,
@@ -2326,10 +2277,10 @@ export class SignalSensitivityPageComponent implements OnInit {
                   fontSize: 11,
                 },
               },
-              ...(exitIdx !== null && s.exitAt
+              ...(exitMs > 0 && s.exitAt
                 ? [
                     {
-                      xAxis: exitIdx,
+                      xAxis: exitMs,
                       lineStyle: {
                         color: exitColour,
                         type: 'dashed' as const,
