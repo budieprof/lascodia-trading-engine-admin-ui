@@ -1169,99 +1169,101 @@ export class SignalSensitivityPageComponent implements OnInit {
       return bestIdx;
     };
 
-    const markLineData: any[] = [
-      {
-        name: 'Entry',
-        yAxis: s.entryPrice,
-        lineStyle: { color: '#6e6e73', type: 'solid', width: 2 },
-        label: {
-          formatter: `Entry ${fmt(s.entryPrice)}`,
-          position: 'end',
-          color: '#6e6e73',
-          fontWeight: 'bold',
-        },
-      },
-      {
-        name: 'TP',
-        yAxis: s.originalTP,
-        lineStyle: { color: '#1f8a3d', type: 'solid', width: 2 },
-        label: {
-          formatter: `TP ${fmt(s.originalTP)}`,
-          position: 'end',
-          color: '#1f8a3d',
-          fontWeight: 'bold',
-        },
-      },
-      {
-        name: 'SL',
-        yAxis: s.originalSL,
-        lineStyle: { color: '#c4290a', type: 'solid', width: 2 },
-        label: {
-          formatter: `SL ${fmt(s.originalSL)}`,
-          position: 'end',
-          color: '#c4290a',
-          fontWeight: 'bold',
-        },
-      },
+    // Filled bands for the "reward zone" (entry → TP, green) and "risk zone"
+    // (entry → SL, red) — much louder than thin horizontal lines that blend
+    // into the chart's horizontal gridlines.
+    const markAreaData: any[][] = [
+      [
+        { yAxis: s.entryPrice, itemStyle: { color: 'rgba(31, 138, 61, 0.12)' }, name: 'TP zone' },
+        { yAxis: s.originalTP },
+      ],
+      [
+        { yAxis: s.entryPrice, itemStyle: { color: 'rgba(196, 41, 10, 0.12)' }, name: 'SL zone' },
+        { yAxis: s.originalSL },
+      ],
     ];
+
+    // Helper: build a horizontal-line markLine entry with a pill-style label
+    // backed by a coloured fill so the label always reads regardless of where
+    // it lands on the chart. Pill renders against the right gutter so it
+    // doesn't sit on top of candles.
+    const horizontalLine = (
+      yValue: number,
+      color: string,
+      labelText: string,
+      lineWidth = 2.5,
+      dashed = false,
+    ) => ({
+      yAxis: yValue,
+      lineStyle: {
+        color,
+        type: dashed ? 'dashed' : 'solid',
+        width: lineWidth,
+        opacity: dashed ? 0.7 : 1,
+      },
+      label: {
+        show: true,
+        formatter: labelText,
+        position: 'insideEndTop',
+        backgroundColor: color,
+        color: '#ffffff',
+        padding: [3, 7],
+        borderRadius: 3,
+        fontWeight: 'bold',
+        fontSize: 11,
+      },
+    });
+
+    const markLineData: any[] = [
+      horizontalLine(s.entryPrice, '#000000', `ENTRY ${fmt(s.entryPrice)}`, 2.5),
+      horizontalLine(s.originalTP, '#1f8a3d', `TP ${fmt(s.originalTP)}`, 2.5),
+      horizontalLine(s.originalSL, '#c4290a', `SL ${fmt(s.originalSL)}`, 2.5),
+    ];
+
     if (tpMul !== 1 || slMul !== 1) {
       markLineData.push(
-        {
-          name: 'TP scn',
-          yAxis: scenarioTp,
-          lineStyle: { color: '#1f8a3d', type: 'dashed', width: 1.5, opacity: 0.7 },
-          label: {
-            formatter: `TP×${tpMul} ${fmt(scenarioTp)}`,
-            position: 'start',
-            color: '#1f8a3d',
-            opacity: 0.8,
-          },
-        },
-        {
-          name: 'SL scn',
-          yAxis: scenarioSl,
-          lineStyle: { color: '#c4290a', type: 'dashed', width: 1.5, opacity: 0.7 },
-          label: {
-            formatter: `SL×${slMul} ${fmt(scenarioSl)}`,
-            position: 'start',
-            color: '#c4290a',
-            opacity: 0.8,
-          },
-        },
+        horizontalLine(scenarioTp, '#1f8a3d', `TP×${tpMul} ${fmt(scenarioTp)}`, 1.5, true),
+        horizontalLine(scenarioSl, '#c4290a', `SL×${slMul} ${fmt(scenarioSl)}`, 1.5, true),
       );
     }
+
+    // Exit also rendered as a horizontal line (per operator request) so its
+    // price level is unambiguous, in addition to the dot marker at the exact
+    // (timestamp, price) coordinate which shows WHEN the exit happened.
+    let exitColour = '#0071e3';
+    let exitIdx: number | null = null;
+    if (s.exitPrice !== null && s.exitAt) {
+      exitIdx = findClosestIndex(s.exitAt);
+      exitColour =
+        s.outcome === 'HitTP' ? '#1f8a3d' : s.outcome === 'HitSL' ? '#c4290a' : '#0071e3';
+      markLineData.push(horizontalLine(s.exitPrice, exitColour, `EXIT ${fmt(s.exitPrice)}`, 2));
+    }
+
     // Vertical line at the signal-fire bar (closest candle to GeneratedAt).
     const signalIdx = findClosestIndex(s.generatedAt);
     markLineData.push({
-      name: 'Signal',
       xAxis: signalIdx,
       lineStyle: { color: '#0071e3', type: 'solid', width: 1.5, opacity: 0.6 },
       label: {
+        show: true,
         formatter: 'Signal fired',
         position: 'insideEndTop',
         color: '#0071e3',
         fontWeight: 'bold',
+        fontSize: 11,
       },
     });
 
+    // Keep a small dot at the exact exit (timestamp, price) so the operator
+    // can read WHEN — the horizontal exit line shows the WHERE.
     const markPointData: any[] = [];
-    if (s.exitPrice !== null && s.exitAt) {
-      const exitIdx = findClosestIndex(s.exitAt);
-      const exitColour =
-        s.outcome === 'HitTP' ? '#1f8a3d' : s.outcome === 'HitSL' ? '#c4290a' : '#0071e3';
+    if (exitIdx !== null && s.exitPrice !== null) {
       markPointData.push({
-        name: 'Exit',
         coord: [exitIdx, s.exitPrice],
         symbol: 'circle',
-        symbolSize: 14,
+        symbolSize: 10,
         itemStyle: { color: exitColour, borderColor: '#ffffff', borderWidth: 2 },
-        label: {
-          formatter: `Exit ${fmt(s.exitPrice)}`,
-          show: true,
-          position: 'top',
-          color: exitColour,
-          fontWeight: 'bold',
-        },
+        label: { show: false },
       });
     }
 
@@ -1285,7 +1287,7 @@ export class SignalSensitivityPageComponent implements OnInit {
     const yMax = Math.max(...allYs);
     const yPad = (yMax - yMin) * 0.15;
 
-    return {
+    return <EChartsOption>{
       animation: false,
       grid: { left: 70, right: 100, top: 32, bottom: 64 },
       xAxis: {
@@ -1331,13 +1333,20 @@ export class SignalSensitivityPageComponent implements OnInit {
             borderColor: '#1f8a3d',
             borderColor0: '#c4290a',
           },
+          markArea: {
+            silent: true,
+            data: markAreaData,
+          },
           markLine: {
             symbol: 'none',
             data: markLineData,
-            silent: false,
+            silent: true,
+            animation: false,
           },
           markPoint: {
             data: markPointData,
+            silent: true,
+            animation: false,
           },
         },
       ],
