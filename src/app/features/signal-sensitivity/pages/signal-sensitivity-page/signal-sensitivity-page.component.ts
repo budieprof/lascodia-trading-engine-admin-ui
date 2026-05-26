@@ -1953,23 +1953,56 @@ export class SignalSensitivityPageComponent implements OnInit {
       : s.entryPrice + (s.originalSL - s.entryPrice) * slMul;
 
     // Candlestick series wants [open, close, low, high] per bar.
-    const ohlc = candles.map((c) => [c.open, c.close, c.low, c.high]);
-    const xLabels = candles.map((c) => c.timestamp);
+    const ohlc: (number[] | (number | string)[])[] = candles.map((c) => [
+      c.open,
+      c.close,
+      c.low,
+      c.high,
+    ]);
+    const xLabels: string[] = candles.map((c) => c.timestamp);
+
+    // Pad the x-axis with synthetic empty bars when the signal-fire / exit
+    // timestamps land AFTER the last available candle. Without this, the
+    // findClosestIndex search clamps both signalIdx and exitIdx to the last
+    // real candle — collapsing the Signal-fired marker against the right
+    // edge and placing the exit dot at a candle that predates the signal.
+    // The synthetic bars carry "-" for OHLC so the candlestick series
+    // renders nothing there, but the category index still resolves correctly.
+    const tfMin = this.timeframeMinutes(this.selectedTimeframe());
+    const tfMs = tfMin * 60_000;
+    const lastCandleMs = candles.length
+      ? new Date(candles[candles.length - 1].timestamp).getTime()
+      : new Date(s.generatedAt).getTime();
+    const signalMs = new Date(s.generatedAt).getTime();
+    const exitMs = s.exitAt ? new Date(s.exitAt).getTime() : 0;
+    const futureTargetMs = Math.max(signalMs, exitMs);
+    if (futureTargetMs > lastCandleMs) {
+      // Pad to one timeframe step past the latest target so the marker
+      // doesn't sit on the very last bar.
+      let t = lastCandleMs + tfMs;
+      const endMs = futureTargetMs + tfMs;
+      while (t <= endMs) {
+        xLabels.push(new Date(t).toISOString());
+        ohlc.push(['-', '-', '-', '-']); // empty bar — ECharts skips '-'
+        t += tfMs;
+      }
+    }
 
     // Decimal precision: match the price's natural scale (4-digit JPY pairs,
     // 5-digit majors). Crude but effective for the formatter labels + axis.
     const pricePrecision = s.entryPrice > 50 ? 3 : 5;
     const fmt = (n: number) => n.toFixed(pricePrecision);
 
-    // Find the candle index whose timestamp is closest to exitAt — markPoint
-    // on a category xAxis needs the coord's x to match a category exactly,
-    // OR it can use a numeric index. We use the index for robustness.
+    // Find the index whose timestamp is closest to a given ISO string —
+    // searches the EXTENDED labels (real candles + synthetic future slots)
+    // so signal-fire / exit timestamps map to legitimate slots even when
+    // they're past the last real candle.
     const findClosestIndex = (iso: string): number => {
       const target = new Date(iso).getTime();
       let bestIdx = 0;
       let bestDelta = Infinity;
-      for (let i = 0; i < candles.length; i++) {
-        const delta = Math.abs(new Date(candles[i].timestamp).getTime() - target);
+      for (let i = 0; i < xLabels.length; i++) {
+        const delta = Math.abs(new Date(xLabels[i]).getTime() - target);
         if (delta < bestDelta) {
           bestDelta = delta;
           bestIdx = i;
@@ -1978,12 +2011,12 @@ export class SignalSensitivityPageComponent implements OnInit {
       return bestIdx;
     };
 
-    // Closest candle to GeneratedAt for the vertical "Signal fired" marker.
+    // Closest x-axis slot to GeneratedAt for the vertical "Signal fired" marker.
     // Computed early so markArea + line series can clip to "signal onwards" —
     // pre-signal candles are CONTEXT only, the position doesn't exist yet so
     // reference lines/bands extending backwards would be misleading.
     const signalIdx = findClosestIndex(s.generatedAt);
-    const lastIdx = candles.length - 1;
+    const lastIdx = xLabels.length - 1;
 
     // Exit timing + color. We render exit both as a horizontal line (price
     // level, drawn via a dedicated series below) and as a dot at the exact
@@ -2063,7 +2096,7 @@ export class SignalSensitivityPageComponent implements OnInit {
     // appear during the position's lifetime — they shouldn't extend backwards
     // into context candles where the position didn't yet exist.
     const flat = (y: number): (number | null)[] =>
-      candles.map((_, i) => (i < signalIdx ? null : y));
+      xLabels.map((_, i) => (i < signalIdx ? null : y));
     const lineSeries: any[] = [
       {
         name: 'Entry',
@@ -2229,7 +2262,7 @@ export class SignalSensitivityPageComponent implements OnInit {
       // the right edge when the signal is recent.
       dataZoom: (() => {
         const focusStartIdx = Math.max(0, signalIdx - 24);
-        const focusStartPct = candles.length > 1 ? (focusStartIdx / (candles.length - 1)) * 100 : 0;
+        const focusStartPct = xLabels.length > 1 ? (focusStartIdx / (xLabels.length - 1)) * 100 : 0;
         return [
           { type: 'inside', xAxisIndex: 0, start: focusStartPct, end: 100 },
           {
