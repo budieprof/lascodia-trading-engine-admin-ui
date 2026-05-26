@@ -3292,10 +3292,20 @@ export interface AnalyzeSignalSensitivitySignalDto {
   exitPrice: number | null;
   exitAt: string;
   scenarioPnL: number;
+  lotSize: number;
+}
+
+/** One point on the equity curve produced when RiskProfile-based sizing is on. */
+export interface AnalyzeSignalSensitivityEquityPointDto {
+  at: string;
+  balance: number;
+  pnL: number;
+  lots: number;
 }
 
 /** Sensitivity analysis result envelope: aggregate KPIs at the operator's
- *  chosen multipliers + a TP sweep + per-signal detail. */
+ *  chosen multipliers + a TP sweep + per-signal detail. When a RiskProfile
+ *  is in play, also carries equity-curve + drawdown + return%. */
 export interface AnalyzeSignalSensitivityResultDto {
   fromUtc: string;
   toUtc: string;
@@ -3307,6 +3317,15 @@ export interface AnalyzeSignalSensitivityResultDto {
   aggregate: AnalyzeSignalSensitivityAggregateDto;
   tpSweep: AnalyzeSignalSensitivityAggregateDto[];
   signals: AnalyzeSignalSensitivitySignalDto[];
+
+  riskProfileId?: number | null;
+  riskProfileName?: string | null;
+  startingBalance?: number | null;
+  finalBalance?: number | null;
+  returnPct?: number | null;
+  maxDrawdown?: number | null;
+  maxDrawdownPct?: number | null;
+  equityCurve: AnalyzeSignalSensitivityEquityPointDto[];
 }
 
 /** Request shape for POST /trade-signal/sensitivity-analysis. */
@@ -3319,4 +3338,6 @@ export interface AnalyzeSignalSensitivityRequest {
   slMultiplier?: number;
   tpSweepValues?: number[];
   signalDetailCap?: number;
+  riskProfileId?: number;
+  startingBalance?: number;
 }

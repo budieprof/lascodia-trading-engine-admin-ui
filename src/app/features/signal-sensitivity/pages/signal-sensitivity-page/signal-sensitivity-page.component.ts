@@ -1,12 +1,21 @@
-import { Component, ChangeDetectionStrategy, computed, inject, signal } from '@angular/core';
+import {
+  Component,
+  ChangeDetectionStrategy,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { CurrencyPipe, DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { catchError, of } from 'rxjs';
 
 import { SignalSensitivityService } from '@core/services/signal-sensitivity.service';
+import { RiskProfilesService } from '@core/services/risk-profiles.service';
 import {
   AnalyzeSignalSensitivityResultDto,
-  AnalyzeSignalSensitivityAggregateDto,
+  AnalyzeSignalSensitivityEquityPointDto,
+  RiskProfileDto,
 } from '@core/api/api.types';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 
@@ -107,6 +116,31 @@ const WINDOW_OPTIONS = [
               placeholder="0.5, 0.75, 1.0, 1.25, 1.5"
             />
           </label>
+        </div>
+        <div class="filter-row">
+          <label class="field field--wide">
+            <span>Risk Profile (optional — enables equity curve)</span>
+            <select [(ngModel)]="riskProfileId" name="riskProfileId">
+              <option [ngValue]="null">— Use signal SuggestedLotSize —</option>
+              @for (rp of riskProfiles(); track rp.id) {
+                <option [ngValue]="rp.id">
+                  {{ rp.name || '#' + rp.id }} ({{ rp.maxRiskPerTradePct | number: '1.1-2' }}%
+                  risk/trade)
+                </option>
+              }
+            </select>
+          </label>
+          <label class="field">
+            <span>Starting Balance</span>
+            <input
+              type="number"
+              step="100"
+              min="100"
+              [(ngModel)]="startingBalance"
+              name="startingBalance"
+              [disabled]="riskProfileId() === null"
+            />
+          </label>
           <button type="submit" class="run-btn" [disabled]="loading()">
             {{ loading() ? 'Analysing…' : 'Analyse' }}
           </button>
@@ -174,6 +208,58 @@ const WINDOW_OPTIONS = [
             </div>
           </div>
         </section>
+
+        <!-- ── Equity-curve KPIs + sparkline (when RiskProfile mode is on) ── -->
+        @if (r.riskProfileId !== null && r.riskProfileId !== undefined) {
+          <section class="equity-card">
+            <header class="equity-header">
+              <h2>
+                Equity curve
+                <small>
+                  · {{ r.riskProfileName }} · starting {{ r.startingBalance | currency: 'USD' }}
+                </small>
+              </h2>
+              <div class="equity-kpis">
+                <div class="equity-kpi">
+                  <span class="equity-kpi-label">Final balance</span>
+                  <span
+                    class="equity-kpi-value"
+                    [class.profit]="(r.finalBalance ?? 0) > (r.startingBalance ?? 0)"
+                    [class.loss]="(r.finalBalance ?? 0) < (r.startingBalance ?? 0)"
+                  >
+                    {{ r.finalBalance | currency: 'USD' }}
+                  </span>
+                </div>
+                <div class="equity-kpi">
+                  <span class="equity-kpi-label">Return</span>
+                  <span
+                    class="equity-kpi-value"
+                    [class.profit]="(r.returnPct ?? 0) > 0"
+                    [class.loss]="(r.returnPct ?? 0) < 0"
+                  >
+                    {{ r.returnPct | number: '1.2-2' }}%
+                  </span>
+                </div>
+                <div class="equity-kpi">
+                  <span class="equity-kpi-label">Max drawdown</span>
+                  <span class="equity-kpi-value loss">
+                    {{ r.maxDrawdown | currency: 'USD' }}
+                    <small>({{ r.maxDrawdownPct | number: '1.2-2' }}%)</small>
+                  </span>
+                </div>
+              </div>
+            </header>
+            <svg
+              class="equity-spark"
+              [attr.viewBox]="equityViewBox()"
+              preserveAspectRatio="none"
+              aria-label="Equity curve"
+            >
+              <polyline class="equity-baseline" [attr.points]="equityBaselinePoints()" />
+              <polyline class="equity-line" [attr.points]="equityLinePoints()" />
+            </svg>
+          </section>
+        }
 
         <!-- ── TP sweep curve as a table + ASCII bar visual ───────────────── -->
         <section class="sweep-card">
@@ -431,11 +517,77 @@ const WINDOW_OPTIONS = [
       /* .profit / .loss colours defined below (theme-aware). */
 
       .sweep-card,
-      .signals-card {
+      .signals-card,
+      .equity-card {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: 8px;
         padding: 0.75rem 1rem;
+      }
+      .equity-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-bottom: 0.75rem;
+      }
+      .equity-header h2 {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 600;
+      }
+      .equity-header h2 small {
+        font-weight: 400;
+        opacity: 0.7;
+        margin-left: 0.5rem;
+      }
+      .equity-kpis {
+        display: flex;
+        gap: 1.5rem;
+        flex-wrap: wrap;
+      }
+      .equity-kpi {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .equity-kpi-label {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        opacity: 0.7;
+        font-weight: 600;
+      }
+      .equity-kpi-value {
+        font-size: 1.1rem;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+      .equity-kpi-value small {
+        font-size: 0.75rem;
+        opacity: 0.7;
+        font-weight: 400;
+        margin-left: 0.25rem;
+      }
+      .equity-spark {
+        width: 100%;
+        height: 160px;
+        display: block;
+      }
+      .equity-line {
+        fill: none;
+        stroke: var(--accent);
+        stroke-width: 2;
+        vector-effect: non-scaling-stroke;
+      }
+      .equity-baseline {
+        fill: none;
+        stroke: var(--text-tertiary);
+        stroke-width: 1;
+        stroke-dasharray: 4 4;
+        vector-effect: non-scaling-stroke;
+        opacity: 0.5;
       }
       .sweep-card h2,
       .signals-card h2 {
@@ -554,8 +706,9 @@ const WINDOW_OPTIONS = [
     `,
   ],
 })
-export class SignalSensitivityPageComponent {
+export class SignalSensitivityPageComponent implements OnInit {
   private readonly svc = inject(SignalSensitivityService);
+  private readonly riskProfilesSvc = inject(RiskProfilesService);
 
   readonly sourcesAvail = SOURCES;
   readonly windows = WINDOW_OPTIONS;
@@ -566,10 +719,67 @@ export class SignalSensitivityPageComponent {
   readonly tpMultiplier = signal<number>(1.0);
   readonly slMultiplier = signal<number>(1.0);
   readonly sweepInput = signal<string>('0.5, 0.75, 1.0, 1.25, 1.5');
+  readonly riskProfileId = signal<number | null>(null);
+  readonly startingBalance = signal<number>(10000);
 
   readonly loading = signal(false);
   readonly errorMessage = signal<string | null>(null);
   readonly result = signal<AnalyzeSignalSensitivityResultDto | null>(null);
+  readonly riskProfiles = signal<RiskProfileDto[]>([]);
+
+  /** SVG viewBox spanning the equity curve. Computed so the sparkline renders
+   *  with consistent y-padding regardless of absolute balance magnitudes. */
+  readonly equityViewBox = computed(() => {
+    const pts = this.result()?.equityCurve ?? [];
+    if (pts.length < 2) return '0 0 100 100';
+    const xs = pts.map((_, i) => i);
+    const ys = pts.map((p) => p.balance);
+    const minY = Math.min(...ys, this.result()?.startingBalance ?? 0);
+    const maxY = Math.max(...ys, this.result()?.startingBalance ?? 0);
+    const pad = Math.max((maxY - minY) * 0.1, 1);
+    const w = Math.max(xs.length - 1, 1);
+    return `0 ${minY - pad} ${w} ${maxY - minY + 2 * pad}`;
+  });
+
+  /** Points string for the equity polyline. SVG y-axis is flipped — we render
+   *  high balance UP, so we invert with maxY + (range - currentY). */
+  readonly equityLinePoints = computed(() => {
+    const r = this.result();
+    if (!r || r.equityCurve.length < 2) return '';
+    const ys = r.equityCurve.map((p) => p.balance);
+    const minY = Math.min(...ys, r.startingBalance ?? 0);
+    const maxY = Math.max(...ys, r.startingBalance ?? 0);
+    const pad = Math.max((maxY - minY) * 0.1, 1);
+    const flip = (y: number) => maxY + pad - (y - (minY - pad));
+    return r.equityCurve.map((p, i) => `${i},${flip(p.balance)}`).join(' ');
+  });
+
+  /** Horizontal baseline at the starting-balance level (visual reference). */
+  readonly equityBaselinePoints = computed(() => {
+    const r = this.result();
+    if (!r || r.equityCurve.length < 2 || r.startingBalance == null) return '';
+    const ys = r.equityCurve.map((p) => p.balance);
+    const minY = Math.min(...ys, r.startingBalance);
+    const maxY = Math.max(...ys, r.startingBalance);
+    const pad = Math.max((maxY - minY) * 0.1, 1);
+    const flip = (y: number) => maxY + pad - (y - (minY - pad));
+    const yBase = flip(r.startingBalance);
+    return `0,${yBase} ${r.equityCurve.length - 1},${yBase}`;
+  });
+
+  ngOnInit() {
+    // Load risk profiles for the dropdown — wide page size since the profile
+    // catalogue is small (operator-curated). Failure is non-fatal: the
+    // dropdown stays empty and the operator can still run sweep-only mode.
+    this.riskProfilesSvc
+      .list({ currentPage: 1, itemCountPerPage: 200 })
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        if (res?.status && res.data?.data) {
+          this.riskProfiles.set(res.data.data);
+        }
+      });
+  }
 
   toggleSource(s: string) {
     const current = this.selectedSources();
@@ -591,6 +801,9 @@ export class SignalSensitivityPageComponent {
       .map((v) => parseFloat(v.trim()))
       .filter((n) => !isNaN(n) && n > 0);
 
+    const riskProfileId = this.riskProfileId();
+    const startingBalance = riskProfileId !== null ? this.startingBalance() : undefined;
+
     this.svc
       .analyze({
         sources: this.selectedSources().length ? this.selectedSources() : undefined,
@@ -601,6 +814,8 @@ export class SignalSensitivityPageComponent {
         slMultiplier: this.slMultiplier(),
         tpSweepValues: sweep.length ? sweep : undefined,
         signalDetailCap: 200,
+        riskProfileId: riskProfileId ?? undefined,
+        startingBalance,
       })
       .pipe(
         catchError((err) => {
