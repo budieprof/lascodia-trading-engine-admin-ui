@@ -1063,7 +1063,7 @@ export class SignalSensitivityPageComponent implements OnInit {
 
   /**
    * Open the chart modal for a signal. Fetches H1 candles in a window
-   * spanning ~12h before GeneratedAt → ~6h after ExpiresAt so the operator
+   * spanning ~24h before GeneratedAt → ~6h after ExpiresAt so the operator
    * sees pre-signal context + post-expiry drift. H1 is the safest default
    * because the LLM analyser writes at H1 — candles always exist.
    */
@@ -1075,7 +1075,7 @@ export class SignalSensitivityPageComponent implements OnInit {
 
     const generated = new Date(s.generatedAt);
     const expires = new Date(s.expiresAt);
-    const from = new Date(generated.getTime() - 12 * 60 * 60 * 1000); // -12h
+    const from = new Date(generated.getTime() - 24 * 60 * 60 * 1000); // -24h
     const to = new Date(expires.getTime() + 6 * 60 * 60 * 1000); // +6h
 
     this.marketDataSvc
@@ -1183,79 +1183,23 @@ export class SignalSensitivityPageComponent implements OnInit {
       ],
     ];
 
-    // Helper: build a horizontal-line markLine entry with a pill-style label
-    // backed by a coloured fill so the label always reads regardless of where
-    // it lands on the chart. Pill renders against the right gutter so it
-    // doesn't sit on top of candles.
-    const horizontalLine = (
-      yValue: number,
-      color: string,
-      labelText: string,
-      lineWidth = 2.5,
-      dashed = false,
-    ) => ({
-      yAxis: yValue,
-      lineStyle: {
-        color,
-        type: dashed ? 'dashed' : 'solid',
-        width: lineWidth,
-        opacity: dashed ? 0.7 : 1,
-      },
-      label: {
-        show: true,
-        formatter: labelText,
-        position: 'insideEndTop',
-        backgroundColor: color,
-        color: '#ffffff',
-        padding: [3, 7],
-        borderRadius: 3,
-        fontWeight: 'bold',
-        fontSize: 11,
-      },
-    });
-
-    const markLineData: any[] = [
-      horizontalLine(s.entryPrice, '#000000', `ENTRY ${fmt(s.entryPrice)}`, 2.5),
-      horizontalLine(s.originalTP, '#1f8a3d', `TP ${fmt(s.originalTP)}`, 2.5),
-      horizontalLine(s.originalSL, '#c4290a', `SL ${fmt(s.originalSL)}`, 2.5),
-    ];
-
-    if (tpMul !== 1 || slMul !== 1) {
-      markLineData.push(
-        horizontalLine(scenarioTp, '#1f8a3d', `TP×${tpMul} ${fmt(scenarioTp)}`, 1.5, true),
-        horizontalLine(scenarioSl, '#c4290a', `SL×${slMul} ${fmt(scenarioSl)}`, 1.5, true),
-      );
-    }
-
-    // Exit also rendered as a horizontal line (per operator request) so its
-    // price level is unambiguous, in addition to the dot marker at the exact
-    // (timestamp, price) coordinate which shows WHEN the exit happened.
+    // Exit timing + color. We render exit both as a horizontal line (price
+    // level, drawn via a dedicated series below) and as a dot at the exact
+    // (timestamp, price) coordinate so the operator can read WHEN as well as
+    // WHERE the exit happened.
     let exitColour = '#0071e3';
     let exitIdx: number | null = null;
     if (s.exitPrice !== null && s.exitAt) {
       exitIdx = findClosestIndex(s.exitAt);
       exitColour =
         s.outcome === 'HitTP' ? '#1f8a3d' : s.outcome === 'HitSL' ? '#c4290a' : '#0071e3';
-      markLineData.push(horizontalLine(s.exitPrice, exitColour, `EXIT ${fmt(s.exitPrice)}`, 2));
     }
 
-    // Vertical line at the signal-fire bar (closest candle to GeneratedAt).
+    // Closest candle to GeneratedAt for the vertical "Signal fired" marker.
     const signalIdx = findClosestIndex(s.generatedAt);
-    markLineData.push({
-      xAxis: signalIdx,
-      lineStyle: { color: '#0071e3', type: 'solid', width: 1.5, opacity: 0.6 },
-      label: {
-        show: true,
-        formatter: 'Signal fired',
-        position: 'insideEndTop',
-        color: '#0071e3',
-        fontWeight: 'bold',
-        fontSize: 11,
-      },
-    });
 
-    // Keep a small dot at the exact exit (timestamp, price) so the operator
-    // can read WHEN — the horizontal exit line shows the WHERE.
+    // Dot at the exact exit (timestamp, price) — companion to the exit
+    // horizontal line so the operator gets WHEN + WHERE at a glance.
     const markPointData: any[] = [];
     if (exitIdx !== null && s.exitPrice !== null) {
       markPointData.push({
@@ -1268,8 +1212,8 @@ export class SignalSensitivityPageComponent implements OnInit {
     }
 
     // Y-axis bounds: ensure entry/TP/SL all visible with a 15% padding.
-    // ECharts' default scale doesn't always span our markLines if they sit
-    // outside the candle high/low range — common when TP / SL haven't been
+    // ECharts' default scale doesn't always span our reference lines if they
+    // sit outside the candle high/low range — common when TP / SL haven't been
     // touched yet by the visible bars.
     const lows = candles.map((c) => c.low);
     const highs = candles.map((c) => c.high);
@@ -1286,6 +1230,117 @@ export class SignalSensitivityPageComponent implements OnInit {
     const yMin = Math.min(...allYs);
     const yMax = Math.max(...allYs);
     const yPad = (yMax - yMin) * 0.15;
+
+    // Dedicated horizontal-line series for Entry/TP/SL/Exit. We render these
+    // as real `type: 'line'` series rather than relying on markLine because
+    // markLine on a candlestick series is rendered unreliably (z-order +
+    // clipping quirks observed live). Each series carries a constant Y across
+    // every bar, producing a flat horizontal line that's guaranteed to draw.
+    const flat = (y: number): number[] => candles.map(() => y);
+    const lineSeries: any[] = [
+      {
+        name: 'Entry',
+        type: 'line',
+        data: flat(s.entryPrice),
+        symbol: 'none',
+        lineStyle: { color: '#000000', width: 2.5, type: 'solid' },
+        tooltip: { show: false },
+        z: 10,
+        endLabel: {
+          show: true,
+          formatter: `ENTRY ${fmt(s.entryPrice)}`,
+          backgroundColor: '#000000',
+          color: '#ffffff',
+          padding: [3, 7],
+          borderRadius: 3,
+          fontWeight: 'bold',
+          fontSize: 11,
+        },
+      },
+      {
+        name: 'TP',
+        type: 'line',
+        data: flat(s.originalTP),
+        symbol: 'none',
+        lineStyle: { color: '#1f8a3d', width: 2.5, type: 'solid' },
+        tooltip: { show: false },
+        z: 10,
+        endLabel: {
+          show: true,
+          formatter: `TP ${fmt(s.originalTP)}`,
+          backgroundColor: '#1f8a3d',
+          color: '#ffffff',
+          padding: [3, 7],
+          borderRadius: 3,
+          fontWeight: 'bold',
+          fontSize: 11,
+        },
+      },
+      {
+        name: 'SL',
+        type: 'line',
+        data: flat(s.originalSL),
+        symbol: 'none',
+        lineStyle: { color: '#c4290a', width: 2.5, type: 'solid' },
+        tooltip: { show: false },
+        z: 10,
+        endLabel: {
+          show: true,
+          formatter: `SL ${fmt(s.originalSL)}`,
+          backgroundColor: '#c4290a',
+          color: '#ffffff',
+          padding: [3, 7],
+          borderRadius: 3,
+          fontWeight: 'bold',
+          fontSize: 11,
+        },
+      },
+    ];
+
+    if (tpMul !== 1 || slMul !== 1) {
+      lineSeries.push(
+        {
+          name: `TP×${tpMul}`,
+          type: 'line',
+          data: flat(scenarioTp),
+          symbol: 'none',
+          lineStyle: { color: '#1f8a3d', width: 1.5, type: 'dashed', opacity: 0.7 },
+          tooltip: { show: false },
+          z: 9,
+        },
+        {
+          name: `SL×${slMul}`,
+          type: 'line',
+          data: flat(scenarioSl),
+          symbol: 'none',
+          lineStyle: { color: '#c4290a', width: 1.5, type: 'dashed', opacity: 0.7 },
+          tooltip: { show: false },
+          z: 9,
+        },
+      );
+    }
+
+    if (s.exitPrice !== null) {
+      lineSeries.push({
+        name: 'Exit',
+        type: 'line',
+        data: flat(s.exitPrice),
+        symbol: 'none',
+        lineStyle: { color: exitColour, width: 2, type: 'solid' },
+        tooltip: { show: false },
+        z: 11,
+        endLabel: {
+          show: true,
+          formatter: `EXIT ${fmt(s.exitPrice)}`,
+          backgroundColor: exitColour,
+          color: '#ffffff',
+          padding: [3, 7],
+          borderRadius: 3,
+          fontWeight: 'bold',
+          fontSize: 11,
+        },
+      });
+    }
 
     return <EChartsOption>{
       animation: false,
@@ -1313,10 +1368,11 @@ export class SignalSensitivityPageComponent implements OnInit {
         trigger: 'axis',
         axisPointer: { type: 'cross' },
         formatter: (params: any) => {
-          const c = Array.isArray(params) ? params[0] : params;
-          if (!c?.data) return '';
-          const [, o, cl, lo, hi] = c.data;
-          return `<b>${c.name}</b><br/>O ${o}<br/>H ${hi}<br/>L ${lo}<br/>C ${cl}`;
+          const arr = Array.isArray(params) ? params : [params];
+          const candle = arr.find((p: any) => p.seriesType === 'candlestick');
+          if (!candle?.data) return '';
+          const [, o, cl, lo, hi] = candle.data;
+          return `<b>${candle.name}</b><br/>O ${o}<br/>H ${hi}<br/>L ${lo}<br/>C ${cl}`;
         },
       },
       dataZoom: [
@@ -1333,22 +1389,43 @@ export class SignalSensitivityPageComponent implements OnInit {
             borderColor: '#1f8a3d',
             borderColor0: '#c4290a',
           },
+          z: 5,
           markArea: {
             silent: true,
+            z: 0,
             data: markAreaData,
           },
           markLine: {
             symbol: 'none',
-            data: markLineData,
+            z: 12,
+            // Only the vertical "Signal fired" marker lives on markLine —
+            // horizontal price levels are dedicated line series above so
+            // they're guaranteed to render.
+            data: [
+              {
+                xAxis: signalIdx,
+                lineStyle: { color: '#0071e3', type: 'solid', width: 1.5, opacity: 0.6 },
+                label: {
+                  show: true,
+                  formatter: 'Signal fired',
+                  position: 'insideStartTop',
+                  color: '#0071e3',
+                  fontWeight: 'bold',
+                  fontSize: 11,
+                },
+              },
+            ],
             silent: true,
             animation: false,
           },
           markPoint: {
             data: markPointData,
+            z: 13,
             silent: true,
             animation: false,
           },
         },
+        ...lineSeries,
       ],
     };
   });
