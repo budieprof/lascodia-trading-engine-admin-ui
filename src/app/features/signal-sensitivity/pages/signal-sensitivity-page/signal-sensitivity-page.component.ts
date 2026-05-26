@@ -2294,22 +2294,44 @@ export class SignalSensitivityPageComponent implements OnInit {
           markLine: {
             symbol: 'none',
             z: 12,
-            // Only the vertical "Signal fired" marker lives on markLine —
-            // horizontal price levels are dedicated line series above so
-            // they're guaranteed to render.
+            // Only vertical timing markers live on markLine — horizontal price
+            // levels are dedicated line series above so they're guaranteed to
+            // render. Two verticals: ENTRY at signal-fire time, EXIT at the
+            // resolution time (TP/SL hit, or expiry).
             data: [
               {
                 xAxis: signalIdx,
-                lineStyle: { color: '#0071e3', type: 'solid', width: 1.5, opacity: 0.6 },
+                lineStyle: { color: '#0071e3', type: 'solid', width: 1.5, opacity: 0.7 },
                 label: {
                   show: true,
-                  formatter: 'Signal fired',
+                  formatter: 'ENTRY',
                   position: 'insideStartTop',
                   color: '#0071e3',
                   fontWeight: 'bold',
                   fontSize: 11,
                 },
               },
+              ...(exitIdx !== null
+                ? [
+                    {
+                      xAxis: exitIdx,
+                      lineStyle: {
+                        color: exitColour,
+                        type: 'solid' as const,
+                        width: 1.5,
+                        opacity: 0.7,
+                      },
+                      label: {
+                        show: true,
+                        formatter: 'EXIT',
+                        position: 'insideEndTop' as const,
+                        color: exitColour,
+                        fontWeight: 'bold' as const,
+                        fontSize: 11,
+                      },
+                    },
+                  ]
+                : []),
             ],
             silent: true,
             animation: false,
