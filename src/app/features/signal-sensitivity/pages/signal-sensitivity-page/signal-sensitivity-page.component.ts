@@ -9,12 +9,18 @@ import {
 import { CurrencyPipe, DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { catchError, of } from 'rxjs';
+import { NgxEchartsDirective } from 'ngx-echarts';
+import type { EChartsOption } from 'echarts';
 
 import { SignalSensitivityService } from '@core/services/signal-sensitivity.service';
 import { RiskProfilesService } from '@core/services/risk-profiles.service';
+import { MarketDataService } from '@core/services/market-data.service';
+import { ThemeService } from '@core/theme/theme.service';
 import {
   AnalyzeSignalSensitivityResultDto,
   AnalyzeSignalSensitivityEquityPointDto,
+  AnalyzeSignalSensitivitySignalDto,
+  CandleDto,
   RiskProfileDto,
 } from '@core/api/api.types';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -40,7 +46,15 @@ const WINDOW_OPTIONS = [
   selector: 'app-signal-sensitivity-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CurrencyPipe, DatePipe, DecimalPipe, PercentPipe, FormsModule, PageHeaderComponent],
+  imports: [
+    CurrencyPipe,
+    DatePipe,
+    DecimalPipe,
+    PercentPipe,
+    FormsModule,
+    NgxEchartsDirective,
+    PageHeaderComponent,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -332,8 +346,11 @@ const WINDOW_OPTIONS = [
               <tbody>
                 @for (s of r.signals; track s.signalId) {
                   <tr
+                    class="signal-row"
                     [class.row--win]="s.outcome === 'HitTP'"
                     [class.row--loss]="s.outcome === 'HitSL'"
+                    (click)="openSignalChart(s)"
+                    [attr.title]="'Click to view chart'"
                   >
                     <td>{{ s.signalId }}</td>
                     <td>{{ s.generatedAt | date: 'short' }}</td>
@@ -376,6 +393,89 @@ const WINDOW_OPTIONS = [
           Pick filters + multipliers, then press <b>Analyse</b>. The query replays each matching
           signal against actual candles between its <code>GeneratedAt</code> and
           <code>ExpiresAt</code>, applying your TP/SL multipliers to compute the outcome.
+        </div>
+      }
+
+      <!-- ── Signal-chart modal ─────────────────────────────────────────── -->
+      @if (selectedSignal(); as s) {
+        <div class="modal-scrim" (click)="closeSignalChart()" role="dialog" aria-modal="true">
+          <div class="modal-card" (click)="$event.stopPropagation()">
+            <header class="modal-header">
+              <div>
+                <h2>
+                  Signal #{{ s.signalId }} · {{ s.symbol }} · {{ s.direction }}
+                  <span
+                    class="outcome-chip"
+                    [class.chip--tp]="s.outcome === 'HitTP'"
+                    [class.chip--sl]="s.outcome === 'HitSL'"
+                    [class.chip--exp]="s.outcome === 'Expired'"
+                  >
+                    {{ s.outcome }}
+                  </span>
+                </h2>
+                <p class="modal-sub">
+                  {{ s.generatedAt | date: 'medium' }} → expires {{ s.expiresAt | date: 'short' }} ·
+                  {{ s.source }} · scenario P&amp;L
+                  <strong [class.profit]="s.scenarioPnL > 0" [class.loss]="s.scenarioPnL < 0">
+                    {{ s.scenarioPnL | currency: 'USD' }}
+                  </strong>
+                </p>
+              </div>
+              <button
+                type="button"
+                class="modal-close"
+                (click)="closeSignalChart()"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </header>
+            <div class="modal-body">
+              @if (chartLoading()) {
+                <div class="status">Loading candles…</div>
+              } @else if (chartError()) {
+                <div class="status error">{{ chartError() }}</div>
+              } @else if (chartOptions(); as opts) {
+                <div
+                  echarts
+                  [options]="opts"
+                  [theme]="echartsTheme()"
+                  [autoResize]="true"
+                  class="chart-instance"
+                ></div>
+                <div class="chart-legend">
+                  <span class="legend-item"
+                    ><span class="dot dot--entry"></span>Entry
+                    {{ s.entryPrice | number: '1.5-5' }}</span
+                  >
+                  <span class="legend-item"
+                    ><span class="dot dot--tp"></span>Original TP
+                    {{ s.originalTP | number: '1.5-5' }}</span
+                  >
+                  <span class="legend-item"
+                    ><span class="dot dot--sl"></span>Original SL
+                    {{ s.originalSL | number: '1.5-5' }}</span
+                  >
+                  @if (result()!.tpMultiplier !== 1 || result()!.slMultiplier !== 1) {
+                    <span class="legend-item"
+                      ><span class="dot dot--tp-scenario"></span>Scenario TP ×
+                      {{ result()!.tpMultiplier }}</span
+                    >
+                    <span class="legend-item"
+                      ><span class="dot dot--sl-scenario"></span>Scenario SL ×
+                      {{ result()!.slMultiplier }}</span
+                    >
+                  }
+                  @if (s.exitPrice !== null) {
+                    <span class="legend-item">
+                      <span class="dot dot--exit"></span>Exit {{ s.exitPrice | number: '1.5-5' }} @
+                      {{ s.exitAt | date: 'short' }}
+                    </span>
+                  }
+                </div>
+              }
+            </div>
+          </div>
         </div>
       }
     </div>
@@ -706,15 +806,142 @@ const WINDOW_OPTIONS = [
       :host-context([data-theme='dark']) .loss {
         color: #ff8278;
       }
+
+      /* ── Signal row click affordance + chart modal ───────────────────── */
+      .signal-table tr.signal-row {
+        cursor: pointer;
+        transition: background 0.1s ease;
+      }
+      .signal-table tr.signal-row:hover td {
+        background: var(--bg-tertiary);
+      }
+
+      .modal-scrim {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        padding: 2rem;
+      }
+      .modal-card {
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        width: min(1100px, 100%);
+        max-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+      }
+      .modal-header {
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+      }
+      .modal-header h2 {
+        margin: 0;
+        font-size: 1.05rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .modal-sub {
+        margin: 0.25rem 0 0;
+        font-size: 0.85rem;
+        opacity: 0.7;
+      }
+      .modal-close {
+        background: transparent;
+        border: none;
+        color: inherit;
+        font-size: 1.5rem;
+        cursor: pointer;
+        line-height: 1;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+      }
+      .modal-close:hover {
+        background: var(--bg-tertiary);
+      }
+      .modal-body {
+        flex: 1;
+        padding: 1rem 1.25rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        min-height: 480px;
+      }
+      .chart-instance {
+        flex: 1;
+        min-height: 420px;
+      }
+      .chart-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        font-size: 0.8rem;
+        opacity: 0.85;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--border);
+      }
+      .legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
+      .dot {
+        display: inline-block;
+        width: 14px;
+        height: 3px;
+        border-radius: 1px;
+      }
+      .dot--entry {
+        background: #6e6e73;
+      }
+      .dot--tp {
+        background: #1f8a3d;
+      }
+      .dot--sl {
+        background: #c4290a;
+      }
+      .dot--tp-scenario {
+        background: #1f8a3d;
+        opacity: 0.55;
+      }
+      .dot--sl-scenario {
+        background: #c4290a;
+        opacity: 0.55;
+      }
+      .dot--exit {
+        background: var(--accent);
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+      }
     `,
   ],
 })
 export class SignalSensitivityPageComponent implements OnInit {
   private readonly svc = inject(SignalSensitivityService);
   private readonly riskProfilesSvc = inject(RiskProfilesService);
+  private readonly marketDataSvc = inject(MarketDataService);
+  private readonly themeSvc = inject(ThemeService);
 
   readonly sourcesAvail = SOURCES;
   readonly windows = WINDOW_OPTIONS;
+
+  // ── Signal-chart modal state ───────────────────────────────────────────
+  readonly selectedSignal = signal<AnalyzeSignalSensitivitySignalDto | null>(null);
+  readonly chartLoading = signal(false);
+  readonly chartError = signal<string | null>(null);
+  readonly chartCandles = signal<CandleDto[]>([]);
+  readonly echartsTheme = computed(() => (this.themeSvc.theme() === 'dark' ? 'dark' : ''));
 
   readonly windowDays = signal<number>(30);
   readonly symbolFilter = signal<string>('');
@@ -833,4 +1060,194 @@ export class SignalSensitivityPageComponent implements OnInit {
           this.errorMessage.set(res.message ?? 'Query returned failure.');
       });
   }
+
+  /**
+   * Open the chart modal for a signal. Fetches H1 candles in a window
+   * spanning ~12h before GeneratedAt → ~6h after ExpiresAt so the operator
+   * sees pre-signal context + post-expiry drift. H1 is the safest default
+   * because the LLM analyser writes at H1 — candles always exist.
+   */
+  openSignalChart(s: AnalyzeSignalSensitivitySignalDto) {
+    this.selectedSignal.set(s);
+    this.chartCandles.set([]);
+    this.chartError.set(null);
+    this.chartLoading.set(true);
+
+    const generated = new Date(s.generatedAt);
+    const expires = new Date(s.expiresAt);
+    const from = new Date(generated.getTime() - 12 * 60 * 60 * 1000); // -12h
+    const to = new Date(expires.getTime() + 6 * 60 * 60 * 1000); // +6h
+
+    this.marketDataSvc
+      .listCandles({
+        currentPage: 1,
+        itemCountPerPage: 500,
+        sortBy: 'timestamp',
+        sortDirection: 'asc',
+        filter: {
+          symbol: s.symbol,
+          timeframe: 'H1',
+          from: from.toISOString(),
+          to: to.toISOString(),
+        },
+      })
+      .pipe(
+        catchError((err) => {
+          this.chartError.set(err?.message ?? 'Failed to load candles.');
+          return of(null);
+        }),
+      )
+      .subscribe((res) => {
+        this.chartLoading.set(false);
+        if (res?.status && res.data?.data) {
+          this.chartCandles.set(res.data.data);
+          if (res.data.data.length === 0) {
+            this.chartError.set('No H1 candles in the window. Signal may pre-date candle ingest.');
+          }
+        }
+      });
+  }
+
+  closeSignalChart() {
+    this.selectedSignal.set(null);
+    this.chartCandles.set([]);
+    this.chartError.set(null);
+  }
+
+  /**
+   * ECharts candlestick options with horizontal markLines for entry / original
+   * SL / original TP, and dashed lines for the scenario-multiplier SL/TP when
+   * they differ from the originals. Marks the exit point with a scatter dot.
+   */
+  readonly chartOptions = computed<EChartsOption | null>(() => {
+    const s = this.selectedSignal();
+    const r = this.result();
+    const candles = this.chartCandles();
+    if (!s || !r || candles.length === 0) return null;
+
+    const isLong = s.direction === 'Buy';
+    const tpMul = r.tpMultiplier;
+    const slMul = r.slMultiplier;
+    const scenarioTp = isLong
+      ? s.entryPrice + (s.originalTP - s.entryPrice) * tpMul
+      : s.entryPrice - (s.entryPrice - s.originalTP) * tpMul;
+    const scenarioSl = isLong
+      ? s.entryPrice - (s.entryPrice - s.originalSL) * slMul
+      : s.entryPrice + (s.originalSL - s.entryPrice) * slMul;
+
+    // Candlestick series wants [open, close, low, high] per bar.
+    const ohlc = candles.map((c) => [c.open, c.close, c.low, c.high]);
+    const xLabels = candles.map((c) => c.timestamp);
+
+    const markLineData: any[] = [
+      {
+        name: 'Entry',
+        yAxis: s.entryPrice,
+        lineStyle: { color: '#6e6e73', type: 'solid', width: 1.5 },
+        label: { formatter: 'Entry {c}', position: 'insideEndTop' },
+      },
+      {
+        name: 'TP',
+        yAxis: s.originalTP,
+        lineStyle: { color: '#1f8a3d', type: 'solid', width: 1.5 },
+        label: { formatter: 'TP {c}', position: 'insideEndTop' },
+      },
+      {
+        name: 'SL',
+        yAxis: s.originalSL,
+        lineStyle: { color: '#c4290a', type: 'solid', width: 1.5 },
+        label: { formatter: 'SL {c}', position: 'insideEndBottom' },
+      },
+    ];
+    if (tpMul !== 1 || slMul !== 1) {
+      markLineData.push(
+        {
+          name: 'TP scn',
+          yAxis: scenarioTp,
+          lineStyle: { color: '#1f8a3d', type: 'dashed', width: 1, opacity: 0.6 },
+          label: { formatter: `TP×${tpMul} {c}`, position: 'insideEndTop' },
+        },
+        {
+          name: 'SL scn',
+          yAxis: scenarioSl,
+          lineStyle: { color: '#c4290a', type: 'dashed', width: 1, opacity: 0.6 },
+          label: { formatter: `SL×${slMul} {c}`, position: 'insideEndBottom' },
+        },
+      );
+    }
+    // GeneratedAt vertical line so the operator sees when the signal fired.
+    markLineData.push({
+      name: 'Signal',
+      xAxis: s.generatedAt,
+      lineStyle: { color: 'var(--accent)', type: 'solid', width: 1, opacity: 0.5 },
+      label: { formatter: 'Signal', position: 'end' },
+    });
+
+    const markPointData: any[] = [];
+    if (s.exitPrice !== null && s.exitAt) {
+      markPointData.push({
+        name: 'Exit',
+        coord: [s.exitAt, s.exitPrice],
+        symbol: 'circle',
+        symbolSize: 12,
+        itemStyle: { color: '#0071e3' },
+        label: { formatter: 'Exit', show: true, position: 'top', fontWeight: 'bold' },
+      });
+    }
+
+    return {
+      animation: false,
+      grid: { left: 60, right: 60, top: 24, bottom: 56 },
+      xAxis: {
+        type: 'category',
+        data: xLabels,
+        axisLabel: {
+          formatter: (val: string) => {
+            const d = new Date(val);
+            return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:00`;
+          },
+        },
+        boundaryGap: true,
+      },
+      yAxis: {
+        type: 'value',
+        scale: true,
+        splitLine: { show: true },
+      },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'cross' },
+        formatter: (params: any) => {
+          const c = Array.isArray(params) ? params[0] : params;
+          if (!c?.data) return '';
+          const [, o, cl, lo, hi] = c.data;
+          return `<b>${c.name}</b><br/>O ${o}<br/>H ${hi}<br/>L ${lo}<br/>C ${cl}`;
+        },
+      },
+      dataZoom: [
+        { type: 'inside', xAxisIndex: 0 },
+        { type: 'slider', xAxisIndex: 0, height: 24, bottom: 8 },
+      ],
+      series: [
+        {
+          type: 'candlestick',
+          data: ohlc,
+          itemStyle: {
+            color: '#1f8a3d', // bullish body fill
+            color0: '#c4290a', // bearish body fill
+            borderColor: '#1f8a3d',
+            borderColor0: '#c4290a',
+          },
+          markLine: {
+            symbol: 'none',
+            data: markLineData,
+            silent: false,
+          },
+          markPoint: {
+            data: markPointData,
+          },
+        },
+      ],
+    };
+  });
 }
