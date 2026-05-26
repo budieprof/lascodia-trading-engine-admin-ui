@@ -193,15 +193,28 @@ const WINDOW_OPTIONS = [
             <div class="kpi-sub">{{ r.aggregate.winCount }} W / {{ r.aggregate.lossCount }} L</div>
           </div>
           <div class="kpi">
-            <div class="kpi-label">Sum P&amp;L</div>
+            <div class="kpi-label">Realized P&amp;L</div>
             <div
               class="kpi-value"
-              [class.profit]="r.aggregate.sumPnL > 0"
-              [class.loss]="r.aggregate.sumPnL < 0"
+              [class.profit]="r.aggregate.realizedPnL > 0"
+              [class.loss]="r.aggregate.realizedPnL < 0"
             >
-              {{ r.aggregate.sumPnL | currency: 'USD' }}
+              {{ r.aggregate.realizedPnL | currency: 'USD' }}
             </div>
-            <div class="kpi-sub">avg {{ r.aggregate.avgPnL | currency: 'USD' }}/sig</div>
+            <div class="kpi-sub">
+              from {{ r.aggregate.winCount + r.aggregate.lossCount }} closed
+            </div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Unrealized P&amp;L</div>
+            <div
+              class="kpi-value"
+              [class.profit]="r.aggregate.unrealizedPnL > 0"
+              [class.loss]="r.aggregate.unrealizedPnL < 0"
+            >
+              {{ r.aggregate.unrealizedPnL | currency: 'USD' }}
+            </div>
+            <div class="kpi-sub">from {{ r.aggregate.expiredCount }} expired · mark-to-market</div>
           </div>
           <div class="kpi">
             <div class="kpi-label">Profit factor</div>
@@ -231,7 +244,8 @@ const WINDOW_OPTIONS = [
               <h2>
                 Equity curve
                 <small>
-                  · {{ r.riskProfileName }} · starting {{ r.startingBalance | currency: 'USD' }}
+                  · {{ r.riskProfileName }} · starting {{ r.startingBalance | currency: 'USD' }} ·
+                  realized only
                 </small>
               </h2>
               <div class="equity-kpis">
@@ -244,6 +258,23 @@ const WINDOW_OPTIONS = [
                   >
                     {{ r.finalBalance | currency: 'USD' }}
                   </span>
+                </div>
+                <div class="equity-kpi">
+                  <span class="equity-kpi-label">Floating equity</span>
+                  <span
+                    class="equity-kpi-value"
+                    [class.profit]="
+                      (r.finalBalance ?? 0) + r.aggregate.unrealizedPnL > (r.startingBalance ?? 0)
+                    "
+                    [class.loss]="
+                      (r.finalBalance ?? 0) + r.aggregate.unrealizedPnL < (r.startingBalance ?? 0)
+                    "
+                  >
+                    {{ (r.finalBalance ?? 0) + r.aggregate.unrealizedPnL | currency: 'USD' }}
+                  </span>
+                  <small class="equity-kpi-hint">
+                    incl. {{ r.aggregate.unrealizedPnL | currency: 'USD' }} unrealized
+                  </small>
                 </div>
                 <div class="equity-kpi">
                   <span class="equity-kpi-label">Return</span>
@@ -687,6 +718,11 @@ const WINDOW_OPTIONS = [
         opacity: 0.7;
         font-weight: 400;
         margin-left: 0.25rem;
+      }
+      .equity-kpi-hint {
+        font-size: 0.7rem;
+        opacity: 0.65;
+        margin-top: 2px;
       }
       .equity-spark {
         width: 100%;

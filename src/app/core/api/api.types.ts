@@ -3270,6 +3270,11 @@ export interface AnalyzeSignalSensitivityAggregateDto {
   lossCount: number;
   scratchCount: number;
   winRatePct: number;
+  /** Realized P&L: sum of HitTP + HitSL outcomes. */
+  realizedPnL: number;
+  /** Unrealized P&L: sum of Expired outcomes (mark-to-market at expiry). */
+  unrealizedPnL: number;
+  /** Total = realizedPnL + unrealizedPnL. */
   sumPnL: number;
   avgPnL: number;
   avgWinPnL: number;
