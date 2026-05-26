@@ -1100,8 +1100,16 @@ export class SignalSensitivityPageComponent implements OnInit {
       .subscribe((res) => {
         this.chartLoading.set(false);
         if (res?.status && res.data?.data) {
-          this.chartCandles.set(res.data.data);
-          if (res.data.data.length === 0) {
+          // Defensively sort ASC by timestamp — the API's sort safelist
+          // may not honour 'timestamp' for the candle endpoint, in which
+          // case the data lands in some other order (DESC observed live).
+          // Without this, the X-axis renders right-to-left and the markPoint
+          // exit coordinate misaligns with the candle category index.
+          const sorted = [...res.data.data].sort(
+            (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+          );
+          this.chartCandles.set(sorted);
+          if (sorted.length === 0) {
             this.chartError.set('No H1 candles in the window. Signal may pre-date candle ingest.');
           }
         }
@@ -1139,24 +1147,61 @@ export class SignalSensitivityPageComponent implements OnInit {
     const ohlc = candles.map((c) => [c.open, c.close, c.low, c.high]);
     const xLabels = candles.map((c) => c.timestamp);
 
+    // Decimal precision: match the price's natural scale (4-digit JPY pairs,
+    // 5-digit majors). Crude but effective for the formatter labels + axis.
+    const pricePrecision = s.entryPrice > 50 ? 3 : 5;
+    const fmt = (n: number) => n.toFixed(pricePrecision);
+
+    // Find the candle index whose timestamp is closest to exitAt — markPoint
+    // on a category xAxis needs the coord's x to match a category exactly,
+    // OR it can use a numeric index. We use the index for robustness.
+    const findClosestIndex = (iso: string): number => {
+      const target = new Date(iso).getTime();
+      let bestIdx = 0;
+      let bestDelta = Infinity;
+      for (let i = 0; i < candles.length; i++) {
+        const delta = Math.abs(new Date(candles[i].timestamp).getTime() - target);
+        if (delta < bestDelta) {
+          bestDelta = delta;
+          bestIdx = i;
+        }
+      }
+      return bestIdx;
+    };
+
     const markLineData: any[] = [
       {
         name: 'Entry',
         yAxis: s.entryPrice,
-        lineStyle: { color: '#6e6e73', type: 'solid', width: 1.5 },
-        label: { formatter: 'Entry {c}', position: 'insideEndTop' },
+        lineStyle: { color: '#6e6e73', type: 'solid', width: 2 },
+        label: {
+          formatter: `Entry ${fmt(s.entryPrice)}`,
+          position: 'end',
+          color: '#6e6e73',
+          fontWeight: 'bold',
+        },
       },
       {
         name: 'TP',
         yAxis: s.originalTP,
-        lineStyle: { color: '#1f8a3d', type: 'solid', width: 1.5 },
-        label: { formatter: 'TP {c}', position: 'insideEndTop' },
+        lineStyle: { color: '#1f8a3d', type: 'solid', width: 2 },
+        label: {
+          formatter: `TP ${fmt(s.originalTP)}`,
+          position: 'end',
+          color: '#1f8a3d',
+          fontWeight: 'bold',
+        },
       },
       {
         name: 'SL',
         yAxis: s.originalSL,
-        lineStyle: { color: '#c4290a', type: 'solid', width: 1.5 },
-        label: { formatter: 'SL {c}', position: 'insideEndBottom' },
+        lineStyle: { color: '#c4290a', type: 'solid', width: 2 },
+        label: {
+          formatter: `SL ${fmt(s.originalSL)}`,
+          position: 'end',
+          color: '#c4290a',
+          fontWeight: 'bold',
+        },
       },
     ];
     if (tpMul !== 1 || slMul !== 1) {
@@ -1164,40 +1209,85 @@ export class SignalSensitivityPageComponent implements OnInit {
         {
           name: 'TP scn',
           yAxis: scenarioTp,
-          lineStyle: { color: '#1f8a3d', type: 'dashed', width: 1, opacity: 0.6 },
-          label: { formatter: `TP×${tpMul} {c}`, position: 'insideEndTop' },
+          lineStyle: { color: '#1f8a3d', type: 'dashed', width: 1.5, opacity: 0.7 },
+          label: {
+            formatter: `TP×${tpMul} ${fmt(scenarioTp)}`,
+            position: 'start',
+            color: '#1f8a3d',
+            opacity: 0.8,
+          },
         },
         {
           name: 'SL scn',
           yAxis: scenarioSl,
-          lineStyle: { color: '#c4290a', type: 'dashed', width: 1, opacity: 0.6 },
-          label: { formatter: `SL×${slMul} {c}`, position: 'insideEndBottom' },
+          lineStyle: { color: '#c4290a', type: 'dashed', width: 1.5, opacity: 0.7 },
+          label: {
+            formatter: `SL×${slMul} ${fmt(scenarioSl)}`,
+            position: 'start',
+            color: '#c4290a',
+            opacity: 0.8,
+          },
         },
       );
     }
-    // GeneratedAt vertical line so the operator sees when the signal fired.
+    // Vertical line at the signal-fire bar (closest candle to GeneratedAt).
+    const signalIdx = findClosestIndex(s.generatedAt);
     markLineData.push({
       name: 'Signal',
-      xAxis: s.generatedAt,
-      lineStyle: { color: 'var(--accent)', type: 'solid', width: 1, opacity: 0.5 },
-      label: { formatter: 'Signal', position: 'end' },
+      xAxis: signalIdx,
+      lineStyle: { color: '#0071e3', type: 'solid', width: 1.5, opacity: 0.6 },
+      label: {
+        formatter: 'Signal fired',
+        position: 'insideEndTop',
+        color: '#0071e3',
+        fontWeight: 'bold',
+      },
     });
 
     const markPointData: any[] = [];
     if (s.exitPrice !== null && s.exitAt) {
+      const exitIdx = findClosestIndex(s.exitAt);
+      const exitColour =
+        s.outcome === 'HitTP' ? '#1f8a3d' : s.outcome === 'HitSL' ? '#c4290a' : '#0071e3';
       markPointData.push({
         name: 'Exit',
-        coord: [s.exitAt, s.exitPrice],
+        coord: [exitIdx, s.exitPrice],
         symbol: 'circle',
-        symbolSize: 12,
-        itemStyle: { color: '#0071e3' },
-        label: { formatter: 'Exit', show: true, position: 'top', fontWeight: 'bold' },
+        symbolSize: 14,
+        itemStyle: { color: exitColour, borderColor: '#ffffff', borderWidth: 2 },
+        label: {
+          formatter: `Exit ${fmt(s.exitPrice)}`,
+          show: true,
+          position: 'top',
+          color: exitColour,
+          fontWeight: 'bold',
+        },
       });
     }
 
+    // Y-axis bounds: ensure entry/TP/SL all visible with a 15% padding.
+    // ECharts' default scale doesn't always span our markLines if they sit
+    // outside the candle high/low range — common when TP / SL haven't been
+    // touched yet by the visible bars.
+    const lows = candles.map((c) => c.low);
+    const highs = candles.map((c) => c.high);
+    const allYs = [
+      ...lows,
+      ...highs,
+      s.entryPrice,
+      s.originalTP,
+      s.originalSL,
+      scenarioTp,
+      scenarioSl,
+      s.exitPrice ?? s.entryPrice,
+    ];
+    const yMin = Math.min(...allYs);
+    const yMax = Math.max(...allYs);
+    const yPad = (yMax - yMin) * 0.15;
+
     return {
       animation: false,
-      grid: { left: 60, right: 60, top: 24, bottom: 56 },
+      grid: { left: 70, right: 100, top: 32, bottom: 64 },
       xAxis: {
         type: 'category',
         data: xLabels,
@@ -1212,6 +1302,9 @@ export class SignalSensitivityPageComponent implements OnInit {
       yAxis: {
         type: 'value',
         scale: true,
+        min: yMin - yPad,
+        max: yMax + yPad,
+        axisLabel: { formatter: (val: number) => val.toFixed(pricePrecision) },
         splitLine: { show: true },
       },
       tooltip: {
