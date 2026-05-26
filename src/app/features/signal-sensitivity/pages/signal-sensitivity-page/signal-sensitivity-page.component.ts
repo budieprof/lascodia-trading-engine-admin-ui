@@ -22,6 +22,7 @@ import {
   AnalyzeSignalSensitivitySignalDto,
   CandleDto,
   RiskProfileDto,
+  SignalSensitivityHeatmapCellDto,
   Timeframe,
 } from '@core/api/api.types';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -307,50 +308,343 @@ const WINDOW_OPTIONS = [
           </section>
         }
 
-        <!-- ── TP sweep curve as a table + ASCII bar visual ───────────────── -->
-        <section class="sweep-card">
-          <h2>
-            TP-multiplier sweep <small>(SL × {{ r.slMultiplier | number: '1.2-2' }})</small>
-          </h2>
-          <table class="sweep-table">
-            <thead>
-              <tr>
-                <th>TP×</th>
-                <th>Win rate</th>
-                <th>Win curve</th>
-                <th class="num">W</th>
-                <th class="num">L</th>
-                <th class="num">PF</th>
-                <th class="num">Sum P&amp;L</th>
-                <th class="num">Avg P&amp;L</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (row of r.tpSweep; track row.tpMultiplier) {
-                <tr [class.row--active]="row.tpMultiplier === r.tpMultiplier">
-                  <td>{{ row.tpMultiplier | number: '1.2-2' }}</td>
-                  <td [class.profit]="row.winRatePct >= 50" [class.loss]="row.winRatePct < 50">
-                    {{ row.winRatePct | number: '1.1-1' }}%
-                  </td>
-                  <td class="curve">
-                    <div
-                      class="curve-bar"
-                      [style.width.%]="row.winRatePct"
-                      [class.curve-bar--profit]="row.winRatePct >= 50"
-                      [class.curve-bar--loss]="row.winRatePct < 50"
-                    ></div>
-                  </td>
-                  <td class="num">{{ row.winCount | number }}</td>
-                  <td class="num">{{ row.lossCount | number }}</td>
-                  <td class="num">{{ row.profitFactor | number: '1.2-2' }}</td>
-                  <td class="num" [class.profit]="row.sumPnL > 0" [class.loss]="row.sumPnL < 0">
-                    {{ row.sumPnL | currency: 'USD' }}
-                  </td>
-                  <td class="num">{{ row.avgPnL | currency: 'USD' }}</td>
+        <!-- ── Cohort breakdowns (symbol / direction / source) ──────────── -->
+        <section class="breakdown-grid">
+          <article class="breakdown-card">
+            <header class="breakdown-header">
+              <h2>
+                By symbol <small>({{ r.breakdownsBySymbol.length }} pairs)</small>
+              </h2>
+            </header>
+            <div class="table-scroll">
+              <table class="breakdown-table">
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th class="num">N</th>
+                    <th class="num">Win%</th>
+                    <th class="num">TP</th>
+                    <th class="num">SL</th>
+                    <th class="num">Exp</th>
+                    <th class="num">Realized</th>
+                    <th class="num">Unrealized</th>
+                    <th class="num">PF</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of r.breakdownsBySymbol; track row.key) {
+                    <tr>
+                      <td class="key">{{ row.key }}</td>
+                      <td class="num">{{ row.aggregate.walkable | number }}</td>
+                      <td
+                        class="num"
+                        [class.profit]="row.aggregate.winRatePct >= 50"
+                        [class.loss]="row.aggregate.winRatePct < 50"
+                      >
+                        {{ row.aggregate.winRatePct | number: '1.0-1' }}
+                      </td>
+                      <td class="num">{{ row.aggregate.hitTpCount | number }}</td>
+                      <td class="num">{{ row.aggregate.hitSlCount | number }}</td>
+                      <td class="num">{{ row.aggregate.expiredCount | number }}</td>
+                      <td
+                        class="num"
+                        [class.profit]="row.aggregate.realizedPnL > 0"
+                        [class.loss]="row.aggregate.realizedPnL < 0"
+                      >
+                        {{ row.aggregate.realizedPnL | currency: 'USD' : 'symbol' : '1.0-0' }}
+                      </td>
+                      <td
+                        class="num"
+                        [class.profit]="row.aggregate.unrealizedPnL > 0"
+                        [class.loss]="row.aggregate.unrealizedPnL < 0"
+                      >
+                        {{ row.aggregate.unrealizedPnL | currency: 'USD' : 'symbol' : '1.0-0' }}
+                      </td>
+                      <td class="num">{{ row.aggregate.profitFactor | number: '1.2-2' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="breakdown-card">
+            <header class="breakdown-header">
+              <h2>By direction</h2>
+            </header>
+            <div class="table-scroll">
+              <table class="breakdown-table">
+                <thead>
+                  <tr>
+                    <th>Side</th>
+                    <th class="num">N</th>
+                    <th class="num">Win%</th>
+                    <th class="num">Realized</th>
+                    <th class="num">Unrealized</th>
+                    <th class="num">PF</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of r.breakdownsByDirection; track row.key) {
+                    <tr>
+                      <td class="key">{{ row.key }}</td>
+                      <td class="num">{{ row.aggregate.walkable | number }}</td>
+                      <td
+                        class="num"
+                        [class.profit]="row.aggregate.winRatePct >= 50"
+                        [class.loss]="row.aggregate.winRatePct < 50"
+                      >
+                        {{ row.aggregate.winRatePct | number: '1.0-1' }}
+                      </td>
+                      <td
+                        class="num"
+                        [class.profit]="row.aggregate.realizedPnL > 0"
+                        [class.loss]="row.aggregate.realizedPnL < 0"
+                      >
+                        {{ row.aggregate.realizedPnL | currency: 'USD' : 'symbol' : '1.0-0' }}
+                      </td>
+                      <td
+                        class="num"
+                        [class.profit]="row.aggregate.unrealizedPnL > 0"
+                        [class.loss]="row.aggregate.unrealizedPnL < 0"
+                      >
+                        {{ row.aggregate.unrealizedPnL | currency: 'USD' : 'symbol' : '1.0-0' }}
+                      </td>
+                      <td class="num">{{ row.aggregate.profitFactor | number: '1.2-2' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="breakdown-card">
+            <header class="breakdown-header">
+              <h2>By source</h2>
+            </header>
+            <div class="table-scroll">
+              <table class="breakdown-table">
+                <thead>
+                  <tr>
+                    <th>Source</th>
+                    <th class="num">N</th>
+                    <th class="num">Win%</th>
+                    <th class="num">Realized</th>
+                    <th class="num">Unrealized</th>
+                    <th class="num">PF</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of r.breakdownsBySource; track row.key) {
+                    <tr>
+                      <td class="key">{{ row.key }}</td>
+                      <td class="num">{{ row.aggregate.walkable | number }}</td>
+                      <td
+                        class="num"
+                        [class.profit]="row.aggregate.winRatePct >= 50"
+                        [class.loss]="row.aggregate.winRatePct < 50"
+                      >
+                        {{ row.aggregate.winRatePct | number: '1.0-1' }}
+                      </td>
+                      <td
+                        class="num"
+                        [class.profit]="row.aggregate.realizedPnL > 0"
+                        [class.loss]="row.aggregate.realizedPnL < 0"
+                      >
+                        {{ row.aggregate.realizedPnL | currency: 'USD' : 'symbol' : '1.0-0' }}
+                      </td>
+                      <td
+                        class="num"
+                        [class.profit]="row.aggregate.unrealizedPnL > 0"
+                        [class.loss]="row.aggregate.unrealizedPnL < 0"
+                      >
+                        {{ row.aggregate.unrealizedPnL | currency: 'USD' : 'symbol' : '1.0-0' }}
+                      </td>
+                      <td class="num">{{ row.aggregate.profitFactor | number: '1.2-2' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <!-- ── 2D TP × SL heatmap ───────────────────────────────────────── -->
+        <section class="heatmap-card">
+          <header class="heatmap-header">
+            <h2>
+              TP × SL sweep <small>· cell colour = {{ heatmapMetricLabel() }}</small>
+            </h2>
+            <div class="heatmap-controls">
+              <label class="heatmap-control">
+                <span>Colour by</span>
+                <select [ngModel]="heatmapMetric()" (ngModelChange)="heatmapMetric.set($event)">
+                  <option value="realizedPnL">Realized P&amp;L</option>
+                  <option value="sumPnL">Total P&amp;L</option>
+                  <option value="winRatePct">Win rate %</option>
+                  <option value="profitFactor">Profit factor</option>
+                  <option value="expectancy">Expectancy / signal</option>
+                </select>
+              </label>
+            </div>
+          </header>
+          <div
+            echarts
+            [options]="heatmapOptions()"
+            [theme]="echartsTheme()"
+            [autoResize]="true"
+            class="heatmap-chart"
+          ></div>
+          <p class="heatmap-hint">
+            Operator-selected cell is highlighted. Cell tooltip shows full KPI set; click a cell to
+            see the heatmap diverge around it (lighter = neutral, deeper colour = better/worse than
+            the active cell).
+          </p>
+        </section>
+
+        <!-- ── Distributions + streaks + risk metrics ─────────────────────── -->
+        <section class="analytics-grid">
+          <article class="analytics-card">
+            <header class="analytics-header">
+              <h2>Hold-time distribution</h2>
+              <small>Time from signal fire → exit (or expiry)</small>
+            </header>
+            <table class="dist-table">
+              <thead>
+                <tr>
+                  <th>Bucket</th>
+                  <th>Bar</th>
+                  <th class="num">Count</th>
+                  <th class="num">Win%</th>
+                  <th class="num">TP</th>
+                  <th class="num">SL</th>
+                  <th class="num">Exp</th>
+                  <th class="num">Avg P&amp;L</th>
                 </tr>
-              }
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                @for (b of r.holdTimeBuckets; track b.label) {
+                  <tr>
+                    <td>{{ b.label }}</td>
+                    <td class="bar-cell">
+                      <div
+                        class="dist-bar"
+                        [style.width.%]="distPct(b.count, maxHoldCount())"
+                      ></div>
+                    </td>
+                    <td class="num">{{ b.count | number }}</td>
+                    <td
+                      class="num"
+                      [class.profit]="b.winRatePct >= 50"
+                      [class.loss]="b.winRatePct < 50 && b.hitTpCount + b.hitSlCount > 0"
+                    >
+                      {{ b.winRatePct | number: '1.0-1' }}
+                    </td>
+                    <td class="num">{{ b.hitTpCount | number }}</td>
+                    <td class="num">{{ b.hitSlCount | number }}</td>
+                    <td class="num">{{ b.expiredCount | number }}</td>
+                    <td class="num" [class.profit]="b.avgPnL > 0" [class.loss]="b.avgPnL < 0">
+                      {{ b.avgPnL | currency: 'USD' : 'symbol' : '1.0-0' }}
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </article>
+
+          <article class="analytics-card">
+            <header class="analytics-header">
+              <h2>R-multiple distribution</h2>
+              <small>P&amp;L normalised by SL-risk per signal</small>
+            </header>
+            <table class="dist-table">
+              <thead>
+                <tr>
+                  <th>Bucket</th>
+                  <th>Bar</th>
+                  <th class="num">Count</th>
+                  <th class="num">% of total</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (b of r.rMultipleBuckets; track b.label) {
+                  <tr>
+                    <td>{{ b.label }}</td>
+                    <td class="bar-cell">
+                      <div
+                        class="dist-bar"
+                        [class.dist-bar--loss]="(b.maxR ?? 0) <= 0"
+                        [class.dist-bar--profit]="(b.minR ?? 0) >= 0"
+                        [style.width.%]="distPct(b.count, maxRCount())"
+                      ></div>
+                    </td>
+                    <td class="num">{{ b.count | number }}</td>
+                    <td class="num">{{ rBucketPct(b.count) | number: '1.0-1' }}%</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </article>
+
+          <article class="analytics-card">
+            <header class="analytics-header">
+              <h2>Streaks &amp; risk metrics</h2>
+              <small>Resolved signals only · chronological</small>
+            </header>
+            <div class="metric-grid">
+              <div class="metric">
+                <span class="metric-label">Max win streak</span>
+                <span class="metric-value profit">{{ r.streaks.maxWinStreak }}</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Max loss streak</span>
+                <span class="metric-value loss">{{ r.streaks.maxLossStreak }}</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Current streak</span>
+                <span
+                  class="metric-value"
+                  [class.profit]="r.streaks.currentStreakType === 'Win'"
+                  [class.loss]="r.streaks.currentStreakType === 'Loss'"
+                >
+                  {{
+                    r.streaks.currentStreakType === 'None'
+                      ? '—'
+                      : r.streaks.currentStreakLength + ' ' + r.streaks.currentStreakType
+                  }}
+                </span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Expectancy / signal</span>
+                <span
+                  class="metric-value"
+                  [class.profit]="r.riskMetrics.expectancy > 0"
+                  [class.loss]="r.riskMetrics.expectancy < 0"
+                >
+                  {{ r.riskMetrics.expectancy | currency: 'USD' }}
+                </span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Payoff ratio</span>
+                <span class="metric-value">{{ r.riskMetrics.payoffRatio | number: '1.2-2' }}</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Sharpe proxy</span>
+                <span
+                  class="metric-value"
+                  [class.profit]="r.riskMetrics.sharpeProxy > 0"
+                  [class.loss]="r.riskMetrics.sharpeProxy < 0"
+                >
+                  {{ r.riskMetrics.sharpeProxy | number: '1.3-3' }}
+                </span>
+              </div>
+            </div>
+            <p class="metric-hint">
+              Expectancy = (winRate × avgWin) − (lossRate × |avgLoss|). Payoff = avgWin / |avgLoss|.
+              Sharpe proxy is mean / stddev of realized per-signal P&amp;L; requires RiskProfile
+              mode to be meaningful.
+            </p>
+          </article>
         </section>
 
         <!-- ── Per-signal table ────────────────────────────────────────────── -->
@@ -667,11 +961,202 @@ const WINDOW_OPTIONS = [
 
       .sweep-card,
       .signals-card,
-      .equity-card {
+      .equity-card,
+      .breakdown-card,
+      .heatmap-card,
+      .analytics-card {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: 8px;
         padding: 0.75rem 1rem;
+      }
+      .analytics-grid {
+        display: grid;
+        grid-template-columns: 1.2fr 1fr 1fr;
+        gap: 1rem;
+      }
+      @media (max-width: 1100px) {
+        .analytics-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .analytics-header h2 {
+        margin: 0;
+        font-size: 0.95rem;
+        font-weight: 600;
+      }
+      .analytics-header small {
+        opacity: 0.6;
+        font-size: 0.75rem;
+        display: block;
+        margin-top: 2px;
+      }
+      .dist-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.82rem;
+        margin-top: 0.5rem;
+      }
+      .dist-table th,
+      .dist-table td {
+        text-align: left;
+        padding: 0.3rem 0.5rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .dist-table th.num,
+      .dist-table td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .dist-table th {
+        font-weight: 600;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        opacity: 0.65;
+      }
+      .bar-cell {
+        width: 35%;
+        min-width: 80px;
+      }
+      .dist-bar {
+        height: 0.65rem;
+        background: var(--accent);
+        border-radius: 2px;
+        opacity: 0.6;
+      }
+      .dist-bar--loss {
+        background: #c4290a;
+      }
+      .dist-bar--profit {
+        background: #1f8a3d;
+      }
+      .metric-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem 1rem;
+        margin-top: 0.5rem;
+      }
+      .metric {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .metric-label {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        opacity: 0.7;
+        font-weight: 600;
+      }
+      .metric-value {
+        font-size: 1.05rem;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+      .metric-hint {
+        font-size: 0.7rem;
+        opacity: 0.6;
+        margin: 0.75rem 0 0;
+      }
+      .heatmap-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-bottom: 0.5rem;
+      }
+      .heatmap-header h2 {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 600;
+      }
+      .heatmap-header h2 small {
+        font-weight: 400;
+        opacity: 0.6;
+      }
+      .heatmap-controls {
+        display: flex;
+        gap: 0.75rem;
+      }
+      .heatmap-control {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .heatmap-control span {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        opacity: 0.7;
+        font-weight: 600;
+      }
+      .heatmap-control select {
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 0.3rem 0.5rem;
+        font-size: 0.85rem;
+      }
+      .heatmap-chart {
+        width: 100%;
+        height: 380px;
+      }
+      .heatmap-hint {
+        font-size: 0.78rem;
+        opacity: 0.65;
+        margin: 0.5rem 0 0;
+      }
+      .breakdown-grid {
+        display: grid;
+        grid-template-columns: 1.6fr 1fr 1fr;
+        gap: 1rem;
+      }
+      @media (max-width: 1100px) {
+        .breakdown-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .breakdown-header h2 {
+        margin: 0 0 0.5rem;
+        font-size: 0.95rem;
+        font-weight: 600;
+      }
+      .breakdown-header h2 small {
+        font-weight: 400;
+        opacity: 0.6;
+        margin-left: 0.35rem;
+      }
+      .breakdown-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.82rem;
+      }
+      .breakdown-table th,
+      .breakdown-table td {
+        text-align: left;
+        padding: 0.3rem 0.55rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .breakdown-table th.num,
+      .breakdown-table td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .breakdown-table th {
+        font-weight: 600;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        opacity: 0.65;
+      }
+      .breakdown-table td.key {
+        font-weight: 600;
+      }
+      .breakdown-table tbody tr:last-child td {
+        border-bottom: none;
       }
       .equity-header {
         display: flex;
@@ -1050,6 +1535,11 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly result = signal<AnalyzeSignalSensitivityResultDto | null>(null);
   readonly riskProfiles = signal<RiskProfileDto[]>([]);
 
+  /** Metric the operator wants the heatmap to colour by. */
+  readonly heatmapMetric = signal<
+    'realizedPnL' | 'sumPnL' | 'winRatePct' | 'profitFactor' | 'expectancy'
+  >('realizedPnL');
+
   /** SVG viewBox spanning the equity curve. Computed so the sparkline renders
    *  with consistent y-padding regardless of absolute balance magnitudes. */
   readonly equityViewBox = computed(() => {
@@ -1075,6 +1565,181 @@ export class SignalSensitivityPageComponent implements OnInit {
     const pad = Math.max((maxY - minY) * 0.1, 1);
     const flip = (y: number) => maxY + pad - (y - (minY - pad));
     return r.equityCurve.map((p, i) => `${i},${flip(p.balance)}`).join(' ');
+  });
+
+  /** Max bucket count across hold-time buckets — for percent-width sizing of bars. */
+  readonly maxHoldCount = computed(() => {
+    const buckets = this.result()?.holdTimeBuckets ?? [];
+    return Math.max(1, ...buckets.map((b) => b.count));
+  });
+
+  /** Max bucket count across R-multiple buckets. */
+  readonly maxRCount = computed(() => {
+    const buckets = this.result()?.rMultipleBuckets ?? [];
+    return Math.max(1, ...buckets.map((b) => b.count));
+  });
+
+  /** Percent of the widest bar — used for inline distribution bars. */
+  distPct(count: number, max: number): number {
+    return max > 0 ? (count / max) * 100 : 0;
+  }
+
+  /** R-multiple bucket count as percentage of all R-classified signals. */
+  rBucketPct(count: number): number {
+    const total = (this.result()?.rMultipleBuckets ?? []).reduce((sum, b) => sum + b.count, 0);
+    return total > 0 ? (count / total) * 100 : 0;
+  }
+
+  /** Human-readable label for the metric the heatmap is colouring by. */
+  readonly heatmapMetricLabel = computed(() => {
+    switch (this.heatmapMetric()) {
+      case 'realizedPnL':
+        return 'Realized P&L';
+      case 'sumPnL':
+        return 'Total P&L (Realized + Unrealized)';
+      case 'winRatePct':
+        return 'Win rate %';
+      case 'profitFactor':
+        return 'Profit factor';
+      case 'expectancy':
+        return 'Expectancy / signal';
+    }
+  });
+
+  /** Extract the scalar value the heatmap should colour by for a given cell. */
+  private heatmapCellValue(cell: SignalSensitivityHeatmapCellDto): number {
+    const a = cell.aggregate;
+    switch (this.heatmapMetric()) {
+      case 'realizedPnL':
+        return a.realizedPnL ?? 0;
+      case 'sumPnL':
+        return a.sumPnL ?? 0;
+      case 'winRatePct':
+        return a.winRatePct ?? 0;
+      case 'profitFactor':
+        // Cap at 5 for colouring — the backend returns 999 sentinel for
+        // no-loss cohorts, which would saturate the scale.
+        return Math.min(a.profitFactor ?? 0, 5);
+      case 'expectancy': {
+        const resolved = (a.winCount ?? 0) + (a.lossCount ?? 0);
+        return resolved > 0 ? (a.realizedPnL ?? 0) / resolved : 0;
+      }
+    }
+  }
+
+  /** ECharts heatmap config. Diverging colour scale centred on zero so
+   *  loss cells go red, profit cells go green. Active cell is marked. */
+  readonly heatmapOptions = computed<EChartsOption | null>(() => {
+    const r = this.result();
+    if (!r || !r.heatmap?.length) return null;
+
+    // ECharts heatmap wants [xIndex, yIndex, value] triples. We use SL as
+    // x-axis and TP as y-axis (matches operator convention of plotting risk
+    // horizontally).
+    const slAxis = r.slSweepAxis ?? [];
+    const tpAxis = r.tpSweepAxis ?? [];
+    const slIdx = new Map(slAxis.map((v, i) => [v, i]));
+    const tpIdx = new Map(tpAxis.map((v, i) => [v, i]));
+
+    const data = r.heatmap.map((c) => [
+      slIdx.get(c.slMultiplier) ?? 0,
+      tpIdx.get(c.tpMultiplier) ?? 0,
+      this.heatmapCellValue(c),
+    ]);
+    const values = data.map((d) => d[2] as number);
+    const minV = Math.min(...values, 0);
+    const maxV = Math.max(...values, 0);
+    const absMax = Math.max(Math.abs(minV), Math.abs(maxV), 1);
+
+    // Highlight the operator's active cell with a markPoint.
+    const activeSlIdx = slIdx.get(r.slMultiplier) ?? -1;
+    const activeTpIdx = tpIdx.get(r.tpMultiplier) ?? -1;
+
+    return <EChartsOption>{
+      animation: false,
+      tooltip: {
+        position: 'top',
+        formatter: (params: any) => {
+          const [sx, ty] = params.value as [number, number, number];
+          const cell = r.heatmap.find(
+            (c) =>
+              (slIdx.get(c.slMultiplier) ?? -1) === sx && (tpIdx.get(c.tpMultiplier) ?? -1) === ty,
+          );
+          if (!cell) return '';
+          const a = cell.aggregate;
+          const fmt = (n: number) => (n == null ? '—' : n.toFixed(2));
+          const cur = (n: number) => (n == null ? '—' : '$' + n.toFixed(0));
+          return `
+            <b>TP×${cell.tpMultiplier} · SL×${cell.slMultiplier}</b><br/>
+            Win rate: ${fmt(a.winRatePct)}% (${a.winCount}/${a.lossCount})<br/>
+            Realized: ${cur(a.realizedPnL)}<br/>
+            Unrealized: ${cur(a.unrealizedPnL)}<br/>
+            Profit factor: ${fmt(a.profitFactor)}<br/>
+            Walkable: ${a.walkable} · Expired: ${a.expiredCount}
+          `;
+        },
+      },
+      grid: { left: 60, right: 30, top: 30, bottom: 60, containLabel: true },
+      xAxis: {
+        type: 'category',
+        name: 'SL ×',
+        nameLocation: 'middle',
+        nameGap: 30,
+        data: slAxis.map((v) => v.toString()),
+        splitArea: { show: true },
+      },
+      yAxis: {
+        type: 'category',
+        name: 'TP ×',
+        nameLocation: 'middle',
+        nameGap: 40,
+        data: tpAxis.map((v) => v.toString()),
+        splitArea: { show: true },
+      },
+      visualMap: {
+        min: -absMax,
+        max: absMax,
+        calculable: true,
+        orient: 'horizontal',
+        left: 'center',
+        bottom: 8,
+        // Diverging red-white-green palette (matches profit/loss conventions).
+        inRange: { color: ['#c4290a', '#f1eee5', '#1f8a3d'] },
+      },
+      series: [
+        {
+          name: this.heatmapMetricLabel(),
+          type: 'heatmap',
+          data,
+          label: {
+            show: true,
+            formatter: (params: any) => {
+              const v = params.value[2] as number;
+              if (this.heatmapMetric() === 'winRatePct') return v.toFixed(0) + '%';
+              if (this.heatmapMetric() === 'profitFactor') return v.toFixed(2);
+              return Math.abs(v) >= 1000 ? (v / 1000).toFixed(1) + 'k' : v.toFixed(0);
+            },
+            fontSize: 10,
+          },
+          emphasis: { itemStyle: { borderColor: '#000', borderWidth: 2 } },
+          markPoint:
+            activeSlIdx >= 0 && activeTpIdx >= 0
+              ? {
+                  symbol: 'pin',
+                  symbolSize: 28,
+                  itemStyle: { color: '#0071e3' },
+                  label: {
+                    show: true,
+                    formatter: '★',
+                    color: '#ffffff',
+                    fontSize: 12,
+                  },
+                  data: [{ coord: [activeSlIdx, activeTpIdx] }],
+                }
+              : undefined,
+        },
+      ],
+    };
   });
 
   /** Horizontal baseline at the starting-balance level (visual reference). */

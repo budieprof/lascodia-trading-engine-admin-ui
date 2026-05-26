@@ -3282,6 +3282,59 @@ export interface AnalyzeSignalSensitivityAggregateDto {
   profitFactor: number;
 }
 
+/**
+ * One row of a cohort breakdown (per-symbol, per-direction, per-source).
+ * `key` is the group identifier; `aggregate` is the same shape as the page's
+ * main aggregate so the same KPI cells render in both places.
+ */
+export interface SignalSensitivityCohortBreakdownDto {
+  key: string;
+  aggregate: AnalyzeSignalSensitivityAggregateDto;
+}
+
+/** One cell of the 2D TP×SL heatmap. */
+export interface SignalSensitivityHeatmapCellDto {
+  tpMultiplier: number;
+  slMultiplier: number;
+  aggregate: AnalyzeSignalSensitivityAggregateDto;
+}
+
+/** One bucket of the hold-time histogram. */
+export interface SignalSensitivityHoldTimeBucketDto {
+  label: string;
+  maxMinutes: number | null;
+  count: number;
+  hitTpCount: number;
+  hitSlCount: number;
+  expiredCount: number;
+  sumPnL: number;
+  avgPnL: number;
+  winRatePct: number;
+}
+
+/** One bucket of the R-multiple histogram. */
+export interface SignalSensitivityRMultipleBucketDto {
+  label: string;
+  minR: number | null;
+  maxR: number | null;
+  count: number;
+}
+
+/** Win/loss streak metrics. */
+export interface SignalSensitivityStreakMetricsDto {
+  maxWinStreak: number;
+  maxLossStreak: number;
+  currentStreakLength: number;
+  currentStreakType: 'Win' | 'Loss' | 'None';
+}
+
+/** Summary risk metrics. */
+export interface SignalSensitivityRiskMetricsDto {
+  expectancy: number;
+  payoffRatio: number;
+  sharpeProxy: number;
+}
+
 /** Per-signal drill-in detail row. */
 export interface AnalyzeSignalSensitivitySignalDto {
   signalId: number;
@@ -3323,6 +3376,29 @@ export interface AnalyzeSignalSensitivityResultDto {
   tpSweep: AnalyzeSignalSensitivityAggregateDto[];
   signals: AnalyzeSignalSensitivitySignalDto[];
 
+  /** 2D (tp × sl) heatmap — one cell per (TpMultiplier, SlMultiplier). */
+  heatmap: SignalSensitivityHeatmapCellDto[];
+  /** TP axis values (rows of heatmap). */
+  tpSweepAxis: number[];
+  /** SL axis values (columns of heatmap). */
+  slSweepAxis: number[];
+
+  /** Per-symbol breakdown at operator's chosen (tp, sl). */
+  breakdownsBySymbol: SignalSensitivityCohortBreakdownDto[];
+  /** Per-direction (Buy/Sell) breakdown. */
+  breakdownsByDirection: SignalSensitivityCohortBreakdownDto[];
+  /** Per-source (SpotAnalysis/Strategy/...) breakdown. */
+  breakdownsBySource: SignalSensitivityCohortBreakdownDto[];
+
+  /** Hold-time histogram (5 fixed buckets). */
+  holdTimeBuckets: SignalSensitivityHoldTimeBucketDto[];
+  /** R-multiple distribution histogram. */
+  rMultipleBuckets: SignalSensitivityRMultipleBucketDto[];
+  /** Win/loss streak metrics. */
+  streaks: SignalSensitivityStreakMetricsDto;
+  /** Expectancy / payoff / Sharpe summary metrics. */
+  riskMetrics: SignalSensitivityRiskMetricsDto;
+
   riskProfileId?: number | null;
   riskProfileName?: string | null;
   startingBalance?: number | null;
@@ -3342,6 +3418,8 @@ export interface AnalyzeSignalSensitivityRequest {
   tpMultiplier?: number;
   slMultiplier?: number;
   tpSweepValues?: number[];
+  /** SL sweep axis for 2D heatmap. Defaults to [0.5, 0.75, 1.0, 1.5, 2.0]. */
+  slSweepValues?: number[];
   signalDetailCap?: number;
   riskProfileId?: number;
   startingBalance?: number;
