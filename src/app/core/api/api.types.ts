@@ -3252,3 +3252,71 @@ export interface LookAheadAuditReport {
   durationMs: number;
   tests: LookAheadAuditTestResult[];
 }
+
+// ── Signal Sensitivity Analysis (Phase 2c+) ────────────────────────────────
+/** One aggregate row in the sensitivity analysis response. Used both for the
+ *  operator-picked (tpMultiplier, slMultiplier) point and for each row of the
+ *  TP sweep. */
+export interface AnalyzeSignalSensitivityAggregateDto {
+  tpMultiplier: number;
+  slMultiplier: number;
+  total: number;
+  walkable: number;
+  hitTpCount: number;
+  hitSlCount: number;
+  expiredCount: number;
+  noCandlesCount: number;
+  winCount: number;
+  lossCount: number;
+  scratchCount: number;
+  winRatePct: number;
+  sumPnL: number;
+  avgPnL: number;
+  avgWinPnL: number;
+  avgLossPnL: number;
+  profitFactor: number;
+}
+
+/** Per-signal drill-in detail row. */
+export interface AnalyzeSignalSensitivitySignalDto {
+  signalId: number;
+  symbol: string;
+  source: string;
+  direction: string;
+  entryPrice: number;
+  originalSL: number;
+  originalTP: number;
+  generatedAt: string;
+  expiresAt: string;
+  outcome: string;
+  exitPrice: number | null;
+  exitAt: string;
+  scenarioPnL: number;
+}
+
+/** Sensitivity analysis result envelope: aggregate KPIs at the operator's
+ *  chosen multipliers + a TP sweep + per-signal detail. */
+export interface AnalyzeSignalSensitivityResultDto {
+  fromUtc: string;
+  toUtc: string;
+  symbol: string | null;
+  sources: string[];
+  tpMultiplier: number;
+  slMultiplier: number;
+  signalCount: number;
+  aggregate: AnalyzeSignalSensitivityAggregateDto;
+  tpSweep: AnalyzeSignalSensitivityAggregateDto[];
+  signals: AnalyzeSignalSensitivitySignalDto[];
+}
+
+/** Request shape for POST /trade-signal/sensitivity-analysis. */
+export interface AnalyzeSignalSensitivityRequest {
+  sources?: string[];
+  symbol?: string;
+  fromUtc?: string;
+  toUtc?: string;
+  tpMultiplier?: number;
+  slMultiplier?: number;
+  tpSweepValues?: number[];
+  signalDetailCap?: number;
+}

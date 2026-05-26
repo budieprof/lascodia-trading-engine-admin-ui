@@ -96,6 +96,14 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'signal-sensitivity',
+        data: { breadcrumb: 'Signal Sensitivity' },
+        loadChildren: () =>
+          import('@features/signal-sensitivity/signal-sensitivity.routes').then(
+            (m) => m.SIGNAL_SENSITIVITY_ROUTES,
+          ),
+      },
+      {
         path: 'ml-models',
         data: { breadcrumb: 'ML Models' },
         loadChildren: () =>
