@@ -1993,6 +1993,17 @@ export class SignalSensitivityPageComponent implements OnInit {
     const pricePrecision = s.entryPrice > 50 ? 3 : 5;
     const fmt = (n: number) => n.toFixed(pricePrecision);
 
+    // HH:mm clock format for the vertical timing labels — lets the operator
+    // distinguish entry vs exit timestamps when the verticals fall on the
+    // same or adjacent bars.
+    const formatClockTime = (iso: string) => {
+      const d = new Date(iso);
+      return `${d.getHours().toString().padStart(2, '0')}:${d
+        .getMinutes()
+        .toString()
+        .padStart(2, '0')}`;
+    };
+
     // Find the index whose timestamp is closest to a given ISO string —
     // searches the EXTENDED labels (real candles + synthetic future slots)
     // so signal-fire / exit timestamps map to legitimate slots even when
@@ -2294,38 +2305,45 @@ export class SignalSensitivityPageComponent implements OnInit {
           markLine: {
             symbol: 'none',
             z: 12,
-            // Only vertical timing markers live on markLine — horizontal price
-            // levels are dedicated line series above so they're guaranteed to
-            // render. Two verticals: ENTRY at signal-fire time, EXIT at the
-            // resolution time (TP/SL hit, or expiry).
+            // Vertical timing markers. Naming distinct from the horizontal
+            // ENTRY/EXIT price pills so the operator doesn't confuse "the
+            // line at price 0.58530" with "the line at 7:32 AM". Solid blue
+            // for signal-fire, dashed outcome-colour for exit so even when
+            // they're 1 bar apart (fast resolution) they read distinctly.
             data: [
               {
                 xAxis: signalIdx,
-                lineStyle: { color: '#0071e3', type: 'solid', width: 1.5, opacity: 0.7 },
+                lineStyle: { color: '#0071e3', type: 'solid', width: 2, opacity: 0.9 },
                 label: {
                   show: true,
-                  formatter: 'ENTRY',
+                  formatter: `Signal fired ${formatClockTime(s.generatedAt)}`,
                   position: 'insideStartTop',
-                  color: '#0071e3',
+                  color: '#ffffff',
+                  backgroundColor: '#0071e3',
+                  padding: [3, 6],
+                  borderRadius: 3,
                   fontWeight: 'bold',
                   fontSize: 11,
                 },
               },
-              ...(exitIdx !== null
+              ...(exitIdx !== null && s.exitAt
                 ? [
                     {
                       xAxis: exitIdx,
                       lineStyle: {
                         color: exitColour,
-                        type: 'solid' as const,
-                        width: 1.5,
-                        opacity: 0.7,
+                        type: 'dashed' as const,
+                        width: 2,
+                        opacity: 0.9,
                       },
                       label: {
                         show: true,
-                        formatter: 'EXIT',
+                        formatter: `Exit ${formatClockTime(s.exitAt)}`,
                         position: 'insideEndTop' as const,
-                        color: exitColour,
+                        color: '#ffffff',
+                        backgroundColor: exitColour,
+                        padding: [3, 6],
+                        borderRadius: 3,
                         fontWeight: 'bold' as const,
                         fontSize: 11,
                       },
