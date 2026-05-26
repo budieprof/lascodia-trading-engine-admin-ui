@@ -2222,10 +2222,26 @@ export class SignalSensitivityPageComponent implements OnInit {
           return `<b>${candle.name}</b><br/>O ${o}<br/>H ${hi}<br/>L ${lo}<br/>C ${cl}`;
         },
       },
-      dataZoom: [
-        { type: 'inside', xAxisIndex: 0 },
-        { type: 'slider', xAxisIndex: 0, height: 24, bottom: 8 },
-      ],
+      // Default zoom: focus on ~24 bars of pre-signal context + everything
+      // after signal fire. Pre-context is fetched generously (so the operator
+      // can scroll back via the slider) but the default view zooms in on the
+      // signal region so the reference lines + bands aren't squeezed against
+      // the right edge when the signal is recent.
+      dataZoom: (() => {
+        const focusStartIdx = Math.max(0, signalIdx - 24);
+        const focusStartPct = candles.length > 1 ? (focusStartIdx / (candles.length - 1)) * 100 : 0;
+        return [
+          { type: 'inside', xAxisIndex: 0, start: focusStartPct, end: 100 },
+          {
+            type: 'slider',
+            xAxisIndex: 0,
+            height: 24,
+            bottom: 8,
+            start: focusStartPct,
+            end: 100,
+          },
+        ];
+      })(),
       series: [
         {
           type: 'candlestick',
