@@ -1978,19 +1978,12 @@ export class SignalSensitivityPageComponent implements OnInit {
       return bestIdx;
     };
 
-    // Filled bands for the "reward zone" (entry → TP, green) and "risk zone"
-    // (entry → SL, red) — much louder than thin horizontal lines that blend
-    // into the chart's horizontal gridlines.
-    const markAreaData: any[][] = [
-      [
-        { yAxis: s.entryPrice, itemStyle: { color: 'rgba(31, 138, 61, 0.12)' }, name: 'TP zone' },
-        { yAxis: s.originalTP },
-      ],
-      [
-        { yAxis: s.entryPrice, itemStyle: { color: 'rgba(196, 41, 10, 0.12)' }, name: 'SL zone' },
-        { yAxis: s.originalSL },
-      ],
-    ];
+    // Closest candle to GeneratedAt for the vertical "Signal fired" marker.
+    // Computed early so markArea + line series can clip to "signal onwards" —
+    // pre-signal candles are CONTEXT only, the position doesn't exist yet so
+    // reference lines/bands extending backwards would be misleading.
+    const signalIdx = findClosestIndex(s.generatedAt);
+    const lastIdx = candles.length - 1;
 
     // Exit timing + color. We render exit both as a horizontal line (price
     // level, drawn via a dedicated series below) and as a dot at the exact
@@ -2004,8 +1997,30 @@ export class SignalSensitivityPageComponent implements OnInit {
         s.outcome === 'HitTP' ? '#1f8a3d' : s.outcome === 'HitSL' ? '#c4290a' : '#0071e3';
     }
 
-    // Closest candle to GeneratedAt for the vertical "Signal fired" marker.
-    const signalIdx = findClosestIndex(s.generatedAt);
+    // Filled bands for the "reward zone" (entry → TP, green) and "risk zone"
+    // (entry → SL, red) — much louder than thin horizontal lines that blend
+    // into the chart's horizontal gridlines. Clipped to [signalIdx, last] so
+    // the band only spans the position's lifetime, not pre-signal context.
+    const markAreaData: any[][] = [
+      [
+        {
+          yAxis: s.entryPrice,
+          xAxis: signalIdx,
+          itemStyle: { color: 'rgba(31, 138, 61, 0.12)' },
+          name: 'TP zone',
+        },
+        { yAxis: s.originalTP, xAxis: lastIdx },
+      ],
+      [
+        {
+          yAxis: s.entryPrice,
+          xAxis: signalIdx,
+          itemStyle: { color: 'rgba(196, 41, 10, 0.12)' },
+          name: 'SL zone',
+        },
+        { yAxis: s.originalSL, xAxis: lastIdx },
+      ],
+    ];
 
     // Dot at the exact exit (timestamp, price) — companion to the exit
     // horizontal line so the operator gets WHEN + WHERE at a glance.
@@ -2043,9 +2058,12 @@ export class SignalSensitivityPageComponent implements OnInit {
     // Dedicated horizontal-line series for Entry/TP/SL/Exit. We render these
     // as real `type: 'line'` series rather than relying on markLine because
     // markLine on a candlestick series is rendered unreliably (z-order +
-    // clipping quirks observed live). Each series carries a constant Y across
-    // every bar, producing a flat horizontal line that's guaranteed to draw.
-    const flat = (y: number): number[] => candles.map(() => y);
+    // clipping quirks observed live). Each series carries a constant Y from
+    // signalIdx onward (null for pre-signal bars) so reference lines only
+    // appear during the position's lifetime — they shouldn't extend backwards
+    // into context candles where the position didn't yet exist.
+    const flat = (y: number): (number | null)[] =>
+      candles.map((_, i) => (i < signalIdx ? null : y));
     const lineSeries: any[] = [
       {
         name: 'Entry',
