@@ -3347,6 +3347,8 @@ export interface AnalyzeSignalSensitivitySignalDto {
   originalSL: number;
   originalTP: number;
   generatedAt: string;
+  /** Underlying market-event timestamp (bar close). May precede generatedAt for queued/deferred pipelines. */
+  triggeredAt: string;
   expiresAt: string;
   outcome: string;
   /** Fill timestamp = first bar whose range contained entryPrice. Null when EntryNotReached. */

@@ -758,6 +758,7 @@ const WINDOW_OPTIONS = [
                   </span>
                 </h2>
                 <p class="modal-sub">
+                  Triggered {{ s.triggeredAt | date: 'medium' }} · Generated
                   {{ s.generatedAt | date: 'medium' }} → expires {{ s.expiresAt | date: 'short' }} ·
                   {{ s.source }} · scenario P&amp;L
                   <strong [class.profit]="s.scenarioPnL > 0" [class.loss]="s.scenarioPnL < 0">
