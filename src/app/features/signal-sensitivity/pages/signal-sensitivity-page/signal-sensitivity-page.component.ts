@@ -146,6 +146,18 @@ const WINDOW_OPTIONS = [
               placeholder="0.5, 0.75, 1.0, 1.25, 1.5"
             />
           </label>
+          <label class="field">
+            <span>Expiry override (hours)</span>
+            <input
+              type="number"
+              step="0.5"
+              min="0"
+              max="24"
+              [(ngModel)]="expiryOverrideHours"
+              name="expiryOverrideHours"
+              placeholder="use signal's own"
+            />
+          </label>
         </div>
         <div class="filter-row">
           <label class="field field--wide">
@@ -1555,6 +1567,8 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly tpMultiplier = signal<number>(1.0);
   readonly slMultiplier = signal<number>(1.0);
   readonly sweepInput = signal<string>('0.5, 0.75, 1.0, 1.25, 1.5');
+  /** Hours override for signal validity. null = use signal's persisted ExpiresAt. */
+  readonly expiryOverrideHours = signal<number | null>(null);
   readonly riskProfileId = signal<number | null>(null);
   readonly startingBalance = signal<number>(10000);
 
@@ -1846,6 +1860,12 @@ export class SignalSensitivityPageComponent implements OnInit {
         signalDetailCap: 200,
         riskProfileId: riskProfileId ?? undefined,
         startingBalance,
+        // Operator's what-if expiry override (hours). Empty/0 → omit so the
+        // walker uses each signal's persisted ExpiresAt.
+        expiryOverrideHours:
+          this.expiryOverrideHours() && this.expiryOverrideHours()! > 0
+            ? this.expiryOverrideHours()!
+            : undefined,
       })
       .pipe(
         catchError((err) => {

@@ -3434,4 +3434,10 @@ export interface AnalyzeSignalSensitivityRequest {
   signalDetailCap?: number;
   riskProfileId?: number;
   startingBalance?: number;
+  /**
+   * What-if expiry override in HOURS. When set, the walker replaces each
+   * signal's ExpiresAt with `generatedAt + this hours`. Clamped server-side
+   * to [0.5, 24]. Blank/0 = use signal's persisted ExpiresAt.
+   */
+  expiryOverrideHours?: number;
 }
