@@ -152,7 +152,6 @@ const WINDOW_OPTIONS = [
               type="number"
               step="0.5"
               min="0"
-              max="24"
               [(ngModel)]="expiryOverrideHours"
               name="expiryOverrideHours"
               placeholder="use signal's own"
