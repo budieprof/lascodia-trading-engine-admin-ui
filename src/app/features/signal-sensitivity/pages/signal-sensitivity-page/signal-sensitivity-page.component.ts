@@ -14,6 +14,7 @@ import type { EChartsOption } from 'echarts';
 
 import { SignalSensitivityService } from '@core/services/signal-sensitivity.service';
 import { RiskProfilesService } from '@core/services/risk-profiles.service';
+import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { MarketDataService } from '@core/services/market-data.service';
 import { ThemeService } from '@core/theme/theme.service';
 import {
@@ -75,13 +76,49 @@ const WINDOW_OPTIONS = [
             </select>
           </label>
           <label class="field field--wide">
-            <span>Symbols <small>(comma-separated, any = blank)</small></span>
-            <input
-              type="text"
-              placeholder="e.g. NZDUSD, USDCAD, USDJPY"
-              [(ngModel)]="symbolFilter"
-              name="symbol"
-            />
+            <span>Symbols <small>(empty = all)</small></span>
+            <div class="symbol-multiselect">
+              <!-- Selected-chip tray -->
+              @if (selectedSymbols().length > 0) {
+                <div class="symbol-chips">
+                  @for (s of selectedSymbols(); track s) {
+                    <span class="symbol-chip">
+                      {{ s }}
+                      <button
+                        type="button"
+                        class="symbol-chip-remove"
+                        (click)="removeSymbol(s)"
+                        aria-label="Remove"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  }
+                </div>
+              }
+              <!-- Native datalist autocomplete: free-text + browser-rendered
+                   suggestion list of every loaded CurrencyPair symbol.
+                   Enter or comma commits the typed value. -->
+              <input
+                type="text"
+                list="symbol-options"
+                [placeholder]="
+                  selectedSymbols().length === 0
+                    ? 'pick or type — Enter / comma to add'
+                    : 'add another…'
+                "
+                [(ngModel)]="symbolInput"
+                name="symbolInput"
+                (keydown.enter)="$event.preventDefault(); commitSymbolInput()"
+                (keydown.comma)="$event.preventDefault(); commitSymbolInput()"
+                (change)="commitSymbolInput()"
+              />
+              <datalist id="symbol-options">
+                @for (sym of availableSymbols(); track sym) {
+                  <option [value]="sym"></option>
+                }
+              </datalist>
+            </div>
           </label>
           <label class="field">
             <span>Direction</span>
@@ -930,6 +967,44 @@ const WINDOW_OPTIONS = [
       .chip-checkbox:hover {
         background: var(--bg-tertiary);
       }
+      .symbol-multiselect {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        width: 100%;
+      }
+      .symbol-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+      }
+      .symbol-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        padding: 0.25rem 0.4rem 0.25rem 0.65rem;
+        border-radius: 9999px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        background: rgba(0, 113, 227, 0.15);
+        color: var(--accent);
+        font-variant-numeric: tabular-nums;
+      }
+      .symbol-chip-remove {
+        background: transparent;
+        border: none;
+        color: inherit;
+        font-size: 1rem;
+        line-height: 1;
+        padding: 0 0.25rem;
+        cursor: pointer;
+        border-radius: 9999px;
+        opacity: 0.7;
+      }
+      .symbol-chip-remove:hover {
+        opacity: 1;
+        background: rgba(0, 113, 227, 0.25);
+      }
       .run-btn {
         background: var(--accent);
         color: #fff;
@@ -1539,6 +1614,7 @@ export class SignalSensitivityPageComponent implements OnInit {
   private readonly svc = inject(SignalSensitivityService);
   private readonly riskProfilesSvc = inject(RiskProfilesService);
   private readonly marketDataSvc = inject(MarketDataService);
+  private readonly currencyPairsSvc = inject(CurrencyPairsService);
   private readonly themeSvc = inject(ThemeService);
 
   readonly sourcesAvail = SOURCES;
@@ -1560,7 +1636,12 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly selectedTimeframe = signal<Timeframe>('H1');
 
   readonly windowDays = signal<number>(30);
-  readonly symbolFilter = signal<string>('');
+  /** Symbols the operator has committed to filter on. Empty = all symbols. */
+  readonly selectedSymbols = signal<string[]>([]);
+  /** Live free-text input — committed to selectedSymbols on Enter / comma / blur. */
+  readonly symbolInput = signal<string>('');
+  /** Full list of tradable pair symbols loaded once at page init for the datalist. */
+  readonly availableSymbols = signal<string[]>([]);
   readonly selectedSources = signal<string[]>(['SpotAnalysis']);
   readonly selectedDirections = signal<string[]>([]);
   readonly tpMultiplier = signal<number>(1.0);
@@ -1808,6 +1889,24 @@ export class SignalSensitivityPageComponent implements OnInit {
           this.riskProfiles.set(res.data.data);
         }
       });
+
+    // Load the full active-pair catalogue for the Symbols multi-select
+    // datalist. Same failure posture as risk profiles — if the call fails,
+    // the operator can still free-type symbols (datalist autocomplete just
+    // shows no suggestions). Page size is generous because the catalogue
+    // is bounded (~20-50 pairs in practice).
+    this.currencyPairsSvc
+      .list({ currentPage: 1, itemCountPerPage: 500 })
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        if (res?.status && res.data?.data) {
+          const symbols = res.data.data
+            .filter((p) => p.isActive && !!p.symbol)
+            .map((p) => p.symbol!.toUpperCase())
+            .sort();
+          this.availableSymbols.set(symbols);
+        }
+      });
   }
 
   toggleSource(s: string) {
@@ -1822,6 +1921,34 @@ export class SignalSensitivityPageComponent implements OnInit {
     this.selectedDirections.set(
       current.includes(d) ? current.filter((x) => x !== d) : [...current, d],
     );
+  }
+
+  /**
+   * Commit whatever's in the input box to the selected-chip list. Accepts
+   * comma-separated lists too, so an operator can paste
+   * "NZDUSD, USDCAD, USDJPY" and get three chips at once. Case-normalises
+   * to upper and de-duplicates against already-selected entries.
+   */
+  commitSymbolInput() {
+    const raw = this.symbolInput().trim();
+    if (!raw) return;
+    const tokens = raw
+      .split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter((s) => s.length > 0);
+    if (tokens.length === 0) {
+      this.symbolInput.set('');
+      return;
+    }
+    const current = this.selectedSymbols();
+    const merged = [...current];
+    for (const t of tokens) if (!merged.includes(t)) merged.push(t);
+    this.selectedSymbols.set(merged);
+    this.symbolInput.set('');
+  }
+
+  removeSymbol(symbol: string) {
+    this.selectedSymbols.set(this.selectedSymbols().filter((s) => s !== symbol));
   }
 
   run() {
@@ -1840,11 +1967,11 @@ export class SignalSensitivityPageComponent implements OnInit {
     const riskProfileId = this.riskProfileId();
     const startingBalance = riskProfileId !== null ? this.startingBalance() : undefined;
 
-    // Parse comma-separated symbol input into a list of uppercase symbols.
-    const symbolList = this.symbolFilter()
-      .split(',')
-      .map((s) => s.trim().toUpperCase())
-      .filter((s) => s.length > 0);
+    // If the operator left text in the input box without committing it (no
+    // Enter / comma / blur), flush it into the selected list first so we
+    // don't silently drop their last symbol.
+    if (this.symbolInput().trim().length > 0) this.commitSymbolInput();
+    const symbolList = this.selectedSymbols();
 
     this.svc
       .analyze({
