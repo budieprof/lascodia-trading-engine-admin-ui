@@ -8,7 +8,7 @@ import {
 } from '@angular/core';
 import { CurrencyPipe, DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { catchError, of } from 'rxjs';
+import { catchError, of, switchMap } from 'rxjs';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import type { EChartsOption } from 'echarts';
 
@@ -802,8 +802,8 @@ const WINDOW_OPTIONS = [
                   picked from the heatmap. Confirm to write
                   <code>Llm:SpotAnalysisTakeProfitShrinkagePerSymbol:SYMBOL</code> +
                   <code>Llm:SpotAnalysisStopLossShrinkagePerSymbol:SYMBOL</code> rows to
-                  EngineConfig. <b>Engine restart required</b> for the new values to take effect
-                  (LlmOptions is read once at boot).
+                  EngineConfig, then hot-reload the live LlmOptions so the overrides take effect
+                  immediately — no engine restart needed.
                 </p>
               </div>
               <button
@@ -2265,24 +2265,45 @@ export class SignalSensitivityPageComponent implements OnInit {
     ]);
     this.autoConfigApplying.set(true);
     this.autoConfigMessage.set(null);
+    // Two-step: write rows, then hot-reload the live LlmOptions singleton
+    // so the new values take effect without an engine restart. The reload
+    // endpoint re-runs the EngineConfig overlay against the existing
+    // singleton instance — every service that captured LlmOptions by
+    // reference sees the change on its next read.
     this.llmSvc
       .updateSettings(entries)
       .pipe(
+        switchMap((writeRes) => {
+          if (!writeRes?.status) return of({ writeRes, reloadRes: null });
+          return this.llmSvc.reloadSettings().pipe(
+            catchError(() => of(null)),
+            switchMap((reloadRes) => of({ writeRes, reloadRes })),
+          );
+        }),
         catchError((err) => {
           this.autoConfigMessage.set(err?.message ?? 'Save failed.');
           return of(null);
         }),
       )
-      .subscribe((res) => {
+      .subscribe((bundle) => {
         this.autoConfigApplying.set(false);
-        if (res?.status) {
-          this.autoConfigMessage.set(
-            `Wrote ${res.data ?? 0} row(s). Engine restart required for new values to take effect.`,
-          );
+        if (!bundle) return;
+        const { writeRes, reloadRes } = bundle;
+        if (writeRes?.status) {
+          const wrote = writeRes.data ?? 0;
+          if (reloadRes?.status) {
+            this.autoConfigMessage.set(
+              `Wrote ${wrote} row(s) and reloaded live config — overrides are active now.`,
+            );
+          } else {
+            this.autoConfigMessage.set(
+              `Wrote ${wrote} row(s). Reload failed — engine restart still required.`,
+            );
+          }
           // Auto-dismiss after a short read window.
           setTimeout(() => this.cancelAutoConfig(), 2500);
-        } else if (res && !res.status) {
-          this.autoConfigMessage.set(res.message ?? 'Save failed.');
+        } else if (writeRes && !writeRes.status) {
+          this.autoConfigMessage.set(writeRes.message ?? 'Save failed.');
         }
       });
   }

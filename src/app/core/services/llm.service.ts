@@ -92,6 +92,17 @@ export class LlmService {
   }
 
   /**
+   * Hot-reload Llm:* EngineConfig rows into the live LlmOptions singleton.
+   * Call this after `updateSettings` so changes take effect without a
+   * full engine restart — every service that captured LlmOptions by
+   * reference (e.g. SignalShrinkagePolicy) sees the new values on its
+   * next read.
+   */
+  reloadSettings(): Observable<ResponseData<number>> {
+    return this.api.post(`/llm/settings/reload`, {});
+  }
+
+  /**
    * Connectivity smoke test — fires a trivial prompt at the currently
    * configured Deep + Quick clients. Each tier reports independently so a
    * misconfigured Quick provider doesn't mask a healthy Deep tier.
