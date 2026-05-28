@@ -1922,12 +1922,14 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly chartCandles = signal<CandleDto[]>([]);
   readonly echartsTheme = computed(() => (this.themeSvc.theme() === 'dark' ? 'dark' : ''));
 
-  // Timeframe the operator picks from the chart toolbar. Default H1 because
-  // SpotAnalysis writes at H1 — candles are guaranteed to exist. M5/M15 give
-  // finer granularity when investigating short-lived signals; H4/D1 widen
-  // the macro context for long-horizon signals.
+  // Timeframe the operator picks from the chart toolbar. Default M5 because
+  // the walker pins TP/SL touches to the smallest available timeframe bar,
+  // so M5 candles render the exact bar the verdict was registered on. H1
+  // and above hide intra-hour movement behind wider bars and make the exit
+  // dot look misaligned vs visible price action. M15/H1/H4/D1 stay one
+  // click away for macro context on long-horizon signals.
   readonly chartTimeframes: Timeframe[] = ['M5', 'M15', 'H1', 'H4', 'D1'];
-  readonly selectedTimeframe = signal<Timeframe>('H1');
+  readonly selectedTimeframe = signal<Timeframe>('M5');
 
   readonly windowDays = signal<number>(30);
   /** Symbols the operator has committed to filter on. Empty = all symbols. */
@@ -2464,13 +2466,15 @@ export class SignalSensitivityPageComponent implements OnInit {
   }
 
   /**
-   * Open the chart modal for a signal. Default timeframe is H1 (LLM/Spot
-   * analysers write at H1, candles always exist). The operator can switch
-   * granularity from the chart toolbar.
+   * Open the chart modal for a signal. Default timeframe is M5 so the
+   * exit dot lands on the exact bar that registered the TP/SL touch
+   * (matches the walker's smallest-timeframe pinning). The operator can
+   * switch granularity from the chart toolbar; M5 may be empty for very
+   * old signals predating M5 ingest, in which case H1 is the fallback.
    */
   openSignalChart(s: AnalyzeSignalSensitivitySignalDto) {
     this.selectedSignal.set(s);
-    this.selectedTimeframe.set('H1');
+    this.selectedTimeframe.set('M5');
     this.reloadChart();
   }
 
