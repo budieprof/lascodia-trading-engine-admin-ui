@@ -3318,6 +3318,8 @@ export interface SignalSensitivityPerSymbolBestDto {
   lossCount: number;
   walkable: number;
   profitFactor: number;
+  /** Full KPI aggregate at this symbol's best cell — used for the optimal-per-symbol cohort rollup. */
+  aggregate: AnalyzeSignalSensitivityAggregateDto;
 }
 
 /** One bucket of the hold-time histogram. */

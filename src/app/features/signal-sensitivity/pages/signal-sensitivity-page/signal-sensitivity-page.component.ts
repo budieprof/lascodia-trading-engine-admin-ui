@@ -282,6 +282,17 @@ const WINDOW_OPTIONS = [
             <div class="kpi-sub">from {{ r.aggregate.expiredCount }} expired · mark-to-market</div>
           </div>
           <div class="kpi">
+            <div class="kpi-label">Total P&amp;L</div>
+            <div
+              class="kpi-value"
+              [class.profit]="r.aggregate.sumPnL > 0"
+              [class.loss]="r.aggregate.sumPnL < 0"
+            >
+              {{ r.aggregate.sumPnL | currency: 'USD' }}
+            </div>
+            <div class="kpi-sub">realized + unrealized</div>
+          </div>
+          <div class="kpi">
             <div class="kpi-label">Profit factor</div>
             <div class="kpi-value">{{ r.aggregate.profitFactor | number: '1.2-2' }}</div>
             <div class="kpi-sub">
@@ -304,6 +315,79 @@ const WINDOW_OPTIONS = [
             </div>
           </div>
         </section>
+
+        <!-- ── Optimal per-symbol scenario (each symbol at its own best cell) ── -->
+        @if (optimalAggregate(); as opt) {
+          <section class="kpi-grid kpi-grid--optimal">
+            <div class="optimal-banner">
+              <div class="optimal-banner-title">Optimal per-symbol scenario</div>
+              <div class="optimal-banner-sub">
+                Each of {{ opt.symbolCount }} symbol(s) at its own best (TP×, SL×) from the heatmap
+              </div>
+            </div>
+            <div class="kpi kpi--optimal">
+              <div class="kpi-label">Win rate</div>
+              <div
+                class="kpi-value"
+                [class.profit]="opt.winRatePct >= 50"
+                [class.loss]="opt.winRatePct < 50"
+              >
+                {{ opt.winRatePct | number: '1.1-1' }}%
+              </div>
+              <div class="kpi-sub">{{ opt.winCount }} W / {{ opt.lossCount }} L</div>
+            </div>
+            <div class="kpi kpi--optimal">
+              <div class="kpi-label">Realized P&amp;L</div>
+              <div
+                class="kpi-value"
+                [class.profit]="opt.realizedPnL > 0"
+                [class.loss]="opt.realizedPnL < 0"
+              >
+                {{ opt.realizedPnL | currency: 'USD' }}
+              </div>
+              <div class="kpi-sub">from {{ opt.winCount + opt.lossCount }} closed</div>
+            </div>
+            <div class="kpi kpi--optimal">
+              <div class="kpi-label">Unrealized P&amp;L</div>
+              <div
+                class="kpi-value"
+                [class.profit]="opt.unrealizedPnL > 0"
+                [class.loss]="opt.unrealizedPnL < 0"
+              >
+                {{ opt.unrealizedPnL | currency: 'USD' }}
+              </div>
+              <div class="kpi-sub">from {{ opt.expiredCount }} expired · mark-to-market</div>
+            </div>
+            <div class="kpi kpi--optimal">
+              <div class="kpi-label">Total P&amp;L</div>
+              <div class="kpi-value" [class.profit]="opt.sumPnL > 0" [class.loss]="opt.sumPnL < 0">
+                {{ opt.sumPnL | currency: 'USD' }}
+              </div>
+              <div class="kpi-sub">realized + unrealized</div>
+            </div>
+            <div class="kpi kpi--optimal">
+              <div class="kpi-label">Profit factor</div>
+              <div class="kpi-value">{{ opt.profitFactor | number: '1.2-2' }}</div>
+              <div class="kpi-sub">
+                avg W {{ opt.avgWinPnL | currency: 'USD' }} / avg L
+                {{ opt.avgLossPnL | currency: 'USD' }}
+              </div>
+            </div>
+            <div class="kpi kpi--optimal">
+              <div class="kpi-label">Outcome mix</div>
+              <div class="kpi-value">{{ opt.walkable | number }}</div>
+              <div class="kpi-sub">
+                {{ opt.hitTpCount }} TP / {{ opt.hitSlCount }} SL / {{ opt.expiredCount }} exp
+                @if (opt.entryNotReachedCount > 0) {
+                  · {{ opt.entryNotReachedCount }} unfilled
+                }
+                @if (opt.noCandlesCount > 0) {
+                  · {{ opt.noCandlesCount }} no-data
+                }
+              </div>
+            </div>
+          </section>
+        }
 
         <!-- ── Equity-curve KPIs + sparkline (when RiskProfile mode is on) ── -->
         @if (r.riskProfileId !== null && r.riskProfileId !== undefined) {
@@ -1142,6 +1226,33 @@ const WINDOW_OPTIONS = [
         gap: 1rem;
         grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       }
+      .kpi-grid--optimal {
+        padding: 0.75rem;
+        border: 1px dashed var(--accent);
+        border-radius: 8px;
+        background: rgba(0, 113, 227, 0.04);
+      }
+      .optimal-banner {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: baseline;
+        gap: 0.6rem;
+        padding: 0 0.25rem;
+      }
+      .optimal-banner-title {
+        font-size: 0.9rem;
+        font-weight: 700;
+        color: var(--accent);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .optimal-banner-sub {
+        font-size: 0.78rem;
+        opacity: 0.7;
+      }
+      .kpi--optimal {
+        background: var(--bg-primary);
+      }
       .kpi {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
@@ -1844,6 +1955,71 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly heatmapMetric = signal<
     'realizedPnL' | 'sumPnL' | 'winRatePct' | 'profitFactor' | 'expectancy'
   >('realizedPnL');
+
+  /**
+   * Cohort KPIs in the "optimal per-symbol" scenario — each symbol uses
+   * its own best (TP×, SL×) cell from the heatmap instead of a single
+   * cohort-wide pair. Win-rate and profit-factor are re-derived from
+   * summed wins/losses (averaging would be wrong). Returns null when
+   * the cohort had no signals.
+   */
+  readonly optimalAggregate = computed(() => {
+    const picks = this.result()?.perSymbolBest ?? [];
+    if (!picks.length) return null;
+    let realizedPnL = 0;
+    let unrealizedPnL = 0;
+    let winCount = 0;
+    let lossCount = 0;
+    let expiredCount = 0;
+    let entryNotReachedCount = 0;
+    let noCandlesCount = 0;
+    let walkable = 0;
+    let hitTpCount = 0;
+    let hitSlCount = 0;
+    let sumWinPnL = 0;
+    let sumLossPnL = 0;
+    for (const p of picks) {
+      const a = p.aggregate;
+      realizedPnL += a.realizedPnL ?? 0;
+      unrealizedPnL += a.unrealizedPnL ?? 0;
+      winCount += a.winCount ?? 0;
+      lossCount += a.lossCount ?? 0;
+      expiredCount += a.expiredCount ?? 0;
+      entryNotReachedCount += a.entryNotReachedCount ?? 0;
+      noCandlesCount += a.noCandlesCount ?? 0;
+      walkable += a.walkable ?? 0;
+      hitTpCount += a.hitTpCount ?? 0;
+      hitSlCount += a.hitSlCount ?? 0;
+      // avgWinPnL × winCount reconstructs sumWinPnL — the backend doesn't
+      // ship the sums directly. Same for losses.
+      sumWinPnL += (a.avgWinPnL ?? 0) * (a.winCount ?? 0);
+      sumLossPnL += (a.avgLossPnL ?? 0) * (a.lossCount ?? 0);
+    }
+    const resolved = winCount + lossCount;
+    const winRatePct = resolved > 0 ? (100 * winCount) / resolved : 0;
+    const avgWinPnL = winCount > 0 ? sumWinPnL / winCount : 0;
+    const avgLossPnL = lossCount > 0 ? sumLossPnL / lossCount : 0;
+    const profitFactor =
+      sumLossPnL < 0 ? sumWinPnL / Math.abs(sumLossPnL) : sumWinPnL > 0 ? 999 : 0;
+    return {
+      realizedPnL,
+      unrealizedPnL,
+      sumPnL: realizedPnL + unrealizedPnL,
+      winCount,
+      lossCount,
+      expiredCount,
+      entryNotReachedCount,
+      noCandlesCount,
+      walkable,
+      hitTpCount,
+      hitSlCount,
+      winRatePct,
+      avgWinPnL,
+      avgLossPnL,
+      profitFactor,
+      symbolCount: picks.length,
+    };
+  });
 
   /** SVG viewBox spanning the equity curve. Computed so the sparkline renders
    *  with consistent y-padding regardless of absolute balance magnitudes. */
