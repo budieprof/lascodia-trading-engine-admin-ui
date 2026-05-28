@@ -3388,6 +3388,10 @@ export interface AnalyzeSignalSensitivitySignalDto {
   entryPrice: number;
   originalSL: number;
   originalTP: number;
+  /** SL after the read-time shrinkage policy — the level the walker walks (before SL multiplier). */
+  effectiveSL: number;
+  /** TP after the read-time shrinkage policy — the level the walker walks (before TP multiplier). */
+  effectiveTP: number;
   generatedAt: string;
   /** Underlying market-event timestamp (bar close). May precede generatedAt for queued/deferred pipelines. */
   triggeredAt: string;
