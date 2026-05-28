@@ -15,6 +15,8 @@ import {
   LifecycleRationaleQueryFilter,
   TestLlmProviderResult,
   RationaleCoverageDto,
+  ApplyPerSymbolShrinkagePick,
+  ApplyPerSymbolShrinkageResult,
 } from '@core/api/api.types';
 
 /**
@@ -100,6 +102,18 @@ export class LlmService {
    */
   reloadSettings(): Observable<ResponseData<number>> {
     return this.api.post(`/llm/settings/reload`, {});
+  }
+
+  /**
+   * Persist per-symbol shrinkage picks from the Signal Sensitivity heatmap.
+   * Send the RAW heatmap multipliers — the server composes each with the
+   * symbol's current effective shrinkage so live trading matches the picked
+   * scenario. Also reloads the live LlmOptions singleton on success.
+   */
+  applyPerSymbolShrinkage(
+    picks: ApplyPerSymbolShrinkagePick[],
+  ): Observable<ResponseData<ApplyPerSymbolShrinkageResult>> {
+    return this.api.post(`/llm/settings/apply-per-symbol-shrinkage`, { picks });
   }
 
   /**

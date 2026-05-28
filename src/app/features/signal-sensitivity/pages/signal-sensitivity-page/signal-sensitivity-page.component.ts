@@ -8,7 +8,7 @@ import {
 } from '@angular/core';
 import { CurrencyPipe, DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { catchError, of, switchMap } from 'rxjs';
+import { catchError, of } from 'rxjs';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import type { EChartsOption } from 'echarts';
 
@@ -2418,68 +2418,53 @@ export class SignalSensitivityPageComponent implements OnInit {
   }
 
   /**
-   * Write the selected per-symbol shrinkage overrides to EngineConfig via
-   * the existing PUT /llm/settings endpoint. Two rows per symbol:
-   *   Llm:SpotAnalysisTakeProfitShrinkagePerSymbol:SYMBOL = tp
-   *   Llm:SpotAnalysisStopLossShrinkagePerSymbol:SYMBOL   = sl
-   * Engine picks these up on next restart (LlmOptions is a singleton
-   * snapshot — see EngineConfigLlmOptionsPostConfigure xml-doc).
+   * Persist the selected per-symbol shrinkage picks. We send the RAW heatmap
+   * multipliers; the server composes each with the symbol's current
+   * effective shrinkage (new_shrinkage = current × picked) before writing,
+   * so live trading's effective TP/SL match the picked heatmap scenario.
+   *
+   * After Apply succeeds we reset the form's TP/SL multipliers to 1.0 —
+   * subsequent Analyse clicks then walk at the new shrinkage baseline with
+   * no further scenario multiplication, producing idempotent KPI numbers.
+   * Without the reset, the previous form values would stack on top of the
+   * just-applied shrinkage and outcomes would drift on every re-click.
    */
   applyAutoConfig() {
     if (this.autoConfigApplying()) return;
     const picks = this.autoConfigPicks().filter((p) => !this.autoConfigExcluded().has(p.symbol));
     if (!picks.length) return;
-    const entries = picks.flatMap((p) => [
-      {
-        key: `Llm:SpotAnalysisTakeProfitShrinkagePerSymbol:${p.symbol}`,
-        value: String(p.bestTpMultiplier),
-      },
-      {
-        key: `Llm:SpotAnalysisStopLossShrinkagePerSymbol:${p.symbol}`,
-        value: String(p.bestSlMultiplier),
-      },
-    ]);
+    const payload = picks.map((p) => ({
+      symbol: p.symbol,
+      pickedTpMultiplier: p.bestTpMultiplier,
+      pickedSlMultiplier: p.bestSlMultiplier,
+    }));
     this.autoConfigApplying.set(true);
     this.autoConfigMessage.set(null);
-    // Two-step: write rows, then hot-reload the live LlmOptions singleton
-    // so the new values take effect without an engine restart. The reload
-    // endpoint re-runs the EngineConfig overlay against the existing
-    // singleton instance — every service that captured LlmOptions by
-    // reference sees the change on its next read.
     this.llmSvc
-      .updateSettings(entries)
+      .applyPerSymbolShrinkage(payload)
       .pipe(
-        switchMap((writeRes) => {
-          if (!writeRes?.status) return of({ writeRes, reloadRes: null });
-          return this.llmSvc.reloadSettings().pipe(
-            catchError(() => of(null)),
-            switchMap((reloadRes) => of({ writeRes, reloadRes })),
-          );
-        }),
         catchError((err) => {
-          this.autoConfigMessage.set(err?.message ?? 'Save failed.');
+          this.autoConfigMessage.set(err?.message ?? 'Apply failed.');
           return of(null);
         }),
       )
-      .subscribe((bundle) => {
+      .subscribe((res) => {
         this.autoConfigApplying.set(false);
-        if (!bundle) return;
-        const { writeRes, reloadRes } = bundle;
-        if (writeRes?.status) {
-          const wrote = writeRes.data ?? 0;
-          if (reloadRes?.status) {
-            this.autoConfigMessage.set(
-              `Wrote ${wrote} row(s) and reloaded live config — overrides are active now.`,
-            );
-          } else {
-            this.autoConfigMessage.set(
-              `Wrote ${wrote} row(s). Reload failed — engine restart still required.`,
-            );
-          }
-          // Auto-dismiss after a short read window.
-          setTimeout(() => this.cancelAutoConfig(), 2500);
-        } else if (writeRes && !writeRes.status) {
-          this.autoConfigMessage.set(writeRes.message ?? 'Save failed.');
+        if (!res) return;
+        if (res.status && res.data) {
+          const clamped = res.data.rows.filter((r) => r.tpClamped).length;
+          const clampNote = clamped > 0 ? ` (${clamped} TP capped at 1.0)` : '';
+          this.autoConfigMessage.set(
+            `Applied ${res.data.rows.length} symbol(s)${clampNote}. ` +
+              `Form multipliers reset to 1.0 — re-Analyse to see the new baseline.`,
+          );
+          // Reset the form so the next Analyse runs at the picked-scenario
+          // baseline without compounding the now-stale multipliers.
+          this.tpMultiplier.set(1);
+          this.slMultiplier.set(1);
+          setTimeout(() => this.cancelAutoConfig(), 2800);
+        } else if (!res.status) {
+          this.autoConfigMessage.set(res.message ?? 'Apply failed.');
         }
       });
   }

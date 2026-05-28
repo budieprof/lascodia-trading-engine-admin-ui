@@ -2068,6 +2068,27 @@ export interface LlmConfigUpdateEntry {
   value: string;
 }
 
+/** Per-symbol heatmap pick to apply as a shrinkage override. */
+export interface ApplyPerSymbolShrinkagePick {
+  symbol: string;
+  pickedTpMultiplier: number;
+  pickedSlMultiplier: number;
+}
+
+export interface ApplyPerSymbolShrinkageRow {
+  symbol: string;
+  currentTpShrinkage: number;
+  currentSlShrinkage: number;
+  newTpShrinkage: number;
+  newSlShrinkage: number;
+  tpClamped: boolean;
+}
+
+export interface ApplyPerSymbolShrinkageResult {
+  writeCount: number;
+  rows: ApplyPerSymbolShrinkageRow[];
+}
+
 export interface TestLlmProviderTierResult {
   tier: 'Deep' | 'Quick';
   provider: string;
