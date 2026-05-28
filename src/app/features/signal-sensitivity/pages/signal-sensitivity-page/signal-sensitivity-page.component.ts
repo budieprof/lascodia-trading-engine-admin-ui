@@ -2418,16 +2418,15 @@ export class SignalSensitivityPageComponent implements OnInit {
   }
 
   /**
-   * Persist the selected per-symbol shrinkage picks. We send the RAW heatmap
-   * multipliers; the server composes each with the symbol's current
-   * effective shrinkage (new_shrinkage = current × picked) before writing,
-   * so live trading's effective TP/SL match the picked heatmap scenario.
+   * Persist the selected per-symbol shrinkage picks. The server writes the
+   * raw heatmap multipliers verbatim as the new live shrinkage values for
+   * each picked symbol — because the sensitivity walker is decoupled from
+   * the live shrinkage policy, the multiplier IS the value live trading
+   * should use to match the picked scenario.
    *
-   * After Apply succeeds we reset the form's TP/SL multipliers to 1.0 —
-   * subsequent Analyse clicks then walk at the new shrinkage baseline with
-   * no further scenario multiplication, producing idempotent KPI numbers.
-   * Without the reset, the previous form values would stack on top of the
-   * just-applied shrinkage and outcomes would drift on every re-click.
+   * Re-clicking Analyse after Apply produces the SAME KPIs because the
+   * walker doesn't read live shrinkage; it walks original × form-multiplier.
+   * No form reset needed.
    */
   applyAutoConfig() {
     if (this.autoConfigApplying()) return;
@@ -2455,14 +2454,9 @@ export class SignalSensitivityPageComponent implements OnInit {
           const clamped = res.data.rows.filter((r) => r.tpClamped).length;
           const clampNote = clamped > 0 ? ` (${clamped} TP capped at 1.0)` : '';
           this.autoConfigMessage.set(
-            `Applied ${res.data.rows.length} symbol(s)${clampNote}. ` +
-              `Form multipliers reset to 1.0 — re-Analyse to see the new baseline.`,
+            `Applied ${res.data.rows.length} symbol(s)${clampNote} — live shrinkage updated.`,
           );
-          // Reset the form so the next Analyse runs at the picked-scenario
-          // baseline without compounding the now-stale multipliers.
-          this.tpMultiplier.set(1);
-          this.slMultiplier.set(1);
-          setTimeout(() => this.cancelAutoConfig(), 2800);
+          setTimeout(() => this.cancelAutoConfig(), 2500);
         } else if (!res.status) {
           this.autoConfigMessage.set(res.message ?? 'Apply failed.');
         }
@@ -2595,20 +2589,15 @@ export class SignalSensitivityPageComponent implements OnInit {
     const isLong = s.direction === 'Buy';
     const tpMul = r.tpMultiplier;
     const slMul = r.slMultiplier;
-    // Scenario lines use the EFFECTIVE TP/SL (post-shrinkage) as the
-    // baseline — same formula the walker uses to detect TP/SL hits.
-    // Drawing them off `originalTP/originalSL` would misalign the chart
-    // with the verdict whenever a shrinkage knob is non-1.0: the operator
-    // would see the exit dot land below the green TP line yet read
-    // "HitTP" because the walker actually hit the (lower) effective TP.
-    const effectiveTp = s.effectiveTP ?? s.originalTP;
-    const effectiveSl = s.effectiveSL ?? s.originalSL;
+    // Walker is decoupled from the live shrinkage policy: scenario lines
+    // sit at entry + (originalTP − entry) × tpMul (and the SL analogue),
+    // matching the walker's hit-detection levels exactly.
     const scenarioTp = isLong
-      ? s.entryPrice + (effectiveTp - s.entryPrice) * tpMul
-      : s.entryPrice - (s.entryPrice - effectiveTp) * tpMul;
+      ? s.entryPrice + (s.originalTP - s.entryPrice) * tpMul
+      : s.entryPrice - (s.entryPrice - s.originalTP) * tpMul;
     const scenarioSl = isLong
-      ? s.entryPrice - (s.entryPrice - effectiveSl) * slMul
-      : s.entryPrice + (effectiveSl - s.entryPrice) * slMul;
+      ? s.entryPrice - (s.entryPrice - s.originalSL) * slMul
+      : s.entryPrice + (s.originalSL - s.entryPrice) * slMul;
 
     // ── Time-axis chart ──────────────────────────────────────────────────
     // We use a `type: 'time'` x-axis (not category) so signal-fire and exit
@@ -2794,60 +2783,47 @@ export class SignalSensitivityPageComponent implements OnInit {
       },
     ];
 
-    // Show the dashed scenario line whenever it diverges from the LLM's
-    // verbatim level — that's the case when EITHER the operator multiplier
-    // != 1 OR a non-trivial shrinkage is active. Otherwise the operator
-    // sees the green "TP" line and the exit dot below it and (rightly)
-    // suspects the verdict, when in fact the walker hit the effective
-    // (shrunken) TP that the chart was hiding.
-    const tpScenarioVisible = Math.abs(scenarioTp - s.originalTP) > 1e-9;
-    const slScenarioVisible = Math.abs(scenarioSl - s.originalSL) > 1e-9;
-    // Label format mirrors what the walker uses. TP×1 with shrinkage gets
-    // labeled "TP (eff)" since the multiplier didn't contribute. When the
-    // multiplier is non-trivial we keep the "TP×N" form.
-    const tpScenarioLabel = tpMul === 1 ? 'TP (eff)' : `TP×${tpMul}`;
-    const slScenarioLabel = slMul === 1 ? 'SL (eff)' : `SL×${slMul}`;
-    if (tpScenarioVisible) {
-      lineSeries.push({
-        name: tpScenarioLabel,
-        type: 'line',
-        data: flat(scenarioTp),
-        symbol: 'none',
-        lineStyle: { color: '#1f8a3d', width: 2, type: 'dashed' },
-        tooltip: { show: false },
-        z: 9,
-        endLabel: {
-          show: true,
-          formatter: `${tpScenarioLabel} ${fmt(scenarioTp)}`,
-          backgroundColor: '#1f8a3d',
-          color: '#ffffff',
-          padding: [2, 6],
-          borderRadius: 3,
-          fontSize: 10,
-          offset: [0, 18],
+    if (tpMul !== 1 || slMul !== 1) {
+      lineSeries.push(
+        {
+          name: `TP×${tpMul}`,
+          type: 'line',
+          data: flat(scenarioTp),
+          symbol: 'none',
+          lineStyle: { color: '#1f8a3d', width: 2, type: 'dashed' },
+          tooltip: { show: false },
+          z: 9,
+          endLabel: {
+            show: true,
+            formatter: `TP×${tpMul} ${fmt(scenarioTp)}`,
+            backgroundColor: '#1f8a3d',
+            color: '#ffffff',
+            padding: [2, 6],
+            borderRadius: 3,
+            fontSize: 10,
+            offset: [0, 18],
+          },
         },
-      });
-    }
-    if (slScenarioVisible) {
-      lineSeries.push({
-        name: slScenarioLabel,
-        type: 'line',
-        data: flat(scenarioSl),
-        symbol: 'none',
-        lineStyle: { color: '#c4290a', width: 2, type: 'dashed' },
-        tooltip: { show: false },
-        z: 9,
-        endLabel: {
-          show: true,
-          formatter: `${slScenarioLabel} ${fmt(scenarioSl)}`,
-          backgroundColor: '#c4290a',
-          color: '#ffffff',
-          padding: [2, 6],
-          borderRadius: 3,
-          fontSize: 10,
-          offset: [0, 18],
+        {
+          name: `SL×${slMul}`,
+          type: 'line',
+          data: flat(scenarioSl),
+          symbol: 'none',
+          lineStyle: { color: '#c4290a', width: 2, type: 'dashed' },
+          tooltip: { show: false },
+          z: 9,
+          endLabel: {
+            show: true,
+            formatter: `SL×${slMul} ${fmt(scenarioSl)}`,
+            backgroundColor: '#c4290a',
+            color: '#ffffff',
+            padding: [2, 6],
+            borderRadius: 3,
+            fontSize: 10,
+            offset: [0, 18],
+          },
         },
-      });
+      );
     }
 
     if (s.exitPrice !== null) {
