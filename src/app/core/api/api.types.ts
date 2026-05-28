@@ -3301,6 +3301,25 @@ export interface SignalSensitivityHeatmapCellDto {
   aggregate: AnalyzeSignalSensitivityAggregateDto;
 }
 
+/**
+ * Per-symbol best (TpMultiplier, SlMultiplier) cell picked from the 2D
+ * heatmap by maximum realised P&L on that symbol's signals alone. Drives
+ * the "Apply per-symbol shrinkage" confirmation dialog on the Signal
+ * Sensitivity page — the operator confirms which symbols + values to
+ * persist as Llm:SpotAnalysis*ShrinkagePerSymbol:SYMBOL EngineConfig rows.
+ */
+export interface SignalSensitivityPerSymbolBestDto {
+  symbol: string;
+  bestTpMultiplier: number;
+  bestSlMultiplier: number;
+  realizedPnL: number;
+  winRatePct: number;
+  winCount: number;
+  lossCount: number;
+  walkable: number;
+  profitFactor: number;
+}
+
 /** One bucket of the hold-time histogram. */
 export interface SignalSensitivityHoldTimeBucketDto {
   label: string;
@@ -3395,6 +3414,13 @@ export interface AnalyzeSignalSensitivityResultDto {
   breakdownsByDirection: SignalSensitivityCohortBreakdownDto[];
   /** Per-source (SpotAnalysis/Strategy/...) breakdown. */
   breakdownsBySource: SignalSensitivityCohortBreakdownDto[];
+
+  /**
+   * Best (tp, sl) cell per symbol from the heatmap, ranked by realised P&L.
+   * Empty when the cohort had zero signals. Used by the page's auto-config
+   * confirmation dialog.
+   */
+  perSymbolBest: SignalSensitivityPerSymbolBestDto[];
 
   /** Hold-time histogram (5 fixed buckets). */
   holdTimeBuckets: SignalSensitivityHoldTimeBucketDto[];

@@ -16,6 +16,7 @@ import { SignalSensitivityService } from '@core/services/signal-sensitivity.serv
 import { RiskProfilesService } from '@core/services/risk-profiles.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { MarketDataService } from '@core/services/market-data.service';
+import { LlmService } from '@core/services/llm.service';
 import { ThemeService } from '@core/theme/theme.service';
 import {
   AnalyzeSignalSensitivityResultDto,
@@ -24,6 +25,7 @@ import {
   CandleDto,
   RiskProfileDto,
   SignalSensitivityHeatmapCellDto,
+  SignalSensitivityPerSymbolBestDto,
   Timeframe,
 } from '@core/api/api.types';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -785,6 +787,105 @@ const WINDOW_OPTIONS = [
           Pick filters + multipliers, then press <b>Analyse</b>. The query replays each matching
           signal against actual candles between its <code>GeneratedAt</code> and
           <code>ExpiresAt</code>, applying your TP/SL multipliers to compute the outcome.
+        </div>
+      }
+
+      <!-- ── Per-symbol shrinkage auto-config dialog ────────────────────── -->
+      @if (autoConfigPicks().length > 0) {
+        <div class="modal-scrim" role="dialog" aria-modal="true" (click)="cancelAutoConfig()">
+          <div class="modal-card autoconfig-card" (click)="$event.stopPropagation()">
+            <header class="modal-header">
+              <div>
+                <h2>Apply per-symbol shrinkage overrides</h2>
+                <p class="modal-sub">
+                  For each symbol below, the (TP×, SL×) cell with the highest realised P&amp;L is
+                  picked from the heatmap. Confirm to write
+                  <code>Llm:SpotAnalysisTakeProfitShrinkagePerSymbol:SYMBOL</code> +
+                  <code>Llm:SpotAnalysisStopLossShrinkagePerSymbol:SYMBOL</code> rows to
+                  EngineConfig. <b>Engine restart required</b> for the new values to take effect
+                  (LlmOptions is read once at boot).
+                </p>
+              </div>
+              <button
+                type="button"
+                class="modal-close"
+                (click)="cancelAutoConfig()"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </header>
+            <div class="modal-body">
+              <div class="table-scroll">
+                <table class="autoconfig-table">
+                  <thead>
+                    <tr>
+                      <th class="check-col"></th>
+                      <th>Symbol</th>
+                      <th class="num">Best TP×</th>
+                      <th class="num">Best SL×</th>
+                      <th class="num">Realized P&amp;L</th>
+                      <th class="num">Win%</th>
+                      <th class="num">Walkable</th>
+                      <th class="num">PF</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (p of autoConfigPicks(); track p.symbol) {
+                      <tr [class.row--excluded]="!isAutoConfigApplied(p.symbol)">
+                        <td class="check-col">
+                          <input
+                            type="checkbox"
+                            [checked]="isAutoConfigApplied(p.symbol)"
+                            (change)="toggleAutoConfigSymbol(p.symbol)"
+                            [attr.aria-label]="'Include ' + p.symbol"
+                          />
+                        </td>
+                        <td class="key">{{ p.symbol }}</td>
+                        <td class="num">{{ p.bestTpMultiplier | number: '1.2-2' }}</td>
+                        <td class="num">{{ p.bestSlMultiplier | number: '1.2-2' }}</td>
+                        <td
+                          class="num"
+                          [class.profit]="p.realizedPnL > 0"
+                          [class.loss]="p.realizedPnL < 0"
+                        >
+                          {{ p.realizedPnL | currency: 'USD' : 'symbol' : '1.0-0' }}
+                        </td>
+                        <td class="num">{{ p.winRatePct | number: '1.0-1' }}</td>
+                        <td class="num">{{ p.walkable | number }}</td>
+                        <td class="num">{{ p.profitFactor | number: '1.2-2' }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+              @if (autoConfigMessage()) {
+                <p
+                  class="autoconfig-message"
+                  [class.error]="autoConfigMessage()!.toLowerCase().includes('fail')"
+                >
+                  {{ autoConfigMessage() }}
+                </p>
+              }
+            </div>
+            <footer class="autoconfig-footer">
+              <button type="button" class="btn-secondary" (click)="cancelAutoConfig()">
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="run-btn"
+                (click)="applyAutoConfig()"
+                [disabled]="autoConfigApplying() || autoConfigSelectedCount() === 0"
+              >
+                {{
+                  autoConfigApplying()
+                    ? 'Applying…'
+                    : 'Apply ' + autoConfigSelectedCount() + ' symbol(s)'
+                }}
+              </button>
+            </footer>
+          </div>
         </div>
       }
 
@@ -1607,6 +1708,75 @@ const WINDOW_OPTIONS = [
         height: 8px;
         border-radius: 50%;
       }
+
+      /* ── Per-symbol auto-config dialog ────────────────────────────────── */
+      .autoconfig-card {
+        width: min(880px, 100%);
+      }
+      .autoconfig-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+      }
+      .autoconfig-table th,
+      .autoconfig-table td {
+        padding: 0.4rem 0.6rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+      }
+      .autoconfig-table th.num,
+      .autoconfig-table td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .autoconfig-table th {
+        font-weight: 600;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        opacity: 0.7;
+      }
+      .autoconfig-table td.key {
+        font-weight: 600;
+      }
+      .autoconfig-table .check-col {
+        width: 32px;
+        text-align: center;
+        padding-right: 0;
+      }
+      .autoconfig-table tr.row--excluded td {
+        opacity: 0.45;
+      }
+      .autoconfig-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.5rem;
+        padding: 0.75rem 1.25rem;
+        border-top: 1px solid var(--border);
+      }
+      .btn-secondary {
+        background: transparent;
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+        padding: 0.5rem 1rem;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .btn-secondary:hover {
+        background: var(--bg-tertiary);
+      }
+      .autoconfig-message {
+        margin: 0.75rem 0 0;
+        padding: 0.5rem 0.75rem;
+        background: var(--bg-tertiary);
+        border-radius: 4px;
+        font-size: 0.85rem;
+      }
+      .autoconfig-message.error {
+        background: rgba(196, 41, 10, 0.15);
+        color: #c4290a;
+      }
     `,
   ],
 })
@@ -1615,7 +1785,20 @@ export class SignalSensitivityPageComponent implements OnInit {
   private readonly riskProfilesSvc = inject(RiskProfilesService);
   private readonly marketDataSvc = inject(MarketDataService);
   private readonly currencyPairsSvc = inject(CurrencyPairsService);
+  private readonly llmSvc = inject(LlmService);
   private readonly themeSvc = inject(ThemeService);
+
+  // ── Per-symbol shrinkage auto-config dialog ───────────────────────────
+  // Opens after Analyse succeeds when the result includes at least one
+  // PerSymbolBest row. The operator can uncheck rows or hit Cancel; Apply
+  // posts each kept row as a pair of EngineConfig writes (TP + SL) under
+  // Llm:SpotAnalysis*ShrinkagePerSymbol:SYMBOL. The engine reads these on
+  // restart (see ISignalShrinkagePolicy resolution path).
+  readonly autoConfigPicks = signal<SignalSensitivityPerSymbolBestDto[]>([]);
+  /** Symbols the operator has chosen NOT to apply. Drives the checkbox state. */
+  readonly autoConfigExcluded = signal<Set<string>>(new Set());
+  readonly autoConfigApplying = signal(false);
+  readonly autoConfigMessage = signal<string | null>(null);
 
   readonly sourcesAvail = SOURCES;
   readonly directionsAvail = ['Buy', 'Sell'] as const;
@@ -2001,9 +2184,106 @@ export class SignalSensitivityPageComponent implements OnInit {
       )
       .subscribe((res) => {
         this.loading.set(false);
-        if (res?.status && res.data) this.result.set(res.data);
-        else if (res && !res.status)
+        if (res?.status && res.data) {
+          this.result.set(res.data);
+          // Surface the per-symbol best-cell picks for confirmation. The
+          // dialog stays closed when the cohort had no signals (the picks
+          // array is empty in that case).
+          this.openAutoConfigDialog(res.data.perSymbolBest ?? []);
+        } else if (res && !res.status)
           this.errorMessage.set(res.message ?? 'Query returned failure.');
+      });
+  }
+
+  // ── Per-symbol shrinkage auto-config ─────────────────────────────────
+
+  /**
+   * Open the auto-config confirmation dialog. Pre-selects every symbol
+   * that produced at least one walkable signal in the cohort — symbols
+   * with zero walkable rows still appear (with the checkbox unchecked
+   * by default) so the operator can opt them in if they want.
+   */
+  openAutoConfigDialog(picks: SignalSensitivityPerSymbolBestDto[]) {
+    if (!picks.length) {
+      this.autoConfigPicks.set([]);
+      this.autoConfigExcluded.set(new Set());
+      return;
+    }
+    this.autoConfigPicks.set(picks);
+    this.autoConfigMessage.set(null);
+    // Default-exclude any symbol with zero walkable signals — the "best"
+    // cell for those is arbitrary (all zero P&L). The operator can re-tick
+    // them in the dialog if they want to write the row anyway.
+    const excluded = new Set(picks.filter((p) => p.walkable === 0).map((p) => p.symbol));
+    this.autoConfigExcluded.set(excluded);
+  }
+
+  isAutoConfigApplied(symbol: string): boolean {
+    return !this.autoConfigExcluded().has(symbol);
+  }
+
+  toggleAutoConfigSymbol(symbol: string) {
+    const current = new Set(this.autoConfigExcluded());
+    if (current.has(symbol)) current.delete(symbol);
+    else current.add(symbol);
+    this.autoConfigExcluded.set(current);
+  }
+
+  /** How many of the picked rows are currently selected to write. */
+  readonly autoConfigSelectedCount = computed(
+    () => this.autoConfigPicks().filter((p) => !this.autoConfigExcluded().has(p.symbol)).length,
+  );
+
+  /** Close the dialog without writing. Picks stay accessible via a future re-open. */
+  cancelAutoConfig() {
+    this.autoConfigPicks.set([]);
+    this.autoConfigExcluded.set(new Set());
+    this.autoConfigMessage.set(null);
+  }
+
+  /**
+   * Write the selected per-symbol shrinkage overrides to EngineConfig via
+   * the existing PUT /llm/settings endpoint. Two rows per symbol:
+   *   Llm:SpotAnalysisTakeProfitShrinkagePerSymbol:SYMBOL = tp
+   *   Llm:SpotAnalysisStopLossShrinkagePerSymbol:SYMBOL   = sl
+   * Engine picks these up on next restart (LlmOptions is a singleton
+   * snapshot — see EngineConfigLlmOptionsPostConfigure xml-doc).
+   */
+  applyAutoConfig() {
+    if (this.autoConfigApplying()) return;
+    const picks = this.autoConfigPicks().filter((p) => !this.autoConfigExcluded().has(p.symbol));
+    if (!picks.length) return;
+    const entries = picks.flatMap((p) => [
+      {
+        key: `Llm:SpotAnalysisTakeProfitShrinkagePerSymbol:${p.symbol}`,
+        value: String(p.bestTpMultiplier),
+      },
+      {
+        key: `Llm:SpotAnalysisStopLossShrinkagePerSymbol:${p.symbol}`,
+        value: String(p.bestSlMultiplier),
+      },
+    ]);
+    this.autoConfigApplying.set(true);
+    this.autoConfigMessage.set(null);
+    this.llmSvc
+      .updateSettings(entries)
+      .pipe(
+        catchError((err) => {
+          this.autoConfigMessage.set(err?.message ?? 'Save failed.');
+          return of(null);
+        }),
+      )
+      .subscribe((res) => {
+        this.autoConfigApplying.set(false);
+        if (res?.status) {
+          this.autoConfigMessage.set(
+            `Wrote ${res.data ?? 0} row(s). Engine restart required for new values to take effect.`,
+          );
+          // Auto-dismiss after a short read window.
+          setTimeout(() => this.cancelAutoConfig(), 2500);
+        } else if (res && !res.status) {
+          this.autoConfigMessage.set(res.message ?? 'Save failed.');
+        }
       });
   }
 
