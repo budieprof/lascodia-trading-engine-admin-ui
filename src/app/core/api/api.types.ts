@@ -1451,6 +1451,212 @@ export interface EAInstanceDto {
   deregisteredAt: string | null;
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// EA admin management (/admin/ea/* endpoints)
+//
+// The rich-state envelope is intentionally schemaless on the wire (jsonb on
+// the engine, JsonElement on the way out, parsed by the UI as a free record).
+// The keys listed in `EAStatePayload` reflect the v8.47.13x EA — they may
+// grow over time. Components should render defensively (use `?? '—'`, treat
+// unknown values as informational).
+// ──────────────────────────────────────────────────────────────────────────────
+
+export type EAStateMachineState =
+  | 'INITIALIZING'
+  | 'RUNNING'
+  | 'SAFE_MODE'
+  | 'BROKER_DISCONNECTED'
+  | 'SAFETY_STOP'
+  | 'SAFETY_PAUSE'
+  | 'MARKET_CLOSED'
+  | 'SHUTTING_DOWN'
+  | string;
+
+export type EASafetyStopCategory =
+  | 'NONE'
+  | 'INFRA'
+  | 'DAILY_RESET'
+  | 'CAS_EXHAUSTION'
+  | 'COMPLIANCE'
+  | string;
+
+/** Rich-state envelope the EA pushes with each heartbeat (engine persists as jsonb). */
+export interface EAStatePayload {
+  stateMachine?: EAStateMachineState;
+  safetyStopCategory?: EASafetyStopCategory;
+  killSwitchActive?: boolean;
+  globalSafetyStop?: boolean;
+  brokerConnected?: boolean;
+  isCoordinator?: boolean;
+  httpCircuitOpen?: boolean;
+  deadManSwitchArmed?: boolean;
+  engineFailuresConsec?: number;
+  reconDriftConsecutive?: number;
+  orderQueueSize?: number;
+  orderQueueUsagePct?: number;
+  retryQueuePending?: boolean;
+  retryQueueCount?: number;
+  pendingCommandAcks?: number;
+  gvarTotal?: number;
+  gvarLasc?: number;
+  gvarUsageHigh?: boolean;
+  // Defensive: tolerate future EA-added keys.
+  [key: string]: unknown;
+}
+
+/** Returned by GET /admin/ea — one row per registered EA instance. */
+export interface EAFleetItem {
+  instanceId: string;
+  tradingAccountId: number;
+  symbols: string;
+  chartSymbol: string;
+  chartTimeframe: string;
+  isCoordinator: boolean;
+  status: EAInstanceStatus;
+  eaVersion: string;
+  registeredAt: string;
+  lastHeartbeat: string;
+  lastStateUpdatedAt: string | null;
+  deregisteredAt: string | null;
+}
+
+/** Returned by GET /admin/ea/{instanceId} — single-instance detail incl. state envelope. */
+export interface EAInstanceDetail {
+  instanceId: string;
+  tradingAccountId: number;
+  symbols: string;
+  chartSymbol: string;
+  chartTimeframe: string;
+  isCoordinator: boolean;
+  status: EAInstanceStatus;
+  eaVersion: string;
+  registeredAt: string;
+  lastHeartbeat: string;
+  lastStateUpdatedAt: string | null;
+  deregisteredAt: string | null;
+  lastProcessedDeltaSequence: number | null;
+  lastProcessedPositionSnapshotSequence: number | null;
+  lastProcessedOrderSnapshotSequence: number | null;
+  lastProcessedDealSnapshotSequence: number | null;
+  state: EAStatePayload | null;
+}
+
+export type EAAuditSeverity = 'INFO' | 'WARN' | 'ERROR' | 'CRIT' | string;
+
+/** Returned by GET /admin/ea/{instanceId}/audit. */
+export interface EAAuditTimelineItem {
+  id: number;
+  occurredAt: string;
+  receivedAt: string;
+  severity: EAAuditSeverity;
+  eventType: string;
+  symbol: string;
+  details: string;
+  value: number;
+  correlationId: string | null;
+}
+
+export interface EAAuditTimelineQuery {
+  from?: string;
+  to?: string;
+  /** Case-insensitive prefix match against EventType. */
+  eventType?: string;
+  /** 1..2000. Defaults to 200 server-side. */
+  take?: number;
+}
+
+// ── Command response envelopes ───────────────────────────────────────────────
+
+/** Returned by every per-instance POST /admin/ea/{instanceId}/... command. */
+export interface AdminCommandQueueResult {
+  commandId: number;
+  targetInstanceId: string;
+  commandType: string;
+}
+
+/** Returned by every fleet POST /admin/ea/all/... command. */
+export interface AdminFleetCommandResult {
+  targeted: number;
+  queued: number;
+  targetedInstanceIds: string[];
+  commandType: string;
+}
+
+// ── Per-instance command request bodies ──────────────────────────────────────
+
+export interface ForceSafetyStopRequest {
+  category?: 'COMPLIANCE' | 'INFRA' | 'DAILY_RESET' | 'CAS_EXHAUSTION' | null;
+  reason?: string | null;
+}
+export interface ClearSafetyStopRequest {
+  reason?: string | null;
+}
+export interface TriggerKillSwitchRequest {
+  reason?: string | null;
+  /** Defaults to true (flatten + halt). Pass false for "halt only". */
+  closePositions?: boolean;
+}
+export interface ReleaseKillSwitchRequest {
+  reason?: string | null;
+}
+export interface FlattenInstanceRequest {
+  reason?: string | null;
+}
+export interface ResetCircuitBreakerRequest {
+  scope?: 'symbol' | 'fleet' | 'both' | null;
+  symbol?: string | null;
+  reason?: string | null;
+}
+export interface FlushRetryQueueRequest {
+  reason?: string | null;
+}
+export interface PurgeRetryQueueRequest {
+  reason?: string | null;
+}
+
+/**
+ * Per-instance config push body — Phase 2C admin wrapper around the engine-
+ * wide UpdateEAConfigRequest. InstanceId is supplied via the route; the body
+ * carries the 10 safety knobs (zero / undefined means "keep current").
+ */
+export interface UpdateInstanceConfigRequest {
+  maxPosPerSymbol?: number;
+  maxLotPerOrder?: number;
+  maxSpreadPoints?: number;
+  maxConsecLosses?: number;
+  consecLossPauseMin?: number;
+  maxDailyLossPerSymbolPct?: number;
+  maxOpenPositions?: number;
+  maxDailyLossPct?: number;
+  maxOrdersPerMin?: number;
+  maxTotalLots?: number;
+}
+
+// ── Fleet command request bodies (mirror per-instance, no InstanceId) ────────
+
+export interface FleetSafetyStopRequest {
+  category?: 'COMPLIANCE' | 'INFRA' | 'DAILY_RESET' | 'CAS_EXHAUSTION' | null;
+  reason?: string | null;
+}
+export interface FleetClearSafetyStopRequest {
+  reason?: string | null;
+}
+export interface FleetKillSwitchRequest {
+  reason?: string | null;
+  closePositions?: boolean;
+}
+export interface FleetReleaseKillSwitchRequest {
+  reason?: string | null;
+}
+export interface FleetFlattenRequest {
+  reason?: string | null;
+}
+export interface FleetResetCircuitBreakerRequest {
+  scope?: 'symbol' | 'fleet' | 'both' | null;
+  symbol?: string | null;
+  reason?: string | null;
+}
+
 export interface DeadLetterDto {
   id: number;
   eventType: string | null;
@@ -2206,6 +2412,12 @@ export interface SpotAnalysisSummaryDto {
   realizedPnl: number;
   unrealizedPnl: number;
   totalPnl: number;
+  /** Recs the viability gate let through ONLY because the high-confidence bypass overrode a soft check. */
+  gateBypassed: number;
+  /** Recs the gate rejected on a soft check (EntryTooFar / TargetUnreachable). */
+  gateSoftRejected: number;
+  /** Recs the gate rejected on a hard check (SideInconsistent / StopTooTight / RewardRiskTooThin / BelowConfidence / MissingPrice). */
+  gateHardRejected: number;
 }
 
 /** One point on the cumulative-P&L time series — one entry per analysis in

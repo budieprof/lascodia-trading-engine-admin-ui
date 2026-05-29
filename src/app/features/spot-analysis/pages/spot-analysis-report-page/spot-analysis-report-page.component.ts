@@ -45,6 +45,9 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
   realizedPnl: 0,
   unrealizedPnl: 0,
   totalPnl: 0,
+  gateBypassed: 0,
+  gateSoftRejected: 0,
+  gateHardRejected: 0,
 };
 
 /**
@@ -166,6 +169,27 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
           format="currency"
           [colorByValue]="true"
         />
+      </div>
+
+      <!-- Viability-gate cohort counts — tuning data for the bypass threshold -->
+      <div class="gate-strip" [attr.aria-label]="'Viability gate cohort'">
+        <div class="gate-label">VIABILITY GATE</div>
+        <div class="gate-cell">
+          <span class="gate-cell-label">Bypassed</span>
+          <span class="gate-cell-value bypass">{{ summary().gateBypassed | number }}</span>
+        </div>
+        <div class="gate-cell">
+          <span class="gate-cell-label">Soft-rejected</span>
+          <span class="gate-cell-value soft">{{ summary().gateSoftRejected | number }}</span>
+        </div>
+        <div class="gate-cell">
+          <span class="gate-cell-label">Hard-rejected</span>
+          <span class="gate-cell-value hard">{{ summary().gateHardRejected | number }}</span>
+        </div>
+        <div class="gate-hint">
+          Bypassed = high-conf overrode soft check · Soft = EntryTooFar / TargetUnreachable · Hard =
+          structural breakage (always enforced)
+        </div>
       </div>
 
       <!-- Cumulative P&L over the window -->
@@ -681,6 +705,68 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
         gap: var(--space-3);
+      }
+      .gate-strip {
+        display: grid;
+        grid-template-columns: auto repeat(3, auto) 1fr;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-2) var(--space-3);
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        font-size: var(--text-xs);
+      }
+      .gate-label {
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-tertiary);
+        font-size: 10px;
+      }
+      .gate-cell {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 6px;
+        padding-right: var(--space-2);
+        border-right: 1px solid var(--border);
+      }
+      .gate-cell:last-of-type {
+        border-right: none;
+      }
+      .gate-cell-label {
+        color: var(--text-secondary);
+        font-size: 11px;
+      }
+      .gate-cell-value {
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+        font-size: 14px;
+      }
+      .gate-cell-value.bypass {
+        color: #f59e0b;
+      }
+      .gate-cell-value.soft {
+        color: #ef4444;
+      }
+      .gate-cell-value.hard {
+        color: #6b7280;
+      }
+      .gate-hint {
+        color: var(--text-tertiary);
+        font-size: 10px;
+        text-align: right;
+        font-style: italic;
+      }
+      @media (max-width: 800px) {
+        .gate-strip {
+          grid-template-columns: 1fr 1fr 1fr;
+        }
+        .gate-label,
+        .gate-hint {
+          grid-column: 1 / -1;
+          text-align: left;
+        }
       }
       .error-banner {
         padding: var(--space-3);
