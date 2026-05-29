@@ -12,6 +12,7 @@ import type { EChartsOption } from 'echarts';
 import { catchError, of } from 'rxjs';
 
 import { SpotAnalysisService } from '@core/services/spot-analysis.service';
+import { TradeSignalsService } from '@core/services/trade-signals.service';
 import {
   SpotAnalysisListItemDto,
   SpotAnalysisSummaryDto,
@@ -449,6 +450,7 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
                       <th>Status</th>
                       <th class="num">Entry</th>
                       <th class="num">Conf</th>
+                      <th class="action-col"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -468,7 +470,42 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
                         </td>
                         <td class="num mono">{{ s.entryPrice }}</td>
                         <td class="num mono">{{ s.confidence * 100 | number: '1.0-0' }}%</td>
+                        <td class="action-col">
+                          @if (s.status === 'Rejected') {
+                            <button
+                              type="button"
+                              class="reapprove-btn"
+                              [disabled]="isReapproving(s.id)"
+                              (click)="reapproveRejectedSignal(s.id, s.rejectionReason)"
+                              title="Flip back to Pending and re-flow through Tier-1 risk checks"
+                            >
+                              {{ isReapproving(s.id) ? 'Approving…' : 'Approve' }}
+                            </button>
+                          }
+                        </td>
                       </tr>
+                      @if (s.status === 'Rejected' && s.rejectionReason) {
+                        <tr class="reason-row">
+                          <td colspan="7" class="muted reason-cell">
+                            <span class="reason-prefix">Rejection:</span>
+                            {{ s.rejectionReason }}
+                          </td>
+                        </tr>
+                      }
+                      @if (reapproveStatus(); as st) {
+                        @if (st.id === s.id) {
+                          <tr class="reason-row">
+                            <td
+                              colspan="7"
+                              class="reapprove-status"
+                              [class.ok]="st.ok"
+                              [class.bad]="!st.ok"
+                            >
+                              {{ st.message }}
+                            </td>
+                          </tr>
+                        }
+                      }
                     }
                   </tbody>
                 </table>
@@ -902,6 +939,54 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
       .sub-table td.num {
         text-align: right;
       }
+      .sub-table th.action-col,
+      .sub-table td.action-col {
+        text-align: right;
+        white-space: nowrap;
+      }
+      .reapprove-btn {
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        padding: 2px 8px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--accent);
+        background: transparent;
+        color: var(--accent);
+        cursor: pointer;
+      }
+      .reapprove-btn:hover:not([disabled]) {
+        background: rgba(0, 113, 227, 0.1);
+      }
+      .reapprove-btn[disabled] {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .reason-row td.reason-cell {
+        padding: 4px 8px 8px 16px;
+        font-size: 11px;
+        font-style: italic;
+        border-bottom: 1px solid var(--border);
+        background: rgba(255, 59, 48, 0.04);
+      }
+      .reason-row .reason-prefix {
+        font-style: normal;
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+        margin-right: 4px;
+      }
+      .reapprove-status {
+        padding: 4px 8px;
+        font-size: 11px;
+        border-bottom: 1px solid var(--border);
+      }
+      .reapprove-status.ok {
+        background: rgba(52, 199, 89, 0.1);
+        color: #16a34a;
+      }
+      .reapprove-status.bad {
+        background: rgba(255, 59, 48, 0.1);
+        color: #dc2626;
+      }
       .status-chip {
         font-size: 10px;
         padding: 1px 5px;
@@ -934,6 +1019,13 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
 })
 export class SpotAnalysisReportPageComponent implements OnInit {
   private readonly service = inject(SpotAnalysisService);
+  private readonly tradeSignalsService = inject(TradeSignalsService);
+
+  // ── Re-approve state (per-row, keyed by signal id) ───────────────────
+  /** Signal ids that have a re-approval call in flight — disables the button. */
+  readonly reapprovingIds = signal<Set<number>>(new Set());
+  /** Inline message rendered next to the most recently re-approved row. */
+  readonly reapproveStatus = signal<{ id: number; ok: boolean; message: string } | null>(null);
 
   readonly windows = WINDOWS;
   readonly pageSizes = PAGE_SIZES;
@@ -1091,6 +1183,7 @@ export class SpotAnalysisReportPageComponent implements OnInit {
     this.detail.set(null);
     this.detailError.set(null);
     this.detailLoading.set(true);
+    this.reapproveStatus.set(null);
     this.service
       .getDetail(row.id)
       .pipe(
@@ -1107,6 +1200,71 @@ export class SpotAnalysisReportPageComponent implements OnInit {
           this.detail.set(res.data);
         } else if (res && !res.status) {
           this.detailError.set(res.message ?? 'Failed to load analysis detail.');
+        }
+      });
+  }
+
+  /**
+   * True while the re-approval call for the given signal id is in flight —
+   * used by the template to disable the button so the operator can't fire
+   * duplicate requests by double-clicking.
+   */
+  isReapproving(id: number): boolean {
+    return this.reapprovingIds().has(id);
+  }
+
+  /**
+   * Operator override: flip a Rejected signal back to Pending so it re-flows
+   * through Tier-1 risk checks. Shows the original rejection reason in a
+   * native confirm; only proceeds on Yes. Refreshes the drawer detail on
+   * success so the status chip + reasonReason move in lockstep with the DB.
+   */
+  reapproveRejectedSignal(signalId: number, reason: string | null): void {
+    const ok = window.confirm(
+      `Re-approve signal #${signalId}?\n\nIt was originally rejected with:\n${reason ?? '(no reason recorded)'}\n\nIt will re-flow through Tier-1 risk checks (margin, exposure, spread) — Tier-1 may reject again with its own reason.`,
+    );
+    if (!ok) return;
+    if (this.isReapproving(signalId)) return;
+    const next = new Set(this.reapprovingIds());
+    next.add(signalId);
+    this.reapprovingIds.set(next);
+    this.reapproveStatus.set(null);
+    this.tradeSignalsService
+      .reapprove(signalId)
+      .pipe(
+        catchError((err) => {
+          this.reapproveStatus.set({
+            id: signalId,
+            ok: false,
+            message: err?.error?.message ?? err?.message ?? 'Re-approve call failed.',
+          });
+          return of(null);
+        }),
+      )
+      .subscribe((res) => {
+        const clearing = new Set(this.reapprovingIds());
+        clearing.delete(signalId);
+        this.reapprovingIds.set(clearing);
+        if (res?.status) {
+          this.reapproveStatus.set({
+            id: signalId,
+            ok: true,
+            message: res.message ?? 'Re-approved.',
+          });
+          // Refresh the drawer detail so the status chip + reason text
+          // reflect the just-applied change.
+          const row = this.selectedRow();
+          if (row) {
+            this.service.getDetail(row.id).subscribe((det) => {
+              if (det?.status && det.data) this.detail.set(det.data);
+            });
+          }
+        } else if (res && !res.status) {
+          this.reapproveStatus.set({
+            id: signalId,
+            ok: false,
+            message: res.message ?? 'Re-approve refused.',
+          });
         }
       });
   }
