@@ -10,7 +10,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { catchError, of } from 'rxjs';
+import { catchError, of, switchMap } from 'rxjs';
 
 import { LlmService } from '@core/services/llm.service';
 import { LlmConfigEntryDto, ConfigDataType, TestLlmProviderResult } from '@core/api/api.types';
@@ -528,21 +528,46 @@ export class LlmSettingsPageComponent implements OnInit {
   save(): void {
     const dirty = this.entries().filter((e) => e.isDirty);
     if (dirty.length === 0) return;
+    // Two-step: write EngineConfig rows, then hot-reload the live LlmOptions
+    // singleton so the new values take effect WITHOUT an engine restart.
+    // Every service that captured LlmOptions by reference (SignalShrinkagePolicy,
+    // the viability gate's high-conf bypass threshold, etc.) sees the change
+    // on its next read. If the reload call itself fails (network blip, etc.)
+    // the operator gets a graceful warning — the rows are still written, just
+    // not yet live, so a manual reload (or restart) recovers.
     this.llm
       .updateSettings(dirty.map((e) => ({ key: e.key, value: e.editedValue })))
       .pipe(
+        switchMap((writeRes) => {
+          if (!writeRes?.status) return of({ writeRes, reloadRes: null });
+          return this.llm.reloadSettings().pipe(
+            catchError(() => of(null)),
+            switchMap((reloadRes) => of({ writeRes, reloadRes })),
+          );
+        }),
         catchError((err) => {
           this.notifications.error?.(`Save failed: ${err?.message ?? err}`);
           return of(null);
         }),
         takeUntilDestroyed(this.destroyRef),
       )
-      .subscribe((res) => {
-        if (res?.status) {
-          this.notifications.success?.(`Saved ${res.data} setting(s).`);
+      .subscribe((bundle) => {
+        if (!bundle) return;
+        const { writeRes, reloadRes } = bundle;
+        if (writeRes?.status) {
+          const wrote = writeRes.data ?? 0;
+          if (reloadRes?.status) {
+            this.notifications.success?.(
+              `Saved ${wrote} setting(s) and reloaded live config — active now.`,
+            );
+          } else {
+            this.notifications.success?.(
+              `Saved ${wrote} setting(s). Hot-reload failed — engine restart required to activate.`,
+            );
+          }
           this.reload();
-        } else if (res) {
-          this.notifications.error?.(res.message ?? 'Save refused.');
+        } else if (writeRes) {
+          this.notifications.error?.(writeRes.message ?? 'Save refused.');
         }
       });
   }
