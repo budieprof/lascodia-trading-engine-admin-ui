@@ -35,6 +35,7 @@ import { MarketDataService } from '@core/services/market-data.service';
 import { MarketRegimeService } from '@core/services/market-regime.service';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import { PositionsService } from '@core/services/positions.service';
+import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import {
   LivePriceDto,
   PagerRequest,
@@ -1769,6 +1770,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   private regimeService = inject(MarketRegimeService);
   private tradeSignalsService = inject(TradeSignalsService);
   private positionsService = inject(PositionsService);
+  private currencyPairsService = inject(CurrencyPairsService);
   private destroy$ = new Subject<void>();
 
   // ── Market Insights state (chart-focused symbol/timeframe) ───────────
@@ -1829,9 +1831,9 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     if (focusHist.length < 5) return [];
     const focusReturns = this.toReturns(focusHist);
     const out: { symbol: string; r: number }[] = [];
-    for (let i = 0; i < this.watchedSymbols.length; i++) {
-      const apiSym = this.watchedSymbols[i];
-      const dispSym = this.displaySymbols[i];
+    for (let i = 0; i < this.watchedSymbols().length; i++) {
+      const apiSym = this.watchedSymbols()[i];
+      const dispSym = this.displaySymbols()[i];
       if (apiSym === focusJoined) continue;
       const hist = this.priceHistory[apiSym] ?? [];
       if (hist.length < 5) continue;
@@ -2549,17 +2551,54 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   // operators "best-known-truth" instead of a row of `-`.
   private lastLiveSpread: Record<string, number> = {};
 
-  watchedSymbols = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'EURGBP', 'USDCHF', 'NZDUSD', 'USDCAD'];
-  displaySymbols = [
-    'EUR/USD',
-    'GBP/USD',
-    'USD/JPY',
-    'AUD/USD',
-    'EUR/GBP',
-    'USD/CHF',
-    'NZD/USD',
-    'USD/CAD',
-  ];
+  // Watched-pair catalogue is driven by the CurrencyPair API — fetched once
+  // at OnInit and used as the source-of-truth for every spread / strength /
+  // depth board on the page. A hardcoded majors list (the previous shape)
+  // silently dropped any pair registered later (AUDNZD / EURJPY / GBPJPY etc.).
+  // Defaults to the historical majors so the page still renders during the
+  // initial fetch and survives an API miss.
+  watchedSymbols = signal<string[]>([
+    'EURUSD',
+    'GBPUSD',
+    'USDJPY',
+    'AUDUSD',
+    'EURGBP',
+    'USDCHF',
+    'NZDUSD',
+    'USDCAD',
+  ]);
+  /** Display variant (slash-formatted) of {@link watchedSymbols}. Same length and order. */
+  displaySymbols = computed(() => this.watchedSymbols().map((s) => this.formatPairSymbol(s)));
+
+  /** Insert a slash between the base and quote currencies (`EURUSD` → `EUR/USD`). */
+  private formatPairSymbol(symbol: string): string {
+    return symbol.length === 6 ? `${symbol.slice(0, 3)}/${symbol.slice(3)}` : symbol;
+  }
+
+  /**
+   * Pull every active currency pair from the API and replace the watched-pair
+   * signal. Page size is generous because the catalogue is bounded (~10-30
+   * pairs in practice); failure is non-fatal — the seed defaults stay live
+   * and the boards keep working.
+   */
+  private loadWatchedPairs(): void {
+    this.currencyPairsService
+      .list({ currentPage: 1, itemCountPerPage: 500 })
+      .pipe(
+        catchError(() => of(null)),
+        takeUntil(this.destroy$),
+      )
+      .subscribe((res) => {
+        if (!res?.status || !res.data?.data) return;
+        const symbols = res.data.data
+          .filter((p) => p.isActive && !!p.symbol)
+          .map((p) => p.symbol!.toUpperCase())
+          .sort();
+        if (symbols.length > 0) {
+          this.watchedSymbols.set(symbols);
+        }
+      });
+  }
 
   // Spread-bearing entries only — candle-fallback rows have a synthetic
   // spread of 0 that would distort averages and flatten min/max readings.
@@ -2576,7 +2615,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     // Bind to livePrices so the computed re-runs on every poll.
     this.livePrices();
     let total = 0;
-    for (const sym of this.watchedSymbols) {
+    for (const sym of this.watchedSymbols()) {
       const hist = this.priceHistory[sym] ?? [];
       for (let i = 1; i < hist.length; i++) {
         if (hist[i] !== hist[i - 1]) total++;
@@ -3051,7 +3090,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   // the layout.
   ribbonCards = computed<{ symbol: string; live: PriceEntry | null }[]>(() => {
     const live = this.livePrices();
-    return this.displaySymbols.map((sym) => ({
+    return this.displaySymbols().map((sym) => ({
       symbol: sym,
       live: live.find((p) => p.symbol === sym) ?? null,
     }));
@@ -3064,8 +3103,8 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     { symbol: string; live: PriceEntry | null; spark: number[]; rangePips: number | null }[]
   >(() => {
     const live = this.livePrices();
-    return this.displaySymbols.map((sym, i) => {
-      const apiSym = this.watchedSymbols[i];
+    return this.displaySymbols().map((sym, i) => {
+      const apiSym = this.watchedSymbols()[i];
       // rangePips stays on the live-tick buffer (it's a live range read);
       // the spark uses the timeframe-aligned series so it doesn't churn.
       const hist = this.priceHistory[apiSym] ?? [];
@@ -3223,7 +3262,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   // cold start. The matrix is later consumed by the chart and the KPI strip.
   private corrMatrix = computed<number[][]>(() => {
     this.livePrices(); // re-run on each poll
-    const apiSyms = this.watchedSymbols;
+    const apiSyms = this.watchedSymbols();
     const n = apiSyms.length;
     const matrix: number[][] = [];
     for (let i = 0; i < n; i++) {
@@ -3263,7 +3302,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
 
   correlationOptions = computed<EChartsOption>(() => {
     const matrix = this.corrMatrix();
-    const symbols = this.displaySymbols;
+    const symbols = this.displaySymbols();
     const data: [number, number, number][] = [];
     for (let i = 0; i < symbols.length; i++) {
       for (let j = 0; j < symbols.length; j++) {
@@ -3315,8 +3354,8 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   // stats table and a few of the KPI tiles.
   perSymbolStats = computed(() => {
     this.livePrices(); // re-run on each poll
-    return this.displaySymbols.map((sym, i) => {
-      const apiSym = this.watchedSymbols[i];
+    return this.displaySymbols().map((sym, i) => {
+      const apiSym = this.watchedSymbols()[i];
       const hist = this.priceHistory[apiSym] ?? [];
       const live = this.livePrices().find((p) => p.symbol === sym);
       const isJPY = sym.includes('JPY');
@@ -3514,8 +3553,8 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
       series = prices.map((p) => ({ symbol: p.symbol ?? '', spread: p.spread }));
     } else if (Object.keys(this.lastLiveSpread).length > 0) {
       series = Object.entries(this.lastLiveSpread).map(([apiSym, spread], i) => {
-        const idx = this.watchedSymbols.indexOf(apiSym);
-        return { symbol: idx >= 0 ? this.displaySymbols[idx] : apiSym, spread };
+        const idx = this.watchedSymbols().indexOf(apiSym);
+        return { symbol: idx >= 0 ? this.displaySymbols()[idx] : apiSym, spread };
       });
     } else {
       return {};
@@ -3643,10 +3682,10 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     const prices = this.livePrices();
     if (prices.length === 0) return {};
     // Calculate tick-to-tick volatility from price history
-    const volData = this.displaySymbols
+    const volData = this.displaySymbols()
       .slice(0, 8)
       .map((sym, i) => {
-        const apiSym = this.watchedSymbols[i];
+        const apiSym = this.watchedSymbols()[i];
         const hist = this.priceHistory[apiSym] || [];
         if (hist.length < 3) return { name: sym, vol: 0 };
         const returns = hist.slice(1).map((v, j) => Math.abs((v - hist[j]) / hist[j]) * 10000);
@@ -3689,7 +3728,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     const prices = this.livePrices();
     if (prices.length === 0) return {};
     // Show distribution for first symbol
-    const firstSym = this.watchedSymbols[0];
+    const firstSym = this.watchedSymbols()[0];
     const hist = this.priceHistory[firstSym] || [];
     if (hist.length < 5) return {};
 
@@ -3792,6 +3831,13 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit() {
+    // Load the active currency-pair catalogue from the API and update the
+    // watched-pair signal so every dependent computed (spreads / strength /
+    // depth / symbol matrix) reshapes around the live registered set. Falls
+    // back to the seed defaults if the API misses — the page still works,
+    // just on the majors-only subset.
+    this.loadWatchedPairs();
+
     // Spark seeding is driven by the chartTimeframe effect in the
     // constructor (it fires on initial settle and on every TF change), so
     // there's no explicit seed call here — that would double-seed and
@@ -3866,7 +3912,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
         map((candles) => ({ sym, candles })),
       );
 
-    forkJoin(this.watchedSymbols.map(seedOne))
+    forkJoin(this.watchedSymbols().map(seedOne))
       .pipe(takeUntil(this.destroy$))
       .subscribe((results) => {
         let seeded = 0;
@@ -3902,7 +3948,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     // recent M5 candle when the cache returns nothing for a symbol. The
     // candle-derived entry is flagged so spread KPIs / charts can exclude it
     // (a synthetic spread of 0 would otherwise distort the average).
-    const requests = this.watchedSymbols.map((symbol, i) =>
+    const requests = this.watchedSymbols().map((symbol, i) =>
       this.marketDataService.getLivePrice(symbol).pipe(
         catchError(() => of(null as any)),
         switchMap((res: any) => {
@@ -3914,8 +3960,8 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
             // otherwise miss the displaySymbols-keyed `find` calls.
             return of({
               symbol,
-              displaySymbol: this.displaySymbols[i],
-              data: { ...(live as LivePriceDto), symbol: this.displaySymbols[i] },
+              displaySymbol: this.displaySymbols()[i],
+              data: { ...(live as LivePriceDto), symbol: this.displaySymbols()[i] },
               fromCandle: false,
             });
           }
@@ -3926,9 +3972,9 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
               if (!candle?.close) return null;
               return {
                 symbol,
-                displaySymbol: this.displaySymbols[i],
+                displaySymbol: this.displaySymbols()[i],
                 data: {
-                  symbol: this.displaySymbols[i],
+                  symbol: this.displaySymbols()[i],
                   bid: candle.close,
                   ask: candle.close,
                   spread: 0,
