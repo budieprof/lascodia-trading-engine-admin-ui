@@ -22,6 +22,7 @@ import { MarketDataService } from '@core/services/market-data.service';
 import { PositionsService } from '@core/services/positions.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { ConfigService } from '@core/services/config.service';
+import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import {
   CandleDto,
   LivePriceDto,
@@ -309,7 +310,7 @@ const LEGACY_LAST_ANALYSIS_KEY = 'tradingChart.lastAnalysis.v1';
             [ngModel]="selectedSymbol()"
             (ngModelChange)="onSymbolChange($event)"
           >
-            @for (s of symbols; track s) {
+            @for (s of symbols(); track s) {
               <option [value]="s">{{ s }}</option>
             }
           </select>
@@ -2000,6 +2001,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   private positionsService = inject(PositionsService);
   private notifications = inject(NotificationService);
   private configService = inject(ConfigService);
+  private currencyPairsService = inject(CurrencyPairsService);
   private destroy$ = new Subject<void>();
   /** Position id currently being SL/TP-modified — prevents stacking concurrent drags. */
   private modifyingPosId: number | null = null;
@@ -2008,7 +2010,11 @@ export class TradingChartComponent implements OnInit, OnDestroy {
    *  with notMerge:true doesn't snap the dragged line back mid-gesture. */
   private dragInProgress = false;
 
-  symbols = [
+  // Symbol selector list — fetched from the CurrencyPair API on ngOnInit
+  // so any pair registered later (AUDNZD / EURJPY / GBPJPY / crosses / future
+  // additions) shows up automatically. Seed defaults are the historical
+  // majors so the dropdown is non-empty during the initial fetch.
+  symbols = signal<string[]>([
     'EUR/USD',
     'GBP/USD',
     'USD/JPY',
@@ -2017,7 +2023,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     'USD/CHF',
     'NZD/USD',
     'USD/CAD',
-  ];
+  ]);
   timeframes = [
     { label: '1m', value: 'M1' },
     { label: '5m', value: 'M5' },
@@ -2577,6 +2583,10 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     // config rows. Runs once — loadChartConfig (which re-runs on every pair
     // switch) recomputes the per-pair toggle from the cached watch list.
     this.loadLiveAnalysisConfig();
+    // Pull the active CurrencyPair catalogue so the symbol dropdown reflects
+    // every registered pair, not just the seeded 8 majors. Failure leaves
+    // the seed defaults live.
+    this.loadSymbolCatalogue();
     this.loadCandles();
     this.startLivePricePolling();
     // 1 s tick drives the candle-close countdown shown in the toolbar.
@@ -2587,6 +2597,33 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     // analysis was left on. Auto-runs fire ONLY on candle close (see the
     // candle-close effect). The bubble isn't blank on load because the last
     // completed analysis was restored from storage in loadChartConfig().
+  }
+
+  /**
+   * Pull every active currency pair from the API and overwrite the seed
+   * symbol list with the canonical slash-formatted set (`EURUSD` → `EUR/USD`).
+   * The catalogue is bounded (~10-30 pairs in practice) so a single page
+   * request is enough. Failure is non-fatal — the seed defaults stay and
+   * the dropdown still works on the majors subset.
+   */
+  private loadSymbolCatalogue(): void {
+    this.currencyPairsService
+      .list({ currentPage: 1, itemCountPerPage: 500 })
+      .pipe(
+        catchError(() => of(null)),
+        takeUntil(this.destroy$),
+      )
+      .subscribe((res) => {
+        if (!res?.status || !res.data?.data) return;
+        const formatted = res.data.data
+          .filter((p) => p.isActive && !!p.symbol)
+          .map((p) => {
+            const s = p.symbol!.toUpperCase();
+            return s.length === 6 ? `${s.slice(0, 3)}/${s.slice(3)}` : s;
+          })
+          .sort();
+        if (formatted.length > 0) this.symbols.set(formatted);
+      });
   }
 
   ngOnDestroy() {
