@@ -2594,9 +2594,18 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
           .filter((p) => p.isActive && !!p.symbol)
           .map((p) => p.symbol!.toUpperCase())
           .sort();
-        if (symbols.length > 0) {
-          this.watchedSymbols.set(symbols);
-        }
+        if (symbols.length === 0) return;
+        // Detect new pairs (catalogue grew vs the seeded defaults) so we
+        // can backfill their spark histories. Without this, freshly-added
+        // pairs would have empty sparklines until tick noise accumulated
+        // — see the AUDNZD bug where the watch card stayed flat because
+        // the constructor's seed effect fired BEFORE this async fetch
+        // landed and so missed every pair beyond the original 8 majors.
+        const previous = new Set(this.watchedSymbols());
+        this.watchedSymbols.set(symbols);
+        const isNew = symbols.some((s) => !previous.has(s));
+        const tf = this.chartTimeframe();
+        if (isNew && tf) this.seedSparkHistory(tf);
       });
   }
 
