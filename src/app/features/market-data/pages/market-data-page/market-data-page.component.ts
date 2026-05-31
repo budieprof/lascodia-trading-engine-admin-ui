@@ -3586,7 +3586,14 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
               borderRadius: [0, 4, 4, 0],
             },
           })),
-          barWidth: 18,
+          // Bars auto-size to fit the chart's vertical space (no fixed pixel
+          // width — that made the bars touch and the labels overlap as soon
+          // as the watched-pair count grew past 8). The category gap reserves
+          // 50% of each slot as whitespace so bars stay visually distinct
+          // regardless of pair count, and barMaxWidth caps the per-bar
+          // thickness so a 3-pair filter doesn't render comically wide.
+          barCategoryGap: '50%',
+          barMaxWidth: 20,
           label: {
             show: true,
             position: 'right',
@@ -3717,7 +3724,10 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
             value: d.vol,
             itemStyle: { color: '#AF52DE', borderRadius: [0, 4, 4, 0] },
           })),
-          barWidth: 18,
+          // Same auto-size + 50% gap shape as the spread chart for visual
+          // consistency and to survive the same pair-count growth case.
+          barCategoryGap: '50%',
+          barMaxWidth: 20,
           label: { show: true, position: 'right', fontSize: 10, color: '#6E6E73' },
         },
       ],
