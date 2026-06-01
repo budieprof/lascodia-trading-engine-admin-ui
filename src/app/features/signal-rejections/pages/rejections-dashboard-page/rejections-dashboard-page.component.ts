@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { catchError, map, of } from 'rxjs';
@@ -8,10 +8,11 @@ import { SignalRejectionsService } from '@core/services/signal-rejections.servic
 import type { SignalRejectionEventDto, SignalRejectionStage } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
+import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
-import { ProgressBarComponent } from '@shared/components/ui/progress-bar/progress-bar.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 interface StageCount {
@@ -24,37 +25,24 @@ interface SubStageCount {
   stage: SignalRejectionStage;
   count: number;
   latest: string;
+  share: number; // 0..1 of max count — drives the bar width
 }
 
+const WINDOW_PRESETS = [1, 6, 24, 168] as const;
+
 /**
- * v8.47.175 — fleet-wide rejection dashboard.  The per-instance
- * Rejection log answers "what has EA-X been rejecting today?"; the
- * per-signal Account-attempts panel answers "what happened to signal
- * Y across every account?".  This page answers the third operator
- * question that neither covers:
+ * Fleet-wide rejection dashboard. Answers "what's the worst rejection pattern
+ * across my whole fleet in the last N hours, and is it getting worse?"
  *
- *   "What's the worst rejection pattern across my whole fleet
- *    in the last N hours, and is it getting worse?"
- *
- * Two aggregated views computed from a single 500-row fetch:
- *
- *  - Stage tiles — Local / Engine / Broker counts as headline
- *    cards.  Operator glances and sees instantly whether the day's
- *    rejection load is dominated by EA-local gates (safety stack
- *    doing its job), engine checks (probably misconfiguration), or
- *    broker retcodes (real broker-side trouble).
- *
- *  - Top sub-stages table — the 10 most-frequent SubStage values,
- *    sorted by count.  Catches "SafetyGate.GlobalCB pile-up on
- *    Exness" or "Validator.SpreadFilter killing every BTC trade"
- *    patterns that the per-instance view can't surface without
- *    cycling through every EA.
- *
- * Stats are computed client-side from the 500-row paged sample —
- * cheap, no new engine endpoint, accurate for the operator's day-
- * scale window.  If the working set grows past the sample size,
- * a future GetRejectionStatsQuery on the engine can replace the
- * client-side aggregation without changing the page's surface.
+ * Layout follows the canonical "feed" page pattern used by Position Deltas and
+ * Signal Exits:
+ *   - <app-page-header> with Refresh action
+ *   - .filter-bar with window-preset chips + symbol / account / stage filters
+ *   - <app-metric-card> tiles in a .kpi-strip for Local / Engine / Broker
+ *     + secondary counters
+ *   - .data-table-card with sticky-thead board-tables for Top reasons +
+ *     Recent activity, each capped with .table-scroll for a predictable
+ *     page footprint regardless of cohort size.
  */
 @Component({
   selector: 'app-rejections-dashboard-page',
@@ -62,32 +50,96 @@ interface SubStageCount {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     DatePipe,
+    DecimalPipe,
     FormsModule,
     RouterLink,
+    PageHeaderComponent,
+    MetricCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
-    ProgressBarComponent,
     RelativeTimePipe,
   ],
   template: `
     <div class="page">
-      <header class="page-head">
-        <h1 class="page-title">Signal rejections</h1>
-        <p class="page-subtitle">
-          Fleet-wide rejection log — every reason an EA, the engine, or a broker declined a signal
-          in the last
-          <select [ngModel]="windowHours()" (ngModelChange)="windowHours.set(+$event)">
-            <option [value]="1">1 hour</option>
-            <option [value]="6">6 hours</option>
-            <option [value]="24">24 hours</option>
-            <option [value]="168">7 days</option>
-          </select>
-          .
-        </p>
-      </header>
+      <app-page-header
+        title="Signal rejections"
+        subtitle="Fleet-wide rejection log — every reason an EA, the engine, or a broker declined a signal"
+      >
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="resource.refresh()"
+          [disabled]="resource.loading()"
+        >
+          {{ resource.loading() ? 'Loading…' : 'Refresh' }}
+        </button>
+      </app-page-header>
 
-      <ui-progress-bar [active]="resource.loading()" />
+      <section class="filter-bar">
+        <div class="fb-field">
+          <label class="fb-label">Window</label>
+          <div class="window-presets">
+            @for (p of windowPresets; track p) {
+              <button
+                type="button"
+                class="preset"
+                [class.active]="windowHours() === p"
+                (click)="windowHours.set(p)"
+              >
+                {{ p < 24 ? p + 'h' : p / 24 + 'd' }}
+              </button>
+            }
+          </div>
+        </div>
+        <div class="fb-field">
+          <label for="symbol" class="fb-label">Symbol</label>
+          <input
+            id="symbol"
+            class="filter-input"
+            type="search"
+            placeholder="e.g. EURUSD"
+            [ngModel]="symbolFilter()"
+            (ngModelChange)="symbolFilter.set($event)"
+          />
+        </div>
+        <div class="fb-field">
+          <label for="account" class="fb-label">Account #</label>
+          <input
+            id="account"
+            class="filter-input"
+            type="search"
+            placeholder="id"
+            [ngModel]="accountFilter()"
+            (ngModelChange)="accountFilter.set($event)"
+          />
+        </div>
+        <div class="fb-field">
+          <label for="stage" class="fb-label">Stage</label>
+          <select
+            id="stage"
+            class="filter-select"
+            [ngModel]="stageFilter()"
+            (ngModelChange)="stageFilter.set($event)"
+          >
+            <option value="">all</option>
+            <option value="Local">Local</option>
+            <option value="Engine">Engine</option>
+            <option value="Broker">Broker</option>
+          </select>
+        </div>
+        <div class="fb-field">
+          <label for="substage" class="fb-label">Sub-stage</label>
+          <input
+            id="substage"
+            class="filter-input"
+            type="search"
+            placeholder="e.g. SpreadFilter"
+            [ngModel]="subStageFilter()"
+            (ngModelChange)="subStageFilter.set($event)"
+          />
+        </div>
+      </section>
 
       @if (loading()) {
         <app-card-skeleton [lines]="8" />
@@ -103,30 +155,73 @@ interface SubStageCount {
           message="Every EA in the fleet is processing every eligible signal — no local gate, engine check, or broker retcode has fired."
         />
       } @else {
-        <!-- Stage headline cards -->
-        <section class="stage-cards" aria-label="Counts by stage">
-          @for (sc of stageCounts(); track sc.stage) {
-            <article class="stage-card" [attr.data-stage]="sc.stage">
-              <div class="stage-label">{{ sc.stage }}</div>
-              <div class="stage-count">{{ sc.count }}</div>
-              <div class="stage-hint">{{ stageHint(sc.stage) }}</div>
-            </article>
-          }
-        </section>
+        <!-- KPI strip — canonical metric-cards, always rendered -->
+        <div class="kpi-strip">
+          <app-metric-card
+            label="Local"
+            [value]="localCount()"
+            format="number"
+            [dotColor]="localCount() > 0 ? '#FF9500' : '#34C759'"
+          />
+          <app-metric-card
+            label="Engine"
+            [value]="engineCount()"
+            format="number"
+            [dotColor]="engineCount() > 0 ? '#0071E3' : '#34C759'"
+          />
+          <app-metric-card
+            label="Broker"
+            [value]="brokerCount()"
+            format="number"
+            [dotColor]="brokerCount() > 0 ? '#FF3B30' : '#34C759'"
+          />
+          <app-metric-card
+            label="Last hour"
+            [value]="lastHourCount()"
+            format="number"
+            dotColor="#AF52DE"
+          />
+          <app-metric-card
+            label="Accounts"
+            [value]="distinctAccounts()"
+            format="number"
+            dotColor="#5856D6"
+          />
+          <app-metric-card
+            label="Symbols"
+            [value]="distinctSymbols()"
+            format="number"
+            dotColor="#5856D6"
+          />
+          <app-metric-card
+            label="Distinct reasons"
+            [value]="distinctSubStages()"
+            format="number"
+            dotColor="#8E8E93"
+          />
+          <app-metric-card
+            label="Events shown"
+            [value]="filteredRows().length"
+            format="number"
+            dotColor="#0071E3"
+          />
+        </div>
 
-        <!-- Top sub-stages -->
-        <section class="panel" aria-label="Top sub-stages">
-          <header class="panel-head"><h2>Top reasons</h2></header>
-          @if (topSubStages().length === 0) {
-            <p class="muted">(no sub-stage activity)</p>
-          } @else {
-            <table class="substage-table">
+        <!-- Top reasons -->
+        <section class="data-table-card">
+          <header class="board-head">
+            <h3>Top reasons</h3>
+            <span class="muted">{{ topSubStages().length }} sub-stages</span>
+          </header>
+          <div class="table-scroll table-scroll--rollup">
+            <table class="board-table">
               <thead>
                 <tr>
                   <th class="num">#</th>
                   <th>Stage</th>
                   <th>Sub-stage</th>
                   <th class="num">Count</th>
+                  <th class="bar-col">Share</th>
                   <th>Latest</th>
                 </tr>
               </thead>
@@ -135,46 +230,71 @@ interface SubStageCount {
                   <tr>
                     <td class="num muted">{{ i + 1 }}</td>
                     <td>
-                      <span class="stage" [attr.data-stage]="s.stage">{{ s.stage }}</span>
+                      <span class="stage-pill" [attr.data-stage]="s.stage">{{ s.stage }}</span>
                     </td>
                     <td class="mono">{{ s.subStage }}</td>
-                    <td class="num">{{ s.count }}</td>
-                    <td class="muted" [title]="s.latest | date: 'medium'">
+                    <td class="num">{{ s.count | number }}</td>
+                    <td class="bar-col">
+                      <span class="bar-track">
+                        <span
+                          class="bar-fill"
+                          [attr.data-stage]="s.stage"
+                          [style.width.%]="s.share * 100"
+                        ></span>
+                      </span>
+                    </td>
+                    <td class="time" [title]="s.latest | date: 'medium'">
                       {{ s.latest | relativeTime }}
                     </td>
                   </tr>
                 }
               </tbody>
             </table>
-          }
+          </div>
         </section>
 
-        <!-- Recent activity feed -->
-        <section class="panel" aria-label="Recent activity">
-          <header class="panel-head">
-            <h2>Recent activity</h2>
-            <span class="muted">{{ rows().length }} event{{ rows().length === 1 ? '' : 's' }}</span>
+        <!-- Recent activity -->
+        <section class="data-table-card">
+          <header class="board-head">
+            <h3>Recent activity</h3>
+            <span class="muted">{{ filteredRows().length | number }} events</span>
           </header>
-          <ul class="rejection-list" role="list">
-            @for (row of recent(); track row.id) {
-              <li class="rejection-row">
-                <span class="time" [title]="row.createdAt | date: 'medium'">
-                  {{ row.createdAt | relativeTime }}
-                </span>
-                <a
-                  class="signal"
-                  [routerLink]="['/trade-signals', row.tradeSignalId]"
-                  title="Open signal detail"
-                  >#{{ row.tradeSignalId }}</a
-                >
-                <span class="acct">acct&nbsp;{{ row.tradingAccountId }}</span>
-                <span class="symbol">{{ row.symbol ?? '—' }}</span>
-                <span class="stage" [attr.data-stage]="row.stage">{{ row.stage }}</span>
-                <span class="substage mono">{{ row.subStage }}</span>
-                <span class="reason">{{ row.reason }}</span>
-              </li>
-            }
-          </ul>
+          <div class="table-scroll table-scroll--events">
+            <table class="board-table">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Signal</th>
+                  <th>Acct</th>
+                  <th>Symbol</th>
+                  <th>Stage</th>
+                  <th>Sub-stage</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of recent(); track row.id) {
+                  <tr>
+                    <td class="time" [title]="row.createdAt | date: 'medium'">
+                      {{ row.createdAt | relativeTime }}
+                    </td>
+                    <td>
+                      <a class="link mono" [routerLink]="['/trade-signals', row.tradeSignalId]"
+                        >#{{ row.tradeSignalId }}</a
+                      >
+                    </td>
+                    <td class="mono">acct {{ row.tradingAccountId }}</td>
+                    <td class="mono">{{ row.symbol ?? '—' }}</td>
+                    <td>
+                      <span class="stage-pill" [attr.data-stage]="row.stage">{{ row.stage }}</span>
+                    </td>
+                    <td class="mono small">{{ row.subStage }}</td>
+                    <td class="reason small">{{ row.reason }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
         </section>
       }
     </div>
@@ -183,176 +303,232 @@ interface SubStageCount {
     `
       .page {
         padding: var(--space-2) 0;
-      }
-      .page-head {
-        margin-bottom: var(--space-3);
-      }
-      .page-title {
-        font-size: var(--text-xl);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        margin: 0 0 var(--space-1);
-        letter-spacing: var(--tracking-tight);
-      }
-      .page-subtitle {
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-        margin: 0;
-      }
-      .page-subtitle select {
-        margin: 0 4px;
-        padding: 2px 6px;
-      }
-      .stage-cards {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: 12px;
-        margin-bottom: 20px;
-      }
-      .stage-card {
-        background: var(--surface-base);
-        border-radius: 8px;
-        padding: 14px 16px;
-        border-left: 4px solid;
-      }
-      .stage-card[data-stage='Local'] {
-        border-left-color: var(--badge-amber-fg);
-      }
-      .stage-card[data-stage='Engine'] {
-        border-left-color: var(--badge-blue-fg);
-      }
-      .stage-card[data-stage='Broker'] {
-        border-left-color: var(--badge-red-fg);
-      }
-      .stage-label {
-        font-size: 12px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        color: var(--text-muted);
-        font-weight: 600;
-      }
-      .stage-count {
-        font-size: 28px;
-        font-weight: 700;
-        color: var(--text-primary);
-        margin-top: 4px;
-        font-variant-numeric: tabular-nums;
-      }
-      .stage-hint {
-        font-size: 11px;
-        color: var(--text-muted);
-        margin-top: 4px;
-      }
-      .panel {
-        background: var(--surface-base);
-        border-radius: 8px;
-        padding: 16px;
-        margin-bottom: 16px;
-      }
-      .panel-head {
         display: flex;
-        justify-content: space-between;
+        flex-direction: column;
+        gap: var(--space-4);
+      }
+
+      /* ── Filter bar — matches sibling feed pages ─────────────────────── */
+      .filter-bar {
+        display: flex;
+        align-items: flex-end;
+        gap: var(--space-3);
+        flex-wrap: wrap;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
+      }
+      .fb-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .fb-label {
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .filter-input,
+      .filter-select {
+        height: 28px;
+        padding: 0 var(--space-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        font-size: var(--text-xs);
+        color: var(--text-primary);
+        min-width: 130px;
+      }
+      .filter-input:focus,
+      .filter-select:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .window-presets {
+        display: inline-flex;
+        gap: 0;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+      }
+      .preset {
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        border: none;
+        padding: 4px 10px;
+        font-size: var(--text-xs);
+        cursor: pointer;
+        border-right: 1px solid var(--border);
+      }
+      .preset:last-child {
+        border-right: none;
+      }
+      .preset:hover {
+        background: var(--bg-tertiary);
+      }
+      .preset.active {
+        background: var(--accent);
+        color: var(--accent-contrast, #fff);
+        font-weight: var(--font-semibold);
+      }
+
+      /* ── KPI strip ───────────────────────────────────────────────────── */
+      .kpi-strip {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: var(--space-3);
+      }
+
+      /* ── Board-pattern tables (sibling of feed-page board-tables) ────── */
+      .data-table-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+      }
+      .board-head {
+        display: flex;
         align-items: baseline;
-        margin-bottom: 12px;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
       }
-      .panel-head h2 {
+      .board-head h3 {
         margin: 0;
-        font-size: var(--text-lg);
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
       }
-      .substage-table {
+      .board-head .muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+      .board-table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 13px;
       }
-      .substage-table th {
+      .board-table th,
+      .board-table td {
+        padding: 6px var(--space-3);
         text-align: left;
-        font-weight: 600;
-        color: var(--text-muted);
-        padding: 8px 6px;
-        border-bottom: 1px solid var(--border-subtle);
-        font-size: 11px;
+        border-bottom: 1px solid var(--border);
+        font-size: var(--text-xs);
+        vertical-align: middle;
+      }
+      .board-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+      .board-table th {
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
         text-transform: uppercase;
-        letter-spacing: 0.5px;
+        letter-spacing: 0.04em;
+        position: sticky;
+        top: 0;
+        z-index: 1;
       }
-      .substage-table td {
-        padding: 8px 6px;
-        border-bottom: 1px solid var(--border-subtle);
-      }
-      .substage-table tr:last-child td {
-        border-bottom: 0;
-      }
-      .num {
+      .board-table td.num,
+      .board-table th.num {
         text-align: right;
         font-variant-numeric: tabular-nums;
+        white-space: nowrap;
       }
+      .table-scroll {
+        overflow: auto;
+      }
+      /* Bound each panel — pages should never grow to thousands of pixels.
+         Both tables become scroll surfaces that stay below the fold. */
+      .table-scroll--rollup {
+        max-height: 320px;
+      }
+      .table-scroll--events {
+        max-height: 520px;
+      }
+
+      /* ── Stage pill (Local / Engine / Broker) ────────────────────────── */
+      .stage-pill {
+        display: inline-block;
+        padding: 1px 6px;
+        border-radius: var(--radius-sm);
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        line-height: 1.5;
+      }
+      .stage-pill[data-stage='Local'] {
+        background: rgba(255, 149, 0, 0.15);
+        color: #b86200;
+      }
+      .stage-pill[data-stage='Engine'] {
+        background: rgba(0, 113, 227, 0.14);
+        color: #0058b8;
+      }
+      .stage-pill[data-stage='Broker'] {
+        background: rgba(255, 59, 48, 0.15);
+        color: #c4290a;
+      }
+
+      /* ── Share bar (Top reasons count column) ───────────────────────── */
+      .bar-col {
+        min-width: 140px;
+      }
+      .bar-track {
+        display: block;
+        width: 100%;
+        height: 6px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        overflow: hidden;
+      }
+      .bar-fill {
+        display: block;
+        height: 100%;
+        background: #8e8e93;
+        transition: width 200ms ease;
+      }
+      .bar-fill[data-stage='Local'] {
+        background: #ff9500;
+      }
+      .bar-fill[data-stage='Engine'] {
+        background: #0071e3;
+      }
+      .bar-fill[data-stage='Broker'] {
+        background: #ff3b30;
+      }
+
+      /* ── Inline utility classes ──────────────────────────────────────── */
       .mono {
-        font-family: var(--font-mono);
+        font-family: 'SF Mono', 'Fira Code', monospace;
+      }
+      .small {
+        font-size: var(--text-xs);
       }
       .muted {
-        color: var(--text-muted);
-      }
-      .stage {
-        font-size: 11px;
-        padding: 2px 6px;
-        border-radius: 4px;
-        text-transform: uppercase;
-        font-weight: 600;
-      }
-      .stage[data-stage='Local'] {
-        background: var(--badge-amber-bg);
-        color: var(--badge-amber-fg);
-      }
-      .stage[data-stage='Engine'] {
-        background: var(--badge-blue-bg);
-        color: var(--badge-blue-fg);
-      }
-      .stage[data-stage='Broker'] {
-        background: var(--badge-red-bg);
-        color: var(--badge-red-fg);
-      }
-      .rejection-list {
-        list-style: none;
-        padding: 0;
-        margin: 0;
-      }
-      .rejection-row {
-        display: grid;
-        grid-template-columns: 80px 70px 70px 80px 80px 160px 1fr;
-        gap: 8px;
-        padding: 6px 0;
-        border-bottom: 1px solid var(--border-subtle);
-        align-items: center;
-        font-size: 13px;
-      }
-      .rejection-row:last-child {
-        border-bottom: 0;
+        color: var(--text-tertiary);
       }
       .time {
-        color: var(--text-muted);
+        color: var(--text-tertiary);
         font-variant-numeric: tabular-nums;
-      }
-      .signal {
-        font-family: var(--font-mono);
-      }
-      .acct {
-        font-family: var(--font-mono);
-        font-weight: 600;
-      }
-      .symbol {
-        font-family: var(--font-mono);
-        font-weight: 600;
-      }
-      .substage {
-        font-size: 12px;
-        color: var(--text-secondary);
-        overflow: hidden;
-        text-overflow: ellipsis;
         white-space: nowrap;
+      }
+      .link {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .link:hover {
+        text-decoration: underline;
       }
       .reason {
+        color: var(--text-secondary);
+        max-width: 520px;
+        white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        white-space: nowrap;
       }
     `,
   ],
@@ -360,7 +536,13 @@ interface SubStageCount {
 export class RejectionsDashboardPageComponent {
   private readonly rejectionsService = inject(SignalRejectionsService);
 
+  readonly windowPresets = WINDOW_PRESETS;
+
   readonly windowHours = signal<number>(24);
+  readonly symbolFilter = signal<string>('');
+  readonly accountFilter = signal<string>('');
+  readonly stageFilter = signal<string>('');
+  readonly subStageFilter = signal<string>('');
 
   protected readonly resource = createPolledResource(
     () => {
@@ -385,45 +567,92 @@ export class RejectionsDashboardPageComponent {
     () => this.resource.loading() && (this.resource.value() ?? null) === null,
   );
 
+  /** Filtered set drives every downstream KPI + breakdown — single source of truth. */
+  readonly filteredRows = computed(() => {
+    const sym = this.symbolFilter().trim().toUpperCase();
+    const acct = this.accountFilter().trim();
+    const stage = this.stageFilter().trim();
+    const sub = this.subStageFilter().trim().toLowerCase();
+    return this.rows().filter((r) => {
+      if (sym && (r.symbol ?? '').toUpperCase().indexOf(sym) === -1) return false;
+      if (acct && String(r.tradingAccountId).indexOf(acct) === -1) return false;
+      if (stage && r.stage !== stage) return false;
+      if (sub && r.subStage.toLowerCase().indexOf(sub) === -1) return false;
+      return true;
+    });
+  });
+
   readonly stageCounts = computed<StageCount[]>(() => {
     const seed = new Map<SignalRejectionStage, number>([
       ['Local', 0],
       ['Engine', 0],
       ['Broker', 0],
     ]);
-    for (const r of this.rows()) {
+    for (const r of this.filteredRows()) {
       seed.set(r.stage, (seed.get(r.stage) ?? 0) + 1);
     }
     return Array.from(seed.entries()).map(([stage, count]) => ({ stage, count }));
   });
 
+  readonly localCount = computed(
+    () => this.stageCounts().find((s) => s.stage === 'Local')?.count ?? 0,
+  );
+  readonly engineCount = computed(
+    () => this.stageCounts().find((s) => s.stage === 'Engine')?.count ?? 0,
+  );
+  readonly brokerCount = computed(
+    () => this.stageCounts().find((s) => s.stage === 'Broker')?.count ?? 0,
+  );
+
+  readonly lastHourCount = computed(() => {
+    const cutoff = Date.now() - 60 * 60 * 1000;
+    return this.filteredRows().filter((r) => new Date(r.createdAt).getTime() >= cutoff).length;
+  });
+
+  readonly distinctAccounts = computed(
+    () => new Set(this.filteredRows().map((r) => r.tradingAccountId)).size,
+  );
+
+  readonly distinctSymbols = computed(
+    () => new Set(this.filteredRows().map((r) => r.symbol ?? '—')).size,
+  );
+
+  readonly distinctSubStages = computed(
+    () => new Set(this.filteredRows().map((r) => r.subStage)).size,
+  );
+
+  /**
+   * Top sub-stages by count (capped at 10 rows). The `share` field is the
+   * count divided by the top row's count so the bar visualisation in the
+   * Share column scales 0–100% relative to the leader.
+   */
   readonly topSubStages = computed<SubStageCount[]>(() => {
     const groups = new Map<string, SubStageCount>();
-    for (const r of this.rows()) {
+    for (const r of this.filteredRows()) {
       const key = `${r.stage}::${r.subStage}`;
       const existing = groups.get(key);
       if (existing) {
         existing.count += 1;
         if (r.createdAt > existing.latest) existing.latest = r.createdAt;
       } else {
-        groups.set(key, { subStage: r.subStage, stage: r.stage, count: 1, latest: r.createdAt });
+        groups.set(key, {
+          subStage: r.subStage,
+          stage: r.stage,
+          count: 1,
+          latest: r.createdAt,
+          share: 0,
+        });
       }
     }
-    return Array.from(groups.values())
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
+    const list = Array.from(groups.values()).sort((a, b) => b.count - a.count);
+    const top = list[0]?.count ?? 1;
+    return list.slice(0, 10).map((s) => ({ ...s, share: s.count / top }));
   });
 
-  readonly recent = computed(() => this.rows().slice(0, 50));
-
-  stageHint(stage: SignalRejectionStage): string {
-    switch (stage) {
-      case 'Local':
-        return 'EA-local gates (validator, safety, staleness)';
-      case 'Engine':
-        return 'Engine Tier-2 / risk / kill switch';
-      case 'Broker':
-        return 'MT5 retcodes (CLIENT_DISABLES_AT, NO_MONEY, …)';
-    }
-  }
+  /**
+   * Recent activity feed — cap at 200 rows so the table-scroll container
+   * stays responsive even on a busy window. The total count surfaces on the
+   * card header so the operator knows the cap is in effect.
+   */
+  readonly recent = computed(() => this.filteredRows().slice(0, 200));
 }
