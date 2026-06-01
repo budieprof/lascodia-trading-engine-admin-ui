@@ -370,71 +370,73 @@ interface AnomalyFlag {
               <h3>By position</h3>
               <span class="muted">{{ positionRollups().length }} touched</span>
             </header>
-            <table class="board-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Symbol</th>
-                  <th>Dir</th>
-                  <th>State</th>
-                  <th class="num">Lots</th>
-                  <th class="num">U-PnL</th>
-                  <th class="num">R-PnL</th>
-                  <th>Sequence</th>
-                  <th class="num">N</th>
-                  <th>Latest</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (r of positionRollups(); track r.positionId) {
-                  <tr
-                    [class.row-warn]="r.hasStaleClose"
-                    [class.row-pending]="r.hasClosingPending && !r.hasStaleClose"
-                  >
-                    <td>
-                      <a class="link mono" [routerLink]="['/positions', r.positionId]"
-                        >#{{ r.positionId }}</a
-                      >
-                    </td>
-                    <td class="mono">{{ r.symbol ?? '—' }}</td>
-                    <td>
-                      @if (r.direction) {
-                        <span class="dir-pill" [attr.data-dir]="r.direction">{{
-                          r.direction
-                        }}</span>
-                      } @else {
-                        <span class="muted small">—</span>
-                      }
-                    </td>
-                    <td class="small muted">{{ r.status ?? '—' }}</td>
-                    <td class="num mono">{{ r.openLots | number: '1.2-2' }}</td>
-                    <td
-                      class="num mono"
-                      [class.profit]="r.unrealizedPnL > 0"
-                      [class.loss]="r.unrealizedPnL < 0"
-                    >
-                      {{ r.unrealizedPnL | number: '1.2-2' }}
-                    </td>
-                    <td
-                      class="num mono"
-                      [class.profit]="r.realizedPnL > 0"
-                      [class.loss]="r.realizedPnL < 0"
-                    >
-                      {{ r.realizedPnL | number: '1.2-2' }}
-                    </td>
-                    <td class="sequence">
-                      @for (et of r.eventTypes; track $index) {
-                        <span class="mini-badge" [attr.data-type]="eventBucket(et)">{{
-                          shortType(et)
-                        }}</span>
-                      }
-                    </td>
-                    <td class="num">{{ r.events.length }}</td>
-                    <td class="time">{{ r.lastAt | relativeTime }}</td>
+            <div class="table-scroll table-scroll--rollup">
+              <table class="board-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Symbol</th>
+                    <th>Dir</th>
+                    <th>State</th>
+                    <th class="num">Lots</th>
+                    <th class="num">U-PnL</th>
+                    <th class="num">R-PnL</th>
+                    <th>Sequence</th>
+                    <th class="num">N</th>
+                    <th>Latest</th>
                   </tr>
-                }
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  @for (r of positionRollups(); track r.positionId) {
+                    <tr
+                      [class.row-warn]="r.hasStaleClose"
+                      [class.row-pending]="r.hasClosingPending && !r.hasStaleClose"
+                    >
+                      <td>
+                        <a class="link mono" [routerLink]="['/positions', r.positionId]"
+                          >#{{ r.positionId }}</a
+                        >
+                      </td>
+                      <td class="mono">{{ r.symbol ?? '—' }}</td>
+                      <td>
+                        @if (r.direction) {
+                          <span class="dir-pill" [attr.data-dir]="r.direction">{{
+                            r.direction
+                          }}</span>
+                        } @else {
+                          <span class="muted small">—</span>
+                        }
+                      </td>
+                      <td class="small muted">{{ r.status ?? '—' }}</td>
+                      <td class="num mono">{{ r.openLots | number: '1.2-2' }}</td>
+                      <td
+                        class="num mono"
+                        [class.profit]="r.unrealizedPnL > 0"
+                        [class.loss]="r.unrealizedPnL < 0"
+                      >
+                        {{ r.unrealizedPnL | number: '1.2-2' }}
+                      </td>
+                      <td
+                        class="num mono"
+                        [class.profit]="r.realizedPnL > 0"
+                        [class.loss]="r.realizedPnL < 0"
+                      >
+                        {{ r.realizedPnL | number: '1.2-2' }}
+                      </td>
+                      <td class="sequence">
+                        @for (et of r.eventTypes; track $index) {
+                          <span class="mini-badge" [attr.data-type]="eventBucket(et)">{{
+                            shortType(et)
+                          }}</span>
+                        }
+                      </td>
+                      <td class="num">{{ r.events.length }}</td>
+                      <td class="time">{{ r.lastAt | relativeTime }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
           </section>
 
           <!-- Recent events table -->
@@ -443,72 +445,74 @@ interface AnomalyFlag {
               <h3>Recent events</h3>
               <span class="muted">{{ filteredRows().length }} shown</span>
             </header>
-            <table class="board-table">
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>#</th>
-                  <th>Symbol</th>
-                  <th>Dir</th>
-                  <th>Type</th>
-                  <th>Source</th>
-                  <th class="num">Lots Δ</th>
-                  <th class="num">U-PnL</th>
-                  <th>Note</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (s of filteredRows(); track s.id) {
+            <div class="table-scroll table-scroll--events">
+              <table class="board-table">
+                <thead>
                   <tr>
-                    <td class="time" [title]="s.occurredAt">
-                      {{ s.occurredAt | date: 'HH:mm:ss' }}
-                    </td>
-                    <td>
-                      <a class="link mono" [routerLink]="['/positions', s.positionId]"
-                        >#{{ s.positionId }}</a
-                      >
-                    </td>
-                    <td class="mono">{{ s.symbol ?? '—' }}</td>
-                    <td>
-                      @if (s.direction) {
-                        <span class="dir-pill" [attr.data-dir]="s.direction">{{
-                          s.direction
-                        }}</span>
-                      } @else {
-                        <span class="muted small">—</span>
-                      }
-                    </td>
-                    <td>
-                      <span class="badge" [attr.data-type]="eventBucket(s.eventType)">
-                        {{ s.eventType }}
-                      </span>
-                    </td>
-                    <td class="small mono">{{ s.source }}</td>
-                    <td class="num mono">
-                      @if (s.previousLots !== null) {
-                        {{ s.previousLots | number: '1.2-2' }}
-                      } @else {
-                        —
-                      }
-                      <span class="arrow">→</span>
-                      @if (s.newLots !== null) {
-                        {{ s.newLots | number: '1.2-2' }}
-                      } @else {
-                        —
-                      }
-                    </td>
-                    <td
-                      class="num mono"
-                      [class.profit]="s.unrealizedPnL > 0"
-                      [class.loss]="s.unrealizedPnL < 0"
-                    >
-                      {{ s.unrealizedPnL | number: '1.2-2' }}
-                    </td>
-                    <td class="desc">{{ s.description }}</td>
+                    <th>When</th>
+                    <th>#</th>
+                    <th>Symbol</th>
+                    <th>Dir</th>
+                    <th>Type</th>
+                    <th>Source</th>
+                    <th class="num">Lots Δ</th>
+                    <th class="num">U-PnL</th>
+                    <th>Note</th>
                   </tr>
-                }
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  @for (s of filteredRows(); track s.id) {
+                    <tr>
+                      <td class="time" [title]="s.occurredAt">
+                        {{ s.occurredAt | date: 'HH:mm:ss' }}
+                      </td>
+                      <td>
+                        <a class="link mono" [routerLink]="['/positions', s.positionId]"
+                          >#{{ s.positionId }}</a
+                        >
+                      </td>
+                      <td class="mono">{{ s.symbol ?? '—' }}</td>
+                      <td>
+                        @if (s.direction) {
+                          <span class="dir-pill" [attr.data-dir]="s.direction">{{
+                            s.direction
+                          }}</span>
+                        } @else {
+                          <span class="muted small">—</span>
+                        }
+                      </td>
+                      <td>
+                        <span class="badge" [attr.data-type]="eventBucket(s.eventType)">
+                          {{ s.eventType }}
+                        </span>
+                      </td>
+                      <td class="small mono">{{ s.source }}</td>
+                      <td class="num mono">
+                        @if (s.previousLots !== null) {
+                          {{ s.previousLots | number: '1.2-2' }}
+                        } @else {
+                          —
+                        }
+                        <span class="arrow">→</span>
+                        @if (s.newLots !== null) {
+                          {{ s.newLots | number: '1.2-2' }}
+                        } @else {
+                          —
+                        }
+                      </td>
+                      <td
+                        class="num mono"
+                        [class.profit]="s.unrealizedPnL > 0"
+                        [class.loss]="s.unrealizedPnL < 0"
+                      >
+                        {{ s.unrealizedPnL | number: '1.2-2' }}
+                      </td>
+                      <td class="desc">{{ s.description }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
           </section>
         }
       }
@@ -827,6 +831,22 @@ interface AnomalyFlag {
         font-weight: var(--font-semibold);
         text-transform: uppercase;
         letter-spacing: 0.04em;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      /* Bound the rollup + events tables so the page doesn't stretch to
+         hundreds of pixels of vertical scroll. Each table gets its own
+         max-height + an internal scroll; the sticky thead keeps the
+         column labels visible as the operator scrolls within the panel. */
+      .table-scroll {
+        overflow: auto;
+      }
+      .table-scroll--rollup {
+        max-height: 360px;
+      }
+      .table-scroll--events {
+        max-height: 520px;
       }
       .board-table td.num,
       .board-table th.num {
