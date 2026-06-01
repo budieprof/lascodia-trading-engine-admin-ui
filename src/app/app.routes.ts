@@ -44,6 +44,14 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'rejections',
+        data: { breadcrumb: 'Signal Rejections' },
+        loadChildren: () =>
+          import('@features/signal-rejections/signal-rejections.routes').then(
+            (m) => m.SIGNAL_REJECTIONS_ROUTES,
+          ),
+      },
+      {
         path: 'trading-accounts',
         data: { breadcrumb: 'Trading Accounts' },
         loadChildren: () =>

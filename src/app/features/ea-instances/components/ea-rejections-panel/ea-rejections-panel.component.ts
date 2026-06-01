@@ -124,7 +124,7 @@ const STAGE_OPTIONS: ReadonlyArray<{ value: StageFilter; label: string }> = [
                 </span>
                 <a
                   class="signal"
-                  [routerLink]="['/signals', row.tradeSignalId]"
+                  [routerLink]="['/trade-signals', row.tradeSignalId]"
                   (click)="$event.stopPropagation()"
                   title="Open signal detail — cross-account attempts"
                   >#{{ row.tradeSignalId }}</a
