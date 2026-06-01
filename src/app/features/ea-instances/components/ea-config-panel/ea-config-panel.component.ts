@@ -488,11 +488,21 @@ export class EAConfigPanelComponent {
       fields: [
         {
           key: 'entryToleranceBandPct',
-          label: 'Tolerance band % (0.0010 = 10 bps)',
+          label: 'Tolerance band — legacy fraction of price (0 to use TP-frac only)',
           kind: 'double',
           step: 0.0001,
           badge: 'live',
-          takesEffect: 'Next signal ClassifyExecutionType.',
+          takesEffect:
+            'Next signal ClassifyExecutionType. Used as fallback when entryToleranceTpFrac=0 or TP missing.',
+        },
+        {
+          key: 'entryToleranceTpFrac',
+          label: 'Tolerance band (fraction of |TP-entry|, 0 = use legacy band)',
+          kind: 'double',
+          step: 0.01,
+          badge: 'live',
+          takesEffect:
+            'Next signal ClassifyExecutionType — dimensionally-correct fast-market-fill threshold.',
         },
         {
           key: 'entryToleranceMaxSignalAgeSec',
@@ -964,6 +974,7 @@ type HotReloadKey =
   | 'heartbeatSec'
   | 'commandPollSec'
   | 'entryToleranceBandPct'
+  | 'entryToleranceTpFrac'
   | 'entryToleranceMaxSignalAgeSec'
   | 'maxSignalAgeSec'
   | 'maxAdverseTpDriftPct'

@@ -1573,6 +1573,7 @@ export interface EAConfigInputs {
   heartbeatSec?: number;
   commandPollSec?: number;
   entryToleranceBandPct?: number;
+  entryToleranceTpFrac?: number;
   entryToleranceMaxSignalAgeSec?: number;
   maxSignalAgeSec?: number;
   maxAdverseTpDriftPct?: number;
@@ -2049,6 +2050,7 @@ export interface UpdateInstanceConfigRequest {
   heartbeatSec?: number | null;
   commandPollSec?: number | null;
   entryToleranceBandPct?: number | null;
+  entryToleranceTpFrac?: number | null;
   entryToleranceMaxSignalAgeSec?: number | null;
   maxSignalAgeSec?: number | null;
   maxAdverseTpDriftPct?: number | null;
