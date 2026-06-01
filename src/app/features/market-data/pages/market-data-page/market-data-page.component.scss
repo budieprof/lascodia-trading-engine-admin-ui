@@ -617,8 +617,11 @@
   background: var(--text-tertiary);
 }
 .watch-card {
-  flex: 0 0 auto;
-  width: 180px;
+  /* grow=1 to soak up any leftover horizontal space (no dead gap on the
+     right when the strip fits), shrink=0 to enforce a 180px minimum so
+     the strip becomes a horizontal scroll surface when the viewport
+     can't fit every card. basis=180px is that minimum. */
+  flex: 1 0 180px;
   scroll-snap-align: start;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
