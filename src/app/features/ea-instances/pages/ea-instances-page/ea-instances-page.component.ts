@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { catchError, map, of, switchMap } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
@@ -14,6 +15,8 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+
+import { FleetActionsBarComponent } from '../../components/fleet-actions-bar/fleet-actions-bar.component';
 
 type StatusFilter = 'all' | EAInstanceStatus;
 type ViewMode = 'cards' | 'table';
@@ -31,6 +34,8 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
     EmptyStateComponent,
     DatePipe,
     FormsModule,
+    RouterLink,
+    FleetActionsBarComponent,
   ],
   template: `
     <div class="page">
@@ -38,6 +43,9 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
         title="EA Instances"
         subtitle="Expert Advisor heartbeats and symbol ownership"
       />
+
+      <!-- Phase-3A: fleet bulk-ops bar above the per-instance grid -->
+      <app-fleet-actions-bar (commandQueued)="onFleetCommandQueued($event)" />
 
       @if (loading()) {
         <app-card-skeleton [lines]="6" />
@@ -153,7 +161,14 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
         @if (viewMode() === 'cards') {
           <section class="grid">
             @for (i of filtered(); track i.instanceId) {
-              <article class="card" [attr.data-status]="i.status">
+              <article
+                class="card clickable"
+                [attr.data-status]="i.status"
+                [routerLink]="['/ea-instances', i.id]"
+                role="link"
+                tabindex="0"
+                (keydown.enter)="$any($event.target).click()"
+              >
                 <header class="head">
                   <div class="title">
                     <span class="status-dot" [attr.data-status]="i.status"></span>
@@ -231,7 +246,13 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
               </thead>
               <tbody>
                 @for (i of filtered(); track i.instanceId) {
-                  <tr>
+                  <tr
+                    class="row-clickable"
+                    [routerLink]="['/ea-instances', i.id]"
+                    role="link"
+                    tabindex="0"
+                    (keydown.enter)="$any($event.target).click()"
+                  >
                     <td>
                       <span class="pill" [attr.data-status]="i.status">{{ i.status }}</span>
                     </td>
@@ -449,6 +470,32 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
         gap: var(--space-3);
+      }
+      .card.clickable {
+        cursor: pointer;
+        transition:
+          background 0.12s ease,
+          border-color 0.12s ease,
+          transform 0.12s ease;
+      }
+      .card.clickable:hover {
+        background: var(--bg-tertiary, rgba(0, 113, 227, 0.05));
+        border-color: var(--accent);
+        transform: translateY(-1px);
+      }
+      .card.clickable:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .row-clickable {
+        cursor: pointer;
+      }
+      .row-clickable:hover {
+        background: var(--bg-tertiary, rgba(0, 113, 227, 0.05));
+      }
+      .row-clickable:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
       }
       .card {
         background: var(--bg-secondary);
@@ -751,6 +798,16 @@ export class EAInstancesPageComponent {
     { intervalMs: 15_000 },
   );
 
+  /**
+   * Phase-3A: refresh the fleet list after a fan-out completes so the
+   * KPI strip + per-instance grid reflect the new posture (e.g. instances
+   * that just transitioned RUNNING → SAFETY_STOP).  The audit timeline
+   * updates per-instance once each EA pushes its outbox.
+   */
+  protected onFleetCommandQueued(_actionKey: string): void {
+    this.resource.refresh();
+  }
+
   // Active currency pairs — used to score coverage. Probe-and-fetch so a
   // fresh deployment with hundreds of pairs all loads in one round-trip.
   private readonly pairsResource = createPolledResource(
@@ -780,7 +837,7 @@ export class EAInstancesPageComponent {
   readonly search = signal('');
   readonly statusFilter = signal<StatusFilter>('all');
   readonly viewMode = signal<ViewMode>('cards');
-  readonly coverageFilter = signal<CoverageFilter>('uncovered');
+  readonly coverageFilter = signal<CoverageFilter>('all');
 
   /** Split the engine's CSV `symbols` field into a clean array. */
   protected symbolsOf(ea: EAInstanceDto): string[] {

@@ -1,8 +1,10 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   OnInit,
   computed,
+  effect,
   inject,
   signal,
 } from '@angular/core';
@@ -24,6 +26,7 @@ import { OrdersService } from '@core/services/orders.service';
 import { HealthService } from '@core/services/health.service';
 import { DrawdownRecoveryService } from '@core/services/drawdown-recovery.service';
 import { TradingAccountsService } from '@core/services/trading-accounts.service';
+import { AccountScopeService } from '@core/scope/account-scope.service';
 import { StrategyEnsembleService } from '@core/services/strategy-ensemble.service';
 import { AlertsService } from '@core/services/alerts.service';
 import { EAInstancesService } from '@core/services/ea-instances.service';
@@ -93,10 +96,21 @@ interface ActivityEntry {
           <span class="dot"></span>
           {{ realtimeOnline() ? 'Realtime live' : 'Realtime offline' }}
         </span>
+        <!--
+          Multi-account scope is owned by the global selector in the
+          header chrome (AccountScopePillComponent) — it shows on
+          every page so flipping it reshapes orders, positions,
+          drawdown, and the dashboard tiles in lockstep.  When the
+          operator has a single live account, render a lightweight
+          label here too so the chosen account is still visible on
+          the page header.
+        -->
         @if (account(); as a) {
-          <span class="head-pill" data-state="muted">
-            {{ a.accountName ?? a.accountId }} · {{ a.currency }}
-          </span>
+          @if (liveAccounts().length <= 1) {
+            <span class="head-pill" data-state="muted">
+              {{ a.accountName ?? a.accountId }}{{ a.isPaper ? ' · paper' : '' }} · {{ a.currency }}
+            </span>
+          }
         }
       </app-page-header>
 
@@ -587,6 +601,39 @@ interface ActivityEntry {
       }
       .head-pill[data-state='muted'] .dot {
         display: none;
+      }
+      .head-pill.account-select {
+        gap: 6px;
+        cursor: pointer;
+      }
+      .head-pill.account-select .select-label {
+        opacity: 0.7;
+        font-size: 11px;
+      }
+      .head-pill.account-select .select-native {
+        appearance: none;
+        background: transparent;
+        border: 0;
+        color: inherit;
+        font: inherit;
+        font-size: 12px;
+        padding: 0 14px 0 2px;
+        cursor: pointer;
+        background-image:
+          linear-gradient(45deg, transparent 50%, currentColor 50%),
+          linear-gradient(135deg, currentColor 50%, transparent 50%);
+        background-position:
+          calc(100% - 8px) 50%,
+          calc(100% - 4px) 50%;
+        background-size:
+          4px 4px,
+          4px 4px;
+        background-repeat: no-repeat;
+      }
+      .head-pill.account-select .select-native:focus {
+        outline: 1px solid var(--accent);
+        outline-offset: 2px;
+        border-radius: 2px;
       }
 
       .hero-strip {
@@ -1165,23 +1212,163 @@ export class DashboardPageComponent implements OnInit {
     )
       .pipe(throttleTime(3_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
       .subscribe(() => this.refresh());
+
+    // Re-fetch the Drawdown tile any time the scoped account set
+    // changes — selecting a different account in the header dropdown
+    // re-issues /drawdown-recovery/latest?accountIds=… so the tile
+    // shows that account's per-account snapshot instead of the
+    // fleet-wide aggregate.  Effect runs in injection context so
+    // takeUntilDestroyed is handled automatically.
+    effect(() => {
+      const scope = this.scopedAccountIds();
+      if (scope.size === 0) return;
+      const ids = Array.from(scope);
+      this.drawdownService
+        .getLatest(ids)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (r) => this.drawdown.set(r.data ?? null),
+          // Leave the previous value in place on transient errors —
+          // better than flashing the tile blank.
+          error: () => {},
+        });
+    });
   }
+
+  private readonly destroyRef = inject(DestroyRef);
 
   // ── Data signals ──────────────────────────────────────────────────────
   readonly loading = signal(true);
   readonly equity = signal<number | null>(null);
-  readonly unrealizedPnl = signal<number | null>(null);
-  readonly openPositionCount = signal<number | null>(null);
+  // Derived from openPositions() — re-derives when scope changes.
+  readonly unrealizedPnl = computed<number | null>(() => {
+    const open = this.openPositions();
+    if (open.length === 0) return null;
+    return open.reduce((s, p) => s + p.unrealizedPnL, 0);
+  });
+  readonly openPositionCount = computed<number | null>(() => this.openPositions().length || null);
   readonly activeStrategyCount = signal<number | null>(null);
   readonly pendingSignalCount = signal<number | null>(null);
   readonly pendingSignals = signal<TradeSignalDto[]>([]);
   readonly allSignals = signal<TradeSignalDto[]>([]);
   readonly healthStatus = signal(false);
   readonly engineStatus = signal<EngineStatusDto | null>(null);
+  // Drawdown snapshot fetched per scope from the engine.  The
+  // /drawdown-recovery/latest endpoint accepts an accountIds query
+  // string and returns either a single account's row or an aggregate
+  // synthesized server-side (sums equity/peak, picks the worst
+  // recovery mode across the set).  We re-fetch whenever the scoped
+  // account set changes — same cadence as Account Equity.
   readonly drawdown = signal<DrawdownSnapshotDto | null>(null);
-  readonly account = signal<TradingAccountDto | null>(null);
-  readonly closedPositions = signal<PositionDto[]>([]);
-  readonly openPositions = signal<PositionDto[]>([]);
+  // ── Multi-account dashboard scoping ──────────────────────────────
+  //
+  // Sourced from the global AccountScopeService — same service drives
+  // the header-pill selector, the Orders page filter, the Positions
+  // page filter, and the Drawdown query parameter.  Flipping the
+  // header dropdown reshapes every account-derived tile on this
+  // page in lockstep with the rest of the console.
+  protected readonly accountScope = inject(AccountScopeService);
+  readonly accounts = this.accountScope.accounts;
+  readonly liveAccounts = this.accountScope.liveAccounts;
+  readonly selectedAccountId = this.accountScope.selected;
+
+  readonly account = computed<TradingAccountDto | null>(() => {
+    const live = this.liveAccounts();
+    if (live.length === 0) return null;
+    const sel = this.selectedAccountId();
+    if (sel === AccountScopeService.SCOPE_AGGREGATE_REAL) {
+      return DashboardPageComponent.aggregateReal(live.filter((a) => !a.isPaper));
+    }
+    if (sel === AccountScopeService.SCOPE_AGGREGATE_ALL) {
+      return DashboardPageComponent.aggregateReal(live);
+    }
+    const id = typeof sel === 'string' ? Number(sel) : sel;
+    const match = live.find((a) => a.id === id);
+    if (match) return match;
+    return DashboardPageComponent.aggregateReal(live.filter((a) => !a.isPaper));
+  });
+
+  readonly realAccountCount = computed(() => this.liveAccounts().filter((a) => !a.isPaper).length);
+
+  // Engine-tagged ids set the dashboard filters against.  Reads
+  // straight from the global scope; the AccountScopeService owns the
+  // sentinel-vs-id resolution, paper-exclusion default, and stale-
+  // selection fallback.
+  readonly scopedAccountIds = computed<Set<number>>(() => new Set(this.accountScope.accountIds()));
+
+  /** Synthesize an aggregated DTO across the supplied accounts.  Sums balance/
+   *  equity/margin; pairs the resulting equity-weighted marginLevel.
+   *  Returns the only real account when there's just one, or a null-
+   *  placeholder when zero real accounts (operator running paper-
+   *  only).  Caller is expected to pass already-live accounts (those
+   *  with an actually-running EAInstance) — we only filter `isPaper`
+   *  here, not `isActive` (which is sticky and includes detached
+   *  accounts). */
+  private static aggregateReal(liveAccounts: TradingAccountDto[]): TradingAccountDto | null {
+    const real = liveAccounts.filter((a) => !a.isPaper);
+    if (real.length === 0) return null;
+    if (real.length === 1) return real[0];
+    const sum = (k: keyof TradingAccountDto) =>
+      real.reduce((acc, a) => acc + (Number(a[k] ?? 0) || 0), 0);
+    const balance = sum('balance');
+    const equity = sum('equity');
+    const marginUsed = sum('marginUsed');
+    const marginAvailable = sum('marginAvailable');
+    // Equity-weighted margin level — preserves the per-account
+    // proportion when accounts have wildly different equities.
+    const marginLevel =
+      equity > 0 ? real.reduce((acc, a) => acc + (a.marginLevel ?? 0) * a.equity, 0) / equity : 0;
+    const profit = sum('profit');
+    const credit = sum('credit');
+    return {
+      id: -1,
+      accountId: null,
+      accountName: `Aggregate · ${real.length} real accounts`,
+      brokerServer: null,
+      brokerName: null,
+      accountType: real[0].accountType,
+      leverage: real[0].leverage,
+      marginMode: real[0].marginMode,
+      currency: real[0].currency,
+      balance,
+      equity,
+      marginUsed,
+      marginAvailable,
+      marginLevel,
+      profit,
+      credit,
+      marginSoMode: real[0].marginSoMode,
+      marginSoCall: real[0].marginSoCall,
+      marginSoStopOut: real[0].marginSoStopOut,
+      maxAbsoluteDailyLoss: sum('maxAbsoluteDailyLoss'),
+      isActive: true,
+      isPaper: false,
+      lastSyncedAt:
+        real
+          .map((a) => a.lastSyncedAt)
+          .filter(Boolean)
+          .sort()
+          .reverse()[0] ?? new Date().toISOString(),
+      riskProfileId: null,
+    };
+  }
+
+  // Raw fetch buckets — set verbatim from the engine response.  Each
+  // derived signal below filters by scopedAccountIds() so the account
+  // dropdown actively reshapes every account-tagged metric (open/closed
+  // position counts, unrealized + realized PnL, top-positions list,
+  // P&L by symbol, position exposure, equity curve, daily PnL, win
+  // rate, profit factor, recent activity).
+  readonly rawClosedPositions = signal<PositionDto[]>([]);
+  readonly rawOpenPositions = signal<PositionDto[]>([]);
+  readonly closedPositions = computed<PositionDto[]>(() => {
+    const scope = this.scopedAccountIds();
+    return this.rawClosedPositions().filter((p) => scope.has(p.tradingAccountId));
+  });
+  readonly openPositions = computed<PositionDto[]>(() => {
+    const scope = this.scopedAccountIds();
+    return this.rawOpenPositions().filter((p) => scope.has(p.tradingAccountId));
+  });
   readonly allocations = signal<StrategyAllocationDto[]>([]);
   readonly alerts = signal<AlertDto[]>([]);
   readonly eaInstances = signal<EAInstanceDto[]>([]);
@@ -1191,7 +1378,17 @@ export class DashboardPageComponent implements OnInit {
   // 7d live Sharpe — surfaced as a dashboard pin so operators see overfit before
   // drift workers get to it on lagging metrics.
   readonly overfitWatchlist = signal<MLModelOverfitFlagDto[]>([]);
-  readonly recentOrders = signal<OrderDto[]>([]);
+  readonly rawRecentOrders = signal<OrderDto[]>([]);
+  readonly recentOrders = computed<OrderDto[]>(() => {
+    const scope = this.scopedAccountIds();
+    return this.rawRecentOrders().filter(
+      (o) =>
+        // Tolerate older engine builds that didn't tag orders — show them
+        // in all scopes rather than swallow.  Once the engine is the
+        // current build, every order carries tradingAccountId.
+        o.tradingAccountId == null || scope.has(o.tradingAccountId),
+    );
+  });
   // Reactive realtime status from the SignalR connection-state signal.
   readonly realtimeOnline = computed(() => this.realtime.isConnected());
 
@@ -1565,9 +1762,13 @@ export class DashboardPageComponent implements OnInit {
         map((r) => r.data ?? null),
         catchError(() => of(null as DrawdownSnapshotDto | null)),
       ),
-      account: this.accountsService.getCurrentActive().pipe(
-        map((r) => r.data ?? null),
-        catchError(() => of(null as TradingAccountDto | null)),
+      // Fetch ALL accounts (not just "current active") — the dashboard
+      // is multi-account aware and the operator selects which one (or
+      // the aggregate) to display via the header dropdown.  The 50-item
+      // page size comfortably covers any realistic operator setup.
+      accounts: this.accountsService.list({ currentPage: 1, itemCountPerPage: 50 }).pipe(
+        map((r) => r.data?.data ?? []),
+        catchError(() => of([] as TradingAccountDto[])),
       ),
       allocations: this.ensembleService.getAllocations().pipe(
         map((r) => r.data ?? []),
@@ -1594,40 +1795,55 @@ export class DashboardPageComponent implements OnInit {
         orders,
         status,
         drawdown,
-        account,
+        accounts,
         allocations,
         alerts,
         eaInstances,
         workers,
         mlModels,
       }) => {
-        const open = positions.filter((p) => p.status === 'Open' || p.status === 'Closing');
-        const closed = positions.filter((p) => p.status === 'Closed');
-        this.openPositions.set(open);
-        this.closedPositions.set(closed);
-        this.openPositionCount.set(open.length);
-        this.unrealizedPnl.set(open.reduce((s, p) => s + p.unrealizedPnL, 0));
+        // Set RAW position/order buckets — derived signals
+        // (openPositions/closedPositions/recentOrders/unrealizedPnl/
+        // openPositionCount/topOpenPositions/recentActivity/equityCurve/
+        // dailyPnL/winRate/profitFactor/etc.) re-compute reactively when
+        // the account scope changes.
+        this.rawOpenPositions.set(
+          positions.filter((p) => p.status === 'Open' || p.status === 'Closing'),
+        );
+        this.rawClosedPositions.set(positions.filter((p) => p.status === 'Closed'));
+        this.rawRecentOrders.set(orders);
 
         this.activeStrategyCount.set(strategies.filter((s) => s.status === 'Active').length);
 
+        // Signals are multi-account (engine-side fan-out via SignalAccountAttempt),
+        // so the Pending Signals tile stays fleet-wide and is labelled
+        // as such in the template.
         const pending = signals.filter((s) => s.status === 'Pending');
         this.pendingSignalCount.set(pending.length);
         this.pendingSignals.set(pending.slice(0, 8));
         this.allSignals.set(signals);
-
-        this.recentOrders.set(orders);
 
         this.healthStatus.set(status?.isRunning ?? false);
         this.engineStatus.set(status);
 
         this.drawdown.set(drawdown);
 
-        this.account.set(account);
-        if (account) this.equity.set(account.equity);
+        // accounts + eaInstances are owned by AccountScopeService — no
+        // local set call here.  The forkJoin still pulls them so the
+        // tiles light up immediately on first paint instead of waiting
+        // for the global scope service's 30s tick.
+        if (accounts.length > 0) this.accountScope.accounts.set(accounts);
+        this.accountScope.eaInstances.set(eaInstances);
+        // Selection-staleness fallback is owned by AccountScopeService —
+        // it already snaps to the real-aggregate when the persisted
+        // selection points at a no-longer-live account.
+        const acc = this.account();
+        if (acc) this.equity.set(acc.equity);
 
         this.allocations.set(allocations);
         this.alerts.set(alerts);
-        this.eaInstances.set(eaInstances);
+        // eaInstances was set above (before the account/equity derivations)
+        // so liveAccounts() resolves correctly on the same tick.
         this.workers.set(workers);
         this.mlModels.set(mlModels);
 

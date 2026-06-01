@@ -174,6 +174,14 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'fleet-health',
+        // Phase-16: read-only observability dashboard.
+        canActivate: [requireRoles('Operator', 'Admin')],
+        data: { breadcrumb: 'Fleet Health' },
+        loadChildren: () =>
+          import('@features/fleet-health/fleet-health.routes').then((m) => m.FLEET_HEALTH_ROUTES),
+      },
+      {
         path: 'alerts',
         data: { breadcrumb: 'Alerts' },
         loadChildren: () => import('@features/alerts/alerts.routes').then((m) => m.ALERTS_ROUTES),
@@ -287,6 +295,14 @@ export const routes: Routes = [
         data: { breadcrumb: 'EA Instances' },
         loadChildren: () =>
           import('@features/ea-instances/ea-instances.routes').then((m) => m.EA_INSTANCES_ROUTES),
+      },
+      {
+        path: 'terminals',
+        data: { breadcrumb: 'Terminals' },
+        loadComponent: () =>
+          import('@features/terminals/pages/terminals-page/terminals-page.component').then(
+            (m) => m.TerminalsPageComponent,
+          ),
       },
       {
         path: 'dead-letter',

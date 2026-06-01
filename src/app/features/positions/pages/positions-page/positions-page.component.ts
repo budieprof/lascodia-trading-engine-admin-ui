@@ -18,6 +18,7 @@ import type { EChartsOption } from 'echarts';
 import { PositionsService } from '@core/services/positions.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { AccountScopeService } from '@core/scope/account-scope.service';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { PositionDto, PagedData, PagerRequest } from '@core/api/api.types';
 
@@ -981,6 +982,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 })
 export class PositionsPageComponent implements OnInit, OnDestroy {
   private readonly positionsService = inject(PositionsService);
+  protected readonly accountScope = inject(AccountScopeService);
   private readonly router = inject(Router);
   private readonly realtime = inject(RealtimeService);
   private readonly notifications = inject(NotificationService);
@@ -1060,6 +1062,16 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       if (this.activeTab() === 'closed') {
         this.closedTable?.loadData();
       }
+    });
+
+    // Re-fetch both tables (and the summary) whenever the operator
+    // flips the global account-scope dropdown.  Reads the signal
+    // inside the effect to register the dependency.
+    effect(() => {
+      this.accountScope.accountIds();
+      this.openTable?.loadData();
+      this.closedTable?.loadData();
+      this.loadSummaryData();
     });
   }
 
@@ -2070,8 +2082,24 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   });
 
   // ── Data fetchers ────────────────────────────────────────────────
+  //
+  // Both list fetchers drop the global account-scope's tradingAccountIds
+  // onto the request filter so PositionQueryFilter narrows server-side.
+  // Decorating in one helper keeps the open / closed paths consistent
+  // and makes future scope semantics (e.g. include-paper toggle) a
+  // one-line change.
+  private scoped(params: PagerRequest): PagerRequest {
+    const scopedIds = this.accountScope.accountIds();
+    if (scopedIds.length === 0) return params;
+    const filter = {
+      ...((params.filter as object | null) ?? {}),
+      tradingAccountIds: Array.from(scopedIds),
+    };
+    return { ...params, filter };
+  }
+
   readonly fetchOpenPositions = (params: PagerRequest): Observable<PagedData<PositionDto>> => {
-    return this.positionsService.list(params).pipe(
+    return this.positionsService.list(this.scoped(params)).pipe(
       map((response) => {
         const pagedData = response.data!;
         const openOnly = pagedData.data.filter(
@@ -2084,7 +2112,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   };
 
   readonly fetchClosedPositions = (params: PagerRequest): Observable<PagedData<PositionDto>> => {
-    return this.positionsService.list(params).pipe(
+    return this.positionsService.list(this.scoped(params)).pipe(
       map((response) => {
         const pagedData = response.data!;
         const closedOnly = pagedData.data.filter((p) => p.status === 'Closed');
@@ -2395,8 +2423,14 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   // ── Helpers ──
 
   private loadSummaryData(): void {
+    // Analytics summary uses the same scoping as the live tables so
+    // every figure on the page tells the same story.  The filter map
+    // is the engine-side PositionQueryFilter — passing
+    // tradingAccountIds restricts to the scope.
+    const scopedIds = this.accountScope.accountIds();
+    const filter = scopedIds.length > 0 ? { tradingAccountIds: Array.from(scopedIds) } : null;
     this.positionsService
-      .list({ currentPage: 1, itemCountPerPage: 500 })
+      .list({ currentPage: 1, itemCountPerPage: 500, filter })
       .pipe(map((r) => r.data?.data ?? []))
       .subscribe((positions) => {
         const open = positions.filter((p) => p.status === 'Open' || p.status === 'Closing');

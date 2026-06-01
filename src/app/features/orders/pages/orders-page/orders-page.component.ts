@@ -1,6 +1,7 @@
 import {
   Component,
   ChangeDetectionStrategy,
+  effect,
   inject,
   signal,
   computed,
@@ -15,6 +16,7 @@ import type { EChartsOption } from 'echarts';
 import { OrdersService } from '@core/services/orders.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
+import { AccountScopeService } from '@core/scope/account-scope.service';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, merge, of, throttleTime } from 'rxjs';
 import { DatePipe, DecimalPipe } from '@angular/common';
@@ -1424,6 +1426,7 @@ export class OrdersPageComponent {
   private readonly fb = inject(FormBuilder);
   private readonly realtime = inject(RealtimeService);
   private readonly savedViewsService = inject(SavedViewsService);
+  protected readonly accountScope = inject(AccountScopeService);
 
   readonly savedViews = this.savedViewsService.forRoute<OrdersViewState>('/orders');
   readonly pinnedSavedViews = computed(() => this.savedViews().filter((v) => v.pinned));
@@ -1446,6 +1449,16 @@ export class OrdersPageComponent {
         this.reloadTable();
         this.loadRecent();
       });
+
+    // Re-fetch whenever the operator changes the global account scope
+    // from the header dropdown.  Effect runs in injection context so
+    // teardown is handled automatically.
+    effect(() => {
+      // Touch the signal to register the dependency, then reload.
+      this.accountScope.accountIds();
+      this.reloadTable();
+      this.loadRecent();
+    });
 
     this.loadRecent();
   }
@@ -1568,8 +1581,14 @@ export class OrdersPageComponent {
   }
 
   private loadRecent(): void {
+    // Recent-orders sample (powers the Order Analytics tab + KPIs at
+    // the top of the page).  Scoped through the global selector so
+    // the Fill Rate / Avg fill latency / Symbols traded tiles reflect
+    // ONLY the operator's selected accounts — not fleet-wide.
+    const scopedIds = this.accountScope.accountIds();
+    const filter = scopedIds.length > 0 ? { tradingAccountIds: Array.from(scopedIds) } : null;
     this.ordersService
-      .list({ currentPage: 1, itemCountPerPage: 500 })
+      .list({ currentPage: 1, itemCountPerPage: 500, filter })
       .pipe(catchError(() => of(null)))
       .subscribe((res) => {
         const rows = res?.data?.data ?? [];
@@ -1755,9 +1774,16 @@ export class OrdersPageComponent {
   ];
 
   fetchData = (params: PagerRequest) => {
-    const filter: Record<string, string> = {};
+    const filter: Record<string, unknown> = {};
     if (this.filterStatus()) filter['status'] = this.filterStatus();
     if (this.filterSide()) filter['orderType'] = this.filterSide();
+    // Global account scope — drops a tradingAccountIds list onto the
+    // filter so engine-side OrderQueryFilter narrows the result set
+    // to the operator's selected scope (or aggregate of live real
+    // accounts).  Same selector flips Positions, Drawdown, and the
+    // dashboard tiles in lockstep — see AccountScopeService.
+    const scopedIds = this.accountScope.accountIds();
+    if (scopedIds.length > 0) filter['tradingAccountIds'] = Array.from(scopedIds);
 
     const requestParams: PagerRequest = {
       ...params,

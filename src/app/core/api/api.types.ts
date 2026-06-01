@@ -75,6 +75,8 @@ export interface OrderQueryFilter {
   status?: string;
   orderType?: string;
   strategyId?: number;
+  /** Phase-5b: per-account scope for the EA detail page. */
+  tradingAccountId?: number;
 }
 export interface PositionQueryFilter {
   symbol?: string;
@@ -215,7 +217,8 @@ export type OrderStatus =
   | 'Filled'
   | 'Cancelled'
   | 'Rejected'
-  | 'Expired';
+  | 'Expired'
+  | 'Cancelling';
 
 export type PositionStatus = 'Open' | 'Closed' | 'Closing';
 
@@ -364,6 +367,8 @@ export type PromotionDecision = 'AutoPromoted' | 'FlaggedForReview' | 'Rejected'
 export interface OrderDto {
   id: number;
   tradeSignalId: number | null;
+  /** Trading-account scope (engine added Phase-5b for per-account filtering). */
+  tradingAccountId?: number;
   symbol: string | null;
   orderType: OrderType;
   executionType: ExecutionType;
@@ -384,6 +389,9 @@ export interface OrderDto {
 
 export interface PositionDto {
   id: number;
+  /** Owning trading account (multi-account scope) — engine added so the
+   *  dashboard can filter position-derived metrics per account. */
+  tradingAccountId: number;
   symbol: string | null;
   direction: PositionDirection;
   openLots: number;
@@ -1500,6 +1508,128 @@ export interface EAStatePayload {
   gvarTotal?: number;
   gvarLasc?: number;
   gvarUsageHigh?: boolean;
+  // ── Phase-5a: chart-panel parity (v8.47.141+) ─────────────────────────
+  /** Open positions held by this EA instance. */
+  positionCount?: number;
+  /** Signals processed since the heartbeat counter last reset. */
+  signalsProcessed?: number;
+  /** Net daily P&L (account currency) for this instance. */
+  dailyPnL?: number;
+  /** Broker-time Unix seconds of the most recent signal accepted; 0 = none yet. */
+  lastSignalAtUnix?: number;
+  /** Engine /health/ping reachable from this EA. */
+  engineReachable?: boolean;
+  /** Rolling fraction of successful HTTP requests in the recent window (0..1). */
+  httpSuccessRate?: number;
+  /** "HTTP" or "DLL". */
+  transportMode?: string;
+  /** Transport-level connection (HTTP socket / DLL bridge handshake). */
+  transportConnected?: boolean;
+  /** Order-queue capacity — pair with orderQueueSize to render usage %. */
+  orderQueueCapacity?: number;
+  /** Order-fill success rate (0..1). */
+  fillRate?: number;
+  /** Average broker execution latency in milliseconds. */
+  avgLatencyMs?: number;
+  /** Average requested-vs-fill slippage in points. */
+  avgSlippagePoints?: number;
+  /** Execution latency percentiles in milliseconds. */
+  latencyP50Ms?: number;
+  latencyP95Ms?: number;
+  latencyP99Ms?: number;
+  /** First owned symbol — the "primary" used for spread / tick display. */
+  primarySymbol?: string;
+  /** Bid-ask spread in points on the primary symbol. */
+  primarySpreadPoints?: number;
+  /**
+   * Wall-clock age (seconds) of the most recent *advancing* broker tick on
+   * the primary symbol.  EA-computed against `TimeLocal()`, not broker time
+   * — broker time freezes on weekends/holidays and would report 0s forever.
+   * `-1` sentinel: no tick observed yet.
+   */
+  lastTickAgeSec?: number;
+  /** "OPEN" if broker connected + fresh tick + state ≠ MARKET_CLOSED, else "CLOSED". */
+  marketState?: 'OPEN' | 'CLOSED' | 'UNKNOWN' | string;
+  /** Phase-4: current values of the EA's configuration inputs. */
+  inputs?: EAConfigInputs;
+  // Defensive: tolerate future EA-added keys.
+  [key: string]: unknown;
+}
+
+/**
+ * Phase-4: current values of the EA's configuration inputs carried in the
+ * heartbeat envelope.  Hot-reloadable fields (the first 16) mirror the EA's
+ * g_cfg* shadows and can be updated live via POST /admin/ea/{id}/config; the
+ * remaining read-only fields mirror Inp* declarations frozen at attach time.
+ * Both blocks are present so the admin UI can render the full picture
+ * (Editable / Read-only tabs) without a second round-trip.
+ */
+export interface EAConfigInputs {
+  // ── Hot-reloadable ──
+  tickThrottleMs?: number;
+  signalPollSec?: number;
+  positionSyncSec?: number;
+  accountSyncSec?: number;
+  heartbeatSec?: number;
+  commandPollSec?: number;
+  entryToleranceBandPct?: number;
+  entryToleranceMaxSignalAgeSec?: number;
+  maxSlippagePoints?: number;
+  maxOrderRetries?: number;
+  httpTimeoutData?: number;
+  httpTimeoutOrder?: number;
+  maxNotionalExposurePct?: number;
+  maxPeakDrawdownPct?: number;
+  flashCrashPct?: number;
+  engineTimeoutSec?: number;
+
+  // Phase-4d: legacy safety knobs (already hot-reloadable via CB.HotReload).
+  maxPosPerSymbol?: number;
+  maxLotPerOrder?: number;
+  maxSpreadPoints?: number;
+  maxConsecLosses?: number;
+  consecLossPauseMin?: number;
+  maxDailyLossPerSymbolPct?: number;
+  maxOpenPositions?: number;
+  maxDailyLossPct?: number;
+  maxOrdersPerMin?: number;
+  maxTotalLots?: number;
+
+  // Phase-4c hot-reloadable additions
+  engineFailThreshold?: number;
+  unmatchedDealExpirySec?: number;
+  safeModeTimeoutSec?: number;
+  backfillBars?: number;
+  backfillChunkSize?: number;
+  specRefreshHour?: number;
+  tickBufferMax?: number;
+  telemetryEndpoint?: string;
+  telemetryPushSec?: number;
+  enableNewsBlackout?: boolean;
+  newsBlackoutFilePath?: string;
+  logLevel?: string;
+  enableFileLogging?: boolean;
+  logJsonFormat?: boolean;
+  enableChartPanel?: boolean;
+  enableChartMarkers?: boolean;
+
+  // ── Read-only (truly load-bearing — restart required) ──
+  engineBaseUrl?: string;
+  symbols?: string;
+  symbolMapping?: string;
+  timeframes?: string;
+  instanceLabel?: string;
+  magicNumber?: number;
+  useAsyncOrders?: boolean;
+  useDllTransport?: boolean;
+  dllBridgeHost?: string;
+  dllBridgePort?: number;
+  dllBridgeUseTls?: boolean;
+  dllBridgeStrictTls?: boolean;
+  dllBridgeCertFingerprint?: string;
+  coordinatorStaleSec?: number;
+  casEscalateThreshold?: number;
+
   // Defensive: tolerate future EA-added keys.
   [key: string]: unknown;
 }
@@ -1565,6 +1695,273 @@ export interface EAAuditTimelineQuery {
   take?: number;
 }
 
+// ── Phase-12: terminal supervisor (cross-broker MT5 lifecycle) ──────────
+
+/** One MT5 install a daemon advertises — broker-account-pinned. */
+export interface TerminalInstallDto {
+  installId: string;
+  name: string;
+  executable: string | null;
+  brokerName: string | null;
+  accountLogin: string | null;
+  /** True when this is the canonical source bundle clone-mt5 reads from
+   *  (`wine-mt5-default` slug, or any install under the original Wine
+   *  prefix).  Admin UI hides the Remove button when set. */
+  isDefault?: boolean;
+}
+
+/** A registered sidecar daemon. */
+export interface TerminalDaemonDto {
+  id: number;
+  daemonId: string;
+  name: string;
+  baseUrl: string;
+  registeredAt: string;
+  lastSeenAt: string;
+  isOnline: boolean;
+  installs: TerminalInstallDto[];
+}
+
+/** One running (or recently-closed) MT5 terminal session. */
+export interface TerminalSessionDto {
+  id: number;
+  daemonId: number;
+  daemonName: string;
+  daemonSessionId: string;
+  installId: string;
+  pid: number | null;
+  status: string;
+  reason: string | null;
+  launchedAt: string;
+  lastSeenAt: string;
+  stoppedAt: string | null;
+}
+
+export interface LaunchTerminalRequest {
+  daemonId: number;
+  installId: string;
+  reason?: string | null;
+}
+
+// ── Phase-15 wave 1: per-daemon install management ──────────────────────
+
+/**
+ * Full install schema returned by GET /admin/terminals/daemons/{id}/installs.
+ * Distinct from the summary in TerminalDaemonDto.installs (which lacks
+ * extraArgs + wineBinary because the dropdown doesn't need them).
+ */
+export interface DaemonInstallDto {
+  installId: string;
+  name: string;
+  executable: string;
+  useWine: boolean;
+  extraArgs: string[];
+  brokerName: string;
+  accountLogin: string;
+  wineBinary: string | null;
+  /** Wine prefix root — auto-derived from `executable` at register time when omitted. */
+  winePrefix?: string | null;
+  /** True when this is the canonical source bundle that `clone-mt5` reads from
+   *  to seed every broker clone (`wine-mt5-default` slug, or any install whose
+   *  executable lives under `~/Library/Application Support/net.metaquotes.wine.metatrader5/`).
+   *  Admin UI MUST hide the Remove button for these — removing the default install
+   *  orphans the daemon and breaks every future `+ Add broker terminal` flow. */
+  isDefault?: boolean;
+}
+
+/** Body for POST /admin/terminals/daemons/{id}/installs/clone-mt5. */
+export interface CloneMt5OnDaemonRequest {
+  brokerSlug: string;
+  sourceAppPath?: string | null;
+}
+
+/**
+ * Returned by clone-mt5.  Tells the operator where the cloned bundle
+ * ended up + what to point the subsequent register call at, plus a
+ * human-readable next-steps script for the UI to render verbatim.
+ */
+export interface DaemonCloneMt5Response {
+  brokerSlug: string;
+  bundlePath: string;
+  expectedExecutable: string;
+  winePrefix: string;
+  bundleId: string;
+  nextSteps: string[];
+}
+
+/** Body for POST /admin/terminals/daemons/{id}/installs/register. */
+export interface RegisterInstallOnDaemonRequest {
+  installId: string;
+  executable: string;
+  name?: string | null;
+  useWine?: boolean;
+  wineBinary?: string | null;
+  extraArgs?: string[];
+}
+
+/** Body for PATCH /admin/terminals/daemons/{id}/installs/{installId}. */
+export interface PatchInstallOnDaemonRequest {
+  name?: string | null;
+  extraArgs?: string[] | null;
+  useWine?: boolean | null;
+  wineBinary?: string | null;
+  brokerName?: string | null;
+  accountLogin?: string | null;
+}
+
+/** Response from POST /admin/terminals/daemons/{id}/restart. */
+export interface DaemonRestartResponse {
+  ok: boolean;
+  scheduledExitInMs: number;
+}
+
+/** Response from POST /admin/terminals/daemons/{id}/rotate-api-key. */
+export interface DaemonRotateApiKeyResponse {
+  ok: boolean;
+  newApiKey: string;
+  remediation: string;
+}
+
+/** Response from GET /admin/terminals/daemons/{id}/logs/tail. */
+export interface DaemonLogTailResponse {
+  path: string;
+  lines: string[];
+  available: boolean;
+}
+
+// ── Orphan MT5 processes ────────────────────────────────────────────────
+
+/** Row from GET /admin/terminals/daemons/{id}/orphans. */
+export interface DaemonOrphanDto {
+  pid: number;
+  name: string | null;
+  exePath: string | null;
+  cmdline: string;
+  startedAt: string;
+  /** install_id whose executable path matches this process — null when no match. */
+  installHint: string | null;
+}
+
+/** Body for POST /admin/terminals/daemons/{id}/orphans/{pid}/kill. */
+export interface KillOrphanRequest {
+  /** SIGTERM grace before SIGKILL (clamped to [0, 60] by the daemon). */
+  graceSeconds?: number;
+  /** Skip SIGTERM and SIGKILL immediately — use when MT5 is unresponsive. */
+  force?: boolean;
+}
+
+/** Response from POST /admin/terminals/daemons/{id}/orphans/{pid}/kill. */
+export interface DaemonKillOrphanResponse {
+  ok: boolean;
+  pid: number;
+  method: string;
+  exitedWithinGrace: boolean;
+}
+
+// ── Observability (Phase-16) ────────────────────────────────────────────
+
+export interface FleetEaSummary {
+  total: number;
+  active: number;
+  idleOverStale: number;
+  disconnected: number;
+  coordinators: number;
+  distinctAccounts: number;
+  distinctVersions: number;
+  oldestHeartbeat: string | null;
+}
+export interface FleetDaemonSummary {
+  total: number;
+  online: number;
+  offline: number;
+}
+export interface FleetSessionSummary {
+  running: number;
+  closed: number;
+}
+export interface FleetObservabilityDto {
+  generatedAt: string;
+  eas: FleetEaSummary;
+  daemons: FleetDaemonSummary;
+  sessions: FleetSessionSummary;
+  staleThresholdMinutes: number;
+}
+
+export interface EAObservabilityHighlights {
+  stateMachine: string | null;
+  safetyStopCategory: string | null;
+  marketState: string | null;
+  brokerConnected: boolean | null;
+  engineReachable: boolean | null;
+  killSwitchActive: boolean | null;
+  globalSafetyStop: boolean | null;
+  httpSuccessRate: number | null;
+  httpCircuitOpen: boolean | null;
+  gvarUsageHigh: boolean | null;
+  gvarTotal: number | null;
+  positionCount: number | null;
+  orderQueueSize: number | null;
+  orderQueueCapacity: number | null;
+  dailyPnL: number | null;
+  latencyP95Ms: number | null;
+  latencyP99Ms: number | null;
+  lastTickAgeSec: number | null;
+  pendingCommandAcks: number | null;
+}
+
+export interface EAObservabilityDto {
+  instanceId: string;
+  status: string;
+  eAVersion: string;
+  isCoordinator: boolean;
+  tradingAccountId: number;
+  registeredAt: string;
+  lastHeartbeat: string;
+  heartbeatAgeSec: number;
+  lastStateUpdatedAt: string | null;
+  stateAgeSec: number | null;
+  highlights: EAObservabilityHighlights | null;
+  rawState: string | null;
+  generatedAt: string;
+}
+
+export interface EngineObservabilityDto {
+  generatedAt: string;
+  dbLatencyMs: number;
+  openPositions: number;
+  workingOrders: number;
+  activeAccounts: number;
+  outboxPending: number | null;
+  metricsEndpoint: string;
+}
+
+/** Phase-9: log level on the wire.  Only WARN/ERROR forwarded today. */
+export type EALogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | string;
+
+/** Returned by GET /admin/ea/{instanceId}/logs. */
+export interface EALogTimelineItem {
+  id: number;
+  occurredAt: string;
+  receivedAt: string;
+  level: EALogLevel;
+  component: string;
+  message: string;
+  correlationId: string | null;
+}
+
+export interface EALogTimelineQuery {
+  from?: string;
+  to?: string;
+  /** Exact match — 'WARN' or 'ERROR'. */
+  level?: EALogLevel;
+  /** Case-insensitive prefix match against Component. */
+  component?: string;
+  /** Free-text substring search across the message body. */
+  search?: string;
+  /** 1..2000. Defaults to 200 server-side. */
+  take?: number;
+}
+
 // ── Command response envelopes ───────────────────────────────────────────────
 
 /** Returned by every per-instance POST /admin/ea/{instanceId}/... command. */
@@ -1616,10 +2013,17 @@ export interface PurgeRetryQueueRequest {
 
 /**
  * Per-instance config push body — Phase 2C admin wrapper around the engine-
- * wide UpdateEAConfigRequest. InstanceId is supplied via the route; the body
- * carries the 10 safety knobs (zero / undefined means "keep current").
+ * wide UpdateEAConfigRequest. InstanceId is supplied via the route, but must
+ * also be echoed in the body so System.Text.Json's `required` enforcement
+ * passes — the controller's route-binding assignment of `command.InstanceId`
+ * runs after JSON deserialisation, so the property is checked while still
+ * unset. The body also carries the 10 safety knobs + Phase-4 hot-reloadables
+ * (zero / undefined means "keep current").
  */
 export interface UpdateInstanceConfigRequest {
+  /** Required by the engine's `required string InstanceId` constraint; mirrors the route param. */
+  instanceId?: string;
+  // Safety knobs (zero / undefined = keep current — legacy semantics)
   maxPosPerSymbol?: number;
   maxLotPerOrder?: number;
   maxSpreadPoints?: number;
@@ -1630,6 +2034,46 @@ export interface UpdateInstanceConfigRequest {
   maxDailyLossPct?: number;
   maxOrdersPerMin?: number;
   maxTotalLots?: number;
+
+  // Phase-4 hot-reloadable input shadows (null = keep current).  The engine
+  // emits the field only when set; the EA's HasField check applies values
+  // that pass per-field range validation and silently ignores the rest.
+  tickThrottleMs?: number | null;
+  signalPollSec?: number | null;
+  positionSyncSec?: number | null;
+  accountSyncSec?: number | null;
+  heartbeatSec?: number | null;
+  commandPollSec?: number | null;
+  entryToleranceBandPct?: number | null;
+  entryToleranceMaxSignalAgeSec?: number | null;
+  maxSlippagePoints?: number | null;
+  maxOrderRetries?: number | null;
+  httpTimeoutData?: number | null;
+  httpTimeoutOrder?: number | null;
+  maxNotionalExposurePct?: number | null;
+  maxPeakDrawdownPct?: number | null;
+  flashCrashPct?: number | null;
+  engineTimeoutSec?: number | null;
+
+  // Phase-4c
+  engineFailThreshold?: number | null;
+  unmatchedDealExpirySec?: number | null;
+  safeModeTimeoutSec?: number | null;
+  backfillBars?: number | null;
+  backfillChunkSize?: number | null;
+  specRefreshHour?: number | null;
+  tickBufferMax?: number | null;
+  telemetryEndpoint?: string | null;
+  telemetryPushSec?: number | null;
+  enableNewsBlackout?: boolean | null;
+  newsBlackoutFilePath?: string | null;
+  logLevel?: string | null;
+  enableFileLogging?: boolean | null;
+  logJsonFormat?: boolean | null;
+  enableChartPanel?: boolean | null;
+  enableChartMarkers?: boolean | null;
+  /** Phase-13: owned-symbol CSV.  EA rejects empty / "CHART" / "ALL" and refuses removals that orphan open positions. */
+  symbols?: string | null;
 }
 
 // ── Fleet command request bodies (mirror per-instance, no InstanceId) ────────

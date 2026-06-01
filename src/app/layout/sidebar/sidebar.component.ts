@@ -487,10 +487,12 @@ export class SidebarComponent {
       label: 'System',
       items: [
         { label: 'Engine Overview', route: '/engine-overview', icon: '🩺' },
+        { label: 'Fleet Health', route: '/fleet-health', icon: '📊', policy: 'Operator' },
         { label: 'Health', route: '/system-health', icon: '💚' },
         { label: 'Logs', route: '/system-logs', icon: '📝' },
         { label: 'Worker Health', route: '/worker-health', icon: '⚡' },
         { label: 'EA Instances', route: '/ea-instances', icon: '🛰' },
+        { label: 'Terminals', route: '/terminals', icon: '🖥', policy: 'Operator' },
         { label: 'Config', route: '/engine-config', icon: '⚙', policy: 'Operator' },
         { label: 'Audit Trail', route: '/audit-trail', icon: '📜' },
         { label: 'Drawdown', route: '/drawdown-recovery', icon: '📉' },

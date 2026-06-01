@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  signal,
+} from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -6,16 +13,26 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { catchError, finalize, map, of } from 'rxjs';
 
 import { EAInstancesService } from '@core/services/ea-instances.service';
+import { EAAdminService } from '@core/services/ea-admin.service';
 import { AuditTrailService } from '@core/services/audit-trail.service';
 import { NotificationService } from '@core/notifications/notification.service';
-import type { EAInstanceDto, UpdateEAConfigRequest } from '@core/api/api.types';
+import type { EAInstanceDetail, EAInstanceDto, UpdateEAConfigRequest } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { ProgressBarComponent } from '@shared/components/ui/progress-bar/progress-bar.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+
+import { EAStatePanelComponent } from '../../components/ea-state-panel/ea-state-panel.component';
+import { EAAuditTimelineComponent } from '../../components/ea-audit-timeline/ea-audit-timeline.component';
+import { EAControlPanelComponent } from '../../components/ea-control-panel/ea-control-panel.component';
+import { EAConfigPanelComponent } from '../../components/ea-config-panel/ea-config-panel.component';
+import { EAPositionsPanelComponent } from '../../components/ea-positions-panel/ea-positions-panel.component';
+import { EAPendingOrdersPanelComponent } from '../../components/ea-pending-orders-panel/ea-pending-orders-panel.component';
+import { EALogsPanelComponent } from '../../components/ea-logs-panel/ea-logs-panel.component';
 
 interface ConfigForm {
   // Per-instance safety
@@ -43,7 +60,15 @@ interface ConfigForm {
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
+    ProgressBarComponent,
     RelativeTimePipe,
+    EAStatePanelComponent,
+    EAAuditTimelineComponent,
+    EAControlPanelComponent,
+    EAConfigPanelComponent,
+    EAPositionsPanelComponent,
+    EAPendingOrdersPanelComponent,
+    EALogsPanelComponent,
   ],
   template: `
     <div class="page">
@@ -57,12 +82,26 @@ interface ConfigForm {
         <button
           type="button"
           class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
+          (click)="refreshAll()"
+          [disabled]="anyLoading()"
         >
-          Refresh
+          @if (anyLoading()) {
+            Refreshing…
+          } @else {
+            Refresh
+          }
         </button>
       </app-page-header>
+
+      <!--
+        Always-visible loading affordance.  The per-section shimmers from the
+        earlier change handle initial empty states, but real fetches resolve
+        in <100ms locally and the shimmer flashes too briefly to register.
+        This thin bar gives a consistent "something is happening" cue during
+        any in-flight fetch (initial mount, 15s background polls, manual
+        Refresh, post-command refresh).
+      -->
+      <ui-progress-bar [active]="anyLoading()" />
 
       @if (loading()) {
         <app-card-skeleton [lines]="6" />
@@ -131,6 +170,56 @@ interface ConfigForm {
           }
         </section>
 
+        <!-- Phase-1 admin: rich-state envelope visualization -->
+        <app-ea-state-panel
+          [state]="adminState()"
+          [lastUpdated]="adminLastStateUpdatedAt()"
+          [loading]="detailLoading()"
+        />
+
+        <!-- Phase-5b admin: live open positions + working orders, narrowed
+             to symbols this specific EA instance owns.  Without the
+             ownedSymbolsCsv input a sibling's detail page surfaces the
+             parent's positions and pending orders, which mis-attributes
+             P&L to the wrong instance.  See Phase-14. -->
+        <app-ea-positions-panel
+          [tradingAccountId]="ea()!.tradingAccountId"
+          [instanceId]="ea()!.instanceId"
+          [ownedSymbolsCsv]="ea()!.symbols"
+        />
+        <app-ea-pending-orders-panel
+          [tradingAccountId]="ea()!.tradingAccountId"
+          [ownedSymbolsCsv]="ea()!.symbols"
+        />
+
+        <!-- Phase-1/2/3 admin: operator control surface (9 actions, inline confirm dialogs) -->
+        <app-ea-control-panel
+          [instanceId]="ea()!.instanceId"
+          (commandQueued)="onCommandQueued($event)"
+        />
+
+        <!-- Phase-4 admin: hot-reload input editor + read-only inspection -->
+        <app-ea-config-panel
+          [instanceId]="ea()!.instanceId"
+          [inputs]="adminInputs()"
+          [loading]="detailLoading()"
+          (configPushed)="onCommandQueued('configPush')"
+        />
+
+        <!-- Phase-9 admin: live WARN/ERROR log tail forwarded from the EA -->
+        <app-ea-logs-panel [instanceId]="ea()!.instanceId" />
+
+        <!-- Phase-2A admin: per-instance safety-audit timeline -->
+        <app-ea-audit-timeline [instanceId]="ea()!.instanceId" />
+
+        <!--
+          Phase 4d: the "Push safety config…" button is retired — all 10
+          safety knobs are now covered by the new EAConfigPanel in the
+          "Safety — per-instance" + "Safety — fleet" groups, which post
+          the same payload through /admin/ea/{instanceId}/config.
+          "Refresh symbol specs" stays — it's a coordinator-only action
+          that doesn't fit the per-instance config push surface.
+        -->
         <section class="actions-row">
           <button
             type="button"
@@ -139,14 +228,6 @@ interface ConfigForm {
             [disabled]="submitting()"
           >
             Refresh symbol specs
-          </button>
-          <button
-            type="button"
-            class="action-btn warn"
-            (click)="openConfigPush()"
-            [disabled]="submitting()"
-          >
-            Push safety config…
           </button>
         </section>
       }
@@ -550,6 +631,7 @@ interface ConfigForm {
 })
 export class EaDetailPageComponent {
   private readonly service = inject(EAInstancesService);
+  private readonly admin = inject(EAAdminService);
   private readonly auditTrail = inject(AuditTrailService);
   private readonly notify = inject(NotificationService);
   private readonly route = inject(ActivatedRoute);
@@ -575,9 +657,107 @@ export class EaDetailPageComponent {
     return list.find((x) => x.id === want) ?? null;
   });
 
+  /**
+   * Phase-1 admin detail poll.  The list-based `ea()` carries everything
+   * the legacy view needed; the admin endpoint adds the rich-state
+   * envelope and the Phase-2 LastStateUpdatedAt.  Keyed off the resolved
+   * `instanceId` so it only fires once the list lookup succeeds.
+   */
+  protected readonly detailResource = createPolledResource(
+    () => {
+      const instanceId = this.ea()?.instanceId;
+      if (!instanceId) {
+        return of<EAInstanceDetail | null>(null);
+      }
+      return this.admin.getDetail(instanceId).pipe(
+        map((res) => res.data ?? null),
+        catchError(() => of<EAInstanceDetail | null>(null)),
+      );
+    },
+    { intervalMs: 15_000 },
+  );
+
+  protected readonly adminState = computed(() => this.detailResource.value()?.state ?? null);
+  protected readonly adminLastStateUpdatedAt = computed(
+    () => this.detailResource.value()?.lastStateUpdatedAt ?? null,
+  );
+  /** Phase-4: the inputs sub-object the EA emits inside the rich-state envelope. */
+  protected readonly adminInputs = computed(() => this.adminState()?.inputs ?? null);
+
+  /**
+   * detailResource's fetcher reads `this.ea()?.instanceId` — but on initial
+   * page mount the fleet-list resource hasn't returned yet, so the first
+   * fire sees ea()=null and returns `of(null)`.  Without this effect we'd
+   * then wait the full 15-second poll cycle before refetching, during which
+   * the panels show the "no envelope yet" empty state even though the
+   * envelope is sitting in the database.  Watching ea() and refresh()-ing
+   * the moment its instanceId resolves closes the gap.  Tracks the last
+   * fetched instanceId so a second fire on the same id doesn't re-poll.
+   */
+  private lastFetchedInstanceId: string | null = null;
+  private readonly _refreshOnEa = effect(() => {
+    const id = this.ea()?.instanceId ?? null;
+    if (id && id !== this.lastFetchedInstanceId) {
+      this.lastFetchedInstanceId = id;
+      this.detailResource.refresh();
+    }
+  });
+
+  /**
+   * Triggered by the control panel after a successful command queue.  Both
+   * resources are refreshed so the state envelope reflects the new posture
+   * within a cycle, and the timeline picks up the audit entry the command
+   * handler emitted.
+   */
+  protected onCommandQueued(_actionKey: string): void {
+    this.resource.refresh();
+    this.detailResource.refresh();
+  }
+
   protected readonly loading = computed(
     () => this.resource.loading() && (this.resource.value() ?? null) === null,
   );
+
+  /**
+   * True whenever *either* the fleet-list resource or the admin detail
+   * resource has an outstanding fetch.  Drives the always-visible
+   * `<ui-progress-bar>` in the page header so users get a consistent
+   * "something is happening" cue — the per-section shimmers handle initial
+   * empty-state, but real fetches complete in <100ms locally and the
+   * shimmer flashes too briefly to perceive.  This bar pulses for every
+   * 15-second background poll too, which doubles as an "auto-refresh is
+   * alive" signal.
+   */
+  protected readonly anyLoading = computed(
+    () => this.resource.loading() || this.detailResource.loading(),
+  );
+
+  /** Manual refresh — kick both resources at once instead of just the list. */
+  protected refreshAll(): void {
+    this.resource.refresh();
+    this.detailResource.refresh();
+  }
+
+  /**
+   * True while the admin detail endpoint is mid-flight and the state envelope
+   * hasn't been received yet.  Passed to the child state + config panels so
+   * they shimmer placeholder rows instead of the "no envelope yet" copy on
+   * first paint.  After the first successful response we stay quiet on
+   * subsequent polls (envelope cached and re-rendered in-place).
+   *
+   * The third branch covers the bridging window: the detailResource fires
+   * once on mount with ea()=null and returns of(null) synchronously
+   * (loading flips back to false, value stays null), then the effect above
+   * triggers a refetch on the next microtask after ea() resolves.  During
+   * that handful of milliseconds loading() is false and value() is null but
+   * we definitely *intend* to fetch, so we still want to shimmer.
+   */
+  protected readonly detailLoading = computed(() => {
+    const value = this.detailResource.value();
+    if (value !== null) return false;
+    if (this.detailResource.loading()) return true;
+    return !!this.ea()?.instanceId;
+  });
 
   protected readonly ownedSymbols = computed(() => {
     const s = this.ea()?.symbols ?? '';
