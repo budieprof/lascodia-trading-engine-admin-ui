@@ -235,51 +235,55 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
             <span class="muted">Completed runs where the search beat the baseline the most</span>
           </header>
           @if (topLifts().length > 0) {
-            <table class="op-board-table">
-              <thead>
-                <tr>
-                  <th>Run</th>
-                  <th class="num">Strategy</th>
-                  <th class="num">Iterations</th>
-                  <th class="num">Baseline</th>
-                  <th class="num">Best</th>
-                  <th class="num">Δ</th>
-                  <th>Trigger</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (r of topLifts(); track r.id) {
-                  <tr (click)="select(r)">
-                    <td class="mono">#{{ r.id }}</td>
-                    <td class="num mono">#{{ r.strategyId }}</td>
-                    <td class="num mono">{{ r.iterations }}</td>
-                    <td class="num mono">
-                      {{
-                        r.baselineHealthScore !== null
-                          ? (r.baselineHealthScore | number: '1.3-3')
-                          : '—'
-                      }}
-                    </td>
-                    <td class="num mono">
-                      {{ r.bestHealthScore !== null ? (r.bestHealthScore | number: '1.3-3') : '—' }}
-                    </td>
-                    <td
-                      class="num mono"
-                      [class.profit]="(r.bestHealthScore ?? 0) > (r.baselineHealthScore ?? 0)"
-                      [class.loss]="(r.bestHealthScore ?? 0) < (r.baselineHealthScore ?? 0)"
-                    >
-                      @if (r.bestHealthScore !== null && r.baselineHealthScore !== null) {
-                        {{ r.bestHealthScore - r.baselineHealthScore >= 0 ? '+' : ''
-                        }}{{ r.bestHealthScore - r.baselineHealthScore | number: '1.3-3' }}
-                      } @else {
-                        —
-                      }
-                    </td>
-                    <td class="mono">{{ r.triggerType }}</td>
+            <div class="op-table-scroll">
+              <table class="op-board-table">
+                <thead>
+                  <tr>
+                    <th>Run</th>
+                    <th class="num">Strategy</th>
+                    <th class="num">Iterations</th>
+                    <th class="num">Baseline</th>
+                    <th class="num">Best</th>
+                    <th class="num">Δ</th>
+                    <th>Trigger</th>
                   </tr>
-                }
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  @for (r of topLifts(); track r.id) {
+                    <tr (click)="select(r)">
+                      <td class="mono">#{{ r.id }}</td>
+                      <td class="num mono">#{{ r.strategyId }}</td>
+                      <td class="num mono">{{ r.iterations }}</td>
+                      <td class="num mono">
+                        {{
+                          r.baselineHealthScore !== null
+                            ? (r.baselineHealthScore | number: '1.3-3')
+                            : '—'
+                        }}
+                      </td>
+                      <td class="num mono">
+                        {{
+                          r.bestHealthScore !== null ? (r.bestHealthScore | number: '1.3-3') : '—'
+                        }}
+                      </td>
+                      <td
+                        class="num mono"
+                        [class.profit]="(r.bestHealthScore ?? 0) > (r.baselineHealthScore ?? 0)"
+                        [class.loss]="(r.bestHealthScore ?? 0) < (r.baselineHealthScore ?? 0)"
+                      >
+                        @if (r.bestHealthScore !== null && r.baselineHealthScore !== null) {
+                          {{ r.bestHealthScore - r.baselineHealthScore >= 0 ? '+' : ''
+                          }}{{ r.bestHealthScore - r.baselineHealthScore | number: '1.3-3' }}
+                        } @else {
+                          —
+                        }
+                      </td>
+                      <td class="mono">{{ r.triggerType }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
           } @else {
             <p class="muted" style="padding: var(--space-4)">
               No completed runs with measurable lift yet.
@@ -293,40 +297,42 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
             <span class="muted">Runs and outcomes grouped by strategy</span>
           </header>
           @if (perStrategyBreakdown().length > 0) {
-            <table class="op-board-table">
-              <thead>
-                <tr>
-                  <th>Strategy</th>
-                  <th class="num">Runs</th>
-                  <th class="num">Completed</th>
-                  <th class="num">Abandoned</th>
-                  <th class="num">Avg iter</th>
-                  <th class="num">Best lift</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (row of perStrategyBreakdown(); track row.strategyId) {
+            <div class="op-table-scroll">
+              <table class="op-board-table">
+                <thead>
                   <tr>
-                    <td class="mono">#{{ row.strategyId }}</td>
-                    <td class="num mono">{{ row.runs }}</td>
-                    <td class="num mono profit">{{ row.completed }}</td>
-                    <td class="num mono" [class.warn]="row.abandoned > 0">{{ row.abandoned }}</td>
-                    <td class="num mono">{{ row.avgIterations.toFixed(1) }}</td>
-                    <td
-                      class="num mono"
-                      [class.profit]="row.bestLift !== null && row.bestLift > 0"
-                      [class.loss]="row.bestLift !== null && row.bestLift < 0"
-                    >
-                      @if (row.bestLift !== null) {
-                        {{ row.bestLift >= 0 ? '+' : '' }}{{ row.bestLift | number: '1.3-3' }}
-                      } @else {
-                        —
-                      }
-                    </td>
+                    <th>Strategy</th>
+                    <th class="num">Runs</th>
+                    <th class="num">Completed</th>
+                    <th class="num">Abandoned</th>
+                    <th class="num">Avg iter</th>
+                    <th class="num">Best lift</th>
                   </tr>
-                }
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  @for (row of perStrategyBreakdown(); track row.strategyId) {
+                    <tr>
+                      <td class="mono">#{{ row.strategyId }}</td>
+                      <td class="num mono">{{ row.runs }}</td>
+                      <td class="num mono profit">{{ row.completed }}</td>
+                      <td class="num mono" [class.warn]="row.abandoned > 0">{{ row.abandoned }}</td>
+                      <td class="num mono">{{ row.avgIterations.toFixed(1) }}</td>
+                      <td
+                        class="num mono"
+                        [class.profit]="row.bestLift !== null && row.bestLift > 0"
+                        [class.loss]="row.bestLift !== null && row.bestLift < 0"
+                      >
+                        @if (row.bestLift !== null) {
+                          {{ row.bestLift >= 0 ? '+' : '' }}{{ row.bestLift | number: '1.3-3' }}
+                        } @else {
+                          —
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
           }
         </section>
       </div>
@@ -731,6 +737,20 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
         font-weight: var(--font-semibold);
         text-transform: uppercase;
         letter-spacing: 0.04em;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      /* Bound the Biggest-lifts + Per-strategy panels — these used to
+         render every row inline, so the page stretched to ~12k px tall
+         when the per-strategy breakdown had hundreds of rows. Each
+         table becomes a scroll surface; the sticky thead above keeps
+         the column labels pinned while the operator scrolls inside the
+         panel. The third "All optimization runs" section is server-
+         paged via app-data-table and stays uncapped. */
+      .op-table-scroll {
+        max-height: 420px;
+        overflow: auto;
       }
       .op-board-table th.num,
       .op-board-table td.num {
