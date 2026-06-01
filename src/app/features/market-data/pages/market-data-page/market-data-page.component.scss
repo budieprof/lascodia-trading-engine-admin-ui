@@ -592,24 +592,34 @@
   flex: 1;
 }
 
-/* Watch ribbon */
+/* Watch ribbon — single horizontal strip that scrolls if it can't fit.
+   Grid wrapping made 11 pairs render as 8 + 3 with an awkward partial
+   row of whitespace; a flex strip with fixed-width cards always looks
+   balanced regardless of pair count (3, 8, 20+). The horizontal scroll
+   bar appears only when needed. */
 .watch-ribbon {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  display: flex;
   gap: var(--space-2);
   margin-top: var(--space-3);
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px; /* room for the scrollbar without clipping borders */
+  scroll-snap-type: x proximity;
 }
-@media (max-width: 1400px) {
-  .watch-ribbon {
-    grid-template-columns: repeat(4, 1fr);
-  }
+.watch-ribbon::-webkit-scrollbar {
+  height: 6px;
 }
-@media (max-width: 720px) {
-  .watch-ribbon {
-    grid-template-columns: repeat(2, 1fr);
-  }
+.watch-ribbon::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+.watch-ribbon::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
 }
 .watch-card {
+  flex: 0 0 auto;
+  width: 180px;
+  scroll-snap-align: start;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
