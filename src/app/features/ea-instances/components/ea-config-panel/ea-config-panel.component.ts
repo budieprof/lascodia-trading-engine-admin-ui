@@ -510,6 +510,15 @@ export class EAConfigPanelComponent {
           badge: 'live',
           takesEffect: 'Next SignalProcessor::Poll cycle — older signals are skipped locally.',
         },
+        {
+          key: 'maxAdverseTpDriftPct',
+          label: 'Max adverse drift (fraction of TP distance, 0 = disabled)',
+          kind: 'double',
+          step: 0.01,
+          badge: 'live',
+          takesEffect:
+            'Next SignalProcessor::Poll cycle — signals whose market has overshot entry past this fraction of |TP-entry| are skipped locally.',
+        },
       ],
     },
     {
@@ -940,6 +949,7 @@ type HotReloadKey =
   | 'entryToleranceBandPct'
   | 'entryToleranceMaxSignalAgeSec'
   | 'maxSignalAgeSec'
+  | 'maxAdverseTpDriftPct'
   | 'maxSlippagePoints'
   | 'maxOrderRetries'
   | 'httpTimeoutData'

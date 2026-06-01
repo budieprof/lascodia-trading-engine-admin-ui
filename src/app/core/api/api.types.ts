@@ -1575,6 +1575,7 @@ export interface EAConfigInputs {
   entryToleranceBandPct?: number;
   entryToleranceMaxSignalAgeSec?: number;
   maxSignalAgeSec?: number;
+  maxAdverseTpDriftPct?: number;
   maxSlippagePoints?: number;
   maxOrderRetries?: number;
   httpTimeoutData?: number;
@@ -2048,6 +2049,7 @@ export interface UpdateInstanceConfigRequest {
   entryToleranceBandPct?: number | null;
   entryToleranceMaxSignalAgeSec?: number | null;
   maxSignalAgeSec?: number | null;
+  maxAdverseTpDriftPct?: number | null;
   maxSlippagePoints?: number | null;
   maxOrderRetries?: number | null;
   httpTimeoutData?: number | null;
