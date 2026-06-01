@@ -1700,6 +1700,55 @@ export interface EAAuditTimelineQuery {
   take?: number;
 }
 
+// ── v8.47.172: per-(EA × account × signal) rejection log ────────────────
+
+/**
+ * Top-level grouping for {@link SignalRejectionEventDto}.  See
+ * `docs/SIGNAL_REJECTION_VISIBILITY.md` for the canonical taxonomy of
+ * `subStage` values per stage.
+ */
+export type SignalRejectionStage = 'Local' | 'Engine' | 'Broker';
+
+/**
+ * One row of the rejection log — every reason an EA / engine / broker
+ * declined to act on a signal for a specific account.  Returned by
+ * `GET /signal-rejection` (paged list, admin filters) and
+ * `GET /trade-signal/{id}/rejections` (per-signal account-attempts panel).
+ */
+export interface SignalRejectionEventDto {
+  id: number;
+  tradeSignalId: number;
+  tradingAccountId: number;
+  eaInstanceId: string;
+  stage: SignalRejectionStage;
+  subStage: string;
+  reason: string;
+  metadataJson: string | null;
+  correlationId: string | null;
+  createdAt: string;
+  /** Joined from TradeSignal.Symbol for admin-UI rendering convenience. */
+  symbol: string | null;
+  /** Joined from TradeSignal.Direction. */
+  signalDirection: string | null;
+}
+
+/** Filter parameters for the rejection-log queries. */
+export interface SignalRejectionQuery {
+  currentPage?: number;
+  itemCountPerPage?: number;
+  eaInstanceId?: string;
+  tradingAccountId?: number;
+  tradingAccountIds?: number[];
+  signalId?: number;
+  /** "Local" | "Engine" | "Broker" — case-insensitive on the engine side. */
+  stage?: SignalRejectionStage | string;
+  /** Substring match against SubStage. */
+  subStage?: string;
+  symbol?: string;
+  createdFrom?: string;
+  createdTo?: string;
+}
+
 // ── Phase-12: terminal supervisor (cross-broker MT5 lifecycle) ──────────
 
 /** One MT5 install a daemon advertises — broker-account-pinned. */

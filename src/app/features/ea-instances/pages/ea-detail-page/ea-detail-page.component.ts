@@ -33,6 +33,7 @@ import { EAConfigPanelComponent } from '../../components/ea-config-panel/ea-conf
 import { EAPositionsPanelComponent } from '../../components/ea-positions-panel/ea-positions-panel.component';
 import { EAPendingOrdersPanelComponent } from '../../components/ea-pending-orders-panel/ea-pending-orders-panel.component';
 import { EALogsPanelComponent } from '../../components/ea-logs-panel/ea-logs-panel.component';
+import { EARejectionsPanelComponent } from '../../components/ea-rejections-panel/ea-rejections-panel.component';
 
 interface ConfigForm {
   // Per-instance safety
@@ -69,6 +70,7 @@ interface ConfigForm {
     EAPositionsPanelComponent,
     EAPendingOrdersPanelComponent,
     EALogsPanelComponent,
+    EARejectionsPanelComponent,
   ],
   template: `
     <div class="page">
@@ -211,6 +213,7 @@ interface ConfigForm {
 
         <!-- Phase-2A admin: per-instance safety-audit timeline -->
         <app-ea-audit-timeline [instanceId]="ea()!.instanceId" />
+        <app-ea-rejections-panel [instanceId]="ea()!.instanceId" />
 
         <!--
           Phase 4d: the "Push safety config…" button is retired — all 10
