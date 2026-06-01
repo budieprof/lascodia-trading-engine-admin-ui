@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { catchError, map, of } from 'rxjs';
 
 import { SignalRejectionsService } from '@core/services/signal-rejections.service';
@@ -40,6 +41,7 @@ const STAGE_OPTIONS: ReadonlyArray<{ value: StageFilter; label: string }> = [
   imports: [
     DatePipe,
     FormsModule,
+    RouterLink,
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
@@ -120,7 +122,13 @@ const STAGE_OPTIONS: ReadonlyArray<{ value: StageFilter; label: string }> = [
                 <span class="time" [title]="row.createdAt | date: 'medium'">
                   {{ row.createdAt | relativeTime }}
                 </span>
-                <span class="signal">#{{ row.tradeSignalId }}</span>
+                <a
+                  class="signal"
+                  [routerLink]="['/signals', row.tradeSignalId]"
+                  (click)="$event.stopPropagation()"
+                  title="Open signal detail — cross-account attempts"
+                  >#{{ row.tradeSignalId }}</a
+                >
                 <span class="symbol">{{ row.symbol ?? '—' }}</span>
                 <span class="stage" [attr.data-stage]="row.stage">{{ row.stage }}</span>
                 <span class="substage">{{ row.subStage }}</span>
