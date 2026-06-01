@@ -238,7 +238,13 @@ const STAGE_OPTIONS: ReadonlyArray<{ value: StageFilter; label: string }> = [
   ],
 })
 export class EARejectionsPanelComponent {
-  readonly instanceId = input.required<string>();
+  // Intentionally non-required: createPolledResource invokes the fetcher
+  // synchronously inside its field-initializer, which would otherwise
+  // hit Angular's NG0950 ("required input not yet available") because
+  // parent template bindings don't flush until after construction.
+  // The fetcher's `if (!id)` guard handles the empty first tick and
+  // picks up the real instance id on the next polling cycle.
+  readonly instanceId = input<string>('');
   readonly stageOptions = STAGE_OPTIONS;
 
   readonly stageFilter = signal<StageFilter>('all');
