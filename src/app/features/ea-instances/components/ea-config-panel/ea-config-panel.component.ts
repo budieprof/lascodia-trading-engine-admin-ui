@@ -496,11 +496,19 @@ export class EAConfigPanelComponent {
         },
         {
           key: 'entryToleranceMaxSignalAgeSec',
-          label: 'Max signal age (s)',
+          label: 'Max signal age (s) — tolerance band gate',
           kind: 'int',
           step: 1,
           badge: 'live',
           takesEffect: 'Next signal ClassifyExecutionType.',
+        },
+        {
+          key: 'maxSignalAgeSec',
+          label: 'Hard staleness gate (s, 0 = disabled)',
+          kind: 'int',
+          step: 1,
+          badge: 'live',
+          takesEffect: 'Next SignalProcessor::Poll cycle — older signals are skipped locally.',
         },
       ],
     },
@@ -931,6 +939,7 @@ type HotReloadKey =
   | 'commandPollSec'
   | 'entryToleranceBandPct'
   | 'entryToleranceMaxSignalAgeSec'
+  | 'maxSignalAgeSec'
   | 'maxSlippagePoints'
   | 'maxOrderRetries'
   | 'httpTimeoutData'
