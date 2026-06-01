@@ -18,7 +18,7 @@ import { NotificationService } from '@core/notifications/notification.service';
 import type { AdminFleetCommandResult, ResponseData } from '@core/api/api.types';
 
 /**
- * Fleet-bulk operations bar for the EA-instances list page.  Renders six
+ * Fleet-bulk operations bar for the EA-instances list page.  Renders seven
  * actions that fan out across every live EA instance (same liveness filter
  * the engine uses: Active + heartbeat within 10 min).  Each action opens an
  * inline confirm dialog with a required reason on destructive variants and
@@ -490,6 +490,15 @@ export class FleetActionsBarComponent {
       confirmLabel: 'Reset all breakers',
       tone: 'info',
     },
+    {
+      key: 'restart',
+      label: 'Restart (all)',
+      commandType: 'RestartInstance',
+      description:
+        'In-place restart of every live EA via ChartApplyTemplate. Each chart deinitalizes (REASON_TEMPLATE), reloads the .ex5 from disk, and runs OnInit on the fresh binary — the standard post-deploy fleet refresh. Open positions and trailing stops survive (the broker holds them); the EA reconciles back on OnInit. v8.47.175 config overrides on each instance are replayed from disk so operator-pushed shadows persist.\n\nFirst-time-after-upgrade caveat: an EA upgraded from a pre-Phase-10 build has no chart template seeded yet — its first restart ack reads "template not seeded; detach + re-attach manually once". Subsequent restarts work normally.',
+      confirmLabel: 'Restart fleet',
+      tone: 'warn',
+    },
   ];
 
   protected readonly open = signal(false);
@@ -608,6 +617,8 @@ export class FleetActionsBarComponent {
           symbol: this.resetScope === 'symbol' ? this.resetSymbol.trim() : null,
           reason,
         });
+      case 'restart':
+        return this.admin.fleetRestart({ reason });
     }
   }
 }
@@ -619,7 +630,8 @@ type FleetKey =
   | 'killSwitch'
   | 'releaseKillSwitch'
   | 'flatten'
-  | 'resetCircuitBreaker';
+  | 'resetCircuitBreaker'
+  | 'restart';
 
 interface FleetAction {
   key: FleetKey;

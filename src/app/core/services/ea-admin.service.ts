@@ -16,6 +16,7 @@ import type {
   FleetKillSwitchRequest,
   FleetReleaseKillSwitchRequest,
   FleetResetCircuitBreakerRequest,
+  FleetRestartRequest,
   FleetSafetyStopRequest,
   FlattenInstanceRequest,
   FlushRetryQueueRequest,
@@ -283,5 +284,9 @@ export class EAAdminService {
       `${this.base}/all/circuit-breaker/reset`,
       body,
     );
+  }
+
+  fleetRestart(body: FleetRestartRequest): Observable<ResponseData<AdminFleetCommandResult>> {
+    return this.api.post<ResponseData<AdminFleetCommandResult>>(`${this.base}/all/restart`, body);
   }
 }

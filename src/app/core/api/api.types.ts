@@ -2159,6 +2159,9 @@ export interface FleetResetCircuitBreakerRequest {
   symbol?: string | null;
   reason?: string | null;
 }
+export interface FleetRestartRequest {
+  reason?: string | null;
+}
 
 export interface DeadLetterDto {
   id: number;
