@@ -350,31 +350,33 @@ interface AnomalyFlag {
               <h3>By symbol</h3>
               <span class="muted">{{ symbolBuckets().length }} touched</span>
             </header>
-            <table class="board-table">
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th class="num">N</th>
-                  <th class="num">Share</th>
-                  <th>Latest</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (b of symbolBuckets(); track b.key) {
+            <div class="table-scroll table-scroll--rollup">
+              <table class="board-table">
+                <thead>
                   <tr>
-                    <td class="mono">{{ b.key }}</td>
-                    <td class="num">{{ b.count }}</td>
-                    <td class="num">
-                      <span class="bar-track">
-                        <span class="bar-fill green" [style.width.%]="b.share * 100"></span>
-                      </span>
-                      <span class="small muted">{{ b.share * 100 | number: '1.0-0' }}%</span>
-                    </td>
-                    <td class="time">{{ b.recentAt | relativeTime }}</td>
+                    <th>Symbol</th>
+                    <th class="num">N</th>
+                    <th class="num">Share</th>
+                    <th>Latest</th>
                   </tr>
-                }
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  @for (b of symbolBuckets(); track b.key) {
+                    <tr>
+                      <td class="mono">{{ b.key }}</td>
+                      <td class="num">{{ b.count }}</td>
+                      <td class="num">
+                        <span class="bar-track">
+                          <span class="bar-fill green" [style.width.%]="b.share * 100"></span>
+                        </span>
+                        <span class="small muted">{{ b.share * 100 | number: '1.0-0' }}%</span>
+                      </td>
+                      <td class="time">{{ b.recentAt | relativeTime }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
           </section>
 
           <!-- By strategy rollup -->
@@ -383,42 +385,44 @@ interface AnomalyFlag {
               <h3>By strategy</h3>
               <span class="muted">{{ strategyRollups().length }} touched</span>
             </header>
-            <table class="board-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Symbols</th>
-                  <th class="num">Rejected</th>
-                  <th class="num">Expired</th>
-                  <th class="num">Total</th>
-                  <th>Top reason</th>
-                  <th>Latest</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (r of strategyRollups(); track r.strategyId) {
+            <div class="table-scroll table-scroll--rollup">
+              <table class="board-table">
+                <thead>
                   <tr>
-                    <td>
-                      <a class="link mono" [routerLink]="['/strategies', r.strategyId]"
-                        >#{{ r.strategyId }}</a
-                      >
-                    </td>
-                    <td>
-                      <div class="symbol-chips">
-                        @for (s of r.symbols; track s) {
-                          <span class="mono small chip">{{ s }}</span>
-                        }
-                      </div>
-                    </td>
-                    <td class="num">{{ r.rejectedCount }}</td>
-                    <td class="num">{{ r.expiredCount }}</td>
-                    <td class="num">{{ r.count }}</td>
-                    <td class="reason small">{{ r.topReason }}</td>
-                    <td class="time">{{ r.recentAt | relativeTime }}</td>
+                    <th>#</th>
+                    <th>Symbols</th>
+                    <th class="num">Rejected</th>
+                    <th class="num">Expired</th>
+                    <th class="num">Total</th>
+                    <th>Top reason</th>
+                    <th>Latest</th>
                   </tr>
-                }
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  @for (r of strategyRollups(); track r.strategyId) {
+                    <tr>
+                      <td>
+                        <a class="link mono" [routerLink]="['/strategies', r.strategyId]"
+                          >#{{ r.strategyId }}</a
+                        >
+                      </td>
+                      <td>
+                        <div class="symbol-chips">
+                          @for (s of r.symbols; track s) {
+                            <span class="mono small chip">{{ s }}</span>
+                          }
+                        </div>
+                      </td>
+                      <td class="num">{{ r.rejectedCount }}</td>
+                      <td class="num">{{ r.expiredCount }}</td>
+                      <td class="num">{{ r.count }}</td>
+                      <td class="reason small">{{ r.topReason }}</td>
+                      <td class="time">{{ r.recentAt | relativeTime }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
           </section>
 
           <!-- Recent events table -->
@@ -427,48 +431,52 @@ interface AnomalyFlag {
               <h3>Recent events</h3>
               <span class="muted">{{ filteredRows().length }} shown</span>
             </header>
-            <table class="board-table">
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>Signal</th>
-                  <th>Symbol</th>
-                  <th>Dir</th>
-                  <th>Strategy</th>
-                  <th>Status</th>
-                  <th>Source</th>
-                  <th>Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (s of filteredRows(); track s.id) {
+            <div class="table-scroll table-scroll--events">
+              <table class="board-table">
+                <thead>
                   <tr>
-                    <td class="time" [title]="s.generatedAt">
-                      {{ s.generatedAt | date: 'HH:mm:ss' }}
-                    </td>
-                    <td>
-                      <a class="link mono" [routerLink]="['/trade-signals', s.id]">#{{ s.id }}</a>
-                    </td>
-                    <td class="mono">{{ s.symbol ?? '—' }}</td>
-                    <td>
-                      <span class="dir-pill" [attr.data-dir]="s.direction">{{ s.direction }}</span>
-                    </td>
-                    <td>
-                      <a class="link" [routerLink]="['/strategies', s.strategyId]"
-                        >#{{ s.strategyId }}</a
-                      >
-                    </td>
-                    <td>
-                      <span class="status" [attr.data-status]="s.status">{{ s.status }}</span>
-                    </td>
-                    <td>
-                      <span class="src-pill" [attr.data-source]="s.source">{{ s.source }}</span>
-                    </td>
-                    <td class="reason small">{{ s.reasonDetail || s.reasonCategory }}</td>
+                    <th>When</th>
+                    <th>Signal</th>
+                    <th>Symbol</th>
+                    <th>Dir</th>
+                    <th>Strategy</th>
+                    <th>Status</th>
+                    <th>Source</th>
+                    <th>Reason</th>
                   </tr>
-                }
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  @for (s of filteredRows(); track s.id) {
+                    <tr>
+                      <td class="time" [title]="s.generatedAt">
+                        {{ s.generatedAt | date: 'HH:mm:ss' }}
+                      </td>
+                      <td>
+                        <a class="link mono" [routerLink]="['/trade-signals', s.id]">#{{ s.id }}</a>
+                      </td>
+                      <td class="mono">{{ s.symbol ?? '—' }}</td>
+                      <td>
+                        <span class="dir-pill" [attr.data-dir]="s.direction">{{
+                          s.direction
+                        }}</span>
+                      </td>
+                      <td>
+                        <a class="link" [routerLink]="['/strategies', s.strategyId]"
+                          >#{{ s.strategyId }}</a
+                        >
+                      </td>
+                      <td>
+                        <span class="status" [attr.data-status]="s.status">{{ s.status }}</span>
+                      </td>
+                      <td>
+                        <span class="src-pill" [attr.data-source]="s.source">{{ s.source }}</span>
+                      </td>
+                      <td class="reason small">{{ s.reasonDetail || s.reasonCategory }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
           </section>
         }
       }
@@ -713,6 +721,13 @@ interface AnomalyFlag {
         display: flex;
         flex-direction: column;
         gap: 4px;
+        /* Cap the list so a cohort with 30+ distinct reasons (the live
+           page hit this with 38 reasons) doesn't stretch the insight card
+           hundreds of pixels tall. Internal scroll keeps the panel
+           predictable; tall lists become a scroll surface instead of
+           ballooning the layout. */
+        max-height: 240px;
+        overflow-y: auto;
       }
       .bd-row {
         display: grid;
@@ -786,6 +801,23 @@ interface AnomalyFlag {
         font-weight: var(--font-semibold);
         text-transform: uppercase;
         letter-spacing: 0.04em;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      /* Bound each data-table so the page doesn't stretch to thousands of
+         pixels of vertical scroll when the cohort is busy. Each table gets
+         its own max-height + an internal scroll; the sticky thead above
+         keeps the column labels visible while the operator scrolls within
+         the panel. */
+      .table-scroll {
+        overflow: auto;
+      }
+      .table-scroll--rollup {
+        max-height: 320px;
+      }
+      .table-scroll--events {
+        max-height: 520px;
       }
       .board-table td.num,
       .board-table th.num {
