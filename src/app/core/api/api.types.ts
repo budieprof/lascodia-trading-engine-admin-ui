@@ -1577,6 +1577,8 @@ export interface EAConfigInputs {
   maxSignalAgeSec?: number;
   maxAdverseTpDriftPct?: number;
   maxSlippagePoints?: number;
+  maxSlippageSlFrac?: number;
+  maxSpreadSlFrac?: number;
   maxOrderRetries?: number;
   httpTimeoutData?: number;
   httpTimeoutOrder?: number;
@@ -2051,6 +2053,8 @@ export interface UpdateInstanceConfigRequest {
   maxSignalAgeSec?: number | null;
   maxAdverseTpDriftPct?: number | null;
   maxSlippagePoints?: number | null;
+  maxSlippageSlFrac?: number | null;
+  maxSpreadSlFrac?: number | null;
   maxOrderRetries?: number | null;
   httpTimeoutData?: number | null;
   httpTimeoutOrder?: number | null;

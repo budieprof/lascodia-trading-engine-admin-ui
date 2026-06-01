@@ -526,11 +526,28 @@ export class EAConfigPanelComponent {
       fields: [
         {
           key: 'maxSlippagePoints',
-          label: 'Max slippage (points)',
+          label: 'Max slippage (points) — legacy fallback',
           kind: 'int',
           step: 1,
           badge: 'live',
-          takesEffect: 'COrderExecutor.SetMaxSlippagePoints — next OrderSend.',
+          takesEffect:
+            'COrderExecutor.SetMaxSlippagePoints — next OrderSend. Only used when maxSlippageSlFrac=0.',
+        },
+        {
+          key: 'maxSlippageSlFrac',
+          label: 'Max slippage (fraction of SL distance, 0 = use legacy points)',
+          kind: 'double',
+          step: 0.01,
+          badge: 'live',
+          takesEffect: 'Next OrderSend — request.deviation scales with the signal’s SL distance.',
+        },
+        {
+          key: 'maxSpreadSlFrac',
+          label: 'Max spread (fraction of SL distance, 0 = use legacy points)',
+          kind: 'double',
+          step: 0.01,
+          badge: 'live',
+          takesEffect: 'Next signal validation + execution-time spread re-check.',
         },
         {
           key: 'maxOrderRetries',
@@ -950,6 +967,8 @@ type HotReloadKey =
   | 'entryToleranceMaxSignalAgeSec'
   | 'maxSignalAgeSec'
   | 'maxAdverseTpDriftPct'
+  | 'maxSlippageSlFrac'
+  | 'maxSpreadSlFrac'
   | 'maxSlippagePoints'
   | 'maxOrderRetries'
   | 'httpTimeoutData'
