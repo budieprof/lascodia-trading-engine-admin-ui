@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  HostListener,
   ViewChild,
   computed,
   effect,
@@ -153,76 +154,82 @@ const DAY_MS = 24 * HOUR_MS;
         </form>
       }
 
+      <!--
+        Event detail surface — slide-in side drawer (right edge) with a
+        scrim backdrop.  Replaces the previous inline panel that pushed
+        the entire page down by ~600px when an event was selected.
+        Drawer is fixed-position so the underlying calendar stays in
+        place; backdrop click + Escape both close it.
+      -->
       @if (mode() === 'actual' && selectedEvent(); as evt) {
-        <section class="panel detail-panel" aria-label="Economic event detail">
-          <div class="panel-head">
-            <div class="detail-head-left">
-              <h3 class="detail-title">{{ evt.title }}</h3>
-              <div class="detail-chips">
+        <div class="drawer-backdrop" (click)="cancel()" aria-hidden="true"></div>
+        <aside class="drawer" role="dialog" aria-label="Economic event detail">
+          <header class="drawer-head">
+            <div class="drawer-head-meta">
+              <div class="drawer-chips">
                 <span class="chip chip-currency">{{ evt.currency }}</span>
-                <span class="chip chip-impact" [attr.data-impact]="evt.impact">{{
-                  evt.impact
-                }}</span>
+                <span class="chip chip-impact" [attr.data-impact]="evt.impact"
+                  >{{ evt.impact }} impact</span
+                >
                 <span class="chip chip-source">{{ evt.source }}</span>
               </div>
+              <h2 class="drawer-title">{{ evt.title }}</h2>
+              <p class="drawer-subtitle">
+                <span class="drawer-time">{{
+                  evt.scheduledAt | date: 'EEE, MMM d · HH:mm' : 'UTC'
+                }}</span>
+                <span class="drawer-time-suffix">UTC</span>
+                <span class="drawer-sep">·</span>
+                <span class="drawer-countdown">{{ countdown(evt.scheduledAt) }}</span>
+              </p>
             </div>
-            <button type="button" class="close" (click)="cancel()" aria-label="Close">
+            <button
+              type="button"
+              class="drawer-close"
+              (click)="cancel()"
+              aria-label="Close (Esc)"
+              title="Close (Esc)"
+            >
               &times;
             </button>
-          </div>
+          </header>
 
-          <div class="panel-body detail-body">
-            <dl class="detail-grid">
-              <dt>Scheduled (UTC)</dt>
-              <dd>{{ evt.scheduledAt | date: 'yyyy-MM-dd HH:mm' : 'UTC' }}</dd>
-
-              <dt>Scheduled (Local)</dt>
-              <dd>{{ evt.scheduledAt | date: 'medium' }}</dd>
-
-              <dt>Forecast</dt>
-              <dd>{{ evt.forecast || '—' }}</dd>
-
-              <dt>Previous</dt>
-              <dd>{{ evt.previous || '—' }}</dd>
-
-              <dt>Actual</dt>
-              <dd>{{ evt.actual || '—' }}</dd>
-
-              <dt>External Key</dt>
-              <dd class="muted mono">{{ evt.externalKey || '—' }}</dd>
-            </dl>
-
-            <!-- Description section -->
-            <div class="description-section">
-              <div class="description-head">
-                <h4>Explainer</h4>
-                @if (currentDescription(); as d) {
+          <div class="drawer-body">
+            <!-- 1. Explainer — the primary read for this drawer. -->
+            <section class="drawer-section explainer-section">
+              <header class="section-head">
+                <h3>Explainer</h3>
+                @if (currentDescription()) {
                   <span class="chip chip-desc" [attr.data-source]="currentDescriptionSource()">
                     {{ descriptionSourceLabel(currentDescriptionSource()) }}
                   </span>
-                  @if (currentDescriptionUpdatedAt(); as ts) {
-                    <span class="muted small">updated {{ ts | date: 'medium' }}</span>
-                  }
                 }
-              </div>
+              </header>
+
               @if (descriptionLoading()) {
-                <p class="muted">Resolving explainer…</p>
-              } @else if (currentDescription()) {
-                <p class="description-text">{{ currentDescription() }}</p>
-                <div class="description-actions">
+                <div class="loading-state">
+                  <span class="spin"></span>
+                  <span>Resolving explainer…</span>
+                </div>
+              } @else if (currentDescription(); as desc) {
+                <p class="explainer-prose">{{ desc }}</p>
+                <footer class="section-footer">
+                  @if (currentDescriptionUpdatedAt(); as ts) {
+                    <span class="muted small">Updated {{ ts | date: 'medium' }}</span>
+                  }
                   <button
                     type="button"
-                    class="btn btn-secondary btn-sm"
+                    class="btn btn-ghost btn-sm"
                     (click)="regenerateExplainer()"
                     [disabled]="descriptionLoading()"
                     title="Force a fresh LLM call, bypassing the cached explainer"
                   >
-                    Regenerate via LLM
+                    ↻ Regenerate
                   </button>
-                </div>
+                </footer>
               } @else {
-                <p class="muted">No explainer yet.</p>
-                <div class="description-actions">
+                <div class="empty-state">
+                  <p class="muted small">No explainer cached for this event yet.</p>
                   <button
                     type="button"
                     class="btn btn-primary btn-sm"
@@ -233,43 +240,73 @@ const DAY_MS = 24 * HOUR_MS;
                   </button>
                 </div>
               }
-            </div>
+            </section>
 
-            <!-- Existing actual-value form -->
-            <form [formGroup]="actualForm" (ngSubmit)="submitActual()" class="actual-form">
-              <h4>Update Actual</h4>
-              <app-form-field
-                class="wide"
-                label="Actual Value"
-                [required]="true"
-                [control]="actualForm.controls.actual"
-              >
-                <input appFormFieldControl formControlName="actual" placeholder="e.g. 275K" />
-              </app-form-field>
-              <div class="actions">
-                <button
-                  type="button"
-                  class="btn btn-secondary"
-                  (click)="cancel()"
-                  [disabled]="busy()"
-                >
-                  Close
-                </button>
-                <button
-                  type="submit"
-                  class="btn btn-primary"
-                  [disabled]="busy() || actualForm.invalid"
-                >
-                  @if (busy()) {
-                    <span class="spin"></span>
-                  } @else {
-                    Save actual
-                  }
-                </button>
+            <!-- 2. Release values — what every trader wants at a glance. -->
+            <section class="drawer-section">
+              <h3 class="section-title">Release values</h3>
+              <div class="facts-grid">
+                <div class="fact">
+                  <span class="fact-label">Forecast</span>
+                  <span class="fact-value">{{ evt.forecast || '—' }}</span>
+                </div>
+                <div class="fact">
+                  <span class="fact-label">Previous</span>
+                  <span class="fact-value">{{ evt.previous || '—' }}</span>
+                </div>
+                <div class="fact fact-emphasis">
+                  <span class="fact-label">Actual</span>
+                  <span class="fact-value">{{ evt.actual || '—' }}</span>
+                </div>
               </div>
-            </form>
+            </section>
+
+            <!-- 3. Schedule + metadata. -->
+            <section class="drawer-section">
+              <h3 class="section-title">Schedule &amp; metadata</h3>
+              <dl class="kv-list">
+                <dt>Scheduled (UTC)</dt>
+                <dd>{{ evt.scheduledAt | date: 'yyyy-MM-dd HH:mm' : 'UTC' }}</dd>
+                <dt>Scheduled (Local)</dt>
+                <dd>{{ evt.scheduledAt | date: 'medium' }}</dd>
+                <dt>External Key</dt>
+                <dd class="mono small">{{ evt.externalKey || '—' }}</dd>
+              </dl>
+            </section>
+
+            <!-- 4. Update Actual — collapsible to keep the drawer scannable. -->
+            <section class="drawer-section">
+              <details class="actual-details">
+                <summary class="actual-summary">
+                  <span>Update Actual value</span>
+                  <span class="muted small">Manual override</span>
+                </summary>
+                <form [formGroup]="actualForm" (ngSubmit)="submitActual()" class="actual-form">
+                  <app-form-field
+                    label="Actual"
+                    [required]="true"
+                    [control]="actualForm.controls.actual"
+                  >
+                    <input appFormFieldControl formControlName="actual" placeholder="e.g. 275K" />
+                  </app-form-field>
+                  <div class="actual-form-actions">
+                    <button
+                      type="submit"
+                      class="btn btn-primary btn-sm"
+                      [disabled]="busy() || actualForm.invalid"
+                    >
+                      @if (busy()) {
+                        <span class="spin"></span>
+                      } @else {
+                        Save actual
+                      }
+                    </button>
+                  </div>
+                </form>
+              </details>
+            </section>
           </div>
-        </section>
+        </aside>
       }
 
       <!-- 8-card KPI strip — calendar density at a glance -->
@@ -507,34 +544,17 @@ const DAY_MS = 24 * HOUR_MS;
         border-radius: var(--radius-md);
         overflow: hidden;
       }
-      /* Detail-panel: overrides the bare .panel-body grid to be a single-column flow */
-      .detail-panel .panel-body {
-        display: block;
-      }
-      .detail-head-left {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-      }
-      .detail-title {
-        margin: 0;
-        font-size: var(--text-lg);
-        font-weight: var(--font-semibold);
-      }
-      .detail-chips {
-        display: flex;
-        gap: var(--space-2);
-        flex-wrap: wrap;
-      }
+      /* ── Chips (reused across drawer + future inline contexts) ───────────── */
       .chip {
         display: inline-flex;
         align-items: center;
-        padding: 2px 8px;
+        padding: 2px 10px;
         border-radius: var(--radius-full);
         font-size: var(--text-xs);
         font-weight: var(--font-medium);
         background: var(--bg-tertiary);
         color: var(--text-secondary);
+        white-space: nowrap;
       }
       .chip-currency {
         font-family: var(--font-mono);
@@ -574,70 +594,306 @@ const DAY_MS = 24 * HOUR_MS;
         color: var(--text-secondary);
       }
 
-      .detail-body {
+      /* ── Side drawer (slides in from the right) ───────────────────────────
+         Fixed-position so the underlying calendar / filters / table stay
+         in place; backdrop click + Escape both close it. */
+      .drawer-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.36);
+        z-index: 998;
+        animation: drawer-fade-in 140ms ease-out;
+      }
+      .drawer {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: min(560px, 100vw);
+        z-index: 999;
+        background: var(--bg-primary);
+        border-left: 1px solid var(--border);
+        box-shadow: -4px 0 24px rgba(0, 0, 0, 0.12);
+        display: flex;
+        flex-direction: column;
+        animation: drawer-slide-in 200ms cubic-bezier(0.22, 0.61, 0.36, 1);
+      }
+      @keyframes drawer-fade-in {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+      @keyframes drawer-slide-in {
+        from {
+          transform: translateX(100%);
+        }
+        to {
+          transform: translateX(0);
+        }
+      }
+      .drawer-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: var(--space-3);
         padding: var(--space-5);
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-secondary);
       }
-      .detail-grid {
-        display: grid;
-        grid-template-columns: 160px 1fr;
-        gap: var(--space-2) var(--space-4);
-        margin: 0 0 var(--space-5) 0;
+      .drawer-head-meta {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
       }
-      .detail-grid dt {
-        color: var(--text-secondary);
-        font-size: var(--text-xs);
+      .drawer-chips {
+        display: flex;
+        gap: var(--space-2);
+        flex-wrap: wrap;
+      }
+      .drawer-title {
         margin: 0;
+        font-size: var(--text-xl);
+        font-weight: var(--font-semibold);
+        line-height: 1.25;
+        color: var(--text-primary);
+        word-wrap: break-word;
       }
-      .detail-grid dd {
+      .drawer-subtitle {
         margin: 0;
         font-size: var(--text-sm);
+        color: var(--text-secondary);
+        display: flex;
+        gap: var(--space-2);
+        align-items: baseline;
+        flex-wrap: wrap;
+      }
+      .drawer-time {
+        font-variant-numeric: tabular-nums;
+        color: var(--text-primary);
+        font-weight: var(--font-medium);
+      }
+      .drawer-time-suffix {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .drawer-sep {
+        opacity: 0.5;
+      }
+      .drawer-countdown {
+        font-size: var(--text-xs);
+        padding: 1px 8px;
+        border-radius: var(--radius-full);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+      }
+      .drawer-close {
+        flex: 0 0 auto;
+        background: transparent;
+        border: none;
+        font-size: 24px;
+        line-height: 1;
+        color: var(--text-secondary);
+        cursor: pointer;
+        width: 36px;
+        height: 36px;
+        border-radius: var(--radius-full);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition:
+          background 100ms ease,
+          color 100ms ease;
+      }
+      .drawer-close:hover {
+        background: var(--bg-tertiary);
         color: var(--text-primary);
       }
-      .description-section {
-        border-top: 1px solid var(--border);
-        padding-top: var(--space-4);
-        margin-bottom: var(--space-5);
+      .drawer-body {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        padding: var(--space-5);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-5);
       }
-      .description-head {
+
+      /* ── Drawer sections ──────────────────────────────────────────────── */
+      .drawer-section {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-4);
+      }
+      .section-title {
+        margin: 0 0 var(--space-3) 0;
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .section-head {
         display: flex;
         align-items: center;
+        justify-content: space-between;
         gap: var(--space-3);
-        margin-bottom: var(--space-2);
+        margin-bottom: var(--space-3);
       }
-      .description-head h4 {
+      .section-head h3 {
         margin: 0;
         font-size: var(--text-sm);
         font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
       }
-      .description-text {
-        margin: 0 0 var(--space-3) 0;
+      .section-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        margin-top: var(--space-3);
+        flex-wrap: wrap;
+      }
+
+      /* Explainer section gets a soft tint to draw the eye */
+      .explainer-section {
+        background: linear-gradient(180deg, rgba(191, 90, 242, 0.04) 0%, var(--bg-secondary) 60%);
+        border-color: rgba(191, 90, 242, 0.2);
+      }
+      .explainer-prose {
+        margin: 0;
         font-size: var(--text-sm);
-        line-height: 1.5;
+        line-height: 1.6;
         color: var(--text-primary);
         white-space: pre-wrap;
       }
-      .description-actions {
+
+      .loading-state,
+      .empty-state {
         display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+      }
+      .empty-state {
+        flex-direction: column;
+        align-items: flex-start;
         gap: var(--space-2);
+      }
+
+      /* Facts grid — Forecast / Previous / Actual side-by-side */
+      .facts-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--space-2);
+      }
+      .fact {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: var(--space-3);
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+      }
+      .fact-label {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .fact-value {
+        font-size: var(--text-lg);
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-primary);
+      }
+      .fact-emphasis {
+        background: rgba(0, 113, 227, 0.06);
+        border-color: rgba(0, 113, 227, 0.3);
+      }
+      .fact-emphasis .fact-value {
+        color: #0071e3;
+      }
+
+      /* Key/value list for metadata */
+      .kv-list {
+        display: grid;
+        grid-template-columns: 140px 1fr;
+        gap: var(--space-2) var(--space-3);
+        margin: 0;
+      }
+      .kv-list dt {
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .kv-list dd {
+        margin: 0;
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Collapsible Update Actual */
+      .actual-details summary {
+        list-style: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+      }
+      .actual-details summary::-webkit-details-marker {
+        display: none;
+      }
+      .actual-summary {
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        color: var(--text-primary);
+      }
+      .actual-summary::before {
+        content: '▸';
+        margin-right: var(--space-2);
+        color: var(--text-secondary);
+        transition: transform 120ms ease;
+        display: inline-block;
+      }
+      .actual-details[open] .actual-summary::before {
+        transform: rotate(90deg);
       }
       .actual-form {
-        border-top: 1px solid var(--border);
-        padding-top: var(--space-4);
-      }
-      .actual-form h4 {
-        margin: 0 0 var(--space-3) 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .actual-form .actions {
-        display: flex;
-        gap: var(--space-2);
-        justify-content: flex-end;
         margin-top: var(--space-3);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
       }
+      .actual-form-actions {
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      /* Shared utility classes */
       .btn-sm {
         padding: 4px 10px;
         font-size: var(--text-xs);
+      }
+      .btn-ghost {
+        background: transparent;
+        color: var(--text-secondary);
+        border: 1px solid var(--border);
+      }
+      .btn-ghost:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
       }
       .muted {
         color: var(--text-secondary);
@@ -1374,6 +1630,16 @@ export class EconomicEventsPageComponent {
     this.currentDescriptionSource.set('None');
     this.currentDescriptionUpdatedAt.set(null);
     this.descriptionLoading.set(false);
+  }
+
+  //--- Escape key closes the side drawer (modal-style affordance).  Only
+  //--- fires when there's an open detail; otherwise let the key bubble so
+  //--- other surfaces (e.g. the global command palette) can claim it.
+  @HostListener('document:keydown.escape')
+  onEscapeKey(): void {
+    if (this.mode() === 'actual' && this.selectedEvent()) {
+      this.cancel();
+    }
   }
 
   /**
