@@ -18,6 +18,7 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 import type {
   CreateEconomicEventRequest,
+  EconomicEventDescriptionSource,
   EconomicEventDto,
   EconomicImpact,
   PagedData,
@@ -52,6 +53,7 @@ const DAY_MS = 24 * HOUR_MS;
     FormsModule,
     FormFieldComponent,
     FormFieldControlDirective,
+    DatePipe,
   ],
   template: `
     <div class="page">
@@ -151,46 +153,123 @@ const DAY_MS = 24 * HOUR_MS;
         </form>
       }
 
-      @if (mode() === 'actual' && selectedEvent()) {
-        <form class="panel" [formGroup]="actualForm" (ngSubmit)="submitActual()">
+      @if (mode() === 'actual' && selectedEvent(); as evt) {
+        <section class="panel detail-panel" aria-label="Economic event detail">
           <div class="panel-head">
-            <h3>Update Actual — {{ selectedEvent()?.title }}</h3>
+            <div class="detail-head-left">
+              <h3 class="detail-title">{{ evt.title }}</h3>
+              <div class="detail-chips">
+                <span class="chip chip-currency">{{ evt.currency }}</span>
+                <span class="chip chip-impact" [attr.data-impact]="evt.impact">{{
+                  evt.impact
+                }}</span>
+                <span class="chip chip-source">{{ evt.source }}</span>
+              </div>
+            </div>
             <button type="button" class="close" (click)="cancel()" aria-label="Close">
               &times;
             </button>
           </div>
-          <div class="panel-body">
-            <app-form-field
-              class="wide"
-              label="Actual Value"
-              [required]="true"
-              [control]="actualForm.controls.actual"
-            >
-              <input appFormFieldControl formControlName="actual" placeholder="e.g. 275K" />
-            </app-form-field>
-            <div class="actions">
-              <button
-                type="button"
-                class="btn btn-secondary"
-                (click)="cancel()"
-                [disabled]="busy()"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                class="btn btn-primary"
-                [disabled]="busy() || actualForm.invalid"
-              >
-                @if (busy()) {
-                  <span class="spin"></span>
-                } @else {
-                  Save
+
+          <div class="panel-body detail-body">
+            <dl class="detail-grid">
+              <dt>Scheduled (UTC)</dt>
+              <dd>{{ evt.scheduledAt | date: 'yyyy-MM-dd HH:mm' : 'UTC' }}</dd>
+
+              <dt>Scheduled (Local)</dt>
+              <dd>{{ evt.scheduledAt | date: 'medium' }}</dd>
+
+              <dt>Forecast</dt>
+              <dd>{{ evt.forecast || '—' }}</dd>
+
+              <dt>Previous</dt>
+              <dd>{{ evt.previous || '—' }}</dd>
+
+              <dt>Actual</dt>
+              <dd>{{ evt.actual || '—' }}</dd>
+
+              <dt>External Key</dt>
+              <dd class="muted mono">{{ evt.externalKey || '—' }}</dd>
+            </dl>
+
+            <!-- Description section -->
+            <div class="description-section">
+              <div class="description-head">
+                <h4>Explainer</h4>
+                @if (currentDescription(); as d) {
+                  <span class="chip chip-desc" [attr.data-source]="currentDescriptionSource()">
+                    {{ descriptionSourceLabel(currentDescriptionSource()) }}
+                  </span>
+                  @if (currentDescriptionUpdatedAt(); as ts) {
+                    <span class="muted small">updated {{ ts | date: 'medium' }}</span>
+                  }
                 }
-              </button>
+              </div>
+              @if (descriptionLoading()) {
+                <p class="muted">Resolving explainer…</p>
+              } @else if (currentDescription()) {
+                <p class="description-text">{{ currentDescription() }}</p>
+                <div class="description-actions">
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    (click)="regenerateExplainer()"
+                    [disabled]="descriptionLoading()"
+                    title="Force a fresh LLM call, bypassing the cached explainer"
+                  >
+                    Regenerate via LLM
+                  </button>
+                </div>
+              } @else {
+                <p class="muted">No explainer yet.</p>
+                <div class="description-actions">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-sm"
+                    (click)="generateExplainer()"
+                    [disabled]="descriptionLoading()"
+                  >
+                    Generate explainer
+                  </button>
+                </div>
+              }
             </div>
+
+            <!-- Existing actual-value form -->
+            <form [formGroup]="actualForm" (ngSubmit)="submitActual()" class="actual-form">
+              <h4>Update Actual</h4>
+              <app-form-field
+                class="wide"
+                label="Actual Value"
+                [required]="true"
+                [control]="actualForm.controls.actual"
+              >
+                <input appFormFieldControl formControlName="actual" placeholder="e.g. 275K" />
+              </app-form-field>
+              <div class="actions">
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  (click)="cancel()"
+                  [disabled]="busy()"
+                >
+                  Close
+                </button>
+                <button
+                  type="submit"
+                  class="btn btn-primary"
+                  [disabled]="busy() || actualForm.invalid"
+                >
+                  @if (busy()) {
+                    <span class="spin"></span>
+                  } @else {
+                    Save actual
+                  }
+                </button>
+              </div>
+            </form>
           </div>
-        </form>
+        </section>
       }
 
       <!-- 8-card KPI strip — calendar density at a glance -->
@@ -427,6 +506,147 @@ const DAY_MS = 24 * HOUR_MS;
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         overflow: hidden;
+      }
+      /* Detail-panel: overrides the bare .panel-body grid to be a single-column flow */
+      .detail-panel .panel-body {
+        display: block;
+      }
+      .detail-head-left {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .detail-title {
+        margin: 0;
+        font-size: var(--text-lg);
+        font-weight: var(--font-semibold);
+      }
+      .detail-chips {
+        display: flex;
+        gap: var(--space-2);
+        flex-wrap: wrap;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+      }
+      .chip-currency {
+        font-family: var(--font-mono);
+        font-weight: var(--font-semibold);
+        background: rgba(0, 113, 227, 0.12);
+        color: #0071e3;
+      }
+      .chip-impact[data-impact='High'] {
+        background: rgba(255, 59, 48, 0.12);
+        color: #d70015;
+      }
+      .chip-impact[data-impact='Medium'] {
+        background: rgba(255, 149, 0, 0.12);
+        color: #c93400;
+      }
+      .chip-impact[data-impact='Low'] {
+        background: rgba(52, 199, 89, 0.12);
+        color: #248a3d;
+      }
+      .chip-source {
+        font-size: 11px;
+      }
+      .chip-desc[data-source='Scraped'] {
+        background: rgba(52, 199, 89, 0.12);
+        color: #248a3d;
+      }
+      .chip-desc[data-source='LlmGenerated'] {
+        background: rgba(191, 90, 242, 0.14);
+        color: #8e4ec6;
+      }
+      .chip-desc[data-source='Manual'] {
+        background: rgba(0, 113, 227, 0.12);
+        color: #0071e3;
+      }
+      .chip-desc[data-source='None'] {
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+      }
+
+      .detail-body {
+        padding: var(--space-5);
+      }
+      .detail-grid {
+        display: grid;
+        grid-template-columns: 160px 1fr;
+        gap: var(--space-2) var(--space-4);
+        margin: 0 0 var(--space-5) 0;
+      }
+      .detail-grid dt {
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        margin: 0;
+      }
+      .detail-grid dd {
+        margin: 0;
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+      .description-section {
+        border-top: 1px solid var(--border);
+        padding-top: var(--space-4);
+        margin-bottom: var(--space-5);
+      }
+      .description-head {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        margin-bottom: var(--space-2);
+      }
+      .description-head h4 {
+        margin: 0;
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .description-text {
+        margin: 0 0 var(--space-3) 0;
+        font-size: var(--text-sm);
+        line-height: 1.5;
+        color: var(--text-primary);
+        white-space: pre-wrap;
+      }
+      .description-actions {
+        display: flex;
+        gap: var(--space-2);
+      }
+      .actual-form {
+        border-top: 1px solid var(--border);
+        padding-top: var(--space-4);
+      }
+      .actual-form h4 {
+        margin: 0 0 var(--space-3) 0;
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .actual-form .actions {
+        display: flex;
+        gap: var(--space-2);
+        justify-content: flex-end;
+        margin-top: var(--space-3);
+      }
+      .btn-sm {
+        padding: 4px 10px;
+        font-size: var(--text-xs);
+      }
+      .muted {
+        color: var(--text-secondary);
+      }
+      .small {
+        font-size: var(--text-xs);
+      }
+      .mono {
+        font-family: var(--font-mono);
       }
       .panel-head {
         display: flex;
@@ -698,6 +918,15 @@ export class EconomicEventsPageComponent {
   readonly mode = signal<'idle' | 'create' | 'actual'>('idle');
   readonly busy = signal(false);
   readonly selectedEvent = signal<EconomicEventDto | null>(null);
+
+  //--- Detail-drawer description state.  Mirrors the selected event's
+  //--- description fields with optimistic local updates after the
+  //--- explainer endpoint returns — avoids a second list-refresh round
+  //--- trip just to render the new description.
+  readonly currentDescription = signal<string | null>(null);
+  readonly currentDescriptionSource = signal<EconomicEventDescriptionSource>('None');
+  readonly currentDescriptionUpdatedAt = signal<string | null>(null);
+  readonly descriptionLoading = signal(false);
 
   readonly createForm = this.fb.nonNullable.group({
     title: ['', Validators.required],
@@ -1127,11 +1356,119 @@ export class EconomicEventsPageComponent {
     this.selectedEvent.set(row);
     this.actualForm.reset({ actual: row.actual ?? '' });
     this.mode.set('actual');
+
+    //--- Seed the description signals from the list-row (may be null if
+    //--- the list query doesn't project all fields) then re-fetch with
+    //--- the full GetById so we have the latest Description and source
+    //--- provenance.
+    this.currentDescription.set(row.description ?? null);
+    this.currentDescriptionSource.set(row.descriptionSource ?? 'None');
+    this.currentDescriptionUpdatedAt.set(row.descriptionUpdatedAt ?? null);
+    this.refreshDetail(row.id);
   }
 
   cancel(): void {
     this.mode.set('idle');
     this.selectedEvent.set(null);
+    this.currentDescription.set(null);
+    this.currentDescriptionSource.set('None');
+    this.currentDescriptionUpdatedAt.set(null);
+    this.descriptionLoading.set(false);
+  }
+
+  /**
+   * Fetches the latest full event detail (incl. description) and refreshes
+   * the drawer.  Called on open and after explain/regenerate so the
+   * displayed text matches the persisted row.
+   */
+  private refreshDetail(id: number): void {
+    this.service.getById(id).subscribe({
+      next: (res) => {
+        if (!res.status || !res.data) return;
+        // Only update if the drawer is still showing the same event
+        if (this.selectedEvent()?.id !== id) return;
+        this.selectedEvent.set(res.data);
+        this.currentDescription.set(res.data.description ?? null);
+        this.currentDescriptionSource.set(res.data.descriptionSource ?? 'None');
+        this.currentDescriptionUpdatedAt.set(res.data.descriptionUpdatedAt ?? null);
+      },
+      // Silent on failure — the drawer keeps whatever we seeded from the
+      // list row, operator can still click "Generate" to retry.
+      error: () => {},
+    });
+  }
+
+  generateExplainer(): void {
+    const evt = this.selectedEvent();
+    if (!evt) return;
+    this.descriptionLoading.set(true);
+    this.service.explain(evt.id, false).subscribe({
+      next: (res) => {
+        this.descriptionLoading.set(false);
+        if (!res.status || !res.data) {
+          this.notifications.error(res.message ?? 'Explainer generation failed');
+          return;
+        }
+        this.applyExplainResult(evt.id, res.data);
+        if (!res.data.description)
+          this.notifications.error(
+            'No explainer available — provider scrape blocked and LLM unavailable',
+          );
+      },
+      error: () => {
+        this.descriptionLoading.set(false);
+        this.notifications.error('Explainer request failed');
+      },
+    });
+  }
+
+  regenerateExplainer(): void {
+    const evt = this.selectedEvent();
+    if (!evt) return;
+    this.descriptionLoading.set(true);
+    this.service.explain(evt.id, true).subscribe({
+      next: (res) => {
+        this.descriptionLoading.set(false);
+        if (res.status && res.data) {
+          this.applyExplainResult(evt.id, res.data);
+          this.notifications.success('Explainer regenerated');
+        } else {
+          this.notifications.error(res.message ?? 'Regenerate failed');
+        }
+      },
+      error: () => {
+        this.descriptionLoading.set(false);
+        this.notifications.error('Regenerate request failed');
+      },
+    });
+  }
+
+  private applyExplainResult(
+    eventId: number,
+    result: {
+      description: string | null;
+      descriptionSource: EconomicEventDescriptionSource;
+      descriptionUpdatedAt: string | null;
+    },
+  ): void {
+    if (this.selectedEvent()?.id !== eventId) return;
+    this.currentDescription.set(result.description);
+    this.currentDescriptionSource.set(result.descriptionSource);
+    this.currentDescriptionUpdatedAt.set(result.descriptionUpdatedAt);
+  }
+
+  descriptionSourceLabel(source: EconomicEventDescriptionSource): string {
+    switch (source) {
+      case 'Scraped':
+        return 'From source';
+      case 'LlmGenerated':
+        return 'AI-generated';
+      case 'Manual':
+        return 'Manual';
+      case 'None':
+      default:
+        return '—';
+    }
   }
 
   submitCreate(): void {

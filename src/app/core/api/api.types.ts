@@ -1026,6 +1026,19 @@ export interface EconomicEventDto {
   previous: string | null;
   actual: string | null;
   source: EconomicEventSource;
+  externalKey?: string | null;
+  description?: string | null;
+  descriptionSource?: EconomicEventDescriptionSource;
+  descriptionUpdatedAt?: string | null;
+}
+
+export type EconomicEventDescriptionSource = 'None' | 'Scraped' | 'LlmGenerated' | 'Manual';
+
+export interface EconomicEventExplainResult {
+  id: number;
+  description: string | null;
+  descriptionSource: EconomicEventDescriptionSource;
+  descriptionUpdatedAt: string | null;
 }
 
 export interface DrawdownSnapshotDto {
