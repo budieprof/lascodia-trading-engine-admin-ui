@@ -149,8 +149,8 @@ interface PriceEntry extends LivePriceDto {
               dotColor="#0071E3"
             />
             <app-metric-card
-              label="Avg spread"
-              [value]="avgSpread()"
+              label="Median spread"
+              [value]="medianSpread()"
               format="number"
               dotColor="#FF9500"
             />
@@ -1109,7 +1109,7 @@ interface PriceEntry extends LivePriceDto {
         <div class="chart-row">
           <app-chart-card
             title="Spread comparison"
-            subtitle="Live spreads across watched pairs"
+            subtitle="Live spreads across watched pairs · log scale"
             [options]="spreadChartOptions()"
             height="240px"
           />
@@ -1145,8 +1145,8 @@ interface PriceEntry extends LivePriceDto {
             [dotColor]="candleCount() > 0 ? '#FF9500' : '#34C759'"
           />
           <app-metric-card
-            label="Avg spread"
-            [value]="avgSpread()"
+            label="Median spread"
+            [value]="medianSpread()"
             format="number"
             dotColor="#FF9500"
           />
@@ -1328,7 +1328,7 @@ interface PriceEntry extends LivePriceDto {
         <div class="charts-row two-col">
           <app-chart-card
             title="Spread comparison"
-            subtitle="Live-only spreads (excludes candle-fallback rows)"
+            subtitle="Live-only spreads · log scale (excludes candle-fallback rows)"
             [options]="spreadChartOptions()"
             height="280px"
           />
@@ -3030,10 +3030,17 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     return Object.values(this.lastLiveSpread);
   });
 
-  avgSpread = computed(() => {
+  // Median, not mean, so a single exotic pair (e.g. USD/NGN at ~22,000 pips)
+  // can't drag the headline spread into the thousands. The median tracks the
+  // typical major-pair spread (~1 pip) regardless of how wild the outliers
+  // are; Tightest/Widest below still surface the true min/max extremes.
+  medianSpread = computed(() => {
     const spreads = this.spreadsForKpis();
     if (spreads.length === 0) return null;
-    return spreads.reduce((sum, s) => sum + s, 0) / spreads.length;
+    const sorted = [...spreads].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+    return +median.toFixed(1);
   });
 
   // ── Trading-chart tab — surrounding context computeds ────────────
@@ -3569,13 +3576,20 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
       return {};
     }
     const sorted = [...series].sort((a, b) => b.spread - a.spread);
+    // Logarithmic x-axis: watched pairs span a huge dynamic range — majors sit
+    // at ~0.1–3 pips while an exotic like USD/NGN can be ~22,000 pips. On a
+    // linear scale that one outlier flattens every major bar to an invisible
+    // sliver. Log scale keeps both the sub-pip majors and the exotic visible
+    // in the same panel. Log can't plot 0/negative, so the plotted value is
+    // floored to 0.1 while the bar label always shows the true spread.
     return {
-      grid: { top: 10, right: 40, bottom: 30, left: 80 },
+      grid: { top: 10, right: 56, bottom: 30, left: 80 },
       xAxis: {
-        type: 'value',
+        type: 'log',
+        min: 0.1,
         axisLabel: { fontSize: 11, color: '#6E6E73' },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-        name: 'Spread (pips)',
+        name: 'Spread (pips · log)',
         nameLocation: 'center',
         nameGap: 25,
         nameTextStyle: { fontSize: 11, color: '#6E6E73' },
@@ -3588,13 +3602,17 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
       series: [
         {
           type: 'bar',
-          data: sorted.map((p) => ({
-            value: +p.spread.toFixed(1),
-            itemStyle: {
-              color: p.spread > 3 ? '#FF3B30' : p.spread > 2 ? '#FF9500' : '#0071E3',
-              borderRadius: [0, 4, 4, 0],
-            },
-          })),
+          data: sorted.map((p) => {
+            const spread = +p.spread.toFixed(1);
+            return {
+              value: Math.max(spread, 0.1),
+              spread,
+              itemStyle: {
+                color: p.spread > 3 ? '#FF3B30' : p.spread > 2 ? '#FF9500' : '#0071E3',
+                borderRadius: [0, 4, 4, 0],
+              },
+            };
+          }),
           // Bars auto-size to fit the chart's vertical space (no fixed pixel
           // width — that made the bars touch and the labels overlap as soon
           // as the watched-pair count grew past 8). The category gap reserves
@@ -3608,7 +3626,8 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
             position: 'right',
             fontSize: 11,
             color: '#6E6E73',
-            formatter: '{c}',
+            // Show the true spread, not the log-floored plot value.
+            formatter: (p: any) => `${p.data?.spread ?? ''}`,
           },
         },
       ],
