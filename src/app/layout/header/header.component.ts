@@ -1,6 +1,8 @@
-import { Component, inject, output } from '@angular/core';
+import { Component, inject, output, signal } from '@angular/core';
+import { Location } from '@angular/common';
 import { AuthService } from '@core/auth/auth.service';
-import { Router } from '@angular/router';
+import { NavigationEnd, NavigationStart, Router } from '@angular/router';
+import { filter } from 'rxjs';
 import { CommandPaletteComponent } from '@shared/components/command-palette/command-palette.component';
 import { WallModeService } from '@core/wall-mode/wall-mode.service';
 import { AccountScopePillComponent } from '@core/scope/account-scope-pill.component';
@@ -19,6 +21,16 @@ import { AccountScopePillComponent } from '@core/scope/account-scope-pill.compon
           (click)="openMobileNav.emit()"
         >
           <span aria-hidden="true">☰</span>
+        </button>
+        <button
+          type="button"
+          class="icon-btn back-btn"
+          (click)="goBack()"
+          [disabled]="!canGoBack()"
+          aria-label="Go back to previous page"
+          title="Back"
+        >
+          <span aria-hidden="true">←</span>
         </button>
         <h2 class="header-title">Admin Console</h2>
       </div>
@@ -245,6 +257,17 @@ import { AccountScopePillComponent } from '@core/scope/account-scope-pill.compon
         outline: 2px solid var(--accent);
         outline-offset: 2px;
       }
+      .icon-btn:disabled {
+        opacity: 0.3;
+        cursor: default;
+      }
+      .icon-btn:disabled:hover {
+        background: transparent;
+        color: var(--text-secondary);
+      }
+      .back-btn {
+        font-size: 20px;
+      }
       .icon-btn.logout:hover,
       .logout-btn:hover {
         background: var(--bg-tertiary);
@@ -267,9 +290,46 @@ export class HeaderComponent {
   auth = inject(AuthService);
   readonly wallMode = inject(WallModeService);
   private router = inject(Router);
+  private location = inject(Location);
   private palette = inject(CommandPaletteComponent, { optional: true });
 
   openMobileNav = output<void>();
+
+  /**
+   * True once there's at least one prior in-app page to return to. Disabling
+   * the button below that threshold keeps `location.back()` from escaping the
+   * SPA (back to the login page or the browser's previous site) — important in
+   * wall mode, where this is often the only visible navigation control.
+   */
+  readonly canGoBack = signal(false);
+
+  /**
+   * Depth of the in-app navigation stack. Forward navigations (router links,
+   * imperative `navigate`) push; browser back/forward (popstate) pops. The
+   * header is instantiated once for the app's lifetime, so this survives
+   * across route changes.
+   */
+  private navDepth = 0;
+  private pendingPop = false;
+
+  constructor() {
+    this.router.events
+      .pipe(filter((e) => e instanceof NavigationStart || e instanceof NavigationEnd))
+      .subscribe((e) => {
+        if (e instanceof NavigationStart) {
+          this.pendingPop = e.navigationTrigger === 'popstate';
+          return;
+        }
+        // NavigationEnd: adjust the stack depth based on how we got here.
+        this.navDepth = this.pendingPop ? Math.max(0, this.navDepth - 1) : this.navDepth + 1;
+        this.pendingPop = false;
+        this.canGoBack.set(this.navDepth > 1);
+      });
+  }
+
+  goBack() {
+    if (this.canGoBack()) this.location.back();
+  }
 
   onSearch() {
     // Falls through gracefully if the palette isn't mounted (e.g. in isolated previews).
