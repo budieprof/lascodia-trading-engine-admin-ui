@@ -8,10 +8,14 @@ import {
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { map } from 'rxjs';
 
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { NotificationService } from '@core/notifications/notification.service';
-import type { CurrencyPairDto } from '@core/api/api.types';
+import { PositionsService } from '@core/services/positions.service';
+import { OrdersService } from '@core/services/orders.service';
+import { createPolledResource } from '@core/polling/polled-resource';
+import type { CurrencyPairDto, PositionDto, OrderDto } from '@core/api/api.types';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 
@@ -54,6 +58,8 @@ type TileSize = 'sm' | 'md' | 'lg' | 'xl';
 const STORAGE_KEY = 'tradingChart.watchlist.v1';
 const SIZE_STORAGE_KEY = 'tradingChart.watchlist.size.v1';
 const BARS_STORAGE_KEY = 'tradingChart.watchlist.bars.v1';
+const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.watchlist.showPositions.v1';
+const SHOW_ORDERS_STORAGE_KEY = 'tradingChart.watchlist.showOrders.v1';
 const TF_OPTIONS: ReadonlyArray<string> = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1', 'W1'];
 const SIZE_OPTIONS: ReadonlyArray<{ value: TileSize; label: string; minPx: number }> = [
   { value: 'sm', label: 'S', minPx: 320 },
@@ -158,6 +164,29 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
             </button>
           }
         </div>
+        <div class="tf-group" role="group" aria-label="Chart overlays">
+          <span class="tf-label">Overlays</span>
+          <button
+            type="button"
+            class="tf-btn"
+            [class.active]="showPositions()"
+            [attr.aria-pressed]="showPositions()"
+            (click)="togglePositions()"
+            title="Show open-position entry / SL / TP lines on each tile"
+          >
+            Positions
+          </button>
+          <button
+            type="button"
+            class="tf-btn"
+            [class.active]="showOrders()"
+            [attr.aria-pressed]="showOrders()"
+            (click)="toggleOrders()"
+            title="Show pending-order price / SL / TP lines on each tile"
+          >
+            Orders
+          </button>
+        </div>
         <div class="add-wrap">
           <input
             #addInput
@@ -238,6 +267,10 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
               [timeframe]="e.timeframe"
               [size]="tileSize()"
               [barCount]="barCount()"
+              [positions]="openPositions()"
+              [orders]="pendingOrders()"
+              [showPositions]="showPositions()"
+              [showOrders]="showOrders()"
               (remove)="removeEntry(e)"
             />
           }
@@ -437,6 +470,34 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
 export class WatchlistPageComponent implements OnInit {
   private readonly pairsService = inject(CurrencyPairsService);
   private readonly notifications = inject(NotificationService);
+  private readonly positionsService = inject(PositionsService);
+  private readonly ordersService = inject(OrdersService);
+
+  /** Chart-overlay toggles — show open positions / pending orders on every
+   *  tile. Persisted so the operator's choice survives reloads. */
+  protected readonly showPositions = signal<boolean>(false);
+  protected readonly showOrders = signal<boolean>(false);
+
+  // Poll positions/orders only while the matching overlay is on (the `active`
+  // gate pauses the poll otherwise — no wasted requests when overlays are off).
+  private readonly positionsRes = createPolledResource(
+    () =>
+      this.positionsService
+        .list({ currentPage: 1, itemCountPerPage: 200, filter: { status: 'Open' } })
+        .pipe(map((r) => r?.data?.data ?? [])),
+    { intervalMs: 15000, active: this.showPositions },
+  );
+  // Orders fetched unfiltered (the working-status set spans Pending/Submitted/
+  // PartialFill and the filter takes a single status); the tile filters them.
+  private readonly ordersRes = createPolledResource(
+    () =>
+      this.ordersService
+        .list({ currentPage: 1, itemCountPerPage: 200, filter: null })
+        .pipe(map((r) => r?.data?.data ?? [])),
+    { intervalMs: 15000, active: this.showOrders },
+  );
+  protected readonly openPositions = computed<PositionDto[]>(() => this.positionsRes.value() ?? []);
+  protected readonly pendingOrders = computed<OrderDto[]>(() => this.ordersRes.value() ?? []);
 
   protected readonly timeframeOptions = TF_OPTIONS;
   protected readonly sizeOptions = SIZE_OPTIONS;
@@ -523,6 +584,30 @@ export class WatchlistPageComponent implements OnInit {
         /* best-effort */
       }
     });
+    // Overlay toggles — persist each under its own key.
+    effect(() => {
+      const on = this.showPositions();
+      try {
+        localStorage.setItem(SHOW_POSITIONS_STORAGE_KEY, on ? '1' : '0');
+      } catch {
+        /* best-effort */
+      }
+    });
+    effect(() => {
+      const on = this.showOrders();
+      try {
+        localStorage.setItem(SHOW_ORDERS_STORAGE_KEY, on ? '1' : '0');
+      } catch {
+        /* best-effort */
+      }
+    });
+  }
+
+  togglePositions(): void {
+    this.showPositions.set(!this.showPositions());
+  }
+  toggleOrders(): void {
+    this.showOrders.set(!this.showOrders());
   }
 
   /**
@@ -543,7 +628,17 @@ export class WatchlistPageComponent implements OnInit {
     this.hydrateFromStorage();
     this.hydrateTileSize();
     this.hydrateBarCount();
+    this.hydrateOverlayToggles();
     this.loadCatalogue();
+  }
+
+  private hydrateOverlayToggles(): void {
+    try {
+      if (localStorage.getItem(SHOW_POSITIONS_STORAGE_KEY) === '1') this.showPositions.set(true);
+      if (localStorage.getItem(SHOW_ORDERS_STORAGE_KEY) === '1') this.showOrders.set(true);
+    } catch {
+      /* localStorage blocked — leave defaults (off) */
+    }
   }
 
   private hydrateTileSize(): void {

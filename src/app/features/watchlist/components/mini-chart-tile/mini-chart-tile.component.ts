@@ -13,12 +13,12 @@ import {
 } from '@angular/core';
 import { Router } from '@angular/router';
 import { NgxEchartsDirective } from 'ngx-echarts';
-import type { EChartsOption } from 'echarts';
+import type { EChartsOption, LineSeriesOption } from 'echarts';
 import { Subject, takeUntil, timer, switchMap, catchError, of } from 'rxjs';
 import { animate, AnimationTriggerMetadata, style, transition, trigger } from '@angular/animations';
 
 import { MarketDataService } from '@core/services/market-data.service';
-import type { CandleDto, LivePriceDto } from '@core/api/api.types';
+import type { CandleDto, LivePriceDto, PositionDto, OrderDto } from '@core/api/api.types';
 
 /**
  * One symbol tile on the watchlist grid. Self-contained: owns its own
@@ -405,6 +405,15 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
    *  immediately, not on the next 30 s tick). */
   readonly barCount = input<number>(60);
 
+  /** Open positions (all symbols) from the parent; the tile filters to its own
+   *  symbol. Drawn as entry/SL/TP overlay lines when {@link showPositions}. */
+  readonly positions = input<PositionDto[]>([]);
+  /** Pending/working orders (all symbols) from the parent; filtered + drawn as
+   *  price/SL/TP overlay lines when {@link showOrders}. */
+  readonly orders = input<OrderDto[]>([]);
+  readonly showPositions = input<boolean>(false);
+  readonly showOrders = input<boolean>(false);
+
   @Output() readonly remove = new EventEmitter<void>();
 
   private readonly marketData = inject(MarketDataService);
@@ -611,6 +620,59 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
       if (c.low < minPrice) minPrice = c.low;
       if (c.high > maxPrice) maxPrice = c.high;
     }
+
+    // ── Open-position / pending-order overlays (filtered to this symbol) ──
+    // Flat line series (same approach as bid/ask) — entry/SL/TP for positions,
+    // price/SL/TP for pending orders. Each overlay price also widens the
+    // candle-derived y-range so the lines aren't clipped off-chart.
+    const symJoined = this.symbol().replace(/\//g, '').toUpperCase();
+    const overlaySeries: LineSeriesOption[] = [];
+    const addOverlay = (
+      y: number | null,
+      color: string,
+      lineType: 'solid' | 'dashed' | 'dotted',
+      width: number,
+      z: number,
+    ): void => {
+      if (y === null || !Number.isFinite(y)) return;
+      if (y < minPrice) minPrice = y;
+      if (y > maxPrice) maxPrice = y;
+      overlaySeries.push({
+        type: 'line',
+        data: xs.map(() => y),
+        symbol: 'none',
+        silent: true,
+        animation: false,
+        smooth: false,
+        lineStyle: { color, width, type: lineType, opacity: 0.9 },
+        z,
+      });
+    };
+
+    if (this.showPositions()) {
+      for (const p of this.positions()) {
+        if ((p.symbol ?? '').replace(/\//g, '').toUpperCase() !== symJoined) continue;
+        if (p.status !== 'Open') continue;
+        const entryColor = p.direction === 'Long' ? '#0071E3' : '#FF6B35';
+        addOverlay(p.averageEntryPrice, entryColor, 'solid', 1.4, 9);
+        addOverlay(p.stopLoss, '#c93631', 'dashed', 1, 8);
+        addOverlay(p.takeProfit, '#34c759', 'dashed', 1, 8);
+      }
+    }
+
+    if (this.showOrders()) {
+      for (const o of this.orders()) {
+        if ((o.symbol ?? '').replace(/\//g, '').toUpperCase() !== symJoined) continue;
+        // Pending/working orders only — skip filled/cancelled/rejected/expired.
+        if (o.status !== 'Pending' && o.status !== 'Submitted' && o.status !== 'PartialFill')
+          continue;
+        const priceColor = o.orderType === 'Buy' ? '#0071E3' : '#FF6B35';
+        addOverlay(o.price, priceColor, 'dotted', 1.2, 7);
+        addOverlay(o.stopLoss, '#c93631', 'dotted', 1, 7);
+        addOverlay(o.takeProfit, '#34c759', 'dotted', 1, 7);
+      }
+    }
+
     const padding = (maxPrice - minPrice) * 0.05 || maxPrice * 0.0005;
 
     // Bid + ask as dedicated FLAT line series — one constant value
@@ -740,6 +802,7 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
           },
           z: 5,
         },
+        ...overlaySeries,
       ],
     };
   });
