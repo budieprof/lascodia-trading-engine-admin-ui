@@ -14,6 +14,7 @@ import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { PositionsService } from '@core/services/positions.service';
 import { OrdersService } from '@core/services/orders.service';
+import { AccountScopeService } from '@core/scope/account-scope.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 import type { CurrencyPairDto, PositionDto, OrderDto } from '@core/api/api.types';
 
@@ -60,6 +61,7 @@ const SIZE_STORAGE_KEY = 'tradingChart.watchlist.size.v1';
 const BARS_STORAGE_KEY = 'tradingChart.watchlist.bars.v1';
 const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.watchlist.showPositions.v1';
 const SHOW_ORDERS_STORAGE_KEY = 'tradingChart.watchlist.showOrders.v1';
+const OVERLAY_ACCOUNT_STORAGE_KEY = 'tradingChart.watchlist.overlayAccount.v1';
 const TF_OPTIONS: ReadonlyArray<string> = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1', 'W1'];
 const SIZE_OPTIONS: ReadonlyArray<{ value: TileSize; label: string; minPx: number }> = [
   { value: 'sm', label: 'S', minPx: 320 },
@@ -186,6 +188,20 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
           >
             Orders
           </button>
+          <select
+            class="acct-select"
+            [value]="overlayAccountStr()"
+            (change)="setOverlayAccount($any($event.target).value)"
+            title="Which account's positions / orders to overlay"
+            aria-label="Overlay account scope"
+          >
+            <option value="all" [selected]="overlayAccount() === 'all'">All accounts</option>
+            @for (a of overlayAccounts(); track a.id) {
+              <option [value]="a.id" [selected]="overlayAccount() === a.id">
+                {{ a.accountName || a.accountId || 'Account ' + a.id }}
+              </option>
+            }
+          </select>
         </div>
         <div class="add-wrap">
           <input
@@ -267,8 +283,8 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
               [timeframe]="e.timeframe"
               [size]="tileSize()"
               [barCount]="barCount()"
-              [positions]="openPositions()"
-              [orders]="pendingOrders()"
+              [positions]="scopedPositions()"
+              [orders]="scopedOrders()"
               [showPositions]="showPositions()"
               [showOrders]="showOrders()"
               (remove)="removeEntry(e)"
@@ -357,6 +373,18 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
         align-items: center;
         flex: 1 1 280px;
         min-width: 260px;
+      }
+      .acct-select {
+        height: 28px;
+        margin-left: 4px;
+        padding: 0 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-size: 12px;
+        max-width: 160px;
+        cursor: pointer;
       }
       .add-input {
         flex: 1;
@@ -472,11 +500,17 @@ export class WatchlistPageComponent implements OnInit {
   private readonly notifications = inject(NotificationService);
   private readonly positionsService = inject(PositionsService);
   private readonly ordersService = inject(OrdersService);
+  private readonly accountScope = inject(AccountScopeService);
 
   /** Chart-overlay toggles — show open positions / pending orders on every
    *  tile. Persisted so the operator's choice survives reloads. */
   protected readonly showPositions = signal<boolean>(false);
   protected readonly showOrders = signal<boolean>(false);
+  /** Which account's positions/orders to overlay — a numeric account id, or
+   *  `'all'` for every account. Persisted. */
+  protected readonly overlayAccount = signal<number | 'all'>('all');
+  /** Accounts offered in the overlay scope picker. */
+  protected readonly overlayAccounts = this.accountScope.accounts;
 
   // Poll positions/orders every 15s from page load (cheap — two requests) so
   // the data is already in hand the instant the operator flips a toggle. The
@@ -499,6 +533,17 @@ export class WatchlistPageComponent implements OnInit {
   );
   protected readonly openPositions = computed<PositionDto[]>(() => this.positionsRes.value() ?? []);
   protected readonly pendingOrders = computed<OrderDto[]>(() => this.ordersRes.value() ?? []);
+  // Overlay data scoped to the chosen account (or all). Tiles receive these.
+  protected readonly scopedPositions = computed<PositionDto[]>(() => {
+    const acct = this.overlayAccount();
+    const xs = this.openPositions();
+    return acct === 'all' ? xs : xs.filter((p) => p.tradingAccountId === acct);
+  });
+  protected readonly scopedOrders = computed<OrderDto[]>(() => {
+    const acct = this.overlayAccount();
+    const xs = this.pendingOrders();
+    return acct === 'all' ? xs : xs.filter((o) => o.tradingAccountId === acct);
+  });
 
   protected readonly timeframeOptions = TF_OPTIONS;
   protected readonly sizeOptions = SIZE_OPTIONS;
@@ -602,6 +647,14 @@ export class WatchlistPageComponent implements OnInit {
         /* best-effort */
       }
     });
+    effect(() => {
+      const acct = this.overlayAccount();
+      try {
+        localStorage.setItem(OVERLAY_ACCOUNT_STORAGE_KEY, String(acct));
+      } catch {
+        /* best-effort */
+      }
+    });
   }
 
   togglePositions(): void {
@@ -609,6 +662,14 @@ export class WatchlistPageComponent implements OnInit {
   }
   toggleOrders(): void {
     this.showOrders.set(!this.showOrders());
+  }
+
+  /** String form of the overlay-account scope for the <select> value binding. */
+  protected overlayAccountStr(): string {
+    return String(this.overlayAccount());
+  }
+  setOverlayAccount(value: string): void {
+    this.overlayAccount.set(value === 'all' ? 'all' : Number(value));
   }
 
   /**
@@ -637,8 +698,11 @@ export class WatchlistPageComponent implements OnInit {
     try {
       if (localStorage.getItem(SHOW_POSITIONS_STORAGE_KEY) === '1') this.showPositions.set(true);
       if (localStorage.getItem(SHOW_ORDERS_STORAGE_KEY) === '1') this.showOrders.set(true);
+      const acct = localStorage.getItem(OVERLAY_ACCOUNT_STORAGE_KEY);
+      if (acct && acct !== 'all' && Number.isFinite(Number(acct)))
+        this.overlayAccount.set(Number(acct));
     } catch {
-      /* localStorage blocked — leave defaults (off) */
+      /* localStorage blocked — leave defaults (off / all) */
     }
   }
 
