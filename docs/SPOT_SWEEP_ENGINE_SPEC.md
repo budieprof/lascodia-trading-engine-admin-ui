@@ -43,10 +43,15 @@ All under the existing `/market-data` controller, envelope-wrapped like the
 rest (`ResponseData<T>`).
 
 ```
-GET  /market-data/spot-sweep/config   → SpotSweepConfig
-PUT  /market-data/spot-sweep/config   ← SpotSweepConfig  → SpotSweepConfig (echo saved)
-GET  /market-data/spot-sweep/status   → SpotSweepStatus
+GET  /market-data/spot-sweep/config        → SpotSweepConfig
+PUT  /market-data/spot-sweep/config        ← SpotSweepConfig  → SpotSweepConfig (echo saved)
+GET  /market-data/spot-sweep/status        → SpotSweepStatus
+GET  /market-data/spot-sweep/history?limit  → SweepHistoryItem[]
 ```
+
+`GET history` returns recent sweep cycles newest-first — back it with the Spot
+Analysis report rows filtered to the sweep source/`sweepRunId` (map each to a
+`SweepHistoryItem`). `SweepHistoryItem` shape is in the UI types file.
 
 - `PUT` carries the **whole** config (UI sends the full object incl. `pairs`
   and `enabled`). Validate: pairs symbols exist in `currency_pair` & are

@@ -432,6 +432,66 @@ import {
       } @else if (loading()) {
         <div class="card muted">Loading configuration…</div>
       }
+
+      <!-- ───────── History ───────── -->
+      <section class="card">
+        <header class="card-head">
+          <h2>Recent sweep runs</h2>
+          <span class="muted small">sweep-originated analyses, newest first</span>
+        </header>
+        @if (history(); as h) {
+          @if (h.length > 0) {
+            <div class="hist-scroll">
+              <table class="hist-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Symbol</th>
+                    <th>TF</th>
+                    <th>Outcome</th>
+                    <th class="num">Conf</th>
+                    <th>Signal</th>
+                    <th>Order</th>
+                    <th>Mode</th>
+                    <th class="num">Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (r of h; track r.id) {
+                    <tr>
+                      <td class="mono nowrap">{{ r.at | date: 'MMM d HH:mm:ss' }}</td>
+                      <td class="mono">{{ r.symbol }}</td>
+                      <td class="muted">{{ r.timeframe }}</td>
+                      <td>
+                        <span class="oc" [class]="'oc oc-' + r.outcome">{{ r.outcome }}</span>
+                      </td>
+                      <td class="num mono">
+                        {{ r.confidence !== null ? (r.confidence | number: '1.2-2') : '—' }}
+                      </td>
+                      <td class="mono">{{ r.signalId ? '#' + r.signalId : '—' }}</td>
+                      <td class="mono">
+                        @if (r.orderId) {
+                          <span class="chip ok">#{{ r.orderId }}</span>
+                        } @else {
+                          <span class="muted">—</span>
+                        }
+                      </td>
+                      <td>
+                        <span class="mode-badge small-badge" [class.live]="r.mode === 'Live'">
+                          {{ r.mode }}
+                        </span>
+                      </td>
+                      <td class="num mono">{{ r.costUsd | number: '1.3-3' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          } @else {
+            <p class="muted small">No sweep runs recorded yet.</p>
+          }
+        }
+      </section>
     </div>
   `,
   styles: [
@@ -804,6 +864,64 @@ import {
         color: var(--profit);
         margin-left: auto;
       }
+      .hist-scroll {
+        max-height: 360px;
+        overflow-y: auto;
+      }
+      .hist-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--text-xs);
+      }
+      .hist-table th,
+      .hist-table td {
+        padding: 7px var(--space-3);
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+      }
+      .hist-table th {
+        position: sticky;
+        top: 0;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        z-index: 1;
+      }
+      .hist-table th.num,
+      .hist-table td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .hist-table tbody tr:hover {
+        background: var(--bg-tertiary);
+      }
+      .oc {
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+      }
+      .oc-SignalCreated {
+        background: rgba(52, 199, 89, 0.16);
+        color: var(--profit);
+      }
+      .oc-GateRejected {
+        background: rgba(255, 59, 48, 0.14);
+        color: var(--loss);
+      }
+      .oc-Skipped {
+        background: rgba(255, 149, 0, 0.14);
+        color: #b25e00;
+      }
+      .small-badge {
+        font-size: 10px;
+        padding: 2px 7px;
+      }
     `,
   ],
 })
@@ -835,6 +953,11 @@ export class SpotSweepPageComponent {
     intervalMs: 5000,
   });
   readonly status = this.statusResource.value;
+
+  private readonly historyResource = createPolledResource(() => this.svc.getHistory(20), {
+    intervalMs: 10000,
+  });
+  readonly history = this.historyResource.value;
 
   constructor() {
     this.load();
@@ -948,6 +1071,7 @@ export class SpotSweepPageComponent {
         this.dirty.set(false);
         this.saving.set(false);
         this.statusResource.refresh();
+        this.historyResource.refresh();
       },
       error: () => {
         this.error.set('Failed to save configuration.');
@@ -968,6 +1092,7 @@ export class SpotSweepPageComponent {
         this.dirty.set(false);
         this.saving.set(false);
         this.statusResource.refresh();
+        this.historyResource.refresh();
       },
       error: () => {
         this.error.set('Failed to toggle sweep.');

@@ -89,6 +89,23 @@ export interface SpotSweepStatus {
   excludedCount: number;
 }
 
+/** One past sweep cycle, for the history table. */
+export interface SweepHistoryItem {
+  id: number;
+  /** ISO timestamp the analysis ran. */
+  at: string;
+  symbol: string;
+  timeframe: string;
+  /** SignalCreated | NoSignal | GateRejected | Skipped */
+  outcome: string;
+  confidence: number | null;
+  signalId: number | null;
+  orderId: number | null;
+  autoApproved: boolean;
+  mode: SweepMode;
+  costUsd: number;
+}
+
 /** Sensible defaults for a fresh config (Phase 1 — Paper, no auto-order). */
 export const DEFAULT_SWEEP_CONFIG: SpotSweepConfig = {
   enabled: false,

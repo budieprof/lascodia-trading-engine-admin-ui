@@ -64,9 +64,10 @@ a restart mid-cycle cannot double-submit.
 ## 4. API contract (engine to implement, UI consumes)
 
 ```
-GET  /market-data/spot-sweep/config   → SpotSweepConfig
-PUT  /market-data/spot-sweep/config   ← SpotSweepConfig   (carries full pairs array + enabled)
-GET  /market-data/spot-sweep/status   → SpotSweepStatus   (poll ~5s, or realtime event)
+GET  /market-data/spot-sweep/config        → SpotSweepConfig
+PUT  /market-data/spot-sweep/config        ← SpotSweepConfig   (carries full pairs array + enabled)
+GET  /market-data/spot-sweep/status        → SpotSweepStatus   (poll ~5s, or realtime event)
+GET  /market-data/spot-sweep/history?limit  → SweepHistoryItem[] (recent sweep cycles, newest first)
 ```
 
 DTO shapes are mirrored in `src/app/features/spot-sweep/spot-sweep.types.ts`

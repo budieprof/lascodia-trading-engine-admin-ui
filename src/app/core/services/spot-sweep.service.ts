@@ -6,6 +6,7 @@ import {
   DEFAULT_SWEEP_CONFIG,
   SpotSweepConfig,
   SpotSweepStatus,
+  SweepHistoryItem,
 } from '@features/spot-sweep/spot-sweep.types';
 
 /**
@@ -58,6 +59,20 @@ export class SpotSweepService {
       return of(this.mockStatus()).pipe(delay(120));
     }
     return this.api.getEnvelope<SpotSweepStatus>('/market-data/spot-sweep/status');
+  }
+
+  /**
+   * Recent sweep cycles for the history table. Real impl reads the Spot
+   * Analysis report filtered to the sweep source (see SPOT_SWEEP_PLAN.md §2);
+   * a dedicated `/spot-sweep/history` endpoint keeps the cockpit decoupled.
+   */
+  getHistory(limit = 15): Observable<SweepHistoryItem[]> {
+    if (SpotSweepService.USE_MOCK) {
+      return of(this.mockHistory(limit)).pipe(delay(140));
+    }
+    return this.api.getEnvelope<SweepHistoryItem[]>(
+      `/market-data/spot-sweep/history?limit=${limit}`,
+    );
   }
 
   /**
@@ -120,6 +135,35 @@ export class SpotSweepService {
       eligibleCount: pairs.length,
       excludedCount: 0,
     };
+  }
+
+  private mockHistory(limit: number): SweepHistoryItem[] {
+    const cfg = this.mockConfig$.value;
+    const pairs = cfg.pairs.length ? cfg.pairs : [{ symbol: 'EURUSD', timeframe: 'H1' }];
+    const outcomes = ['SignalCreated', 'NoSignal', 'GateRejected', 'SignalCreated', 'Skipped'];
+    const base = Math.floor(Date.now() / 6000) * 6000;
+    const step = Math.max(5, cfg.intervalSeconds) * 1000;
+    const items: SweepHistoryItem[] = [];
+    for (let k = 0; k < limit; k++) {
+      const p = pairs[k % pairs.length];
+      const outcome = outcomes[k % outcomes.length];
+      const created = outcome === 'SignalCreated';
+      const autoApproved = created && cfg.autoApprove && cfg.minConfidence <= 0.75 && k % 2 === 0;
+      items.push({
+        id: 5000 - k,
+        at: new Date(base - k * step).toISOString(),
+        symbol: p.symbol,
+        timeframe: p.timeframe,
+        outcome,
+        confidence: created ? +(0.6 + ((k * 7) % 35) / 100).toFixed(2) : null,
+        signalId: created ? 4200 - k : null,
+        orderId: autoApproved ? 8800 - k : null,
+        autoApproved,
+        mode: cfg.mode,
+        costUsd: +(0.01 + (k % 5) * 0.002).toFixed(3),
+      });
+    }
+    return items;
   }
 
   private emptyCounters() {
