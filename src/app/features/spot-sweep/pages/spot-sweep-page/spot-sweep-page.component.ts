@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, effect, inject, signal } from '@ang
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { SpotSweepService } from '@core/services/spot-sweep.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
+import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 import {
   ALL_ACTIVE_SCOPE,
@@ -163,40 +164,44 @@ import {
 
             <!-- Pairs -->
             <div class="field">
-              <label>Pairs ({{ cfg.pairs.length }})</label>
-              @if (cfg.pairs.length > 0) {
-                <ul class="pair-list">
-                  @for (p of cfg.pairs; track p.symbol + p.timeframe; let i = $index) {
+              <label>Pairs ({{ cfg.pairs.length }} selected)</label>
+              <div class="tf-row">
+                <span class="muted small">Timeframe</span>
+                <select
+                  [value]="sweepTimeframe()"
+                  (change)="setSweepTimeframe($any($event.target).value)"
+                >
+                  @for (tf of timeframes; track tf) {
+                    <option [value]="tf" [selected]="tf === sweepTimeframe()">{{ tf }}</option>
+                  }
+                </select>
+                <span class="spacer"></span>
+                @if (availableSymbols().length > 0) {
+                  <button type="button" class="linkish" (click)="toggleAllPairs()">
+                    {{ allPairsSelected() ? 'Clear all' : 'Select all' }}
+                  </button>
+                }
+              </div>
+              @if (availableSymbols().length > 0) {
+                <ul class="pair-check-list">
+                  @for (sym of availableSymbols(); track sym) {
                     <li>
-                      <span class="mono">{{ p.symbol }}</span>
-                      <span class="muted small">{{ p.timeframe }}</span>
-                      <button type="button" class="x" (click)="removePair(i)" aria-label="Remove">
-                        ✕
-                      </button>
+                      <label class="inline-check">
+                        <input
+                          type="checkbox"
+                          [checked]="isPairSelected(sym)"
+                          (change)="togglePair(sym)"
+                        />
+                        <span class="mono">{{ sym }}</span>
+                      </label>
                     </li>
                   }
                 </ul>
+              } @else if (pairsLoading()) {
+                <p class="muted small">Loading currency pairs…</p>
               } @else {
-                <p class="muted small">No pairs yet — add one below.</p>
+                <p class="muted small">No active currency pairs found in the catalogue.</p>
               }
-              <div class="add-pair">
-                <input
-                  class="sym-input"
-                  placeholder="EURUSD"
-                  [value]="newSymbol()"
-                  (input)="newSymbol.set($any($event.target).value)"
-                  (keyup.enter)="addPair()"
-                />
-                <select
-                  [value]="newTimeframe()"
-                  (change)="newTimeframe.set($any($event.target).value)"
-                >
-                  @for (tf of timeframes; track tf) {
-                    <option [value]="tf">{{ tf }}</option>
-                  }
-                </select>
-                <button type="button" class="ghost" (click)="addPair()">Add</button>
-              </div>
             </div>
 
             <!-- Account scope -->
@@ -249,7 +254,7 @@ import {
                   (change)="patch({ barPosition: $any($event.target).value })"
                 >
                   @for (bp of barPositions; track bp) {
-                    <option [value]="bp">{{ bp }}</option>
+                    <option [value]="bp" [selected]="bp === cfg.barPosition">{{ bp }}</option>
                   }
                 </select>
               </div>
@@ -741,33 +746,35 @@ import {
         display: flex;
         gap: var(--space-2);
       }
-      .pair-list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        max-height: 200px;
-        overflow-y: auto;
-      }
-      .pair-list li {
+      .tf-row {
         display: flex;
         align-items: center;
         gap: var(--space-2);
-        padding: 4px 8px;
-        background: var(--bg-primary);
-        border-radius: var(--radius-sm);
+        margin-bottom: 6px;
       }
-      .pair-list li .x {
-        margin-left: auto;
+      .linkish {
         border: none;
         background: transparent;
-        color: var(--text-tertiary);
+        color: var(--accent);
         cursor: pointer;
+        font-size: var(--text-xs);
+        padding: 0;
       }
-      .pair-list li .x:hover {
-        color: var(--loss);
+      .pair-check-list {
+        list-style: none;
+        margin: 0;
+        padding: 6px;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+        gap: 4px 12px;
+        max-height: 220px;
+        overflow-y: auto;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+      }
+      .pair-check-list li {
+        display: flex;
       }
       .inline-check {
         display: flex;
@@ -788,14 +795,6 @@ import {
       }
       .acct-list .chip {
         margin-left: 0;
-      }
-      .add-pair {
-        display: flex;
-        gap: var(--space-2);
-      }
-      .add-pair .sym-input {
-        flex: 1;
-        text-transform: uppercase;
       }
       button.ghost {
         border: 1px solid var(--border);
@@ -928,6 +927,7 @@ import {
 export class SpotSweepPageComponent {
   private readonly svc = inject(SpotSweepService);
   private readonly accountScope = inject(AccountScopeService);
+  private readonly currencyPairs = inject(CurrencyPairsService);
 
   /** Live (active-EA) accounts, used to populate the scope picker. */
   readonly liveAccounts = this.accountScope.liveAccounts;
@@ -942,8 +942,11 @@ export class SpotSweepPageComponent {
   readonly dirty = signal(false);
   readonly pendingLiveConfirm = signal(false);
 
-  readonly newSymbol = signal('');
-  readonly newTimeframe = signal('H1');
+  /** Active currency-pair symbols from the catalogue (the checkbox list). */
+  readonly availableSymbols = signal<string[]>([]);
+  readonly pairsLoading = signal(true);
+  /** The single timeframe applied to every swept pair. */
+  readonly sweepTimeframe = signal('H1');
 
   // Rolling activity feed, fed from the polled status' lastResult.
   readonly feed = signal<SweepLastResult[]>([]);
@@ -961,6 +964,7 @@ export class SpotSweepPageComponent {
 
   constructor() {
     this.load();
+    this.loadCurrencyPairs();
     // Append fresh sweep results to the activity feed as status polls arrive.
     effect(() => {
       const r = this.status()?.lastResult;
@@ -976,6 +980,8 @@ export class SpotSweepPageComponent {
     this.svc.getConfig().subscribe({
       next: (cfg) => {
         this.config.set(cfg);
+        // Seed the timeframe selector from existing pairs (uniform timeframe).
+        if (cfg.pairs.length > 0) this.sweepTimeframe.set(cfg.pairs[0].timeframe);
         this.dirty.set(false);
         this.loading.set(false);
       },
@@ -983,6 +989,23 @@ export class SpotSweepPageComponent {
         this.error.set('Could not load sweep configuration.');
         this.loading.set(false);
       },
+    });
+  }
+
+  /** Loads the active currency-pair symbols that populate the checkbox list. */
+  private loadCurrencyPairs(): void {
+    this.pairsLoading.set(true);
+    this.currencyPairs.list({ currentPage: 1, itemCountPerPage: 500, filter: null }).subscribe({
+      next: (res) => {
+        const symbols = (res?.data?.data ?? [])
+          .filter((p) => p.isActive && p.symbol)
+          .map((p) => p.symbol!.toUpperCase())
+          .filter((s, i, arr) => arr.indexOf(s) === i)
+          .sort();
+        this.availableSymbols.set(symbols);
+        this.pairsLoading.set(false);
+      },
+      error: () => this.pairsLoading.set(false),
     });
   }
 
@@ -1010,26 +1033,43 @@ export class SpotSweepPageComponent {
     this.pendingLiveConfirm.set(false);
   }
 
-  addPair(): void {
-    const symbol = this.newSymbol()
-      .toUpperCase()
-      .replace(/[^A-Z0-9]/g, '');
-    if (!symbol) return;
-    const timeframe = this.newTimeframe();
-    const cur = this.config();
-    if (!cur) return;
-    if (cur.pairs.some((p) => p.symbol === symbol && p.timeframe === timeframe)) {
-      this.newSymbol.set('');
-      return;
-    }
-    this.patch({ pairs: [...cur.pairs, { symbol, timeframe }] });
-    this.newSymbol.set('');
+  isPairSelected(symbol: string): boolean {
+    return this.config()?.pairs.some((p) => p.symbol === symbol) ?? false;
   }
 
-  removePair(index: number): void {
+  /** Check → add the symbol at the current timeframe; uncheck → remove it. */
+  togglePair(symbol: string): void {
     const cur = this.config();
     if (!cur) return;
-    this.patch({ pairs: cur.pairs.filter((_, i) => i !== index) });
+    if (cur.pairs.some((p) => p.symbol === symbol)) {
+      this.patch({ pairs: cur.pairs.filter((p) => p.symbol !== symbol) });
+    } else {
+      this.patch({ pairs: [...cur.pairs, { symbol, timeframe: this.sweepTimeframe() }] });
+    }
+  }
+
+  allPairsSelected(): boolean {
+    const syms = this.availableSymbols();
+    return syms.length > 0 && syms.every((s) => this.isPairSelected(s));
+  }
+
+  toggleAllPairs(): void {
+    const cur = this.config();
+    if (!cur) return;
+    const tf = this.sweepTimeframe();
+    this.patch({
+      pairs: this.allPairsSelected()
+        ? []
+        : this.availableSymbols().map((symbol) => ({ symbol, timeframe: tf })),
+    });
+  }
+
+  /** Single sweep timeframe — applied to every selected pair. */
+  setSweepTimeframe(tf: string): void {
+    this.sweepTimeframe.set(tf);
+    const cur = this.config();
+    if (!cur || cur.pairs.length === 0) return;
+    this.patch({ pairs: cur.pairs.map((p) => ({ ...p, timeframe: tf })) });
   }
 
   // ── Account scope ────────────────────────────────────────────────
