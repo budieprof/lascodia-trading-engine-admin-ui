@@ -127,6 +127,53 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/logs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Phase-9: live log tail for one EA instance (newest-first, defaults to 200 entries). */
+    get: {
+      parameters: {
+        query?: {
+          from?: string;
+          to?: string;
+          level?: string;
+          component?: string;
+          search?: string;
+          take?: number;
+        };
+        header?: never;
+        path: {
+          instanceId: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Queries_GetEAInstanceLogs_EALogTimelineItem, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Queries_GetEAInstanceLogs_EALogTimelineItem, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Queries_GetEAInstanceLogs_EALogTimelineItem, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/safety-stop': {
     parameters: {
       query?: never;
@@ -335,6 +382,144 @@ export interface paths {
           'application/json': components['schemas']['LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_FlattenInstance_FlattenInstanceCommand'];
           'text/json': components['schemas']['LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_FlattenInstance_FlattenInstanceCommand'];
           'application/*+json': components['schemas']['LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_FlattenInstance_FlattenInstanceCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Internal_AdminCommandQueueResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Internal_AdminCommandQueueResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Internal_AdminCommandQueueResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/restart': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Phase-10: in-place restart via ChartApplyTemplate — picks up a freshly-compiled binary. */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          instanceId: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_RestartInstance_RestartInstanceCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_RestartInstance_RestartInstanceCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_RestartInstance_RestartInstanceCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Internal_AdminCommandQueueResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Internal_AdminCommandQueueResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Internal_AdminCommandQueueResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/spawn': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Phase-11: spawn a new EA instance on the same MT5 terminal (one broker account). */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          instanceId: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_LaunchInstance_LaunchInstanceCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_LaunchInstance_LaunchInstanceCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_LaunchInstance_LaunchInstanceCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Internal_AdminCommandQueueResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Internal_AdminCommandQueueResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Internal_AdminCommandQueueResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/shutdown': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Phase-14: graceful targeted shutdown — the EA closes its own chart, runs OnDeinit, releases symbols, deregisters. */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          instanceId: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_ShutdownInstance_ShutdownInstanceCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_ShutdownInstance_ShutdownInstanceCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_ShutdownInstance_ShutdownInstanceCommand'];
         };
       };
       responses: {
@@ -799,6 +984,1160 @@ export interface paths {
         };
       };
     };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/ea/all/restart': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Fleet-wide: in-place restart every live EA instance via ChartApplyTemplate. */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_Fleet_FleetRestartCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_Fleet_FleetRestartCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_Fleet_FleetRestartCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Internal_AdminFleetCommandResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Internal_AdminFleetCommandResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Internal_AdminFleetCommandResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/notifications/feed': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Returns the unified notification feed for the calling operator.
+     *     Defaults to a 24h window and 100 items.  Items are merged from all
+     *     sources, sorted newest-first, and tagged with the operator's read
+     *     and mute state so the bell can render badge + visual emphasis
+     *     without further round-trips.
+     */
+    get: {
+      parameters: {
+        query?: {
+          windowHours?: number;
+          limit?: number;
+          severity?: string[];
+          source?: string[];
+        };
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Notifications_NotificationFeedResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Notifications_NotificationFeedResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Notifications_NotificationFeedResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/notifications/mark-all-read': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Updates the calling operator's "last read" high-water mark.  Pass
+     *     `asOfUtc` to use the timestamp visible in the panel when the
+     *     operator clicked — protects against missing items that arrived
+     *     after the panel rendered but before the click.
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Notifications_MarkAllNotificationsReadCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Notifications_MarkAllNotificationsReadCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_Admin_Notifications_MarkAllNotificationsReadCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_DateTime, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_DateTime, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_DateTime, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/notifications/mute': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Silences notifications of a specific type-key for the caller for
+     *     `durationHours` hours.  Idempotent — re-muting extends the
+     *     window to the new end-time when later.
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Notifications_MuteNotificationCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Notifications_MuteNotificationCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_Admin_Notifications_MuteNotificationCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Notifications_MutedTypeDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Notifications_MutedTypeDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Notifications_MutedTypeDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/notifications/unmute': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Clears the mute for a specific type-key for the caller. */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Notifications_UnmuteNotificationCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Notifications_UnmuteNotificationCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_Admin_Notifications_UnmuteNotificationCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/observability/fleet': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Aggregated snapshot across the whole fleet (EAs, daemons, sessions). */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Observability_FleetObservabilityDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Observability_FleetObservabilityDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Observability_FleetObservabilityDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/observability/ea/{instanceId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Per-EA observability — heartbeat staleness + distilled state-envelope highlights. */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          instanceId: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Observability_EAObservabilityDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Observability_EAObservabilityDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Observability_EAObservabilityDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/observability/engine': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Engine-side vitals — DB latency, working order/position counts, outbox depth. */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Observability_EngineObservabilityDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Observability_EngineObservabilityDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Observability_EngineObservabilityDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/terminals/daemons/auth': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Bootstrap auth for the sidecar daemon.  Anonymous endpoint — the
+     *     daemon proves identity via the API key in the body; engine
+     *     returns a short-lived JWT it then uses for all subsequent calls.
+     *     TOFU on first call (first daemon to claim a `DaemonId`
+     *     pins its API key); subsequent calls must present the matching
+     *     key or fail `-401`.  See
+     *     LascodiaTradingEngine.Application.Admin.Terminals.AuthenticateDaemonCommand for the security model.
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_AuthenticateDaemonCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_AuthenticateDaemonCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_AuthenticateDaemonCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Common_Security_DaemonAuthTokenResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Common_Security_DaemonAuthTokenResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Common_Security_DaemonAuthTokenResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/terminals/daemons': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List all registered daemons with online status + advertised installs. */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_Terminals_TerminalDaemonDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_Terminals_TerminalDaemonDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_Terminals_TerminalDaemonDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+          };
+        };
+      };
+    };
+    put?: never;
+    /** Daemon registration (idempotent — re-register overwrites). */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_RegisterDaemonCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_RegisterDaemonCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_RegisterDaemonCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_TerminalDaemonDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_TerminalDaemonDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_TerminalDaemonDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/terminals/daemons/heartbeat': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Daemon heartbeat — refresh LastSeenAt + reconcile sessions. */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_DaemonHeartbeatCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_DaemonHeartbeatCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_DaemonHeartbeatCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/terminals/sessions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List terminal sessions (optionally scoped by daemonId). */
+    get: {
+      parameters: {
+        query?: {
+          daemonId?: number;
+          includeClosed?: boolean;
+        };
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_Terminals_TerminalSessionDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_Terminals_TerminalSessionDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_Terminals_TerminalSessionDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/terminals/launch': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Launch a terminal — engine proxies to the daemon's /terminals/launch. */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_LaunchTerminalCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_LaunchTerminalCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_LaunchTerminalCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_TerminalSessionDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_TerminalSessionDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_TerminalSessionDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/terminals/sessions/{sessionId}/close': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Close a terminal session — engine proxies to the daemon. */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          sessionId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_CloseTerminalCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_CloseTerminalCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_CloseTerminalCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/terminals/daemons/{daemonId}/installs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List a daemon's advertised installs with the full schema
+     *     (wine_binary + extra_args) the admin UI's per-row edit form
+     *     needs.  Distinct from M:LascodiaTradingEngine.API.Controllers.v1.AdminTerminalsController.ListDaemons which returns
+     *     only the summary the dropdown needs.
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          daemonId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonInstallDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonInstallDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonInstallDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/terminals/daemons/{daemonId}/installs/clone-mt5': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Clone `/Applications/MetaTrader 5.app` on the daemon's
+     *     host for a new broker.  Bundle ends up at
+     *     `/Applications/MetaTrader 5 - <slug>.app` with a
+     *     fresh `CFBundleIdentifier` so macOS provisions a separate
+     *     Wine prefix.  Returns the path the operator should point
+     *     `register` at after the manual MT5 login dance.
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          daemonId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_CloneMt5OnDaemonCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_CloneMt5OnDaemonCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_CloneMt5OnDaemonCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonCloneMt5Response, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonCloneMt5Response, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonCloneMt5Response, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/terminals/daemons/{daemonId}/installs/register': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Register an MT5 install with the daemon.  The daemon
+     *     autofills `broker_name` + `account_login` from the
+     *     install's `config/common.ini`, appends to
+     *     `supervisor.yaml`, and reloads its in-memory config so
+     *     the install is immediately launchable.
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          daemonId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_RegisterInstallOnDaemonCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_RegisterInstallOnDaemonCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_RegisterInstallOnDaemonCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonInstallDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonInstallDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonInstallDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/terminals/daemons/{daemonId}/installs/{installId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Remove an install entry from the daemon's supervisor.yaml.
+     *     Daemon refuses if a running terminal session points at it —
+     *     operator must close the session first.
+     */
+    delete: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          daemonId: number;
+          installId: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+          };
+        };
+      };
+    };
+    options?: never;
+    head?: never;
+    /**
+     * Patch one or more fields on an install (sparse update — only
+     *     the fields actually present in the body are mutated).  Useful
+     *     for fixing a typo'd display name, flipping use_wine, or
+     *     adding/removing extra_args without re-registering.
+     */
+    patch: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          daemonId: number;
+          installId: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_PatchInstallOnDaemonCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_PatchInstallOnDaemonCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_PatchInstallOnDaemonCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonInstallDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonInstallDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonInstallDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/terminals/daemons/{daemonId}/orphans': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List MT5 terminal64.exe processes running on the daemon's host
+     *     that the daemon is NOT tracking — pre-daemon manual launches or
+     *     stale post-crash leftovers.  Includes an `installHint` when
+     *     the orphan's executable path matches one of the configured
+     *     installs, so the operator knows which broker the stale terminal
+     *     belongs to.
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          daemonId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonOrphanDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonOrphanDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonOrphanDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/terminals/daemons/{daemonId}/orphans/{pid}/kill': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Terminate one orphan MT5 process by PID.  Daemon refuses if the
+     *     PID belongs to a tracked session (operator must use the regular
+     *     close-session endpoint), and refuses non-terminal64 PIDs.  With
+     *     `force=true` the daemon skips SIGTERM and goes straight to
+     *     SIGKILL — appropriate when MT5 is unresponsive.
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          daemonId: number;
+          pid: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_KillOrphanOnDaemonCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_KillOrphanOnDaemonCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_KillOrphanOnDaemonCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonKillOrphanResponse, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonKillOrphanResponse, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonKillOrphanResponse, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/terminals/daemons/{daemonId}/restart': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Trigger the daemon to self-exit so launchd respawns a fresh
+     *     process.  Used after on-disk code updates or to recover from a
+     *     hung state.  Daemon returns 202 immediately + exits 200 ms
+     *     later; the engine tolerates the resulting connection-reset as
+     *     a soft success.
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          daemonId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_RestartDaemonResponse, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_RestartDaemonResponse, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_RestartDaemonResponse, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/terminals/daemons/{daemonId}/rotate-api-key': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rotate the daemon's `daemon_api_key`.  Engine still has
+     *     the OLD key pinned via TOFU — the response includes the new
+     *     key + the remediation steps the operator must run (clear the
+     *     engine row, restart daemon) before normal /auth succeeds again.
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          daemonId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_RotateApiKeyResponse, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_RotateApiKeyResponse, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_RotateApiKeyResponse, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/terminals/daemons/{daemonId}/logs/tail': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Tail the daemon's stderr log.  lines
+     *     defaults to 200; daemon clamps to [1, 2000].
+     */
+    get: {
+      parameters: {
+        query?: {
+          lines?: number;
+        };
+        header?: never;
+        path: {
+          daemonId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonLogTailResponse, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonLogTailResponse, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonLogTailResponse, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/admin/terminals/daemons/{daemonId}/config': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Return the daemon's supervisor.yaml as JSON with sensitive
+     *     fields (apiKey, engine_token) redacted.  Useful for verifying
+     *     the running config matches operator intent.
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          daemonId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_Dictionary`2[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[System_Object, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_Dictionary`2[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[System_Object, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_Dictionary`2[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[System_Object, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -3111,10 +4450,17 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get the latest drawdown snapshot */
+    /**
+     * Get the latest drawdown snapshot.  Pass `accountIds` (repeated
+     *     query string OR comma-separated) to scope to a specific account
+     *     or aggregate across a subset; omit to roll up across every
+     *     active account.
+     */
     get: {
       parameters: {
-        query?: never;
+        query?: {
+          accountIds?: string;
+        };
         header?: never;
         path?: never;
         cookie?: never;
@@ -3310,6 +4656,99 @@ export interface paths {
             'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[Lascodia_Trading_Engine_SharedLibrary_PagedData`1[[LascodiaTradingEngine_Application_EconomicEvents_Queries_DTOs_EconomicEventDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], SharedLibrary, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
             'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[Lascodia_Trading_Engine_SharedLibrary_PagedData`1[[LascodiaTradingEngine_Application_EconomicEvents_Queries_DTOs_EconomicEventDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], SharedLibrary, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
             'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[Lascodia_Trading_Engine_SharedLibrary_PagedData`1[[LascodiaTradingEngine_Application_EconomicEvents_Queries_DTOs_EconomicEventDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], SharedLibrary, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/economic-event/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Fetch a single economic event by id, including the Description /
+     *     DescriptionSource / DescriptionUpdatedAt fields rendered in the
+     *     admin UI detail drawer.  Returns -14 when not found.
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_EconomicEvents_Queries_DTOs_EconomicEventDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_EconomicEvents_Queries_DTOs_EconomicEventDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_EconomicEvents_Queries_DTOs_EconomicEventDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/economic-event/{id}/explain': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Resolve an explainer text for an event — used by the admin UI detail
+     *     drawer.  Three-tier resolution: cache → provider scrape → LLM.  On
+     *     success the event row's Description/DescriptionSource/UpdatedAt are
+     *     persisted so subsequent reads are instant.  Set
+     *     `forceRegenerate=true` to bypass the cache and force a fresh
+     *     LLM call (operator override when the cached explainer is stale).
+     */
+    post: {
+      parameters: {
+        query?: {
+          forceRegenerate?: boolean;
+        };
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_EconomicEvents_Commands_ExplainEconomicEvent_EconomicEventExplainResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_EconomicEvents_Commands_ExplainEconomicEvent_EconomicEventExplainResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_EconomicEvents_Commands_ExplainEconomicEvent_EconomicEventExplainResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
           };
         };
       };
@@ -3694,7 +5133,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/v1/lascodia-trading-engine/ea/audit/batch': {
+  '/api/v1/lascodia-trading-engine/ea/logs/batch': {
     parameters: {
       query?: never;
       header?: never;
@@ -3704,6 +5143,45 @@ export interface paths {
     get?: never;
     put?: never;
     /** Receive a batch of safety-audit entries from the EA's local audit log. */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_ExpertAdvisor_Commands_ReceiveEALogBatch_ReceiveEALogBatchCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_ExpertAdvisor_Commands_ReceiveEALogBatch_ReceiveEALogBatchCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_ExpertAdvisor_Commands_ReceiveEALogBatch_ReceiveEALogBatchCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content?: never;
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/ea/audit/batch': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
     post: {
       parameters: {
         query?: never;
@@ -5054,6 +6532,150 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/lascodia-trading-engine/market-data/spot-sweep/config': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Current Spot Sweep configuration (assembled from SpotSweep:* keys). */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_SpotSweep_SpotSweepConfigDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_SpotSweep_SpotSweepConfigDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_SpotSweep_SpotSweepConfigDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    /** Persist the full Spot Sweep configuration. */
+    put: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_SpotSweep_SpotSweepConfigDto'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_SpotSweep_SpotSweepConfigDto'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_SpotSweep_SpotSweepConfigDto'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_SpotSweep_SpotSweepConfigDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_SpotSweep_SpotSweepConfigDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_SpotSweep_SpotSweepConfigDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/market-data/spot-sweep/status': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Runtime status snapshot of the Spot Sweep worker. */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_SpotSweep_SpotSweepStatusDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_SpotSweep_SpotSweepStatusDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_SpotSweep_SpotSweepStatusDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/market-data/spot-sweep/history': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Recent sweep cycles (newest first) for the cockpit history table. */
+    get: {
+      parameters: {
+        query?: {
+          limit?: number;
+        };
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_SpotSweep_SpotSweepHistoryItemDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_SpotSweep_SpotSweepHistoryItemDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_SpotSweep_SpotSweepHistoryItemDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/lascodia-trading-engine/market-data/order-book/latest/{symbol}': {
     parameters: {
       query?: never;
@@ -5407,6 +7029,114 @@ export interface paths {
     };
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/market-data/propose-limit': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Directed limit-proposal variant of M:LascodiaTradingEngine.API.Controllers.v1.MarketDataController.AnalyzeMarket(LascodiaTradingEngine.Application.MarketData.Commands.AnalyzeMarket.AnalyzeMarketCommand). The
+     *     operator pins a direction ("Buy" or "Sell") and the LLM is constrained
+     *     to optimise Entry / SL / TP for a pending <em>limit</em> order in that
+     *     direction (entry on the limit side of current price — below latest
+     *     close for Buy, above for Sell) or refuse with a reason when the
+     *     structure makes the requested direction inadvisable.
+     *
+     *
+     *     Audit row is tagged `market_analysis.limit_proposal` so cohort
+     *     analytics can segment directed proposals from free analyses. Same
+     *     result shape as M:LascodiaTradingEngine.API.Controllers.v1.MarketDataController.AnalyzeMarket(LascodiaTradingEngine.Application.MarketData.Commands.AnalyzeMarket.AnalyzeMarketCommand); the spot-analysis modal
+     *     renders it with a "Limit proposal" badge and the existing
+     *     <em>Create signal</em> button promotes the rec via
+     *     M:LascodiaTradingEngine.API.Controllers.v1.MarketDataController.PersistSignalFromAnalysis(System.Int64,System.Int32).
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_MarketData_Commands_AnalyzeMarket_AnalyzeMarketCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_MarketData_Commands_AnalyzeMarket_AnalyzeMarketCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_MarketData_Commands_AnalyzeMarket_AnalyzeMarketCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_MarketData_Commands_AnalyzeMarket_MarketAnalysisResultDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_MarketData_Commands_AnalyzeMarket_MarketAnalysisResultDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_MarketData_Commands_AnalyzeMarket_MarketAnalysisResultDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/market-data/analyze/{llmInvocationId}/persist-signal': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Operator-initiated promotion of one recommendation from an existing
+     *     spot analysis into a live LascodiaTradingEngine.Domain.Entities.TradeSignal.
+     *     Mirrors the auto-gen path (sentinel strategy, SpotAnalysis source,
+     *     LlmInvocationId provenance, 3-bar TTL) but flags `IsManual = true`
+     *     — the counterpart of the "Auto-gen was off" warning's `Create signal`
+     *     button on the analysis modal.
+     */
+    post: {
+      parameters: {
+        query?: {
+          recommendationIndex?: number;
+        };
+        header?: never;
+        path: {
+          llmInvocationId: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Int64, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Int64, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Int64, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+          };
+        };
+      };
+    };
     delete?: never;
     options?: never;
     head?: never;
@@ -7482,6 +9212,56 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/lascodia-trading-engine/order/{id}/abandon': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * EA-initiated abandon for an engine Order the EA could not fill at the
+     *     broker (e.g. symbol spec genuinely unavailable on this broker after a
+     *     live-collect retry).  Dispatches the same LascodiaTradingEngine.Application.Orders.Commands.CancelOrder.CancelOrderCommand
+     *     as the operator-initiated cancel — the ownership guard restricts the EA
+     *     to its own account's orders, and the no-broker-ticket path flips
+     *     Status → Cancelled directly without queuing an EA cancel-command (the
+     *     EA is the caller; there's nothing to round-trip).  Stops the Pending-
+     *     order limbo where the EA's spec lookup keeps failing and the engine
+     *     Order sits Pending until natural signal expiry.
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/lascodia-trading-engine/order/cancel/batch': {
     parameters: {
       query?: never;
@@ -8307,6 +10087,60 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/lascodia-trading-engine/position/by-broker-ticket/{brokerTicket}/wall-observed': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * EA-emitted wall observation for an open position.  The EA's in-tick
+     *     detector spotted a fresh extreme on the TP-side of entry followed by
+     *     a material reversal (price tested a level, didn't break); the engine
+     *     records the row for later analysis.  Phase 1 is audit-only — no
+     *     automatic decision is taken.  See `WallObservation` entity docs.
+     *     Route uses broker ticket (what the EA knows); the handler resolves
+     *     the engine `Position.Id` via the instance's trading account.
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          brokerTicket: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_ExpertAdvisor_Commands_RecordWallObservation_RecordWallObservationCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_ExpertAdvisor_Commands_RecordWallObservation_RecordWallObservationCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_ExpertAdvisor_Commands_RecordWallObservation_RecordWallObservationCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Int64, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Int64, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Int64, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/lascodia-trading-engine/promotion-review/{id}': {
     parameters: {
       query?: never;
@@ -8779,6 +10613,72 @@ export interface paths {
         };
       };
     };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/signal-rejection': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Paged list of rejection events with optional filters.  Default
+     *     time window is the last 24 hours when neither `createdFrom`
+     *     nor `createdTo` is supplied — keeps first-page response
+     *     bounded on high-volume accounts.
+     */
+    get: {
+      parameters: {
+        query?: {
+          /** @description 1-based page index. */
+          currentPage?: number;
+          /** @description 25/50/100 typical. */
+          itemCountPerPage?: number;
+          /** @description Filter to a single EA instance (per-instance tab). */
+          eaInstanceId?: string;
+          /** @description Filter to a single account. */
+          tradingAccountId?: number;
+          /** @description Aggregate-scope: OR-match any account in the list. */
+          tradingAccountIds?: number[];
+          /** @description Filter to a single trade signal. */
+          signalId?: number;
+          /** @description Top-level grouping: `Local` / `Engine` / `Broker`. */
+          stage?: string;
+          /** @description Substring match against `SubStage`. */
+          subStage?: string;
+          /** @description Filter by signal symbol. */
+          symbol?: string;
+          /** @description Lower bound, ISO-8601 UTC. */
+          createdFrom?: string;
+          /** @description Upper bound, ISO-8601 UTC. */
+          createdTo?: string;
+        };
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[Lascodia_Trading_Engine_SharedLibrary_PagedData`1[[LascodiaTradingEngine_Application_SignalRejections_Queries_DTOs_SignalRejectionEventDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], SharedLibrary, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[Lascodia_Trading_Engine_SharedLibrary_PagedData`1[[LascodiaTradingEngine_Application_SignalRejections_Queries_DTOs_SignalRejectionEventDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], SharedLibrary, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[Lascodia_Trading_Engine_SharedLibrary_PagedData`1[[LascodiaTradingEngine_Application_SignalRejections_Queries_DTOs_SignalRejectionEventDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], SharedLibrary, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -11545,6 +13445,55 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/lascodia-trading-engine/trade-signal/{id}/reapprove': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Operator override that flips a Rejected signal back to Pending so it
+     *     re-flows through Tier-1 risk checks. Used when the viability gate
+     *     (or any rejection path) dropped a recommendation the operator
+     *     believes is actionable after all. Original rejection reason is
+     *     preserved in the column with an audit marker; status flip publishes
+     *     the integration event so SignalOrderBridgeWorker picks it up.
+     *     Idempotent for already-Pending / Approved signals; refuses to flip
+     *     terminal states (Filled / Expired / Cancelled).
+     */
+    put: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+          };
+        };
+      };
+    };
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/lascodia-trading-engine/trade-signal/{id}/reject': {
     parameters: {
       query?: never;
@@ -11638,6 +13587,110 @@ export interface paths {
         };
       };
     };
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/trade-signal/{id}/local-rejection': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * EA-initiated <em>local</em> rejection record — pure observability.
+     *     Unlike `/{id}/execution-rejection` which flips the signal to
+     *     `Rejected` globally, this endpoint records the rejection event
+     *     without changing signal status, so other EAs (different brokers /
+     *     accounts) can still try the same signal.  Every EA-local gate
+     *     (staleness, adverse drift, safety gates, validator, give-up after
+     *     consecutive engine errors, broker retcode) emits one row.
+     *     See `docs/SIGNAL_REJECTION_VISIBILITY.md` for the canonical
+     *     taxonomy of `SubStage` values.
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['LascodiaTradingEngine_Application_ExpertAdvisor_Commands_RecordLocalSignalRejection_RecordLocalSignalRejectionCommand'];
+          'text/json': components['schemas']['LascodiaTradingEngine_Application_ExpertAdvisor_Commands_RecordLocalSignalRejection_RecordLocalSignalRejectionCommand'];
+          'application/*+json': components['schemas']['LascodiaTradingEngine_Application_ExpertAdvisor_Commands_RecordLocalSignalRejection_RecordLocalSignalRejectionCommand'];
+        };
+      };
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Int64, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Int64, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Int64, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lascodia-trading-engine/trade-signal/{id}/rejections': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List rejection events for a single signal — drives the
+     *     "Account attempts" panel on the Trade Signal detail page.  Returns
+     *     every EA / engine / broker rejection that mentioned this signal,
+     *     across all accounts.
+     */
+    get: {
+      parameters: {
+        query?: {
+          currentPage?: number;
+          itemCountPerPage?: number;
+        };
+        header?: never;
+        path: {
+          id: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description OK */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/plain': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[Lascodia_Trading_Engine_SharedLibrary_PagedData`1[[LascodiaTradingEngine_Application_SignalRejections_Queries_DTOs_SignalRejectionEventDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], SharedLibrary, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'application/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[Lascodia_Trading_Engine_SharedLibrary_PagedData`1[[LascodiaTradingEngine_Application_SignalRejections_Queries_DTOs_SignalRejectionEventDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], SharedLibrary, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+            'text/json': components['schemas']['Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[Lascodia_Trading_Engine_SharedLibrary_PagedData`1[[LascodiaTradingEngine_Application_SignalRejections_Queries_DTOs_SignalRejectionEventDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], SharedLibrary, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+          };
+        };
+      };
+    };
+    put?: never;
     post?: never;
     delete?: never;
     options?: never;
@@ -12912,6 +14965,9 @@ export interface components {
       symbol?: string | null;
       reason?: string | null;
     };
+    LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_Fleet_FleetRestartCommand: {
+      reason?: string | null;
+    };
     LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_Fleet_FleetSafetyStopCommand: {
       category?: string | null;
       reason?: string | null;
@@ -12919,6 +14975,12 @@ export interface components {
     LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_ForceSafetyStop_ForceSafetyStopCommand: {
       instanceId: string | null;
       category?: string | null;
+      reason?: string | null;
+    };
+    LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_LaunchInstance_LaunchInstanceCommand: {
+      instanceId: string | null;
+      symbol: string | null;
+      timeframe?: string | null;
       reason?: string | null;
     };
     LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_ReleaseKillSwitch_ReleaseKillSwitchCommand: {
@@ -12931,11 +14993,19 @@ export interface components {
       symbol?: string | null;
       reason?: string | null;
     };
+    LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_RestartInstance_RestartInstanceCommand: {
+      instanceId: string | null;
+      reason?: string | null;
+    };
     LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_RetryQueue_FlushRetryQueueCommand: {
       instanceId: string | null;
       reason?: string | null;
     };
     LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_RetryQueue_PurgeRetryQueueCommand: {
+      instanceId: string | null;
+      reason?: string | null;
+    };
+    LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Commands_ShutdownInstance_ShutdownInstanceCommand: {
       instanceId: string | null;
       reason?: string | null;
     };
@@ -12966,6 +15036,73 @@ export interface components {
       maxOrdersPerMin?: number;
       /** Format: double */
       maxTotalLots?: number;
+      /** Format: int32 */
+      tickThrottleMs?: number | null;
+      /** Format: int32 */
+      signalPollSec?: number | null;
+      /** Format: int32 */
+      positionSyncSec?: number | null;
+      /** Format: int32 */
+      accountSyncSec?: number | null;
+      /** Format: int32 */
+      heartbeatSec?: number | null;
+      /** Format: int32 */
+      commandPollSec?: number | null;
+      /** Format: double */
+      entryToleranceBandPct?: number | null;
+      /** Format: double */
+      entryToleranceTpFrac?: number | null;
+      /** Format: int32 */
+      entryToleranceMaxSignalAgeSec?: number | null;
+      /** Format: int32 */
+      maxSignalAgeSec?: number | null;
+      /** Format: double */
+      maxAdverseTpDriftPct?: number | null;
+      /** Format: int32 */
+      maxSlippagePoints?: number | null;
+      /** Format: double */
+      maxSlippageSlFrac?: number | null;
+      /** Format: double */
+      maxSpreadSlFrac?: number | null;
+      /** Format: int32 */
+      maxOrderRetries?: number | null;
+      /** Format: int32 */
+      httpTimeoutData?: number | null;
+      /** Format: int32 */
+      httpTimeoutOrder?: number | null;
+      /** Format: double */
+      maxNotionalExposurePct?: number | null;
+      /** Format: double */
+      maxPeakDrawdownPct?: number | null;
+      /** Format: double */
+      flashCrashPct?: number | null;
+      /** Format: int32 */
+      engineTimeoutSec?: number | null;
+      /** Format: int32 */
+      engineFailThreshold?: number | null;
+      /** Format: int32 */
+      unmatchedDealExpirySec?: number | null;
+      /** Format: int32 */
+      safeModeTimeoutSec?: number | null;
+      /** Format: int32 */
+      backfillBars?: number | null;
+      /** Format: int32 */
+      backfillChunkSize?: number | null;
+      /** Format: int32 */
+      specRefreshHour?: number | null;
+      /** Format: int32 */
+      tickBufferMax?: number | null;
+      telemetryEndpoint?: string | null;
+      /** Format: int32 */
+      telemetryPushSec?: number | null;
+      enableNewsBlackout?: boolean | null;
+      newsBlackoutFilePath?: string | null;
+      logLevel?: string | null;
+      enableFileLogging?: boolean | null;
+      logJsonFormat?: boolean | null;
+      enableChartPanel?: boolean | null;
+      enableChartMarkers?: boolean | null;
+      symbols?: string | null;
     };
     LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Internal_AdminCommandQueueResult: {
       /** Format: int64 */
@@ -13042,6 +15179,354 @@ export interface components {
       /** Format: int64 */
       lastProcessedDealSnapshotSequence?: number | null;
       state?: unknown;
+    };
+    LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Queries_GetEAInstanceLogs_EALogTimelineItem: {
+      /** Format: int64 */
+      id?: number;
+      /** Format: date-time */
+      occurredAt?: string;
+      /** Format: date-time */
+      receivedAt?: string;
+      level?: string | null;
+      component?: string | null;
+      message?: string | null;
+      correlationId?: string | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Notifications_DetailField: {
+      label?: string | null;
+      value?: string | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Notifications_MarkAllNotificationsReadCommand: {
+      /** Format: date-time */
+      asOfUtc?: string | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Notifications_MuteNotificationCommand: {
+      typeKey: string | null;
+      /** Format: int32 */
+      durationHours?: number;
+    };
+    LascodiaTradingEngine_Application_Admin_Notifications_MutedTypeDto: {
+      typeKey?: string | null;
+      /** Format: date-time */
+      mutedUntilUtc?: string;
+    };
+    LascodiaTradingEngine_Application_Admin_Notifications_NotificationFeedItem: {
+      id?: string | null;
+      source?: string | null;
+      typeKey?: string | null;
+      severity?: string | null;
+      title?: string | null;
+      subtitle?: string | null;
+      symbol?: string | null;
+      instanceId?: string | null;
+      /** Format: date-time */
+      occurredAtUtc?: string;
+      linkRoute?: string | null;
+      linkParams?: {
+        [key: string]: string;
+      } | null;
+      isRead?: boolean;
+      isMuted?: boolean;
+      details?:
+        | components['schemas']['LascodiaTradingEngine_Application_Admin_Notifications_DetailField'][]
+        | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Notifications_NotificationFeedResult: {
+      items?:
+        | components['schemas']['LascodiaTradingEngine_Application_Admin_Notifications_NotificationFeedItem'][]
+        | null;
+      /** Format: int32 */
+      unreadCount?: number;
+      /** Format: date-time */
+      lastReadAtUtc?: string | null;
+      activeMutes?:
+        | components['schemas']['LascodiaTradingEngine_Application_Admin_Notifications_MutedTypeDto'][]
+        | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Notifications_UnmuteNotificationCommand: {
+      typeKey: string | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Observability_EAObservabilityDto: {
+      instanceId?: string | null;
+      status?: string | null;
+      eaVersion?: string | null;
+      isCoordinator?: boolean;
+      /** Format: int64 */
+      tradingAccountId?: number;
+      /** Format: date-time */
+      registeredAt?: string;
+      /** Format: date-time */
+      lastHeartbeat?: string;
+      /** Format: double */
+      heartbeatAgeSec?: number;
+      /** Format: date-time */
+      lastStateUpdatedAt?: string | null;
+      /** Format: double */
+      stateAgeSec?: number | null;
+      highlights?: components['schemas']['LascodiaTradingEngine_Application_Admin_Observability_EAObservabilityHighlights'];
+      rawState?: string | null;
+      /** Format: date-time */
+      generatedAt?: string;
+    };
+    LascodiaTradingEngine_Application_Admin_Observability_EAObservabilityHighlights: {
+      stateMachine?: string | null;
+      safetyStopCategory?: string | null;
+      marketState?: string | null;
+      brokerConnected?: boolean | null;
+      engineReachable?: boolean | null;
+      killSwitchActive?: boolean | null;
+      globalSafetyStop?: boolean | null;
+      /** Format: double */
+      httpSuccessRate?: number | null;
+      httpCircuitOpen?: boolean | null;
+      gvarUsageHigh?: boolean | null;
+      /** Format: int32 */
+      gvarTotal?: number | null;
+      /** Format: int32 */
+      positionCount?: number | null;
+      /** Format: int32 */
+      orderQueueSize?: number | null;
+      /** Format: int32 */
+      orderQueueCapacity?: number | null;
+      /** Format: double */
+      dailyPnL?: number | null;
+      /** Format: double */
+      latencyP95Ms?: number | null;
+      /** Format: double */
+      latencyP99Ms?: number | null;
+      /** Format: int64 */
+      lastTickAgeSec?: number | null;
+      /** Format: int32 */
+      pendingCommandAcks?: number | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Observability_EngineObservabilityDto: {
+      /** Format: date-time */
+      generatedAt?: string;
+      /** Format: double */
+      dbLatencyMs?: number;
+      /** Format: int32 */
+      openPositions?: number;
+      /** Format: int32 */
+      workingOrders?: number;
+      /** Format: int32 */
+      activeAccounts?: number;
+      /** Format: int64 */
+      outboxPending?: number | null;
+      metricsEndpoint?: string | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Observability_FleetDaemonSummary: {
+      /** Format: int32 */
+      total?: number;
+      /** Format: int32 */
+      online?: number;
+      /** Format: int32 */
+      offline?: number;
+    };
+    LascodiaTradingEngine_Application_Admin_Observability_FleetEaSummary: {
+      /** Format: int32 */
+      total?: number;
+      /** Format: int32 */
+      active?: number;
+      /** Format: int32 */
+      idleOverStale?: number;
+      /** Format: int32 */
+      disconnected?: number;
+      /** Format: int32 */
+      coordinators?: number;
+      /** Format: int32 */
+      distinctAccounts?: number;
+      /** Format: int32 */
+      distinctVersions?: number;
+      /** Format: date-time */
+      oldestHeartbeat?: string | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Observability_FleetObservabilityDto: {
+      /** Format: date-time */
+      generatedAt?: string;
+      eas?: components['schemas']['LascodiaTradingEngine_Application_Admin_Observability_FleetEaSummary'];
+      daemons?: components['schemas']['LascodiaTradingEngine_Application_Admin_Observability_FleetDaemonSummary'];
+      sessions?: components['schemas']['LascodiaTradingEngine_Application_Admin_Observability_FleetSessionSummary'];
+      /** Format: int32 */
+      staleThresholdMinutes?: number;
+    };
+    LascodiaTradingEngine_Application_Admin_Observability_FleetSessionSummary: {
+      /** Format: int32 */
+      running?: number;
+      /** Format: int32 */
+      closed?: number;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_AuthenticateDaemonCommand: {
+      daemonId: string | null;
+      name: string | null;
+      baseUrl: string | null;
+      daemonApiKey: string | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_CloneMt5OnDaemonCommand: {
+      /** Format: int64 */
+      daemonId?: number;
+      brokerSlug: string | null;
+      sourceAppPath?: string | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_CloseTerminalCommand: {
+      /** Format: int64 */
+      sessionId: number;
+      reason?: string | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_DaemonCloneMt5Response: {
+      brokerSlug?: string | null;
+      bundlePath?: string | null;
+      expectedExecutable?: string | null;
+      winePrefix?: string | null;
+      bundleId?: string | null;
+      nextSteps?: string[] | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_DaemonHeartbeatCommand: {
+      daemonId: string | null;
+      sessions?:
+        | components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_HeartbeatSessionItem'][]
+        | null;
+      installs?:
+        | components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_TerminalInstallDto'][]
+        | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_DaemonInstallDto: {
+      installId?: string | null;
+      name?: string | null;
+      executable?: string | null;
+      useWine?: boolean;
+      extraArgs?: string[] | null;
+      brokerName?: string | null;
+      accountLogin?: string | null;
+      wineBinary?: string | null;
+      winePrefix?: string | null;
+      isDefault?: boolean;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_DaemonKillOrphanResponse: {
+      ok?: boolean;
+      /** Format: int32 */
+      pid?: number;
+      method?: string | null;
+      exitedWithinGrace?: boolean;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_DaemonLogTailResponse: {
+      path?: string | null;
+      lines?: string[] | null;
+      available?: boolean;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_DaemonOrphanDto: {
+      /** Format: int32 */
+      pid?: number;
+      name?: string | null;
+      exePath?: string | null;
+      cmdline?: string | null;
+      startedAt?: string | null;
+      installHint?: string | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_HeartbeatSessionItem: {
+      daemonSessionId?: string | null;
+      installId?: string | null;
+      /** Format: int32 */
+      pid?: number | null;
+      status?: string | null;
+      /** Format: date-time */
+      stoppedAt?: string | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_KillOrphanOnDaemonCommand: {
+      /** Format: int64 */
+      daemonId?: number;
+      /** Format: int32 */
+      pid?: number;
+      /** Format: int32 */
+      graceSeconds?: number;
+      force?: boolean;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_LaunchTerminalCommand: {
+      /** Format: int64 */
+      daemonId: number;
+      installId: string | null;
+      reason?: string | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_PatchInstallOnDaemonCommand: {
+      /** Format: int64 */
+      daemonId?: number;
+      installId?: string | null;
+      name?: string | null;
+      extraArgs?: string[] | null;
+      useWine?: boolean | null;
+      wineBinary?: string | null;
+      brokerName?: string | null;
+      accountLogin?: string | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_RegisterDaemonCommand: {
+      daemonId: string | null;
+      name: string | null;
+      baseUrl: string | null;
+      daemonApiKey: string | null;
+      installs?:
+        | components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_TerminalInstallDto'][]
+        | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_RegisterInstallOnDaemonCommand: {
+      /** Format: int64 */
+      daemonId?: number;
+      installId: string | null;
+      executable: string | null;
+      name?: string | null;
+      useWine?: boolean;
+      wineBinary?: string | null;
+      extraArgs?: string[] | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_RestartDaemonResponse: {
+      ok?: boolean;
+      /** Format: int32 */
+      scheduledExitInMs?: number;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_RotateApiKeyResponse: {
+      ok?: boolean;
+      newApiKey?: string | null;
+      remediation?: string | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_TerminalDaemonDto: {
+      /** Format: int64 */
+      id?: number;
+      daemonId?: string | null;
+      name?: string | null;
+      baseUrl?: string | null;
+      /** Format: date-time */
+      registeredAt?: string;
+      /** Format: date-time */
+      lastSeenAt?: string;
+      isOnline?: boolean;
+      installs?:
+        | components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_TerminalInstallDto'][]
+        | null;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_TerminalInstallDto: {
+      installId?: string | null;
+      name?: string | null;
+      executable?: string | null;
+      brokerName?: string | null;
+      accountLogin?: string | null;
+      isDefault?: boolean;
+    };
+    LascodiaTradingEngine_Application_Admin_Terminals_TerminalSessionDto: {
+      /** Format: int64 */
+      id?: number;
+      /** Format: int64 */
+      daemonId?: number;
+      daemonName?: string | null;
+      daemonSessionId?: string | null;
+      installId?: string | null;
+      /** Format: int32 */
+      pid?: number | null;
+      status?: string | null;
+      reason?: string | null;
+      /** Format: date-time */
+      launchedAt?: string;
+      /** Format: date-time */
+      lastSeenAt?: string;
+      /** Format: date-time */
+      stoppedAt?: string | null;
     };
     LascodiaTradingEngine_Application_Alerts_Commands_CreateAlert_CreateAlertCommand: {
       alertType: components['schemas']['LascodiaTradingEngine_Domain_Enums_AlertType'];
@@ -13464,6 +15949,13 @@ export interface components {
       /** Format: int32 */
       bridgePort?: number | null;
     };
+    LascodiaTradingEngine_Application_Common_Security_DaemonAuthTokenResult: {
+      token?: string | null;
+      /** Format: date-time */
+      expiresAt?: string;
+      tokenType?: string | null;
+      daemonId?: string | null;
+    };
     LascodiaTradingEngine_Application_CompositeML_Commands_SetGateCutover_SetGateCutoverCommand: {
       layerKey: string | null;
       returnLedgerCount: boolean;
@@ -13823,6 +16315,8 @@ export interface components {
       readonly filterObj?: unknown;
     };
     LascodiaTradingEngine_Application_DrawdownRecovery_Commands_RecordDrawdownSnapshot_RecordDrawdownSnapshotCommand: {
+      /** Format: int64 */
+      tradingAccountId?: number;
       /** Format: double */
       currentEquity?: number;
       /** Format: double */
@@ -13831,6 +16325,8 @@ export interface components {
     LascodiaTradingEngine_Application_DrawdownRecovery_Queries_DTOs_DrawdownSnapshotDto: {
       /** Format: int64 */
       id?: number;
+      /** Format: int64 */
+      tradingAccountId?: number;
       /** Format: double */
       currentEquity?: number;
       /** Format: double */
@@ -13878,6 +16374,14 @@ export interface components {
       externalKey?: string | null;
       actual?: string | null;
     };
+    LascodiaTradingEngine_Application_EconomicEvents_Commands_ExplainEconomicEvent_EconomicEventExplainResult: {
+      /** Format: int64 */
+      id?: number;
+      description?: string | null;
+      descriptionSource?: string | null;
+      /** Format: date-time */
+      descriptionUpdatedAt?: string | null;
+    };
     LascodiaTradingEngine_Application_EconomicEvents_Commands_UpdateEconomicEventActual_UpdateEconomicEventActualCommand: {
       /** Format: int64 */
       id?: number;
@@ -13895,6 +16399,11 @@ export interface components {
       previous?: string | null;
       actual?: string | null;
       source?: components['schemas']['LascodiaTradingEngine_Domain_Enums_EconomicEventSource'];
+      externalKey?: string | null;
+      description?: string | null;
+      descriptionSource?: components['schemas']['LascodiaTradingEngine_Domain_Enums_EconomicEventDescriptionSource'];
+      /** Format: date-time */
+      descriptionUpdatedAt?: string | null;
     };
     LascodiaTradingEngine_Application_EconomicEvents_Queries_GetPagedEconomicEvents_EconomicEventQueryFilter: {
       currency?: string | null;
@@ -14199,6 +16708,20 @@ export interface components {
         | components['schemas']['LascodiaTradingEngine_Application_ExpertAdvisor_Commands_ReceiveEAAuditBatch_EAAuditBatchItem'][]
         | null;
     };
+    LascodiaTradingEngine_Application_ExpertAdvisor_Commands_ReceiveEALogBatch_EALogBatchItem: {
+      /** Format: date-time */
+      occurredAt?: string;
+      level: string | null;
+      component?: string | null;
+      message?: string | null;
+      correlationId?: string | null;
+    };
+    LascodiaTradingEngine_Application_ExpertAdvisor_Commands_ReceiveEALogBatch_ReceiveEALogBatchCommand: {
+      instanceId: string | null;
+      entries?:
+        | components['schemas']['LascodiaTradingEngine_Application_ExpertAdvisor_Commands_ReceiveEALogBatch_EALogBatchItem'][]
+        | null;
+    };
     LascodiaTradingEngine_Application_ExpertAdvisor_Commands_ReceiveOrderBookSnapshotBatch_OrderBookSnapshotItem: {
       symbol?: string | null;
       /** Format: double */
@@ -14353,6 +16876,10 @@ export interface components {
       swapShort?: number;
       /** Format: int32 */
       swapMode?: number;
+      /** Format: double */
+      pipSize?: number;
+      /** Format: double */
+      spreadPoints?: number;
     };
     LascodiaTradingEngine_Application_ExpertAdvisor_Commands_ReceiveTickBatch_ReceiveTickBatchCommand: {
       instanceId: string | null;
@@ -14392,6 +16919,35 @@ export interface components {
       /** Format: int32 */
       dayOfWeekEnd?: number;
     };
+    LascodiaTradingEngine_Application_ExpertAdvisor_Commands_RecordLocalSignalRejection_RecordLocalSignalRejectionCommand: {
+      /** Format: int64 */
+      signalId: number;
+      instanceId: string | null;
+      /** Format: int64 */
+      tradingAccountId: number;
+      stage?: components['schemas']['LascodiaTradingEngine_Domain_Enums_SignalRejectionStage'];
+      subStage: string | null;
+      reason: string | null;
+      metadataJson?: string | null;
+      correlationId?: string | null;
+    };
+    LascodiaTradingEngine_Application_ExpertAdvisor_Commands_RecordWallObservation_RecordWallObservationCommand: {
+      /** Format: int64 */
+      brokerTicket: number;
+      instanceId: string | null;
+      symbol: string | null;
+      /** Format: double */
+      priceLevel: number;
+      /** Format: double */
+      entryPrice: number;
+      /** Format: int32 */
+      rejectionDistancePoints: number;
+      /** Format: int32 */
+      rejectionDurationMs: number;
+      /** Format: date-time */
+      observedAt: string;
+      correlationId?: string | null;
+    };
     LascodiaTradingEngine_Application_ExpertAdvisor_Commands_RefreshSymbolSpecs_RefreshSymbolSpecsCommand: {
       /** Format: int64 */
       tradingAccountId?: number;
@@ -14428,6 +16984,73 @@ export interface components {
       maxOrdersPerMin?: number;
       /** Format: double */
       maxTotalLots?: number;
+      /** Format: int32 */
+      tickThrottleMs?: number | null;
+      /** Format: int32 */
+      signalPollSec?: number | null;
+      /** Format: int32 */
+      positionSyncSec?: number | null;
+      /** Format: int32 */
+      accountSyncSec?: number | null;
+      /** Format: int32 */
+      heartbeatSec?: number | null;
+      /** Format: int32 */
+      commandPollSec?: number | null;
+      /** Format: double */
+      entryToleranceBandPct?: number | null;
+      /** Format: double */
+      entryToleranceTpFrac?: number | null;
+      /** Format: int32 */
+      entryToleranceMaxSignalAgeSec?: number | null;
+      /** Format: int32 */
+      maxSignalAgeSec?: number | null;
+      /** Format: double */
+      maxAdverseTpDriftPct?: number | null;
+      /** Format: double */
+      maxSlippageSlFrac?: number | null;
+      /** Format: double */
+      maxSpreadSlFrac?: number | null;
+      /** Format: int32 */
+      maxSlippagePoints?: number | null;
+      /** Format: int32 */
+      maxOrderRetries?: number | null;
+      /** Format: int32 */
+      httpTimeoutData?: number | null;
+      /** Format: int32 */
+      httpTimeoutOrder?: number | null;
+      /** Format: double */
+      maxNotionalExposurePct?: number | null;
+      /** Format: double */
+      maxPeakDrawdownPct?: number | null;
+      /** Format: double */
+      flashCrashPct?: number | null;
+      /** Format: int32 */
+      engineTimeoutSec?: number | null;
+      /** Format: int32 */
+      engineFailThreshold?: number | null;
+      /** Format: int32 */
+      unmatchedDealExpirySec?: number | null;
+      /** Format: int32 */
+      safeModeTimeoutSec?: number | null;
+      /** Format: int32 */
+      backfillBars?: number | null;
+      /** Format: int32 */
+      backfillChunkSize?: number | null;
+      /** Format: int32 */
+      specRefreshHour?: number | null;
+      /** Format: int32 */
+      tickBufferMax?: number | null;
+      telemetryEndpoint?: string | null;
+      /** Format: int32 */
+      telemetryPushSec?: number | null;
+      enableNewsBlackout?: boolean | null;
+      newsBlackoutFilePath?: string | null;
+      logLevel?: string | null;
+      enableFileLogging?: boolean | null;
+      logJsonFormat?: boolean | null;
+      enableChartPanel?: boolean | null;
+      enableChartMarkers?: boolean | null;
+      symbols?: string | null;
     };
     LascodiaTradingEngine_Application_Llm_Commands_ApplyPerSymbolShrinkage_ApplyPerSymbolShrinkageCommand: {
       picks?:
@@ -15315,6 +17938,7 @@ export interface components {
       timeframe: components['schemas']['LascodiaTradingEngine_Domain_Enums_Timeframe'];
       generateSignals?: boolean;
       barPosition?: string | null;
+      limitProposalDirection?: string | null;
     };
     LascodiaTradingEngine_Application_MarketData_Commands_AnalyzeMarket_MarketAnalysisExitInstructionDto: {
       /** Format: int64 */
@@ -15376,6 +18000,21 @@ export interface components {
       rejectedRecommendations?:
         | components['schemas']['LascodiaTradingEngine_Application_MarketData_Commands_AnalyzeMarket_MarketAnalysisRejectedRecommendationDto'][]
         | null;
+      viabilityGateTally?: components['schemas']['LascodiaTradingEngine_Application_MarketData_Commands_AnalyzeMarket_MarketAnalysisViabilityGateTallyDto'];
+    };
+    LascodiaTradingEngine_Application_MarketData_Commands_AnalyzeMarket_MarketAnalysisViabilityGateTallyDto: {
+      /** Format: int32 */
+      totalRecommendations?: number;
+      /** Format: int32 */
+      viableCleanCount?: number;
+      /** Format: int32 */
+      viableBypassedCount?: number;
+      /** Format: int32 */
+      softRejectedCount?: number;
+      /** Format: int32 */
+      hardRejectedCount?: number;
+      /** Format: double */
+      bypassThreshold?: number;
     };
     LascodiaTradingEngine_Application_MarketData_Queries_DTOs_CandleCoverageDto: {
       symbol?: string | null;
@@ -15657,6 +18296,12 @@ export interface components {
       unrealizedPnl?: number;
       /** Format: double */
       totalPnl?: number;
+      /** Format: int32 */
+      gateBypassed?: number;
+      /** Format: int32 */
+      gateSoftRejected?: number;
+      /** Format: int32 */
+      gateHardRejected?: number;
     };
     LascodiaTradingEngine_Application_MarketData_Queries_GetSpotAnalysesList_SpotAnalysisTimePointDto: {
       /** Format: date-time */
@@ -16036,6 +18681,8 @@ export interface components {
       id?: number;
       /** Format: int64 */
       tradeSignalId?: number | null;
+      /** Format: int64 */
+      tradingAccountId?: number;
       symbol?: string | null;
       orderType?: components['schemas']['LascodiaTradingEngine_Domain_Enums_OrderType'];
       executionType?: components['schemas']['LascodiaTradingEngine_Domain_Enums_ExecutionType'];
@@ -16083,6 +18730,9 @@ export interface components {
       orderType?: string | null;
       /** Format: int64 */
       strategyId?: number | null;
+      /** Format: int64 */
+      tradingAccountId?: number | null;
+      tradingAccountIds?: number[] | null;
     };
     LascodiaTradingEngine_Application_PaperTrading_Commands_BackfillPaperExecutions_BackfillPaperExecutionsCommand: {
       /** Format: int64 */
@@ -16131,6 +18781,8 @@ export interface components {
     LascodiaTradingEngine_Application_Positions_Queries_DTOs_PositionDto: {
       /** Format: int64 */
       id?: number;
+      /** Format: int64 */
+      tradingAccountId?: number;
       symbol?: string | null;
       direction?: components['schemas']['LascodiaTradingEngine_Domain_Enums_PositionDirection'];
       /** Format: double */
@@ -16242,6 +18894,7 @@ export interface components {
       symbol?: string | null;
       status?: string | null;
       isPaper?: boolean | null;
+      tradingAccountIds?: number[] | null;
     };
     LascodiaTradingEngine_Application_RateLimiting_Queries_GetApiQuotaStatus_ApiQuotaStatusDto: {
       brokerKey?: string | null;
@@ -16501,6 +19154,119 @@ export interface components {
       strategyId?: number | null;
       /** Format: int64 */
       tradeSignalId?: number | null;
+    };
+    LascodiaTradingEngine_Application_SignalRejections_Queries_DTOs_SignalRejectionEventDto: {
+      /** Format: int64 */
+      id?: number;
+      /** Format: int64 */
+      tradeSignalId?: number;
+      /** Format: int64 */
+      tradingAccountId?: number;
+      eaInstanceId?: string | null;
+      stage?: components['schemas']['LascodiaTradingEngine_Domain_Enums_SignalRejectionStage'];
+      subStage?: string | null;
+      reason?: string | null;
+      metadataJson?: string | null;
+      correlationId?: string | null;
+      /** Format: date-time */
+      createdAt?: string;
+      symbol?: string | null;
+      signalDirection?: string | null;
+    };
+    LascodiaTradingEngine_Application_SpotSweep_SpotSweepConfigDto: {
+      enabled?: boolean;
+      mode?: string | null;
+      pairs?:
+        | components['schemas']['LascodiaTradingEngine_Application_SpotSweep_SweepPairDto'][]
+        | null;
+      barPosition?: string | null;
+      /** Format: int32 */
+      intervalSeconds?: number;
+      accountScope?: unknown;
+      autoApprove?: boolean;
+      /** Format: double */
+      minConfidence?: number;
+      excludeOpenPosition?: boolean;
+      excludePendingOrder?: boolean;
+      excludePendingSignal?: boolean;
+      requireActiveEaCoverage?: boolean;
+      /** Format: int32 */
+      maxConcurrentSweepPositions?: number;
+      /** Format: int32 */
+      maxNewOrdersPerDay?: number;
+      /** Format: double */
+      maxDailyLlmCostUsd?: number;
+      /** Format: double */
+      maxRiskPerTrade?: number;
+      respectKillSwitch?: boolean;
+    };
+    LascodiaTradingEngine_Application_SpotSweep_SpotSweepHistoryItemDto: {
+      /** Format: int64 */
+      id?: number;
+      /** Format: date-time */
+      at?: string;
+      symbol?: string | null;
+      timeframe?: string | null;
+      outcome?: string | null;
+      /** Format: double */
+      confidence?: number | null;
+      /** Format: int64 */
+      signalId?: number | null;
+      /** Format: int64 */
+      orderId?: number | null;
+      autoApproved?: boolean;
+      mode?: string | null;
+      /** Format: double */
+      costUsd?: number;
+    };
+    LascodiaTradingEngine_Application_SpotSweep_SpotSweepStatusDto: {
+      running?: boolean;
+      phase?: string | null;
+      idleReason?: string | null;
+      currentSymbol?: string | null;
+      /** Format: date-time */
+      startedAt?: string | null;
+      nextEligibleSymbol?: string | null;
+      lastResult?: components['schemas']['LascodiaTradingEngine_Application_SpotSweep_SweepLastResultDto'];
+      today?: components['schemas']['LascodiaTradingEngine_Application_SpotSweep_SweepTodayCountersDto'];
+      killSwitchActive?: boolean;
+      /** Format: int32 */
+      eligibleCount?: number;
+      /** Format: int32 */
+      excludedCount?: number;
+    };
+    LascodiaTradingEngine_Application_SpotSweep_SweepLastResultDto: {
+      symbol?: string | null;
+      outcome?: string | null;
+      /** Format: int64 */
+      signalId?: number | null;
+      /** Format: int64 */
+      orderId?: number | null;
+      autoApproved?: boolean;
+      /** Format: double */
+      costUsd?: number;
+      /** Format: date-time */
+      at?: string;
+    };
+    LascodiaTradingEngine_Application_SpotSweep_SweepPairDto: {
+      symbol?: string | null;
+      timeframe?: string | null;
+    };
+    LascodiaTradingEngine_Application_SpotSweep_SweepTodayCountersDto: {
+      /** Format: int32 */
+      analyses?: number;
+      /** Format: int32 */
+      signalsCreated?: number;
+      /** Format: int32 */
+      ordersPlaced?: number;
+      /** Format: int32 */
+      autoApproved?: number;
+      /** Format: int32 */
+      manualPending?: number;
+      /** Format: int32 */
+      gateRejected?: number;
+      /** Format: double */
+      costUsd?: number;
     };
     LascodiaTradingEngine_Application_Strategies_Commands_ApplyStrategyTemplate_ApplyStrategyTemplateCommand: {
       /** Format: int64 */
@@ -17700,6 +20466,7 @@ export interface components {
       isManual?: boolean;
       initialStatus?: components['schemas']['LascodiaTradingEngine_Domain_Enums_TradeSignalStatus'];
       rejectionReason?: string | null;
+      gateBypassReason?: string | null;
     };
     LascodiaTradingEngine_Application_TradeSignals_Commands_RejectTradeSignal_RejectTradeSignalCommand: {
       /** Format: int64 */
@@ -18364,6 +21131,12 @@ export interface components {
       | 'Bool'
       | 'Json';
     /** @enum {string} */
+    LascodiaTradingEngine_Domain_Enums_EconomicEventDescriptionSource:
+      | 'None'
+      | 'Scraped'
+      | 'LlmGenerated'
+      | 'Manual';
+    /** @enum {string} */
     LascodiaTradingEngine_Domain_Enums_EconomicEventSource:
       | 'ForexFactory'
       | 'Investing'
@@ -18431,7 +21204,8 @@ export interface components {
       | 'Filled'
       | 'Cancelled'
       | 'Rejected'
-      | 'Expired';
+      | 'Expired'
+      | 'Cancelling';
     /** @enum {string} */
     LascodiaTradingEngine_Domain_Enums_OrderType: 'Buy' | 'Sell';
     /** @enum {string} */
@@ -18473,6 +21247,8 @@ export interface components {
       | 'Promoted'
       | 'Rejected'
       | 'Processing';
+    /** @enum {string} */
+    LascodiaTradingEngine_Domain_Enums_SignalRejectionStage: 'Local' | 'Engine' | 'Broker';
     /** @enum {string} */
     LascodiaTradingEngine_Domain_Enums_StrategyLifecycleStage:
       | 'Draft'
@@ -18555,7 +21331,8 @@ export interface components {
       | 'InvalidOptionsSnapshot'
       | 'InvalidStrategySnapshot'
       | 'ExecutionFailed'
-      | 'TransientInfrastructure';
+      | 'TransientInfrastructure'
+      | 'OperatorTerminated';
     /** @enum {string} */
     LascodiaTradingEngine_Domain_Enums_ValidationQueueSource:
       | 'Legacy'
@@ -18585,6 +21362,84 @@ export interface components {
     };
     'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Queries_GetEAInstanceDetail_EAInstanceDetail, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
       data?: components['schemas']['LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Queries_GetEAInstanceDetail_EAInstanceDetail'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Notifications_MutedTypeDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_Admin_Notifications_MutedTypeDto'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Notifications_NotificationFeedResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_Admin_Notifications_NotificationFeedResult'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Observability_EAObservabilityDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_Admin_Observability_EAObservabilityDto'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Observability_EngineObservabilityDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_Admin_Observability_EngineObservabilityDto'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Observability_FleetObservabilityDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_Admin_Observability_FleetObservabilityDto'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonCloneMt5Response, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_DaemonCloneMt5Response'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonInstallDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_DaemonInstallDto'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonKillOrphanResponse, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_DaemonKillOrphanResponse'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonLogTailResponse, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_DaemonLogTailResponse'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_RestartDaemonResponse, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_RestartDaemonResponse'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_RotateApiKeyResponse, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_RotateApiKeyResponse'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_TerminalDaemonDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_TerminalDaemonDto'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Admin_Terminals_TerminalSessionDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_TerminalSessionDto'];
       status?: boolean;
       message?: string | null;
       responseCode?: string | null;
@@ -18627,6 +21482,12 @@ export interface components {
     };
     'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Common_Security_AuthTokenResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
       data?: components['schemas']['LascodiaTradingEngine_Application_Common_Security_AuthTokenResult'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Common_Security_DaemonAuthTokenResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_Common_Security_DaemonAuthTokenResult'];
       status?: boolean;
       message?: string | null;
       responseCode?: string | null;
@@ -18675,6 +21536,18 @@ export interface components {
     };
     'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_DrawdownRecovery_Queries_DTOs_DrawdownSnapshotDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
       data?: components['schemas']['LascodiaTradingEngine_Application_DrawdownRecovery_Queries_DTOs_DrawdownSnapshotDto'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_EconomicEvents_Commands_ExplainEconomicEvent_EconomicEventExplainResult, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_EconomicEvents_Commands_ExplainEconomicEvent_EconomicEventExplainResult'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_EconomicEvents_Queries_DTOs_EconomicEventDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_EconomicEvents_Queries_DTOs_EconomicEventDto'];
       status?: boolean;
       message?: string | null;
       responseCode?: string | null;
@@ -18885,6 +21758,18 @@ export interface components {
     };
     'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_Sentiment_Queries_DTOs_SentimentSnapshotDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
       data?: components['schemas']['LascodiaTradingEngine_Application_Sentiment_Queries_DTOs_SentimentSnapshotDto'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_SpotSweep_SpotSweepConfigDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_SpotSweep_SpotSweepConfigDto'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[LascodiaTradingEngine_Application_SpotSweep_SpotSweepStatusDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['LascodiaTradingEngine_Application_SpotSweep_SpotSweepStatusDto'];
       status?: boolean;
       message?: string | null;
       responseCode?: string | null;
@@ -19213,6 +22098,12 @@ export interface components {
       message?: string | null;
       responseCode?: string | null;
     };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[Lascodia_Trading_Engine_SharedLibrary_PagedData`1[[LascodiaTradingEngine_Application_SignalRejections_Queries_DTOs_SignalRejectionEventDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], SharedLibrary, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      data?: components['schemas']['Lascodia_Trading_Engine_SharedLibrary_PagedData`1[[LascodiaTradingEngine_Application_SignalRejections_Queries_DTOs_SignalRejectionEventDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
     'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[Lascodia_Trading_Engine_SharedLibrary_PagedData`1[[LascodiaTradingEngine_Application_Strategies_Queries_DTOs_StrategyDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], SharedLibrary, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
       data?: components['schemas']['Lascodia_Trading_Engine_SharedLibrary_PagedData`1[[LascodiaTradingEngine_Application_Strategies_Queries_DTOs_StrategyDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]'];
       status?: boolean;
@@ -19269,6 +22160,14 @@ export interface components {
     };
     'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Boolean, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]': {
       data?: boolean;
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_Dictionary`2[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[System_Object, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]': {
+      data?: {
+        [key: string]: unknown;
+      } | null;
       status?: boolean;
       message?: string | null;
       responseCode?: string | null;
@@ -19409,6 +22308,46 @@ export interface components {
       message?: string | null;
       responseCode?: string | null;
     };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Queries_GetEAInstanceLogs_EALogTimelineItem, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]': {
+      data?:
+        | components['schemas']['LascodiaTradingEngine_Application_Admin_ExpertAdvisor_Queries_GetEAInstanceLogs_EALogTimelineItem'][]
+        | null;
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonInstallDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]': {
+      data?:
+        | components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_DaemonInstallDto'][]
+        | null;
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_Terminals_DaemonOrphanDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]': {
+      data?:
+        | components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_DaemonOrphanDto'][]
+        | null;
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_Terminals_TerminalDaemonDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]': {
+      data?:
+        | components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_TerminalDaemonDto'][]
+        | null;
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Admin_Terminals_TerminalSessionDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]': {
+      data?:
+        | components['schemas']['LascodiaTradingEngine_Application_Admin_Terminals_TerminalSessionDto'][]
+        | null;
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
     'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Alerts_Queries_GetAlertChannelStatus_AlertChannelStatusDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]': {
       data?:
         | components['schemas']['LascodiaTradingEngine_Application_Alerts_Queries_GetAlertChannelStatus_AlertChannelStatusDto'][]
@@ -19489,6 +22428,14 @@ export interface components {
       message?: string | null;
       responseCode?: string | null;
     };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_SpotSweep_SpotSweepHistoryItemDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]': {
+      data?:
+        | components['schemas']['LascodiaTradingEngine_Application_SpotSweep_SpotSweepHistoryItemDto'][]
+        | null;
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
     'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[LascodiaTradingEngine_Application_Strategies_Queries_DTOs_StrategyTemplateDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]': {
       data?:
         | components['schemas']['LascodiaTradingEngine_Application_Strategies_Queries_DTOs_StrategyTemplateDto'][]
@@ -19555,6 +22502,13 @@ export interface components {
     };
     'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_Collections_Generic_List`1[[System_String, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]], System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]': {
       data?: string[] | null;
+      status?: boolean;
+      message?: string | null;
+      responseCode?: string | null;
+    };
+    'Lascodia_Trading_Engine_SharedApplication_Common_Models_ResponseData`1[[System_DateTime, System_Private_CoreLib, Version=10_0_0_0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]': {
+      /** Format: date-time */
+      data?: string;
       status?: boolean;
       message?: string | null;
       responseCode?: string | null;
@@ -19727,6 +22681,12 @@ export interface components {
       pager: components['schemas']['Lascodia_Trading_Engine_SharedLibrary_Pager'];
       data:
         | components['schemas']['LascodiaTradingEngine_Application_SignalRejectionAuditNs_Queries_DTOs_SignalRejectionAuditDto'][]
+        | null;
+    };
+    'Lascodia_Trading_Engine_SharedLibrary_PagedData`1[[LascodiaTradingEngine_Application_SignalRejections_Queries_DTOs_SignalRejectionEventDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
+      pager: components['schemas']['Lascodia_Trading_Engine_SharedLibrary_Pager'];
+      data:
+        | components['schemas']['LascodiaTradingEngine_Application_SignalRejections_Queries_DTOs_SignalRejectionEventDto'][]
         | null;
     };
     'Lascodia_Trading_Engine_SharedLibrary_PagedData`1[[LascodiaTradingEngine_Application_Strategies_Queries_DTOs_StrategyDto, LascodiaTradingEngine_Application, Version=1_0_0_0, Culture=neutral, PublicKeyToken=null]]': {
