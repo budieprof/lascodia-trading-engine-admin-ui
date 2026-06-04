@@ -829,6 +829,17 @@
 .symbol-matrix .movers-table td {
   padding: 8px var(--space-3);
 }
+/* Bound the matrix height (it grows one row per watched pair) and scroll the
+   overflow, keeping the column header pinned so it stays readable. */
+.symbol-matrix .matrix-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+}
+.symbol-matrix .matrix-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
 
 .chart-row {
   display: grid;
@@ -839,6 +850,56 @@
 @media (max-width: 1100px) {
   .chart-row {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ── Combined analytics row ─────────────────────────────────────
+   Regime / ML prediction / correlation + the spread & volatility
+   charts, all on one row. minmax(0, …) lets the echarts cells shrink
+   below their content width so nothing overflows the track. */
+.analytics-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  /* Equal heights so every card's bottom edge lines up across the row. */
+  align-items: stretch;
+}
+/* Give the three insight panels the same standalone card chrome as the
+   app-chart-card siblings (background + padding already come from
+   .insight-card), and center their content vertically. These panels hold less
+   than the bar charts, so centering splits the spare height symmetrically
+   instead of leaving one big gap under the content. */
+.analytics-row > .insight-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  justify-content: center;
+}
+/* Keep a long correlation list from stretching the whole row — scroll it. */
+.analytics-row .insight-correlation .corr-list {
+  max-height: 240px;
+  overflow-y: auto;
+}
+@media (max-width: 1400px) {
+  .analytics-row {
+    /* insight panels (3-up) on top, charts (2-up) below */
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .analytics-row > .insight-card {
+    grid-column: span 2;
+  }
+  .analytics-row > app-chart-card {
+    grid-column: span 3;
+  }
+}
+@media (max-width: 900px) {
+  .analytics-row {
+    grid-template-columns: 1fr;
+  }
+  .analytics-row > .insight-card,
+  .analytics-row > app-chart-card {
+    grid-column: auto;
   }
 }
 

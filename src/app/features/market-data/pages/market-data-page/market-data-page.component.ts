@@ -208,166 +208,6 @@ interface PriceEntry extends LivePriceDto {
               {{ chartSymbol() }} · {{ chartTimeframe() }} · refreshes every 5s
             </span>
           </header>
-          <div class="insights-grid">
-            <!-- Regime ─────────────────────────────────────────────── -->
-            <article class="insight-card">
-              <header class="insight-head">
-                <span class="insight-title">Regime</span>
-                @if (regimeLoading() && !regimeSnapshot()) {
-                  <span class="muted insight-status">loading…</span>
-                } @else if (regimeSnapshot()) {
-                  <span class="muted insight-status">
-                    {{ regimeSnapshot()!.detectedAt | date: 'HH:mm:ss' }}
-                  </span>
-                }
-              </header>
-              @if (regimeSnapshot(); as r) {
-                <div
-                  class="regime-pill"
-                  [class.trending]="r.regime === 'Trending'"
-                  [class.ranging]="r.regime === 'Ranging'"
-                  [class.high-vol]="r.regime === 'HighVolatility'"
-                  [class.low-vol]="r.regime === 'LowVolatility'"
-                  [class.crisis]="r.regime === 'Crisis'"
-                  [class.breakout]="r.regime === 'Breakout'"
-                >
-                  {{ r.regime }}
-                  <span class="regime-conf">{{ (r.confidence * 100).toFixed(0) }}%</span>
-                </div>
-                <dl class="regime-stats">
-                  <div>
-                    <dt>ADX</dt>
-                    <dd class="mono" [title]="'Trend strength · >25 = trending'">
-                      {{ r.adx.toFixed(2) }}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>ATR</dt>
-                    <dd class="mono" [title]="'Volatility (price units)'">
-                      {{ r.atr.toFixed(5) }}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>BBW</dt>
-                    <dd class="mono" [title]="'Bollinger band width · expansion / squeeze'">
-                      {{ r.bollingerBandWidth.toFixed(2) }}
-                    </dd>
-                  </div>
-                </dl>
-              } @else {
-                <div class="empty-state">
-                  <span class="muted">No regime snapshot yet.</span>
-                  <span class="empty-hint">
-                    RegimeDetectionWorker emits one each cycle — usually appears within a minute.
-                  </span>
-                </div>
-              }
-            </article>
-
-            <!-- ML Prediction ──────────────────────────────────────── -->
-            <article class="insight-card">
-              <header class="insight-head">
-                <span class="insight-title">ML Prediction</span>
-                @if (predictionLoading() && !latestPredictionSignal()) {
-                  <span class="muted insight-status">loading…</span>
-                } @else if (latestPredictionSignal()) {
-                  <span class="muted insight-status">
-                    sig #{{ latestPredictionSignal()!.id }} ·
-                    {{ latestPredictionSignal()!.generatedAt | date: 'HH:mm:ss' }}
-                  </span>
-                }
-              </header>
-              @if (latestPredictionSignal(); as s) {
-                @if (s.mlPredictedDirection) {
-                  <div
-                    class="pred-pill"
-                    [class.up]="s.mlPredictedDirection === 'Buy'"
-                    [class.down]="s.mlPredictedDirection === 'Sell'"
-                  >
-                    {{ s.mlPredictedDirection === 'Buy' ? '▲' : '▼' }} {{ s.mlPredictedDirection }}
-                    @if (s.mlConfidenceScore !== null) {
-                      <span class="pred-conf"> {{ (s.mlConfidenceScore * 100).toFixed(0) }}% </span>
-                    }
-                  </div>
-                  <dl class="pred-stats">
-                    @if (s.mlPredictedMagnitude !== null) {
-                      <div>
-                        <dt>Magnitude</dt>
-                        <dd class="mono">{{ s.mlPredictedMagnitude.toFixed(1) }}p</dd>
-                      </div>
-                    }
-                    <div>
-                      <dt>Strategy conf.</dt>
-                      <dd class="mono">{{ (s.confidence * 100).toFixed(1) }}%</dd>
-                    </div>
-                    <div>
-                      <dt>Status</dt>
-                      <dd>
-                        <span class="status-chip" [class]="'status-' + s.status.toLowerCase()">
-                          {{ s.status }}
-                        </span>
-                      </dd>
-                    </div>
-                  </dl>
-                } @else {
-                  <div class="empty-state">
-                    <span class="muted">Most recent signal had no ML scoring.</span>
-                    <span class="empty-hint">
-                      Strategy emitted signal #{{ s.id }} without an active ML model.
-                    </span>
-                  </div>
-                }
-              } @else {
-                <div class="empty-state">
-                  <span class="muted">No recent trade signal for this pair.</span>
-                  <span class="empty-hint">
-                    ML predictions ride along on signals — appears once a strategy fires.
-                  </span>
-                </div>
-              }
-            </article>
-
-            <!-- Correlation ────────────────────────────────────────── -->
-            <article class="insight-card insight-correlation">
-              <header class="insight-head">
-                <span class="insight-title">Correlation vs {{ chartSymbol() }}</span>
-                <span class="muted insight-status">last 100 ticks</span>
-              </header>
-              @if (correlations().length > 0) {
-                <ul class="corr-list">
-                  @for (c of correlations(); track c.symbol) {
-                    <li class="corr-row">
-                      <span class="mono corr-symbol">{{ c.symbol }}</span>
-                      <span class="corr-bar-wrap">
-                        <span
-                          class="corr-bar"
-                          [class.positive]="c.r > 0"
-                          [class.negative]="c.r < 0"
-                          [style.width.%]="50 * Math.abs(c.r)"
-                          [style.left.%]="c.r >= 0 ? 50 : 50 - 50 * Math.abs(c.r)"
-                        ></span>
-                        <span class="corr-zero"></span>
-                      </span>
-                      <span
-                        class="mono corr-value"
-                        [class.profit]="c.r > 0.3"
-                        [class.loss]="c.r < -0.3"
-                      >
-                        {{ c.r >= 0 ? '+' : '' }}{{ c.r.toFixed(2) }}
-                      </span>
-                    </li>
-                  }
-                </ul>
-              } @else {
-                <div class="empty-state">
-                  <span class="muted">Waiting for ticks…</span>
-                  <span class="empty-hint">
-                    Need ≥5 ticks per symbol before correlation is meaningful.
-                  </span>
-                </div>
-              }
-            </article>
-          </div>
 
           <!--
             Price action row — 4 cards computed UI-side from the chart's
@@ -1014,102 +854,267 @@ interface PriceEntry extends LivePriceDto {
             <h3>Symbol matrix</h3>
             <span class="muted">Live snapshot · history grows as ticks arrive</span>
           </header>
-          <table class="movers-table">
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th class="num">Bid</th>
-                <th class="num">Ask</th>
-                <th class="num">Spread</th>
-                <th class="num">High</th>
-                <th class="num">Low</th>
-                <th class="num">Range (pips)</th>
-                <th class="num">Δ %</th>
-                <th>Trend</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (row of symbolMatrix(); track row.symbol) {
+          <div class="matrix-scroll">
+            <table class="movers-table">
+              <thead>
                 <tr>
-                  <td class="mono">{{ row.symbol }}</td>
-                  <td class="num mono">
-                    @if (row.live) {
-                      {{ formatPrice(row.live.bid, row.symbol) }}
-                    } @else {
-                      <span class="muted">—</span>
-                    }
-                  </td>
-                  <td class="num mono">
-                    @if (row.live) {
-                      {{ formatPrice(row.live.ask, row.symbol) }}
-                    } @else {
-                      <span class="muted">—</span>
-                    }
-                  </td>
-                  <td class="num mono" [class.loss]="row.live && row.live.spread > 3">
-                    @if (row.live && !row.live.fromCandle) {
-                      {{ row.live.spread.toFixed(1) }}
-                    } @else {
-                      <span class="muted">—</span>
-                    }
-                  </td>
-                  <td class="num mono">
-                    @if (row.live) {
-                      {{ formatPrice(row.live.high24h, row.symbol) }}
-                    } @else {
-                      <span class="muted">—</span>
-                    }
-                  </td>
-                  <td class="num mono">
-                    @if (row.live) {
-                      {{ formatPrice(row.live.low24h, row.symbol) }}
-                    } @else {
-                      <span class="muted">—</span>
-                    }
-                  </td>
-                  <td class="num mono">
-                    @if (row.rangePips !== null) {
-                      {{ row.rangePips.toFixed(1) }}
-                    } @else {
-                      <span class="muted">—</span>
-                    }
-                  </td>
-                  <td
-                    class="num mono"
-                    [class.profit]="row.live && row.live.changePct > 0"
-                    [class.loss]="row.live && row.live.changePct < 0"
-                  >
-                    @if (row.live) {
-                      {{ row.live.changePct >= 0 ? '+' : '' }}{{ row.live.changePct.toFixed(2) }}%
-                    } @else {
-                      <span class="muted">—</span>
-                    }
-                  </td>
-                  <td>
-                    @if (row.spark.length > 1) {
-                      <app-sparkline
-                        [data]="row.spark"
-                        [color]="row.live && row.live.changePct >= 0 ? '#34C759' : '#FF3B30'"
-                        width="120px"
-                        height="20px"
-                      />
-                    } @else {
-                      <span class="muted">—</span>
-                    }
-                  </td>
+                  <th>Symbol</th>
+                  <th class="num">Bid</th>
+                  <th class="num">Ask</th>
+                  <th class="num">Spread</th>
+                  <th class="num">High</th>
+                  <th class="num">Low</th>
+                  <th class="num">Range (pips)</th>
+                  <th class="num">Δ %</th>
+                  <th>Trend</th>
                 </tr>
-              }
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                @for (row of symbolMatrix(); track row.symbol) {
+                  <tr>
+                    <td class="mono">{{ row.symbol }}</td>
+                    <td class="num mono">
+                      @if (row.live) {
+                        {{ formatPrice(row.live.bid, row.symbol) }}
+                      } @else {
+                        <span class="muted">—</span>
+                      }
+                    </td>
+                    <td class="num mono">
+                      @if (row.live) {
+                        {{ formatPrice(row.live.ask, row.symbol) }}
+                      } @else {
+                        <span class="muted">—</span>
+                      }
+                    </td>
+                    <td class="num mono" [class.loss]="row.live && row.live.spread > 3">
+                      @if (row.live && !row.live.fromCandle) {
+                        {{ row.live.spread.toFixed(1) }}
+                      } @else {
+                        <span class="muted">—</span>
+                      }
+                    </td>
+                    <td class="num mono">
+                      @if (row.live) {
+                        {{ formatPrice(row.live.high24h, row.symbol) }}
+                      } @else {
+                        <span class="muted">—</span>
+                      }
+                    </td>
+                    <td class="num mono">
+                      @if (row.live) {
+                        {{ formatPrice(row.live.low24h, row.symbol) }}
+                      } @else {
+                        <span class="muted">—</span>
+                      }
+                    </td>
+                    <td class="num mono">
+                      @if (row.rangePips !== null) {
+                        {{ row.rangePips.toFixed(1) }}
+                      } @else {
+                        <span class="muted">—</span>
+                      }
+                    </td>
+                    <td
+                      class="num mono"
+                      [class.profit]="row.live && row.live.changePct > 0"
+                      [class.loss]="row.live && row.live.changePct < 0"
+                    >
+                      @if (row.live) {
+                        {{ row.live.changePct >= 0 ? '+' : '' }}{{ row.live.changePct.toFixed(2) }}%
+                      } @else {
+                        <span class="muted">—</span>
+                      }
+                    </td>
+                    <td>
+                      @if (row.spark.length > 1) {
+                        <app-sparkline
+                          [data]="row.spark"
+                          [color]="row.live && row.live.changePct >= 0 ? '#34C759' : '#FF3B30'"
+                          width="120px"
+                          height="20px"
+                        />
+                      } @else {
+                        <span class="muted">—</span>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
         </section>
 
-        <!-- Always-on analytics row: spread comparison + volatility radar.
-             Both reuse computeds defined for the analytics tab — when there's
-             no data they short-circuit to {} which renders an empty card. -->
-        <div class="chart-row">
+        <!-- Single analytics row: regime / ML prediction / correlation
+             (relocated from the Market Insights section above) sharing one row
+             with the spread & volatility charts. The three insight panels get
+             standalone card chrome here via .analytics-row > .insight-card. -->
+        <div class="analytics-row">
+          <!-- Regime ─────────────────────────────────────────────── -->
+          <article class="insight-card">
+            <header class="insight-head">
+              <span class="insight-title">Regime</span>
+              @if (regimeLoading() && !regimeSnapshot()) {
+                <span class="muted insight-status">loading…</span>
+              } @else if (regimeSnapshot()) {
+                <span class="muted insight-status">
+                  {{ regimeSnapshot()!.detectedAt | date: 'HH:mm:ss' }}
+                </span>
+              }
+            </header>
+            @if (regimeSnapshot(); as r) {
+              <div
+                class="regime-pill"
+                [class.trending]="r.regime === 'Trending'"
+                [class.ranging]="r.regime === 'Ranging'"
+                [class.high-vol]="r.regime === 'HighVolatility'"
+                [class.low-vol]="r.regime === 'LowVolatility'"
+                [class.crisis]="r.regime === 'Crisis'"
+                [class.breakout]="r.regime === 'Breakout'"
+              >
+                {{ r.regime }}
+                <span class="regime-conf">{{ (r.confidence * 100).toFixed(0) }}%</span>
+              </div>
+              <dl class="regime-stats">
+                <div>
+                  <dt>ADX</dt>
+                  <dd class="mono" [title]="'Trend strength · >25 = trending'">
+                    {{ r.adx.toFixed(2) }}
+                  </dd>
+                </div>
+                <div>
+                  <dt>ATR</dt>
+                  <dd class="mono" [title]="'Volatility (price units)'">
+                    {{ r.atr.toFixed(5) }}
+                  </dd>
+                </div>
+                <div>
+                  <dt>BBW</dt>
+                  <dd class="mono" [title]="'Bollinger band width · expansion / squeeze'">
+                    {{ r.bollingerBandWidth.toFixed(2) }}
+                  </dd>
+                </div>
+              </dl>
+            } @else {
+              <div class="empty-state">
+                <span class="muted">No regime snapshot yet.</span>
+                <span class="empty-hint">
+                  RegimeDetectionWorker emits one each cycle — usually appears within a minute.
+                </span>
+              </div>
+            }
+          </article>
+
+          <!-- ML Prediction ──────────────────────────────────────── -->
+          <article class="insight-card">
+            <header class="insight-head">
+              <span class="insight-title">ML Prediction</span>
+              @if (predictionLoading() && !latestPredictionSignal()) {
+                <span class="muted insight-status">loading…</span>
+              } @else if (latestPredictionSignal()) {
+                <span class="muted insight-status">
+                  sig #{{ latestPredictionSignal()!.id }} ·
+                  {{ latestPredictionSignal()!.generatedAt | date: 'HH:mm:ss' }}
+                </span>
+              }
+            </header>
+            @if (latestPredictionSignal(); as s) {
+              @if (s.mlPredictedDirection) {
+                <div
+                  class="pred-pill"
+                  [class.up]="s.mlPredictedDirection === 'Buy'"
+                  [class.down]="s.mlPredictedDirection === 'Sell'"
+                >
+                  {{ s.mlPredictedDirection === 'Buy' ? '▲' : '▼' }} {{ s.mlPredictedDirection }}
+                  @if (s.mlConfidenceScore !== null) {
+                    <span class="pred-conf"> {{ (s.mlConfidenceScore * 100).toFixed(0) }}% </span>
+                  }
+                </div>
+                <dl class="pred-stats">
+                  @if (s.mlPredictedMagnitude !== null) {
+                    <div>
+                      <dt>Magnitude</dt>
+                      <dd class="mono">{{ s.mlPredictedMagnitude.toFixed(1) }}p</dd>
+                    </div>
+                  }
+                  <div>
+                    <dt>Strategy conf.</dt>
+                    <dd class="mono">{{ (s.confidence * 100).toFixed(1) }}%</dd>
+                  </div>
+                  <div>
+                    <dt>Status</dt>
+                    <dd>
+                      <span class="status-chip" [class]="'status-' + s.status.toLowerCase()">
+                        {{ s.status }}
+                      </span>
+                    </dd>
+                  </div>
+                </dl>
+              } @else {
+                <div class="empty-state">
+                  <span class="muted">Most recent signal had no ML scoring.</span>
+                  <span class="empty-hint">
+                    Strategy emitted signal #{{ s.id }} without an active ML model.
+                  </span>
+                </div>
+              }
+            } @else {
+              <div class="empty-state">
+                <span class="muted">No recent trade signal for this pair.</span>
+                <span class="empty-hint">
+                  ML predictions ride along on signals — appears once a strategy fires.
+                </span>
+              </div>
+            }
+          </article>
+
+          <!-- Correlation ────────────────────────────────────────── -->
+          <article class="insight-card insight-correlation">
+            <header class="insight-head">
+              <span class="insight-title">Correlation vs {{ chartSymbol() }}</span>
+              <span class="muted insight-status">last 100 ticks</span>
+            </header>
+            @if (correlations().length > 0) {
+              <ul class="corr-list">
+                @for (c of correlations(); track c.symbol) {
+                  <li class="corr-row">
+                    <span class="mono corr-symbol">{{ c.symbol }}</span>
+                    <span class="corr-bar-wrap">
+                      <span
+                        class="corr-bar"
+                        [class.positive]="c.r > 0"
+                        [class.negative]="c.r < 0"
+                        [style.width.%]="50 * Math.abs(c.r)"
+                        [style.left.%]="c.r >= 0 ? 50 : 50 - 50 * Math.abs(c.r)"
+                      ></span>
+                      <span class="corr-zero"></span>
+                    </span>
+                    <span
+                      class="mono corr-value"
+                      [class.profit]="c.r > 0.3"
+                      [class.loss]="c.r < -0.3"
+                    >
+                      {{ c.r >= 0 ? '+' : '' }}{{ c.r.toFixed(2) }}
+                    </span>
+                  </li>
+                }
+              </ul>
+            } @else {
+              <div class="empty-state">
+                <span class="muted">Waiting for ticks…</span>
+                <span class="empty-hint">
+                  Need ≥5 ticks per symbol before correlation is meaningful.
+                </span>
+              </div>
+            }
+          </article>
+
+          <!-- Spread comparison + volatility — same row as the insight panels.
+               Reuse computeds defined for the analytics tab; when there's no
+               data they short-circuit to {} which renders an empty card. -->
           <app-chart-card
             title="Spread comparison"
-            subtitle="Live spreads across watched pairs · log scale"
+            [subtitle]="spreadChartCaption()"
             [options]="spreadChartOptions()"
             height="240px"
           />
@@ -1328,7 +1333,7 @@ interface PriceEntry extends LivePriceDto {
         <div class="charts-row two-col">
           <app-chart-card
             title="Spread comparison"
-            subtitle="Live-only spreads · log scale (excludes candle-fallback rows)"
+            [subtitle]="spreadChartCaption()"
             [options]="spreadChartOptions()"
             height="280px"
           />
@@ -1835,6 +1840,9 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
       const apiSym = this.watchedSymbols()[i];
       const dispSym = this.displaySymbols()[i];
       if (apiSym === focusJoined) continue;
+      // Exotics (USD/NGN, USD/CNH) have flat/dead price history → r ≈ 0, which
+      // is meaningless noise in the correlation panel. Skip them.
+      if (this.isExoticPair(dispSym)) continue;
       const hist = this.priceHistory[apiSym] ?? [];
       if (hist.length < 5) continue;
       const rets = this.toReturns(hist);
@@ -3556,40 +3564,77 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     ],
   };
 
-  // Dynamic computed chart options
-  spreadChartOptions = computed<EChartsOption>(() => {
-    // Prefer live ticks. When the feed is stale and every current row is a
-    // candle-fallback (synthetic 0 spread), fall back to the per-symbol
-    // last-known live spread so the chart shows operators the best-known
-    // values instead of an empty panel.
+  // The eight FX majors. A pair with a leg outside this set is "exotic"
+  // (USD/NGN, USD/CNH) — those carry huge spreads and flat/dead price history,
+  // so they distort the spread chart's linear scale and add noise (r ≈ 0) to
+  // the correlation panel. Excluded from both. See {@link isExoticPair}.
+  private static readonly MAJOR_CURRENCIES = new Set([
+    'USD',
+    'EUR',
+    'GBP',
+    'JPY',
+    'AUD',
+    'CHF',
+    'NZD',
+    'CAD',
+  ]);
+
+  /// True when either leg of a pair is a non-major currency. Accepts both the
+  /// slashed ("USD/NGN") and joined ("USDNGN") symbol forms.
+  private isExoticPair(symbol: string): boolean {
+    const cleaned = (symbol ?? '').replace('/', '');
+    if (cleaned.length !== 6) return false; // unknown format — don't exclude
+    const majors = MarketDataPageComponent.MAJOR_CURRENCIES;
+    return !majors.has(cleaned.slice(0, 3)) || !majors.has(cleaned.slice(3, 6));
+  }
+
+  /// Splits the spread series into chart-able majors and excluded exotics.
+  /// Prefers live ticks; when the feed is stale and every current row is a
+  /// candle-fallback (synthetic 0 spread), falls back to the per-symbol
+  /// last-known live spread so the chart shows operators the best-known
+  /// values instead of an empty panel.
+  private spreadChartData = computed(() => {
     this.livePrices(); // re-run trigger
     const prices = this.liveOnly();
     let series: { symbol: string; spread: number }[];
     if (prices.length > 0) {
       series = prices.map((p) => ({ symbol: p.symbol ?? '', spread: p.spread }));
     } else if (Object.keys(this.lastLiveSpread).length > 0) {
-      series = Object.entries(this.lastLiveSpread).map(([apiSym, spread], i) => {
+      series = Object.entries(this.lastLiveSpread).map(([apiSym, spread]) => {
         const idx = this.watchedSymbols().indexOf(apiSym);
         return { symbol: idx >= 0 ? this.displaySymbols()[idx] : apiSym, spread };
       });
     } else {
-      return {};
+      series = [];
     }
-    const sorted = [...series].sort((a, b) => b.spread - a.spread);
-    // Logarithmic x-axis: watched pairs span a huge dynamic range — majors sit
-    // at ~0.1–3 pips while an exotic like USD/NGN can be ~22,000 pips. On a
-    // linear scale that one outlier flattens every major bar to an invisible
-    // sliver. Log scale keeps both the sub-pip majors and the exotic visible
-    // in the same panel. Log can't plot 0/negative, so the plotted value is
-    // floored to 0.1 while the bar label always shows the true spread.
     return {
-      grid: { top: 10, right: 56, bottom: 30, left: 80 },
+      included: series.filter((s) => !this.isExoticPair(s.symbol)),
+      excluded: series.filter((s) => this.isExoticPair(s.symbol)),
+    };
+  });
+
+  /// Caption for the Spread comparison card — notes any exotic pairs dropped
+  /// from the chart so the exclusion is visible, not silent.
+  spreadChartCaption = computed(() => {
+    const excluded = this.spreadChartData().excluded;
+    const base = 'Live-only spreads across watched pairs';
+    if (excluded.length === 0) return base;
+    const names = excluded.map((e) => e.symbol).join(', ');
+    return `${base} · excludes ${excluded.length} exotic (${names})`;
+  });
+
+  // Dynamic computed chart options
+  spreadChartOptions = computed<EChartsOption>(() => {
+    const series = this.spreadChartData().included;
+    if (series.length === 0) return {};
+    const sorted = [...series].sort((a, b) => b.spread - a.spread);
+    return {
+      grid: { top: 10, right: 40, bottom: 30, left: 80 },
       xAxis: {
-        type: 'log',
-        min: 0.1,
+        type: 'value',
         axisLabel: { fontSize: 11, color: '#6E6E73' },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-        name: 'Spread (pips · log)',
+        name: 'Spread (pips)',
         nameLocation: 'center',
         nameGap: 25,
         nameTextStyle: { fontSize: 11, color: '#6E6E73' },
@@ -3602,17 +3647,13 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
       series: [
         {
           type: 'bar',
-          data: sorted.map((p) => {
-            const spread = +p.spread.toFixed(1);
-            return {
-              value: Math.max(spread, 0.1),
-              spread,
-              itemStyle: {
-                color: p.spread > 3 ? '#FF3B30' : p.spread > 2 ? '#FF9500' : '#0071E3',
-                borderRadius: [0, 4, 4, 0],
-              },
-            };
-          }),
+          data: sorted.map((p) => ({
+            value: +p.spread.toFixed(1),
+            itemStyle: {
+              color: p.spread > 3 ? '#FF3B30' : p.spread > 2 ? '#FF9500' : '#0071E3',
+              borderRadius: [0, 4, 4, 0],
+            },
+          })),
           // Bars auto-size to fit the chart's vertical space (no fixed pixel
           // width — that made the bars touch and the labels overlap as soon
           // as the watched-pair count grew past 8). The category gap reserves
@@ -3626,8 +3667,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
             position: 'right',
             fontSize: 11,
             color: '#6E6E73',
-            // Show the true spread, not the log-floored plot value.
-            formatter: (p: any) => `${p.data?.spread ?? ''}`,
+            formatter: '{c}',
           },
         },
       ],
