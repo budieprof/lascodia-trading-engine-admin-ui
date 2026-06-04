@@ -22,8 +22,8 @@ import {
 export class SpotSweepService {
   private readonly api = inject(ApiService);
 
-  /** Toggle off once the engine endpoints are live. */
-  private static readonly USE_MOCK = true;
+  /** Engine endpoints are live — cockpit talks to the real API. */
+  private static readonly USE_MOCK = false;
 
   // ── Mock state (session-scoped) ──────────────────────────────────
   private readonly mockConfig$ = new BehaviorSubject<SpotSweepConfig>({
