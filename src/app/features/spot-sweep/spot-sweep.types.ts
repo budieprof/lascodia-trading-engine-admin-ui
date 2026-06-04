@@ -50,6 +50,8 @@ export interface SpotSweepConfig {
   maxRiskPerTrade: number;
 
   respectKillSwitch: boolean;
+  /** Skip analysis when no in-scope account can open a new position. */
+  skipWhenInsufficientMargin: boolean;
 }
 
 export interface SweepLastResult {
@@ -125,4 +127,5 @@ export const DEFAULT_SWEEP_CONFIG: SpotSweepConfig = {
   maxDailyLlmCostUsd: 5,
   maxRiskPerTrade: 0.1,
   respectKillSwitch: true,
+  skipWhenInsufficientMargin: true,
 };

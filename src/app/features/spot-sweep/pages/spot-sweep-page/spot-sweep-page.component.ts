@@ -322,6 +322,14 @@ import {
                 />
                 Halt on kill switch
               </label>
+              <label>
+                <input
+                  type="checkbox"
+                  [checked]="cfg.skipWhenInsufficientMargin"
+                  (change)="patch({ skipWhenInsufficientMargin: $any($event.target).checked })"
+                />
+                Skip when no margin for a new trade
+              </label>
             </div>
 
             <p class="sub-label">Skip a symbol when it has…</p>
