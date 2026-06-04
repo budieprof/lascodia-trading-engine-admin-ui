@@ -478,14 +478,15 @@ export class WatchlistPageComponent implements OnInit {
   protected readonly showPositions = signal<boolean>(false);
   protected readonly showOrders = signal<boolean>(false);
 
-  // Poll positions/orders only while the matching overlay is on (the `active`
-  // gate pauses the poll otherwise — no wasted requests when overlays are off).
+  // Poll positions/orders every 15s from page load (cheap — two requests) so
+  // the data is already in hand the instant the operator flips a toggle. The
+  // toggles gate only the *display* (tile-side), not the fetch.
   private readonly positionsRes = createPolledResource(
     () =>
       this.positionsService
         .list({ currentPage: 1, itemCountPerPage: 200, filter: { status: 'Open' } })
         .pipe(map((r) => r?.data?.data ?? [])),
-    { intervalMs: 15000, active: this.showPositions },
+    { intervalMs: 15000 },
   );
   // Orders fetched unfiltered (the working-status set spans Pending/Submitted/
   // PartialFill and the filter takes a single status); the tile filters them.
@@ -494,7 +495,7 @@ export class WatchlistPageComponent implements OnInit {
       this.ordersService
         .list({ currentPage: 1, itemCountPerPage: 200, filter: null })
         .pipe(map((r) => r?.data?.data ?? [])),
-    { intervalMs: 15000, active: this.showOrders },
+    { intervalMs: 15000 },
   );
   protected readonly openPositions = computed<PositionDto[]>(() => this.positionsRes.value() ?? []);
   protected readonly pendingOrders = computed<OrderDto[]>(() => this.ordersRes.value() ?? []);
