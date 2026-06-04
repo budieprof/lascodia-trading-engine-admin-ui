@@ -2,8 +2,11 @@ import {
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
+  ElementRef,
   EventEmitter,
+  HostListener,
   Output,
+  ViewChild,
   computed,
   inject,
   input,
@@ -69,7 +72,7 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
       @if (loading() && !inputs()) {
         <div class="form-grid skeleton-grid" aria-label="Loading configuration" role="status">
           @for (i of skeletonFields(); track i) {
-            <div class="field skeleton-field">
+            <div class="skeleton-field">
               <ui-skeleton height="11px" width="48%" borderRadius="4px" />
               <ui-skeleton height="32px" width="100%" borderRadius="6px" />
             </div>
@@ -81,99 +84,264 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
           builds report only legacy safety params via the existing "Push safety config" modal.
         </p>
       } @else if (tab() === 'editable') {
-        <p class="hint muted">
-          Hot-reload takes effect on the next read-site cycle. A few fields seed object-internal
-          copies at OnInit (HTTP / heartbeat / engine timeout) — those need a re-attach to take
-          effect even though the shadow updates live. Empty = keep current.
-        </p>
-        @for (group of HOT_RELOAD_GROUPS; track group.title) {
-          <fieldset class="group">
-            <legend>{{ group.title }}</legend>
-            <div class="form-grid">
-              @for (field of group.fields; track field.key) {
-                <label class="field">
-                  <span class="field-label">
-                    {{ field.label }}
-                    <span
-                      class="badge"
-                      [attr.data-badge]="field.badge"
-                      [title]="field.takesEffect"
-                      >{{ field.badge }}</span
-                    >
-                  </span>
-                  <div class="field-row">
-                    @switch (field.kind) {
-                      @case ('bool') {
-                        <select [(ngModel)]="edits[field.key]" class="input">
-                          <option [ngValue]="undefined">— keep current —</option>
-                          <option [ngValue]="true">true</option>
-                          <option [ngValue]="false">false</option>
-                        </select>
-                      }
-                      @case ('enum') {
-                        <select [(ngModel)]="edits[field.key]" class="input">
-                          <option [ngValue]="undefined">— keep current —</option>
-                          @for (opt of field.options ?? []; track opt) {
-                            <option [ngValue]="opt">{{ opt }}</option>
-                          }
-                        </select>
-                      }
-                      @case ('string') {
-                        <input
-                          type="text"
-                          [placeholder]="formatCurrent(field.key) || '(blank)'"
-                          [(ngModel)]="edits[field.key]"
-                          class="input"
-                          autocomplete="off"
-                        />
-                      }
-                      @default {
-                        <input
-                          type="number"
-                          [step]="field.step ?? 'any'"
-                          [min]="field.min ?? null"
-                          [max]="field.max ?? null"
-                          [placeholder]="formatCurrent(field.key)"
-                          [(ngModel)]="edits[field.key]"
-                          class="input"
-                        />
-                      }
-                    }
-                    <span
-                      class="current mono"
-                      [title]="'Current shadow value: ' + formatCurrent(field.key)"
-                    >
-                      now: {{ formatCurrent(field.key) || '(blank)' }}
-                    </span>
-                  </div>
-                </label>
-              }
-            </div>
-          </fieldset>
-        }
-
-        <footer class="actions">
+        <!-- ── Sticky toolbar (search + filters + save-all) ─────── -->
+        <div class="cfg-toolbar">
+          <div class="cfg-search-wrap">
+            <span class="cfg-search-icon" aria-hidden="true">⌕</span>
+            <input
+              #searchInput
+              type="text"
+              class="cfg-search"
+              [placeholder]="'Search ' + HOT_RELOAD_FIELDS.length + ' fields…'"
+              [ngModel]="searchTerm()"
+              (ngModelChange)="searchTerm.set($event)"
+              aria-label="Search configuration fields"
+            />
+            @if (searchTerm()) {
+              <button
+                type="button"
+                class="cfg-search-clear"
+                (click)="searchTerm.set('')"
+                aria-label="Clear search"
+              >
+                ✕
+              </button>
+            }
+            <kbd class="cfg-kbd">/</kbd>
+          </div>
+          <div class="chip-row" role="tablist" aria-label="Filter by reload behaviour">
+            @for (b of badgeFilterOptions; track b.value) {
+              <button
+                type="button"
+                role="tab"
+                class="chip"
+                [class.active]="badgeFilter() === b.value"
+                [attr.aria-selected]="badgeFilter() === b.value"
+                (click)="badgeFilter.set(b.value)"
+              >
+                {{ b.label }}
+              </button>
+            }
+          </div>
+          <label class="cfg-dirty-toggle" [class.active]="dirtyOnly()">
+            <input type="checkbox" [checked]="dirtyOnly()" (change)="dirtyOnly.set(!dirtyOnly())" />
+            Unsaved only
+            @if (dirtyCount() > 0) {
+              <span class="cfg-toolbar-count">{{ dirtyCount() }}</span>
+            }
+          </label>
+          <div class="cfg-spacer"></div>
           <button
             type="button"
-            class="btn btn-secondary"
-            (click)="clearEdits()"
-            [disabled]="submitting()"
-          >
-            Reset form
-          </button>
-          <button
-            type="button"
-            class="btn btn-primary"
-            (click)="submit()"
+            class="btn btn-primary cfg-save-all"
             [disabled]="submitting() || !hasDirty()"
+            (click)="submit()"
+            [title]="hasDirty() ? 'Push pending changes (⌘/Ctrl + S)' : 'No unsaved changes'"
           >
-            {{
-              submitting()
-                ? 'Pushing…'
-                : 'Push ' + dirtyCount() + ' change' + (dirtyCount() === 1 ? '' : 's')
-            }}
+            @if (submitting()) {
+              Pushing…
+            } @else if (hasDirty()) {
+              Push {{ dirtyCount() }} change{{ dirtyCount() === 1 ? '' : 's' }}
+              <kbd class="save-bar-kbd">⌘S</kbd>
+            } @else {
+              Push 0 changes
+            }
           </button>
-        </footer>
+        </div>
+
+        @if (filteredGroups().length === 0) {
+          <p class="cfg-empty muted">
+            No fields match the current filter.
+            <button type="button" class="link-btn" (click)="clearSearch()">Clear filters</button>
+          </p>
+        } @else {
+          <!-- ── Master-detail body ─────────────────────────────── -->
+          <div class="cfg-body">
+            <aside class="cfg-sidebar" aria-label="Sections">
+              <div class="cfg-sb-head">
+                <span>Sections</span>
+                <span class="muted">{{ sidebarGroups().length }}</span>
+              </div>
+              <input
+                type="search"
+                class="cfg-sb-filter"
+                placeholder="Filter sections…"
+                [ngModel]="categoryFilter()"
+                (ngModelChange)="categoryFilter.set($event)"
+                aria-label="Filter sections"
+              />
+              <nav class="cfg-sb-list">
+                <button
+                  type="button"
+                  class="cat"
+                  [class.active]="selectedCategory() === ALL_CATEGORY"
+                  (click)="selectCategory(ALL_CATEGORY)"
+                >
+                  <span class="cat-name">All sections</span>
+                  <span class="cat-meta">
+                    @if (dirtyCount() > 0) {
+                      <span class="cat-dirty">{{ dirtyCount() }}</span>
+                    }
+                    <span class="cat-count">{{ visibleCount() }}</span>
+                  </span>
+                </button>
+                @for (group of sidebarGroups(); track group.title) {
+                  <button
+                    type="button"
+                    class="cat"
+                    [class.active]="selectedCategory() === group.title"
+                    (click)="selectCategory(group.title)"
+                  >
+                    <span class="cat-name">{{ group.title }}</span>
+                    <span class="cat-meta">
+                      @if (groupDirtyCount(group) > 0) {
+                        <span class="cat-dirty">{{ groupDirtyCount(group) }}</span>
+                      }
+                      <span class="cat-count">{{ group.fields.length }}</span>
+                    </span>
+                  </button>
+                }
+              </nav>
+            </aside>
+
+            <main class="cfg-editor">
+              <header class="cfg-editor-head">
+                <div class="cfg-editor-title">
+                  <h4>{{ selectedCategoryTitle() }}</h4>
+                  <span class="muted">
+                    {{ visibleCount() }}
+                    {{ visibleCount() === 1 ? 'field' : 'fields' }}
+                    @if (dirtyOnly() || searchTerm() || badgeFilter() !== 'all') {
+                      · filtered
+                    }
+                  </span>
+                </div>
+                <p class="cfg-editor-hint muted">
+                  Hot-reload takes effect on the next read-site cycle. Empty = keep current; ⏎ saves
+                  the row, Esc reverts it.
+                </p>
+              </header>
+              @if (visibleFields().length === 0) {
+                <p class="cfg-empty muted">No fields in this section match the current filter.</p>
+              } @else {
+                <div class="cfg-table-scroll">
+                  <table class="cfg-table">
+                    <thead>
+                      <tr>
+                        <th class="col-key">Field</th>
+                        <th class="col-value">Value</th>
+                        <th class="col-reload">Reload</th>
+                        <th class="col-current">Current</th>
+                        <th class="col-actions"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (field of visibleFields(); track field.key) {
+                        <tr [class.row-dirty]="isDirty(field)">
+                          <td class="col-key">
+                            <span class="field-label">{{ field.label }}</span>
+                            <code class="field-key" [title]="field.takesEffect">{{
+                              field.key
+                            }}</code>
+                          </td>
+                          <td class="col-value">
+                            @switch (field.kind) {
+                              @case ('bool') {
+                                <select
+                                  [(ngModel)]="edits[field.key]"
+                                  (ngModelChange)="markEdited()"
+                                  (keydown)="onFieldKey($event, field)"
+                                  class="input"
+                                >
+                                  <option [ngValue]="undefined">— keep current —</option>
+                                  <option [ngValue]="true">true</option>
+                                  <option [ngValue]="false">false</option>
+                                </select>
+                              }
+                              @case ('enum') {
+                                <select
+                                  [(ngModel)]="edits[field.key]"
+                                  (ngModelChange)="markEdited()"
+                                  (keydown)="onFieldKey($event, field)"
+                                  class="input"
+                                >
+                                  <option [ngValue]="undefined">— keep current —</option>
+                                  @for (opt of field.options ?? []; track opt) {
+                                    <option [ngValue]="opt">{{ opt }}</option>
+                                  }
+                                </select>
+                              }
+                              @case ('string') {
+                                <input
+                                  type="text"
+                                  [placeholder]="
+                                    'current: ' + (formatCurrent(field.key) || '(blank)')
+                                  "
+                                  [(ngModel)]="edits[field.key]"
+                                  (ngModelChange)="markEdited()"
+                                  (keydown)="onFieldKey($event, field)"
+                                  class="input"
+                                  autocomplete="off"
+                                />
+                              }
+                              @default {
+                                <input
+                                  type="number"
+                                  [step]="field.step ?? 'any'"
+                                  [min]="field.min ?? null"
+                                  [max]="field.max ?? null"
+                                  [placeholder]="'current: ' + formatCurrent(field.key)"
+                                  [(ngModel)]="edits[field.key]"
+                                  (ngModelChange)="markEdited()"
+                                  (keydown)="onFieldKey($event, field)"
+                                  class="input"
+                                />
+                              }
+                            }
+                          </td>
+                          <td class="col-reload">
+                            <span
+                              class="badge"
+                              [attr.data-badge]="field.badge"
+                              [title]="field.takesEffect"
+                              >{{ field.badge }}</span
+                            >
+                          </td>
+                          <td class="col-current">
+                            <span class="current mono">{{
+                              formatCurrent(field.key) || '(blank)'
+                            }}</span>
+                          </td>
+                          <td class="col-actions">
+                            @if (isDirty(field)) {
+                              <button
+                                type="button"
+                                class="reset-btn"
+                                (click)="revertField(field)"
+                                title="Discard this edit (Esc)"
+                              >
+                                ↺
+                              </button>
+                            }
+                            <button
+                              type="button"
+                              class="btn-row-save"
+                              [disabled]="!isDirty(field) || submitting()"
+                              (click)="saveField(field)"
+                              [title]="isDirty(field) ? 'Save this row (⏎)' : 'No changes'"
+                            >
+                              Save
+                            </button>
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              }
+            </main>
+          </div>
+        }
       } @else {
         <p class="hint muted">
           These inputs are read at attach-time and cached on objects that don't expose live setters.
@@ -274,24 +442,6 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
       .muted {
         color: var(--text-tertiary);
       }
-      .group {
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        padding: var(--space-3);
-        margin: 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-        background: var(--bg-primary);
-      }
-      .group legend {
-        padding: 0 6px;
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
       .form-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -301,12 +451,9 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
         margin-top: var(--space-2);
       }
       .skeleton-field {
-        gap: 6px;
-      }
-      .field {
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 6px;
       }
       .field-label {
         font-size: var(--text-xs);
@@ -316,22 +463,23 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
         align-items: center;
         gap: 6px;
       }
-      .field-row {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
       .input {
-        padding: 6px 10px;
+        padding: 5px 10px;
         border-radius: var(--radius-sm);
         border: 1px solid var(--border);
         background: var(--bg-primary);
         color: var(--text-primary);
         font-size: var(--text-sm);
         font-variant-numeric: tabular-nums;
+        width: 100%;
+        outline: none;
+        transition: border-color 0.12s ease;
+      }
+      .input:focus {
+        border-color: var(--accent);
       }
       .current {
-        font-size: 10px;
+        font-size: 11px;
         color: var(--text-tertiary);
       }
       .ro-field {
@@ -358,6 +506,448 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
         justify-content: flex-end;
         gap: var(--space-3);
       }
+
+      /* ── Search toolbar (sticky inside the panel) ────────────── */
+      .cfg-toolbar {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        flex-wrap: wrap;
+        position: sticky;
+        top: 0;
+        z-index: 3;
+      }
+      .cfg-search-wrap {
+        position: relative;
+        flex: 1 1 280px;
+        min-width: 220px;
+        display: inline-flex;
+        align-items: center;
+      }
+      .cfg-search-icon {
+        position: absolute;
+        left: 10px;
+        color: var(--text-tertiary);
+        font-size: 14px;
+        pointer-events: none;
+      }
+      .cfg-search {
+        width: 100%;
+        height: 30px;
+        padding: 0 56px 0 30px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        outline: none;
+        transition: border-color 0.12s ease;
+      }
+      .cfg-search:focus {
+        border-color: var(--accent);
+      }
+      .cfg-search-clear {
+        position: absolute;
+        right: 32px;
+        background: transparent;
+        border: none;
+        color: var(--text-tertiary);
+        cursor: pointer;
+        font-size: 11px;
+        padding: 3px 5px;
+      }
+      .cfg-search-clear:hover {
+        color: var(--text-primary);
+      }
+      .cfg-kbd,
+      .save-bar-kbd {
+        font-family: 'SF Mono', 'Menlo', monospace;
+        font-size: 10px;
+        color: var(--text-tertiary);
+        background: var(--bg-tertiary);
+        padding: 1px 5px;
+        border-radius: var(--radius-sm);
+      }
+      .cfg-kbd {
+        position: absolute;
+        right: 8px;
+      }
+      .chip-row {
+        display: inline-flex;
+        gap: 2px;
+        padding: 2px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+      }
+      .chip {
+        appearance: none;
+        border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        font-family: inherit;
+        font-size: 11px;
+        font-weight: var(--font-semibold);
+        padding: 3px 10px;
+        border-radius: var(--radius-full);
+        cursor: pointer;
+        transition:
+          background 0.12s ease,
+          color 0.12s ease;
+      }
+      .chip:hover {
+        color: var(--text-primary);
+      }
+      .chip.active {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        box-shadow: 0 0 0 1px var(--border);
+      }
+      .cfg-dirty-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        cursor: pointer;
+        user-select: none;
+        padding: 3px 8px;
+        border-radius: var(--radius-full);
+        transition: background 0.12s ease;
+      }
+      .cfg-dirty-toggle:hover {
+        background: var(--bg-tertiary);
+      }
+      .cfg-dirty-toggle input {
+        accent-color: var(--accent);
+        margin: 0;
+      }
+      .cfg-dirty-toggle.active {
+        color: var(--text-primary);
+      }
+      .cfg-toolbar-count {
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        background: var(--accent);
+        color: white;
+        border-radius: var(--radius-full);
+        padding: 1px 6px;
+        font-variant-numeric: tabular-nums;
+      }
+      .cfg-empty {
+        padding: var(--space-4);
+        text-align: center;
+        font-size: var(--text-xs);
+        background: var(--bg-primary);
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-sm);
+      }
+      .link-btn {
+        background: transparent;
+        border: none;
+        color: var(--accent);
+        font-weight: var(--font-medium);
+        font-size: var(--text-xs);
+        cursor: pointer;
+        padding: 0 0 0 6px;
+      }
+      .link-btn:hover {
+        text-decoration: underline;
+      }
+
+      /* ── Toolbar spacer + save-all CTA ──────────────────────── */
+      .cfg-spacer {
+        flex: 1;
+      }
+      .cfg-save-all {
+        height: 32px;
+        padding: 0 14px;
+        font-size: 12px;
+        font-weight: var(--font-semibold);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: auto;
+      }
+      .save-bar-kbd {
+        background: rgba(255, 255, 255, 0.22);
+        color: rgba(255, 255, 255, 0.9);
+        padding: 1px 5px;
+        border-radius: var(--radius-sm);
+        font-size: 9px;
+        font-family: 'SF Mono', 'Menlo', monospace;
+      }
+
+      /* ── Master-detail body (sidebar | editor) ──────────────── */
+      .cfg-body {
+        display: grid;
+        grid-template-columns: 200px 1fr;
+        gap: var(--space-3);
+        height: min(70vh, 720px);
+        min-height: 440px;
+      }
+      @media (max-width: 900px) {
+        .cfg-body {
+          grid-template-columns: 1fr;
+          height: auto;
+        }
+      }
+
+      .cfg-sidebar {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+      }
+      .cfg-sb-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        padding: 6px 10px;
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        border-bottom: 1px solid var(--border);
+      }
+      .cfg-sb-head .muted {
+        font-size: 10px;
+        color: var(--text-tertiary);
+      }
+      .cfg-sb-filter {
+        appearance: none;
+        margin: 6px 6px;
+        height: 26px;
+        padding: 0 8px;
+        border: 1px solid var(--border);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border-radius: var(--radius-sm);
+        font-size: 11px;
+        outline: none;
+      }
+      .cfg-sb-filter:focus {
+        border-color: var(--accent);
+      }
+      .cfg-sb-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 4px;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .cat {
+        appearance: none;
+        background: transparent;
+        border: none;
+        color: var(--text-primary);
+        font-family: inherit;
+        font-size: 12px;
+        text-align: left;
+        padding: 6px 10px;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        transition:
+          background 0.1s ease,
+          color 0.1s ease;
+      }
+      .cat:hover {
+        background: var(--bg-tertiary);
+      }
+      .cat.active {
+        background: color-mix(in srgb, var(--accent, #0071e3) 14%, transparent);
+        color: var(--accent, #0071e3);
+        font-weight: var(--font-semibold);
+      }
+      .cat-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .cat-meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        flex-shrink: 0;
+      }
+      .cat-count {
+        font-size: 10.5px;
+        color: var(--text-tertiary);
+        font-variant-numeric: tabular-nums;
+      }
+      .cat.active .cat-count {
+        color: var(--accent, #0071e3);
+      }
+      .cat-dirty {
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        background: rgba(255, 149, 0, 0.18);
+        color: #b86200;
+        padding: 0 6px;
+        border-radius: var(--radius-full);
+        font-variant-numeric: tabular-nums;
+        min-width: 16px;
+        text-align: center;
+      }
+
+      /* ── Editor pane ────────────────────────────────────────── */
+      .cfg-editor {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+      }
+      .cfg-editor-head {
+        padding: 10px var(--space-3) 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      .cfg-editor-title {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+      .cfg-editor-title h4 {
+        margin: 0;
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .cfg-editor-title .muted {
+        font-size: 11px;
+        color: var(--text-tertiary);
+      }
+      .cfg-editor-hint {
+        margin: 6px 0 0 0;
+        font-size: 11px;
+      }
+
+      .cfg-table-scroll {
+        flex: 1;
+        overflow: auto;
+      }
+      .cfg-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .cfg-table th {
+        text-align: left;
+        padding: 6px var(--space-3);
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      .cfg-table td {
+        padding: 6px var(--space-3);
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+      }
+      .cfg-table tbody tr:hover {
+        background: var(--bg-secondary);
+      }
+      .cfg-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+      .row-dirty {
+        background: rgba(255, 149, 0, 0.05) !important;
+        box-shadow: inset 3px 0 0 0 #ff9500;
+      }
+      .col-key {
+        min-width: 240px;
+        max-width: 380px;
+      }
+      .col-value {
+        min-width: 200px;
+      }
+      .col-reload {
+        width: 80px;
+      }
+      .col-current {
+        width: 140px;
+      }
+      .col-actions {
+        width: 110px;
+        text-align: right;
+        white-space: nowrap;
+      }
+      .cfg-table .field-label {
+        display: block;
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        line-height: 1.3;
+      }
+      .field-key {
+        display: block;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--text-tertiary);
+        margin-top: 2px;
+      }
+      .cfg-table .current {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--text-secondary);
+        word-break: break-all;
+      }
+      .btn-row-save {
+        height: 24px;
+        padding: 0 10px;
+        border: none;
+        border-radius: var(--radius-sm);
+        background: var(--accent);
+        color: white;
+        font-size: 11px;
+        font-weight: var(--font-semibold);
+        cursor: pointer;
+        font-family: inherit;
+        min-width: 52px;
+      }
+      .btn-row-save:hover:not(:disabled) {
+        filter: brightness(1.05);
+      }
+      .btn-row-save:disabled {
+        background: var(--bg-tertiary);
+        color: var(--text-tertiary);
+        cursor: not-allowed;
+      }
+      .reset-btn {
+        height: 24px;
+        width: 24px;
+        margin-right: 4px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        font-size: 13px;
+        cursor: pointer;
+        vertical-align: middle;
+      }
+      .reset-btn:hover {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+
       .btn {
         padding: 8px 18px;
         border-radius: var(--radius-sm);
@@ -409,6 +999,37 @@ export class EAConfigPanelComponent {
   protected edits: Partial<Record<HotReloadKey, string | number | boolean | null | undefined>> = {};
   protected readonly tab = signal<'editable' | 'readonly'>('editable');
   protected readonly submitting = signal(false);
+
+  // ── Browse / search state ─────────────────────────────────────────
+  protected readonly ALL_CATEGORY = '__all__';
+
+  protected readonly searchTerm = signal<string>('');
+  protected readonly badgeFilter = signal<'all' | 'live' | 'next-job' | 'restart'>('all');
+  protected readonly dirtyOnly = signal<boolean>(false);
+  /** Currently selected section in the sidebar; `__all__` means show everything. */
+  protected readonly selectedCategory = signal<string>(this.ALL_CATEGORY);
+  /** Small filter on the sidebar list itself — for finding a section fast. */
+  protected readonly categoryFilter = signal<string>('');
+  /**
+   * Spike counter that ticks whenever an edit changes — used purely to
+   * invalidate the dirty-derived computeds since `edits` is a plain
+   * object (no Angular signal under it). Anything that reads dirty
+   * state in a computed must read this via `dirtyRevision()` to opt
+   * into recomputation.
+   */
+  private readonly dirtyRevision = signal(0);
+
+  @ViewChild('searchInput') private searchInput?: ElementRef<HTMLInputElement>;
+
+  protected readonly badgeFilterOptions: ReadonlyArray<{
+    label: string;
+    value: 'all' | 'live' | 'next-job' | 'restart';
+  }> = [
+    { label: 'All', value: 'all' },
+    { label: 'Live', value: 'live' },
+    { label: 'Next-job', value: 'next-job' },
+    { label: 'Restart', value: 'restart' },
+  ];
 
   // ── Field catalogues (driven from the engine DTO schema) ───────────────
 
@@ -900,6 +1521,7 @@ export class EAConfigPanelComponent {
   }
 
   protected dirtyCount(): number {
+    this.dirtyRevision(); // opt computeds into recomputation when edits change
     let n = 0;
     for (const f of this.HOT_RELOAD_FIELDS) {
       if (this.isDirty(f)) n++;
@@ -907,7 +1529,7 @@ export class EAConfigPanelComponent {
     return n;
   }
 
-  private isDirty(field: FieldDef): boolean {
+  protected isDirty(field: FieldDef): boolean {
     const raw = this.edits[field.key];
     if (raw === undefined || raw === null || raw === '') return false;
     const current = this.inputs()?.[field.key];
@@ -919,9 +1541,154 @@ export class EAConfigPanelComponent {
     return current !== num;
   }
 
+  /**
+   * Bump after any field edit so dirty-derived computeds invalidate.
+   * Called inline from the template via (ngModelChange) on every input.
+   */
+  protected markEdited(): void {
+    this.dirtyRevision.update((n) => n + 1);
+  }
+
+  protected revertField(field: FieldDef): void {
+    delete this.edits[field.key];
+    this.markEdited();
+    this.cdr.markForCheck();
+  }
+
+  // ── Search / filter helpers ──────────────────────────────────────
+
+  protected fieldMatchesGlobalFilters(field: FieldDef): boolean {
+    const q = this.searchTerm().trim().toLowerCase();
+    if (q) {
+      const hay = (field.label + ' ' + field.key).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    const bf = this.badgeFilter();
+    if (bf !== 'all' && field.badge !== bf) return false;
+    if (this.dirtyOnly() && !this.isDirty(field)) return false;
+    return true;
+  }
+
+  /**
+   * Group buckets used by the sidebar — derived from the global filter
+   * set (search / badge / dirty-only) so sidebar counts react live, but
+   * NOT scoped to the currently-selected category (that scoping happens
+   * on the right pane only).
+   */
+  protected readonly filteredGroups = computed<FieldGroup[]>(() => {
+    this.dirtyRevision();
+    this.searchTerm();
+    this.badgeFilter();
+    this.dirtyOnly();
+    const out: FieldGroup[] = [];
+    for (const g of this.HOT_RELOAD_GROUPS) {
+      const fields = g.fields.filter((f) => this.fieldMatchesGlobalFilters(f));
+      if (fields.length > 0) out.push({ title: g.title, fields });
+    }
+    return out;
+  });
+
+  /**
+   * Sidebar list: filteredGroups passed through the sidebar's own
+   * filter input and sorted alphabetically (stable order is important
+   * for a nav surface — dirty-first sorting would make sections jump
+   * around as the operator edits, which is disorienting).
+   */
+  protected readonly sidebarGroups = computed<FieldGroup[]>(() => {
+    const filter = this.categoryFilter().toLowerCase().trim();
+    return this.filteredGroups()
+      .filter((g) => !filter || g.title.toLowerCase().includes(filter))
+      .slice()
+      .sort((a, b) => a.title.localeCompare(b.title));
+  });
+
+  /**
+   * The fields actually rendered in the editor — flat list scoped to
+   * the selected category. `__all__` flattens every visible field
+   * across every group.
+   */
+  protected readonly visibleFields = computed<FieldDef[]>(() => {
+    const cat = this.selectedCategory();
+    const groups = this.filteredGroups();
+    if (cat === this.ALL_CATEGORY) return groups.flatMap((g) => g.fields);
+    const match = groups.find((g) => g.title === cat);
+    return match ? match.fields.slice() : [];
+  });
+
+  protected readonly visibleCount = computed(() => this.visibleFields().length);
+
+  protected groupDirtyCount(group: FieldGroup): number {
+    this.dirtyRevision();
+    let n = 0;
+    for (const f of group.fields) if (this.isDirty(f)) n++;
+    return n;
+  }
+
+  protected selectedCategoryTitle(): string {
+    const cat = this.selectedCategory();
+    return cat === this.ALL_CATEGORY ? 'All sections' : cat;
+  }
+
+  protected selectCategory(title: string): void {
+    this.selectedCategory.set(title);
+  }
+
+  protected clearSearch(): void {
+    this.searchTerm.set('');
+    this.badgeFilter.set('all');
+    this.dirtyOnly.set(false);
+    this.categoryFilter.set('');
+  }
+
   protected clearEdits(): void {
     this.edits = {};
+    this.markEdited();
     this.cdr.markForCheck();
+  }
+
+  // ── Keyboard shortcuts ───────────────────────────────────────────
+  /**
+   * `/` focuses the field search; `⌘S` / `Ctrl+S` pushes pending
+   * changes. Both are scoped to the document so the operator can hit
+   * them from anywhere on the EA detail page while this panel has
+   * unsaved state.
+   */
+  @HostListener('document:keydown', ['$event'])
+  onKey(ev: KeyboardEvent): void {
+    if ((ev.metaKey || ev.ctrlKey) && (ev.key === 's' || ev.key === 'S')) {
+      // Only intercept when this panel is the one holding dirty state — avoids
+      // hijacking ⌘S on pages that don't have a config form active.
+      if (this.tab() === 'editable' && this.hasDirty() && !this.submitting()) {
+        ev.preventDefault();
+        this.submit();
+      }
+      return;
+    }
+    const target = ev.target as HTMLElement | null;
+    const inEditable =
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      (target?.isContentEditable ?? false);
+    if (ev.key === '/' && !inEditable && this.tab() === 'editable') {
+      ev.preventDefault();
+      this.searchInput?.nativeElement.focus();
+      this.searchInput?.nativeElement.select();
+    }
+  }
+
+  /**
+   * Pack one dirty field into the bulk-push body shape. The API only
+   * ships an `UpdateInstanceConfigRequest` endpoint (no per-key route),
+   * so per-row saves are a one-field bulk push.
+   */
+  private packField(body: UpdateInstanceConfigRequest, f: FieldDef): void {
+    const raw = this.edits[f.key];
+    let value: number | string | boolean;
+    if (f.kind === 'bool') value = raw as boolean;
+    else if (f.kind === 'enum' || f.kind === 'string') value = String(raw);
+    else value = Number(raw);
+    (body as Record<string, number | string | boolean>)[f.key] = value;
   }
 
   protected submit(): void {
@@ -931,15 +1698,28 @@ export class EAConfigPanelComponent {
     // rejects the request body otherwise (the controller's route-binding
     // assignment runs *after* JSON deserialisation).
     const body: UpdateInstanceConfigRequest = { instanceId: this.instanceId() };
+    const fields: FieldDef[] = [];
     for (const f of this.HOT_RELOAD_FIELDS) {
       if (!this.isDirty(f)) continue;
-      const raw = this.edits[f.key];
-      let value: number | string | boolean;
-      if (f.kind === 'bool') value = raw as boolean;
-      else if (f.kind === 'enum' || f.kind === 'string') value = String(raw);
-      else value = Number(raw);
-      (body as Record<string, number | string | boolean>)[f.key] = value;
+      this.packField(body, f);
+      fields.push(f);
     }
+    this.pushBody(body, fields);
+  }
+
+  /**
+   * Push a single field via the bulk endpoint. Mirrors the
+   * engine-config page's per-row Save UX so the operator can commit
+   * one knob without disturbing other in-flight edits.
+   */
+  protected saveField(field: FieldDef): void {
+    if (!this.isDirty(field) || this.submitting()) return;
+    const body: UpdateInstanceConfigRequest = { instanceId: this.instanceId() };
+    this.packField(body, field);
+    this.pushBody(body, [field]);
+  }
+
+  private pushBody(body: UpdateInstanceConfigRequest, fields: FieldDef[]): void {
     this.submitting.set(true);
     this.admin
       .updateInstanceConfig(this.instanceId(), body)
@@ -953,9 +1733,10 @@ export class EAConfigPanelComponent {
         next: (res) => {
           if (res.status) {
             this.notify.success(
-              `Config push queued (${Object.keys(body).length} field${Object.keys(body).length === 1 ? '' : 's'}).`,
+              `Config push queued (${fields.length} field${fields.length === 1 ? '' : 's'}).`,
             );
-            this.edits = {};
+            for (const f of fields) delete this.edits[f.key];
+            this.markEdited();
             this.configPushed.emit();
           } else {
             this.notify.error(res.message ?? 'Config push failed.');
@@ -963,6 +1744,22 @@ export class EAConfigPanelComponent {
         },
         error: () => this.notify.error('Config push failed.'),
       });
+  }
+
+  /**
+   * Per-row keyboard: Enter on a field input saves that field, Esc
+   * reverts it. Shift+Enter passes through in textareas (none in this
+   * panel today but kept as a safety net for future Json fields).
+   */
+  protected onFieldKey(ev: KeyboardEvent, field: FieldDef): void {
+    if (ev.key === 'Enter' && !ev.shiftKey && !(ev.target instanceof HTMLTextAreaElement)) {
+      ev.preventDefault();
+      if (this.isDirty(field)) this.saveField(field);
+    } else if (ev.key === 'Escape') {
+      ev.preventDefault();
+      this.revertField(field);
+      (ev.target as HTMLElement).blur();
+    }
   }
 }
 

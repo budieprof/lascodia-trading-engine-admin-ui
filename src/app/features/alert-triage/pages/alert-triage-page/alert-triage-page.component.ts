@@ -70,6 +70,25 @@ interface ParsedAlert extends AlertDto {
   age: string;
 }
 
+/**
+ * One operator-actionable "incident": a bucket of alerts that share a
+ * (severity, alertType). The triage queue is overwhelmingly recurring
+ * noise (one worker crash → 20 alerts; one MU drift → 30 alerts across
+ * symbols). Grouping by `${severity}::${alertType}` collapses the wall
+ * into ~10 distinct things to triage, each with bulk snooze/ack.
+ */
+interface IncidentGroup {
+  key: string;
+  severity: AlertSeverity;
+  alertType: string;
+  count: number;
+  alerts: ParsedAlert[];
+  topSymbols: string[];
+  symbolOverflow: number;
+  latestAt: string;
+  snoozedCount: number;
+}
+
 const SEVERITY_ORDER: Record<AlertSeverity, number> = {
   Critical: 0,
   High: 1,
@@ -353,116 +372,323 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
               <h3>By symbol</h3>
               <span class="muted">{{ symbolRollups().length }} touched</span>
             </header>
-            <table class="board-table">
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th class="num">Total</th>
-                  <th class="num">Critical</th>
-                  <th class="num">High</th>
-                  <th class="num">Medium</th>
-                  <th class="num">Info</th>
-                  <th>Top type</th>
-                  <th>Latest</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (r of symbolRollups(); track r.symbol) {
-                  <tr [class.row-warn]="r.critical > 0">
-                    <td class="mono">{{ r.symbol }}</td>
-                    <td class="num">{{ r.total }}</td>
-                    <td class="num" [class.sev-cell-crit]="r.critical > 0">
-                      {{ r.critical }}
-                    </td>
-                    <td class="num" [class.sev-cell-high]="r.high > 0">{{ r.high }}</td>
-                    <td class="num">{{ r.medium }}</td>
-                    <td class="num">{{ r.info }}</td>
-                    <td class="reason small">{{ r.topType }}</td>
-                    <td class="time">
-                      @if (r.recentAt) {
-                        {{ r.recentAt | relativeTime }}
-                      } @else {
-                        —
-                      }
-                    </td>
+            <div class="table-scroll table-scroll--rollup">
+              <table class="board-table">
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th class="num">Total</th>
+                    <th class="num">Critical</th>
+                    <th class="num">High</th>
+                    <th class="num">Medium</th>
+                    <th class="num">Info</th>
+                    <th>Top type</th>
+                    <th>Latest</th>
                   </tr>
-                }
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  @for (r of symbolRollups(); track r.symbol) {
+                    <tr
+                      [class.row-warn]="r.critical > 0"
+                      class="symbol-clickable"
+                      (click)="filterBySymbol(r.symbol)"
+                      [title]="'Filter queue to ' + r.symbol"
+                    >
+                      <td class="mono">{{ r.symbol }}</td>
+                      <td class="num">{{ r.total }}</td>
+                      <td class="num" [class.sev-cell-crit]="r.critical > 0">
+                        {{ r.critical }}
+                      </td>
+                      <td class="num" [class.sev-cell-high]="r.high > 0">{{ r.high }}</td>
+                      <td class="num">{{ r.medium }}</td>
+                      <td class="num">{{ r.info }}</td>
+                      <td class="reason small">{{ r.topType }}</td>
+                      <td class="time">
+                        @if (r.recentAt) {
+                          {{ r.recentAt | relativeTime }}
+                        } @else {
+                          —
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
           </section>
 
           <!-- Triage queue -->
           <section class="data-table-card">
             <header class="board-head">
               <h3>Triage queue</h3>
-              <span class="muted">{{ triageQueue().length }} shown</span>
-            </header>
-            <table class="board-table">
-              <thead>
-                <tr>
-                  <th>Sev</th>
-                  <th>Type</th>
-                  <th>Symbol</th>
-                  <th>Reason</th>
-                  <th>Triggered</th>
-                  <th class="num">Cooldown</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                @if (triageQueue().length === 0) {
-                  <tr class="empty-row">
-                    <td colspan="7" class="muted small">
-                      No actionable alerts under current filters.
-                    </td>
-                  </tr>
-                } @else {
-                  @for (a of triageQueue(); track a.id) {
-                    <tr [class.snoozed]="isSnoozed(a.id) !== null">
-                      <td>
-                        <span class="sev-pill" [attr.data-sev]="a.severity">{{ a.severity }}</span>
-                      </td>
-                      <td class="small mono">{{ a.alertType }}</td>
-                      <td class="mono">{{ a.symbol ?? '—' }}</td>
-                      <td class="reason small">{{ a.parsedReason }}</td>
-                      <td class="time" [title]="a.lastTriggeredAt">
-                        @if (a.lastTriggeredAt) {
-                          {{ a.lastTriggeredAt | relativeTime }}
-                        } @else {
-                          —
-                        }
-                      </td>
-                      <td class="num small mono">{{ a.cooldownSeconds }}s</td>
-                      <td class="actions">
-                        @if (isSnoozed(a.id); as until) {
-                          <span class="snooze-tag small muted">
-                            snoozed → {{ until | date: 'HH:mm' }}
-                          </span>
-                        } @else {
-                          <button class="btn btn-ghost btn-xs" (click)="snooze(a.id, 15)">
-                            15m
-                          </button>
-                          <button class="btn btn-ghost btn-xs" (click)="snooze(a.id, 60)">
-                            1h
-                          </button>
-                          <button class="btn btn-secondary btn-xs" (click)="acknowledge(a)">
-                            Ack
-                          </button>
-                        }
-                        @if (a.symbol) {
-                          <a
-                            class="link small"
-                            [routerLink]="['/market-data']"
-                            [queryParams]="{ symbol: a.symbol }"
-                            >chart</a
-                          >
-                        }
-                      </td>
-                    </tr>
-                  }
+              <span class="muted">
+                {{ triageQueue().length }} alert{{ triageQueue().length === 1 ? '' : 's' }}
+                @if (viewMode() === 'grouped') {
+                  · {{ incidentGroups().length }} incident{{
+                    incidentGroups().length === 1 ? '' : 's'
+                  }}
                 }
-              </tbody>
-            </table>
+              </span>
+              <div class="queue-tools">
+                @if (viewMode() === 'grouped' && incidentGroups().length > 0) {
+                  <div class="link-group">
+                    <button type="button" class="link-btn" (click)="expandAllGroups()">
+                      Expand all
+                    </button>
+                    <button type="button" class="link-btn" (click)="collapseAllGroups()">
+                      Collapse all
+                    </button>
+                  </div>
+                }
+                <div class="view-toggle" role="tablist" aria-label="Queue view mode">
+                  <button
+                    type="button"
+                    role="tab"
+                    class="vt-btn"
+                    [class.active]="viewMode() === 'grouped'"
+                    [attr.aria-selected]="viewMode() === 'grouped'"
+                    (click)="viewMode.set('grouped')"
+                    title="Group by alert type — collapses repeated noise"
+                  >
+                    Grouped
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    class="vt-btn"
+                    [class.active]="viewMode() === 'flat'"
+                    [attr.aria-selected]="viewMode() === 'flat'"
+                    (click)="viewMode.set('flat')"
+                    title="One row per alert — for raw inspection"
+                  >
+                    Flat
+                  </button>
+                </div>
+              </div>
+            </header>
+            @if (viewMode() === 'grouped') {
+              @if (incidentGroups().length === 0) {
+                <p class="empty-line muted" style="padding: var(--space-3) var(--space-4)">
+                  No actionable alerts under current filters.
+                </p>
+              } @else {
+                <div class="table-scroll table-scroll--events">
+                  <div class="incident-list">
+                    @for (g of incidentGroups(); track g.key) {
+                      <article class="incident" [attr.data-sev]="g.severity">
+                        <header
+                          class="incident-head"
+                          (click)="toggleGroup(g.key)"
+                          [attr.aria-expanded]="isGroupOpen(g.key)"
+                        >
+                          <span class="incident-chev" [class.open]="isGroupOpen(g.key)"
+                            >&#9654;</span
+                          >
+                          <span class="sev-pill" [attr.data-sev]="g.severity">{{
+                            g.severity
+                          }}</span>
+                          <span class="incident-type">{{ g.alertType }}</span>
+                          <span class="incident-count">×&nbsp;{{ g.count }}</span>
+                          @if (g.snoozedCount > 0) {
+                            <span class="incident-snoozed-tag" title="Snoozed alerts in this group">
+                              {{ g.snoozedCount }} snoozed
+                            </span>
+                          }
+                          <span class="incident-symbols">
+                            @for (s of g.topSymbols; track s) {
+                              <button
+                                type="button"
+                                class="sym-chip"
+                                (click)="filterBySymbol(s); $event.stopPropagation()"
+                                [title]="'Filter by ' + s"
+                              >
+                                {{ s }}
+                              </button>
+                            }
+                            @if (g.symbolOverflow > 0) {
+                              <span class="sym-overflow muted">+{{ g.symbolOverflow }}</span>
+                            }
+                          </span>
+                          <span class="incident-time muted">
+                            latest
+                            @if (g.latestAt) {
+                              {{ g.latestAt | relativeTime }}
+                            } @else {
+                              —
+                            }
+                          </span>
+                          <div
+                            class="incident-actions"
+                            (click)="$event.stopPropagation()"
+                            role="group"
+                            aria-label="Group actions"
+                          >
+                            <button
+                              type="button"
+                              class="btn btn-ghost btn-xs"
+                              (click)="snoozeGroup(g, 15)"
+                              [disabled]="g.snoozedCount === g.count"
+                            >
+                              Snooze 15m
+                            </button>
+                            <button
+                              type="button"
+                              class="btn btn-ghost btn-xs"
+                              (click)="snoozeGroup(g, 60)"
+                              [disabled]="g.snoozedCount === g.count"
+                            >
+                              1h
+                            </button>
+                            <button
+                              type="button"
+                              class="btn btn-secondary btn-xs"
+                              (click)="ackGroup(g)"
+                              [disabled]="g.snoozedCount === g.count"
+                            >
+                              Ack all
+                            </button>
+                          </div>
+                        </header>
+                        @if (isGroupOpen(g.key)) {
+                          <table class="board-table inner-table">
+                            <thead>
+                              <tr>
+                                <th>Symbol</th>
+                                <th>Reason</th>
+                                <th>Triggered</th>
+                                <th class="num">Cooldown</th>
+                                <th>Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              @for (a of g.alerts; track a.id) {
+                                <tr [class.snoozed]="isSnoozed(a.id) !== null">
+                                  <td class="mono">{{ a.symbol ?? '—' }}</td>
+                                  <td class="reason small">{{ a.parsedReason }}</td>
+                                  <td class="time" [title]="a.lastTriggeredAt">
+                                    @if (a.lastTriggeredAt) {
+                                      {{ a.lastTriggeredAt | relativeTime }}
+                                    } @else {
+                                      —
+                                    }
+                                  </td>
+                                  <td class="num small mono">{{ a.cooldownSeconds }}s</td>
+                                  <td class="actions">
+                                    @if (isSnoozed(a.id); as until) {
+                                      <span class="snooze-tag small muted">
+                                        snoozed → {{ until | date: 'HH:mm' }}
+                                      </span>
+                                    } @else {
+                                      <button
+                                        class="btn btn-ghost btn-xs"
+                                        (click)="snooze(a.id, 15)"
+                                      >
+                                        15m
+                                      </button>
+                                      <button
+                                        class="btn btn-ghost btn-xs"
+                                        (click)="snooze(a.id, 60)"
+                                      >
+                                        1h
+                                      </button>
+                                      <button
+                                        class="btn btn-secondary btn-xs"
+                                        (click)="acknowledge(a)"
+                                      >
+                                        Ack
+                                      </button>
+                                    }
+                                    @if (a.symbol) {
+                                      <a
+                                        class="link small"
+                                        [routerLink]="['/market-data']"
+                                        [queryParams]="{ symbol: a.symbol }"
+                                        >chart</a
+                                      >
+                                    }
+                                  </td>
+                                </tr>
+                              }
+                            </tbody>
+                          </table>
+                        }
+                      </article>
+                    }
+                  </div>
+                </div>
+              }
+            } @else {
+              <div class="table-scroll table-scroll--events">
+                <table class="board-table">
+                  <thead>
+                    <tr>
+                      <th>Sev</th>
+                      <th>Type</th>
+                      <th>Symbol</th>
+                      <th>Reason</th>
+                      <th>Triggered</th>
+                      <th class="num">Cooldown</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @if (triageQueue().length === 0) {
+                      <tr class="empty-row">
+                        <td colspan="7" class="muted small">
+                          No actionable alerts under current filters.
+                        </td>
+                      </tr>
+                    } @else {
+                      @for (a of triageQueue(); track a.id) {
+                        <tr [class.snoozed]="isSnoozed(a.id) !== null">
+                          <td>
+                            <span class="sev-pill" [attr.data-sev]="a.severity">{{
+                              a.severity
+                            }}</span>
+                          </td>
+                          <td class="small mono">{{ a.alertType }}</td>
+                          <td class="mono">{{ a.symbol ?? '—' }}</td>
+                          <td class="reason small">{{ a.parsedReason }}</td>
+                          <td class="time" [title]="a.lastTriggeredAt">
+                            @if (a.lastTriggeredAt) {
+                              {{ a.lastTriggeredAt | relativeTime }}
+                            } @else {
+                              —
+                            }
+                          </td>
+                          <td class="num small mono">{{ a.cooldownSeconds }}s</td>
+                          <td class="actions">
+                            @if (isSnoozed(a.id); as until) {
+                              <span class="snooze-tag small muted">
+                                snoozed → {{ until | date: 'HH:mm' }}
+                              </span>
+                            } @else {
+                              <button class="btn btn-ghost btn-xs" (click)="snooze(a.id, 15)">
+                                15m
+                              </button>
+                              <button class="btn btn-ghost btn-xs" (click)="snooze(a.id, 60)">
+                                1h
+                              </button>
+                              <button class="btn btn-secondary btn-xs" (click)="acknowledge(a)">
+                                Ack
+                              </button>
+                            }
+                            @if (a.symbol) {
+                              <a
+                                class="link small"
+                                [routerLink]="['/market-data']"
+                                [queryParams]="{ symbol: a.symbol }"
+                                >chart</a
+                              >
+                            }
+                          </td>
+                        </tr>
+                      }
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
           </section>
         }
       }
@@ -486,6 +712,9 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         padding: var(--space-3) var(--space-4);
+        position: sticky;
+        top: var(--space-2);
+        z-index: 5;
       }
       .fb-field {
         display: flex;
@@ -776,12 +1005,27 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
         font-weight: var(--font-semibold);
         text-transform: uppercase;
         letter-spacing: 0.04em;
+        position: sticky;
+        top: 0;
+        z-index: 1;
       }
       .board-table td.num,
       .board-table th.num {
         text-align: right;
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
+      }
+      /* Bound each table — operator pages must not grow unbounded as the
+         alert backlog grows; rollup + queue become scroll surfaces with
+         sticky headers so they stay below the fold. */
+      .table-scroll {
+        overflow: auto;
+      }
+      .table-scroll--rollup {
+        max-height: 320px;
+      }
+      .table-scroll--events {
+        max-height: 560px;
       }
       .row-warn {
         background: rgba(239, 68, 68, 0.05);
@@ -891,6 +1135,190 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
       .snooze-tag {
         white-space: nowrap;
       }
+
+      /* ── Queue header tools (view toggle, expand/collapse) ─────── */
+      .queue-tools {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-3);
+      }
+      .link-group {
+        display: inline-flex;
+        gap: var(--space-2);
+        align-items: center;
+      }
+      .link-btn {
+        background: transparent;
+        border: none;
+        padding: 0;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        color: var(--accent);
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .link-btn:hover {
+        text-decoration: underline;
+      }
+      .link-group .link-btn + .link-btn::before {
+        content: '·';
+        margin-right: var(--space-2);
+        color: var(--text-tertiary);
+      }
+      .view-toggle {
+        display: inline-flex;
+        gap: 2px;
+        padding: 2px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+      }
+      .vt-btn {
+        appearance: none;
+        border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        font-family: inherit;
+        font-size: 11px;
+        font-weight: var(--font-semibold);
+        padding: 3px 10px;
+        border-radius: var(--radius-full);
+        cursor: pointer;
+        transition:
+          background 0.12s ease,
+          color 0.12s ease;
+      }
+      .vt-btn:hover {
+        color: var(--text-primary);
+      }
+      .vt-btn.active {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        box-shadow: 0 0 0 1px var(--border);
+      }
+
+      /* ── Incident cards (grouped queue) ────────────────────────── */
+      .incident-list {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        background: var(--border);
+      }
+      .incident {
+        background: var(--bg-secondary);
+      }
+      .incident-head {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: 8px var(--space-4);
+        cursor: pointer;
+        user-select: none;
+        flex-wrap: wrap;
+        border-left: 3px solid transparent;
+        transition: background 0.1s ease;
+      }
+      .incident-head:hover {
+        background: var(--bg-tertiary);
+      }
+      .incident[data-sev='Critical'] .incident-head {
+        border-left-color: rgb(220, 38, 38);
+      }
+      .incident[data-sev='High'] .incident-head {
+        border-left-color: rgb(217, 119, 6);
+      }
+      .incident[data-sev='Medium'] .incident-head {
+        border-left-color: rgb(37, 99, 235);
+      }
+      .incident[data-sev='Info'] .incident-head {
+        border-left-color: var(--border);
+      }
+      .incident-chev {
+        font-size: 9px;
+        color: var(--text-tertiary);
+        transition: transform 0.15s ease;
+        flex-shrink: 0;
+      }
+      .incident-chev.open {
+        transform: rotate(90deg);
+      }
+      .incident-type {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      .incident-count {
+        font-size: 11px;
+        font-weight: var(--font-bold);
+        color: var(--text-primary);
+        background: var(--bg-tertiary);
+        padding: 1px 8px;
+        border-radius: var(--radius-full);
+        font-variant-numeric: tabular-nums;
+      }
+      .incident-snoozed-tag {
+        font-size: 10px;
+        color: var(--text-tertiary);
+        background: var(--bg-tertiary);
+        padding: 1px 6px;
+        border-radius: var(--radius-full);
+        font-style: italic;
+      }
+      .incident-symbols {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        align-items: center;
+        max-width: 360px;
+      }
+      .sym-chip {
+        appearance: none;
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: 10.5px;
+        padding: 1px 6px;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        transition:
+          background 0.1s ease,
+          color 0.1s ease;
+      }
+      .sym-chip:hover {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+      .sym-overflow {
+        font-size: 10.5px;
+      }
+      .incident-time {
+        margin-left: auto;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+      .incident-actions {
+        display: inline-flex;
+        gap: 4px;
+        align-items: center;
+        flex-shrink: 0;
+      }
+      .inner-table {
+        background: var(--bg-tertiary);
+        border-top: 1px solid var(--border);
+      }
+      .inner-table th {
+        background: var(--bg-secondary);
+      }
+
+      /* ── Make By-symbol rollup rows clickable as a quick filter ─ */
+      .symbol-clickable {
+        cursor: pointer;
+      }
+      .symbol-clickable:hover {
+        background: var(--bg-tertiary);
+      }
     `,
   ],
 })
@@ -904,6 +1332,16 @@ export class AlertTriagePageComponent {
   protected readonly typeFilter = signal<string>('');
   protected readonly symbolFilter = signal<string>('');
   protected readonly statusFilter = signal<string>('actionable');
+
+  /**
+   * Queue display mode. `grouped` (default) bucket alerts by
+   * `severity × alertType` so 25 `WorkerFault` rows collapse to one
+   * incident card with bulk Snooze / Ack. `flat` shows every alert on
+   * its own row for raw inspection.
+   */
+  protected readonly viewMode = signal<'grouped' | 'flat'>('grouped');
+  /** Set of incident keys the operator has expanded. */
+  protected readonly openGroups = signal<Set<string>>(new Set());
 
   // Snooze map kept in sessionStorage so an operator's triage state survives
   // tab refreshes within a session but doesn't leak across days.
@@ -1008,6 +1446,55 @@ export class AlertTriagePageComponent {
       return -tA;
     }),
   );
+
+  /**
+   * Triage queue bucketed by `severity × alertType`. Drives the grouped
+   * view. Sort: severity first, then count desc, then most-recent
+   * trigger — so the loudest fresh problems sit at the top.
+   */
+  protected readonly incidentGroups = computed<IncidentGroup[]>(() => {
+    const buckets = new Map<string, ParsedAlert[]>();
+    for (const a of this.triageQueue()) {
+      const key = `${a.severity}::${a.alertType}`;
+      const list = buckets.get(key) ?? [];
+      list.push(a);
+      buckets.set(key, list);
+    }
+    const now = Date.now();
+    const snoozed = this.snoozedUntil();
+    const out: IncidentGroup[] = [];
+    for (const [key, alerts] of buckets.entries()) {
+      const [severity, alertType] = key.split('::') as [AlertSeverity, string];
+      const symbols: string[] = [];
+      let latestAt = '';
+      let snoozedCount = 0;
+      for (const a of alerts) {
+        const s = a.symbol ?? '—';
+        if (!symbols.includes(s)) symbols.push(s);
+        const t = a.lastTriggeredAt ?? '';
+        if (t > latestAt) latestAt = t;
+        if ((snoozed[a.id] ?? 0) > now) snoozedCount++;
+      }
+      out.push({
+        key,
+        severity,
+        alertType,
+        count: alerts.length,
+        alerts,
+        topSymbols: symbols.slice(0, 5),
+        symbolOverflow: Math.max(0, symbols.length - 5),
+        latestAt,
+        snoozedCount,
+      });
+    }
+    return out.sort((a, b) => {
+      const sevA = SEVERITY_ORDER[a.severity];
+      const sevB = SEVERITY_ORDER[b.severity];
+      if (sevA !== sevB) return sevA - sevB;
+      if (a.count !== b.count) return b.count - a.count;
+      return (b.latestAt ?? '').localeCompare(a.latestAt ?? '');
+    });
+  });
 
   protected readonly loading = computed(
     () => this.resource.loading() && (this.resource.value() ?? []).length === 0,
@@ -1219,6 +1706,54 @@ export class AlertTriagePageComponent {
     // proper call and the local snooze becomes a redundant safety net.
     this.snooze(alert.id, 60 * 24);
     this.notify.info('Acknowledged locally (snoozed 24h). Engine-side ack pending.');
+  }
+
+  // ── Group-level actions (grouped view) ──────────────────────────────
+
+  private bulkSnooze(alerts: ParsedAlert[], minutes: number): void {
+    const until = Date.now() + minutes * 60 * 1000;
+    const next = { ...this.snoozedUntil() };
+    for (const a of alerts) next[a.id] = until;
+    this.snoozedUntil.set(next);
+    this.writeSnoozes(next);
+  }
+
+  snoozeGroup(g: IncidentGroup, minutes: number): void {
+    this.bulkSnooze(g.alerts, minutes);
+    this.notify.success(`Snoozed ${g.count} ${g.alertType} alerts for ${minutes} min`);
+  }
+
+  ackGroup(g: IncidentGroup): void {
+    this.bulkSnooze(g.alerts, 60 * 24);
+    this.notify.info(`Acknowledged ${g.count} ${g.alertType} alerts (snoozed 24h)`);
+  }
+
+  toggleGroup(key: string): void {
+    const next = new Set(this.openGroups());
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    this.openGroups.set(next);
+  }
+
+  isGroupOpen(key: string): boolean {
+    return this.openGroups().has(key);
+  }
+
+  expandAllGroups(): void {
+    this.openGroups.set(new Set(this.incidentGroups().map((g) => g.key)));
+  }
+
+  collapseAllGroups(): void {
+    this.openGroups.set(new Set());
+  }
+
+  /**
+   * Quick filter: clicking a symbol chip (in incident headers or the
+   * By-symbol rollup) drops the symbol into the page's symbol filter so
+   * the queue narrows to just that pair.
+   */
+  filterBySymbol(symbol: string): void {
+    this.symbolFilter.set(symbol === '—' ? '' : symbol);
   }
 
   // ── Helpers ────────────────────────────────────────────────────────

@@ -164,3 +164,109 @@ textarea:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+// ── Router view transitions ─────────────────────────────────────────────────
+// Wired up via `withViewTransitions()` in app.config.ts. The browser
+// snapshots the outgoing page and crossfades into the incoming one;
+// these rules give the cross-fade a subtle upward slide on the new
+// page so a navigation feels like the content settles into place
+// rather than abruptly swapping.
+//
+// Pseudo-elements explained:
+//   ::view-transition-old(root) — the outgoing page snapshot
+//   ::view-transition-new(root) — the incoming page snapshot
+// Each pair is a `<view-transition-image-pair>` that the browser
+// composites independently; animating both lets us run a fade-out on
+// the leaving page and a fade-in-up on the arriving page at the same
+// time without one painting on top of the other.
+//
+// Falls back gracefully: browsers without the View Transitions API
+// (Firefox, older Safari) skip the transition entirely — navigation
+// still works, just without the crossfade.
+::view-transition-old(root),
+::view-transition-new(root) {
+  // Easing tuned for a "settles in" feel — fast start, gentle finish.
+  // Keep the duration short enough that fast-clicks through the
+  // sidebar still feel snappy.
+  animation-duration: 240ms;
+  animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+::view-transition-old(root) {
+  animation-name: lascodia-fade-out;
+}
+::view-transition-new(root) {
+  animation-name: lascodia-fade-in-up;
+}
+
+@keyframes lascodia-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes lascodia-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// ── Slide-left variant ──────────────────────────────────────────────────────
+// Set on <html> by `onViewTransitionCreated` (see app.config.ts) when the
+// origin component requested a horizontal slide before navigating — e.g.
+// clicking a watchlist tile to open its pair in the full Market Data chart.
+// The outgoing watchlist page slides off to the left while the incoming
+// chart slides in from the right, like swiping forward through a deck.
+//
+// Slightly longer duration than the default fade so the larger pixel
+// distance reads as deliberate motion instead of a jerky lurch. Same
+// easing as the default for consistency.
+html[data-view-transition='slide-left']::view-transition-old(root),
+html[data-view-transition='slide-left']::view-transition-new(root) {
+  animation-duration: 320ms;
+  animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+html[data-view-transition='slide-left']::view-transition-old(root) {
+  animation-name: lascodia-slide-out-left;
+}
+html[data-view-transition='slide-left']::view-transition-new(root) {
+  animation-name: lascodia-slide-in-right;
+}
+
+@keyframes lascodia-slide-out-left {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+}
+@keyframes lascodia-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+// Honour the OS-level reduced-motion preference — users on this
+// setting get an instant swap with no animation, matching the
+// accessibility contract every other animated surface here follows.
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 1ms;
+    animation-name: none;
+  }
+}

@@ -424,6 +424,7 @@ export class SidebarComponent {
         { label: 'Signal Exits', route: '/trade-signals/feedback', icon: '📨' },
         { label: 'Signal Rejections', route: '/rejections', icon: '🚫' },
         { label: 'Market Data', route: '/market-data', icon: '📈' },
+        { label: 'Watchlist', route: '/watchlist', icon: '👁' },
       ],
     },
     {

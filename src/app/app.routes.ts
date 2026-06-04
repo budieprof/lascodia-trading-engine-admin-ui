@@ -88,6 +88,12 @@ export const routes: Routes = [
           import('@features/market-data/market-data.routes').then((m) => m.MARKET_DATA_ROUTES),
       },
       {
+        path: 'watchlist',
+        data: { breadcrumb: 'Watchlist' },
+        loadChildren: () =>
+          import('@features/watchlist/watchlist.routes').then((m) => m.WATCHLIST_ROUTES),
+      },
+      {
         path: 'spot-analysis',
         data: { breadcrumb: 'Spot Analysis' },
         loadChildren: () =>

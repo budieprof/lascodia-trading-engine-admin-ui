@@ -15,6 +15,7 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DatePipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import type { EChartsOption } from 'echarts';
 import { Subject, timer, switchMap, takeUntil, catchError, of } from 'rxjs';
@@ -294,12 +295,17 @@ const LAST_ANALYSIS_STORAGE_PREFIX = 'tradingChart.lastAnalysis.v2';
 // Pre-per-pair single-slot key. Migrated into the per-pair store on first
 // load of the pair it belonged to, then deleted. Kept only for that bridge.
 const LEGACY_LAST_ANALYSIS_KEY = 'tradingChart.lastAnalysis.v1';
+// One-shot deep-link hand-off used by the Watchlist page: the tile writes
+// {symbol, timeframe} into localStorage and navigates here; our ngOnInit
+// pulls + clears the key on first read. Survives exactly one navigation —
+// subsequent visits to /market-data start from the chart's own state.
+const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
 
 @Component({
   selector: 'app-trading-chart',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgxEchartsDirective, FormsModule, DatePipe],
+  imports: [NgxEchartsDirective, FormsModule, DatePipe, RouterLink],
   template: `
     <div class="trading-chart">
       <!-- Toolbar -->
@@ -407,6 +413,49 @@ const LEGACY_LAST_ANALYSIS_KEY = 'tradingChart.lastAnalysis.v1';
             (click)="runMacroAnalysis()"
           >
             {{ macroAnalyzing() ? '⏳ Macro…' : '🌐 Macro' }}
+          </button>
+          <!--
+            Directed limit-proposal variant of the spot analysis. The
+            operator pins the direction; the LLM is constrained to optimise
+            Entry / SL / TP for a pending limit order in that direction
+            (entry on the limit side of latest close — below for Buy,
+            above for Sell). Result renders in the same modal with a
+            "Limit proposal" badge; promote via the existing Create
+            signal button.
+          -->
+          <button
+            type="button"
+            class="analyze-btn limit-buy"
+            [disabled]="proposingLimit() !== null"
+            [title]="
+              proposingLimit()
+                ? 'Limit proposal in flight — wait for it to complete.'
+                : 'Ask the LLM to propose the best Entry / SL / TP for a Buy LIMIT ' +
+                  'on a pullback in ' +
+                  selectedSymbol() +
+                  ' ' +
+                  selectedTimeframe()
+            "
+            (click)="runProposeLimit('Buy')"
+          >
+            {{ proposingLimit() === 'Buy' ? '⏳ Buy Limit…' : '↘️ Buy Limit' }}
+          </button>
+          <button
+            type="button"
+            class="analyze-btn limit-sell"
+            [disabled]="proposingLimit() !== null"
+            [title]="
+              proposingLimit()
+                ? 'Limit proposal in flight — wait for it to complete.'
+                : 'Ask the LLM to propose the best Entry / SL / TP for a Sell LIMIT ' +
+                  'on a rally in ' +
+                  selectedSymbol() +
+                  ' ' +
+                  selectedTimeframe()
+            "
+            (click)="runProposeLimit('Sell')"
+          >
+            {{ proposingLimit() === 'Sell' ? '⏳ Sell Limit…' : '↗️ Sell Limit' }}
           </button>
           <button
             type="button"
@@ -677,7 +726,16 @@ const LEGACY_LAST_ANALYSIS_KEY = 'tradingChart.lastAnalysis.v1';
           @if (analysisResult(); as ar) {
             <header class="analysis-head">
               <div class="analysis-title-wrap">
-                <h3 id="analysis-title">Spot analysis · {{ ar.symbol }} · {{ ar.timeframe }}</h3>
+                <h3 id="analysis-title">
+                  {{ analysisKindTitle() }} · {{ ar.symbol }} · {{ ar.timeframe }}
+                  @if (analysisKind() === 'limit_buy' || analysisKind() === 'limit_sell') {
+                    <span
+                      class="limit-badge"
+                      [attr.data-direction]="analysisKind() === 'limit_buy' ? 'Buy' : 'Sell'"
+                      >{{ analysisKind() === 'limit_buy' ? 'Buy' : 'Sell' }} limit</span
+                    >
+                  }
+                </h3>
                 <div class="analysis-meta">
                   <span class="tag mono">{{ ar.provider }} / {{ ar.model }}</span>
                   <span class="muted">·</span>
@@ -777,14 +835,77 @@ const LEGACY_LAST_ANALYSIS_KEY = 'tradingChart.lastAnalysis.v1';
                 @if (rec.rationale) {
                   <p class="rec-rationale">{{ rec.rationale }}</p>
                 }
+                <!-- Promote-to-signal row. Only meaningful for an actionable
+                     Buy/Sell with prices. Disabled (with explanatory tooltip)
+                     when auto-gen already persisted a signal for this analysis,
+                     when the manual promote already succeeded in this session,
+                     or while the request is in flight. -->
+                @if (
+                  rec.action !== 'Hold' &&
+                  rec.entryPrice !== null &&
+                  rec.stopLoss !== null &&
+                  rec.takeProfit !== null
+                ) {
+                  <div class="rec-actions">
+                    @if (manualSignalId(); as sid) {
+                      <span class="rec-signal-tag">
+                        Signal
+                        <a class="rec-signal-link mono" [routerLink]="['/trade-signals', sid]"
+                          >#{{ sid }}</a
+                        >
+                        created
+                      </span>
+                    } @else if (autoPersistedSignalIds(ar); as ids) {
+                      <span class="rec-signal-tag">
+                        Persisted by auto-gen:
+                        @for (id of ids; track id) {
+                          <a class="rec-signal-link mono" [routerLink]="['/trade-signals', id]"
+                            >#{{ id }}</a
+                          >
+                        }
+                      </span>
+                    } @else {
+                      <button
+                        type="button"
+                        class="rec-create-signal"
+                        [class.busy]="creatingSignal()"
+                        [disabled]="creatingSignal()"
+                        (click)="createSignalFromAnalysis(ar)"
+                        [title]="'Promote this recommendation to a manual trade signal'"
+                      >
+                        @if (creatingSignal()) {
+                          Creating…
+                        } @else {
+                          Create signal
+                        }
+                      </button>
+                    }
+                  </div>
+                }
               </section>
             } @else {
               <section class="rec-card rec-missing">
                 <div class="rec-row">
-                  <span class="rec-action">No recommendation</span>
+                  <span class="rec-action">
+                    @if (analysisKind() === 'limit_buy' || analysisKind() === 'limit_sell') {
+                      No viable {{ analysisKind() === 'limit_buy' ? 'Buy' : 'Sell' }} limit
+                    } @else {
+                      No recommendation
+                    }
+                  </span>
                 </div>
                 <p class="rec-rationale">
-                  The model didn't emit a structured trade block — review the prose below.
+                  @if (analysisKind() === 'limit_buy' || analysisKind() === 'limit_sell') {
+                    The model didn't propose a viable
+                    {{ analysisKind() === 'limit_buy' ? 'Buy' : 'Sell' }} limit for this market — it
+                    either refused (structure doesn't support a
+                    {{ analysisKind() === 'limit_buy' ? 'buy' : 'sell' }} entry right now) or
+                    proposed a setup that failed server-side validation (wrong direction or entry on
+                    the wrong side of current price for a limit order). The model's full reasoning
+                    is in the analysis below.
+                  } @else {
+                    The model didn't emit a structured trade block — review the prose below.
+                  }
                 </p>
               </section>
             }
@@ -1176,6 +1297,44 @@ const LEGACY_LAST_ANALYSIS_KEY = 'tradingChart.lastAnalysis.v1';
       .analyze-btn:disabled {
         opacity: 0.6;
         cursor: progress;
+      }
+      /* Limit-proposal buttons: direction-coloured so the operator scans the
+         toolbar by colour instead of reading the label every time. */
+      .analyze-btn.limit-buy {
+        background: #1d8a3e;
+        border-color: #1d8a3e;
+      }
+      .analyze-btn.limit-buy:hover:not(:disabled) {
+        background: #166e31;
+      }
+      .analyze-btn.limit-sell {
+        background: #c93631;
+        border-color: #c93631;
+      }
+      .analyze-btn.limit-sell:hover:not(:disabled) {
+        background: #a82a26;
+      }
+      /* Modal title pill that tags a result as a directed proposal. */
+      .limit-badge {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 1px 7px;
+        border-radius: var(--radius-full);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        vertical-align: middle;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+      }
+      .limit-badge[data-direction='Buy'] {
+        background: rgba(52, 199, 89, 0.16);
+        color: #1d8a3e;
+      }
+      .limit-badge[data-direction='Sell'] {
+        background: rgba(255, 59, 48, 0.16);
+        color: #c4290a;
       }
 
       /* Live-analysis toggle — sits next to the Analyse button. Off state
@@ -1597,6 +1756,58 @@ const LEGACY_LAST_ANALYSIS_KEY = 'tradingChart.lastAnalysis.v1';
         line-height: 1.5;
         color: var(--text-secondary);
         font-style: italic;
+      }
+
+      /* Promote-to-signal action row at the bottom of the recommendation card.
+         Three states share the row: the CTA button (default), an "already
+         created via auto-gen" tag, and a "manually created" tag with a link
+         to the new signal. */
+      .rec-actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: var(--space-2);
+        padding-top: var(--space-2);
+        margin-top: var(--space-1);
+        border-top: 1px dashed var(--border);
+      }
+      .rec-create-signal {
+        appearance: none;
+        border: 1px solid transparent;
+        background: var(--accent, #0071e3);
+        color: white;
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: var(--font-semibold);
+        padding: 6px 14px;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        transition:
+          filter 0.12s ease,
+          background 0.12s ease;
+      }
+      .rec-create-signal:hover:not(:disabled) {
+        filter: brightness(1.05);
+      }
+      .rec-create-signal:disabled,
+      .rec-create-signal.busy {
+        opacity: 0.75;
+        cursor: not-allowed;
+      }
+      .rec-signal-tag {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .rec-signal-link {
+        color: var(--accent, #0071e3);
+        text-decoration: none;
+        font-weight: var(--font-semibold);
+      }
+      .rec-signal-link:hover {
+        text-decoration: underline;
       }
 
       /* Exit-instructions card — sits between the recommendation and the
@@ -2089,6 +2300,27 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   /** Error string when the most recent call failed; non-null renders the
    *  error modal. Mutually exclusive with `analysisResult`. */
   readonly analysisError = signal<string | null>(null);
+  /** True while a /market-data/analyze/{id}/persist-signal call is in
+   *  flight. Used to spin / disable the "Create signal" CTA on the modal. */
+  readonly creatingSignal = signal(false);
+  /** Non-null while a /market-data/propose-limit call is in flight; the
+   *  value is the requested direction so the corresponding Buy/Sell button
+   *  can show its own spinner without locking out the other one's hover
+   *  hint. Both buttons disable while either direction is in flight. */
+  readonly proposingLimit = signal<'Buy' | 'Sell' | null>(null);
+  /** Provenance of the analysis result currently in the modal — drives the
+   *  title ("Spot analysis" vs "Limit proposal") and the Buy/Sell badge.
+   *  Set whenever a fresh result lands; cleared on close. `spot` covers
+   *  both manual Analyse and Live auto-runs; the two limit kinds segment
+   *  the directed-mode variants. */
+  readonly analysisKind = signal<'spot' | 'limit_buy' | 'limit_sell' | null>(null);
+  /** The signal id created by the most recent manual promote, keyed to the
+   *  currently-open analysis. Set after a successful persist-signal so the
+   *  CTA collapses into a "Signal #N created" link — prevents accidental
+   *  double-clicks creating duplicate signals and gives the operator a
+   *  one-click path to the new signal's detail page. Cleared when the
+   *  modal closes or a fresh analysis result is set. */
+  readonly manualSignalId = signal<number | null>(null);
 
   // ── Live analysis ──────────────────────────────────────────────────
   /** When on, a silent spot-analysis fires on every candle close for the
@@ -2578,6 +2810,12 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit() {
+    // Watchlist tiles deep-link to this page by stashing a (symbol, tf) pair
+    // in localStorage just before navigating. Consume + clear it BEFORE
+    // loadChartConfig so its candle / live-price loaders see the requested
+    // pair on their first tick. One-shot — survives a single navigation,
+    // then evaporates so subsequent visits don't re-pin to a stale choice.
+    this.consumeDeepLinkIfAny();
     this.loadChartConfig();
     // Hydrate the live-analysis toolbar from the engine's SpotAnalysisWorker:*
     // config rows. Runs once — loadChartConfig (which re-runs on every pair
@@ -2718,7 +2956,15 @@ export class TradingChartComponent implements OnInit, OnDestroy {
           const data = res.data;
           this.lastAnalysisByPair.update((m) => ({ ...m, [reqKey]: data }));
           this.persistLastAnalysis(reqSym, reqTf, data);
-          if (!silent) this.analysisResult.set(data);
+          if (!silent) {
+            // Fresh analysis → reset the per-modal manual-promote latch
+            // so the CTA appears again. The auto-gen path may have set
+            // generatedSignalIds on this result; the template's autoPersisted
+            // branch handles that case before showing the CTA.
+            this.manualSignalId.set(null);
+            this.analysisKind.set('spot');
+            this.analysisResult.set(data);
+          }
         } else if (res && !silent) {
           this.analysisError.set(res.message ?? 'Analysis refused by the engine.');
         }
@@ -2753,6 +2999,10 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     this.liveAnalysisEnabled.set(adding);
 
     const enabled = this.watchPairs.length > 0;
+    // Empty string is a valid encoding for "no pairs" — the engine's
+    // SpotAnalysisWorker.ParsePairs short-circuits on IsNullOrWhiteSpace and
+    // returns []. The UpsertEngineConfig validator allows empty Value (only
+    // null is rejected), so disabling the last watched pair lands cleanly.
     this.writeLiveConfig(CFG_LIVE_PAIRS, this.watchPairs.join(','), 'String');
     this.writeLiveConfig(CFG_LIVE_ENABLED, String(enabled), 'Bool');
   }
@@ -2891,13 +3141,23 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   /** Bubble click → open the last completed analysis in the modal. */
   openLastAnalysis(): void {
     const last = this.lastAnalysis();
-    if (last) this.analysisResult.set(last);
+    if (last) {
+      this.manualSignalId.set(null);
+      // Restored results don't carry their original mode (no `kind` on the
+      // DTO yet); default to spot — the safe characterisation for the
+      // bubble's last-analysis cache, which is dominated by Live + manual
+      // Analyse runs.
+      this.analysisKind.set('spot');
+      this.analysisResult.set(last);
+    }
   }
 
   /** Dismiss whichever overlay is currently visible (success or error). */
   closeAnalysis(): void {
     this.analysisResult.set(null);
     this.analysisError.set(null);
+    this.manualSignalId.set(null);
+    this.analysisKind.set(null);
   }
 
   /** Native <dialog> emits `close` on Escape and programmatic .close().
@@ -2905,6 +3165,113 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   onAnalysisDialogClose(): void {
     this.analysisResult.set(null);
     this.analysisError.set(null);
+    this.manualSignalId.set(null);
+    this.analysisKind.set(null);
+  }
+
+  /**
+   * Header label for the analysis modal — flips between "Spot analysis"
+   * and "Limit proposal" so the operator knows whether they're reading a
+   * free analysis or a directed proposal. The Buy/Sell direction badge
+   * sits next to this in the template.
+   */
+  analysisKindTitle(): string {
+    return this.analysisKind() === 'limit_buy' || this.analysisKind() === 'limit_sell'
+      ? 'Limit proposal'
+      : 'Spot analysis';
+  }
+
+  /**
+   * Run the directed limit-proposal variant of the spot analysis. The
+   * engine pins the LLM to the requested direction and validates the
+   * response has entry on the limit side of the latest close (below for
+   * Buy, above for Sell); a refusal or no-viable-proposal lands on the
+   * error path with the model's reasoning visible via the audit row link.
+   */
+  runProposeLimit(direction: 'Buy' | 'Sell'): void {
+    if (this.proposingLimit() !== null) return;
+    this.proposingLimit.set(direction);
+    this.marketData
+      .proposeLimit(this.selectedSymbol(), this.selectedTimeframe(), direction)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (res) => {
+          this.proposingLimit.set(null);
+          if (res?.status && res.data) {
+            // Same cache + persistence path the free analysis uses so the
+            // bubble + storage replay handle limit proposals transparently.
+            const data = res.data;
+            const reqKey = `${data.symbol}|${data.timeframe}`;
+            this.lastAnalysisByPair.update((m) => ({ ...m, [reqKey]: data }));
+            this.persistLastAnalysis(data.symbol, data.timeframe, data);
+            this.manualSignalId.set(null);
+            this.analysisKind.set(direction === 'Buy' ? 'limit_buy' : 'limit_sell');
+            this.analysisResult.set(data);
+          } else {
+            this.analysisError.set(
+              res?.message ?? `LLM did not return a viable ${direction} limit proposal.`,
+            );
+          }
+        },
+        error: (err) => {
+          this.proposingLimit.set(null);
+          this.analysisError.set(
+            err?.error?.message ??
+              `Could not run a ${direction} limit proposal — engine returned an error.`,
+          );
+        },
+      });
+  }
+
+  /**
+   * Signals that the engine already auto-persisted from this analysis
+   * (server-truth, populated when the auto-gen toggle was on at analyse
+   * time). Returns null when the array is empty so the template's `@if`
+   * collapses cleanly to the manual-create button.
+   */
+  autoPersistedSignalIds(ar: MarketAnalysisResultDto): number[] | null {
+    const ids = ar.generatedSignalIds ?? [];
+    return ids.length > 0 ? ids : null;
+  }
+
+  /**
+   * Promote the primary recommendation on the open spot analysis into a
+   * live TradeSignal via the engine's persist-signal endpoint. Mirrors
+   * the auto-gen path server-side (sentinel strategy, SpotAnalysis
+   * source, LlmInvocationId provenance, 3-bar TTL) but flagged
+   * IsManual=true. The CTA only renders when the rec is Buy/Sell with
+   * full prices and no signal was already persisted for this analysis,
+   * so we don't need to re-validate here.
+   *
+   * On success we stash the new signal id locally so the modal flips to
+   * a "Signal #N created" link — preventing accidental double-creates
+   * from a stale modal and giving a one-click path to the signal detail.
+   */
+  createSignalFromAnalysis(ar: MarketAnalysisResultDto): void {
+    if (this.creatingSignal()) return;
+    this.creatingSignal.set(true);
+    this.marketData
+      .persistSignalFromAnalysis(ar.llmInvocationId, 0)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (res) => {
+          this.creatingSignal.set(false);
+          if (res?.status && res.data && res.data > 0) {
+            this.manualSignalId.set(res.data);
+            this.notifications.success(`Trade signal #${res.data} created from analysis.`);
+          } else {
+            this.notifications.error(
+              res?.message ?? 'Could not create a signal from this analysis.',
+            );
+          }
+        },
+        error: () => {
+          this.creatingSignal.set(false);
+          this.notifications.error(
+            'Could not create a signal from this analysis — engine returned an error.',
+          );
+        },
+      });
   }
 
   /**
@@ -3067,6 +3434,38 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   /** localStorage key holding the last analysis for one (symbol, timeframe). */
   private lastAnalysisStorageKey(symbol: string, timeframe: string): string {
     return `${LAST_ANALYSIS_STORAGE_PREFIX}.${symbol}.${timeframe}`;
+  }
+
+  /**
+   * Read the watchlist-tile deep-link payload from localStorage and apply
+   * it to the chart's selected (symbol, timeframe). One-shot: the key is
+   * removed in the same read so a refresh of /market-data later doesn't
+   * keep snapping back to whatever pair the tile picked. Best-effort —
+   * any parse error silently no-ops and the chart starts at its default.
+   *
+   * Symbol is normalised from the canonical engine form ("EURUSD") to the
+   * slashed display form the chart's `selectedSymbol` signal uses
+   * ("EUR/USD"). Non-6-character symbols pass through unchanged.
+   */
+  private consumeDeepLinkIfAny(): void {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(DEEP_LINK_STORAGE_KEY);
+      if (!raw) return;
+      localStorage.removeItem(DEEP_LINK_STORAGE_KEY);
+      const parsed = JSON.parse(raw) as { symbol?: unknown; timeframe?: unknown };
+      const sym = typeof parsed.symbol === 'string' ? parsed.symbol.toUpperCase() : '';
+      const tf = typeof parsed.timeframe === 'string' ? parsed.timeframe : '';
+      if (sym.length > 0) {
+        const display = sym.length === 6 ? `${sym.slice(0, 3)}/${sym.slice(3)}` : sym;
+        this.selectedSymbol.set(display);
+      }
+      if (tf.length > 0) {
+        this.selectedTimeframe.set(tf);
+      }
+    } catch {
+      /* malformed payload — best-effort */
+    }
   }
 
   private loadChartConfig(): void {

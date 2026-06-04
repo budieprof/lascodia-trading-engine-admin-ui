@@ -86,6 +86,56 @@ export class MarketDataService {
   }
 
   /**
+   * POST /market-data/propose-limit — directed limit-proposal variant of
+   * {@link analyzeMarket}. The operator pins a direction (`Buy` or `Sell`)
+   * and the LLM is constrained to optimise Entry / SL / TP for a pending
+   * limit order in that direction — entry must be on the limit side of
+   * the latest close (below for Buy, above for Sell), or the engine
+   * filters the rec out and returns a "no viable proposal" error.
+   *
+   * Same result shape as {@link analyzeMarket} so the modal renders it
+   * with the existing `rec-card` and the Create signal button works
+   * transparently — the persist-signal endpoint accepts either
+   * `market_analysis.spot` or `market_analysis.limit_proposal`.
+   */
+  proposeLimit(
+    symbol: string,
+    timeframe: string,
+    direction: 'Buy' | 'Sell',
+    barPosition = 'closed',
+  ): Observable<ResponseData<MarketAnalysisResultDto>> {
+    return this.api.post(`/market-data/propose-limit`, {
+      symbol: this.formatSymbol(symbol),
+      timeframe,
+      barPosition,
+      // The operator's directional choice — the engine pins the LLM to
+      // this and validates the response shape (direction + limit-side
+      // entry) before returning.
+      limitProposalDirection: direction,
+    });
+  }
+
+  /**
+   * POST /market-data/analyze/{llmInvocationId}/persist-signal — promote one
+   * recommendation from an existing spot analysis into a live TradeSignal.
+   * Mirrors the engine's auto-gen path (sentinel strategy + SpotAnalysis
+   * source + LlmInvocationId provenance + 3-bar TTL) but flags IsManual=true.
+   *
+   * The "Create signal" button on the spot-analysis modal — used when the
+   * auto-gen toggle was off at analyse time and the operator still wants to
+   * file the rec without re-running the LLM call. Returns the new signal id
+   * in `data` on success, or a failed envelope (-12 / -14) on invalid index,
+   * missing analysis, or already-persisted recommendation.
+   */
+  persistSignalFromAnalysis(
+    llmInvocationId: number,
+    recommendationIndex = 0,
+  ): Observable<ResponseData<number>> {
+    const qs = new URLSearchParams({ recommendationIndex: String(recommendationIndex) }).toString();
+    return this.api.post(`/market-data/analyze/${llmInvocationId}/persist-signal?${qs}`, {});
+  }
+
+  /**
    * GET /market-data/analyze/latest — most recent COMPLETED spot analysis
    * for a (symbol, timeframe), replayed server-side from the stored
    * LlmInvocation audit row. NO new LLM call / no spend. Used to default

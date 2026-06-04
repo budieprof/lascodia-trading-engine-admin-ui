@@ -6,11 +6,12 @@ import { filter } from 'rxjs';
 import { CommandPaletteComponent } from '@shared/components/command-palette/command-palette.component';
 import { WallModeService } from '@core/wall-mode/wall-mode.service';
 import { AccountScopePillComponent } from '@core/scope/account-scope-pill.component';
+import { NotificationBellComponent } from './notification-bell.component';
 
 @Component({
   selector: 'app-header',
   standalone: true,
-  imports: [AccountScopePillComponent],
+  imports: [AccountScopePillComponent, NotificationBellComponent],
   template: `
     <header class="header" role="banner">
       <div class="header-left">
@@ -51,6 +52,7 @@ import { AccountScopePillComponent } from '@core/scope/account-scope-pill.compon
 
       <div class="header-right">
         <app-account-scope-pill />
+        <app-notification-bell />
         @if (auth.user(); as user) {
           <div
             class="user-pill"

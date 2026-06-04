@@ -1,5 +1,5 @@
 import { ApplicationConfig, ErrorHandler, provideZoneChangeDetection } from '@angular/core';
-import { provideRouter, withPreloading } from '@angular/router';
+import { provideRouter, withPreloading, withViewTransitions } from '@angular/router';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { provideAnimations } from '@angular/platform-browser/animations';
 import { HoverPreloadingStrategy } from '@core/routing/hover-preloading.strategy';
@@ -26,7 +26,38 @@ export function buildAppConfig(runtimeConfig: RuntimeConfig): ApplicationConfig 
     providers: [
       { provide: RUNTIME_CONFIG, useValue: runtimeConfig },
       provideZoneChangeDetection({ eventCoalescing: true }),
-      provideRouter(routes, withPreloading(HoverPreloadingStrategy)),
+      provideRouter(
+        routes,
+        withPreloading(HoverPreloadingStrategy),
+        // Native View Transitions API on each navigation. The browser
+        // snapshots the outgoing page and crossfades into the incoming
+        // one; we customise the animation in global styles via the
+        // `::view-transition-*` pseudo-elements. Falls back to no
+        // animation on browsers without API support (currently Firefox).
+        //
+        // onViewTransitionCreated lets us override the default fade
+        // for specific gestures by reading a one-shot intent flag the
+        // origin component stashed in sessionStorage. The watchlist
+        // tile uses this to request a horizontal slide when the
+        // operator opens a tile into the full chart — feels like the
+        // mini-chart is sliding away to make room for the big one.
+        withViewTransitions({
+          onViewTransitionCreated: ({ transition }) => {
+            const kind = sessionStorage.getItem('lascodia.viewTransition.next');
+            if (!kind) return;
+            sessionStorage.removeItem('lascodia.viewTransition.next');
+            document.documentElement.dataset['viewTransition'] = kind;
+            // Clean the attribute back off once the transition resolves
+            // so subsequent navigations fall back to the default
+            // fade-in-up. `.finished` rejects on a skipped transition
+            // (e.g. user clicked something else mid-flight) — handle
+            // both branches via .finally().
+            transition.finished.finally(() => {
+              delete document.documentElement.dataset['viewTransition'];
+            });
+          },
+        }),
+      ),
       // Order matters: auth → retry (so retries carry the token) → error (final toast).
       provideHttpClient(withInterceptors([authInterceptor, retryInterceptor, errorInterceptor])),
       provideAnimations(),

@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  HostListener,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -274,12 +281,19 @@ const WINDOW_PRESETS = [1, 6, 24, 168] as const;
               </thead>
               <tbody>
                 @for (row of recent(); track row.id) {
-                  <tr>
+                  <tr
+                    class="clickable"
+                    [class.selected]="selectedRow()?.id === row.id"
+                    (click)="openDrawer(row)"
+                  >
                     <td class="time" [title]="row.createdAt | date: 'medium'">
                       {{ row.createdAt | relativeTime }}
                     </td>
                     <td>
-                      <a class="link mono" [routerLink]="['/trade-signals', row.tradeSignalId]"
+                      <a
+                        class="link mono"
+                        [routerLink]="['/trade-signals', row.tradeSignalId]"
+                        (click)="$event.stopPropagation()"
                         >#{{ row.tradeSignalId }}</a
                       >
                     </td>
@@ -296,6 +310,93 @@ const WINDOW_PRESETS = [1, 6, 24, 168] as const;
             </table>
           </div>
         </section>
+      }
+
+      <!-- ── Detail drawer ──────────────────────────────────────────────────
+           Row click opens a slide-in side panel that renders the full
+           rejection record + parses metadataJson into a structured kv-list.
+           The "detail" key (when present, set by the EA's SafetyGate from
+           v8.47.187) is sub-parsed from its "key=value key=value …" shape
+           into discrete rows — operators see projectedNotional / limit /
+           equity etc. directly instead of having to read a JSON blob. -->
+      @if (selectedRow(); as sel) {
+        <div class="drawer-backdrop" (click)="closeDrawer()"></div>
+        <aside class="drawer" role="dialog" aria-label="Rejection detail">
+          <header class="drawer-header">
+            <div class="drawer-title-row">
+              <span class="stage-pill" [attr.data-stage]="sel.stage">{{ sel.stage }}</span>
+              <span class="mono small">{{ sel.subStage }}</span>
+            </div>
+            <button type="button" class="btn btn-ghost" (click)="closeDrawer()" aria-label="Close">
+              ✕
+            </button>
+          </header>
+          <div class="drawer-body">
+            <section class="drawer-section">
+              <h4>Reason</h4>
+              <p class="reason-text">{{ sel.reason }}</p>
+            </section>
+
+            @if (parsedDetail().length > 0) {
+              <section class="drawer-section">
+                <h4>Decision context</h4>
+                <dl class="kv-list">
+                  @for (kv of parsedDetail(); track kv.key) {
+                    <dt>{{ kv.key }}</dt>
+                    <dd class="mono">{{ kv.value }}</dd>
+                  }
+                </dl>
+              </section>
+            }
+
+            @if (parsedMetadataKvs().length > 0) {
+              <section class="drawer-section">
+                <h4>Metadata</h4>
+                <dl class="kv-list">
+                  @for (kv of parsedMetadataKvs(); track kv.key) {
+                    <dt>{{ kv.key }}</dt>
+                    <dd class="mono">{{ kv.value }}</dd>
+                  }
+                </dl>
+              </section>
+            }
+
+            <section class="drawer-section">
+              <h4>Identifiers</h4>
+              <dl class="kv-list">
+                <dt>Signal</dt>
+                <dd>
+                  <a class="link mono" [routerLink]="['/trade-signals', sel.tradeSignalId]"
+                    >#{{ sel.tradeSignalId }}</a
+                  >
+                </dd>
+                <dt>Trading account</dt>
+                <dd class="mono">acct {{ sel.tradingAccountId }}</dd>
+                <dt>EA instance</dt>
+                <dd class="mono small">{{ sel.eaInstanceId || '—' }}</dd>
+                <dt>Symbol</dt>
+                <dd class="mono">{{ sel.symbol ?? '—' }}</dd>
+                @if (sel.signalDirection) {
+                  <dt>Direction</dt>
+                  <dd class="mono">{{ sel.signalDirection }}</dd>
+                }
+                @if (sel.correlationId) {
+                  <dt>Correlation</dt>
+                  <dd class="mono small">{{ sel.correlationId }}</dd>
+                }
+                <dt>When</dt>
+                <dd class="mono">{{ sel.createdAt | date: 'medium' }}</dd>
+              </dl>
+            </section>
+
+            @if (sel.metadataJson) {
+              <section class="drawer-section">
+                <h4>Raw metadata</h4>
+                <pre class="raw-json">{{ sel.metadataJson }}</pre>
+              </section>
+            }
+          </div>
+        </aside>
       }
     </div>
   `,
@@ -530,6 +631,136 @@ const WINDOW_PRESETS = [1, 6, 24, 168] as const;
         overflow: hidden;
         text-overflow: ellipsis;
       }
+
+      /* ── Click-to-open row interaction ────────────────────────────────── */
+      tr.clickable {
+        cursor: pointer;
+        transition: background-color 120ms ease-out;
+      }
+      tr.clickable:hover {
+        background: var(--bg-hover, rgba(0, 113, 227, 0.06));
+      }
+      tr.clickable.selected {
+        background: rgba(0, 113, 227, 0.1);
+      }
+
+      /* ── Detail drawer ────────────────────────────────────────────────── */
+      .drawer-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.32);
+        z-index: 998;
+        animation: drawer-fade-in 200ms cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      .drawer {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: min(560px, 96vw);
+        background: var(--bg-primary, #fff);
+        border-left: 1px solid var(--border);
+        box-shadow: -8px 0 32px rgba(0, 0, 0, 0.18);
+        z-index: 999;
+        display: flex;
+        flex-direction: column;
+        animation: drawer-slide-in 200ms cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      .drawer-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-secondary);
+      }
+      .drawer-title-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .drawer-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: var(--space-4);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+      }
+      .drawer-section h4 {
+        margin: 0 0 var(--space-2) 0;
+        font-size: var(--text-xs);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-tertiary);
+      }
+      .reason-text {
+        margin: 0;
+        color: var(--text-primary);
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: var(--text-sm);
+      }
+      .kv-list {
+        display: grid;
+        grid-template-columns: minmax(140px, 1fr) 2fr;
+        gap: var(--space-1) var(--space-3);
+        margin: 0;
+      }
+      .kv-list dt {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+        align-self: center;
+      }
+      .kv-list dd {
+        margin: 0;
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        word-break: break-word;
+      }
+      .raw-json {
+        margin: 0;
+        padding: var(--space-2) var(--space-3);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        white-space: pre-wrap;
+        word-break: break-all;
+        max-height: 240px;
+        overflow-y: auto;
+      }
+      .btn-ghost {
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: var(--text-lg);
+        padding: var(--space-1) var(--space-2);
+        border-radius: var(--radius-sm);
+      }
+      .btn-ghost:hover {
+        background: var(--bg-hover, rgba(0, 0, 0, 0.05));
+      }
+      @keyframes drawer-fade-in {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+      @keyframes drawer-slide-in {
+        from {
+          transform: translateX(100%);
+        }
+        to {
+          transform: translateX(0);
+        }
+      }
     `,
   ],
 })
@@ -655,4 +886,86 @@ export class RejectionsDashboardPageComponent {
    * card header so the operator knows the cap is in effect.
    */
   readonly recent = computed(() => this.filteredRows().slice(0, 200));
+
+  // ── Detail drawer ────────────────────────────────────────────────────
+  // Row-click opens a side panel that renders the full rejection record
+  // plus a parsed view of `metadataJson`.  The drawer is closed by:
+  // (a) clicking the backdrop, (b) clicking the × button, (c) Escape key,
+  // or (d) clicking the same row again.  Selection is local state — no
+  // route param — so the back button doesn't fight the drawer.
+
+  readonly selectedRow = signal<SignalRejectionEventDto | null>(null);
+
+  openDrawer(row: SignalRejectionEventDto): void {
+    if (this.selectedRow()?.id === row.id) {
+      this.closeDrawer();
+      return;
+    }
+    this.selectedRow.set(row);
+  }
+
+  closeDrawer(): void {
+    this.selectedRow.set(null);
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscape(): void {
+    if (this.selectedRow()) this.closeDrawer();
+  }
+
+  /**
+   * Parse `metadataJson` into a kv-list of top-level keys.  The `detail`
+   * key (when present) is intentionally excluded here — it gets its own
+   * "Decision context" section with finer-grained parsing (see
+   * `parsedDetail`).  Falls back to an empty list when the JSON is
+   * unparseable or null.
+   */
+  readonly parsedMetadataKvs = computed<{ key: string; value: string }[]>(() => {
+    const raw = this.selectedRow()?.metadataJson;
+    if (!raw) return [];
+    let obj: Record<string, unknown>;
+    try {
+      obj = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return [];
+    }
+    return Object.entries(obj)
+      .filter(([key]) => key !== 'detail')
+      .map(([key, value]) => ({
+        key,
+        value: typeof value === 'object' ? JSON.stringify(value) : String(value),
+      }));
+  });
+
+  /**
+   * Parse the `detail` sub-field of `metadataJson` — written by the EA
+   * (v8.47.187+) as a "key=value key=value …" string carrying the
+   * failing gate's decision numbers (projectedNotional, limit, equity,
+   * contributing positions, etc.).  Each k=v becomes one row; values are
+   * shown verbatim so the operator sees the same numbers the gate
+   * actually compared.  Returns empty list when `detail` is absent
+   * (legacy rejections from older EA builds, or non-SafetyGate stages).
+   */
+  readonly parsedDetail = computed<{ key: string; value: string }[]>(() => {
+    const raw = this.selectedRow()?.metadataJson;
+    if (!raw) return [];
+    let obj: { detail?: unknown };
+    try {
+      obj = JSON.parse(raw) as { detail?: unknown };
+    } catch {
+      return [];
+    }
+    const detail = obj?.detail;
+    if (typeof detail !== 'string' || detail.length === 0) return [];
+    // Split on whitespace, then on first '='.  Tokens without '=' are
+    // skipped (defensive — shouldn't happen given the EA's format).
+    return detail
+      .split(/\s+/)
+      .map((tok) => {
+        const eq = tok.indexOf('=');
+        if (eq <= 0) return null;
+        return { key: tok.slice(0, eq), value: tok.slice(eq + 1) };
+      })
+      .filter((kv): kv is { key: string; value: string } => kv !== null);
+  });
 }

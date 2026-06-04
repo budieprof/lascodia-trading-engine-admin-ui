@@ -42,6 +42,9 @@ export const REALTIME_EVENTS = [
   // ── Presence (hub-invoked, not bus-relayed) ──
   'presenceJoined',
   'presenceLeft',
+  // ── Notification bell (NotificationDispatcherWorker tickles every client
+  //    when the unified feed's source-table max-timestamp advances) ──
+  'notificationsChanged',
 ] as const;
 export type RealtimeEventName = (typeof REALTIME_EVENTS)[number];
 

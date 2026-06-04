@@ -1745,6 +1745,68 @@ export interface SignalRejectionEventDto {
   signalDirection: string | null;
 }
 
+// ── Admin notification bell ────────────────────────────────────────────────
+
+/** One row in the unified admin notification feed. */
+export interface NotificationFeedItem {
+  /** Stable composite id (`alert:123`, `ealog:42`, `rej:7`, `ea:9:1`). */
+  id: string;
+  /** Source bucket — drives filter chips + iconography. */
+  source: 'Alert' | 'EALog' | 'SignalRejection' | 'EAState';
+  /** Mute axis — `alert:PriceLevel`, `ealog:ERROR:OrderExecutor`, etc. */
+  typeKey: string;
+  /** "Info" | "Medium" | "High" | "Critical" — mirrors `AlertSeverity`. */
+  severity: string;
+  title: string;
+  subtitle: string | null;
+  symbol: string | null;
+  instanceId: string | null;
+  occurredAtUtc: string;
+  /** Click-through route inside the admin UI. */
+  linkRoute: string | null;
+  linkParams: Record<string, string> | null;
+  /** Item's `occurredAt` is at-or-before the operator's lastReadAtUtc. */
+  isRead: boolean;
+  /** This `typeKey` is currently muted by the operator. */
+  isMuted: boolean;
+  /**
+   * Per-source rich-context list shown in the bell's detail modal.
+   * Insertion order is preserved so producers control field ordering.
+   * Values are raw strings — the modal handles JSON / monospace rendering.
+   */
+  details: DetailField[] | null;
+}
+
+export interface DetailField {
+  label: string;
+  value: string;
+}
+
+export interface MutedTypeDto {
+  typeKey: string;
+  mutedUntilUtc: string;
+}
+
+export interface NotificationFeedResult {
+  items: NotificationFeedItem[];
+  unreadCount: number;
+  lastReadAtUtc: string | null;
+  activeMutes: MutedTypeDto[];
+}
+
+export interface MarkAllNotificationsReadRequest {
+  asOfUtc?: string;
+}
+
+export interface MuteNotificationRequest {
+  typeKey: string;
+  durationHours: number;
+}
+
+export interface UnmuteNotificationRequest {
+  typeKey: string;
+}
+
 /** Filter parameters for the rejection-log queries. */
 export interface SignalRejectionQuery {
   currentPage?: number;
