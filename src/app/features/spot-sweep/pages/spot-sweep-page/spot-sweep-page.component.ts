@@ -269,6 +269,28 @@ import {
               </div>
             </div>
 
+            <!-- Entry-style bias -->
+            <div class="field">
+              <label>Entry bias</label>
+              <select
+                [value]="cfg.entryPreference"
+                (change)="patch({ entryPreference: $any($event.target).value })"
+              >
+                <option value="Any" [selected]="cfg.entryPreference === 'Any'">
+                  No preference
+                </option>
+                <option value="Stop" [selected]="cfg.entryPreference === 'Stop'">
+                  Prefer breakout (stop orders)
+                </option>
+                <option value="Limit" [selected]="cfg.entryPreference === 'Limit'">
+                  Prefer pullback (limit orders)
+                </option>
+              </select>
+              <span class="muted small">
+                Biases the LLM to rank stop-side (breakout) or limit-side (pullback) entries first.
+              </span>
+            </div>
+
             <!-- Automation -->
             <div class="field check">
               <label>

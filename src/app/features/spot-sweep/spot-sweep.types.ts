@@ -52,7 +52,12 @@ export interface SpotSweepConfig {
   respectKillSwitch: boolean;
   /** Skip analysis when no in-scope account can open a new position. */
   skipWhenInsufficientMargin: boolean;
+  /** Entry-style bias for the LLM: 'Any' | 'Stop' (prefer breakout) | 'Limit'
+   *  (prefer pullback). */
+  entryPreference: EntryPreference;
 }
+
+export type EntryPreference = 'Any' | 'Stop' | 'Limit';
 
 export interface SweepLastResult {
   symbol: string;
@@ -128,4 +133,5 @@ export const DEFAULT_SWEEP_CONFIG: SpotSweepConfig = {
   maxRiskPerTrade: 0.1,
   respectKillSwitch: true,
   skipWhenInsufficientMargin: true,
+  entryPreference: 'Any',
 };
