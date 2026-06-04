@@ -460,6 +460,7 @@ export class SidebarComponent {
       items: [
         { label: 'Proposals', route: '/strategies/llm-proposals', icon: '💡' },
         { label: 'Spot Analysis', route: '/spot-analysis', icon: '📊' },
+        { label: 'Spot Sweep', route: '/spot-sweep', icon: '🛰' },
         { label: 'Analyser Comparison', route: '/analyser-comparison', icon: '🆚' },
         {
           label: 'Look-ahead Audit',

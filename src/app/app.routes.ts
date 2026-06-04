@@ -96,6 +96,12 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'spot-sweep',
+        data: { breadcrumb: 'Spot Sweep' },
+        loadChildren: () =>
+          import('@features/spot-sweep/spot-sweep.routes').then((m) => m.SPOT_SWEEP_ROUTES),
+      },
+      {
         path: 'analyser-comparison',
         data: { breadcrumb: 'Analyser Comparison' },
         loadChildren: () =>
