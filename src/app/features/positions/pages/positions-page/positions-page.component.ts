@@ -2468,11 +2468,16 @@ function pipSizeFor(symbol: string | null): number {
  * (data corruption / missing fields).
  */
 function pnlPct(p: PositionDto | null | undefined): number | null {
-  if (!p) return null;
-  const notional = p.averageEntryPrice * p.openLots;
-  if (notional === 0) return null;
-  const pnl = p.status === 'Closed' ? p.realizedPnL : p.unrealizedPnL;
-  return (pnl / notional) * 100;
+  if (!p || p.currentPrice === null || p.averageEntryPrice === 0) return null;
+  // Return on notional, direction-aware. Mathematically equals
+  // unrealizedPnL / notional, but derived from the price move so it needs no
+  // contract size or FX conversion (both cancel) — staying correct for JPY and
+  // cross pairs where the raw P&L isn't in the account currency.
+  const move =
+    p.direction === 'Long'
+      ? p.currentPrice - p.averageEntryPrice
+      : p.averageEntryPrice - p.currentPrice;
+  return (move / p.averageEntryPrice) * 100;
 }
 
 /**
