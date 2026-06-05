@@ -72,6 +72,19 @@ const PRICE_FLASH_TRIGGER: AnimationTriggerMetadata = trigger('priceFlash', [
           <strong class="symbol">{{ formatSymbolDisplay(symbol()) }}</strong>
           <span class="tf-pill">{{ timeframe() }}</span>
         </div>
+        <span class="head-spacer"></span>
+        @if (positionPnl() !== null) {
+          <span
+            class="pnl"
+            [class.up]="positionPnl()! > 0"
+            [class.down]="positionPnl()! < 0"
+            [title]="
+              'Open P&L · ' + positionCount() + ' position' + (positionCount() === 1 ? '' : 's')
+            "
+          >
+            {{ formatPnl(positionPnl()!) }}
+          </span>
+        }
         @if (changePct(); as pct) {
           <span class="change" [class.up]="pct > 0" [class.down]="pct < 0">
             {{ pct > 0 ? '+' : '' }}{{ pct.toFixed(2) }}%
@@ -208,8 +221,10 @@ const PRICE_FLASH_TRIGGER: AnimationTriggerMetadata = trigger('priceFlash', [
         padding: 1px 6px;
         border-radius: var(--radius-full);
       }
+      .head-spacer {
+        flex: 1 1 auto;
+      }
       .change {
-        margin-left: auto;
         font-size: 12px;
         font-weight: var(--font-semibold);
         color: var(--text-secondary);
@@ -220,6 +235,24 @@ const PRICE_FLASH_TRIGGER: AnimationTriggerMetadata = trigger('priceFlash', [
       }
       .change.down {
         color: #c93631;
+      }
+      .pnl {
+        font-size: 11px;
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        padding: 1px 7px;
+        border-radius: var(--radius-full);
+        white-space: nowrap;
+      }
+      .pnl.up {
+        color: #1d8a3e;
+        background: rgba(29, 138, 62, 0.1);
+      }
+      .pnl.down {
+        color: #c93631;
+        background: rgba(201, 54, 49, 0.1);
       }
       .tile-remove {
         appearance: none;
@@ -444,6 +477,26 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
     const prev = this.previousAsk();
     if (cur == null || prev == null || cur === prev) return 'flat';
     return cur > prev ? 'up' : 'down';
+  });
+
+  /** This symbol's open positions (account-scoped upstream by the parent). */
+  private readonly symbolPositions = computed<PositionDto[]>(() => {
+    if (!this.showPositions()) return [];
+    const sym = this.symbol().replace(/\//g, '').toUpperCase();
+    return this.positions().filter(
+      (p) => p.status === 'Open' && (p.symbol ?? '').replace(/\//g, '').toUpperCase() === sym,
+    );
+  });
+
+  /** How many open positions feed {@link positionPnl} (for the tooltip). */
+  protected readonly positionCount = computed<number>(() => this.symbolPositions().length);
+
+  /** Cumulative unrealised P&L of this symbol's open positions, or null when
+   *  positions aren't shown / none match this symbol. */
+  protected readonly positionPnl = computed<number | null>(() => {
+    const rows = this.symbolPositions();
+    if (rows.length === 0) return null;
+    return rows.reduce((sum, p) => sum + (p.unrealizedPnL ?? 0), 0);
   });
 
   /**
@@ -855,6 +908,20 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
     const sym = this.symbol();
     const dp = sym.includes('JPY') ? 3 : 5;
     return p.toFixed(dp);
+  }
+
+  /**
+   * Format the cumulative open P&L for the header pill — signed, two
+   * decimals, thousands-separated (account currency, as the engine emits
+   * it). A leading '+' marks profit; losses keep their own '-'.
+   */
+  protected formatPnl(v: number): string {
+    const abs = Math.abs(v).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    const sign = v > 0 ? '+' : v < 0 ? '-' : '';
+    return `${sign}${abs}`;
   }
 
   /**
