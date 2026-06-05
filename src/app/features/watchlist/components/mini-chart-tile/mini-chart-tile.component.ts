@@ -614,18 +614,25 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
     // stable while still letting the bid/ask lines float to wherever
     // the live price sits inside that band (or slightly outside, when
     // price has moved past the last closed bar's extremes).
-    let minPrice = Infinity;
-    let maxPrice = -Infinity;
+    let candleMin = Infinity;
+    let candleMax = -Infinity;
     for (const c of xs) {
-      if (c.low < minPrice) minPrice = c.low;
-      if (c.high > maxPrice) maxPrice = c.high;
+      if (c.low < candleMin) candleMin = c.low;
+      if (c.high > candleMax) candleMax = c.high;
     }
 
     // ── Open-position / pending-order overlays (filtered to this symbol) ──
     // Flat line series (same approach as bid/ask) — entry/SL/TP for positions,
-    // price/SL/TP for pending orders. Each overlay price also widens the
-    // candle-derived y-range so the lines aren't clipped off-chart.
+    // price/SL/TP for pending orders. Overlay prices widen the candle-derived
+    // y-range so the lines stay on-chart — but the expansion is CAPPED to ~1×
+    // the candle range per side so a far-off order (or a wide SL/TP) can't
+    // squish the candles into a sliver. Overlays beyond the cap still draw but
+    // clip at the chart edge.
     const symJoined = this.symbol().replace(/\//g, '').toUpperCase();
+    const candleRange = candleMax - candleMin || candleMax * 0.001 || 0.0001;
+    const expandCap = candleRange;
+    let minPrice = candleMin;
+    let maxPrice = candleMax;
     const overlaySeries: LineSeriesOption[] = [];
     const addOverlay = (
       y: number | null,
@@ -634,9 +641,14 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
       width: number,
       z: number,
     ): void => {
-      if (y === null || !Number.isFinite(y)) return;
-      if (y < minPrice) minPrice = y;
-      if (y > maxPrice) maxPrice = y;
+      // Skip null/NaN and non-positive values — a 0 SL/TP/price means "none"
+      // (FX prices are always > 0) and would drag the range down to zero.
+      if (y === null || !Number.isFinite(y) || y <= 0) return;
+      // Bounded expansion: a far overlay extends the view by at most expandCap.
+      const lo = Math.max(y, candleMin - expandCap);
+      const hi = Math.min(y, candleMax + expandCap);
+      if (lo < minPrice) minPrice = lo;
+      if (hi > maxPrice) maxPrice = hi;
       overlaySeries.push({
         type: 'line',
         data: xs.map(() => y),
