@@ -28,6 +28,19 @@ export interface SpotSweepConfig {
   barPosition: SweepBarPosition;
   /** Pause between consecutive analyses (one analysis is ever in flight). */
   intervalSeconds: number;
+  /**
+   * How long a signal created by this sweep stays Pending before the
+   * engine auto-expires it. Mirrors the standard `TradeSignal.ExpiresAt`
+   * semantics — once a signal hits this age unfilled it cancels (and any
+   * open position derived from it closes at market).
+   *
+   * Stored in seconds to match {@link intervalSeconds}. Range: 60 s
+   * (1 min — only useful for sub-bar scalps) to 86 400 s (24 h —
+   * matches the engine's TTL ceiling for SpotAnalysis signals).
+   * Default 3 600 (1 h), a reasonable fit for the H1 timeframe most
+   * sweeps run on.
+   */
+  signalExpirationSeconds: number;
   /** Explicit account ids, or the all-active sentinel. */
   accountScope: number[] | typeof ALL_ACTIVE_SCOPE;
 
@@ -120,6 +133,7 @@ export const DEFAULT_SWEEP_CONFIG: SpotSweepConfig = {
   pairs: [],
   barPosition: 'closed',
   intervalSeconds: 60,
+  signalExpirationSeconds: 3600,
   accountScope: ALL_ACTIVE_SCOPE,
   autoApprove: false,
   minConfidence: 0.7,

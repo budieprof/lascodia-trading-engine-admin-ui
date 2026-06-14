@@ -42,7 +42,16 @@ export class SpotSweepService {
         delay(120),
       );
     }
-    return this.api.getEnvelope<SpotSweepConfig>('/market-data/spot-sweep/config');
+    // Backfill any field the engine doesn't yet emit with its default
+    // from DEFAULT_SWEEP_CONFIG. The Spot Sweep contract evolves ahead
+    // of the engine in this repo (UI ships fields before the server
+    // recognises them), so a config that round-trips through an older
+    // engine would otherwise come back with undefined slots — which
+    // would render every dependent form field blank instead of
+    // pre-filled with a sensible default.
+    return this.api
+      .getEnvelope<SpotSweepConfig>('/market-data/spot-sweep/config')
+      .pipe(map((c) => ({ ...DEFAULT_SWEEP_CONFIG, ...c })));
   }
 
   saveConfig(config: SpotSweepConfig): Observable<SpotSweepConfig> {
@@ -51,7 +60,15 @@ export class SpotSweepService {
       this.mockConfig$.next(next);
       return of(structuredClone(next)).pipe(delay(180));
     }
-    return this.api.putEnvelope<SpotSweepConfig>('/market-data/spot-sweep/config', config);
+    // Symmetric backfill with getConfig: the engine's PUT response can
+    // strip fields it doesn't yet understand (or echo them through with
+    // server-side defaults that override what we just sent). Merging the
+    // ORIGINAL config the caller sent over the response keeps fields
+    // the engine drops — so a save round-trip never silently clears
+    // operator-typed values for not-yet-recognised fields.
+    return this.api
+      .putEnvelope<SpotSweepConfig>('/market-data/spot-sweep/config', config)
+      .pipe(map((saved) => ({ ...DEFAULT_SWEEP_CONFIG, ...config, ...saved })));
   }
 
   getStatus(): Observable<SpotSweepStatus> {

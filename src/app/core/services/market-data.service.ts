@@ -116,6 +116,35 @@ export class MarketDataService {
   }
 
   /**
+   * POST /market-data/propose-stop — directed STOP-proposal variant of
+   * {@link analyzeMarket}, sibling of {@link proposeLimit}. The operator
+   * pins a direction (`Buy` or `Sell`) and the LLM is constrained to
+   * optimise Entry / SL / TP for a pending stop order in that direction
+   * — entry must be on the STOP side of the latest close (above for
+   * Buy = breakout above resistance, below for Sell = breakdown below
+   * support), or the engine filters the rec out and returns a "no
+   * viable proposal" envelope.
+   *
+   * Same result shape as {@link analyzeMarket}; the modal renders it
+   * with a "Stop proposal" badge and the Create signal button works
+   * transparently — the persist-signal endpoint accepts
+   * `market_analysis.stop_proposal` alongside spot and limit.
+   */
+  proposeStop(
+    symbol: string,
+    timeframe: string,
+    direction: 'Buy' | 'Sell',
+    barPosition = 'closed',
+  ): Observable<ResponseData<MarketAnalysisResultDto>> {
+    return this.api.post(`/market-data/propose-stop`, {
+      symbol: this.formatSymbol(symbol),
+      timeframe,
+      barPosition,
+      stopProposalDirection: direction,
+    });
+  }
+
+  /**
    * POST /market-data/analyze/{llmInvocationId}/persist-signal — promote one
    * recommendation from an existing spot analysis into a live TradeSignal.
    * Mirrors the engine's auto-gen path (sentinel strategy + SpotAnalysis

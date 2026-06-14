@@ -269,6 +269,36 @@ import {
               </div>
             </div>
 
+            <!-- Signal expiration — how long a sweep-created signal lives
+                 before the engine auto-cancels it. Stored in seconds to
+                 match the rest of this config; the helper line below
+                 surfaces the human-readable equivalent so the operator
+                 doesn't have to do the arithmetic in their head. -->
+            <div class="field">
+              <label>Signal expiration (seconds)</label>
+              <input
+                type="number"
+                min="60"
+                max="86400"
+                step="60"
+                [value]="cfg.signalExpirationSeconds"
+                (input)="
+                  patch({
+                    signalExpirationSeconds: parseRawInt($any($event.target).value),
+                  })
+                "
+                (change)="
+                  patch({
+                    signalExpirationSeconds: clampInt($any($event.target).value, 60, 86400),
+                  })
+                "
+              />
+              <span class="muted small">
+                {{ formatDuration(cfg.signalExpirationSeconds) }} · pending sweep signals expire
+                after this; cancels any unfilled order and closes the position at market.
+              </span>
+            </div>
+
             <!-- Entry-style bias -->
             <div class="field">
               <label>Entry bias</label>
@@ -1180,5 +1210,41 @@ export class SpotSweepPageComponent {
     const n = Number(v);
     if (Number.isNaN(n)) return min;
     return Math.min(max, Math.max(min, n));
+  }
+
+  /**
+   * Parse a raw integer from a number input without clamping. Used in
+   * `(input)` handlers for fields whose `clampInt(..., min, max)` would
+   * otherwise snap a mid-type value to `min` on every keystroke (typing
+   * "120" with min=60 would otherwise progress 60 → 602 → 6020 instead
+   * of 1 → 12 → 120). The committed value still goes through
+   * {@link clampInt} on the `(change)` event so the saved config never
+   * carries an out-of-range number.
+   *
+   * Returns 0 for empty/non-numeric input so the live helper line
+   * renders a sensible "0 s" instead of NaN.
+   */
+  parseRawInt(v: string): number {
+    const n = Math.round(Number(v));
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  }
+
+  /**
+   * Render a seconds count as a compact human-readable duration like
+   * "1 h 30 min" or "45 min". Used under the Signal-expiration input so
+   * the operator sees what 3600 s actually means without doing the
+   * arithmetic. Anything below a minute reads as raw seconds; anything
+   * 60 s or above rounds to whole minutes (no need for second-level
+   * precision on signal lifetime).
+   */
+  formatDuration(totalSeconds: number): string {
+    if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return '0 s';
+    if (totalSeconds < 60) return `${Math.round(totalSeconds)} s`;
+    const totalMin = Math.round(totalSeconds / 60);
+    const hours = Math.floor(totalMin / 60);
+    const min = totalMin % 60;
+    if (hours === 0) return `${min} min`;
+    if (min === 0) return `${hours} h`;
+    return `${hours} h ${min} min`;
   }
 }

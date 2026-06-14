@@ -457,6 +457,48 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
           >
             {{ proposingLimit() === 'Sell' ? '⏳ Sell Limit…' : '↗️ Sell Limit' }}
           </button>
+          <!--
+            Stop-proposal sibling buttons. Same UX as Limit but the LLM
+            is asked for a BREAKOUT entry: Buy Stop = entry above latest
+            close (above resistance); Sell Stop = entry below latest
+            close (below support). Result renders in the same modal
+            with a "Stop proposal" badge; the existing Create signal
+            button promotes the rec via the same persist-signal path.
+          -->
+          <button
+            type="button"
+            class="analyze-btn stop-buy"
+            [disabled]="proposingStop() !== null"
+            [title]="
+              proposingStop()
+                ? 'Stop proposal in flight — wait for it to complete.'
+                : 'Ask the LLM to propose the best Entry / SL / TP for a Buy STOP ' +
+                  'on a breakout above resistance in ' +
+                  selectedSymbol() +
+                  ' ' +
+                  selectedTimeframe()
+            "
+            (click)="runProposeStop('Buy')"
+          >
+            {{ proposingStop() === 'Buy' ? '⏳ Buy Stop…' : '⤴ Buy Stop' }}
+          </button>
+          <button
+            type="button"
+            class="analyze-btn stop-sell"
+            [disabled]="proposingStop() !== null"
+            [title]="
+              proposingStop()
+                ? 'Stop proposal in flight — wait for it to complete.'
+                : 'Ask the LLM to propose the best Entry / SL / TP for a Sell STOP ' +
+                  'on a breakdown below support in ' +
+                  selectedSymbol() +
+                  ' ' +
+                  selectedTimeframe()
+            "
+            (click)="runProposeStop('Sell')"
+          >
+            {{ proposingStop() === 'Sell' ? '⏳ Sell Stop…' : '⤵ Sell Stop' }}
+          </button>
           <button
             type="button"
             class="live-toggle"
@@ -734,6 +776,12 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
                       [attr.data-direction]="analysisKind() === 'limit_buy' ? 'Buy' : 'Sell'"
                       >{{ analysisKind() === 'limit_buy' ? 'Buy' : 'Sell' }} limit</span
                     >
+                  } @else if (analysisKind() === 'stop_buy' || analysisKind() === 'stop_sell') {
+                    <span
+                      class="limit-badge"
+                      [attr.data-direction]="analysisKind() === 'stop_buy' ? 'Buy' : 'Sell'"
+                      >{{ analysisKind() === 'stop_buy' ? 'Buy' : 'Sell' }} stop</span
+                    >
                   }
                 </h3>
                 <div class="analysis-meta">
@@ -889,6 +937,8 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
                   <span class="rec-action">
                     @if (analysisKind() === 'limit_buy' || analysisKind() === 'limit_sell') {
                       No viable {{ analysisKind() === 'limit_buy' ? 'Buy' : 'Sell' }} limit
+                    } @else if (analysisKind() === 'stop_buy' || analysisKind() === 'stop_sell') {
+                      No viable {{ analysisKind() === 'stop_buy' ? 'Buy' : 'Sell' }} stop
                     } @else {
                       No recommendation
                     }
@@ -903,6 +953,18 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
                     proposed a setup that failed server-side validation (wrong direction or entry on
                     the wrong side of current price for a limit order). The model's full reasoning
                     is in the analysis below.
+                  } @else if (analysisKind() === 'stop_buy' || analysisKind() === 'stop_sell') {
+                    The model didn't propose a viable
+                    {{ analysisKind() === 'stop_buy' ? 'Buy' : 'Sell' }} stop for this market — it
+                    either refused (no structural level supports a
+                    {{
+                      analysisKind() === 'stop_buy'
+                        ? 'breakout above resistance'
+                        : 'breakdown below support'
+                    }}
+                    right now) or proposed a setup that failed server-side validation (wrong
+                    direction or entry on the wrong side of current price for a stop order). The
+                    model's full reasoning is in the analysis below.
                   } @else {
                     The model didn't emit a structured trade block — review the prose below.
                   }
@@ -1313,6 +1375,26 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
       }
       .analyze-btn.limit-sell:hover:not(:disabled) {
         background: #a82a26;
+      }
+      /* Stop-proposal buttons: same direction-colour mapping as limits
+         (green = Buy, red = Sell) but rendered as OUTLINE buttons so
+         the operator can visually distinguish "limit (pullback, filled)"
+         from "stop (breakout, outline)" at a glance. */
+      .analyze-btn.stop-buy {
+        background: transparent;
+        color: #1d8a3e;
+        border-color: #1d8a3e;
+      }
+      .analyze-btn.stop-buy:hover:not(:disabled) {
+        background: rgba(29, 138, 62, 0.12);
+      }
+      .analyze-btn.stop-sell {
+        background: transparent;
+        color: #c93631;
+        border-color: #c93631;
+      }
+      .analyze-btn.stop-sell:hover:not(:disabled) {
+        background: rgba(201, 54, 49, 0.12);
       }
       /* Modal title pill that tags a result as a directed proposal. */
       .limit-badge {
@@ -2308,12 +2390,19 @@ export class TradingChartComponent implements OnInit, OnDestroy {
    *  can show its own spinner without locking out the other one's hover
    *  hint. Both buttons disable while either direction is in flight. */
   readonly proposingLimit = signal<'Buy' | 'Sell' | null>(null);
+  /** Sibling of {@link proposingLimit} for the propose-stop endpoint.
+   *  Tracked separately so the Buy Limit / Sell Limit / Buy Stop / Sell
+   *  Stop buttons each show their own spinner correctly when their kind
+   *  is the one in flight. */
+  readonly proposingStop = signal<'Buy' | 'Sell' | null>(null);
   /** Provenance of the analysis result currently in the modal — drives the
-   *  title ("Spot analysis" vs "Limit proposal") and the Buy/Sell badge.
-   *  Set whenever a fresh result lands; cleared on close. `spot` covers
-   *  both manual Analyse and Live auto-runs; the two limit kinds segment
-   *  the directed-mode variants. */
-  readonly analysisKind = signal<'spot' | 'limit_buy' | 'limit_sell' | null>(null);
+   *  title ("Spot analysis" / "Limit proposal" / "Stop proposal") and the
+   *  Buy/Sell badge. Set whenever a fresh result lands; cleared on close.
+   *  `spot` covers both manual Analyse and Live auto-runs; the limit_* and
+   *  stop_* kinds segment the directed-mode variants. */
+  readonly analysisKind = signal<
+    'spot' | 'limit_buy' | 'limit_sell' | 'stop_buy' | 'stop_sell' | null
+  >(null);
   /** The signal id created by the most recent manual promote, keyed to the
    *  currently-open analysis. Set after a successful persist-signal so the
    *  CTA collapses into a "Signal #N created" link — prevents accidental
@@ -3170,15 +3259,16 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Header label for the analysis modal — flips between "Spot analysis"
-   * and "Limit proposal" so the operator knows whether they're reading a
-   * free analysis or a directed proposal. The Buy/Sell direction badge
-   * sits next to this in the template.
+   * Header label for the analysis modal — picks "Spot analysis" /
+   * "Limit proposal" / "Stop proposal" based on the kind the most
+   * recent result came from. The Buy/Sell direction badge sits next to
+   * this in the template.
    */
   analysisKindTitle(): string {
-    return this.analysisKind() === 'limit_buy' || this.analysisKind() === 'limit_sell'
-      ? 'Limit proposal'
-      : 'Spot analysis';
+    const k = this.analysisKind();
+    if (k === 'limit_buy' || k === 'limit_sell') return 'Limit proposal';
+    if (k === 'stop_buy' || k === 'stop_sell') return 'Stop proposal';
+    return 'Spot analysis';
   }
 
   /**
@@ -3218,6 +3308,47 @@ export class TradingChartComponent implements OnInit, OnDestroy {
           this.analysisError.set(
             err?.error?.message ??
               `Could not run a ${direction} limit proposal — engine returned an error.`,
+          );
+        },
+      });
+  }
+
+  /**
+   * Run the directed STOP-proposal variant — breakout sibling of
+   * {@link runProposeLimit}. The engine constrains the LLM to entry on
+   * the stop side of the latest close (above for Buy = breakout above
+   * resistance, below for Sell = breakdown below support); a refusal or
+   * no-viable-proposal lands the result with empty recommendations so
+   * the modal renders the prose with a "No viable Buy/Sell stop" notice.
+   */
+  runProposeStop(direction: 'Buy' | 'Sell'): void {
+    if (this.proposingStop() !== null) return;
+    this.proposingStop.set(direction);
+    this.marketData
+      .proposeStop(this.selectedSymbol(), this.selectedTimeframe(), direction)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (res) => {
+          this.proposingStop.set(null);
+          if (res?.status && res.data) {
+            const data = res.data;
+            const reqKey = `${data.symbol}|${data.timeframe}`;
+            this.lastAnalysisByPair.update((m) => ({ ...m, [reqKey]: data }));
+            this.persistLastAnalysis(data.symbol, data.timeframe, data);
+            this.manualSignalId.set(null);
+            this.analysisKind.set(direction === 'Buy' ? 'stop_buy' : 'stop_sell');
+            this.analysisResult.set(data);
+          } else {
+            this.analysisError.set(
+              res?.message ?? `LLM did not return a viable ${direction} stop proposal.`,
+            );
+          }
+        },
+        error: (err) => {
+          this.proposingStop.set(null);
+          this.analysisError.set(
+            err?.error?.message ??
+              `Could not run a ${direction} stop proposal — engine returned an error.`,
           );
         },
       });
