@@ -3,6 +3,8 @@ import { LayoutComponent } from './layout/layout.component';
 import { LoginComponent } from '@core/auth/login/login.component';
 import { authGuard } from '@core/auth/auth.guard';
 import { requireRoles } from '@core/auth/role.guard';
+import { requirePermission } from '@core/auth/permission.guard';
+import { mustChangePasswordGuard } from '@core/auth/must-change-password.guard';
 
 export const routes: Routes = [
   { path: 'login', component: LoginComponent },
@@ -10,6 +12,7 @@ export const routes: Routes = [
     path: '',
     component: LayoutComponent,
     canActivate: [authGuard],
+    canActivateChild: [mustChangePasswordGuard],
     children: [
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
       {
@@ -364,6 +367,25 @@ export const routes: Routes = [
         data: { breadcrumb: 'Auto-Tune' },
         loadChildren: () =>
           import('@features/auto-tune/auto-tune.routes').then((m) => m.AUTO_TUNE_ROUTES),
+      },
+      {
+        path: 'admin/users',
+        data: { breadcrumb: 'Admin Users' },
+        canActivate: [requirePermission('users.manage')],
+        loadChildren: () =>
+          import('@features/admin-users/admin-users.routes').then((m) => m.ADMIN_USERS_ROUTES),
+      },
+      {
+        path: 'admin/roles',
+        data: { breadcrumb: 'Roles' },
+        canActivate: [requirePermission('roles.manage')],
+        loadChildren: () => import('@features/roles/roles.routes').then((m) => m.ROLES_ROUTES),
+      },
+      {
+        path: 'account',
+        data: { breadcrumb: 'Account' },
+        loadChildren: () =>
+          import('@features/account/account.routes').then((m) => m.ACCOUNT_ROUTES),
       },
       { path: '**', redirectTo: 'dashboard' },
     ],
