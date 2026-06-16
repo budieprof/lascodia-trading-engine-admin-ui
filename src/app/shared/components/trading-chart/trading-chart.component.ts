@@ -374,131 +374,76 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
             </div>
           }
           <!--
-            Spot LLM analysis trigger. Disabled while a previous call is
-            in flight (these typically take 15-60s on the deep-tier model)
-            so the operator can't queue duplicate analyses.
+            LLM analysis menu — collapses the six analysis actions (spot,
+            macro, directed limit/stop proposals) into a single dropdown to
+            save toolbar space. Each item routes to its existing handler;
+            results render in the same modal as before. Per-item disabled
+            state mirrors the in-flight signal for that analysis kind.
           -->
-          <button
-            type="button"
-            class="analyze-btn"
-            [disabled]="analyzing()"
-            [title]="
-              analyzing()
-                ? 'Analysis in flight — wait for the current call to complete.'
-                : 'Run an LLM spot analysis of the current market for ' +
-                  selectedSymbol() +
-                  ' ' +
-                  selectedTimeframe()
-            "
-            (click)="runMarketAnalysis()"
-          >
-            {{ analyzing() ? '⏳ Analysing…' : '🔍 Analyse' }}
-          </button>
-          <!--
-            Longer-horizon macro analysis. D1-anchored, materially costlier
-            than spot per call (≈12mo of D1 + COT + 14d catalysts) — a
-            deliberate, separate action, never auto-fired on candle close.
-          -->
-          <button
-            type="button"
-            class="analyze-btn"
-            [disabled]="macroAnalyzing()"
-            [title]="
-              macroAnalyzing()
-                ? 'Macro analysis in flight — wait for it to complete.'
-                : 'Run a longer-horizon (multi-week → multi-month) macro analysis for ' +
-                  selectedSymbol() +
-                  ' (D1-anchored)'
-            "
-            (click)="runMacroAnalysis()"
-          >
-            {{ macroAnalyzing() ? '⏳ Macro…' : '🌐 Macro' }}
-          </button>
-          <!--
-            Directed limit-proposal variant of the spot analysis. The
-            operator pins the direction; the LLM is constrained to optimise
-            Entry / SL / TP for a pending limit order in that direction
-            (entry on the limit side of latest close — below for Buy,
-            above for Sell). Result renders in the same modal with a
-            "Limit proposal" badge; promote via the existing Create
-            signal button.
-          -->
-          <button
-            type="button"
-            class="analyze-btn limit-buy"
-            [disabled]="proposingLimit() !== null"
-            [title]="
-              proposingLimit()
-                ? 'Limit proposal in flight — wait for it to complete.'
-                : 'Ask the LLM to propose the best Entry / SL / TP for a Buy LIMIT ' +
-                  'on a pullback in ' +
-                  selectedSymbol() +
-                  ' ' +
-                  selectedTimeframe()
-            "
-            (click)="runProposeLimit('Buy')"
-          >
-            {{ proposingLimit() === 'Buy' ? '⏳ Buy Limit…' : '↘️ Buy Limit' }}
-          </button>
-          <button
-            type="button"
-            class="analyze-btn limit-sell"
-            [disabled]="proposingLimit() !== null"
-            [title]="
-              proposingLimit()
-                ? 'Limit proposal in flight — wait for it to complete.'
-                : 'Ask the LLM to propose the best Entry / SL / TP for a Sell LIMIT ' +
-                  'on a rally in ' +
-                  selectedSymbol() +
-                  ' ' +
-                  selectedTimeframe()
-            "
-            (click)="runProposeLimit('Sell')"
-          >
-            {{ proposingLimit() === 'Sell' ? '⏳ Sell Limit…' : '↗️ Sell Limit' }}
-          </button>
-          <!--
-            Stop-proposal sibling buttons. Same UX as Limit but the LLM
-            is asked for a BREAKOUT entry: Buy Stop = entry above latest
-            close (above resistance); Sell Stop = entry below latest
-            close (below support). Result renders in the same modal
-            with a "Stop proposal" badge; the existing Create signal
-            button promotes the rec via the same persist-signal path.
-          -->
-          <button
-            type="button"
-            class="analyze-btn stop-buy"
-            [disabled]="proposingStop() !== null"
-            [title]="
-              proposingStop()
-                ? 'Stop proposal in flight — wait for it to complete.'
-                : 'Ask the LLM to propose the best Entry / SL / TP for a Buy STOP ' +
-                  'on a breakout above resistance in ' +
-                  selectedSymbol() +
-                  ' ' +
-                  selectedTimeframe()
-            "
-            (click)="runProposeStop('Buy')"
-          >
-            {{ proposingStop() === 'Buy' ? '⏳ Buy Stop…' : '⤴ Buy Stop' }}
-          </button>
-          <button
-            type="button"
-            class="analyze-btn stop-sell"
-            [disabled]="proposingStop() !== null"
-            [title]="
-              proposingStop()
-                ? 'Stop proposal in flight — wait for it to complete.'
-                : 'Ask the LLM to propose the best Entry / SL / TP for a Sell STOP ' +
-                  'on a breakdown below support in ' +
-                  selectedSymbol() +
-                  ' ' +
-                  selectedTimeframe()
-            "
-            (click)="runProposeStop('Sell')"
-          >
-            {{ proposingStop() === 'Sell' ? '⏳ Sell Stop…' : '⤵ Sell Stop' }}
-          </button>
+          <div class="picker-wrapper">
+            <button
+              type="button"
+              class="analyze-btn"
+              [class.active]="analyzeMenuOpen()"
+              [disabled]="anyAnalysisRunning()"
+              [title]="
+                anyAnalysisRunning()
+                  ? 'Analysis in flight — wait for it to complete.'
+                  : 'Run an LLM analysis for ' + selectedSymbol() + ' ' + selectedTimeframe()
+              "
+              (click)="toggleAnalyzeMenu()"
+            >
+              {{ anyAnalysisRunning() ? '⏳ Analysing…' : '🔍 Analyse ▾' }}
+            </button>
+            @if (analyzeMenuOpen()) {
+              <div class="picker-dropdown" (click)="$event.stopPropagation()">
+                <button class="picker-item" [disabled]="analyzing()" (click)="pickAnalysis('spot')">
+                  🔍 Spot analysis
+                </button>
+                <button
+                  class="picker-item"
+                  [disabled]="macroAnalyzing()"
+                  (click)="pickAnalysis('macro')"
+                >
+                  🌐 Macro analysis
+                </button>
+                <div class="picker-section">
+                  <span class="picker-section-title">Limit proposal</span>
+                  <button
+                    class="picker-item"
+                    [disabled]="proposingLimit() !== null"
+                    (click)="pickAnalysis('limitBuy')"
+                  >
+                    ↘️ Buy Limit (pullback)
+                  </button>
+                  <button
+                    class="picker-item"
+                    [disabled]="proposingLimit() !== null"
+                    (click)="pickAnalysis('limitSell')"
+                  >
+                    ↗️ Sell Limit (rally)
+                  </button>
+                </div>
+                <div class="picker-section">
+                  <span class="picker-section-title">Stop proposal</span>
+                  <button
+                    class="picker-item"
+                    [disabled]="proposingStop() !== null"
+                    (click)="pickAnalysis('stopBuy')"
+                  >
+                    ⤴ Buy Stop (breakout)
+                  </button>
+                  <button
+                    class="picker-item"
+                    [disabled]="proposingStop() !== null"
+                    (click)="pickAnalysis('stopSell')"
+                  >
+                    ⤵ Sell Stop (breakdown)
+                  </button>
+                </div>
+              </div>
+            }
+          </div>
           <button
             type="button"
             class="live-toggle"
@@ -2555,6 +2500,18 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   /** Picker dropdown open/closed. */
   pickerOpen = signal(false);
 
+  /** LLM-analysis dropdown menu open/closed (collapses the 6 analysis actions). */
+  readonly analyzeMenuOpen = signal(false);
+
+  /** True when any analysis kind (spot / macro / limit / stop) is in flight. */
+  readonly anyAnalysisRunning = computed(
+    () =>
+      this.analyzing() ||
+      this.macroAnalyzing() ||
+      this.proposingLimit() !== null ||
+      this.proposingStop() !== null,
+  );
+
   /** Inline params editor — id of the indicator currently being tuned, or
    *  null when the editor is closed. */
   editingIndicatorId = signal<string | null>(null);
@@ -3487,6 +3444,36 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   /** Open / close the "+ Indicator" picker dropdown. */
   togglePicker() {
     this.pickerOpen.set(!this.pickerOpen());
+  }
+
+  /** Open / close the combined LLM-analysis dropdown. */
+  toggleAnalyzeMenu() {
+    this.analyzeMenuOpen.set(!this.analyzeMenuOpen());
+  }
+
+  /** Route a chosen analysis kind to its existing handler, then close the menu. */
+  pickAnalysis(kind: 'spot' | 'macro' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell') {
+    this.analyzeMenuOpen.set(false);
+    switch (kind) {
+      case 'spot':
+        this.runMarketAnalysis();
+        break;
+      case 'macro':
+        this.runMacroAnalysis();
+        break;
+      case 'limitBuy':
+        this.runProposeLimit('Buy');
+        break;
+      case 'limitSell':
+        this.runProposeLimit('Sell');
+        break;
+      case 'stopBuy':
+        this.runProposeStop('Buy');
+        break;
+      case 'stopSell':
+        this.runProposeStop('Sell');
+        break;
+    }
   }
 
   /** Open / close the inline params editor for an indicator chip. */
