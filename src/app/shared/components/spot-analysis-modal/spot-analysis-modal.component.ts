@@ -422,8 +422,9 @@ export class SpotAnalysisModalComponent {
   readonly symbol = input.required<string>();
   readonly timeframe = input.required<string>();
   readonly barPosition = input<string>('closed');
-  /** When true, run a spot analysis as soon as the modal opens. */
-  readonly autoRun = input<boolean>(true);
+  /** When true, run a spot analysis as soon as the modal opens. Default false —
+   *  the operator picks the analysis mode (Spot / Limit / Stop) first. */
+  readonly autoRun = input<boolean>(false);
 
   readonly closed = output<void>();
 
