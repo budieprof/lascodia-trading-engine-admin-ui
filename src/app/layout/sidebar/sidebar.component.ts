@@ -16,6 +16,12 @@ interface NavItem {
    * `AuthService.hasPolicy` for the full cascade.
    */
   policy?: Role;
+  /**
+   * Required fine-grained permission key. When set, the item is hidden unless
+   * the user holds the permission (super admins always pass). See
+   * `AuthService.hasPermission`.
+   */
+  permission?: string;
 }
 
 interface NavGroup {
@@ -519,6 +525,19 @@ export class SidebarComponent {
         { label: 'Operator Roles', route: '/operator-roles', icon: '🔐', policy: 'Admin' },
       ],
     },
+    {
+      label: 'Administration',
+      items: [
+        { label: 'Users', route: '/admin/users', icon: '👤', permission: 'users.manage' },
+        {
+          label: 'Roles & Permissions',
+          route: '/admin/roles',
+          icon: '🛂',
+          permission: 'roles.manage',
+        },
+        { label: 'My Account', route: '/account/profile', icon: '🪪' },
+      ],
+    },
   ];
 
   readonly swaggerUrl = `${inject(RUNTIME_CONFIG).apiBaseUrl.replace(/\/$/, '')}/swagger`;
@@ -532,7 +551,11 @@ export class SidebarComponent {
     const groups = this.navGroups
       .map((g) => ({
         ...g,
-        items: g.items.filter((item) => !item.policy || this.auth.hasPolicy(item.policy)),
+        items: g.items.filter(
+          (item) =>
+            (!item.policy || this.auth.hasPolicy(item.policy)) &&
+            (!item.permission || this.auth.hasPermission(item.permission)),
+        ),
       }))
       .filter((g) => g.items.length > 0);
     return groups;

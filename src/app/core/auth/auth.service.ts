@@ -72,6 +72,38 @@ export interface OperatorAuthEnvelope {
   responseCode: string | null;
 }
 
+/** Shape of a successful `POST /admin/auth/login` envelope from the engine. */
+export interface AdminAuthEnvelope {
+  data: {
+    token: string;
+    expiresAt: string;
+    tokenType: string;
+    mustChangePassword: boolean;
+    user?: {
+      id: number;
+      username: string;
+      displayName: string;
+      email: string;
+      isSuperAdmin: boolean;
+      roles: string[];
+    };
+  } | null;
+  status: boolean;
+  message: string | null;
+}
+
+/** Shape of `GET /admin/auth/me` data. */
+export interface AdminMeData {
+  id: number;
+  username: string;
+  displayName: string;
+  email: string;
+  isSuperAdmin: boolean;
+  mustChangePassword: boolean;
+  roles: string[];
+  permissions: string[];
+}
+
 /**
  * Session persistence:
  *   - Token + user are mirrored to `sessionStorage` so a page refresh doesn't
@@ -85,6 +117,7 @@ export interface OperatorAuthEnvelope {
  */
 const TOKEN_KEY = 'lascodia.auth.token';
 const USER_KEY = 'lascodia.auth.user';
+const PERMS_KEY = 'lascodia.auth.perms';
 const LAST_ACTIVITY_KEY = 'lascodia.auth.lastActivity';
 // Master switch for the client-side idle auto-logout. When false, neither
 // the restored-session staleness check nor the periodic watcher will ever
@@ -145,6 +178,22 @@ export class AuthService {
     return this._cookieRoles();
   });
 
+  /**
+   * Effective permission keys for the signed-in admin user, sourced from
+   * `GET /admin/auth/me` (the engine resolves roles → permissions server-side;
+   * super admins receive the full catalog). Used to gate menus/routes — the
+   * engine remains the authoritative enforcer. Empty for broker/EA logins,
+   * which fall back to role/policy gating.
+   */
+  private readonly _permissions = signal<string[]>(this.readSessionJson<string[]>(PERMS_KEY) ?? []);
+  private readonly _isSuperAdmin = signal<boolean>(false);
+  private readonly _mustChangePassword = signal<boolean>(false);
+
+  readonly permissions = this._permissions.asReadonly();
+  readonly isSuperAdmin = this._isSuperAdmin.asReadonly();
+  /** True when the user must change their password before using the app. */
+  readonly mustChangePassword = this._mustChangePassword.asReadonly();
+
   private lastActivity = Number(this.readSessionString(LAST_ACTIVITY_KEY) ?? Date.now());
   private activityListenersBound = false;
   private idleIntervalId: ReturnType<typeof setInterval> | null = null;
@@ -181,6 +230,14 @@ export class AuthService {
         this.removeSession(USER_KEY);
       }
     });
+    effect(() => {
+      const perms = this._permissions();
+      if (perms.length > 0) {
+        this.writeSession(PERMS_KEY, JSON.stringify(perms));
+      } else {
+        this.removeSession(PERMS_KEY);
+      }
+    });
 
     // If we restored a session, check whether it's gone stale.
     if (this.isAuthenticated() && this.isIdleExpired()) {
@@ -193,7 +250,15 @@ export class AuthService {
       // on the server side. If we can't read `exp` (cookie session), the
       // fallback interval still keeps the cookie alive.
       this.scheduleRefresh();
+      // Re-hydrate the admin permission set from the engine on boot.
+      if (this.isAdminToken()) this.loadMe().subscribe();
     }
+  }
+
+  /** True when the current token is an admin-user token (carries the adminUserId claim). */
+  private isAdminToken(): boolean {
+    const payload = decodeJwt(this._token());
+    return payload != null && payload['adminUserId'] != null;
   }
 
   login(credentials: LoginCredentials): Observable<TokenResponseDto> {
@@ -309,6 +374,75 @@ export class AuthService {
   }
 
   /**
+   * Admin-user login via `POST /admin/auth/login` (username + password). On success the issued
+   * JWT carries the user's role claims and (for super admins) `is_superadmin`; we then load the
+   * effective permission set from `/admin/auth/me` for menu/route gating.
+   */
+  loginAdmin(username: string, password: string): Observable<AdminAuthEnvelope> {
+    return this.api.post<AdminAuthEnvelope>('/admin/auth/login', { username, password }).pipe(
+      tap((response) => {
+        if (response?.status && response.data?.token) {
+          this._token.set(response.data.token);
+          this._user.set({
+            passportId: String(response.data.user?.id ?? ''),
+            firstName: response.data.user?.displayName || response.data.user?.username || '',
+            lastName: '',
+            email: response.data.user?.email ?? '',
+          });
+          this._isSuperAdmin.set(!!response.data.user?.isSuperAdmin);
+          this._mustChangePassword.set(!!response.data.mustChangePassword);
+          this.touchActivity();
+          this.startIdleWatch();
+          this.scheduleRefresh();
+          this.loadMe().subscribe();
+        }
+      }),
+    );
+  }
+
+  /**
+   * Loads the signed-in admin user's profile + effective permissions from
+   * `GET /admin/auth/me` and pushes them into the reactive signals. Safe no-op
+   * for non-admin sessions (the engine returns a failure envelope).
+   */
+  loadMe(): Observable<AdminMeData | null> {
+    return this.api.get<{ data: AdminMeData | null; status: boolean }>('/admin/auth/me').pipe(
+      tap((res) => {
+        if (res?.status && res.data) {
+          this._permissions.set(res.data.permissions ?? []);
+          this._isSuperAdmin.set(!!res.data.isSuperAdmin);
+          this._mustChangePassword.set(!!res.data.mustChangePassword);
+          this._user.set({
+            passportId: String(res.data.id),
+            firstName: res.data.displayName || res.data.username,
+            lastName: '',
+            email: res.data.email ?? '',
+          });
+        }
+      }),
+      map((res) => res?.data ?? null),
+      catchError(() => of(null)),
+    );
+  }
+
+  /** Clears the must-change-password flag locally after a successful self-change. */
+  clearMustChangePassword(): void {
+    this._mustChangePassword.set(false);
+  }
+
+  /**
+   * True when the user holds the given permission key. Super admins hold every
+   * permission. Empty-permission + empty-role tokens (legacy dev `/auth/token`)
+   * fall through to "allowed" for backward compatibility, matching `hasPolicy`.
+   */
+  hasPermission(permission: string): boolean {
+    if (this._isSuperAdmin()) return true;
+    const perms = this._permissions();
+    if (perms.length === 0 && this.roles().length === 0) return true; // legacy dev-token escape hatch
+    return perms.includes(permission);
+  }
+
+  /**
    * Logs out locally and — if the current session is backed by an engine-issued
    * JWT — tells the engine to revoke the token's `jti` so the same string can't
    * be replayed. The API call is best-effort; a failure still clears the
@@ -318,9 +452,11 @@ export class AuthService {
     const hadToken = !!this._token();
     if (hadToken) {
       // Fire-and-forget — don't block the UX on the network. errors are
-      // logged by the HTTP error interceptor; we don't rethrow here.
+      // logged by the HTTP error interceptor; we don't rethrow here. Admin
+      // tokens revoke via the admin endpoint (no tradingAccountId claim).
+      const logoutPath = this.isAdminToken() ? '/admin/auth/logout' : '/auth/logout';
       this.api
-        .post('/auth/logout', {})
+        .post(logoutPath, {})
         .pipe(catchError(() => of(null)))
         .subscribe();
     }
@@ -450,6 +586,10 @@ export class AuthService {
   private clearSession(): void {
     this._token.set(null);
     this._user.set(null);
+    this._permissions.set([]);
+    this._isSuperAdmin.set(false);
+    this._mustChangePassword.set(false);
+    this._cookieRoles.set([]);
     this.removeSession(LAST_ACTIVITY_KEY);
     this.stopIdleWatch();
     this.cancelRefresh();

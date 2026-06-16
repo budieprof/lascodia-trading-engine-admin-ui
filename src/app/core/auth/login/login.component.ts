@@ -21,6 +21,16 @@ import { AuthService } from '../auth.service';
             type="button"
             role="tab"
             class="mode-btn"
+            [class.active]="mode() === 'admin'"
+            [attr.aria-selected]="mode() === 'admin'"
+            (click)="mode.set('admin')"
+          >
+            Admin
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="mode-btn"
             [class.active]="mode() === 'operator'"
             [attr.aria-selected]="mode() === 'operator'"
             (click)="mode.set('operator')"
@@ -39,7 +49,48 @@ import { AuthService } from '../auth.service';
           </button>
         </div>
 
-        @if (mode() === 'operator') {
+        @if (mode() === 'admin') {
+          <form (ngSubmit)="onAdminLogin()" class="login-form">
+            <div class="field">
+              <label for="username">Username</label>
+              <input
+                id="username"
+                type="text"
+                [(ngModel)]="username"
+                name="username"
+                placeholder="superadmin"
+                autocomplete="username"
+                required
+              />
+            </div>
+
+            <div class="field">
+              <label for="adminPassword">Password</label>
+              <input
+                id="adminPassword"
+                type="password"
+                [(ngModel)]="adminPassword"
+                name="adminPassword"
+                autocomplete="current-password"
+                required
+              />
+            </div>
+
+            @if (error()) {
+              <div class="error-message">{{ error() }}</div>
+            }
+
+            <button type="submit" [disabled]="loading()" class="login-btn">
+              @if (loading()) {
+                <span class="spinner"></span>
+              } @else {
+                Sign In
+              }
+            </button>
+          </form>
+
+          <p class="dev-note">Admin user — username &amp; password.</p>
+        } @else if (mode() === 'operator') {
           <form (ngSubmit)="onOperatorLogin()" class="login-form">
             <div class="field">
               <label for="accountId">Account ID</label>
@@ -347,7 +398,11 @@ export class LoginComponent {
   private auth = inject(AuthService);
   private router = inject(Router);
 
-  readonly mode = signal<'operator' | 'dev'>('operator');
+  readonly mode = signal<'admin' | 'operator' | 'dev'>('admin');
+
+  // Admin-mode fields (username + password)
+  username = '';
+  adminPassword = '';
 
   // Operator-mode fields
   accountId = '';
@@ -362,6 +417,31 @@ export class LoginComponent {
 
   loading = signal(false);
   error = signal<string | null>(null);
+
+  onAdminLogin() {
+    if (!this.username || !this.adminPassword) {
+      this.error.set('Username and password are required.');
+      return;
+    }
+    this.loading.set(true);
+    this.error.set(null);
+    this.auth.loginAdmin(this.username, this.adminPassword).subscribe({
+      next: (res) => {
+        if (res?.status && res.data?.token) {
+          this.router.navigate([
+            res.data.mustChangePassword ? '/account/change-password' : '/dashboard',
+          ]);
+        } else {
+          this.error.set(res?.message || 'Invalid username or password.');
+          this.loading.set(false);
+        }
+      },
+      error: (err) => {
+        this.error.set(err?.message || 'Login failed. Is the engine reachable?');
+        this.loading.set(false);
+      },
+    });
+  }
 
   onOperatorLogin() {
     if (!this.accountId || !this.brokerServer || !this.password) {
