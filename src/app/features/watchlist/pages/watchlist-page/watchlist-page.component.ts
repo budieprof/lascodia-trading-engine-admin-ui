@@ -21,6 +21,7 @@ import type { CurrencyPairDto, PositionDto, OrderDto } from '@core/api/api.types
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 
 import { MiniChartTileComponent } from '../../components/mini-chart-tile/mini-chart-tile.component';
+import { SpotAnalysisModalComponent } from '@shared/components/spot-analysis-modal/spot-analysis-modal.component';
 
 /**
  * Multi-symbol watchlist — a single page that renders one mini-chart tile
@@ -78,7 +79,7 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
   selector: 'app-watchlist-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, MiniChartTileComponent],
+  imports: [FormsModule, PageHeaderComponent, MiniChartTileComponent, SpotAnalysisModalComponent],
   template: `
     <div class="page">
       <app-page-header
@@ -288,11 +289,20 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
               [showPositions]="showPositions()"
               [showOrders]="showOrders()"
               (remove)="removeEntry(e)"
+              (analyze)="openAnalysis(e)"
             />
           }
         </section>
       }
     </div>
+
+    @if (analysisTarget(); as t) {
+      <app-spot-analysis-modal
+        [symbol]="t.symbol"
+        [timeframe]="t.timeframe"
+        (closed)="closeAnalysis()"
+      />
+    }
   `,
   styles: [
     `
@@ -873,6 +883,17 @@ export class WatchlistPageComponent implements OnInit {
     this.entries.update((xs) =>
       xs.filter((e) => !(e.symbol === target.symbol && e.timeframe === target.timeframe)),
     );
+  }
+
+  /** The tile whose LLM analysis modal is open, or null. */
+  protected readonly analysisTarget = signal<WatchlistEntry | null>(null);
+
+  protected openAnalysis(target: WatchlistEntry): void {
+    this.analysisTarget.set(target);
+  }
+
+  protected closeAnalysis(): void {
+    this.analysisTarget.set(null);
   }
 
   protected clearAll(): void {

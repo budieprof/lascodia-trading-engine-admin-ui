@@ -92,6 +92,15 @@ const PRICE_FLASH_TRIGGER: AnimationTriggerMetadata = trigger('priceFlash', [
         }
         <button
           type="button"
+          class="tile-analyze"
+          (click)="onAnalyzeClick($event)"
+          [title]="'Run LLM analysis on ' + symbol()"
+          aria-label="Run LLM analysis"
+        >
+          ⚡
+        </button>
+        <button
+          type="button"
           class="tile-remove"
           (click)="onRemoveClick($event)"
           [title]="'Remove ' + symbol() + ' from watchlist'"
@@ -254,7 +263,8 @@ const PRICE_FLASH_TRIGGER: AnimationTriggerMetadata = trigger('priceFlash', [
         color: #c93631;
         background: rgba(201, 54, 49, 0.1);
       }
-      .tile-remove {
+      .tile-remove,
+      .tile-analyze {
         appearance: none;
         background: transparent;
         border: none;
@@ -266,9 +276,16 @@ const PRICE_FLASH_TRIGGER: AnimationTriggerMetadata = trigger('priceFlash', [
         border-radius: var(--radius-sm);
         margin-left: 4px;
       }
-      .tile-remove:hover {
+      .tile-analyze {
+        font-size: 13px;
+      }
+      .tile-remove:hover,
+      .tile-analyze:hover {
         background: var(--bg-tertiary);
         color: var(--text-primary);
+      }
+      .tile-analyze:hover {
+        color: var(--accent, #0071e3);
       }
 
       .tile-prices {
@@ -448,6 +465,8 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
   readonly showOrders = input<boolean>(false);
 
   @Output() readonly remove = new EventEmitter<void>();
+  /** Operator clicked the tile's ⚡ — parent opens the LLM analysis modal. */
+  @Output() readonly analyze = new EventEmitter<void>();
 
   private readonly marketData = inject(MarketDataService);
   private readonly router = inject(Router);
@@ -945,6 +964,11 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
   protected onRemoveClick(ev: MouseEvent): void {
     ev.stopPropagation();
     this.remove.emit();
+  }
+
+  protected onAnalyzeClick(ev: MouseEvent): void {
+    ev.stopPropagation(); // don't also open the full chart
+    this.analyze.emit();
   }
 
   /**
