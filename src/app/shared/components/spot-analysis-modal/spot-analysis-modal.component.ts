@@ -8,6 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { MarketDataService } from '@core/services/market-data.service';
+import { NotificationService } from '@core/notifications/notification.service';
 import type { MarketAnalysisRecommendationDto, MarketAnalysisResultDto } from '@core/api/api.types';
 
 type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
@@ -78,6 +79,14 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
           </button>
         </div>
 
+        <label
+          class="autogen"
+          title="Auto-create signals from viable recommendations (Spot analysis only)"
+        >
+          <input type="checkbox" [checked]="autoGenerate()" (change)="toggleAutoGenerate($event)" />
+          Auto-create signals on Spot analysis
+        </label>
+
         <div class="body">
           @if (running()) {
             <div class="state">
@@ -91,6 +100,14 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
             <div class="meta muted">
               {{ r.provider }} · {{ r.model }} · {{ r.latencyMs }}ms · {{ modeLabel() }}
             </div>
+
+            @if (r.generatedSignalIds && r.generatedSignalIds.length > 0) {
+              <div class="signal-banner ok">
+                Auto-created {{ r.generatedSignalIds.length }} signal{{
+                  r.generatedSignalIds.length === 1 ? '' : 's'
+                }}: #{{ r.generatedSignalIds.join(', #') }}
+              </div>
+            }
 
             @if (recommendations(r).length > 0) {
               <div class="recs">
@@ -108,6 +125,23 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
                       </div>
                     }
                     <p class="rationale">{{ rec.rationale }}</p>
+
+                    @if (rec.action !== 'Hold') {
+                      <div class="rec-actions">
+                        @if (createdSignal($index); as sigId) {
+                          <span class="signal-banner ok">Signal #{{ sigId }} created ✓</span>
+                        } @else {
+                          <button
+                            type="button"
+                            class="create-btn"
+                            [disabled]="creatingIndex() !== null"
+                            (click)="createSignal(r, $index)"
+                          >
+                            {{ creatingIndex() === $index ? 'Creating…' : 'Create signal' }}
+                          </button>
+                        }
+                      </div>
+                    }
                   </div>
                 }
               </div>
@@ -237,6 +271,49 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
       .meta {
         margin-bottom: var(--space-3);
       }
+      .autogen {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: var(--space-2) var(--space-4);
+        border-bottom: 1px solid var(--border);
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        cursor: pointer;
+      }
+      .signal-banner {
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        padding: 6px 10px;
+        border-radius: var(--radius-sm);
+        margin-bottom: var(--space-3);
+      }
+      .signal-banner.ok {
+        color: #1d8a3e;
+        background: rgba(29, 138, 62, 0.1);
+      }
+      .rec-actions {
+        margin-top: var(--space-2);
+        display: flex;
+        justify-content: flex-end;
+      }
+      .rec-actions .signal-banner {
+        margin-bottom: 0;
+      }
+      .create-btn {
+        padding: 5px 12px;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: #fff;
+        border-radius: var(--radius-full);
+        cursor: pointer;
+      }
+      .create-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
       .recs {
         display: flex;
         flex-direction: column;
@@ -340,6 +417,7 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
 })
 export class SpotAnalysisModalComponent {
   private readonly marketData = inject(MarketDataService);
+  private readonly notify = inject(NotificationService);
 
   readonly symbol = input.required<string>();
   readonly timeframe = input.required<string>();
@@ -353,6 +431,13 @@ export class SpotAnalysisModalComponent {
   protected readonly error = signal<string | null>(null);
   protected readonly result = signal<MarketAnalysisResultDto | null>(null);
   protected readonly mode = signal<AnalysisMode | null>(null);
+
+  /** Auto-create signals from viable recommendations during a Spot analysis. */
+  protected readonly autoGenerate = signal(false);
+  /** Recommendation index currently being persisted, or null. */
+  protected readonly creatingIndex = signal<number | null>(null);
+  /** Map of recommendation index → created TradeSignal id (manual or shown after create). */
+  private readonly createdByIndex = signal<Record<number, number>>({});
 
   protected readonly modeLabel = computed(() => {
     switch (this.mode()) {
@@ -377,11 +462,16 @@ export class SpotAnalysisModalComponent {
     });
   }
 
+  protected toggleAutoGenerate(ev: Event): void {
+    this.autoGenerate.set((ev.target as HTMLInputElement).checked);
+  }
+
   protected run(mode: AnalysisMode): void {
     if (this.running()) return;
     this.mode.set(mode);
     this.running.set(true);
     this.error.set(null);
+    this.createdByIndex.set({}); // fresh result → reset manual-create state
 
     const sym = this.symbol();
     const tf = this.timeframe();
@@ -389,7 +479,7 @@ export class SpotAnalysisModalComponent {
 
     const call$ =
       mode === 'spot'
-        ? this.marketData.analyzeMarket(sym, tf, false, bar)
+        ? this.marketData.analyzeMarket(sym, tf, this.autoGenerate(), bar)
         : mode === 'limitBuy'
           ? this.marketData.proposeLimit(sym, tf, 'Buy', bar)
           : mode === 'limitSell'
@@ -418,6 +508,32 @@ export class SpotAnalysisModalComponent {
   protected recommendations(r: MarketAnalysisResultDto): MarketAnalysisRecommendationDto[] {
     if (r.recommendations?.length) return r.recommendations;
     return r.recommendation ? [r.recommendation] : [];
+  }
+
+  /** Created TradeSignal id for a recommendation index, or null if not yet created. */
+  protected createdSignal(index: number): number | null {
+    return this.createdByIndex()[index] ?? null;
+  }
+
+  /** Manually promote one recommendation to a live TradeSignal (persist-signal endpoint). */
+  protected createSignal(r: MarketAnalysisResultDto, index: number): void {
+    if (this.creatingIndex() !== null || this.createdSignal(index) !== null) return;
+    this.creatingIndex.set(index);
+    this.marketData.persistSignalFromAnalysis(r.llmInvocationId, index).subscribe({
+      next: (res) => {
+        this.creatingIndex.set(null);
+        if (res?.status && res.data != null) {
+          this.createdByIndex.update((m) => ({ ...m, [index]: res.data as number }));
+          this.notify.success(`Signal #${res.data} created`);
+        } else {
+          this.notify.error(res?.message || 'Could not create signal from this recommendation.');
+        }
+      },
+      error: (err) => {
+        this.creatingIndex.set(null);
+        this.notify.error(err?.message ?? 'Failed to create signal.');
+      },
+    });
   }
 
   protected fmt(price: number | null): string {
