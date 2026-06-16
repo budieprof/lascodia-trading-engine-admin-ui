@@ -81,10 +81,10 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
 
         <label
           class="autogen"
-          title="Auto-create signals from viable recommendations (Spot analysis only)"
+          title="Auto-create signals from viable recommendations for any analysis mode"
         >
           <input type="checkbox" [checked]="autoGenerate()" (change)="toggleAutoGenerate($event)" />
-          Auto-create signals on Spot analysis
+          Auto-create signals
         </label>
 
         <div class="body">
@@ -134,7 +134,7 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
                           <button
                             type="button"
                             class="create-btn"
-                            [disabled]="creatingIndex() !== null"
+                            [disabled]="creatingIndex() !== null || autoCreating()"
                             (click)="createSignal(r, $index)"
                           >
                             {{ creatingIndex() === $index ? 'Creating…' : 'Create signal' }}
@@ -437,6 +437,8 @@ export class SpotAnalysisModalComponent {
   protected readonly autoGenerate = signal(false);
   /** Recommendation index currently being persisted, or null. */
   protected readonly creatingIndex = signal<number | null>(null);
+  /** True while an auto-create pass (limit/stop modes) is persisting recommendations. */
+  protected readonly autoCreating = signal(false);
   /** Map of recommendation index → created TradeSignal id (manual or shown after create). */
   private readonly createdByIndex = signal<Record<number, number>>({});
 
@@ -494,6 +496,9 @@ export class SpotAnalysisModalComponent {
         this.running.set(false);
         if (res?.status && res.data) {
           this.result.set(res.data);
+          // Spot auto-creates server-side (generateSignals flag → generatedSignalIds).
+          // Limit/Stop proposals have no server flag, so persist their viable recs here.
+          if (this.autoGenerate() && mode !== 'spot') this.autoPersist(res.data);
         } else {
           this.result.set(null);
           this.error.set(res?.message || 'No viable analysis returned.');
@@ -514,6 +519,43 @@ export class SpotAnalysisModalComponent {
   /** Created TradeSignal id for a recommendation index, or null if not yet created. */
   protected createdSignal(index: number): number | null {
     return this.createdByIndex()[index] ?? null;
+  }
+
+  /** Auto-persist every viable (non-Hold) recommendation — used for Limit/Stop proposals,
+   *  which the engine doesn't auto-generate server-side. */
+  private autoPersist(r: MarketAnalysisResultDto): void {
+    const indices = this.recommendations(r)
+      .map((rec, i) => ({ rec, i }))
+      .filter((x) => x.rec.action !== 'Hold')
+      .map((x) => x.i);
+    if (indices.length === 0) return;
+
+    this.autoCreating.set(true);
+    let pending = indices.length;
+    const created: number[] = [];
+
+    const done = () => {
+      if (--pending > 0) return;
+      this.autoCreating.set(false);
+      if (created.length > 0) {
+        this.notify.success(
+          `Auto-created ${created.length} signal${created.length === 1 ? '' : 's'}: #${created.join(', #')}`,
+        );
+      }
+    };
+
+    for (const idx of indices) {
+      this.marketData.persistSignalFromAnalysis(r.llmInvocationId, idx).subscribe({
+        next: (res) => {
+          if (res?.status && res.data != null) {
+            this.createdByIndex.update((m) => ({ ...m, [idx]: res.data as number }));
+            created.push(res.data as number);
+          }
+          done();
+        },
+        error: () => done(),
+      });
+    }
   }
 
   /** Manually promote one recommendation to a live TradeSignal (persist-signal endpoint). */
