@@ -14,76 +14,86 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
   imports: [FormsModule, PageHeaderComponent],
   template: `
     <div class="page">
-      <app-page-header
-        title="Change Password"
-        subtitle="Choose a strong password — at least 8 characters with upper, lower, and a digit."
-      />
+      <div class="panel">
+        <app-page-header
+          title="Change Password"
+          subtitle="Choose a strong password — at least 8 characters with upper, lower, and a digit."
+        />
 
-      @if (mustChange()) {
-        <div class="banner">You must change your password before continuing.</div>
-      }
+        @if (mustChange()) {
+          <div class="banner">You must change your password before continuing.</div>
+        }
 
-      <section class="card">
-        <form class="form" (ngSubmit)="submit()">
-          <label class="field">
-            <span class="label">Current password</span>
-            <input
-              class="input"
-              type="password"
-              [(ngModel)]="currentPassword"
-              name="currentPassword"
-              autocomplete="current-password"
-              required
-            />
-          </label>
-          <label class="field">
-            <span class="label">New password</span>
-            <input
-              class="input"
-              type="password"
-              [(ngModel)]="newPassword"
-              name="newPassword"
-              autocomplete="new-password"
-              required
-            />
-          </label>
-          <label class="field">
-            <span class="label">Confirm new password</span>
-            <input
-              class="input"
-              type="password"
-              [(ngModel)]="confirmPassword"
-              name="confirmPassword"
-              autocomplete="new-password"
-              required
-            />
-          </label>
+        <section class="card">
+          <form class="form" (ngSubmit)="submit()">
+            <label class="field">
+              <span class="label">Current password</span>
+              <input
+                class="input"
+                type="password"
+                [(ngModel)]="currentPassword"
+                name="currentPassword"
+                autocomplete="current-password"
+                required
+              />
+            </label>
+            <label class="field">
+              <span class="label">New password</span>
+              <input
+                class="input"
+                type="password"
+                [(ngModel)]="newPassword"
+                name="newPassword"
+                autocomplete="new-password"
+                required
+              />
+            </label>
+            <label class="field">
+              <span class="label">Confirm new password</span>
+              <input
+                class="input"
+                type="password"
+                [(ngModel)]="confirmPassword"
+                name="confirmPassword"
+                autocomplete="new-password"
+                required
+              />
+            </label>
 
-          <ul class="rules">
-            <li [class.ok]="ruleLength()">At least 8 characters</li>
-            <li [class.ok]="ruleUpper()">An uppercase letter</li>
-            <li [class.ok]="ruleLower()">A lowercase letter</li>
-            <li [class.ok]="ruleDigit()">A number</li>
-            <li [class.ok]="ruleMatch()">New password and confirmation match</li>
-          </ul>
+            <ul class="rules">
+              <li [class.ok]="ruleLength()">At least 8 characters</li>
+              <li [class.ok]="ruleUpper()">An uppercase letter</li>
+              <li [class.ok]="ruleLower()">A lowercase letter</li>
+              <li [class.ok]="ruleDigit()">A number</li>
+              <li [class.ok]="ruleMatch()">New password and confirmation match</li>
+            </ul>
 
-          <div class="form-actions">
-            <button type="submit" class="btn btn-primary" [disabled]="pending() || !valid()">
-              {{ pending() ? 'Updating…' : 'Change password' }}
-            </button>
-          </div>
-        </form>
-      </section>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary" [disabled]="pending() || !valid()">
+                {{ pending() ? 'Updating…' : 'Change password' }}
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
     </div>
   `,
   styles: [
     `
       .page {
-        padding: var(--space-2) 0;
+        /* Focused single-task screen — center the panel in the content area. */
+        min-height: calc(100vh - 160px);
+        padding: var(--space-6) var(--space-4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .panel {
+        width: 100%;
+        max-width: 480px;
         display: flex;
         flex-direction: column;
         gap: var(--space-3);
-        max-width: 520px;
       }
       .banner {
         background: rgba(255, 149, 0, 0.12);
