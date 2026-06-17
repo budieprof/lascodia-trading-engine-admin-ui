@@ -6,7 +6,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
@@ -55,6 +55,7 @@ interface ConfigForm {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     DatePipe,
+    DecimalPipe,
     FormsModule,
     RouterLink,
     PageHeaderComponent,
@@ -156,6 +157,129 @@ interface ConfigForm {
             </dd>
           </dl>
         </section>
+
+        <!-- ── Account snapshot ─────────────────────────────────────────
+             Broker-synced balance/equity/margin envelope for the EA's
+             trading account.  Polled on the same cadence as the rest of
+             the detail page (the EA's Phase-5 sync writes TradingAccount
+             every 30s by default), so values refresh implicitly via the
+             page-level polled resource. -->
+        @if (account(); as acct) {
+          <section class="account-block">
+            <header class="account-head">
+              <div class="account-title">
+                <h3>Account · {{ acct.accountName }}</h3>
+                <span class="account-meta mono small">
+                  {{ acct.brokerName }} · {{ acct.brokerServer }} · {{ acct.accountType }} ·
+                  {{ acct.marginMode }} · 1:{{ acct.leverage | number: '1.0-0' }}
+                </span>
+              </div>
+              <div class="account-sync">
+                @if (acct.isPaper) {
+                  <span class="tag tag--paper">PAPER</span>
+                }
+                <span class="sync-ts" [title]="acct.lastSyncedAt | date: 'medium'">
+                  synced {{ acct.lastSyncedAt | relativeTime }}
+                </span>
+              </div>
+            </header>
+
+            <!-- Primary tiles — balance, equity, free margin -->
+            <div class="account-tiles">
+              <div class="acct-tile">
+                <div class="tile-label">Balance</div>
+                <div class="tile-value mono">
+                  {{ acct.balance | number: '1.2-2' }}
+                  <span class="tile-ccy">{{ acct.currency }}</span>
+                </div>
+              </div>
+              <div class="acct-tile">
+                <div class="tile-label">Equity</div>
+                <div
+                  class="tile-value mono"
+                  [class.tile-up]="acct.profit > 0"
+                  [class.tile-down]="acct.profit < 0"
+                >
+                  {{ acct.equity | number: '1.2-2' }}
+                  <span class="tile-ccy">{{ acct.currency }}</span>
+                </div>
+                @if (acct.profit !== 0) {
+                  <div
+                    class="tile-delta"
+                    [class.tile-up]="acct.profit > 0"
+                    [class.tile-down]="acct.profit < 0"
+                  >
+                    {{ acct.profit > 0 ? '+' : '' }}{{ acct.profit | number: '1.2-2' }} floating
+                  </div>
+                }
+              </div>
+              <div class="acct-tile">
+                <div class="tile-label">Free margin</div>
+                <div class="tile-value mono">
+                  {{ acct.marginAvailable | number: '1.2-2' }}
+                  <span class="tile-ccy">{{ acct.currency }}</span>
+                </div>
+                @if (acct.marginUsed > 0) {
+                  <div class="tile-delta muted">
+                    {{ marginUsedPct(acct) | number: '1.0-1' }}% used
+                  </div>
+                }
+              </div>
+              <div class="acct-tile">
+                <div class="tile-label">Margin level</div>
+                <div
+                  class="tile-value mono"
+                  [class.tile-warn]="marginLevelWarn(acct)"
+                  [class.tile-down]="marginLevelDanger(acct)"
+                >
+                  @if (acct.marginUsed > 0) {
+                    {{ acct.marginLevel | number: '1.0-1' }}%
+                  } @else {
+                    <span class="muted">—</span>
+                  }
+                </div>
+                @if (acct.marginSoStopOut > 0) {
+                  <div class="tile-delta muted">
+                    stop-out @ {{ acct.marginSoStopOut | number: '1.0-0'
+                    }}{{ acct.marginSoMode === 'Percent' ? '%' : ' ' + acct.currency }}
+                  </div>
+                }
+              </div>
+            </div>
+
+            <!-- Secondary kv: margin used, credit, broker SO call/stop-out -->
+            <dl class="account-kv">
+              <dt>Margin used</dt>
+              <dd class="mono">{{ acct.marginUsed | number: '1.2-2' }} {{ acct.currency }}</dd>
+              <dt>Credit</dt>
+              <dd class="mono">
+                @if (acct.credit > 0) {
+                  {{ acct.credit | number: '1.2-2' }} {{ acct.currency }}
+                } @else {
+                  <span class="muted">0</span>
+                }
+              </dd>
+              <dt>Margin-call</dt>
+              <dd class="mono">
+                @if (acct.marginSoCall > 0) {
+                  {{ acct.marginSoCall | number: '1.0-1'
+                  }}{{ acct.marginSoMode === 'Percent' ? '%' : ' ' + acct.currency }}
+                } @else {
+                  <span class="muted">—</span>
+                }
+              </dd>
+              <dt>Stop-out</dt>
+              <dd class="mono">
+                @if (acct.marginSoStopOut > 0) {
+                  {{ acct.marginSoStopOut | number: '1.0-1'
+                  }}{{ acct.marginSoMode === 'Percent' ? '%' : ' ' + acct.currency }}
+                } @else {
+                  <span class="muted">—</span>
+                }
+              </dd>
+            </dl>
+          </section>
+        }
 
         <section class="symbols-block">
           <h3>Owned symbols</h3>
@@ -457,6 +581,120 @@ interface ConfigForm {
         color: #0040dd;
         margin-left: 6px;
       }
+      /* ── Account snapshot card ───────────────────────────────────── */
+      .account-block {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
+      .account-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: var(--space-3);
+        flex-wrap: wrap;
+      }
+      .account-title {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .account-title h3 {
+        margin: 0;
+        font-size: var(--text-md);
+      }
+      .account-meta {
+        color: var(--text-tertiary);
+      }
+      .account-sync {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .sync-ts {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+      .tag {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        padding: 2px 8px;
+        border-radius: 8px;
+        font-weight: 600;
+      }
+      .tag--paper {
+        background: rgba(175, 82, 222, 0.15);
+        color: #af52de;
+      }
+      .account-tiles {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: var(--space-2);
+      }
+      .acct-tile {
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: var(--space-3);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .tile-label {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .tile-value {
+        font-size: var(--text-lg);
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        color: var(--text-primary);
+      }
+      .tile-ccy {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        font-weight: 400;
+        margin-left: 4px;
+      }
+      .tile-delta {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .tile-up {
+        color: var(--positive, #34c759);
+      }
+      .tile-down {
+        color: var(--loss, #ff3b30);
+      }
+      .tile-warn {
+        color: #ff9500;
+      }
+      .account-kv {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: var(--space-2) var(--space-4);
+        margin: 0;
+        padding-top: var(--space-2);
+        border-top: 1px dashed var(--border);
+      }
+      .account-kv dt {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        margin-bottom: 2px;
+      }
+      .account-kv dd {
+        margin: 0;
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+
       .symbols-block {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
@@ -684,6 +922,14 @@ export class EaDetailPageComponent {
   protected readonly adminLastStateUpdatedAt = computed(
     () => this.detailResource.value()?.lastStateUpdatedAt ?? null,
   );
+  /**
+   * Account snapshot from the admin detail endpoint — TradingAccount's
+   * latest broker-synced balance / equity / margin envelope.  Null in the
+   * brief gap between page load and the first detailResource tick, and
+   * also when the EA hasn't yet pushed a /trading-account/sync (e.g.
+   * during the first ~5s after an EA registers).
+   */
+  protected readonly account = computed(() => this.detailResource.value()?.account ?? null);
   /** Phase-4: the inputs sub-object the EA emits inside the rich-state envelope. */
   protected readonly adminInputs = computed(() => this.adminState()?.inputs ?? null);
 
@@ -778,6 +1024,52 @@ export class EaDetailPageComponent {
     // 60-second heartbeat-timeout per engine docs; flag rows past 90s as stale.
     return Date.now() - ts > 90_000;
   });
+
+  // ── Account-card helpers ─────────────────────────────────────────────
+  //
+  // Three small computed-style helpers consumed from the template.  Kept
+  // here as plain methods (not signals) because their inputs are derived
+  // from the same `acct` reference the template already destructures via
+  // `@if (ea()!.account; as acct)` — no reactive boundary to cross.
+
+  /**
+   * Percent of equity locked up in current positions: marginUsed / equity.
+   * Falls back to 0 when equity is non-positive (broker disconnect or
+   * fully-stopped-out account) — avoids divide-by-zero rendering NaN.
+   */
+  protected marginUsedPct(acct: { marginUsed: number; equity: number }): number {
+    if (!acct.equity || acct.equity <= 0) return 0;
+    return (acct.marginUsed / acct.equity) * 100;
+  }
+
+  /**
+   * "Margin level is uncomfortably close to broker stop-out" predicate.
+   * Threshold = 2× the stop-out level (e.g. stop-out=50% → warn ≤100%);
+   * mirrors the EA-side StopOutBufferMultiplier=2.0 safety floor convention.
+   */
+  protected marginLevelWarn(acct: {
+    marginUsed: number;
+    marginLevel: number;
+    marginSoStopOut: number;
+    marginSoMode: string;
+  }): boolean {
+    if (acct.marginUsed <= 0 || acct.marginSoMode !== 'Percent') return false;
+    if (acct.marginLevel <= 0 || acct.marginSoStopOut <= 0) return false;
+    const warnThreshold = acct.marginSoStopOut * 2;
+    return acct.marginLevel < warnThreshold && !this.marginLevelDanger(acct);
+  }
+
+  /** "At-or-below broker stop-out level" predicate — the danger band. */
+  protected marginLevelDanger(acct: {
+    marginUsed: number;
+    marginLevel: number;
+    marginSoStopOut: number;
+    marginSoMode: string;
+  }): boolean {
+    if (acct.marginUsed <= 0 || acct.marginSoMode !== 'Percent') return false;
+    if (acct.marginLevel <= 0 || acct.marginSoStopOut <= 0) return false;
+    return acct.marginLevel <= acct.marginSoStopOut;
+  }
 
   // Refresh-symbol-specs modal -------------------------------------------
   protected readonly askingRefresh = signal(false);

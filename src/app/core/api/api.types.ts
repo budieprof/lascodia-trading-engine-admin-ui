@@ -1687,6 +1687,38 @@ export interface EAInstanceDetail {
   lastProcessedOrderSnapshotSequence: number | null;
   lastProcessedDealSnapshotSequence: number | null;
   state: EAStatePayload | null;
+  /**
+   * Broker-synced account envelope (balance / equity / margin) for the
+   * EA's linked TradingAccount, freshened on every Phase-5 account-sync.
+   * Null when the EA hasn't pushed its first sync yet (early registration).
+   */
+  account: EAInstanceAccountSnapshot | null;
+}
+
+export interface EAInstanceAccountSnapshot {
+  accountName: string;
+  brokerName: string;
+  brokerServer: string;
+  currency: string;
+  leverage: number;
+  accountType: string;
+  marginMode: string;
+  isPaper: boolean;
+  balance: number;
+  equity: number;
+  marginUsed: number;
+  marginAvailable: number;
+  /** (Equity + Credit) / MarginUsed × 100, in percent. 0 when no positions. */
+  marginLevel: number;
+  /** Unrealised P&L on open positions. */
+  profit: number;
+  /** Broker-extended credit line — 0 on most accounts. */
+  credit: number;
+  /** "Percent" | "Money" — interpretation of margin SO call/stop-out. */
+  marginSoMode: string;
+  marginSoCall: number;
+  marginSoStopOut: number;
+  lastSyncedAt: string;
 }
 
 export type EAAuditSeverity = 'INFO' | 'WARN' | 'ERROR' | 'CRIT' | string;
