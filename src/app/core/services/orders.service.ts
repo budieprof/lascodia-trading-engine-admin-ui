@@ -14,12 +14,32 @@ import {
   BatchCancelOrdersResult,
 } from '@core/api/api.types';
 
+/**
+ * Execution-latency timestamps for an order, from `GET /order/{id}/timing`.
+ * Any field is null when the Order → TradeSignal link is missing.
+ */
+export interface OrderTimingDto {
+  orderId: number;
+  signalTriggeredAt: string | null;
+  signalGeneratedAt: string | null;
+  orderPlacedAt: string | null;
+  orderFilledAt: string | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class OrdersService {
   private readonly api = inject(ApiService);
 
   getById(id: number): Observable<ResponseData<OrderDto>> {
     return this.api.get(`/order/${id}`);
+  }
+
+  /**
+   * Execution-latency timestamps for an order (signal fired vs. order placed),
+   * resolved server-side via Order → TradeSignal.
+   */
+  getTiming(id: number): Observable<ResponseData<OrderTimingDto>> {
+    return this.api.get(`/order/${id}/timing`);
   }
 
   list(params: PagerRequest): Observable<ResponseData<PagedData<OrderDto>>> {

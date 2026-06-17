@@ -422,6 +422,26 @@ export class EAPendingOrdersPanelComponent {
       },
     });
     this.chartOpen.set(true);
+
+    // Fetch signal → order-placement timing and patch the selection when it
+    // lands (new object → the modal's OnChanges shows the delta). GeneratedAt
+    // is the signal-fired time; TriggeredAt is the analysed bar's market time.
+    this.orders.getTiming(o.id).subscribe({
+      next: (res) => {
+        if (!res?.status || !res.data) return;
+        if (this.selectedOrderId !== o.id) return; // operator moved on
+        const cur = this.chartSelection();
+        if (!cur) return;
+        this.chartSelection.set({
+          ...cur,
+          signalAt: res.data.signalGeneratedAt ?? res.data.signalTriggeredAt,
+          orderPlacedAt: res.data.orderPlacedAt ?? o.createdAt,
+        });
+      },
+      error: () => {
+        /* timing is non-critical — leave the delta hidden on failure */
+      },
+    });
   }
 
   // ── Phase-7c cancel-order flow ───────────────────────────────────────────
