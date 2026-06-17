@@ -397,7 +397,10 @@ export class EAPositionsPanelComponent {
         if (!cur) return;
         this.chartSelection.set({
           ...cur,
-          signalAt: res.data.signalTriggeredAt ?? res.data.signalGeneratedAt,
+          // Use GeneratedAt (when the signal row fired) — not TriggeredAt, which
+          // is the analysed bar's market timestamp and can predate the signal by
+          // days, making the latency meaningless.
+          signalAt: res.data.signalGeneratedAt ?? res.data.signalTriggeredAt,
           orderPlacedAt: res.data.orderPlacedAt,
         });
       },
