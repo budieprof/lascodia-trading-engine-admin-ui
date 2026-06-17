@@ -681,9 +681,21 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
     if (!s || candles.length === 0) return null;
 
     const refMs = new Date(s.referenceTime).getTime();
-    const lastMs = new Date(candles[candles.length - 1].timestamp).getTime();
-    const candleData: [number, number, number, number, number][] = candles.map((c) => [
-      new Date(c.timestamp).getTime(),
+    // Category x-axis so candles are contiguous — no blank gaps for weekends or
+    // missing bars. Reference markers map timestamps → the nearest candle index.
+    const categories = candles.map((c) => c.timestamp);
+    const candleMs = candles.map((c) => new Date(c.timestamp).getTime());
+    const lastIdx = candles.length - 1;
+    const idxAt = (ms: number): number => {
+      let idx = 0;
+      for (let i = 0; i < candleMs.length; i++) {
+        if (candleMs[i] <= ms) idx = i;
+        else break;
+      }
+      return idx;
+    };
+    const refIdx = idxAt(refMs);
+    const candleData: [number, number, number, number][] = candles.map((c) => [
       c.open,
       c.close,
       c.low,
@@ -716,7 +728,7 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
           fontSize: 10,
           fontWeight: 'bold' as const,
         },
-        data: [{ xAxis: refMs }],
+        data: [{ xAxis: refIdx }],
       },
     };
 
@@ -728,29 +740,29 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
       markAreaData.push([
         {
           yAxis: s.referencePrice,
-          xAxis: refMs,
+          xAxis: refIdx,
           itemStyle: { color: 'rgba(31, 138, 61, 0.12)' },
           name: 'TP zone',
         },
-        { yAxis: s.takeProfit, xAxis: lastMs },
+        { yAxis: s.takeProfit, xAxis: lastIdx },
       ]);
     }
     if (s.stopLoss !== null) {
       markAreaData.push([
         {
           yAxis: s.referencePrice,
-          xAxis: refMs,
+          xAxis: refIdx,
           itemStyle: { color: 'rgba(196, 41, 10, 0.12)' },
           name: 'SL zone',
         },
-        { yAxis: s.stopLoss, xAxis: lastMs },
+        { yAxis: s.stopLoss, xAxis: lastIdx },
       ]);
     }
 
     // Reference dots at exact (timestamp, price) points.
     const markPointData: any[] = [];
     markPointData.push({
-      coord: [refMs, s.referencePrice],
+      coord: [refIdx, s.referencePrice],
       symbol: 'circle',
       symbolSize: 10,
       itemStyle: { color: '#000', borderColor: '#fff', borderWidth: 2 },
@@ -758,7 +770,7 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
     });
     if (s.exitTime && s.exitPrice !== null) {
       markPointData.push({
-        coord: [new Date(s.exitTime).getTime(), s.exitPrice],
+        coord: [idxAt(new Date(s.exitTime).getTime()), s.exitPrice],
         symbol: 'circle',
         symbolSize: 10,
         itemStyle: { color: '#5e5ce6', borderColor: '#fff', borderWidth: 2 },
@@ -768,15 +780,17 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
 
     // Horizontal price-level lines, anchored at the reference time and
     // sweeping to the last candle so they don't appear before the trade.
-    const flat = (y: number): [number, number][] => [
-      [refMs, y],
-      [lastMs, y],
-    ];
+    // Level lines run from the entry candle to the last (null before entry so
+    // they don't appear pre-trade); NOW spans the full width. Index-aligned to
+    // the category axis.
+    const levelLine = (y: number): (number | null)[] =>
+      categories.map((_, i) => (i >= refIdx ? y : null));
+    const fullLine = (y: number): number[] => categories.map(() => y);
     const refSeries: any[] = [];
     refSeries.push({
       name: s.referenceLabel,
       type: 'line',
-      data: flat(s.referencePrice),
+      data: levelLine(s.referencePrice),
       symbol: 'none',
       lineStyle: { color: '#000', width: 2.5, type: 'solid' },
       tooltip: { show: false },
@@ -796,7 +810,7 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
       refSeries.push({
         name: 'TP',
         type: 'line',
-        data: flat(s.takeProfit),
+        data: levelLine(s.takeProfit),
         symbol: 'none',
         lineStyle: { color: '#1f8a3d', width: 2, type: 'solid' },
         tooltip: { show: false },
@@ -817,7 +831,7 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
       refSeries.push({
         name: 'SL',
         type: 'line',
-        data: flat(s.stopLoss),
+        data: levelLine(s.stopLoss),
         symbol: 'none',
         lineStyle: { color: '#c4290a', width: 2, type: 'solid' },
         tooltip: { show: false },
@@ -840,10 +854,7 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
         type: 'line',
         // Current price is "live" — span the full chart width to anchor
         // operator attention regardless of where the trade started.
-        data: [
-          [new Date(candles[0].timestamp).getTime(), s.currentPrice],
-          [lastMs, s.currentPrice],
-        ] as [number, number][],
+        data: fullLine(s.currentPrice),
         symbol: 'none',
         lineStyle: { color: '#0071e3', width: 1.5, type: 'dotted' },
         tooltip: { show: false },
@@ -880,8 +891,19 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
       animation: false,
       grid: { left: 60, right: 110, top: 30, bottom: 60 },
       xAxis: {
-        type: 'time',
-        axisLabel: { fontSize: 10, color: '#666' },
+        type: 'category',
+        data: categories,
+        boundaryGap: true,
+        axisLabel: {
+          fontSize: 10,
+          color: '#666',
+          hideOverlap: true,
+          formatter: (v: string) => {
+            const d = new Date(v);
+            const p = (n: number) => String(n).padStart(2, '0');
+            return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+          },
+        },
         splitLine: { show: false },
       },
       yAxis: {
@@ -903,17 +925,13 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
             ? params.find((p) => p.seriesType === 'candlestick')
             : null;
           if (!candle) return '';
-          const [ts, open, close, low, high] = candle.value as [
-            number,
-            number,
-            number,
-            number,
-            number,
-          ];
-          const d = new Date(ts);
-          return `<b>${d.toLocaleString()}</b><br/>
-            O ${fmt(open)} · H ${fmt(high)}<br/>
-            L ${fmt(low)} · C ${fmt(close)}`;
+          // On the category axis we key off dataIndex to recover the OHLC + ts
+          // (candlestick param.value shape varies with the axis encode).
+          const c = candles[candle.dataIndex];
+          if (!c) return '';
+          return `<b>${new Date(c.timestamp).toLocaleString()}</b><br/>
+            O ${fmt(c.open)} · H ${fmt(c.high)}<br/>
+            L ${fmt(c.low)} · C ${fmt(c.close)}`;
         },
       },
       dataZoom: [
