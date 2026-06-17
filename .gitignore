@@ -35,3 +35,6 @@ Thumbs.db
 .claude/scheduled_tasks.lock
 # storybook output
 /storybook-static
+
+# Local dev tooling for tunnel exposure (see Caddyfile comments)
+Caddyfile
