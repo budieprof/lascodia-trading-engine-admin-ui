@@ -600,19 +600,26 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
     const ref = new Date(s.referenceTime);
     const refMs = ref.getTime();
 
-    // 75 bars before reference, 75 after.  For closed trades with an
-    // exit time, expand post-window so the exit point is visible with
-    // 25-bar margin.
+    // Window selection:
+    //  • Closed trades  → frame entry → exit (75-bar pre / 25-bar post margins).
+    //  • Open / pending → the window MUST end at "now" so the latest candle is
+    //    the current bar and the live NOW line aligns with it. Start 75 bars
+    //    before entry, but cap the span at ~480 bars (under the 500-row limit)
+    //    so a long-open trade shows the most recent bars (entry clamps to the
+    //    left edge) rather than a stale window around the entry.
     const preMin = 75 * tfMin;
-    let postMin = 75 * tfMin;
+    const now = Date.now();
+    let from: Date;
+    let to: Date;
     if (s.exitTime) {
       const exitMs = new Date(s.exitTime).getTime();
-      const exitGapMin = (exitMs - refMs) / 60_000;
-      postMin = Math.max(postMin, exitGapMin + 25 * tfMin);
+      from = new Date(refMs - preMin * 60_000);
+      to = new Date(exitMs + 25 * tfMin * 60_000);
+    } else {
+      to = new Date(now);
+      const maxSpanMin = 480 * tfMin;
+      from = new Date(Math.max(refMs - preMin * 60_000, now - maxSpanMin * 60_000));
     }
-
-    const from = new Date(refMs - preMin * 60_000);
-    const to = new Date(refMs + postMin * 60_000);
 
     this.marketData
       .listCandles({
