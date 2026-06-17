@@ -9,12 +9,33 @@ import {
   PositionLifecycleEventDto,
 } from '@core/api/api.types';
 
+/**
+ * Execution-latency timestamps for a position, from `GET /position/{id}/timing`.
+ * Any field is null when the Position → Order → TradeSignal link is missing.
+ */
+export interface PositionTimingDto {
+  positionId: number;
+  signalTriggeredAt: string | null;
+  signalGeneratedAt: string | null;
+  orderPlacedAt: string | null;
+  orderFilledAt: string | null;
+  openedAt: string | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class PositionsService {
   private readonly api = inject(ApiService);
 
   getById(id: number): Observable<ResponseData<PositionDto>> {
     return this.api.get(`/position/${id}`);
+  }
+
+  /**
+   * Execution-latency timestamps for a position (signal fired vs. order placed),
+   * resolved server-side via Position → Order → TradeSignal.
+   */
+  getTiming(id: number): Observable<ResponseData<PositionTimingDto>> {
+    return this.api.get(`/position/${id}/timing`);
   }
 
   list(params: PagerRequest): Observable<ResponseData<PagedData<PositionDto>>> {

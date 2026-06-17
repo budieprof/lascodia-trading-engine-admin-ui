@@ -62,6 +62,11 @@ export interface TradeChartSelection {
   /** Optional exit dot (rare here; included for parity with sensitivity chart). */
   exitPrice: number | null;
   exitTime: string | null;
+  /** When the signal fired (ISO) — used with {@link orderPlacedAt} to show the
+   *  signal → order placement latency. Both null until the timing fetch returns. */
+  signalAt?: string | null;
+  /** When the opening order was placed (ISO). */
+  orderPlacedAt?: string | null;
   /**
    * Optional destructive action footer.  When present the modal renders a
    * primary action button beneath the chart with an inline confirm step.
@@ -105,6 +110,19 @@ export interface TradeChartSelection {
                   · {{ s.referenceTime | date: 'medium' }}
                 }
               </p>
+              @if (signalToOrderLabel(); as lat) {
+                <p
+                  class="modal-sub latency"
+                  [title]="
+                    'Signal fired ' +
+                    (s.signalAt | date: 'medium') +
+                    ' → order placed ' +
+                    (s.orderPlacedAt | date: 'medium')
+                  "
+                >
+                  ⏱ Signal → order placed: <strong>{{ lat }}</strong>
+                </p>
+              }
             }
           </div>
           <div class="head-right">
@@ -255,6 +273,14 @@ export interface TradeChartSelection {
       .ref-label {
         font-weight: var(--font-semibold);
         color: var(--text-primary);
+      }
+      .modal-sub.latency {
+        margin-top: 2px;
+        color: var(--text-tertiary);
+      }
+      .modal-sub.latency strong {
+        color: var(--accent, #0071e3);
+        font-variant-numeric: tabular-nums;
       }
       .head-right {
         display: inline-flex;
@@ -492,6 +518,27 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
     if (this.selectedTimeframe() === tf) return;
     this.selectedTimeframe.set(tf);
     if (this.selection) this.reload();
+  }
+
+  /**
+   * Human label for the signal → order-placement latency, or null until both
+   * timestamps are present. Plain method (not computed) because `selection` is
+   * an @Input — re-evaluated on the OnChanges-driven CD when the parent sets a
+   * new selection object carrying the fetched timing.
+   */
+  protected signalToOrderLabel(): string | null {
+    const s = this.selection;
+    if (!s?.signalAt || !s?.orderPlacedAt) return null;
+    const ms = new Date(s.orderPlacedAt).getTime() - new Date(s.signalAt).getTime();
+    if (!Number.isFinite(ms)) return null;
+
+    const negative = ms < 0;
+    const totalSec = Math.round(Math.abs(ms) / 1000);
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+    const sign = negative ? '−' : '';
+    if (mins === 0) return `${sign}${secs}s`;
+    return `${sign}${mins} min${mins === 1 ? '' : 's'}${secs ? ' ' + secs + 's' : ''}`;
   }
 
   protected close(): void {

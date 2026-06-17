@@ -386,6 +386,25 @@ export class EAPositionsPanelComponent {
       },
     });
     this.chartOpen.set(true);
+
+    // Fetch signal → order-placement timing and patch the selection when it
+    // lands (new object → the modal's OnChanges picks it up and shows the delta).
+    this.positionsSvc.getTiming(p.id).subscribe({
+      next: (res) => {
+        if (!res?.status || !res.data) return;
+        if (this.selectedPositionId !== p.id) return; // operator moved on
+        const cur = this.chartSelection();
+        if (!cur) return;
+        this.chartSelection.set({
+          ...cur,
+          signalAt: res.data.signalTriggeredAt ?? res.data.signalGeneratedAt,
+          orderPlacedAt: res.data.orderPlacedAt,
+        });
+      },
+      error: () => {
+        /* timing is non-critical — leave the delta hidden on failure */
+      },
+    });
   }
 
   // ── Phase-7b close-position flow ─────────────────────────────────────────
