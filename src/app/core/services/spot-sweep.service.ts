@@ -109,11 +109,14 @@ export class SpotSweepService {
         currentSymbol: null,
         startedAt: null,
         nextEligibleSymbol: pairs[0]?.symbol ?? null,
+        nextRunAt: null,
         lastResult: null,
         today: this.emptyCounters(),
         killSwitchActive: false,
         eligibleCount: pairs.length,
         excludedCount: 0,
+        holdCooldowns: [],
+        excludedPairs: [],
       };
     }
 
@@ -122,14 +125,22 @@ export class SpotSweepService {
     const current = pairs[i];
     const prev = pairs[(i - 1 + pairs.length) % pairs.length];
     const autoApproved = cfg.autoApprove && cfg.minConfidence <= 0.75;
+    const phase: SpotSweepStatus['phase'] = tick % 2 === 0 ? 'Analyzing' : 'Cooldown';
+    // In the mock, alternate 6s ticks pretend each phase consumed the
+    // configured interval. Cooldown shows a live countdown; Analyzing is null.
+    const nextRunAt =
+      phase === 'Cooldown'
+        ? new Date(tick * 6000 + Math.max(5, cfg.intervalSeconds) * 1000).toISOString()
+        : null;
 
     return {
       running: true,
-      phase: tick % 2 === 0 ? 'Analyzing' : 'Cooldown',
+      phase,
       idleReason: null,
       currentSymbol: current.symbol,
       startedAt: new Date(tick * 6000).toISOString(),
       nextEligibleSymbol: pairs[(i + 1) % pairs.length].symbol,
+      nextRunAt,
       lastResult: {
         symbol: prev.symbol,
         outcome: 'SignalCreated',
@@ -151,6 +162,41 @@ export class SpotSweepService {
       killSwitchActive: false,
       eligibleCount: pairs.length,
       excludedCount: 0,
+      // Synthesize a couple of fake cooldowns so the panel has something to
+      // render in mock mode. Pick the next two pairs in the rotation.
+      holdCooldowns:
+        pairs.length >= 2
+          ? [
+              {
+                symbol: pairs[(i + 2) % pairs.length].symbol,
+                timeframe: pairs[(i + 2) % pairs.length].timeframe,
+                placedAtUtc: new Date(tick * 6000 - 600_000).toISOString(),
+                expiresAtUtc: new Date(tick * 6000 + 1_200_000).toISOString(),
+              },
+              {
+                symbol: pairs[(i + 3) % pairs.length].symbol,
+                timeframe: pairs[(i + 3) % pairs.length].timeframe,
+                placedAtUtc: new Date(tick * 6000 - 900_000).toISOString(),
+                expiresAtUtc: new Date(tick * 6000 + 900_000).toISOString(),
+              },
+            ]
+          : [],
+      // Synthesize a couple of exposure-based exclusions for the mock panel.
+      excludedPairs:
+        pairs.length >= 4
+          ? [
+              {
+                symbol: pairs[(i + 4) % pairs.length].symbol,
+                timeframe: pairs[(i + 4) % pairs.length].timeframe,
+                reason: 'Open position',
+              },
+              {
+                symbol: pairs[(i + 5) % pairs.length].symbol,
+                timeframe: pairs[(i + 5) % pairs.length].timeframe,
+                reason: 'Pending signal',
+              },
+            ]
+          : [],
     };
   }
 

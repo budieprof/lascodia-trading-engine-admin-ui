@@ -1359,6 +1359,23 @@ export interface EngineLogPageDto {
   droppedCount: number;
 }
 
+/**
+ * Fleet-wide EA trading window policy — when enabled, the engine auto-
+ * rejects any TradeSignal generated outside the configured UTC window and,
+ * if `flattenOnExit` is on, closes every open position + cancels every
+ * pending order at the moment the window ends each day.
+ */
+export interface TradingWindowConfig {
+  enabled: boolean;
+  /** "HH:mm" UTC. Inclusive. */
+  startUtc: string;
+  /** "HH:mm" UTC. Exclusive. May be earlier than `startUtc` (window wraps midnight). */
+  endUtc: string;
+  /** Subset of "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun". */
+  days: string[];
+  flattenOnExit: boolean;
+}
+
 export interface EngineStatusDto {
   isRunning: boolean;
   activeStrategies: number;
@@ -3175,6 +3192,16 @@ export interface MarketAnalysisRecommendationDto {
    *  by the viability gate). Surfaced on the modal as a transparency note
    *  alongside the actual executed TP. */
   originalTakeProfit?: number | null;
+  /** v11 thin-framework — context-aware adjustments the engine applied to
+   *  the LLM's thesis when constructing the executable spec. Empty / null
+   *  when no adjustment fired (the LLM's geometry was sound on its own).
+   *  Each entry is a human-readable one-liner naming the adjustment and
+   *  its before/after values; rendered as badges on the backtest detail
+   *  page so the operator can audit which corrections fired on which
+   *  setup. Known prefixes: "SL bumped to noise-band", "SL pushed past
+   *  liquidity wall", "TP capped at reach", "TP haircut: counter-trend",
+   *  "TP re-widened". */
+  appliedAdjustments?: string[] | null;
 }
 
 /** Structured multi-week → multi-month posture parsed from the macro

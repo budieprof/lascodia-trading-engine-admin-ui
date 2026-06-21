@@ -17,6 +17,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 
 import { FleetActionsBarComponent } from '../../components/fleet-actions-bar/fleet-actions-bar.component';
+import { EATradingWindowPanelComponent } from '../../components/ea-trading-window-panel/ea-trading-window-panel.component';
 
 type StatusFilter = 'all' | EAInstanceStatus;
 type ViewMode = 'cards' | 'table';
@@ -36,6 +37,7 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
     FormsModule,
     RouterLink,
     FleetActionsBarComponent,
+    EATradingWindowPanelComponent,
   ],
   template: `
     <div class="page">
@@ -46,6 +48,10 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
 
       <!-- Phase-3A: fleet bulk-ops bar above the per-instance grid -->
       <app-fleet-actions-bar (commandQueued)="onFleetCommandQueued($event)" />
+
+      <!-- Fleet-wide trading window — auto-rejects signals + optionally
+           flattens positions at window exit. UTC-clock, fleet-scoped. -->
+      <app-ea-trading-window-panel />
 
       @if (loading()) {
         <app-card-skeleton [lines]="6" />

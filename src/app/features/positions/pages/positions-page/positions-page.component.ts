@@ -31,6 +31,10 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
 import { DirectionCellComponent } from '@shared/components/data-table/cell-renderers/direction-cell.component';
 import { CurrencyFormatPipe } from '@shared/pipes/currency-format.pipe';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import {
+  EATradeChartModalComponent,
+  type TradeChartSelection,
+} from '@features/ea-instances/components/ea-trade-chart-modal/ea-trade-chart-modal.component';
 
 @Component({
   selector: 'app-positions-page',
@@ -41,11 +45,47 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     DataTableComponent,
     ChartCardComponent,
     TabsComponent,
+    EATradeChartModalComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <app-page-header title="Positions" subtitle="Monitor open and closed trading positions" />
+
+      <!-- Account scope picker — operator wanted explicit per-account
+           switching on this page (the global header dropdown also works,
+           but having it inline saves the cross-page hunt). Pills mirror
+           AccountScopeService directly, so picking one here propagates to
+           every other page that respects the global scope. The "All real"
+           pill aggregates across every live REAL account; per-account
+           pills filter to one account exactly. Only shown when at least 2
+           live REAL accounts exist — single-account fleets have nothing
+           to switch between. -->
+      @if (accountPills().length >= 2) {
+        <nav class="account-pills" aria-label="Filter by trading account">
+          <button
+            type="button"
+            class="acct-pill"
+            [class.active]="accountScope.isAggregateReal()"
+            (click)="selectAccountScope(aggregateRealScope)"
+            title="Aggregate across every live real account"
+          >
+            All real
+            <span class="acct-count">{{ accountPills().length }}</span>
+          </button>
+          @for (a of accountPills(); track a.id) {
+            <button
+              type="button"
+              class="acct-pill"
+              [class.active]="accountScope.selected() === a.id"
+              (click)="selectAccountScope(a.id)"
+              [title]="a.brokerName ? a.brokerName + ' · ' + a.accountId : ''"
+            >
+              {{ a.label }}
+            </button>
+          }
+        </nav>
+      }
 
       <!-- Summary strip — 8 dense tiles (recent window) -->
       <div class="metrics-strip">
@@ -181,12 +221,15 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
               />
             </div>
 
-            <!-- Cumulative P&L sparkline — at-a-glance equity curve -->
+            <!-- Cumulative P&L equity curve. 260px gives both the curve
+                 and the dense daily date labels (one tick per trade) the
+                 room ECharts needs once containLabel:true reserves space
+                 for them inside the card. -->
             <app-chart-card
               title="Cumulative realized P&L"
               [subtitle]="cumulativeSparklineSubtitle()"
               [options]="cumulativeSparklineChart()"
-              height="140px"
+              height="260px"
             />
 
             <!-- Filter chips -->
@@ -518,9 +561,21 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                   }
                 </span>
               </div>
-              <button class="btn-close" (click)="selectedDetail.set(null)" aria-label="Close">
-                ×
-              </button>
+              <div class="drawer-head-actions">
+                <!-- Same chart modal used by the EA detail page; renders the
+                     position's entry/SL/TP against the bar history. -->
+                <button
+                  type="button"
+                  class="btn-chart"
+                  (click)="openChartFor(p)"
+                  title="Visualise this position on a candle chart"
+                >
+                  View chart
+                </button>
+                <button class="btn-close" (click)="selectedDetail.set(null)" aria-label="Close">
+                  ×
+                </button>
+              </div>
             </header>
 
             <section class="drawer-section">
@@ -649,6 +704,16 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           </aside>
         </div>
       }
+
+      <!-- Shared trade-chart modal: closed-row clicks open it directly; the
+           open-position drawer also has a "View chart" button that triggers
+           the same modal. action=null suppresses the destructive footer
+           that the EA panel uses for Close/Cancel actions. -->
+      <app-ea-trade-chart-modal
+        [selection]="chartSelection()"
+        [open]="chartOpen()"
+        (openChange)="chartOpen.set($event)"
+      />
     </div>
   `,
   styles: [
@@ -820,12 +885,66 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         }
       }
 
+      /* Account scope pills — quick per-account filter above the KPI strip. */
+      .account-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        margin: var(--space-3) 0;
+        padding: 4px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        width: fit-content;
+      }
+      .acct-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 30px;
+        padding: 0 14px;
+        border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        border-radius: var(--radius-full);
+        cursor: pointer;
+        font-family: inherit;
+        transition:
+          background 0.12s ease,
+          color 0.12s ease;
+      }
+      .acct-pill:hover {
+        color: var(--text-primary);
+      }
+      .acct-pill.active {
+        background: var(--bg-secondary);
+        color: var(--accent);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+      }
+      .acct-count {
+        font-size: 10.5px;
+        padding: 1px 6px;
+        background: rgba(0, 113, 227, 0.16);
+        color: var(--accent);
+        border-radius: var(--radius-full);
+        font-weight: var(--font-semibold);
+      }
+      .acct-pill.active .acct-count {
+        background: var(--accent);
+        color: #fff;
+      }
+
       /* Closed-tab filter chips */
       .filter-row {
         display: flex;
         gap: var(--space-3);
         align-items: center;
         flex-wrap: wrap;
+        /* Push down off the cumulative P&L card above — without this the
+           date labels (now padded by containLabel:true) sit right against
+           the chip row. */
+        margin-top: var(--space-4);
         margin-bottom: var(--space-3);
       }
       .chip-group {
@@ -915,6 +1034,27 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         cursor: pointer;
         color: var(--text-tertiary);
       }
+      .drawer-head-actions {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .btn-chart {
+        height: 28px;
+        padding: 0 12px;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: var(--font-semibold);
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .btn-chart:hover {
+        background: rgba(0, 113, 227, 0.08);
+        border-color: var(--accent);
+      }
       .drawer-section {
         padding: var(--space-3) var(--space-5);
         border-bottom: 1px solid var(--border);
@@ -990,6 +1130,32 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   private readonly currencyPipe = new CurrencyFormatPipe();
   private readonly relativeTimePipe = new RelativeTimePipe();
   private pollingInterval: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Live REAL accounts surfaced as pills above the metrics strip. Each
+   * carries a short display label (`accountName` if present, else the
+   * broker login id) so the pill is operator-readable without forcing
+   * UI-side concatenation in the template. Paper accounts are excluded
+   * to match the global scope's `__all_real__` semantics — the operator
+   * who wants paper data flips the global header dropdown.
+   */
+  readonly accountPills = computed(() =>
+    this.accountScope.liveRealAccounts().map((a) => ({
+      id: a.id,
+      label: a.accountName?.trim() || a.accountId || `#${a.id}`,
+      accountId: a.accountId,
+      brokerName: a.brokerName,
+    })),
+  );
+
+  /** Sentinel exposed to the template so the "All real" pill doesn't have
+   *  to repeat the magic string and stay in sync with the service. */
+  readonly aggregateRealScope = AccountScopeService.SCOPE_AGGREGATE_REAL;
+
+  /** Forward the on-page pill click into the global AccountScopeService. */
+  selectAccountScope(next: number | string): void {
+    this.accountScope.select(next);
+  }
 
   /** Position id currently being closed, so we can disable the row's button mid-flight. */
   readonly closingId = signal<number | null>(null);
@@ -1419,10 +1585,69 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   });
 
   onRowClick(p: PositionDto): void {
-    // Open the side drawer instead of navigating away — preserves table
-    // state, selection, and pagination. The drawer footer carries an
-    // "Open detail page →" link for the full route.
+    // Closed positions → open the chart modal directly so the operator sees
+    // entry / SL / TP / exit visualised against the bar history (matches
+    // the EA detail page behaviour). The side drawer's pricing fields are
+    // strictly a subset of what the chart shows.
+    // Open positions → keep the existing drawer (rich live state: trailing
+    // SL, broker ticket, lifecycle, etc. — none of which the chart shows).
+    if (p.status === 'Closed') {
+      this.openChartFor(p);
+      return;
+    }
     this.selectedDetail.set(p);
+  }
+
+  // ── Click-to-chart for closed positions ────────────────────────────────
+  // Mirrors the EA Positions panel's `openChart`: builds a TradeChartSelection
+  // from a PositionDto, then asynchronously fetches signal→order timing so
+  // the chart can show the signal-to-fill latency once it lands. Closed
+  // positions surface exitPrice + exitTime; the action footer is null
+  // because there's nothing destructive left to do.
+  readonly chartSelection = signal<TradeChartSelection | null>(null);
+  readonly chartOpen = signal(false);
+  private selectedChartPositionId: number | null = null;
+
+  openChartFor(p: PositionDto): void {
+    if (!p.symbol) return;
+    const isClosed = p.status === 'Closed';
+    this.selectedChartPositionId = p.id;
+    this.chartSelection.set({
+      title: `Position #${p.id} · ${p.symbol} · ${p.direction}`,
+      symbol: p.symbol,
+      direction: p.direction === 'Long' ? 'Buy' : 'Sell',
+      referencePrice: p.averageEntryPrice,
+      referenceTime: p.openedAt,
+      referenceLabel: 'ENTRY',
+      stopLoss: p.stopLoss,
+      takeProfit: p.takeProfit,
+      // Closed: `currentPrice` carries the exit fill price (same convention
+      // the drawer uses); open: `currentPrice` is the live tick.
+      currentPrice: isClosed ? null : p.currentPrice,
+      exitPrice: isClosed ? p.currentPrice : null,
+      exitTime: isClosed ? p.closedAt : null,
+      action: null,
+    });
+    this.chartOpen.set(true);
+
+    // Patch the selection with signal→order timing once the service responds.
+    // Wrapped in a try/catch via `catchError` so a timing-endpoint failure
+    // (uncommon) doesn't tear down the chart — the latency badge just stays
+    // hidden in that case.
+    this.positionsService
+      .getTiming(p.id)
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        if (!res?.status || !res.data) return;
+        if (this.selectedChartPositionId !== p.id) return; // operator moved on
+        const cur = this.chartSelection();
+        if (!cur) return;
+        this.chartSelection.set({
+          ...cur,
+          signalAt: res.data.signalGeneratedAt ?? res.data.signalTriggeredAt,
+          orderPlacedAt: res.data.orderPlacedAt,
+        });
+      });
   }
 
   // ── Drawer template helpers ──────────────────────────────────────
@@ -1895,11 +2120,26 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
 
   // ── Closed-tab cumulative sparkline ──────────────────────────────
   readonly cumulativeSparklineSubtitle = computed(() => {
-    const last = this.closedTotalRealized();
-    const n = this.closedPositions().length;
+    const closed = [...this.closedPositions()]
+      .filter((p) => p.closedAt)
+      .sort((a, b) => (a.closedAt ?? '').localeCompare(b.closedAt ?? ''));
+    const n = closed.length;
     if (n === 0) return 'No closed trades in window';
-    const sign = last >= 0 ? '+' : '';
-    return `${n} trades · ending ${sign}${last.toFixed(2)}`;
+
+    // Walk the equity curve to derive headline stats — peak, max drawdown,
+    // ending P&L. Cheaper to compute here once than to thread shared state
+    // out of the chart computed.
+    let cum = 0;
+    let peak = 0;
+    let maxDrawdown = 0;
+    for (const p of closed) {
+      cum += p.realizedPnL;
+      if (cum > peak) peak = cum;
+      const dd = peak - cum;
+      if (dd > maxDrawdown) maxDrawdown = dd;
+    }
+    const sign = (v: number) => (v >= 0 ? '+' : '');
+    return `${n} trades · ending ${sign(cum)}${cum.toFixed(2)} · peak ${peak.toFixed(2)} · max DD -${maxDrawdown.toFixed(2)}`;
   });
 
   readonly cumulativeSparklineChart = computed<EChartsOption>(() => {
@@ -1907,28 +2147,115 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       .filter((p) => p.closedAt)
       .sort((a, b) => (a.closedAt ?? '').localeCompare(b.closedAt ?? ''));
     if (closed.length === 0) return this.emptyChartOption('No closed trades');
+
+    // Build the cumulative series + a running high-water-mark series so
+    // drawdown from peak is visible at a glance. Stepped, not smooth —
+    // equity moves in discrete trade-sized jumps, and `smooth: true` on a
+    // sharp drawdown produces an ugly curved overshoot that looked like
+    // a rendering bug.
     let cum = 0;
-    const pts = closed.map((p) => {
+    let peak = 0;
+    const xLabels: string[] = [];
+    const cumValues: number[] = [];
+    const peakValues: number[] = [];
+    const tooltipMeta: {
+      idx: number;
+      closedAt: string;
+      symbol: string | null;
+      realized: number;
+    }[] = [];
+    // Show each date only on the FIRST trade of that calendar day. Every
+    // subsequent trade on the same day gets an empty label, which ECharts
+    // simply renders as an unlabelled tick — far more readable than 194
+    // overlapping "2026-06-18" stamps fighting for space. The tooltip
+    // still carries the full timestamp for every individual trade.
+    let lastDayLabel: string | null = null;
+    closed.forEach((p, idx) => {
       cum += p.realizedPnL;
-      return [p.closedAt!.slice(5, 16).replace('T', ' '), +cum.toFixed(2)] as [string, number];
+      if (cum > peak) peak = cum;
+      cumValues.push(+cum.toFixed(2));
+      peakValues.push(+peak.toFixed(2));
+      const day = p.closedAt!.slice(0, 10);
+      xLabels.push(day === lastDayLabel ? '' : day);
+      lastDayLabel = day;
+      tooltipMeta.push({
+        idx: idx + 1,
+        closedAt: p.closedAt!.replace('T', ' ').slice(0, 19),
+        symbol: p.symbol,
+        realized: p.realizedPnL,
+      });
     });
-    const last = pts[pts.length - 1]?.[1] ?? 0;
+    const last = cumValues[cumValues.length - 1] ?? 0;
     const lineColor = last >= 0 ? '#34C759' : '#FF3B30';
-    return {
-      tooltip: { trigger: 'axis' },
-      grid: { top: 8, right: 16, bottom: 24, left: 50 },
+
+    const opt: EChartsOption = {
+      animation: false,
+      // Show cum + peak rows together in the tooltip; format the header
+      // with the trade index + symbol so a single hover answers "which
+      // trade was that?" without cross-referencing the table.
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'line', lineStyle: { color: '#0071e3', width: 1, type: 'dashed' } },
+        formatter: (params: any) => {
+          const idx = Array.isArray(params) ? params[0]?.dataIndex : params?.dataIndex;
+          const meta = tooltipMeta[idx];
+          if (!meta) return '';
+          const sign = (v: number) => (v >= 0 ? '+' : '');
+          const sym = meta.symbol ?? '—';
+          return [
+            `<div style="font-weight:600;margin-bottom:4px">Trade #${meta.idx} · ${sym}</div>`,
+            `<div style="color:#8e8e93;font-size:11px">${meta.closedAt}</div>`,
+            `<div style="margin-top:6px">Realized: <strong style="color:${meta.realized >= 0 ? '#15803d' : '#b91c1c'}">${sign(meta.realized)}${meta.realized.toFixed(2)}</strong></div>`,
+            `<div>Cumulative: <strong>${sign(cumValues[idx])}${cumValues[idx].toFixed(2)}</strong></div>`,
+            `<div style="color:#8e8e93">Peak: ${peakValues[idx].toFixed(2)} · DD ${(cumValues[idx] - peakValues[idx]).toFixed(2)}</div>`,
+          ].join('');
+        },
+      },
+      // `containLabel: true` tells ECharts to reserve space for the axis
+      // labels INSIDE the chart bounds — without it the date labels render
+      // past the configured `bottom`, spilling out of the chart-card's
+      // 220px height and overlapping the filter row below. The numeric
+      // padding is now treated as minimum padding; ECharts grows the
+      // bottom band as needed for the dense date labels.
+      grid: { top: 16, right: 24, bottom: 24, left: 12, containLabel: true },
       xAxis: {
         type: 'category',
-        data: pts.map(([x]) => x),
-        axisLabel: { fontSize: 9, color: '#8E8E93', hideOverlap: true },
+        data: xLabels,
+        boundaryGap: false,
+        axisLabel: { fontSize: 10, color: '#8E8E93', hideOverlap: true },
+        axisLine: { lineStyle: { color: 'rgba(0,0,0,0.08)' } },
+        axisTick: { show: false },
       },
-      yAxis: { type: 'value', axisLabel: { fontSize: 9, color: '#8E8E93' } },
+      yAxis: {
+        type: 'value',
+        axisLabel: {
+          fontSize: 10,
+          color: '#8E8E93',
+          formatter: (v: number) =>
+            Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0),
+        },
+        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.05)' } },
+      },
       series: [
+        // Running peak — thin gray dashed reference so drawdown depth from
+        // peak is immediately legible. Drawn FIRST so the equity line
+        // paints over it where they coincide.
         {
+          name: 'Peak',
           type: 'line',
-          smooth: true,
+          step: 'end',
           symbol: 'none',
-          data: pts.map(([, y]) => y),
+          data: peakValues,
+          lineStyle: { color: '#8E8E93', width: 1, type: 'dashed', opacity: 0.6 },
+          z: 1,
+        } as any,
+        // Cumulative equity — stepped to honestly show per-trade jumps.
+        {
+          name: 'Cumulative',
+          type: 'line',
+          step: 'end',
+          symbol: 'none',
+          data: cumValues,
           lineStyle: { color: lineColor, width: 2 },
           areaStyle: {
             color: {
@@ -1938,14 +2265,36 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
               x2: 0,
               y2: 1,
               colorStops: [
-                { offset: 0, color: hexAlpha(lineColor, 0.25) },
-                { offset: 1, color: hexAlpha(lineColor, 0.0) },
+                { offset: 0, color: hexAlpha(lineColor, 0.22) },
+                { offset: 1, color: hexAlpha(lineColor, 0) },
               ],
             } as any,
           },
-        },
+          // Zero baseline + max-drawdown marker. yAxis: 0 anchors the
+          // operator's mental model regardless of the y-range; the
+          // drawdown markPoint pin-points the trough on the curve.
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            lineStyle: { color: '#8E8E93', width: 0.8, type: 'dashed', opacity: 0.7 },
+            data: [{ yAxis: 0, label: { show: false } } as any],
+          },
+          markPoint: {
+            symbol: 'circle',
+            symbolSize: 8,
+            data: [
+              {
+                type: 'min' as const,
+                itemStyle: { color: '#FF3B30', borderColor: '#fff', borderWidth: 1.5 },
+                label: { show: false },
+              },
+            ],
+          },
+          z: 2,
+        } as any,
       ],
     };
+    return opt;
   });
 
   // ── Per-symbol breakdown (closed window) ─────────────────────────

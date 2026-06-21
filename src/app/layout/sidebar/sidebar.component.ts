@@ -483,6 +483,13 @@ export class SidebarComponent {
     {
       label: 'Analysis',
       items: [
+        { label: 'LLM Backtest', route: '/llm-backtest', icon: '🔁' },
+        {
+          label: 'Prompt templates',
+          route: '/prompt-templates',
+          icon: '📝',
+          permission: 'prompttemplate.view',
+        },
         { label: 'Performance', route: '/performance', icon: '📉' },
         { label: 'Execution Quality', route: '/execution-quality', icon: '⏱' },
         { label: 'Sentiment', route: '/sentiment', icon: '📰' },

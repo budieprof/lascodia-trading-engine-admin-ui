@@ -2603,39 +2603,56 @@ export class SignalSensitivityPageComponent implements OnInit {
       ? s.entryPrice - (s.entryPrice - s.originalSL) * slMul
       : s.entryPrice + (s.originalSL - s.entryPrice) * slMul;
 
-    // ── Time-axis chart ──────────────────────────────────────────────────
-    // We use a `type: 'time'` x-axis (not category) so signal-fire and exit
-    // markers land at their exact timestamps rather than snapping to the
-    // nearest candle index. This means:
-    //   * Signal fired at 9:32 lands INSIDE the 9:00 H1 bar (not at 10:00).
-    //   * Exit at 9:33 lands 1 minute after signal-fire, visually distinct
-    //     from the signal-fire vertical even though both fall in the same
-    //     H1 bar.
-    // Candlestick data on a time axis is [timestamp, open, close, low, high].
+    // ── Category-axis chart ──────────────────────────────────────────────
+    // Was `type: 'time'` — that allocated linear space for pre-signal time
+    // and weekend gaps, leaving large empty horizontal bands that made the
+    // chart look broken when the candle window started after the time axis
+    // origin. Switched to `type: 'category'` (same as the EA detail modal)
+    // so candles render contiguously, weekend / no-data periods collapse
+    // away, and the chart's drawn area always matches its data extent.
+    //
+    // Timestamps for markers (signal-fire, exit, mark areas) snap to the
+    // nearest candle index via idxAt(ms). The minor cost: a signal that
+    // fires at 9:32 maps to the 9:00 H1 bar rather than rendering at the
+    // sub-bar offset a time axis could express. That's an acceptable
+    // tradeoff for the visual cleanup; tooltips still carry the exact
+    // timestamps for precision.
     const tfMin = this.timeframeMinutes(this.selectedTimeframe());
     const tfMs = tfMin * 60_000;
     const signalMs = new Date(s.generatedAt).getTime();
     const exitMs = s.exitAt ? new Date(s.exitAt).getTime() : 0;
-    const lastCandleMs = candles.length
-      ? new Date(candles[candles.length - 1].timestamp).getTime()
-      : signalMs;
-    // The chart's x-range must extend past the signal/exit time even when
-    // the last real candle hasn't caught up yet (fresh signal, candle
-    // ingest lag). The padding "ghost" point gives the time axis room to
-    // place the verticals without clipping them at the right edge.
-    const lastChartMs = Math.max(lastCandleMs, Math.max(signalMs, exitMs) + tfMs);
+    const candleMs = candles.map((c) => new Date(c.timestamp).getTime());
+    const lastCandleMs = candleMs.length ? candleMs[candleMs.length - 1] : signalMs;
 
-    const candleData: (number | string)[][] = candles.map((c) => [
-      new Date(c.timestamp).getTime(),
+    // Map a wall-clock timestamp to the index of the candle that covers it
+    // (i.e. the last candle whose timestamp is ≤ the query ms). Falls back
+    // to bounds when the timestamp is outside the candle window.
+    const idxAt = (ms: number): number => {
+      if (candleMs.length === 0) return 0;
+      if (ms <= candleMs[0]) return 0;
+      if (ms >= candleMs[candleMs.length - 1]) return candleMs.length - 1;
+      let idx = 0;
+      for (let i = 0; i < candleMs.length; i++) {
+        if (candleMs[i] <= ms) idx = i;
+        else break;
+      }
+      return idx;
+    };
+
+    const categories = candles.map((c) => c.timestamp);
+    const lastIdx = candles.length - 1;
+    const signalIdx = idxAt(signalMs);
+    const exitIdx = exitMs > 0 ? idxAt(exitMs) : -1;
+    const fillIdx = s.fillAt ? idxAt(new Date(s.fillAt).getTime()) : -1;
+
+    // Candlestick data on a CATEGORY axis is [open, close, low, high]; the
+    // x position is implicit (the index into `categories`).
+    const candleData: [number, number, number, number][] = candles.map((c) => [
       c.open,
       c.close,
       c.low,
       c.high,
     ]);
-    if (lastChartMs > lastCandleMs) {
-      // Add a single placeholder so the axis extends without drawing a bar.
-      candleData.push([lastChartMs, '-', '-', '-', '-']);
-    }
 
     // Decimal precision: match the price's natural scale (4-digit JPY pairs,
     // 5-digit majors).
@@ -2656,45 +2673,45 @@ export class SignalSensitivityPageComponent implements OnInit {
       s.outcome === 'HitTP' ? '#1f8a3d' : s.outcome === 'HitSL' ? '#c4290a' : '#0071e3';
 
     // Filled bands from signal-fire onwards (TP zone above/below entry, SL
-    // zone on the other side). Time-axis xAxis values are ms timestamps.
+    // zone on the other side). On a category axis xAxis values are indices
+    // into `categories`.
     const markAreaData: any[][] = [
       [
         {
           yAxis: s.entryPrice,
-          xAxis: signalMs,
+          xAxis: signalIdx,
           itemStyle: { color: 'rgba(31, 138, 61, 0.12)' },
           name: 'TP zone',
         },
-        { yAxis: s.originalTP, xAxis: lastChartMs },
+        { yAxis: s.originalTP, xAxis: lastIdx },
       ],
       [
         {
           yAxis: s.entryPrice,
-          xAxis: signalMs,
+          xAxis: signalIdx,
           itemStyle: { color: 'rgba(196, 41, 10, 0.12)' },
           name: 'SL zone',
         },
-        { yAxis: s.originalSL, xAxis: lastChartMs },
+        { yAxis: s.originalSL, xAxis: lastIdx },
       ],
     ];
 
-    // Markers at exact (timestamp, price) coordinates:
-    //   * Entry dot at the FILL bar timestamp (when the limit was actually
-    //     filled). Black to match the Entry horizontal-line styling.
-    //   * Exit dot at the exit bar timestamp with outcome colour.
+    // Markers at (categoryIndex, price) coordinates:
+    //   * Entry dot at the FILL bar index. Black to match the Entry line.
+    //   * Exit dot at the exit bar index with outcome colour.
     const markPointData: any[] = [];
-    if (s.fillAt) {
+    if (fillIdx >= 0) {
       markPointData.push({
-        coord: [new Date(s.fillAt).getTime(), s.entryPrice],
+        coord: [fillIdx, s.entryPrice],
         symbol: 'circle',
         symbolSize: 10,
         itemStyle: { color: '#000000', borderColor: '#ffffff', borderWidth: 2 },
         label: { show: false },
       });
     }
-    if (exitMs > 0 && s.exitPrice !== null) {
+    if (exitIdx >= 0 && s.exitPrice !== null) {
       markPointData.push({
-        coord: [exitMs, s.exitPrice],
+        coord: [exitIdx, s.exitPrice],
         symbol: 'circle',
         symbolSize: 10,
         itemStyle: { color: exitColour, borderColor: '#ffffff', borderWidth: 2 },
@@ -2720,12 +2737,13 @@ export class SignalSensitivityPageComponent implements OnInit {
     const yMax = Math.max(...allYs);
     const yPad = (yMax - yMin) * 0.15;
 
-    // Reference price lines (Entry/TP/SL/scenario/Exit). With a time axis,
-    // each line is just two points: (signalMs, y) → (lastChartMs, y). The
-    // line is invisible before signalMs because it has no data there.
+    // Reference price lines (Entry/TP/SL/scenario/Exit). On a category
+    // axis, each two-point line is [signalIdx, y] → [lastIdx, y] using
+    // category-index x coords. The line is invisible before signalIdx
+    // because there's no data point in that range.
     const flat = (y: number): [number, number][] => [
-      [signalMs, y],
-      [lastChartMs, y],
+      [signalIdx, y],
+      [lastIdx, y],
     ];
     const lineSeries: any[] = [
       {
@@ -2852,21 +2870,25 @@ export class SignalSensitivityPageComponent implements OnInit {
       });
     }
 
-    // Default zoom: ~24 bars of pre-signal context to chart end. With time
-    // axis we use startValue/endValue (ms) instead of percentages.
-    const focusStartMs = signalMs - 24 * tfMs;
+    // Default zoom: ~24 bars of pre-signal context to chart end. Category-
+    // axis dataZoom uses category indices (start/end), not ms.
+    const focusStartIdx = Math.max(0, signalIdx - 24);
 
     return <EChartsOption>{
       animation: false,
       grid: { left: 70, right: 100, top: 32, bottom: 64 },
       xAxis: {
-        type: 'time',
+        type: 'category',
+        data: categories,
+        boundaryGap: true,
         axisLabel: {
-          formatter: (val: number) => {
+          hideOverlap: true,
+          formatter: (val: string) => {
             const d = new Date(val);
             return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
           },
         },
+        splitLine: { show: false },
       },
       yAxis: {
         type: 'value',
@@ -2883,21 +2905,25 @@ export class SignalSensitivityPageComponent implements OnInit {
           const arr = Array.isArray(params) ? params : [params];
           const candle = arr.find((p: any) => p.seriesType === 'candlestick');
           if (!candle?.data) return '';
-          const [ts, o, cl, lo, hi] = candle.data;
-          const d = new Date(ts);
+          // On the category axis we recover the OHLC + ts via dataIndex —
+          // the candlestick series no longer carries the timestamp in the
+          // data tuple.
+          const c = candles[candle.dataIndex];
+          if (!c) return '';
+          const d = new Date(c.timestamp);
           const label = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-          return `<b>${label}</b><br/>O ${o}<br/>H ${hi}<br/>L ${lo}<br/>C ${cl}`;
+          return `<b>${label}</b><br/>O ${fmt(c.open)}<br/>H ${fmt(c.high)}<br/>L ${fmt(c.low)}<br/>C ${fmt(c.close)}`;
         },
       },
       dataZoom: [
-        { type: 'inside', xAxisIndex: 0, startValue: focusStartMs, endValue: lastChartMs },
+        { type: 'inside', xAxisIndex: 0, startValue: focusStartIdx, endValue: lastIdx },
         {
           type: 'slider',
           xAxisIndex: 0,
           height: 24,
           bottom: 8,
-          startValue: focusStartMs,
-          endValue: lastChartMs,
+          startValue: focusStartIdx,
+          endValue: lastIdx,
         },
       ],
       series: [
@@ -2919,14 +2945,13 @@ export class SignalSensitivityPageComponent implements OnInit {
           markLine: {
             symbol: 'none',
             z: 12,
-            // Vertical timing markers placed by exact timestamp (time axis),
-            // not by category index. Signal-fire at 9:32 and exit at 9:33
-            // sit 1 minute apart visually rather than collapsing onto the
-            // same bar. Solid blue for signal-fire, dashed outcome-colour
-            // for exit.
+            // Vertical timing markers snapped to category indices — signal-
+            // fire and exit are placed at the bar that covers each event's
+            // timestamp. The exact wall-clock time is preserved in the
+            // label so the resolution loss is informational only, not lost.
             data: [
               {
-                xAxis: signalMs,
+                xAxis: signalIdx,
                 lineStyle: { color: '#0071e3', type: 'solid', width: 2, opacity: 0.9 },
                 label: {
                   show: true,
@@ -2940,10 +2965,10 @@ export class SignalSensitivityPageComponent implements OnInit {
                   fontSize: 11,
                 },
               },
-              ...(exitMs > 0 && s.exitAt
+              ...(exitIdx >= 0 && s.exitAt
                 ? [
                     {
-                      xAxis: exitMs,
+                      xAxis: exitIdx,
                       lineStyle: {
                         color: exitColour,
                         type: 'dashed' as const,

@@ -127,6 +127,20 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'llm-backtest',
+        data: { breadcrumb: 'LLM Backtest' },
+        loadChildren: () =>
+          import('@features/llm-backtest/llm-backtest.routes').then((m) => m.LLM_BACKTEST_ROUTES),
+      },
+      {
+        path: 'prompt-templates',
+        data: { breadcrumb: 'Prompt Templates' },
+        loadChildren: () =>
+          import('@features/prompt-templates/prompt-templates.routes').then(
+            (m) => m.PROMPT_TEMPLATES_ROUTES,
+          ),
+      },
+      {
         path: 'ml-models',
         data: { breadcrumb: 'ML Models' },
         loadChildren: () =>

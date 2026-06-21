@@ -68,7 +68,32 @@ export interface SpotSweepConfig {
   /** Entry-style bias for the LLM: 'Any' | 'Stop' (prefer breakout) | 'Limit'
    *  (prefer pullback). */
   entryPreference: EntryPreference;
+  /**
+   * Max pair analyses the worker may run in parallel within a single tick.
+   * The worker fans out across every eligible pair each tick; this caps
+   * concurrent LLM calls. 1 = legacy "one pair per tick" mode; default 6
+   * is a good balance against LLM provider rate limits; > 10 will usually
+   * hit them.
+   */
+  maxParallelAnalyses: number;
+  /**
+   * How long a pair stays excluded after an analysis returned no trade
+   * signal (LLM Hold). Avoids paying for repeat calls on a symbol whose
+   * structure won't have changed inside the same bar. Set to 0 to disable;
+   * default 1800 (30 min). A signal-producing analysis clears any prior
+   * cooldown on that pair.
+   */
+  holdCooldownSeconds: number;
+  /**
+   * Trading sessions the sweep is active in. Empty = always-on (no session
+   * restriction). Otherwise the worker parks whenever UTC time falls
+   * outside every selected session window.
+   */
+  activeSessions: SweepSession[];
 }
+
+export type SweepSession = 'Sydney' | 'Tokyo' | 'London' | 'NewYork';
+export const ALL_SWEEP_SESSIONS: SweepSession[] = ['Sydney', 'Tokyo', 'London', 'NewYork'];
 
 export type EntryPreference = 'Any' | 'Stop' | 'Limit';
 
@@ -102,11 +127,45 @@ export interface SpotSweepStatus {
   /** ISO timestamp of the current analysis start. */
   startedAt: string | null;
   nextEligibleSymbol: string | null;
+  /**
+   * ISO timestamp at which the worker's current sleep expires and the next
+   * tick fires. Set during Cooldown (and parked Idle); null while actively
+   * analysing. Drives the cockpit's per-second countdown — UI shows
+   * `(nextRunAt - now)`.
+   */
+  nextRunAt: string | null;
   lastResult: SweepLastResult | null;
   today: SweepTodayCounters;
   killSwitchActive: boolean;
   eligibleCount: number;
   excludedCount: number;
+  /** Pairs currently in the Hold cooldown — analysed recently, returned no signal. */
+  holdCooldowns: SweepHoldCooldown[];
+  /**
+   * Pairs the worker skipped this tick because they failed the eligibility
+   * check (open position / pending order / pending signal / no EA coverage).
+   * Hold-cooldown'd pairs are not included here — those are in
+   * {@link holdCooldowns}.
+   */
+  excludedPairs: SweepExcludedPair[];
+}
+
+/** One per-pair Hold cooldown entry surfaced to the cockpit. */
+export interface SweepHoldCooldown {
+  symbol: string;
+  timeframe: string;
+  /** ISO timestamp of when the worker stamped the cooldown. */
+  placedAtUtc: string;
+  /** ISO timestamp of when the worker will re-analyse this pair. */
+  expiresAtUtc: string;
+}
+
+/** One per-pair exclusion entry surfaced to the cockpit. */
+export interface SweepExcludedPair {
+  symbol: string;
+  timeframe: string;
+  /** Short operator-facing label, e.g. "Open position", "No EA coverage". */
+  reason: string;
 }
 
 /** One past sweep cycle, for the history table. */
@@ -148,4 +207,10 @@ export const DEFAULT_SWEEP_CONFIG: SpotSweepConfig = {
   respectKillSwitch: true,
   skipWhenInsufficientMargin: true,
   entryPreference: 'Any',
+  maxParallelAnalyses: 6,
+  holdCooldownSeconds: 1800,
+  // Empty = always-on (no session restriction). Operators opt in by ticking
+  // sessions on the cockpit; sessions overlap so e.g. picking London+NewYork
+  // covers 08:00-22:00 UTC including the 13-16 overlap.
+  activeSessions: [],
 };

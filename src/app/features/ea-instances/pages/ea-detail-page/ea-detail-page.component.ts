@@ -158,6 +158,79 @@ interface ConfigForm {
           </dl>
         </section>
 
+        <!-- ── Trading enable / disable ─────────────────────────────────
+             Operator-facing wrapper over the COMPLIANCE safety stop:
+             "Disable trading" halts new order placement (open positions
+             keep their trailing stops); "Enable trading" clears it.  The
+             posture is read from the live-state envelope so the control
+             reflects the EA's *actual* state — including auto-recovering
+             stops and kill switches it can't itself clear — rather than
+             just the last command we queued.  The richer per-category /
+             kill-switch / flatten actions still live in Operator controls
+             below. -->
+        <section class="trading-control" [attr.data-state]="tradingPosture()">
+          <div class="tc-info">
+            <div class="tc-headline">
+              <span class="tc-label">Trading</span>
+              @switch (tradingPosture()) {
+                @case ('enabled') {
+                  <span class="tc-pill ok">Enabled</span>
+                }
+                @case ('disabled-compliance') {
+                  <span class="tc-pill bad">Disabled</span>
+                }
+                @case ('disabled-auto') {
+                  <span class="tc-pill warn">Paused · {{ safetyCategory() }}</span>
+                }
+                @case ('disabled-kill') {
+                  <span class="tc-pill bad">Disabled · kill switch</span>
+                }
+                @default {
+                  <span class="tc-pill muted">—</span>
+                }
+              }
+            </div>
+            <span class="tc-desc muted small">
+              @switch (tradingPosture()) {
+                @case ('disabled-compliance') {
+                  New orders halted by an operator safety stop. Open positions keep running.
+                }
+                @case ('disabled-auto') {
+                  Auto-recovering safety stop — clears itself once its condition resolves. Manage in
+                  Operator controls below.
+                }
+                @case ('disabled-kill') {
+                  Kill switch is active. Release it from Operator controls below to resume.
+                }
+                @default {
+                  Halt new order placement without touching open positions.
+                }
+              }
+            </span>
+          </div>
+          <div class="tc-actions">
+            @if (tradingPosture() === 'disabled-compliance') {
+              <button
+                type="button"
+                class="action-btn ok"
+                (click)="askEnableTrading()"
+                [disabled]="submitting()"
+              >
+                Enable trading
+              </button>
+            } @else if (tradingPosture() === 'enabled' || tradingPosture() === 'unknown') {
+              <button
+                type="button"
+                class="action-btn warn"
+                (click)="askDisableTrading()"
+                [disabled]="submitting()"
+              >
+                Disable trading
+              </button>
+            }
+          </div>
+        </section>
+
         <!-- ── Account snapshot ─────────────────────────────────────────
              Broker-synced balance/equity/margin envelope for the EA's
              trading account.  Polled on the same cadence as the rest of
@@ -388,6 +461,66 @@ interface ConfigForm {
                 [disabled]="submitting()"
               >
                 {{ submitting() ? 'Queuing…' : 'Refresh' }}
+              </button>
+            </footer>
+          </div>
+        </div>
+      }
+
+      @if (tradingActionOpen()) {
+        <div class="modal-overlay" (click)="cancelTradingAction()">
+          <div class="modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true">
+            <header class="modal-head">
+              <h2>{{ tradingIntent() === 'disable' ? 'Disable trading' : 'Enable trading' }}</h2>
+              <button
+                type="button"
+                class="close-btn"
+                (click)="cancelTradingAction()"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </header>
+            <p class="modal-target">
+              Target <strong class="mono">{{ ea()?.instanceId }}</strong>
+            </p>
+            <p class="modal-desc">
+              @if (tradingIntent() === 'disable') {
+                Queues a COMPLIANCE safety stop — the EA halts new order placement on its next
+                command poll. Open positions and their trailing stops are unaffected. Re-enable from
+                this page.
+              } @else {
+                Clears the COMPLIANCE safety stop and returns the EA to RUNNING on its next command
+                poll.
+              }
+            </p>
+            <label class="field">
+              <span>Reason {{ tradingIntent() === 'disable' ? '(required)' : '(optional)' }}</span>
+              <textarea
+                rows="2"
+                [(ngModel)]="tradingReason"
+                placeholder="What prompted this action? (audit trail)"
+              ></textarea>
+            </label>
+            <footer class="modal-foot">
+              <button type="button" class="btn btn-secondary" (click)="cancelTradingAction()">
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary"
+                (click)="confirmTradingAction()"
+                [disabled]="
+                  submitting() || (tradingIntent() === 'disable' && !tradingReason.trim())
+                "
+              >
+                {{
+                  submitting()
+                    ? 'Queuing…'
+                    : tradingIntent() === 'disable'
+                      ? 'Disable trading'
+                      : 'Enable trading'
+                }}
               </button>
             </footer>
           </div>
@@ -726,6 +859,78 @@ interface ConfigForm {
         font-size: var(--text-xs);
         font-weight: var(--font-medium);
       }
+      /* ── Trading enable/disable control ──────────────────────────── */
+      .trading-control {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4);
+        flex-wrap: wrap;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-left-width: 3px;
+        border-left-color: var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+      }
+      .trading-control[data-state='enabled'] {
+        border-left-color: #34c759;
+      }
+      .trading-control[data-state='disabled-compliance'],
+      .trading-control[data-state='disabled-kill'] {
+        border-left-color: #ff3b30;
+      }
+      .trading-control[data-state='disabled-auto'] {
+        border-left-color: #ff9500;
+      }
+      .tc-info {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 240px;
+      }
+      .tc-headline {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .tc-label {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      .tc-pill {
+        font-size: var(--text-xs);
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .tc-pill.ok {
+        background: rgba(52, 199, 89, 0.12);
+        color: #248a3d;
+      }
+      .tc-pill.warn {
+        background: rgba(255, 149, 0, 0.12);
+        color: #c93400;
+      }
+      .tc-pill.bad {
+        background: rgba(255, 59, 48, 0.12);
+        color: #d70015;
+      }
+      .tc-pill.muted {
+        background: rgba(0, 0, 0, 0.06);
+        color: var(--text-tertiary);
+      }
+      .tc-desc {
+        max-width: 60ch;
+      }
+      .tc-actions {
+        display: flex;
+        gap: var(--space-2);
+        flex-shrink: 0;
+      }
       .actions-row {
         display: flex;
         gap: var(--space-3);
@@ -839,7 +1044,8 @@ interface ConfigForm {
         color: var(--text-secondary);
         font-weight: var(--font-medium);
       }
-      .field input {
+      .field input,
+      .field textarea {
         padding: 6px 10px;
         border-radius: var(--radius-sm);
         border: 1px solid var(--border);
@@ -847,6 +1053,11 @@ interface ConfigForm {
         color: var(--text-primary);
         font-size: var(--text-sm);
         font-variant-numeric: tabular-nums;
+      }
+      .field textarea {
+        resize: vertical;
+        min-height: 48px;
+        font-family: inherit;
       }
       .modal-foot {
         display: flex;
@@ -932,6 +1143,36 @@ export class EaDetailPageComponent {
   protected readonly account = computed(() => this.detailResource.value()?.account ?? null);
   /** Phase-4: the inputs sub-object the EA emits inside the rich-state envelope. */
   protected readonly adminInputs = computed(() => this.adminState()?.inputs ?? null);
+
+  /** Active safety-stop category from the live-state envelope (null / 'NONE' = not stopped). */
+  protected readonly safetyCategory = computed(() => this.adminState()?.safetyStopCategory ?? null);
+
+  /**
+   * Operator-facing trading posture, derived from the live-state envelope so
+   * the toggle reflects the EA's real state rather than the last command we
+   * sent:
+   *   - 'enabled'              — running; "Disable trading" available.
+   *   - 'disabled-compliance'  — operator COMPLIANCE safety stop; this page can
+   *                              clear it via "Enable trading".
+   *   - 'disabled-auto'        — INFRA/DAILY_RESET/CAS_EXHAUSTION stop; clears
+   *                              itself, so no manual toggle (managed below).
+   *   - 'disabled-kill'        — kill switch active; release lives in Operator
+   *                              controls, not here.
+   *   - 'unknown'              — no envelope yet; still allow Disable since
+   *                              forceSafetyStop is valid regardless.
+   */
+  protected readonly tradingPosture = computed<
+    'enabled' | 'disabled-compliance' | 'disabled-auto' | 'disabled-kill' | 'unknown'
+  >(() => {
+    const st = this.adminState();
+    if (!st) return 'unknown';
+    if (st.killSwitchActive) return 'disabled-kill';
+    const cat = st.safetyStopCategory;
+    if (cat && cat !== 'NONE') {
+      return cat === 'COMPLIANCE' ? 'disabled-compliance' : 'disabled-auto';
+    }
+    return 'enabled';
+  });
 
   /**
    * detailResource's fetcher reads `this.ea()?.instanceId` — but on initial
@@ -1120,6 +1361,89 @@ export class EaDetailPageComponent {
           }
         },
         error: () => this.notify.error('Refresh request failed.'),
+      });
+  }
+
+  // Trading enable/disable modal -----------------------------------------
+  //
+  // Thin operator wrapper over the COMPLIANCE safety stop: "disable" queues
+  // forceSafetyStop(COMPLIANCE) (halt new orders, positions untouched),
+  // "enable" queues clearSafetyStop.  Shares the `submitting` signal with the
+  // other detail-page modals — they're mutually exclusive on screen.
+  protected readonly tradingActionOpen = signal(false);
+  protected readonly tradingIntent = signal<'disable' | 'enable' | null>(null);
+  protected tradingReason = '';
+
+  protected askDisableTrading(): void {
+    this.tradingReason = '';
+    this.tradingIntent.set('disable');
+    this.tradingActionOpen.set(true);
+  }
+
+  protected askEnableTrading(): void {
+    this.tradingReason = '';
+    this.tradingIntent.set('enable');
+    this.tradingActionOpen.set(true);
+  }
+
+  protected cancelTradingAction(): void {
+    if (this.submitting()) return;
+    this.tradingActionOpen.set(false);
+    this.tradingIntent.set(null);
+  }
+
+  protected confirmTradingAction(): void {
+    const ea = this.ea();
+    const intent = this.tradingIntent();
+    if (!ea || !intent) return;
+    const reason = this.tradingReason.trim() || null;
+    // Reason is mandatory on disable (matches the control-panel safety-stop
+    // convention); optional on the un-do.
+    if (intent === 'disable' && !reason) return;
+
+    this.submitting.set(true);
+    const call =
+      intent === 'disable'
+        ? this.admin.forceSafetyStop(ea.instanceId, { category: 'COMPLIANCE', reason })
+        : this.admin.clearSafetyStop(ea.instanceId, { reason });
+
+    call
+      .pipe(
+        finalize(() => {
+          this.submitting.set(false);
+          this.tradingActionOpen.set(false);
+          this.tradingIntent.set(null);
+          this.resource.refresh();
+          this.detailResource.refresh();
+        }),
+      )
+      .subscribe({
+        next: (res) => {
+          if (res.status) {
+            this.notify.success(
+              intent === 'disable'
+                ? `Trading disabled for EA ${ea.instanceId}.`
+                : `Trading re-enabled for EA ${ea.instanceId}.`,
+            );
+            this.auditTrail
+              .create({
+                entityType: 'EAInstance',
+                entityId: ea.id,
+                decisionType: intent === 'disable' ? 'EAForceSafetyStop' : 'EAClearSafetyStop',
+                outcome: 'Queued',
+                reason,
+                contextJson: JSON.stringify({
+                  instanceId: ea.instanceId,
+                  category: intent === 'disable' ? 'COMPLIANCE' : null,
+                }),
+                source: 'AdminUI',
+              })
+              .subscribe({ error: () => undefined });
+          } else {
+            this.notify.error(res.message ?? 'Command queue failed.');
+          }
+        },
+        error: () => this.notify.error('Command queue failed.'),
       });
   }
 

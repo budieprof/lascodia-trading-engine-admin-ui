@@ -50,6 +50,13 @@ import { ThemeService } from '@core/theme/theme.service';
         border-radius: var(--radius-md);
         padding: var(--card-padding);
         box-shadow: var(--shadow-sm);
+        /* Clip ECharts canvas at the card boundary. Without this, a chart
+           whose options request more vertical space than the card body
+           allocates (dense axis labels, oversize legends, etc.) renders
+           past the card's visible border and overlaps whatever sits
+           below it. Tooltips are unaffected — ECharts attaches them to
+           the document body, not this container. */
+        overflow: hidden;
         transition:
           box-shadow var(--dur-base) var(--ease-out-soft),
           transform var(--dur-base) var(--ease-out-soft);
@@ -79,6 +86,7 @@ import { ThemeService } from '@core/theme/theme.service';
 
       .chart-body {
         position: relative;
+        overflow: hidden;
       }
 
       .chart-instance {

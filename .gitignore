@@ -4,6 +4,7 @@
 # Build
 /dist
 /tmp
+/.tmp-workflows
 /out-tsc
 
 # IDEs

@@ -31,6 +31,10 @@ import { ChartCardComponent } from '@shared/components/chart-card/chart-card.com
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { CreateSignalDialogComponent } from '../../components/create-signal-dialog/create-signal-dialog.component';
+import {
+  SpotRecChartComponent,
+  SpotRecChartRec,
+} from '@shared/components/spot-rec-chart/spot-rec-chart.component';
 
 type StatusChip = 'all' | TradeSignalStatus;
 type DirectionChip = 'all' | TradeDirection;
@@ -49,6 +53,7 @@ type DirectionChip = 'all' | TradeDirection;
     ConfirmDialogComponent,
     CreateSignalDialogComponent,
     RelativeTimePipe,
+    SpotRecChartComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -195,19 +200,60 @@ type DirectionChip = 'all' | TradeDirection;
         </ng-template>
       </app-data-table>
 
-      <!-- Detail drawer -->
+      <!-- Detail modal -->
       @if (selectedDetail(); as s) {
         <div class="drawer-backdrop" (click)="selectedDetail.set(null)">
           <aside class="drawer" (click)="$event.stopPropagation()" aria-label="Signal details">
             <header class="drawer-head">
-              <div>
-                <h3>Signal #{{ s.id }}</h3>
-                <span class="muted">{{ s.symbol }} · {{ s.direction }} · {{ s.status }}</span>
+              <div class="head-titles">
+                <h2 class="head-title">
+                  <span class="signal-id">Signal #{{ s.id }}</span>
+                  <span class="symbol">{{ s.symbol }}</span>
+                  <span
+                    class="dir-chip"
+                    [class.dir-chip--buy]="s.direction === 'Buy'"
+                    [class.dir-chip--sell]="s.direction === 'Sell'"
+                  >
+                    {{ s.direction === 'Buy' ? '↑ Buy' : '↓ Sell' }}
+                  </span>
+                  <span
+                    class="status-chip"
+                    [class.status-chip--pending]="s.status === 'Pending'"
+                    [class.status-chip--approved]="s.status === 'Approved'"
+                    [class.status-chip--rejected]="s.status === 'Rejected'"
+                    [class.status-chip--executed]="s.status === 'Executed'"
+                    [class.status-chip--expired]="s.status === 'Expired'"
+                  >
+                    {{ s.status }}
+                  </span>
+                </h2>
+                <div class="head-sub">
+                  Generated {{ s.generatedAt | date: 'MMM d, HH:mm' }} UTC · expires
+                  {{ s.expiresAt | date: 'MMM d, HH:mm' }} UTC
+                </div>
               </div>
               <button class="btn-close" (click)="selectedDetail.set(null)" aria-label="Close">
                 ×
               </button>
             </header>
+
+            <!-- Chart pane — Entry / SL / TP visualised over the bar window
+                 straddling generatedAt. Renders only when the signal has the
+                 minimum data needed (symbol + entry/SL/TP triple). Uses the
+                 shared SpotRecChart component (same one the Spot Analysis
+                 Report drawer + Signal Detail page use); timeframe defaults
+                 to H1 because the TradeSignalDto doesn't carry one today. -->
+            @if (canChart(s)) {
+              <section class="drawer-section">
+                <h4>Chart</h4>
+                <app-spot-rec-chart
+                  [symbol]="s.symbol ?? ''"
+                  [timeframe]="'H1'"
+                  [asOfUtc]="s.generatedAt"
+                  [recommendations]="chartRecsFor(s)"
+                />
+              </section>
+            }
 
             <section class="drawer-section">
               <h4>Pricing</h4>
@@ -527,78 +573,196 @@ type DirectionChip = 'all' | TradeDirection;
         background: rgba(255, 59, 48, 0.25);
       }
 
-      /* Detail drawer */
+      /* Detail modal  centered card replacing the prior side-drawer.
+         Class names stay drawer-* because the content classes
+         (drawer-section / drawer-grid) ride along; only the outer chrome
+         was restyled to give the chart pane horizontal room and a more
+         readable Sensitivity-style head. */
       .drawer-backdrop {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.35);
+        background: rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(3px);
+        -webkit-backdrop-filter: blur(3px);
         z-index: 100;
         display: flex;
-        justify-content: flex-end;
+        justify-content: center;
+        align-items: center;
+        padding: 1.5rem;
+        animation: scrimIn 0.12s ease-out;
+      }
+      @keyframes scrimIn {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
       }
       .drawer {
-        width: 100%;
-        max-width: 460px;
-        background: var(--bg-secondary);
-        border-left: 1px solid var(--border);
-        box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+        width: min(1060px, 96vw);
+        max-height: 92vh;
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
         display: flex;
         flex-direction: column;
         overflow-y: auto;
+        scrollbar-gutter: stable;
+        animation: cardIn 0.16s ease-out;
+      }
+      @keyframes cardIn {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
       }
       .drawer-head {
         display: flex;
         justify-content: space-between;
-        align-items: center;
-        padding: var(--space-4) var(--space-5);
+        align-items: flex-start;
+        gap: 1rem;
+        padding: 1rem 1.25rem;
         border-bottom: 1px solid var(--border);
+        background: var(--bg-primary);
+        position: sticky;
+        top: 0;
+        z-index: 1;
       }
-      .drawer-head h3 {
+      .head-titles {
+        min-width: 0;
+      }
+      .head-title {
         margin: 0;
-        font-size: var(--text-base);
-        font-weight: var(--font-semibold);
+        font-size: 1.05rem;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
       }
-      .drawer-head .muted {
-        font-size: var(--text-xs);
+      .head-title .signal-id {
+        color: var(--text-secondary);
+        font-weight: 500;
+      }
+      .head-title .symbol {
+        color: var(--text-primary);
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: 1rem;
+      }
+      /* Direction-tinted chip with subtle border + soft bg. */
+      .dir-chip {
+        font-size: 0.72rem;
+        font-weight: 600;
+        padding: 3px 8px;
+        border-radius: 4px;
+        line-height: 1.1;
+        letter-spacing: 0.02em;
+      }
+      .dir-chip--buy {
+        background: rgba(31, 138, 61, 0.14);
+        color: #1f8a3d;
+        border: 1px solid rgba(31, 138, 61, 0.35);
+      }
+      .dir-chip--sell {
+        background: rgba(196, 41, 10, 0.14);
+        color: #c4290a;
+        border: 1px solid rgba(196, 41, 10, 0.35);
+      }
+      /* Status chip; colour per terminal state. */
+      .status-chip {
+        font-size: 0.72rem;
+        font-weight: 600;
+        padding: 3px 8px;
+        border-radius: 4px;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        letter-spacing: 0.02em;
+      }
+      .status-chip--pending {
+        background: rgba(255, 159, 10, 0.14);
+        color: #b75900;
+      }
+      .status-chip--approved {
+        background: rgba(0, 113, 227, 0.14);
+        color: #0071e3;
+      }
+      .status-chip--rejected {
+        background: rgba(196, 41, 10, 0.14);
+        color: #c4290a;
+      }
+      .status-chip--executed {
+        background: rgba(31, 138, 61, 0.14);
+        color: #1f8a3d;
+      }
+      .status-chip--expired {
+        background: rgba(110, 110, 115, 0.18);
+        color: var(--text-secondary);
+      }
+      .head-sub {
+        margin-top: 0.3rem;
+        font-size: 0.78rem;
+        color: var(--text-secondary);
       }
       .btn-close {
         background: transparent;
         border: none;
-        font-size: 22px;
+        font-size: 1.5rem;
         cursor: pointer;
-        color: var(--text-tertiary);
+        line-height: 1;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        color: var(--text-secondary);
+        flex-shrink: 0;
+      }
+      .btn-close:hover {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
       }
       .drawer-section {
-        padding: var(--space-3) var(--space-5);
+        padding: 1rem 1.25rem;
         border-bottom: 1px solid var(--border);
       }
-      .drawer-section h4 {
-        margin: 0 0 var(--space-2);
-        font-size: var(--text-xs);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--text-tertiary);
-        font-weight: var(--font-semibold);
+      .drawer-section:last-of-type {
+        border-bottom: none;
       }
+      .drawer-section h4 {
+        margin: 0 0 0.6rem;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-secondary);
+        font-weight: 600;
+      }
+      /* Three-column grid on the wider modal so the Pricing / Lifecycle /
+         ML rows breathe; collapses to two columns on narrower viewports. */
       .drawer-grid {
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: var(--space-2) var(--space-3);
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 0.85rem 1.5rem;
         margin: 0;
       }
       .drawer-grid dt {
         font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
         color: var(--text-tertiary);
-        margin: 0;
+        margin: 0 0 2px;
+        font-weight: 600;
       }
       .drawer-grid dd {
-        margin: 2px 0 0;
-        font-size: var(--text-sm);
+        margin: 0;
+        font-size: 0.92rem;
         color: var(--text-primary);
       }
       .drawer-grid dd.mono {
         font-family: 'SF Mono', 'Fira Code', monospace;
-        font-size: var(--text-xs);
+        font-size: 0.86rem;
       }
       /* Pre-shrinkage TP shown under the executed Take profit value when the
          engine's SpotAnalysisTakeProfitShrinkage moved it. Muted + smaller so
@@ -653,13 +817,19 @@ type DirectionChip = 'all' | TradeDirection;
         word-break: break-word;
       }
       .drawer-actions {
-        padding: var(--space-4) var(--space-5);
+        padding: 1rem 1.25rem;
         display: flex;
-        gap: var(--space-2);
+        gap: 0.6rem;
+        background: var(--bg-secondary);
+        border-top: 1px solid var(--border);
+        position: sticky;
+        bottom: 0;
+        z-index: 1;
       }
       .drawer-actions .btn {
         flex: 1;
-        height: 36px;
+        height: 40px;
+        font-weight: 600;
       }
     `,
   ],
@@ -699,6 +869,34 @@ export class SignalsPageComponent {
 
   readonly selectedDetail = signal<TradeSignalDto | null>(null);
   readonly showCreateDialog = signal(false);
+
+  /**
+   * Chart-eligibility predicate. The shared `SpotRecChart` needs a symbol
+   * plus the full Entry / SL / TP triple to render reference lines; signals
+   * missing any of these (e.g. an orphan row, or a manual-entry placeholder
+   * that hasn't been priced) skip the chart silently rather than render an
+   * empty plot.
+   */
+  canChart(s: TradeSignalDto): boolean {
+    return !!s.symbol && s.entryPrice != null && s.stopLoss != null && s.takeProfit != null;
+  }
+
+  /**
+   * Wraps the TradeSignal into the chart's rec-shape (singular array — the
+   * signal carries one Entry / SL / TP triple, but the chart component is
+   * the same multi-rec one the Spot Analysis Report drawer uses).
+   */
+  chartRecsFor(s: TradeSignalDto): SpotRecChartRec[] {
+    return [
+      {
+        label: `Signal #${s.id} ${s.direction}`,
+        action: s.direction,
+        entryPrice: s.entryPrice,
+        stopLoss: s.stopLoss,
+        takeProfit: s.takeProfit,
+      },
+    ];
+  }
 
   /**
    * Fired by `<app-create-signal-dialog>` after a successful signal creation.

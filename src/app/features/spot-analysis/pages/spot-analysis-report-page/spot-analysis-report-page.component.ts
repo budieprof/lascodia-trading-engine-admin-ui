@@ -22,6 +22,10 @@ import {
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
+import {
+  SpotRecChartComponent,
+  SpotRecChartRec,
+} from '@shared/components/spot-rec-chart/spot-rec-chart.component';
 
 /** Rolling-window options. */
 const WINDOWS: { label: string; hours: number }[] = [
@@ -70,6 +74,7 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
     PageHeaderComponent,
     MetricCardComponent,
     ChartCardComponent,
+    SpotRecChartComponent,
   ],
   template: `
     <div class="page">
@@ -410,6 +415,30 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
 
           <!-- Replayed prose -->
           @if (detail(); as d) {
+            <!-- Chart pane — visualise the bar the LLM analysed plus a few
+                 forward bars, with every actionable recommendation overlaid
+                 as Entry/SL/TP mark-lines. Hold-only invocations still
+                 render the candle structure unannotated, so the operator
+                 can see what the LLM was looking at. -->
+            @if (chartRecsFor(d); as recs) {
+              <section class="drawer-section">
+                <h4>
+                  Chart
+                  @if (recs.length > 0) {
+                    <span class="muted small">— {{ recs.length }} actionable overlaid</span>
+                  } @else {
+                    <span class="muted small">— Hold only, no overlay</span>
+                  }
+                </h4>
+                <app-spot-rec-chart
+                  [symbol]="d.symbol"
+                  [timeframe]="d.timeframe"
+                  [asOfUtc]="d.invokedAt"
+                  [recommendations]="recs"
+                />
+              </section>
+            }
+
             @if (d.analysis) {
               <section class="drawer-section">
                 <h4>Analysis brief</h4>
@@ -1262,6 +1291,23 @@ export class SpotAnalysisReportPageComponent implements OnInit {
     if (target === this.currentPage()) return;
     this.currentPage.set(target);
     this.load();
+  }
+
+  /**
+   * Maps the detail DTO's recommendations into the chart component's
+   * minimal rec shape. Filters Hold recs implicitly via the chart (Hold
+   * has null entry), but we keep them here so the array length matches
+   * recommendations[] for downstream code that wants both. Labelled by
+   * rank ("#1 Buy", "#2 Sell") because the LLM emits a RANKED ARRAY.
+   */
+  chartRecsFor(d: SpotAnalysisDetailDto): SpotRecChartRec[] {
+    return (d.recommendations ?? []).map((rec, i) => ({
+      label: `#${i + 1} ${rec.action}`,
+      action: rec.action,
+      entryPrice: rec.entryPrice,
+      stopLoss: rec.stopLoss,
+      takeProfit: rec.takeProfit,
+    }));
   }
 
   openDetail(row: SpotAnalysisListItemDto): void {

@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, effect, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  OnDestroy,
+  computed,
+  effect,
+  inject,
+  signal,
+} from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { SpotSweepService } from '@core/services/spot-sweep.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
@@ -6,9 +14,11 @@ import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 import {
   ALL_ACTIVE_SCOPE,
+  ALL_SWEEP_SESSIONS,
   SpotSweepConfig,
   SweepBarPosition,
   SweepLastResult,
+  SweepSession,
 } from '@features/spot-sweep/spot-sweep.types';
 
 /**
@@ -68,10 +78,37 @@ import {
             >
               {{ st.running ? st.phase : 'Idle' }}
             </span>
+            @if (cooldownRemainingSec() !== null) {
+              <span
+                class="countdown-pill"
+                [class.imminent]="cooldownRemainingSec()! <= 5"
+                [title]="
+                  st.phase === 'Cooldown'
+                    ? 'Time until the next sweep tick fires'
+                    : 'Time until the loop re-checks eligibility'
+                "
+              >
+                <span class="countdown-dot"></span>
+                next in <strong class="mono">{{ formatCountdown(cooldownRemainingSec()!) }}</strong>
+              </span>
+            }
+            @if (sessionOpenInSec() !== null) {
+              <span
+                class="countdown-pill session-pill"
+                [class.imminent]="sessionOpenInSec()! <= 60"
+                title="Time until the next selected trading session opens"
+              >
+                <span class="countdown-dot"></span>
+                session opens in
+                <strong class="mono">{{ formatLongCountdown(sessionOpenInSec()!) }}</strong>
+              </span>
+            }
             @if (st.running) {
               <span class="status-line">
-                Analysing <strong class="mono">{{ st.currentSymbol }}</strong> · next
-                <span class="mono">{{ st.nextEligibleSymbol }}</span>
+                Analysing <strong class="mono">{{ st.currentSymbol }}</strong>
+                @if (st.nextEligibleSymbol) {
+                  · next <span class="mono">{{ st.nextEligibleSymbol }}</span>
+                }
               </span>
             } @else {
               <span class="status-line muted">{{ st.idleReason ?? 'Idle' }}</span>
@@ -259,14 +296,87 @@ import {
                 </select>
               </div>
               <div class="field">
-                <label>Interval (seconds between analyses)</label>
+                <label>Interval (seconds between sweep ticks)</label>
                 <input
                   type="number"
                   min="5"
                   [value]="cfg.intervalSeconds"
                   (input)="patch({ intervalSeconds: clampInt($any($event.target).value, 5, 3600) })"
                 />
+                <p class="muted small">
+                  Each tick now analyses every eligible pair in parallel; this is the cooldown
+                  between sweeps of the full list.
+                </p>
               </div>
+              <div class="field">
+                <label>Max parallel analyses</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="16"
+                  [value]="cfg.maxParallelAnalyses"
+                  (input)="
+                    patch({ maxParallelAnalyses: clampInt($any($event.target).value, 1, 16) })
+                  "
+                />
+                <p class="muted small">
+                  Caps concurrent LLM calls per tick. 1 = legacy one-pair-per-tick; 6 is a good
+                  default; > 10 will usually hit provider rate limits.
+                </p>
+              </div>
+              <div class="field">
+                <label>Hold cooldown (seconds)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="86400"
+                  step="60"
+                  [value]="cfg.holdCooldownSeconds"
+                  (input)="
+                    patch({ holdCooldownSeconds: clampInt($any($event.target).value, 0, 86400) })
+                  "
+                />
+                <p class="muted small">
+                  After an analysis returns no signal (Hold), skip that symbol for this many seconds
+                  before re-analysing it. 0 = disable; 1800 (30 min) is a good default. A
+                  signal-producing analysis clears the cooldown.
+                </p>
+              </div>
+            </div>
+
+            <!-- Active trading sessions — when none selected, sweep is
+                 always-on (legacy). When one or more are selected, the
+                 worker parks ticks whose UTC hour falls outside every
+                 selected window. Windows match the chart UI's session bar:
+                 Sydney 22-07 UTC, Tokyo 00-09, London 08-17, NewYork 13-22.
+                 The labels under each box show the UTC window so the
+                 operator doesn't have to remember them. -->
+            <div class="field">
+              <label>Active trading sessions</label>
+              <ul class="session-check-list">
+                @for (s of allSessions; track s.name) {
+                  <li>
+                    <label class="inline-check">
+                      <input
+                        type="checkbox"
+                        [checked]="isSessionSelected(s.name)"
+                        (change)="toggleSession(s.name)"
+                      />
+                      <span>
+                        <strong>{{ s.label }}</strong>
+                        <span class="muted small mono"> · {{ s.window }} UTC</span>
+                      </span>
+                    </label>
+                  </li>
+                }
+              </ul>
+              <p class="muted small">
+                @if (cfg.activeSessions.length === 0) {
+                  Always on — sweep runs 24/5 regardless of session.
+                } @else {
+                  Sweep parks outside the selected window(s).
+                }
+              </p>
             </div>
 
             <!-- Signal expiration — how long a sweep-created signal lives
@@ -471,6 +581,68 @@ import {
                 />
               </div>
             </div>
+
+            <header class="card-head">
+              <h2>Excluded</h2>
+              <span class="muted small">
+                {{ excludedPairs().length }} pair{{ excludedPairs().length === 1 ? '' : 's' }}
+              </span>
+            </header>
+            @if (excludedPairs().length > 0) {
+              <ul class="excluded-list">
+                @for (e of excludedPairs(); track e.symbol + ':' + e.timeframe) {
+                  <li class="excluded-row">
+                    <span class="cool-symbol mono">
+                      {{ e.symbol }}
+                      <span class="cool-tf">· {{ e.timeframe }}</span>
+                    </span>
+                    <span
+                      class="excluded-reason"
+                      [class.no-coverage]="e.reason === 'No EA coverage'"
+                      [class.open-position]="e.reason === 'Open position'"
+                      [class.pending]="
+                        e.reason === 'Pending order' || e.reason === 'Pending signal'
+                      "
+                    >
+                      {{ e.reason }}
+                    </span>
+                  </li>
+                }
+              </ul>
+            } @else {
+              <p class="muted small">All configured pairs are eligible.</p>
+            }
+
+            <header class="card-head">
+              <h2>On hold</h2>
+              <span class="muted small">
+                {{ holdCooldowns().length }} pair{{ holdCooldowns().length === 1 ? '' : 's' }}
+              </span>
+            </header>
+            @if (holdCooldowns().length > 0) {
+              <ul class="cooldown-list">
+                @for (c of holdCooldowns(); track c.symbol + ':' + c.timeframe) {
+                  <li class="cooldown-row">
+                    <span class="cool-symbol mono">
+                      {{ c.symbol }}
+                      <span class="cool-tf">· {{ c.timeframe }}</span>
+                    </span>
+                    <span class="cool-placed muted small">
+                      placed
+                      <span class="mono">{{ c.placedAtUtc | date: 'HH:mm:ss' }}</span>
+                    </span>
+                    <span
+                      class="cool-countdown mono"
+                      [class.imminent]="cooldownExpirySec(c)! <= 30"
+                    >
+                      {{ formatCountdown(cooldownExpirySec(c)!) }}
+                    </span>
+                  </li>
+                }
+              </ul>
+            } @else {
+              <p class="muted small">No pairs currently on Hold cooldown.</p>
+            }
 
             <header class="card-head"><h2>Recent activity</h2></header>
             @if (feed().length > 0) {
@@ -685,6 +857,50 @@ import {
         background: rgba(175, 82, 222, 0.15);
         color: #8944b8;
       }
+      .countdown-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        padding: 3px 10px;
+        border-radius: var(--radius-full);
+        background: rgba(142, 142, 147, 0.12);
+        color: var(--text-secondary);
+        font-variant-numeric: tabular-nums;
+      }
+      .countdown-pill.imminent {
+        background: rgba(255, 149, 0, 0.18);
+        color: #b45309;
+      }
+      .countdown-pill.session-pill {
+        background: rgba(0, 113, 227, 0.12);
+        color: #0071e3;
+      }
+      .countdown-pill.session-pill.imminent {
+        background: rgba(52, 199, 89, 0.18);
+        color: #15803d;
+      }
+      .countdown-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.7;
+        animation: countdown-pulse 1s ease-in-out infinite;
+      }
+      .countdown-pill.imminent .countdown-dot {
+        animation-duration: 0.5s;
+      }
+      @keyframes countdown-pulse {
+        0%,
+        100% {
+          opacity: 0.35;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
       .counters {
         display: grid;
         grid-template-columns: repeat(7, 1fr);
@@ -836,6 +1052,20 @@ import {
       .pair-check-list li {
         display: flex;
       }
+      .session-check-list {
+        list-style: none;
+        margin: 0;
+        padding: 8px 10px;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 6px 16px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+      }
+      .session-check-list li {
+        display: flex;
+      }
       .inline-check {
         display: flex;
         align-items: center;
@@ -909,6 +1139,88 @@ import {
       }
       .feed-outcome {
         color: var(--text-secondary);
+      }
+      .cooldown-list {
+        list-style: none;
+        margin: 0 0 var(--space-3);
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .cooldown-row {
+        display: grid;
+        grid-template-columns: minmax(100px, 1fr) auto auto;
+        gap: var(--space-3);
+        align-items: center;
+        font-size: var(--text-xs);
+        padding: 5px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .cooldown-row:last-child {
+        border-bottom: none;
+      }
+      .cool-symbol {
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      .cool-tf {
+        color: var(--text-tertiary);
+        font-weight: var(--font-medium);
+      }
+      .cool-placed {
+        white-space: nowrap;
+      }
+      .cool-countdown {
+        font-variant-numeric: tabular-nums;
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        background: rgba(175, 82, 222, 0.12);
+        color: #8944b8;
+        font-weight: var(--font-semibold);
+      }
+      .cool-countdown.imminent {
+        background: rgba(52, 199, 89, 0.18);
+        color: #15803d;
+      }
+      .excluded-list {
+        list-style: none;
+        margin: 0 0 var(--space-3);
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .excluded-row {
+        display: grid;
+        grid-template-columns: minmax(100px, 1fr) auto;
+        gap: var(--space-3);
+        align-items: center;
+        font-size: var(--text-xs);
+        padding: 5px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .excluded-row:last-child {
+        border-bottom: none;
+      }
+      .excluded-reason {
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        background: rgba(142, 142, 147, 0.18);
+        color: var(--text-secondary);
+        font-weight: var(--font-medium);
+      }
+      .excluded-reason.no-coverage {
+        background: rgba(255, 149, 0, 0.18);
+        color: #b45309;
+      }
+      .excluded-reason.open-position {
+        background: rgba(52, 199, 89, 0.18);
+        color: #15803d;
+      }
+      .excluded-reason.pending {
+        background: rgba(0, 113, 227, 0.14);
+        color: #0071e3;
       }
       .chip {
         font-size: 10.5px;
@@ -984,7 +1296,7 @@ import {
     `,
   ],
 })
-export class SpotSweepPageComponent {
+export class SpotSweepPageComponent implements OnDestroy {
   private readonly svc = inject(SpotSweepService);
   private readonly accountScope = inject(AccountScopeService);
   private readonly currencyPairs = inject(CurrencyPairsService);
@@ -1022,6 +1334,123 @@ export class SpotSweepPageComponent {
   });
   readonly history = this.historyResource.value;
 
+  /**
+   * Wall-clock signal that ticks every second. Drives the cooldown countdown
+   * — the status poll only fires every 5s, which would make the countdown
+   * jump in 5-second chunks. A separate 1Hz tick keeps the display smooth.
+   */
+  private readonly now = signal(Date.now());
+  private readonly nowTimer = setInterval(() => this.now.set(Date.now()), 1000);
+
+  /**
+   * Seconds remaining until the next sweep tick. Null when the worker is
+   * actively analysing (no countdown applies) or the engine hasn't reported
+   * a `nextRunAt` yet (older engine build). Clamped at 0 — a tick is
+   * imminent past zero, and a negative value would just be visual noise.
+   */
+  readonly cooldownRemainingSec = computed<number | null>(() => {
+    const target = this.status()?.nextRunAt;
+    if (!target) return null;
+    const remainingMs = new Date(target).getTime() - this.now();
+    if (!Number.isFinite(remainingMs)) return null;
+    return Math.max(0, Math.round(remainingMs / 1000));
+  });
+
+  /**
+   * Seconds until the next selected trading session opens, computed against
+   * the configured `activeSessions` list. Null when:
+   *   - No sessions are selected (sweep is always-on; no opening to wait for).
+   *   - Or the current time IS already inside one of the selected sessions
+   *     (the loop is allowed to run; no waiting state to surface).
+   * Otherwise returns the seconds until the soonest selected-session start
+   * time after `now`. Wrap-around sessions (Sydney 22:00) are handled by
+   * shifting the candidate start to tomorrow if today's start has passed.
+   */
+  readonly sessionOpenInSec = computed<number | null>(() => {
+    const cfg = this.config();
+    const selected = cfg?.activeSessions ?? [];
+    if (selected.length === 0) return null;
+
+    const nowMs = this.now();
+    const nowDate = new Date(nowMs);
+    const nowHour = nowDate.getUTCHours();
+
+    // Are we already inside any selected session? If so, no countdown needed.
+    const insideAny = selected.some((name) => {
+      const def = this.allSessions.find((s) => s.name === name);
+      if (!def) return false;
+      // Same UTC-hour inclusion rule the engine uses: [start, end). Wrap
+      // means the window crosses midnight (start > end).
+      return def.startHour <= def.endHour
+        ? nowHour >= def.startHour && nowHour < def.endHour
+        : nowHour >= def.startHour || nowHour < def.endHour;
+    });
+    if (insideAny) return null;
+
+    // Pick the earliest next-open time across selected sessions. For each
+    // session whose start hour hasn't passed today, use today's start; else
+    // use tomorrow's. Minimum delta wins.
+    let bestDeltaMs = Number.POSITIVE_INFINITY;
+    for (const name of selected) {
+      const def = this.allSessions.find((s) => s.name === name);
+      if (!def) continue;
+      const candidate = new Date(nowDate);
+      candidate.setUTCHours(def.startHour, 0, 0, 0);
+      if (candidate.getTime() <= nowMs) {
+        candidate.setUTCDate(candidate.getUTCDate() + 1);
+      }
+      const delta = candidate.getTime() - nowMs;
+      if (delta < bestDeltaMs) bestDeltaMs = delta;
+    }
+    if (!Number.isFinite(bestDeltaMs)) return null;
+    return Math.max(0, Math.round(bestDeltaMs / 1000));
+  });
+
+  /**
+   * Pairs the worker skipped this tick because they failed the eligibility
+   * check. Grouped by reason in the rendered panel so the operator can see
+   * which exposure type is blocking each pair. Sorted by reason then symbol
+   * for stable read order.
+   */
+  readonly excludedPairs = computed(() => {
+    const list = this.status()?.excludedPairs ?? [];
+    return [...list].sort((a, b) => {
+      const r = a.reason.localeCompare(b.reason);
+      return r !== 0 ? r : a.symbol.localeCompare(b.symbol);
+    });
+  });
+
+  /**
+   * Live list of pairs in Hold cooldown, sorted with the soonest-expiring
+   * first so the operator can see which pair is about to come back online.
+   * Re-evaluates on the 1Hz `now` tick so expired entries drop out client-
+   * side immediately — no waiting for the next 5s status poll.
+   */
+  readonly holdCooldowns = computed(() => {
+    const list = this.status()?.holdCooldowns ?? [];
+    const nowMs = this.now();
+    return list
+      .filter((c) => new Date(c.expiresAtUtc).getTime() > nowMs)
+      .sort((a, b) => new Date(a.expiresAtUtc).getTime() - new Date(b.expiresAtUtc).getTime());
+  });
+
+  /** Seconds remaining on a single Hold cooldown row. */
+  cooldownExpirySec(c: { expiresAtUtc: string }): number | null {
+    const remainingMs = new Date(c.expiresAtUtc).getTime() - this.now();
+    if (!Number.isFinite(remainingMs)) return null;
+    return Math.max(0, Math.round(remainingMs / 1000));
+  }
+
+  /** "Hh:mm:ss" / "m:ss" / "Ns" — used when the wait is potentially long. */
+  formatLongCountdown(seconds: number): string {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) return `${h}h ${m.toString().padStart(2, '0')}m`;
+    if (m > 0) return `${m}:${s.toString().padStart(2, '0')}`;
+    return `${s}s`;
+  }
+
   constructor() {
     this.load();
     this.loadCurrencyPairs();
@@ -1033,6 +1462,18 @@ export class SpotSweepPageComponent {
         this.feed.update((f) => [r, ...f].slice(0, 15));
       }
     });
+  }
+
+  ngOnDestroy(): void {
+    clearInterval(this.nowTimer);
+  }
+
+  /** "mm:ss" for the countdown display — drops the leading "00:" when < 1m. */
+  formatCountdown(seconds: number): string {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    if (m === 0) return `${s}s`;
+    return `${m}:${s.toString().padStart(2, '0')}`;
   }
 
   private load(): void {
@@ -1091,6 +1532,43 @@ export class SpotSweepPageComponent {
   }
   cancelLive(): void {
     this.pendingLiveConfirm.set(false);
+  }
+
+  /**
+   * Catalogue rendered by the session checkbox list. Window strings are
+   * descriptive only — the actual gate is enforced server-side in
+   * <c>SpotSweepWorker</c>. Order matches the chart UI's session bar so the
+   * operator's mental model is consistent across pages.
+   * `startHour` / `endHour` (UTC, integer hours) are used client-side to
+   * compute the "session opens in …" countdown when the loop is parked
+   * outside selected sessions.
+   */
+  readonly allSessions: {
+    name: SweepSession;
+    label: string;
+    window: string;
+    startHour: number;
+    endHour: number;
+  }[] = [
+    { name: 'Sydney', label: 'Sydney', window: '22:00 → 07:00', startHour: 22, endHour: 7 },
+    { name: 'Tokyo', label: 'Tokyo', window: '00:00 → 09:00', startHour: 0, endHour: 9 },
+    { name: 'London', label: 'London', window: '08:00 → 17:00', startHour: 8, endHour: 17 },
+    { name: 'NewYork', label: 'New York', window: '13:00 → 22:00', startHour: 13, endHour: 22 },
+  ];
+
+  isSessionSelected(name: SweepSession): boolean {
+    return this.config()?.activeSessions?.includes(name) ?? false;
+  }
+
+  toggleSession(name: SweepSession): void {
+    const cur = this.config();
+    if (!cur) return;
+    const list = cur.activeSessions ?? [];
+    this.patch({
+      activeSessions: list.includes(name)
+        ? (list.filter((s) => s !== name) as SweepSession[])
+        : ([...list, name] as SweepSession[]),
+    });
   }
 
   isPairSelected(symbol: string): boolean {
