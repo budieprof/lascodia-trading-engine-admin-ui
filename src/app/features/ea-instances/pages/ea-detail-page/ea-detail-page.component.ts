@@ -77,10 +77,13 @@ interface ConfigForm {
     <div class="page">
       <app-page-header
         [title]="ea() ? 'EA · ' + ea()!.instanceId : 'EA Detail'"
-        [subtitle]="
-          ea() ? 'Trading account #' + ea()!.tradingAccountId + ' · ' + ea()!.eaVersion : 'Loading…'
-        "
+        [subtitle]="ea() ? 'Trading account #' + ea()!.tradingAccountId : 'Loading…'"
       >
+        @if (ea(); as eaSnap) {
+          <span slot="title-after" class="version-pill mono" [title]="'EA binary version'"
+            >v{{ eaSnap.eaVersion }}</span
+          >
+        }
         <a routerLink="/ea-instances" class="btn btn-secondary">← All EA Instances</a>
         <button
           type="button"
@@ -713,6 +716,23 @@ interface ConfigForm {
         background: rgba(0, 113, 227, 0.12);
         color: #0040dd;
         margin-left: 6px;
+      }
+      /* ── Page-header version pill ────────────────────────────────────
+         Sits next to the InstanceId in the page title so operators can
+         spot which EA build is reporting without scanning the metadata
+         strip. Quiet styling — slate background, monospace — so a stale
+         vs. current version reads at a glance but doesn't compete with
+         the status pill below. */
+      .version-pill {
+        font-size: var(--text-xs);
+        padding: 2px 8px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary, rgba(120, 120, 128, 0.16));
+        color: var(--text-secondary);
+        border: 1px solid var(--border);
+        font-weight: var(--font-medium);
+        letter-spacing: var(--tracking-tight);
+        line-height: 1.4;
       }
       /* ── Account snapshot card ───────────────────────────────────── */
       .account-block {

@@ -7,7 +7,10 @@ import { Component, input, ChangeDetectionStrategy } from '@angular/core';
   template: `
     <div class="page-header">
       <div class="header-left">
-        <h1 class="title">{{ title() }}</h1>
+        <div class="title-row">
+          <h1 class="title">{{ title() }}</h1>
+          <ng-content select="[slot=title-after]" />
+        </div>
         @if (subtitle()) {
           <p class="subtitle">{{ subtitle() }}</p>
         }
@@ -44,6 +47,13 @@ import { Component, input, ChangeDetectionStrategy } from '@angular/core';
         height: 3px;
         border-radius: 2px;
         background: linear-gradient(90deg, var(--accent), rgba(10, 132, 255, 0));
+      }
+
+      .title-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        flex-wrap: wrap;
       }
 
       .title {
