@@ -146,6 +146,7 @@ import {
       [busy]="actionBusy()"
       (openChange)="chartOpen.set($event)"
       (actionConfirmed)="onClosePosition()"
+      (slTpModified)="onSlTpModified()"
     />
   `,
   styles: [
@@ -384,6 +385,7 @@ export class EAPositionsPanelComponent {
           `The engine queues a ClosePosition EA command and transitions Open → Closing; the EA acknowledges ` +
           `when MT5 confirms the broker-side close.`,
       },
+      editable: { kind: 'position', id: p.id },
     });
     this.chartOpen.set(true);
 
@@ -444,5 +446,14 @@ export class EAPositionsPanelComponent {
         },
         error: () => this.notify.error('Failed to queue position close.'),
       });
+  }
+
+  /**
+   * After a chart-driven SL/TP drag is accepted by the engine, refresh
+   * the position list so the row picks up the authoritative new level.
+   * The modal also re-renders its grips off the new selection.
+   */
+  protected onSlTpModified(): void {
+    this.resource.refresh();
   }
 }

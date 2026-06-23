@@ -140,6 +140,7 @@ import {
       [busy]="actionBusy()"
       (openChange)="chartOpen.set($event)"
       (actionConfirmed)="onCancelOrder()"
+      (slTpModified)="onSlTpModified()"
     />
   `,
   styles: [
@@ -420,6 +421,7 @@ export class EAPendingOrdersPanelComponent {
           `The engine transitions the order to Cancelled and queues a CancelOrder EA command if a ` +
           `broker ticket exists.  Orphan-ingested orders without a strategy origin are still cancellable.`,
       },
+      editable: { kind: 'order', id: o.id },
     });
     this.chartOpen.set(true);
 
@@ -469,5 +471,14 @@ export class EAPendingOrdersPanelComponent {
         },
         error: () => this.notify.error('Failed to cancel order.'),
       });
+  }
+
+  /**
+   * After a chart-driven SL/TP drag is accepted by the engine, refresh
+   * the pending-order list so the row picks up the authoritative new
+   * level. The modal also re-renders its grips off the new selection.
+   */
+  protected onSlTpModified(): void {
+    this.resource.refresh();
   }
 }

@@ -13,15 +13,19 @@ import {
   ViewChild,
   ViewEncapsulation,
   computed,
+  effect,
   inject,
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { NgxEchartsModule } from 'ngx-echarts';
 import type { EChartsOption } from 'echarts';
-import { catchError, of } from 'rxjs';
+import { Observable, catchError, of } from 'rxjs';
 
 import { MarketDataService } from '@core/services/market-data.service';
+import { PositionsService } from '@core/services/positions.service';
+import { OrdersService } from '@core/services/orders.service';
+import { NotificationService } from '@core/notifications/notification.service';
 import type { CandleDto, Timeframe } from '@core/api/api.types';
 
 /**
@@ -80,6 +84,25 @@ export interface TradeChartSelection {
     description: string; // e.g. "Closes at the live mid-price ..."
     busyLabel: string; // e.g. "Closing…"
   } | null;
+  /**
+   * Opt-in: when set, the chart renders draggable SL/TP grip circles
+   * pinned to the right axis. The drop-target API is routed by `kind`
+   * — `position` calls PositionsService.modifySlTp; `order` calls
+   * OrdersService.modify. Omit (or set null) to keep the chart
+   * read-only — closed trades and sensitivity previews stay static.
+   */
+  editable?: {
+    kind: 'position' | 'order';
+    id: number;
+  } | null;
+}
+
+/** Emitted after the engine accepts a chart-driven SL/TP modification. */
+export interface SlTpModifiedEvent {
+  kind: 'position' | 'order';
+  id: number;
+  type: 'SL' | 'TP';
+  newPrice: number;
 }
 
 @Component({
@@ -150,7 +173,13 @@ export interface TradeChartSelection {
           } @else if (errorMsg()) {
             <div class="status error">{{ errorMsg() }}</div>
           } @else if (chartOptions(); as opts) {
-            <div echarts [options]="opts" [autoResize]="true" class="chart-instance"></div>
+            <div
+              echarts
+              [options]="opts"
+              [autoResize]="true"
+              class="chart-instance"
+              (chartInit)="onChartInit($event)"
+            ></div>
             <div class="chart-legend">
               <span class="legend-item">
                 <span class="dot dot--entry"></span>
@@ -465,6 +494,13 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
    * until the parent flips `[busy]` back to false and then closes us.
    */
   @Output() readonly actionConfirmed = new EventEmitter<void>();
+  /**
+   * Emitted after the engine accepts a chart-driven SL/TP drag. The parent
+   * panel routes this to its resource refresh so the row gets the
+   * authoritative engine-side price back. Only fires when `selection.editable`
+   * is set; static charts never emit.
+   */
+  @Output() readonly slTpModified = new EventEmitter<SlTpModifiedEvent>();
   /** Set by the parent while the service call is in flight to disable inputs. */
   @Input() busy = false;
 
@@ -485,8 +521,41 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
   protected readonly confirmArmed = signal(false);
 
   private readonly marketData = inject(MarketDataService);
+  private readonly positionsSvc = inject(PositionsService);
+  private readonly ordersSvc = inject(OrdersService);
+  private readonly notify = inject(NotificationService);
   private readonly cdr = inject(ChangeDetectorRef);
   private viewReady = false;
+
+  // ── chart-driven SL/TP drag state ────────────────────────────────────────
+  /** ECharts instance — captured via (chartInit). Null until the chart renders. */
+  private echartsInstance: any = null;
+  /** True while a grip is mid-drag. Suppresses grip rebuilds so the preview
+   *  line and the cursor-tracked circle don't fight each other. */
+  private dragInProgress = false;
+  /** When non-null, a modify call is in flight — refuse re-entry. Cleared in
+   *  the subscribe completion. Keyed by editable.id so a fresh selection
+   *  (different position/order) is never blocked by a prior in-flight call. */
+  private modifyingId: number | null = null;
+
+  constructor() {
+    // Re-install drag grips after each candle reload. The effect depends on
+    // `candles()`, so it fires when the timeframe changes or a new selection
+    // triggers a fresh fetch. Microtask defer lets ngx-echarts apply the
+    // option update before we call convertToPixel.
+    effect(() => {
+      this.candles(); // dep
+      if (!this.echartsInstance) return;
+      if (this.dragInProgress) return;
+      Promise.resolve().then(() => this.refreshGrips());
+    });
+  }
+
+  /** Captures the ECharts instance for grip positioning + drag wiring. */
+  protected onChartInit(ec: any): void {
+    this.echartsInstance = ec;
+    Promise.resolve().then(() => this.refreshGrips());
+  }
 
   ngAfterViewInit(): void {
     this.viewReady = true;
@@ -657,6 +726,293 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
           }
         }
         this.cdr.markForCheck();
+      });
+  }
+
+  // ── chart-driven SL/TP drag implementation ──────────────────────────────
+  //
+  // Mirrors the pattern in `app-trading-chart.makeSlTpHandle` — a draggable
+  // circle pinned ~18px inside the right axis tick zone. ECharts gives us
+  // `ondragstart/ondrag/ondragend` callbacks on `graphic` elements; we
+  // gate live grip rebuilds with `dragInProgress` so the cursor-tracked
+  // circle doesn't get yanked back to the engine-side level mid-drag.
+
+  /**
+   * Rebuilds the SL/TP grips against the current price levels. Called
+   * after each candle reload (via the effect) and right after chart init.
+   * No-op when the selection isn't editable or the chart isn't live yet.
+   */
+  private refreshGrips(): void {
+    const ec = this.echartsInstance;
+    const s = this.selection;
+    if (!ec) return;
+    if (!s?.editable) {
+      // Editable was unset (or never present) — clear any existing grips so
+      // a stale handle doesn't linger when the modal swaps to a static
+      // selection (closed trade, sensitivity preview, etc.).
+      try {
+        ec.setOption({ graphic: [] });
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    const handles: any[] = [];
+    if (s.stopLoss !== null) {
+      const h = this.makeSlTpHandle('SL', s.stopLoss, '#c4290a');
+      if (h) handles.push(h);
+    }
+    if (s.takeProfit !== null) {
+      const h = this.makeSlTpHandle('TP', s.takeProfit, '#1f8a3d');
+      if (h) handles.push(h);
+    }
+    try {
+      ec.setOption({ graphic: handles });
+    } catch {
+      /* ignore — next refresh will retry */
+    }
+  }
+
+  /**
+   * Builds one draggable grip for a given SL or TP level. Returns null if
+   * the chart's coordinate system isn't ready (e.g. mid-resize) — the
+   * effect will rebuild on the next candle update.
+   */
+  private makeSlTpHandle(kind: 'SL' | 'TP', price: number, color: string): any | null {
+    const ec = this.echartsInstance;
+    const s = this.selection;
+    if (!ec || !s?.editable) return null;
+    try {
+      const pixel = ec.convertToPixel({ gridIndex: 0 }, [0, price]);
+      const pixelY = Array.isArray(pixel) ? pixel[1] : NaN;
+      if (!Number.isFinite(pixelY)) return null;
+
+      const gridModel = ec.getModel?.()?.getComponent?.('grid', 0);
+      const rect = gridModel?.coordinateSystem?.getRect?.() ?? gridModel?.getRect?.();
+      if (!rect) return null;
+      // Pin the grip ~18px inside the right axis tick zone — between the
+      // dashed price line and its end-label badge.
+      const handleX = rect.x + rect.width - 18;
+      const yMin = rect.y;
+      const yMax = rect.y + rect.height;
+      const editableId = s.editable.id;
+
+      return {
+        id: `sltp-${kind}-${editableId}`,
+        type: 'circle',
+        shape: { r: 6 },
+        position: [handleX, pixelY],
+        draggable: 'vertical',
+        cursor: 'ns-resize',
+        z: 100,
+        invisible: false,
+        style: {
+          fill: color,
+          stroke: '#ffffff',
+          lineWidth: 2,
+          shadowBlur: 4,
+          shadowColor: 'rgba(0,0,0,0.25)',
+        },
+        ondragstart: () => {
+          this.dragInProgress = true;
+        },
+        ondrag: (params: any) => {
+          if (!this.echartsInstance) return;
+          const t = params?.target;
+          if (!t) return;
+          if (t.y < yMin) t.y = yMin;
+          else if (t.y > yMax) t.y = yMax;
+          const converted = this.echartsInstance.convertFromPixel({ gridIndex: 0 }, [0, t.y]);
+          const dragPrice = Array.isArray(converted) ? converted[1] : NaN;
+          if (!Number.isFinite(dragPrice) || dragPrice <= 0) return;
+          this.previewSlTpLine(kind, dragPrice, color);
+        },
+        ondragend: (params: any) => {
+          if (!this.echartsInstance) {
+            this.dragInProgress = false;
+            return;
+          }
+          const newPixelY = params?.target?.y;
+          if (!Number.isFinite(newPixelY)) {
+            this.dragInProgress = false;
+            this.refreshGrips();
+            return;
+          }
+          const converted = this.echartsInstance.convertFromPixel({ gridIndex: 0 }, [0, newPixelY]);
+          const newPrice = Array.isArray(converted) ? converted[1] : NaN;
+          if (!Number.isFinite(newPrice) || newPrice <= 0) {
+            this.dragInProgress = false;
+            this.refreshGrips();
+            return;
+          }
+          this.confirmAndSubmitSlTp(kind, price, newPrice);
+        },
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Live-preview helper called from `ondrag`. Updates the SL/TP line series
+   * by name so the dashed price line tracks the grip without waiting for a
+   * server round-trip. The level only shows from the reference time onward
+   * (matches the static rendering).
+   */
+  private previewSlTpLine(kind: 'SL' | 'TP', price: number, color: string): void {
+    const ec = this.echartsInstance;
+    const s = this.selection;
+    if (!ec || !s) return;
+    const candles = this.candles();
+    if (candles.length === 0) return;
+    const precision = s.referencePrice > 50 ? 3 : 5;
+    const refMs = new Date(s.referenceTime).getTime();
+    const candleMs = candles.map((c) => new Date(c.timestamp).getTime());
+    let refIdx = 0;
+    for (let i = 0; i < candleMs.length; i++) {
+      if (candleMs[i] <= refMs) refIdx = i;
+      else break;
+    }
+    const data = candles.map((_, i) => (i >= refIdx ? price : null));
+    try {
+      ec.setOption({
+        series: [
+          {
+            name: kind,
+            type: 'line',
+            data,
+            endLabel: {
+              show: true,
+              formatter: `${kind} ${price.toFixed(precision)}`,
+              backgroundColor: color,
+              color: '#fff',
+              padding: [3, 7],
+              borderRadius: 3,
+              fontWeight: 'bold',
+              fontSize: 11,
+            },
+          },
+        ],
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Confirm dialog + service dispatch for a chart-driven SL/TP change.
+   * Routes by `editable.kind`: positions → PositionsService.modifySlTp;
+   * orders → OrdersService.modify. Snaps the grip back to the engine-side
+   * price on cancel / validation failure / refusal.
+   */
+  private confirmAndSubmitSlTp(kind: 'SL' | 'TP', oldPrice: number, newPrice: number): void {
+    const s = this.selection;
+    if (!s?.editable) {
+      this.dragInProgress = false;
+      this.refreshGrips();
+      return;
+    }
+    const editable = s.editable;
+    const precision = s.referencePrice > 50 ? 3 : 5;
+    const rounded = +newPrice.toFixed(precision);
+    if (rounded === +oldPrice.toFixed(precision)) {
+      // No-op drag — snap back without bothering the operator.
+      this.dragInProgress = false;
+      this.refreshGrips();
+      return;
+    }
+    if (this.modifyingId === editable.id) {
+      // A previous modification is still in-flight — refuse and snap back.
+      this.dragInProgress = false;
+      this.refreshGrips();
+      return;
+    }
+
+    // Direction-aware sanity check — SL must stay on the loss side, TP on
+    // the profit side. Brokers reject violations anyway, but catching it
+    // here gives the operator immediate feedback instead of waiting for
+    // an EA round-trip.
+    const isBuy = s.direction === 'Buy';
+    if (kind === 'SL') {
+      const valid = isBuy ? rounded < s.referencePrice : rounded > s.referencePrice;
+      if (!valid) {
+        this.notify.error(
+          `SL must be ${isBuy ? 'below' : 'above'} entry (${s.referencePrice.toFixed(precision)}).`,
+        );
+        this.dragInProgress = false;
+        this.refreshGrips();
+        return;
+      }
+    } else {
+      const valid = isBuy ? rounded > s.referencePrice : rounded < s.referencePrice;
+      if (!valid) {
+        this.notify.error(
+          `TP must be ${isBuy ? 'above' : 'below'} entry (${s.referencePrice.toFixed(precision)}).`,
+        );
+        this.dragInProgress = false;
+        this.refreshGrips();
+        return;
+      }
+    }
+
+    const verb = kind === 'SL' ? 'Stop-Loss' : 'Take-Profit';
+    const subject = editable.kind === 'position' ? 'position' : 'pending order';
+    const ok = window.confirm(
+      `Move ${verb} on ${subject} #${editable.id}\n` +
+        `from ${oldPrice.toFixed(precision)} to ${rounded.toFixed(precision)}?\n\n` +
+        `The engine will queue an EA command so MT5 applies the new level broker-side.`,
+    );
+    if (!ok) {
+      this.dragInProgress = false;
+      this.refreshGrips();
+      return;
+    }
+
+    this.modifyingId = editable.id;
+    const stopLoss = kind === 'SL' ? rounded : null;
+    const takeProfit = kind === 'TP' ? rounded : null;
+    // Union the two service shapes to `Observable<{ status; message? }>` —
+    // we only use those two response fields, so casting to a structural
+    // common parent keeps the call site free of branching pipes.
+    const call$: Observable<{ status: boolean; message?: string } | null> =
+      editable.kind === 'position'
+        ? (this.positionsSvc.modifySlTp(editable.id, stopLoss, takeProfit) as Observable<{
+            status: boolean;
+            message?: string;
+          }>)
+        : (this.ordersSvc.modify(editable.id, { stopLoss, takeProfit }) as Observable<{
+            status: boolean;
+            message?: string;
+          }>);
+
+    call$
+      .pipe(
+        catchError((err: any) => {
+          const msg = (err?.error?.message as string | undefined) ?? err?.message ?? String(err);
+          this.notify.error(`${verb} update failed: ${msg}`);
+          return of(null);
+        }),
+      )
+      .subscribe((res) => {
+        this.modifyingId = null;
+        this.dragInProgress = false;
+        if (res?.status) {
+          this.notify.success(
+            `${verb} on ${subject} #${editable.id} → ${rounded.toFixed(precision)} queued for MT5.`,
+          );
+          this.slTpModified.emit({
+            kind: editable.kind,
+            id: editable.id,
+            type: kind,
+            newPrice: rounded,
+          });
+          // Parent's resource.refresh() will push a new selection with the
+          // authoritative engine-side price; the effect rebuilds grips
+          // automatically on the resulting candle reload.
+        } else {
+          if (res) this.notify.error(res.message ?? `${verb} update refused.`);
+          this.refreshGrips();
+        }
       });
   }
 
