@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { catchError, map, of, switchMap } from 'rxjs';
@@ -7,7 +7,13 @@ import type { EChartsOption } from 'echarts';
 
 import { EAInstancesService } from '@core/services/ea-instances.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
-import type { CurrencyPairDto, EAInstanceDto, EAInstanceStatus } from '@core/api/api.types';
+import { TradingAccountsService } from '@core/services/trading-accounts.service';
+import type {
+  CurrencyPairDto,
+  EAInstanceDto,
+  EAInstanceStatus,
+  TradingAccountDto,
+} from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -34,6 +40,7 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
     CardSkeletonComponent,
     EmptyStateComponent,
     DatePipe,
+    DecimalPipe,
     FormsModule,
     RouterLink,
     FleetActionsBarComponent,
@@ -208,6 +215,33 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
                       {{ uptimeLabel(i) }}
                     </dd>
                   </div>
+                  <div>
+                    <dt>Equity</dt>
+                    <dd
+                      class="mono"
+                      [class.warn]="syncTier(i) === 'stale'"
+                      [class.bad]="syncTier(i) === 'dead'"
+                      [title]="syncTitle(i)"
+                    >
+                      @if (accountOf(i); as a) {
+                        {{ a.equity | number: '1.2-2' }}
+                        <span class="muted">{{ accountCurrency(i) }}</span>
+                      } @else {
+                        —
+                      }
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Balance</dt>
+                    <dd class="mono" [title]="syncTitle(i)">
+                      @if (accountOf(i); as a) {
+                        {{ a.balance | number: '1.2-2' }}
+                        <span class="muted">{{ accountCurrency(i) }}</span>
+                      } @else {
+                        —
+                      }
+                    </dd>
+                  </div>
                   <div class="full">
                     <dt>Owned symbols ({{ symbolsOf(i).length }})</dt>
                     <dd>
@@ -244,6 +278,8 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
                   <th>Status</th>
                   <th>Instance</th>
                   <th>Account</th>
+                  <th class="num">Equity</th>
+                  <th class="num">Balance</th>
                   <th class="num">Symbols</th>
                   <th>Heartbeat</th>
                   <th>Uptime</th>
@@ -264,6 +300,25 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
                     </td>
                     <td class="mono name" [title]="i.instanceId">{{ i.instanceId }}</td>
                     <td class="mono">{{ i.tradingAccountId }}</td>
+                    <td
+                      class="num mono"
+                      [class.warn]="syncTier(i) === 'stale'"
+                      [class.bad]="syncTier(i) === 'dead'"
+                      [title]="syncTitle(i)"
+                    >
+                      @if (accountOf(i); as a) {
+                        {{ a.equity | number: '1.2-2' }}
+                      } @else {
+                        —
+                      }
+                    </td>
+                    <td class="num mono" [title]="syncTitle(i)">
+                      @if (accountOf(i); as a) {
+                        {{ a.balance | number: '1.2-2' }}
+                      } @else {
+                        —
+                      }
+                    </td>
                     <td class="num mono">{{ symbolsOf(i).length }}</td>
                     <td
                       class="mono"
@@ -794,6 +849,7 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
 export class EAInstancesPageComponent {
   private readonly service = inject(EAInstancesService);
   private readonly currencyPairsService = inject(CurrencyPairsService);
+  private readonly tradingAccountsService = inject(TradingAccountsService);
 
   private readonly resource = createPolledResource(
     () =>
@@ -836,6 +892,36 @@ export class EAInstancesPageComponent {
         ),
     { intervalMs: 60_000 },
   );
+
+  // Live trading-account snapshot — used by the EA instance card to show
+  // the current balance + equity for each EA's owning account.  Polled at
+  // the same cadence as the broker-snapshot worker's sync (~15s) so the
+  // card is at most one tick stale.  Probe-and-fetch like the pairs path
+  // so a fleet with many accounts loads in one round-trip.
+  private readonly accountsResource = createPolledResource(
+    () =>
+      this.tradingAccountsService.list({ currentPage: 1, itemCountPerPage: 1 }).pipe(
+        switchMap((probe) => {
+          const total = probe.data?.pager?.totalItemCount ?? 0;
+          if (total === 0) return of([] as TradingAccountDto[]);
+          return this.tradingAccountsService
+            .list({ currentPage: 1, itemCountPerPage: Math.min(total, 500) })
+            .pipe(map((r) => r.data?.data ?? []));
+        }),
+        catchError(() => of([] as TradingAccountDto[])),
+      ),
+    { intervalMs: 15_000 },
+  );
+
+  // Lookup map (account id → DTO) so the card's per-row helpers are O(1)
+  // instead of scanning the accounts list per row.  Falls back to an empty
+  // Map while the first fetch is in flight so the dt rows render the em
+  // dash placeholder gracefully.
+  private readonly accountsById = computed(() => {
+    const m = new Map<number, TradingAccountDto>();
+    for (const a of this.accountsResource.value() ?? []) m.set(a.id, a);
+    return m;
+  });
 
   readonly instances = computed(() => this.resource.value() ?? []);
   readonly loading = computed(() => this.resource.loading() && this.resource.value() === null);
@@ -1067,5 +1153,43 @@ export class EAInstancesPageComponent {
     if (elapsed < 3_600_000) return `${Math.round(elapsed / 60_000)}m`;
     if (elapsed < 86_400_000) return `${(elapsed / 3_600_000).toFixed(1)}h`;
     return `${Math.round(elapsed / 86_400_000)}d`;
+  }
+
+  /**
+   * Resolve the trading-account record backing an EA instance card.
+   * Returns null until the first accounts fetch lands — the template
+   * renders an em dash placeholder in that window.
+   */
+  accountOf(instance: EAInstanceDto): TradingAccountDto | null {
+    return this.accountsById().get(instance.tradingAccountId) ?? null;
+  }
+
+  /** Account currency code (e.g. "USD"). Falls back to the empty string. */
+  accountCurrency(instance: EAInstanceDto): string {
+    return this.accountOf(instance)?.currency ?? '';
+  }
+
+  /**
+   * Tier the equity/balance freshness off the account's lastSyncedAt so
+   * the card can dim/highlight the value when the broker snapshot is
+   * stale.  Mirrors the heartbeat tier semantics — the engine's broker-
+   * snapshot worker pushes a sync every ~15s during market hours; past
+   * 60s we treat it as stale.
+   */
+  syncTier(instance: EAInstanceDto): 'fresh' | 'stale' | 'dead' | 'unknown' {
+    const a = this.accountOf(instance);
+    if (!a?.lastSyncedAt) return 'unknown';
+    const elapsed = Date.now() - new Date(a.lastSyncedAt).getTime();
+    if (elapsed < 30_000) return 'fresh';
+    if (elapsed < 60_000) return 'stale';
+    return 'dead';
+  }
+
+  /** Optional tooltip on the equity/balance row — surfaces the broker
+   *  sync timestamp so operators can spot a stuck account snapshot. */
+  syncTitle(instance: EAInstanceDto): string {
+    const a = this.accountOf(instance);
+    if (!a?.lastSyncedAt) return 'No broker snapshot yet';
+    return `Last broker sync: ${new Date(a.lastSyncedAt).toLocaleString()}`;
   }
 }
