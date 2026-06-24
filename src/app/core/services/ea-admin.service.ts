@@ -7,6 +7,7 @@ import type {
   ClearSafetyStopRequest,
   EAAuditTimelineItem,
   EAAuditTimelineQuery,
+  EAFillModeConfig,
   EAFleetItem,
   EAInstanceDetail,
   EALogTimelineItem,
@@ -26,6 +27,7 @@ import type {
   ResetCircuitBreakerRequest,
   ResponseData,
   TriggerKillSwitchRequest,
+  UpdateEAFillModeRequest,
   UpdateInstanceConfigRequest,
 } from '@core/api/api.types';
 
@@ -235,6 +237,31 @@ export class EAAdminService {
   ): Observable<ResponseData<string>> {
     return this.api.post<ResponseData<string>>(
       `${this.base}/${encodeURIComponent(instanceId)}/config`,
+      this.withInstanceId(instanceId, body),
+    );
+  }
+
+  /**
+   * GET /admin/ea/{instanceId}/fill-mode — current per-EA fill mode and the
+   * compile-time default. Drives the toggle on the EA detail page.
+   */
+  getFillMode(instanceId: string): Observable<ResponseData<EAFillModeConfig>> {
+    return this.api.get<ResponseData<EAFillModeConfig>>(
+      `${this.base}/${encodeURIComponent(instanceId)}/fill-mode`,
+    );
+  }
+
+  /**
+   * PUT /admin/ea/{instanceId}/fill-mode — writes one EngineConfig row
+   * (`EA:FillMode:{InstanceId}`). Hot-reloads through EngineConfigCache;
+   * takes effect on the EA's next signal poll without a restart.
+   */
+  updateFillMode(
+    instanceId: string,
+    body: UpdateEAFillModeRequest,
+  ): Observable<ResponseData<number>> {
+    return this.api.put<ResponseData<number>>(
+      `${this.base}/${encodeURIComponent(instanceId)}/fill-mode`,
       this.withInstanceId(instanceId, body),
     );
   }

@@ -16,7 +16,12 @@ import { EAInstancesService } from '@core/services/ea-instances.service';
 import { EAAdminService } from '@core/services/ea-admin.service';
 import { AuditTrailService } from '@core/services/audit-trail.service';
 import { NotificationService } from '@core/notifications/notification.service';
-import type { EAInstanceDetail, EAInstanceDto, UpdateEAConfigRequest } from '@core/api/api.types';
+import type {
+  EAFillMode,
+  EAInstanceDetail,
+  EAInstanceDto,
+  UpdateEAConfigRequest,
+} from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -231,6 +236,108 @@ interface ConfigForm {
                 Disable trading
               </button>
             }
+          </div>
+        </section>
+
+        <!-- ── Fill mode toggle ─────────────────────────────────────────
+             Per-EA execution-mode switch. Controls whether the engine emits
+             the signal's structural entry price on the pending-execution
+             wire payload (Limit — EA posts BUY/SELL_LIMIT at the anchor)
+             or zeroes it so the EA's classifier takes its EXEC_MARKET
+             escape hatch (Market — default).  Hot-reloads via
+             EngineConfigCache on the EA's next poll. -->
+        <section
+          class="fill-mode-panel"
+          [attr.data-mode]="fillModeDraft() ?? fillModeServer() ?? 'Market'"
+        >
+          <div class="fm-info">
+            <div class="fm-headline">
+              <span class="fm-label">Fill mode</span>
+              @if (fillModeServer() === 'Market') {
+                <span class="fm-pill ok">Market</span>
+              } @else if (fillModeServer() === 'Limit') {
+                <span class="fm-pill warn">Limit</span>
+              } @else {
+                <span class="fm-pill muted">…</span>
+              }
+            </div>
+            <span class="fm-desc muted small">
+              @switch (fillModeDraft() ?? fillModeServer()) {
+                @case ('Market') {
+                  Engine zeroes EntryPrice — EA fires at market on signal receipt. Recommended for
+                  continuation theses.
+                }
+                @case ('Limit') {
+                  Engine ships the signal anchor through — EA posts a pending limit at that price.
+                  Use for fade/reversal theses.
+                }
+                @default {
+                  Loading…
+                }
+              }
+            </span>
+          </div>
+          <div class="fm-actions">
+            <div
+              class="fm-toggle"
+              role="radiogroup"
+              aria-label="EA fill mode"
+              [class.is-loading]="fillModeServer() === null"
+            >
+              <button
+                type="button"
+                role="radio"
+                class="fm-opt"
+                [class.active]="(fillModeDraft() ?? fillModeServer()) === 'Market'"
+                [attr.aria-checked]="(fillModeDraft() ?? fillModeServer()) === 'Market'"
+                [disabled]="fillModeServer() === null || savingFillMode()"
+                (click)="setFillMode('Market')"
+              >
+                Market
+              </button>
+              <button
+                type="button"
+                role="radio"
+                class="fm-opt"
+                [class.active]="(fillModeDraft() ?? fillModeServer()) === 'Limit'"
+                [attr.aria-checked]="(fillModeDraft() ?? fillModeServer()) === 'Limit'"
+                [disabled]="fillModeServer() === null || savingFillMode()"
+                (click)="setFillMode('Limit')"
+              >
+                Limit
+              </button>
+            </div>
+            <div class="fm-status small">
+              @if (savingFillMode()) {
+                <span class="muted">Saving…</span>
+              } @else if (fillModeSaveError()) {
+                <span class="bad">{{ fillModeSaveError() }}</span>
+              } @else if (fillModeSaved()) {
+                <span class="ok">Saved · takes effect on next EA poll</span>
+              } @else if (fillModeDirty()) {
+                <span class="muted">Unsaved change</span>
+              } @else {
+                <span class="muted">Default · Market</span>
+              }
+            </div>
+            <div class="fm-buttons">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                (click)="resetFillMode()"
+                [disabled]="!fillModeDirty() || savingFillMode()"
+              >
+                Revert
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary"
+                (click)="saveFillMode()"
+                [disabled]="!fillModeDirty() || savingFillMode()"
+              >
+                {{ savingFillMode() ? 'Saving…' : 'Save' }}
+              </button>
+            </div>
           </div>
         </section>
 
@@ -951,6 +1058,118 @@ interface ConfigForm {
         gap: var(--space-2);
         flex-shrink: 0;
       }
+      /* ── Fill mode toggle ───────────────────────────────────────── */
+      .fill-mode-panel {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4);
+        flex-wrap: wrap;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-left-width: 3px;
+        border-left-color: var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+      }
+      .fill-mode-panel[data-mode='Market'] {
+        border-left-color: #34c759;
+      }
+      .fill-mode-panel[data-mode='Limit'] {
+        border-left-color: #ff9500;
+      }
+      .fm-info {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 240px;
+      }
+      .fm-headline {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .fm-label {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      .fm-pill {
+        font-size: var(--text-xs);
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .fm-pill.ok {
+        background: rgba(52, 199, 89, 0.12);
+        color: #248a3d;
+      }
+      .fm-pill.warn {
+        background: rgba(255, 149, 0, 0.12);
+        color: #c93400;
+      }
+      .fm-pill.muted {
+        background: rgba(0, 0, 0, 0.06);
+        color: var(--text-tertiary);
+      }
+      .fm-desc {
+        max-width: 60ch;
+      }
+      .fm-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        align-items: flex-end;
+        flex-shrink: 0;
+      }
+      .fm-toggle {
+        display: inline-flex;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+        background: var(--bg-primary);
+      }
+      .fm-toggle.is-loading {
+        opacity: 0.5;
+      }
+      .fm-opt {
+        appearance: none;
+        background: transparent;
+        border: none;
+        padding: 8px 18px;
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        color: var(--text-secondary);
+        cursor: pointer;
+        min-width: 80px;
+      }
+      .fm-opt + .fm-opt {
+        border-left: 1px solid var(--border);
+      }
+      .fm-opt.active {
+        background: var(--bg-elevated, rgba(0, 113, 227, 0.12));
+        color: var(--accent-fg, #0040dd);
+        font-weight: var(--font-semibold);
+      }
+      .fm-opt:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+      .fm-status {
+        min-height: 1.2em;
+      }
+      .fm-status .ok {
+        color: #248a3d;
+      }
+      .fm-status .bad {
+        color: #d70015;
+      }
+      .fm-buttons {
+        display: flex;
+        gap: var(--space-2);
+      }
       .actions-row {
         display: flex;
         gap: var(--space-3);
@@ -1519,6 +1738,95 @@ export class EaDetailPageComponent {
           }
         },
         error: () => this.notify.error('Config push failed.'),
+      });
+  }
+
+  // Fill-mode toggle -----------------------------------------------------
+  //
+  // Per-EA execution-mode switch (`EA:FillMode:{InstanceId}` EngineConfig
+  // row).  Loaded once per resolved instanceId; subsequent saves write
+  // straight back and pin the new value into `fillModeServer` so the UI
+  // doesn't need a re-fetch.  Draft/server signals follow the same pattern
+  // as the viability-gates Ghost-outcome panel.
+  protected readonly fillModeServer = signal<EAFillMode | null>(null);
+  protected readonly fillModeDraft = signal<EAFillMode | null>(null);
+  protected readonly savingFillMode = signal(false);
+  protected readonly fillModeSaved = signal(false);
+  protected readonly fillModeSaveError = signal<string | null>(null);
+
+  private lastFillModeInstanceId: string | null = null;
+  private readonly _loadFillMode = effect(() => {
+    const instanceId = this.ea()?.instanceId ?? null;
+    if (!instanceId) return;
+    if (instanceId === this.lastFillModeInstanceId) return;
+    this.lastFillModeInstanceId = instanceId;
+    this.fillModeServer.set(null);
+    this.fillModeDraft.set(null);
+    this.fillModeSaved.set(false);
+    this.fillModeSaveError.set(null);
+    this.admin
+      .getFillMode(instanceId)
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        const mode = (res?.data?.fillMode ?? 'Market') as EAFillMode;
+        this.fillModeServer.set(mode);
+        this.fillModeDraft.set(mode);
+      });
+  });
+
+  protected fillModeDirty(): boolean {
+    const s = this.fillModeServer();
+    const d = this.fillModeDraft();
+    return s !== null && d !== null && s !== d;
+  }
+
+  protected setFillMode(mode: EAFillMode): void {
+    this.fillModeDraft.set(mode);
+    this.fillModeSaved.set(false);
+    this.fillModeSaveError.set(null);
+  }
+
+  protected resetFillMode(): void {
+    this.fillModeDraft.set(this.fillModeServer());
+    this.fillModeSaved.set(false);
+    this.fillModeSaveError.set(null);
+  }
+
+  protected saveFillMode(): void {
+    const ea = this.ea();
+    const draft = this.fillModeDraft();
+    if (!ea || !draft || draft === this.fillModeServer()) return;
+    this.savingFillMode.set(true);
+    this.fillModeSaveError.set(null);
+    this.admin
+      .updateFillMode(ea.instanceId, { fillMode: draft })
+      .pipe(
+        finalize(() => this.savingFillMode.set(false)),
+        catchError((err) => {
+          this.fillModeSaveError.set(err?.error?.message ?? 'Save failed.');
+          return of(null);
+        }),
+      )
+      .subscribe((res) => {
+        if (res === null) return;
+        if (!res.status) {
+          this.fillModeSaveError.set(res.message ?? 'Save failed.');
+          return;
+        }
+        this.fillModeServer.set(draft);
+        this.fillModeSaved.set(true);
+        this.notify.success(`Fill mode set to ${draft} for EA ${ea.instanceId}.`);
+        this.auditTrail
+          .create({
+            entityType: 'EAInstance',
+            entityId: ea.id,
+            decisionType: 'EAUpdateFillMode',
+            outcome: 'Saved',
+            reason: null,
+            contextJson: JSON.stringify({ instanceId: ea.instanceId, fillMode: draft }),
+            source: 'AdminUI',
+          })
+          .subscribe({ error: () => undefined });
       });
   }
 }

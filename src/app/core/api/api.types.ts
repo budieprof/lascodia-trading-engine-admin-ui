@@ -1545,6 +1545,9 @@ export interface EAStatePayload {
   signalsProcessed?: number;
   /** Net daily P&L (account currency) for this instance. */
   dailyPnL?: number;
+  /** True when this instance's DAILY_RESET SAFETY_STOP was triggered by the
+   * daily profit target (vs the daily loss limit). */
+  dailyProfitTargetHit?: boolean;
   /** Broker-time Unix seconds of the most recent signal accepted; 0 = none yet. */
   lastSignalAtUnix?: number;
   /** Engine /health/ping reachable from this EA. */
@@ -1617,6 +1620,8 @@ export interface EAConfigInputs {
   maxPeakDrawdownPct?: number;
   flashCrashPct?: number;
   engineTimeoutSec?: number;
+  dailyProfitTargetAbs?: number;
+  dailyProfitTargetPct?: number;
 
   // Phase-4d: legacy safety knobs (already hot-reloadable via CB.HotReload).
   maxPosPerSymbol?: number;
@@ -2081,6 +2086,7 @@ export interface EAObservabilityHighlights {
   orderQueueSize: number | null;
   orderQueueCapacity: number | null;
   dailyPnL: number | null;
+  dailyProfitTargetHit: boolean | null;
   latencyP95Ms: number | null;
   latencyP99Ms: number | null;
   lastTickAgeSec: number | null;
@@ -2237,6 +2243,8 @@ export interface UpdateInstanceConfigRequest {
   maxPeakDrawdownPct?: number | null;
   flashCrashPct?: number | null;
   engineTimeoutSec?: number | null;
+  dailyProfitTargetAbs?: number | null;
+  dailyProfitTargetPct?: number | null;
 
   // Phase-4c
   engineFailThreshold?: number | null;
@@ -3309,6 +3317,33 @@ export interface UpdateEAConfigRequest {
 
 export interface RefreshSymbolSpecsRequest {
   tradingAccountId: number;
+}
+
+/**
+ * Per-EA order-execution mode (engine side). Controls whether the engine
+ * emits the signal's structural entry price on the pending-execution wire
+ * payload that the EA polls.
+ *
+ *   `Market` — engine zeroes EntryPrice. EA's COrderExecutor classifier
+ *     takes its `entryPrice <= 0 → EXEC_MARKET` branch and fires at market.
+ *   `Limit`  — engine ships the LLM's structural anchor through. EA's
+ *     classifier converts to BUY/SELL_LIMIT (or _STOP) posted at that anchor.
+ *
+ * Default is `Market` (post-e8563e7 behaviour). Configured per EA instance
+ * on the EA detail page; hot-reloads via EngineConfigCache.
+ */
+export type EAFillMode = 'Market' | 'Limit';
+
+/** Response shape from GET /admin/ea/{instanceId}/fill-mode. */
+export interface EAFillModeConfig {
+  instanceId: string;
+  fillMode: EAFillMode;
+  fillModeDefault: EAFillMode;
+}
+
+/** Body shape for PUT /admin/ea/{instanceId}/fill-mode. */
+export interface UpdateEAFillModeRequest {
+  fillMode: EAFillMode;
 }
 
 export interface StrategyTemplateDto {
