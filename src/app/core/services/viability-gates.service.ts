@@ -29,4 +29,14 @@ export class ViabilityGatesService {
   update(gateName: string, body: UpdateViabilityGateRequest): Observable<number> {
     return this.api.putEnvelope<number>(`/viability-gates/${encodeURIComponent(gateName)}`, body);
   }
+
+  /**
+   * Trigger an on-demand ghost-outcome resolution cycle on the engine.
+   * Returns the number of signals the cycle resolved.  Useful after a
+   * gate-config tweak — refreshes the per-gate ghost stats immediately
+   * instead of waiting for the worker's 5-minute poll.
+   */
+  runGhostOutcomeCycle(): Observable<number> {
+    return this.api.postEnvelope<number>('/viability-gates/ghost-outcome/run');
+  }
 }

@@ -38,8 +38,25 @@ import {
         title="Viability Gates"
         subtitle="Configure and operate the 7 structural-conviction gates (E4e..E4j + E4h). Changes hot-reload — they apply to the next analysis without a restart."
       >
+        <button
+          class="btn btn-ghost"
+          type="button"
+          (click)="runGhostCycle()"
+          [disabled]="ghostRunning()"
+          title="Replay rejected signals against subsequent candles to refresh per-gate ghost stats"
+        >
+          @if (ghostRunning()) {
+            Running ghost cycle…
+          } @else {
+            Run ghost-outcome cycle
+          }
+        </button>
         <button class="btn btn-ghost" type="button" (click)="reload()">Reload</button>
       </app-page-header>
+
+      @if (ghostResultMessage(); as msg) {
+        <div class="state-row" [class.error]="ghostError()">{{ msg }}</div>
+      }
 
       @if (loading()) {
         <div class="state-row muted">Loading gate config…</div>
@@ -387,6 +404,10 @@ export class ViabilityGatesPageComponent {
   private readonly saveErrors = signal<Record<string, string>>({});
   readonly windowStartUtc = signal<string>('');
 
+  readonly ghostRunning = signal<boolean>(false);
+  readonly ghostResultMessage = signal<string | null>(null);
+  readonly ghostError = signal<boolean>(false);
+
   /**
    * Source of truth from the server.  Card edits write to {@link drafts}
    * keyed by gate name; dirty-detection compares drafts to this snapshot.
@@ -402,6 +423,42 @@ export class ViabilityGatesPageComponent {
 
   constructor() {
     this.reload();
+  }
+
+  /**
+   * Trigger an on-demand ghost-outcome resolution cycle on the engine.
+   * Engine returns the count of signals resolved; we surface it as a
+   * banner and then refresh the gate list so the new ghost-stats land
+   * in the cards without a manual Reload click.
+   */
+  runGhostCycle(): void {
+    if (this.ghostRunning()) return;
+    this.ghostRunning.set(true);
+    this.ghostError.set(false);
+    this.ghostResultMessage.set(null);
+    this.svc
+      .runGhostOutcomeCycle()
+      .pipe(
+        catchError((err) => {
+          this.ghostError.set(true);
+          this.ghostResultMessage.set(
+            err?.error?.message ?? err?.message ?? 'Ghost-outcome cycle failed.',
+          );
+          this.ghostRunning.set(false);
+          return of(null);
+        }),
+      )
+      .subscribe((resolved) => {
+        if (resolved === null) return;
+        this.ghostError.set(false);
+        this.ghostResultMessage.set(
+          resolved === 0
+            ? 'Ghost-outcome cycle ran — no unresolved candidates this pass (most likely the worker already picked them up in its last 5-min poll).'
+            : `Ghost-outcome cycle resolved ${resolved} signal(s). Stats refreshed below.`,
+        );
+        this.ghostRunning.set(false);
+        this.reload();
+      });
   }
 
   reload(): void {
