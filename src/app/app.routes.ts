@@ -111,6 +111,14 @@ export const routes: Routes = [
           import('@features/spot-sweep/spot-sweep.routes').then((m) => m.SPOT_SWEEP_ROUTES),
       },
       {
+        path: 'viability-gates',
+        data: { breadcrumb: 'Viability Gates' },
+        loadChildren: () =>
+          import('@features/viability-gates/viability-gates.routes').then(
+            (m) => m.VIABILITY_GATES_ROUTES,
+          ),
+      },
+      {
         path: 'analyser-comparison',
         data: { breadcrumb: 'Analyser Comparison' },
         loadChildren: () =>
