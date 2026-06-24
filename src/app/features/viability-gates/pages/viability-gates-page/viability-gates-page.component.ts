@@ -7,6 +7,8 @@ import { ViabilityGatesService } from '@core/services/viability-gates.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import {
   GateThresholdKind,
+  GhostOutcomeConfig,
+  UpdateGhostOutcomeConfigRequest,
   UpdateViabilityGateThresholdItem,
   VIABILITY_GATE_MODES,
   ViabilityGate,
@@ -56,6 +58,172 @@ import {
 
       @if (ghostResultMessage(); as msg) {
         <div class="state-row" [class.error]="ghostError()">{{ msg }}</div>
+      }
+
+      <!-- ── Ghost-outcome worker config panel ───────────────────────────── -->
+      @if (ghostConfigDraft(); as gc) {
+        <section class="ghost-config">
+          <header class="ghost-head">
+            <div>
+              <h2>Ghost-outcome cycle parameters</h2>
+              <p class="muted">
+                Controls the cadence + scope of the rejected-signal replay. Worker reloads on every
+                cycle — saves take effect on the next iteration (no restart).
+              </p>
+            </div>
+            <label class="enabled-toggle">
+              <input
+                type="checkbox"
+                [checked]="gc.enabled"
+                (change)="setGhostEnabled($any($event.target).checked)"
+              />
+              Enabled
+            </label>
+          </header>
+
+          <div class="ghost-grid">
+            <label class="field">
+              <span class="field-label">
+                Poll interval
+                <span class="kind-tag">seconds</span>
+              </span>
+              <input
+                class="control"
+                type="number"
+                [ngModel]="gc.pollIntervalSeconds"
+                (ngModelChange)="setGhostField('pollIntervalSeconds', $event)"
+                [min]="5"
+                [max]="3600"
+                step="1"
+              />
+              <span class="field-default muted">
+                default {{ gc.pollIntervalSecondsDefault }} · range [5, 3600]
+              </span>
+            </label>
+
+            <label class="field">
+              <span class="field-label">
+                Walk window
+                <span class="kind-tag">hours</span>
+              </span>
+              <input
+                class="control"
+                type="number"
+                [ngModel]="gc.walkWindowHours"
+                (ngModelChange)="setGhostField('walkWindowHours', $event)"
+                [min]="1"
+                [max]="168"
+                step="1"
+              />
+              <span class="field-help muted">
+                Forward-walk window used by the replay. Longer = signals get more room to hit TP/SL.
+              </span>
+              <span class="field-default muted">
+                default {{ gc.walkWindowHoursDefault }}h · range [1, 168]
+              </span>
+            </label>
+
+            <label class="field">
+              <span class="field-label">
+                Lookback
+                <span class="kind-tag">hours</span>
+              </span>
+              <input
+                class="control"
+                type="number"
+                [ngModel]="gc.lookbackHours"
+                (ngModelChange)="setGhostField('lookbackHours', $event)"
+                [min]="1"
+                [max]="720"
+                step="1"
+              />
+              <span class="field-help muted">
+                Only resolve signals younger than this. Wider = older fires resolve.
+              </span>
+              <span class="field-default muted">
+                default {{ gc.lookbackHoursDefault }}h · range [1, 720]
+              </span>
+            </label>
+
+            <label class="field">
+              <span class="field-label">
+                Max per cycle
+                <span class="kind-tag">int</span>
+              </span>
+              <input
+                class="control"
+                type="number"
+                [ngModel]="gc.maxSignalsPerCycle"
+                (ngModelChange)="setGhostField('maxSignalsPerCycle', $event)"
+                [min]="1"
+                [max]="5000"
+                step="1"
+              />
+              <span class="field-default muted">
+                default {{ gc.maxSignalsPerCycleDefault }} · range [1, 5000]
+              </span>
+            </label>
+
+            <label class="field">
+              <span class="field-label">
+                Min signal age
+                <span class="kind-tag">seconds</span>
+              </span>
+              <input
+                class="control"
+                type="number"
+                [ngModel]="gc.minSignalAgeSeconds"
+                (ngModelChange)="setGhostField('minSignalAgeSeconds', $event)"
+                [min]="0"
+                [max]="3600"
+                step="1"
+              />
+              <span class="field-help muted">
+                Skip signals younger than this — gives the chart a bar of room before the walk.
+              </span>
+              <span class="field-default muted">
+                default {{ gc.minSignalAgeSecondsDefault }}s · range [0, 3600]
+              </span>
+            </label>
+          </div>
+
+          <footer class="actions">
+            @if (savingGhostConfig()) {
+              <span class="muted">Saving…</span>
+            } @else if (ghostConfigSaved()) {
+              <span class="ok">Saved.</span>
+            } @else if (ghostConfigSaveError()) {
+              <span class="err">{{ ghostConfigSaveError() }}</span>
+            } @else if (ghostConfigDirty()) {
+              <span class="muted">Unsaved changes.</span>
+            }
+            <button
+              class="btn btn-ghost"
+              type="button"
+              (click)="resetGhostConfig()"
+              [disabled]="!ghostConfigDirty() || savingGhostConfig()"
+            >
+              Revert
+            </button>
+            <button
+              class="btn btn-ghost"
+              type="button"
+              (click)="resetGhostConfigToDefaults()"
+              [disabled]="savingGhostConfig()"
+              title="Set every knob to its compile-time default"
+            >
+              Reset to defaults
+            </button>
+            <button
+              class="btn btn-primary"
+              type="button"
+              (click)="saveGhostConfig()"
+              [disabled]="!ghostConfigDirty() || savingGhostConfig()"
+            >
+              Save parameters
+            </button>
+          </footer>
+        </section>
       }
 
       @if (loading()) {
@@ -227,6 +395,44 @@ import {
       }
       .window-note {
         margin: 0 0 var(--space-4);
+      }
+      .ghost-config {
+        background: var(--surface-1);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: var(--space-4);
+        margin-bottom: var(--space-4);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
+      .ghost-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: var(--space-3);
+      }
+      .ghost-head h2 {
+        margin: 0 0 var(--space-1);
+        font-size: var(--text-md);
+        font-weight: var(--font-semibold);
+      }
+      .ghost-head .muted {
+        margin: 0;
+        font-size: var(--text-xs);
+      }
+      .enabled-toggle {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        white-space: nowrap;
+      }
+      .ghost-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: var(--space-3);
       }
       .gate-grid {
         display: grid;
@@ -408,6 +614,14 @@ export class ViabilityGatesPageComponent {
   readonly ghostResultMessage = signal<string | null>(null);
   readonly ghostError = signal<boolean>(false);
 
+  /** Server snapshot of the ghost-outcome worker config (source of truth). */
+  private readonly ghostConfigServer = signal<GhostOutcomeConfig | null>(null);
+  /** Working draft the form binds to. */
+  readonly ghostConfigDraft = signal<GhostOutcomeConfig | null>(null);
+  readonly savingGhostConfig = signal<boolean>(false);
+  readonly ghostConfigSaved = signal<boolean>(false);
+  readonly ghostConfigSaveError = signal<string | null>(null);
+
   /**
    * Source of truth from the server.  Card edits write to {@link drafts}
    * keyed by gate name; dirty-detection compares drafts to this snapshot.
@@ -423,6 +637,124 @@ export class ViabilityGatesPageComponent {
 
   constructor() {
     this.reload();
+    this.reloadGhostConfig();
+  }
+
+  // ── Ghost-outcome config panel ─────────────────────────────────────────
+
+  reloadGhostConfig(): void {
+    this.svc
+      .getGhostOutcomeConfig()
+      .pipe(catchError(() => of(null)))
+      .subscribe((cfg) => {
+        if (!cfg) return;
+        this.ghostConfigServer.set(cfg);
+        this.ghostConfigDraft.set({ ...cfg });
+        this.ghostConfigSaved.set(false);
+        this.ghostConfigSaveError.set(null);
+      });
+  }
+
+  ghostConfigDirty(): boolean {
+    const server = this.ghostConfigServer();
+    const draft = this.ghostConfigDraft();
+    if (!server || !draft) return false;
+    return (
+      server.enabled !== draft.enabled ||
+      server.pollIntervalSeconds !== draft.pollIntervalSeconds ||
+      server.walkWindowHours !== draft.walkWindowHours ||
+      server.lookbackHours !== draft.lookbackHours ||
+      server.maxSignalsPerCycle !== draft.maxSignalsPerCycle ||
+      server.minSignalAgeSeconds !== draft.minSignalAgeSeconds
+    );
+  }
+
+  setGhostEnabled(enabled: boolean): void {
+    const d = this.ghostConfigDraft();
+    if (!d) return;
+    this.ghostConfigDraft.set({ ...d, enabled });
+    this.ghostConfigSaved.set(false);
+    this.ghostConfigSaveError.set(null);
+  }
+
+  setGhostField(
+    key:
+      | 'pollIntervalSeconds'
+      | 'walkWindowHours'
+      | 'lookbackHours'
+      | 'maxSignalsPerCycle'
+      | 'minSignalAgeSeconds',
+    value: number,
+  ): void {
+    const d = this.ghostConfigDraft();
+    if (!d) return;
+    this.ghostConfigDraft.set({ ...d, [key]: value });
+    this.ghostConfigSaved.set(false);
+    this.ghostConfigSaveError.set(null);
+  }
+
+  resetGhostConfig(): void {
+    const server = this.ghostConfigServer();
+    if (!server) return;
+    this.ghostConfigDraft.set({ ...server });
+    this.ghostConfigSaved.set(false);
+    this.ghostConfigSaveError.set(null);
+  }
+
+  resetGhostConfigToDefaults(): void {
+    const d = this.ghostConfigDraft();
+    if (!d) return;
+    this.ghostConfigDraft.set({
+      ...d,
+      pollIntervalSeconds: d.pollIntervalSecondsDefault,
+      walkWindowHours: d.walkWindowHoursDefault,
+      lookbackHours: d.lookbackHoursDefault,
+      maxSignalsPerCycle: d.maxSignalsPerCycleDefault,
+      minSignalAgeSeconds: d.minSignalAgeSecondsDefault,
+    });
+    this.ghostConfigSaved.set(false);
+    this.ghostConfigSaveError.set(null);
+  }
+
+  saveGhostConfig(): void {
+    const server = this.ghostConfigServer();
+    const draft = this.ghostConfigDraft();
+    if (!server || !draft) return;
+
+    const body: UpdateGhostOutcomeConfigRequest = {};
+    if (draft.enabled !== server.enabled) body.enabled = draft.enabled;
+    if (draft.pollIntervalSeconds !== server.pollIntervalSeconds)
+      body.pollIntervalSeconds = draft.pollIntervalSeconds;
+    if (draft.walkWindowHours !== server.walkWindowHours)
+      body.walkWindowHours = draft.walkWindowHours;
+    if (draft.lookbackHours !== server.lookbackHours) body.lookbackHours = draft.lookbackHours;
+    if (draft.maxSignalsPerCycle !== server.maxSignalsPerCycle)
+      body.maxSignalsPerCycle = draft.maxSignalsPerCycle;
+    if (draft.minSignalAgeSeconds !== server.minSignalAgeSeconds)
+      body.minSignalAgeSeconds = draft.minSignalAgeSeconds;
+
+    if (Object.keys(body).length === 0) {
+      this.ghostConfigSaved.set(true);
+      return;
+    }
+
+    this.savingGhostConfig.set(true);
+    this.ghostConfigSaveError.set(null);
+    this.svc
+      .updateGhostOutcomeConfig(body)
+      .pipe(
+        catchError((err) => {
+          this.savingGhostConfig.set(false);
+          this.ghostConfigSaveError.set(err?.error?.message ?? err?.message ?? 'Save failed.');
+          return of(null);
+        }),
+      )
+      .subscribe((written) => {
+        this.savingGhostConfig.set(false);
+        if (written === null) return;
+        this.ghostConfigSaved.set(true);
+        this.reloadGhostConfig();
+      });
   }
 
   /**

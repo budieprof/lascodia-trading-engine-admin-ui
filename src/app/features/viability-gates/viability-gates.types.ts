@@ -90,3 +90,34 @@ export interface UpdateViabilityGateThresholdItem {
 
 /** Mode picker options — used by the UI dropdown. */
 export const VIABILITY_GATE_MODES: ViabilityGateMode[] = ['Enforce', 'Advisory', 'Off'];
+
+/**
+ * Ghost-outcome worker config — operator-tunable knobs controlling the
+ * cadence + scope of the rejected-signal replay.  Mirrors the backend
+ * `GhostOutcomeConfigDto`; defaults are emitted so the UI can render a
+ * "default X" hint and a Revert action.
+ */
+export interface GhostOutcomeConfig {
+  enabled: boolean;
+  pollIntervalSeconds: number;
+  walkWindowHours: number;
+  lookbackHours: number;
+  maxSignalsPerCycle: number;
+  minSignalAgeSeconds: number;
+
+  pollIntervalSecondsDefault: number;
+  walkWindowHoursDefault: number;
+  lookbackHoursDefault: number;
+  maxSignalsPerCycleDefault: number;
+  minSignalAgeSecondsDefault: number;
+}
+
+/** PUT body — supply only the knobs you want to change. */
+export interface UpdateGhostOutcomeConfigRequest {
+  enabled?: boolean | null;
+  pollIntervalSeconds?: number | null;
+  walkWindowHours?: number | null;
+  lookbackHours?: number | null;
+  maxSignalsPerCycle?: number | null;
+  minSignalAgeSeconds?: number | null;
+}

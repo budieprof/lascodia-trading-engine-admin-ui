@@ -2,6 +2,8 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from '@core/api/api.service';
 import {
+  GhostOutcomeConfig,
+  UpdateGhostOutcomeConfigRequest,
   UpdateViabilityGateRequest,
   ViabilityGatesList,
 } from '@features/viability-gates/viability-gates.types';
@@ -38,5 +40,20 @@ export class ViabilityGatesService {
    */
   runGhostOutcomeCycle(): Observable<number> {
     return this.api.postEnvelope<number>('/viability-gates/ghost-outcome/run');
+  }
+
+  /** Read the current GhostOutcomeWorker config (cadence + scope knobs). */
+  getGhostOutcomeConfig(): Observable<GhostOutcomeConfig> {
+    return this.api.getEnvelope<GhostOutcomeConfig>('/viability-gates/ghost-outcome/config');
+  }
+
+  /**
+   * Update one or more GhostOutcomeWorker knobs.  Only non-null fields
+   * are written; the worker re-reads config at the top of every cycle
+   * so changes propagate without a restart.  Returns the number of
+   * EngineConfig rows the backend wrote.
+   */
+  updateGhostOutcomeConfig(body: UpdateGhostOutcomeConfigRequest): Observable<number> {
+    return this.api.putEnvelope<number>('/viability-gates/ghost-outcome/config', body);
   }
 }
