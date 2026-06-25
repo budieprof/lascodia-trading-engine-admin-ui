@@ -3451,6 +3451,71 @@ export interface UpdateEAPendingSignalRevalRequest {
   maxAttempts: number;
 }
 
+/**
+ * One held-rec row surfaced by the cockpit query.  Mirrors the
+ * `PendingSignalRec` entity on the engine side — every field needed
+ * for the operator table without joining back to the resulting
+ * TradeSignal (which only exists post-approval).
+ *
+ * Lifecycle states (`state` field):
+ *  - `Parked` — waiting for price to reach the recommended entry
+ *  - `Revalidating` — LLM call in flight
+ *  - `Approved` — re-confirmed, `resultingTradeSignalId` is populated
+ *  - `Rejected` — LLM said no, or retry budget exhausted
+ *  - `Expired` — `parkExpiresAt` elapsed
+ *  - `Canceled` — operator-initiated cancel
+ *
+ * `revalAuditJson` is a JSON array string:
+ *   `[{at, decision, reason, latencyMs, llmInvocationId?}, ...]`
+ *   one entry per re-validation attempt.
+ */
+export interface PendingSignalRecDto {
+  id: number;
+  symbol: string;
+  direction: 'Buy' | 'Sell';
+  recommendedEntryPrice: number;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  atrAtGeneration: number;
+  confidence: number;
+  timeframe: string;
+  state: 'Parked' | 'Revalidating' | 'Approved' | 'Rejected' | 'Expired' | 'Canceled';
+  createdAt: string;
+  parkExpiresAt: string;
+  signalExpiresAt: string;
+  lastRevalAttemptAt: string | null;
+  revalAttempts: number;
+  terminalReason: string | null;
+  resultingTradeSignalId: number | null;
+  llmInvocationId: number | null;
+  revalAuditJson: string | null;
+}
+
+/** Filter body for POST /admin/pending-signal-recs/query. */
+export interface PendingSignalRecQueryFilter {
+  /** Case-insensitive substring on `symbol`. */
+  search?: string | null;
+  /** Filter by one or more states.  Empty/omitted = all states. */
+  states?: string[] | null;
+}
+
+/**
+ * Full request body for POST /admin/pending-signal-recs/query.
+ * Combines the standard paging envelope with the filter.
+ */
+export interface PendingSignalRecQueryRequest extends PendingSignalRecQueryFilter {
+  pageNumber?: number;
+  pageSize?: number;
+  orderBy?: string | null;
+  orderDirection?: string | null;
+}
+
+/** Body for POST /admin/pending-signal-recs/{id}/cancel. */
+export interface CancelPendingSignalRecRequest {
+  /** Optional operator note recorded in the row's TerminalReason. */
+  reason?: string | null;
+}
+
 export interface StrategyTemplateDto {
   id: number;
   name: string | null;

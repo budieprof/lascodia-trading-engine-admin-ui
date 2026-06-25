@@ -55,6 +55,14 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'pending-signal-recs',
+        data: { breadcrumb: 'Pending Recs' },
+        loadChildren: () =>
+          import('@features/pending-signal-recs/pending-signal-recs.routes').then(
+            (m) => m.PENDING_SIGNAL_RECS_ROUTES,
+          ),
+      },
+      {
         path: 'trading-accounts',
         data: { breadcrumb: 'Trading Accounts' },
         loadChildren: () =>

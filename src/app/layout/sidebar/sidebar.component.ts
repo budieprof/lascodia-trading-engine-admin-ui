@@ -429,6 +429,7 @@ export class SidebarComponent {
         { label: 'Signal Sensitivity', route: '/signal-sensitivity', icon: '🎛' },
         { label: 'Signal Exits', route: '/trade-signals/feedback', icon: '📨' },
         { label: 'Signal Rejections', route: '/rejections', icon: '🚫' },
+        { label: 'Pending Recs', route: '/pending-signal-recs', icon: '⏸' },
         { label: 'Market Data', route: '/market-data', icon: '📈' },
         { label: 'Watchlist', route: '/watchlist', icon: '👁' },
       ],
