@@ -341,6 +341,102 @@ interface ConfigForm {
           </div>
         </section>
 
+        <!-- ── Daily profit target ──────────────────────────────────────
+             Prominent per-instance control. Reads the EA's echoed current
+             target (heartbeat v8.47.210+), lets the operator set/clear it
+             in one place, and badges when it's been reached today. -->
+        <section class="dpt-panel" [class.is-hit]="dptHit()">
+          <div class="dpt-info">
+            <div class="dpt-headline">
+              <span class="dpt-label">Daily profit target</span>
+              @if (dptHit()) {
+                <span class="dpt-pill hit">Reached today</span>
+              } @else if (dptEnabled()) {
+                <span class="dpt-pill on">Armed · {{ dptSummary() }}</span>
+              } @else {
+                <span class="dpt-pill muted">Off</span>
+              }
+            </div>
+            <span class="dpt-desc muted small">
+              When this instance's daily P&amp;L (account equity vs start-of-day) reaches the
+              target, the EA cancels pending orders, flattens open positions, and parks in
+              SAFETY_STOP until the next trading day. Set a $ amount or a % of start-of-day equity
+              (% wins if both are set). 0 disables.
+            </span>
+          </div>
+          <div class="dpt-actions">
+            <div class="dpt-inputs">
+              <label class="dpt-field">
+                <span>Target ($)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputmode="decimal"
+                  [ngModel]="dptAbsDraft()"
+                  (ngModelChange)="onDptAbs($event)"
+                  [disabled]="savingDpt() || !dptLoaded()"
+                />
+              </label>
+              <label class="dpt-field">
+                <span>Target (% equity)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  inputmode="decimal"
+                  [ngModel]="dptPctDraft()"
+                  (ngModelChange)="onDptPct($event)"
+                  [disabled]="savingDpt() || !dptLoaded()"
+                />
+              </label>
+            </div>
+            <div class="dpt-status small">
+              @if (savingDpt()) {
+                <span class="muted">Saving…</span>
+              } @else if (dptSaveError()) {
+                <span class="bad">{{ dptSaveError() }}</span>
+              } @else if (dptSaved()) {
+                <span class="ok">Saved · takes effect on next EA poll</span>
+              } @else if (dptDirty()) {
+                <span class="muted">Unsaved change</span>
+              } @else if (!dptLoaded()) {
+                <span class="muted">Loading current target…</span>
+              } @else if (dptEnabled()) {
+                <span class="muted">Armed</span>
+              } @else {
+                <span class="muted">Disabled</span>
+              }
+            </div>
+            <div class="dpt-buttons">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                (click)="disableDpt()"
+                [disabled]="savingDpt() || !dptEnabled()"
+              >
+                Disable
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                (click)="resetDpt()"
+                [disabled]="savingDpt() || !dptDirty()"
+              >
+                Revert
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary"
+                (click)="saveDpt()"
+                [disabled]="savingDpt() || !dptDirty()"
+              >
+                {{ savingDpt() ? 'Saving…' : 'Save' }}
+              </button>
+            </div>
+          </div>
+        </section>
+
         <!-- ── Account snapshot ─────────────────────────────────────────
              Broker-synced balance/equity/margin envelope for the EA's
              trading account.  Polled on the same cadence as the rest of
@@ -1170,6 +1266,115 @@ interface ConfigForm {
         display: flex;
         gap: var(--space-2);
       }
+      /* ── Daily profit target card ── mirrors the fill-mode panel ── */
+      .dpt-panel {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4);
+        flex-wrap: wrap;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-left-width: 3px;
+        border-left-color: #34c759;
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+      }
+      .dpt-panel.is-hit {
+        border-left-color: #30b0c7;
+        background: rgba(48, 176, 199, 0.06);
+      }
+      .dpt-info {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 240px;
+      }
+      .dpt-headline {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-wrap: wrap;
+      }
+      .dpt-label {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      .dpt-pill {
+        font-size: var(--text-xs);
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .dpt-pill.on {
+        background: rgba(52, 199, 89, 0.12);
+        color: #248a3d;
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .dpt-pill.hit {
+        background: rgba(48, 176, 199, 0.16);
+        color: #0a7a8c;
+      }
+      .dpt-pill.muted {
+        background: rgba(0, 0, 0, 0.06);
+        color: var(--text-tertiary);
+      }
+      .dpt-desc {
+        max-width: 62ch;
+      }
+      .dpt-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        align-items: flex-end;
+        flex-shrink: 0;
+      }
+      .dpt-inputs {
+        display: flex;
+        gap: var(--space-2);
+        align-items: flex-end;
+      }
+      .dpt-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .dpt-field span {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        font-weight: var(--font-medium);
+      }
+      .dpt-field input {
+        width: 130px;
+        padding: 6px 10px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        font-variant-numeric: tabular-nums;
+      }
+      .dpt-field input:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .dpt-status {
+        min-height: 1.2em;
+      }
+      .dpt-status .ok {
+        color: #248a3d;
+      }
+      .dpt-status .bad {
+        color: #d70015;
+      }
+      .dpt-buttons {
+        display: flex;
+        gap: var(--space-2);
+      }
       .actions-row {
         display: flex;
         gap: var(--space-3);
@@ -1824,6 +2029,157 @@ export class EaDetailPageComponent {
             outcome: 'Saved',
             reason: null,
             contextJson: JSON.stringify({ instanceId: ea.instanceId, fillMode: draft }),
+            source: 'AdminUI',
+          })
+          .subscribe({ error: () => undefined });
+      });
+  }
+
+  // Daily profit target --------------------------------------------------
+  //
+  // Per-instance daily profit target ($ or % of start-of-day equity). The
+  // EA echoes its currently-effective target in the heartbeat state envelope
+  // (v8.47.210+); saves push through the admin per-instance config endpoint.
+  // Server signals are seeded once per resolved instance from that echo and
+  // then updated optimistically on save, so the 15s page poll can't clobber
+  // an in-progress edit (the polled value lags the EA applying the push).
+  protected readonly dptAbsServer = signal<number | null>(null);
+  protected readonly dptPctServer = signal<number | null>(null);
+  protected readonly dptAbsDraft = signal<number | null>(null);
+  protected readonly dptPctDraft = signal<number | null>(null);
+  protected readonly savingDpt = signal(false);
+  protected readonly dptSaved = signal(false);
+  protected readonly dptSaveError = signal<string | null>(null);
+  /** True once the current target has been seeded from the EA's state echo. */
+  protected readonly dptLoaded = signal(false);
+
+  private lastDptInstanceId: string | null = null;
+  private readonly _seedDpt = effect(() => {
+    const instanceId = this.ea()?.instanceId ?? null;
+    const state = this.adminState();
+    if (!instanceId) return;
+    if (instanceId !== this.lastDptInstanceId) {
+      // New instance resolved — re-seed from its state on the next tick.
+      this.lastDptInstanceId = instanceId;
+      this.dptLoaded.set(false);
+      this.dptSaved.set(false);
+      this.dptSaveError.set(null);
+    }
+    if (this.dptLoaded()) return; // already seeded for this instance
+    if (state === null) return; // wait for the first state tick
+    const abs = state.dailyProfitTargetAbs ?? 0;
+    const pct = state.dailyProfitTargetPct ?? 0;
+    this.dptAbsServer.set(abs);
+    this.dptPctServer.set(pct);
+    this.dptAbsDraft.set(abs);
+    this.dptPctDraft.set(pct);
+    this.dptLoaded.set(true);
+  });
+
+  protected readonly dptHit = computed(() => this.adminState()?.dailyProfitTargetHit ?? false);
+  protected readonly dptEnabled = computed(
+    () => (this.dptAbsServer() ?? 0) > 0 || (this.dptPctServer() ?? 0) > 0,
+  );
+
+  protected dptSummary(): string {
+    const pct = this.dptPctServer() ?? 0;
+    const abs = this.dptAbsServer() ?? 0;
+    if (pct > 0) return `${pct}% of start equity`;
+    if (abs > 0) return `$${abs}`;
+    return 'off';
+  }
+
+  protected dptDirty(): boolean {
+    return (
+      (this.dptAbsDraft() ?? 0) !== (this.dptAbsServer() ?? 0) ||
+      (this.dptPctDraft() ?? 0) !== (this.dptPctServer() ?? 0)
+    );
+  }
+
+  private parseDptInput(v: number | string | null): number | null {
+    if (v === null || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  protected onDptAbs(v: number | string | null): void {
+    this.dptAbsDraft.set(this.parseDptInput(v));
+    this.dptSaved.set(false);
+    this.dptSaveError.set(null);
+  }
+
+  protected onDptPct(v: number | string | null): void {
+    this.dptPctDraft.set(this.parseDptInput(v));
+    this.dptSaved.set(false);
+    this.dptSaveError.set(null);
+  }
+
+  protected resetDpt(): void {
+    this.dptAbsDraft.set(this.dptAbsServer());
+    this.dptPctDraft.set(this.dptPctServer());
+    this.dptSaved.set(false);
+    this.dptSaveError.set(null);
+  }
+
+  protected disableDpt(): void {
+    this.dptAbsDraft.set(0);
+    this.dptPctDraft.set(0);
+    this.saveDpt();
+  }
+
+  protected saveDpt(): void {
+    const ea = this.ea();
+    if (!ea || !this.dptDirty()) return;
+    const abs = this.dptAbsDraft() ?? 0;
+    const pct = this.dptPctDraft() ?? 0;
+    if (abs < 0 || pct < 0) {
+      this.dptSaveError.set('Targets must be non-negative.');
+      return;
+    }
+    this.savingDpt.set(true);
+    this.dptSaveError.set(null);
+    this.admin
+      .updateInstanceConfig(ea.instanceId, {
+        dailyProfitTargetAbs: abs,
+        dailyProfitTargetPct: pct,
+      })
+      .pipe(
+        finalize(() => this.savingDpt.set(false)),
+        catchError((err) => {
+          this.dptSaveError.set(err?.error?.message ?? 'Save failed.');
+          return of(null);
+        }),
+      )
+      .subscribe((res) => {
+        if (res === null) return;
+        if (!res.status) {
+          this.dptSaveError.set(res.message ?? 'Save failed.');
+          return;
+        }
+        // Optimistic: the EA applies on its next poll, so the live state echo
+        // lags. Pin the saved values as the new baseline so the card is stable.
+        this.dptAbsServer.set(abs);
+        this.dptPctServer.set(pct);
+        this.dptAbsDraft.set(abs);
+        this.dptPctDraft.set(pct);
+        this.dptSaved.set(true);
+        this.notify.success(
+          abs <= 0 && pct <= 0
+            ? `Daily profit target disabled for EA ${ea.instanceId}.`
+            : `Daily profit target updated for EA ${ea.instanceId}.`,
+        );
+        this.auditTrail
+          .create({
+            entityType: 'EAInstance',
+            entityId: ea.id,
+            decisionType: 'EAUpdateConfig',
+            outcome: 'Queued',
+            reason: null,
+            contextJson: JSON.stringify({
+              instanceId: ea.instanceId,
+              dailyProfitTargetAbs: abs,
+              dailyProfitTargetPct: pct,
+            }),
             source: 'AdminUI',
           })
           .subscribe({ error: () => undefined });

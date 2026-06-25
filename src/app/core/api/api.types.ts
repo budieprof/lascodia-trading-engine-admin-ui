@@ -1548,6 +1548,11 @@ export interface EAStatePayload {
   /** True when this instance's DAILY_RESET SAFETY_STOP was triggered by the
    * daily profit target (vs the daily loss limit). */
   dailyProfitTargetHit?: boolean;
+  /** Currently-effective daily profit target ($, account currency). 0 = disabled.
+   * Echoed by the EA heartbeat (v8.47.210+) so the detail page can show what's set. */
+  dailyProfitTargetAbs?: number;
+  /** Currently-effective daily profit target (% of start-of-day equity). 0 = disabled. */
+  dailyProfitTargetPct?: number;
   /** Broker-time Unix seconds of the most recent signal accepted; 0 = none yet. */
   lastSignalAtUnix?: number;
   /** Engine /health/ping reachable from this EA. */
