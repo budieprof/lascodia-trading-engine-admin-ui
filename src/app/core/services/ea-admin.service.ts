@@ -9,6 +9,7 @@ import type {
   EAAuditTimelineQuery,
   EABreakevenExitConfig,
   EAFillModeConfig,
+  EAPendingSignalRevalConfig,
   EAFleetItem,
   EAInstanceDetail,
   EALogTimelineItem,
@@ -30,6 +31,7 @@ import type {
   TriggerKillSwitchRequest,
   UpdateEABreakevenExitRequest,
   UpdateEAFillModeRequest,
+  UpdateEAPendingSignalRevalRequest,
   UpdateInstanceConfigRequest,
 } from '@core/api/api.types';
 
@@ -291,6 +293,32 @@ export class EAAdminService {
   ): Observable<ResponseData<number>> {
     return this.api.put<ResponseData<number>>(
       `${this.base}/${encodeURIComponent(instanceId)}/breakeven-exit`,
+      this.withInstanceId(instanceId, body),
+    );
+  }
+
+  /**
+   * GET /admin/ea/{instanceId}/pending-signal-reval — current park-and-revalidate
+   * config for the trading account that owns the EA + compile-time defaults.
+   * Drives the pending-signal-reval panel on the EA detail page.
+   */
+  getPendingSignalReval(instanceId: string): Observable<ResponseData<EAPendingSignalRevalConfig>> {
+    return this.api.get<ResponseData<EAPendingSignalRevalConfig>>(
+      `${this.base}/${encodeURIComponent(instanceId)}/pending-signal-reval`,
+    );
+  }
+
+  /**
+   * PUT /admin/ea/{instanceId}/pending-signal-reval — writes the five account-scoped
+   * EngineConfig rows that back the mechanic.  Hot-reloads through EngineConfigCache;
+   * takes effect on the next gate/worker cycle without a restart.
+   */
+  updatePendingSignalReval(
+    instanceId: string,
+    body: UpdateEAPendingSignalRevalRequest,
+  ): Observable<ResponseData<number>> {
+    return this.api.put<ResponseData<number>>(
+      `${this.base}/${encodeURIComponent(instanceId)}/pending-signal-reval`,
       this.withInstanceId(instanceId, body),
     );
   }

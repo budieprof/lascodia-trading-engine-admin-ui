@@ -18,6 +18,7 @@ import { AuditTrailService } from '@core/services/audit-trail.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type {
   EABreakevenExitConfig,
+  EAPendingSignalRevalConfig,
   EAFillMode,
   EAInstanceDetail,
   EAInstanceDto,
@@ -501,6 +502,165 @@ interface ConfigForm {
                   [disabled]="!beDirty() || savingBe()"
                 >
                   {{ savingBe() ? 'Saving…' : 'Save' }}
+                </button>
+              </div>
+            } @else {
+              <span class="muted small">Loading…</span>
+            }
+          </div>
+        </section>
+
+        <!-- ── Pending-signal re-validation ─────────────────────────────
+             Per-account "park-and-revalidate" toggle for LLM signals
+             whose entry price is far from market at generation time
+             (measured in ATR units). When enabled, the engine parks
+             these signals in PendingReval status instead of placing
+             stale limits; when price reaches the recommended entry,
+             a re-validation LLM call decides whether to promote the
+             signal (as a market order) or kill it. Off by default.
+             Schema-first deferral — operators can configure thresholds
+             now; the gate + worker land in a follow-up session. -->
+        <section class="be-panel" [attr.data-arm]="psrDraft()?.enabled ? 'on' : 'off'">
+          <div class="be-info">
+            <div class="be-headline">
+              <span class="be-label">Pending-signal re-validation</span>
+              @if (psrServer() === null) {
+                <span class="be-pill muted">…</span>
+              } @else if (psrServer()?.enabled) {
+                <span class="be-pill warn">Armed</span>
+              } @else {
+                <span class="be-pill muted">Off</span>
+              }
+            </div>
+            <span class="be-desc muted small">
+              Park LLM recs whose entry is far from market and re-validate when price reaches it.
+              Threshold is a fraction of the signal-generation ATR. Hot-reloads on the next
+              gate/worker cycle.
+              <em>Gate + worker land in a follow-up — configurable now, inert until then.</em>
+            </span>
+          </div>
+          <div class="be-actions">
+            @if (psrDraft() !== null) {
+              <div class="be-section">
+                <label class="be-row">
+                  <input
+                    type="checkbox"
+                    [checked]="psrDraft()!.enabled"
+                    [disabled]="savingPsr()"
+                    (change)="
+                      updatePsrDraft({
+                        enabled: $any($event.target).checked,
+                      })
+                    "
+                  />
+                  <span class="be-section-name">Enable park &amp; re-validate</span>
+                </label>
+                <div class="be-fields" [class.disabled]="!psrDraft()!.enabled">
+                  <label class="be-field">
+                    <span>ATR trigger</span>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      max="3.0"
+                      [value]="psrDraft()!.atrTrigger"
+                      [disabled]="!psrDraft()!.enabled || savingPsr()"
+                      (input)="
+                        updatePsrDraft({
+                          atrTrigger: $any($event.target).valueAsNumber,
+                        })
+                      "
+                    />
+                    <span class="be-unit">× ATR</span>
+                  </label>
+                  <label class="be-field">
+                    <span>TTL</span>
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      max="24"
+                      [value]="psrDraft()!.ttlHours"
+                      [disabled]="!psrDraft()!.enabled || savingPsr()"
+                      (input)="
+                        updatePsrDraft({
+                          ttlHours: $any($event.target).valueAsNumber,
+                        })
+                      "
+                    />
+                    <span class="be-unit">h</span>
+                  </label>
+                  <label class="be-field">
+                    <span>Cooldown</span>
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      max="60"
+                      [value]="psrDraft()!.cooldownMinutes"
+                      [disabled]="!psrDraft()!.enabled || savingPsr()"
+                      (input)="
+                        updatePsrDraft({
+                          cooldownMinutes: $any($event.target).valueAsNumber,
+                        })
+                      "
+                    />
+                    <span class="be-unit">min</span>
+                  </label>
+                  <label class="be-field">
+                    <span>Max attempts</span>
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      max="10"
+                      [value]="psrDraft()!.maxAttempts"
+                      [disabled]="!psrDraft()!.enabled || savingPsr()"
+                      (input)="
+                        updatePsrDraft({
+                          maxAttempts: $any($event.target).valueAsNumber,
+                        })
+                      "
+                    />
+                    <span class="be-unit">tries</span>
+                  </label>
+                </div>
+                <p class="be-desc muted small">
+                  Park if <code>|entry − live| / ATR ≥ trigger</code>. Re-validate when price
+                  returns within trigger; cap retries with <em>Max attempts</em>; auto-expire after
+                  <em>TTL</em>.
+                </p>
+              </div>
+
+              <div class="be-status small">
+                @if (savingPsr()) {
+                  <span class="muted">Saving…</span>
+                } @else if (psrSaveError()) {
+                  <span class="bad">{{ psrSaveError() }}</span>
+                } @else if (psrSaved()) {
+                  <span class="ok">Saved · takes effect on next gate/worker cycle</span>
+                } @else if (psrDirty()) {
+                  <span class="muted">Unsaved change</span>
+                } @else {
+                  <span class="muted">Default · off</span>
+                }
+              </div>
+              <div class="be-buttons">
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  (click)="resetPsr()"
+                  [disabled]="!psrDirty() || savingPsr()"
+                >
+                  Revert
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-primary"
+                  (click)="savePsr()"
+                  [disabled]="!psrDirty() || savingPsr()"
+                >
+                  {{ savingPsr() ? 'Saving…' : 'Save' }}
                 </button>
               </div>
             } @else {
@@ -2446,6 +2606,125 @@ export class EaDetailPageComponent {
             entityType: 'EAInstance',
             entityId: ea.id,
             decisionType: 'EAUpdateBreakevenExit',
+            outcome: 'Saved',
+            reason: null,
+            contextJson: JSON.stringify({ instanceId: ea.instanceId, ...draft }),
+            source: 'AdminUI',
+          })
+          .subscribe({ error: () => undefined });
+      });
+  }
+
+  // Pending-signal re-validation -----------------------------------------
+  //
+  // Per-account "park-and-revalidate" config (5 EngineConfig rows behind
+  // a single PUT). Same load/save shape as the BE panel above.  This is
+  // the schema-first deferral phase — operators can configure thresholds
+  // now; the gate + worker that act on the config land in a follow-up.
+  protected readonly psrServer = signal<EAPendingSignalRevalConfig | null>(null);
+  protected readonly psrDraft = signal<{
+    enabled: boolean;
+    atrTrigger: number;
+    ttlHours: number;
+    cooldownMinutes: number;
+    maxAttempts: number;
+  } | null>(null);
+  protected readonly savingPsr = signal(false);
+  protected readonly psrSaved = signal(false);
+  protected readonly psrSaveError = signal<string | null>(null);
+
+  private lastPsrInstanceId: string | null = null;
+  private readonly _loadPsr = effect(() => {
+    const instanceId = this.ea()?.instanceId ?? null;
+    if (!instanceId) return;
+    if (instanceId === this.lastPsrInstanceId) return;
+    this.lastPsrInstanceId = instanceId;
+    this.psrServer.set(null);
+    this.psrDraft.set(null);
+    this.psrSaved.set(false);
+    this.psrSaveError.set(null);
+    this.admin
+      .getPendingSignalReval(instanceId)
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        const cfg = res?.data ?? null;
+        if (!cfg) return;
+        this.psrServer.set(cfg);
+        this.psrDraft.set({
+          enabled: cfg.enabled,
+          atrTrigger: cfg.atrTrigger,
+          ttlHours: cfg.ttlHours,
+          cooldownMinutes: cfg.cooldownMinutes,
+          maxAttempts: cfg.maxAttempts,
+        });
+      });
+  });
+
+  protected psrDirty(): boolean {
+    const s = this.psrServer();
+    const d = this.psrDraft();
+    if (!s || !d) return false;
+    return (
+      s.enabled !== d.enabled ||
+      s.atrTrigger !== d.atrTrigger ||
+      s.ttlHours !== d.ttlHours ||
+      s.cooldownMinutes !== d.cooldownMinutes ||
+      s.maxAttempts !== d.maxAttempts
+    );
+  }
+
+  protected updatePsrDraft(patch: Partial<NonNullable<ReturnType<typeof this.psrDraft>>>): void {
+    const d = this.psrDraft();
+    if (!d) return;
+    this.psrDraft.set({ ...d, ...patch });
+    this.psrSaved.set(false);
+    this.psrSaveError.set(null);
+  }
+
+  protected resetPsr(): void {
+    const s = this.psrServer();
+    if (!s) return;
+    this.psrDraft.set({
+      enabled: s.enabled,
+      atrTrigger: s.atrTrigger,
+      ttlHours: s.ttlHours,
+      cooldownMinutes: s.cooldownMinutes,
+      maxAttempts: s.maxAttempts,
+    });
+    this.psrSaved.set(false);
+    this.psrSaveError.set(null);
+  }
+
+  protected savePsr(): void {
+    const ea = this.ea();
+    const draft = this.psrDraft();
+    const server = this.psrServer();
+    if (!ea || !draft || !server || !this.psrDirty()) return;
+    this.savingPsr.set(true);
+    this.psrSaveError.set(null);
+    this.admin
+      .updatePendingSignalReval(ea.instanceId, draft)
+      .pipe(
+        finalize(() => this.savingPsr.set(false)),
+        catchError((err) => {
+          this.psrSaveError.set(err?.error?.message ?? 'Save failed.');
+          return of(null);
+        }),
+      )
+      .subscribe((res) => {
+        if (res === null) return;
+        if (!res.status) {
+          this.psrSaveError.set(res.message ?? 'Save failed.');
+          return;
+        }
+        this.psrServer.set({ ...server, ...draft });
+        this.psrSaved.set(true);
+        this.notify.success(`Pending-signal re-validation settings saved for EA ${ea.instanceId}.`);
+        this.auditTrail
+          .create({
+            entityType: 'EAInstance',
+            entityId: ea.id,
+            decisionType: 'EAUpdatePendingSignalReval',
             outcome: 'Saved',
             reason: null,
             contextJson: JSON.stringify({ instanceId: ea.instanceId, ...draft }),
