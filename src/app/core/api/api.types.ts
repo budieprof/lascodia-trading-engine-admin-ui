@@ -3339,9 +3339,16 @@ export interface RefreshSymbolSpecsRequest {
  */
 export type EAFillMode = 'Market' | 'Limit';
 
-/** Response shape from GET /admin/ea/{instanceId}/fill-mode. */
+/**
+ * Response shape from GET /admin/ea/{instanceId}/fill-mode.  Storage is
+ * keyed per `tradingAccountId` on the engine — the route still addresses
+ * the toggle per-instance (operator's "configure THIS EA" mental model)
+ * and the engine maps instance → account when reading/writing.
+ * `tradingAccountId` is null when the route instance id doesn't resolve.
+ */
 export interface EAFillModeConfig {
   instanceId: string;
+  tradingAccountId: number | null;
   fillMode: EAFillMode;
   fillModeDefault: EAFillMode;
 }
