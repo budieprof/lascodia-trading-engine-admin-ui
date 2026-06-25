@@ -1236,6 +1236,24 @@ export class EAConfigPanelComponent {
             'CGlobalCircuitBreaker.SetFlashCrashPct — rolling window resets on each update.',
         },
         {
+          key: 'dailyProfitTargetAbs',
+          label: 'Daily profit target ($)',
+          kind: 'double',
+          step: 0.01,
+          badge: 'live',
+          takesEffect:
+            'Per-instance: when combined daily P&L (realized + floating) reaches this, the EA cancels pendings, flattens, and enters SAFETY_STOP until next trading day. 0 = disabled. If % is also set, % wins.',
+        },
+        {
+          key: 'dailyProfitTargetPct',
+          label: 'Daily profit target (% of start equity)',
+          kind: 'double',
+          step: 0.1,
+          badge: 'live',
+          takesEffect:
+            'Per-instance: same as the $ target but expressed as % of start-of-day equity. 0 = disabled. Takes precedence over the $ target when both are set.',
+        },
+        {
           key: 'engineTimeoutSec',
           label: 'Engine timeout (s)',
           kind: 'int',
@@ -1785,6 +1803,8 @@ type HotReloadKey =
   | 'maxPeakDrawdownPct'
   | 'flashCrashPct'
   | 'engineTimeoutSec'
+  | 'dailyProfitTargetAbs'
+  | 'dailyProfitTargetPct'
   // Phase-4c
   | 'engineFailThreshold'
   | 'unmatchedDealExpirySec'

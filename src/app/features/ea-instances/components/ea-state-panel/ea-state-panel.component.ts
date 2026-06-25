@@ -201,8 +201,22 @@ export class EAStatePanelComponent {
       cells.push({
         key: 'safetyCategory',
         label: 'Stop category',
-        value: s.safetyStopCategory,
-        tone: 'bad',
+        // A profit-target stop is a DAILY_RESET that the operator WANTED —
+        // surface it as a benign "profit target" reason rather than a fault.
+        value:
+          s.dailyProfitTargetHit && s.safetyStopCategory === 'DAILY_RESET'
+            ? 'DAILY_RESET (profit target)'
+            : s.safetyStopCategory,
+        tone: s.dailyProfitTargetHit && s.safetyStopCategory === 'DAILY_RESET' ? 'ok' : 'bad',
+      });
+    }
+
+    if (s.dailyProfitTargetHit) {
+      cells.push({
+        key: 'profitTarget',
+        label: 'Daily profit target',
+        value: 'REACHED',
+        tone: 'ok',
       });
     }
 
