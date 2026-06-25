@@ -168,7 +168,14 @@ interface ConfigForm {
           </dl>
         </section>
 
-        <!-- ── Trading enable / disable ─────────────────────────────────
+        <!-- ── Control-panel grid ───────────────────────────────────────
+             The five operator panels below (Trading, Fill mode, Breakeven
+             exit, Pending-signal re-validation, Daily profit target) used
+             to stack full-width.  Wrapped into a 2-up responsive grid so
+             the page is denser on wide screens; collapses to 1-up below
+             the min-cell width. -->
+        <div class="ea-cards-grid">
+          <!-- ── Trading enable / disable ─────────────────────────────────
              Operator-facing wrapper over the COMPLIANCE safety stop:
              "Disable trading" halts new order placement (open positions
              keep their trailing stops); "Enable trading" clears it.  The
@@ -178,339 +185,341 @@ interface ConfigForm {
              just the last command we queued.  The richer per-category /
              kill-switch / flatten actions still live in Operator controls
              below. -->
-        <section class="trading-control" [attr.data-state]="tradingPosture()">
-          <div class="tc-info">
-            <div class="tc-headline">
-              <span class="tc-label">Trading</span>
-              @switch (tradingPosture()) {
-                @case ('enabled') {
-                  <span class="tc-pill ok">Enabled</span>
+          <section class="trading-control" [attr.data-state]="tradingPosture()">
+            <div class="tc-info">
+              <div class="tc-headline">
+                <span class="tc-label">Trading</span>
+                @switch (tradingPosture()) {
+                  @case ('enabled') {
+                    <span class="tc-pill ok">Enabled</span>
+                  }
+                  @case ('disabled-compliance') {
+                    <span class="tc-pill bad">Disabled</span>
+                  }
+                  @case ('disabled-auto') {
+                    <span class="tc-pill warn">Paused · {{ safetyCategory() }}</span>
+                  }
+                  @case ('disabled-kill') {
+                    <span class="tc-pill bad">Disabled · kill switch</span>
+                  }
+                  @default {
+                    <span class="tc-pill muted">—</span>
+                  }
                 }
-                @case ('disabled-compliance') {
-                  <span class="tc-pill bad">Disabled</span>
+              </div>
+              <span class="tc-desc muted small">
+                @switch (tradingPosture()) {
+                  @case ('disabled-compliance') {
+                    New orders halted by an operator safety stop. Open positions keep running.
+                  }
+                  @case ('disabled-auto') {
+                    Auto-recovering safety stop — clears itself once its condition resolves. Manage
+                    in Operator controls below.
+                  }
+                  @case ('disabled-kill') {
+                    Kill switch is active. Release it from Operator controls below to resume.
+                  }
+                  @default {
+                    Halt new order placement without touching open positions.
+                  }
                 }
-                @case ('disabled-auto') {
-                  <span class="tc-pill warn">Paused · {{ safetyCategory() }}</span>
-                }
-                @case ('disabled-kill') {
-                  <span class="tc-pill bad">Disabled · kill switch</span>
-                }
-                @default {
-                  <span class="tc-pill muted">—</span>
-                }
+              </span>
+            </div>
+            <div class="tc-actions">
+              @if (tradingPosture() === 'disabled-compliance') {
+                <button
+                  type="button"
+                  class="action-btn ok"
+                  (click)="askEnableTrading()"
+                  [disabled]="submitting()"
+                >
+                  Enable trading
+                </button>
+              } @else if (tradingPosture() === 'enabled' || tradingPosture() === 'unknown') {
+                <button
+                  type="button"
+                  class="action-btn warn"
+                  (click)="askDisableTrading()"
+                  [disabled]="submitting()"
+                >
+                  Disable trading
+                </button>
               }
             </div>
-            <span class="tc-desc muted small">
-              @switch (tradingPosture()) {
-                @case ('disabled-compliance') {
-                  New orders halted by an operator safety stop. Open positions keep running.
-                }
-                @case ('disabled-auto') {
-                  Auto-recovering safety stop — clears itself once its condition resolves. Manage in
-                  Operator controls below.
-                }
-                @case ('disabled-kill') {
-                  Kill switch is active. Release it from Operator controls below to resume.
-                }
-                @default {
-                  Halt new order placement without touching open positions.
-                }
-              }
-            </span>
-          </div>
-          <div class="tc-actions">
-            @if (tradingPosture() === 'disabled-compliance') {
-              <button
-                type="button"
-                class="action-btn ok"
-                (click)="askEnableTrading()"
-                [disabled]="submitting()"
-              >
-                Enable trading
-              </button>
-            } @else if (tradingPosture() === 'enabled' || tradingPosture() === 'unknown') {
-              <button
-                type="button"
-                class="action-btn warn"
-                (click)="askDisableTrading()"
-                [disabled]="submitting()"
-              >
-                Disable trading
-              </button>
-            }
-          </div>
-        </section>
+          </section>
 
-        <!-- ── Fill mode toggle ─────────────────────────────────────────
+          <!-- ── Fill mode toggle ─────────────────────────────────────────
              Per-EA execution-mode switch. Controls whether the engine emits
              the signal's structural entry price on the pending-execution
              wire payload (Limit — EA posts BUY/SELL_LIMIT at the anchor)
              or zeroes it so the EA's classifier takes its EXEC_MARKET
              escape hatch (Market — default).  Hot-reloads via
              EngineConfigCache on the EA's next poll. -->
-        <section
-          class="fill-mode-panel"
-          [attr.data-mode]="fillModeDraft() ?? fillModeServer() ?? 'Market'"
-        >
-          <div class="fm-info">
-            <div class="fm-headline">
-              <span class="fm-label">Fill mode</span>
-              @if (fillModeServer() === 'Market') {
-                <span class="fm-pill ok">Market</span>
-              } @else if (fillModeServer() === 'Limit') {
-                <span class="fm-pill warn">Limit</span>
-              } @else {
-                <span class="fm-pill muted">…</span>
-              }
-            </div>
-            <span class="fm-desc muted small">
-              @switch (fillModeDraft() ?? fillModeServer()) {
-                @case ('Market') {
-                  Engine zeroes EntryPrice — EA fires at market on signal receipt. Recommended for
-                  continuation theses.
+          <section
+            class="fill-mode-panel"
+            [attr.data-mode]="fillModeDraft() ?? fillModeServer() ?? 'Market'"
+          >
+            <div class="fm-info">
+              <div class="fm-headline">
+                <span class="fm-label">Fill mode</span>
+                @if (fillModeServer() === 'Market') {
+                  <span class="fm-pill ok">Market</span>
+                } @else if (fillModeServer() === 'Limit') {
+                  <span class="fm-pill warn">Limit</span>
+                } @else {
+                  <span class="fm-pill muted">…</span>
                 }
-                @case ('Limit') {
-                  Engine ships the signal anchor through — EA posts a pending limit at that price.
-                  Use for fade/reversal theses.
-                }
-                @default {
-                  Loading…
-                }
-              }
-            </span>
-          </div>
-          <div class="fm-actions">
-            <div
-              class="fm-toggle"
-              role="radiogroup"
-              aria-label="EA fill mode"
-              [class.is-loading]="fillModeServer() === null"
-            >
-              <button
-                type="button"
-                role="radio"
-                class="fm-opt"
-                [class.active]="(fillModeDraft() ?? fillModeServer()) === 'Market'"
-                [attr.aria-checked]="(fillModeDraft() ?? fillModeServer()) === 'Market'"
-                [disabled]="fillModeServer() === null || savingFillMode()"
-                (click)="setFillMode('Market')"
-              >
-                Market
-              </button>
-              <button
-                type="button"
-                role="radio"
-                class="fm-opt"
-                [class.active]="(fillModeDraft() ?? fillModeServer()) === 'Limit'"
-                [attr.aria-checked]="(fillModeDraft() ?? fillModeServer()) === 'Limit'"
-                [disabled]="fillModeServer() === null || savingFillMode()"
-                (click)="setFillMode('Limit')"
-              >
-                Limit
-              </button>
-            </div>
-            <div class="fm-status small">
-              @if (savingFillMode()) {
-                <span class="muted">Saving…</span>
-              } @else if (fillModeSaveError()) {
-                <span class="bad">{{ fillModeSaveError() }}</span>
-              } @else if (fillModeSaved()) {
-                <span class="ok">Saved · takes effect on next EA poll</span>
-              } @else if (fillModeDirty()) {
-                <span class="muted">Unsaved change</span>
-              } @else {
-                <span class="muted">Default · Market</span>
-              }
-            </div>
-            <div class="fm-buttons">
-              <button
-                type="button"
-                class="btn btn-secondary"
-                (click)="resetFillMode()"
-                [disabled]="!fillModeDirty() || savingFillMode()"
-              >
-                Revert
-              </button>
-              <button
-                type="button"
-                class="btn btn-primary"
-                (click)="saveFillMode()"
-                [disabled]="!fillModeDirty() || savingFillMode()"
-              >
-                {{ savingFillMode() ? 'Saving…' : 'Save' }}
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <!-- ── Breakeven exit ────────────────────────────────────────────
-             Per-account rule-based breakeven mechanics. Two independent
-             toggles + their respective trigger fractions (R-units), wired
-             through the engine's PositionWorker.  Defaults off — historical
-             data (Apr-Jun 2026) shows salvage is net-negative across every
-             reasonable threshold, so this is a deliberate opt-in lever
-             rather than a default behaviour. -->
-        <section
-          class="be-panel"
-          [attr.data-arm]="beDraft()?.salvageEnabled || beDraft()?.trailToBeEnabled ? 'on' : 'off'"
-        >
-          <div class="be-info">
-            <div class="be-headline">
-              <span class="be-label">Breakeven exit</span>
-              @if (beServer() === null) {
-                <span class="be-pill muted">…</span>
-              } @else if (beServer()?.salvageEnabled && beServer()?.trailToBeEnabled) {
-                <span class="be-pill warn">Salvage + Trail</span>
-              } @else if (beServer()?.salvageEnabled) {
-                <span class="be-pill warn">Salvage</span>
-              } @else if (beServer()?.trailToBeEnabled) {
-                <span class="be-pill warn">Trail</span>
-              } @else {
-                <span class="be-pill muted">Off</span>
-              }
-            </div>
-            <span class="be-desc muted small">
-              Two mechanics, both off by default. Triggers are fractions of the position's SL
-              distance (R-units). Hot-reloads on the next PositionWorker cycle.
-            </span>
-          </div>
-          <div class="be-actions">
-            @if (beDraft() !== null) {
-              <!-- Salvage section -->
-              <div class="be-section">
-                <label class="be-row">
-                  <input
-                    type="checkbox"
-                    [checked]="beDraft()!.salvageEnabled"
-                    [disabled]="savingBe()"
-                    (change)="
-                      updateBeDraft({
-                        salvageEnabled: $any($event.target).checked,
-                      })
-                    "
-                  />
-                  <span class="be-section-name">Salvage exit</span>
-                </label>
-                <div class="be-fields" [class.disabled]="!beDraft()!.salvageEnabled">
-                  <label class="be-field">
-                    <span>MAE trigger</span>
-                    <input
-                      type="number"
-                      step="0.05"
-                      min="0.05"
-                      max="1.0"
-                      [value]="beDraft()!.salvageMaeTriggerR"
-                      [disabled]="!beDraft()!.salvageEnabled || savingBe()"
-                      (input)="
-                        updateBeDraft({
-                          salvageMaeTriggerR: $any($event.target).valueAsNumber,
-                        })
-                      "
-                    />
-                    <span class="be-unit">R</span>
-                  </label>
-                  <label class="be-field">
-                    <span>Tolerance</span>
-                    <input
-                      type="number"
-                      step="0.005"
-                      min="0.005"
-                      max="0.5"
-                      [value]="beDraft()!.salvageToleranceR"
-                      [disabled]="!beDraft()!.salvageEnabled || savingBe()"
-                      (input)="
-                        updateBeDraft({
-                          salvageToleranceR: $any($event.target).valueAsNumber,
-                        })
-                      "
-                    />
-                    <span class="be-unit">R</span>
-                  </label>
-                </div>
-                <p class="be-desc muted small">
-                  Close at the live price once MAE crosses the trigger AND price returns within the
-                  tolerance band around entry.
-                </p>
               </div>
-
-              <!-- Trail to BE section -->
-              <div class="be-section">
-                <label class="be-row">
-                  <input
-                    type="checkbox"
-                    [checked]="beDraft()!.trailToBeEnabled"
-                    [disabled]="savingBe()"
-                    (change)="
-                      updateBeDraft({
-                        trailToBeEnabled: $any($event.target).checked,
-                      })
-                    "
-                  />
-                  <span class="be-section-name">Trail to breakeven</span>
-                </label>
-                <div class="be-fields" [class.disabled]="!beDraft()!.trailToBeEnabled">
-                  <label class="be-field">
-                    <span>MFE trigger</span>
-                    <input
-                      type="number"
-                      step="0.05"
-                      min="0.05"
-                      max="2.0"
-                      [value]="beDraft()!.trailToBeMfeTriggerR"
-                      [disabled]="!beDraft()!.trailToBeEnabled || savingBe()"
-                      (input)="
-                        updateBeDraft({
-                          trailToBeMfeTriggerR: $any($event.target).valueAsNumber,
-                        })
-                      "
-                    />
-                    <span class="be-unit">R</span>
-                  </label>
-                </div>
-                <p class="be-desc muted small">
-                  One-shot SL→entry move once MFE crosses the trigger. Subsequent reversals through
-                  entry close the position at no loss.
-                </p>
+              <span class="fm-desc muted small">
+                @switch (fillModeDraft() ?? fillModeServer()) {
+                  @case ('Market') {
+                    Engine zeroes EntryPrice — EA fires at market on signal receipt. Recommended for
+                    continuation theses.
+                  }
+                  @case ('Limit') {
+                    Engine ships the signal anchor through — EA posts a pending limit at that price.
+                    Use for fade/reversal theses.
+                  }
+                  @default {
+                    Loading…
+                  }
+                }
+              </span>
+            </div>
+            <div class="fm-actions">
+              <div
+                class="fm-toggle"
+                role="radiogroup"
+                aria-label="EA fill mode"
+                [class.is-loading]="fillModeServer() === null"
+              >
+                <button
+                  type="button"
+                  role="radio"
+                  class="fm-opt"
+                  [class.active]="(fillModeDraft() ?? fillModeServer()) === 'Market'"
+                  [attr.aria-checked]="(fillModeDraft() ?? fillModeServer()) === 'Market'"
+                  [disabled]="fillModeServer() === null || savingFillMode()"
+                  (click)="setFillMode('Market')"
+                >
+                  Market
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  class="fm-opt"
+                  [class.active]="(fillModeDraft() ?? fillModeServer()) === 'Limit'"
+                  [attr.aria-checked]="(fillModeDraft() ?? fillModeServer()) === 'Limit'"
+                  [disabled]="fillModeServer() === null || savingFillMode()"
+                  (click)="setFillMode('Limit')"
+                >
+                  Limit
+                </button>
               </div>
-
-              <div class="be-status small">
-                @if (savingBe()) {
+              <div class="fm-status small">
+                @if (savingFillMode()) {
                   <span class="muted">Saving…</span>
-                } @else if (beSaveError()) {
-                  <span class="bad">{{ beSaveError() }}</span>
-                } @else if (beSaved()) {
-                  <span class="ok">Saved · takes effect on next PositionWorker cycle</span>
-                } @else if (beDirty()) {
+                } @else if (fillModeSaveError()) {
+                  <span class="bad">{{ fillModeSaveError() }}</span>
+                } @else if (fillModeSaved()) {
+                  <span class="ok">Saved · takes effect on next EA poll</span>
+                } @else if (fillModeDirty()) {
                   <span class="muted">Unsaved change</span>
                 } @else {
-                  <span class="muted">Default · both off</span>
+                  <span class="muted">Default · Market</span>
                 }
               </div>
-              <div class="be-buttons">
+              <div class="fm-buttons">
                 <button
                   type="button"
                   class="btn btn-secondary"
-                  (click)="resetBe()"
-                  [disabled]="!beDirty() || savingBe()"
+                  (click)="resetFillMode()"
+                  [disabled]="!fillModeDirty() || savingFillMode()"
                 >
                   Revert
                 </button>
                 <button
                   type="button"
                   class="btn btn-primary"
-                  (click)="saveBe()"
-                  [disabled]="!beDirty() || savingBe()"
+                  (click)="saveFillMode()"
+                  [disabled]="!fillModeDirty() || savingFillMode()"
                 >
-                  {{ savingBe() ? 'Saving…' : 'Save' }}
+                  {{ savingFillMode() ? 'Saving…' : 'Save' }}
                 </button>
               </div>
-            } @else {
-              <span class="muted small">Loading…</span>
-            }
-          </div>
-        </section>
+            </div>
+          </section>
 
-        <!-- ── Pending-signal re-validation ─────────────────────────────
+          <!-- ── Breakeven exit ────────────────────────────────────────────
+             Per-account rule-based breakeven mechanics. Two independent
+             toggles + their respective trigger fractions (R-units), wired
+             through the engine's PositionWorker.  Defaults off — historical
+             data (Apr-Jun 2026) shows salvage is net-negative across every
+             reasonable threshold, so this is a deliberate opt-in lever
+             rather than a default behaviour. -->
+          <section
+            class="be-panel"
+            [attr.data-arm]="
+              beDraft()?.salvageEnabled || beDraft()?.trailToBeEnabled ? 'on' : 'off'
+            "
+          >
+            <div class="be-info">
+              <div class="be-headline">
+                <span class="be-label">Breakeven exit</span>
+                @if (beServer() === null) {
+                  <span class="be-pill muted">…</span>
+                } @else if (beServer()?.salvageEnabled && beServer()?.trailToBeEnabled) {
+                  <span class="be-pill warn">Salvage + Trail</span>
+                } @else if (beServer()?.salvageEnabled) {
+                  <span class="be-pill warn">Salvage</span>
+                } @else if (beServer()?.trailToBeEnabled) {
+                  <span class="be-pill warn">Trail</span>
+                } @else {
+                  <span class="be-pill muted">Off</span>
+                }
+              </div>
+              <span class="be-desc muted small">
+                Two mechanics, both off by default. Triggers are fractions of the position's SL
+                distance (R-units). Hot-reloads on the next PositionWorker cycle.
+              </span>
+            </div>
+            <div class="be-actions">
+              @if (beDraft() !== null) {
+                <!-- Salvage section -->
+                <div class="be-section">
+                  <label class="be-row">
+                    <input
+                      type="checkbox"
+                      [checked]="beDraft()!.salvageEnabled"
+                      [disabled]="savingBe()"
+                      (change)="
+                        updateBeDraft({
+                          salvageEnabled: $any($event.target).checked,
+                        })
+                      "
+                    />
+                    <span class="be-section-name">Salvage exit</span>
+                  </label>
+                  <div class="be-fields" [class.disabled]="!beDraft()!.salvageEnabled">
+                    <label class="be-field">
+                      <span>MAE trigger</span>
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0.05"
+                        max="1.0"
+                        [value]="beDraft()!.salvageMaeTriggerR"
+                        [disabled]="!beDraft()!.salvageEnabled || savingBe()"
+                        (input)="
+                          updateBeDraft({
+                            salvageMaeTriggerR: $any($event.target).valueAsNumber,
+                          })
+                        "
+                      />
+                      <span class="be-unit">R</span>
+                    </label>
+                    <label class="be-field">
+                      <span>Tolerance</span>
+                      <input
+                        type="number"
+                        step="0.005"
+                        min="0.005"
+                        max="0.5"
+                        [value]="beDraft()!.salvageToleranceR"
+                        [disabled]="!beDraft()!.salvageEnabled || savingBe()"
+                        (input)="
+                          updateBeDraft({
+                            salvageToleranceR: $any($event.target).valueAsNumber,
+                          })
+                        "
+                      />
+                      <span class="be-unit">R</span>
+                    </label>
+                  </div>
+                  <p class="be-desc muted small">
+                    Close at the live price once MAE crosses the trigger AND price returns within
+                    the tolerance band around entry.
+                  </p>
+                </div>
+
+                <!-- Trail to BE section -->
+                <div class="be-section">
+                  <label class="be-row">
+                    <input
+                      type="checkbox"
+                      [checked]="beDraft()!.trailToBeEnabled"
+                      [disabled]="savingBe()"
+                      (change)="
+                        updateBeDraft({
+                          trailToBeEnabled: $any($event.target).checked,
+                        })
+                      "
+                    />
+                    <span class="be-section-name">Trail to breakeven</span>
+                  </label>
+                  <div class="be-fields" [class.disabled]="!beDraft()!.trailToBeEnabled">
+                    <label class="be-field">
+                      <span>MFE trigger</span>
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0.05"
+                        max="2.0"
+                        [value]="beDraft()!.trailToBeMfeTriggerR"
+                        [disabled]="!beDraft()!.trailToBeEnabled || savingBe()"
+                        (input)="
+                          updateBeDraft({
+                            trailToBeMfeTriggerR: $any($event.target).valueAsNumber,
+                          })
+                        "
+                      />
+                      <span class="be-unit">R</span>
+                    </label>
+                  </div>
+                  <p class="be-desc muted small">
+                    One-shot SL→entry move once MFE crosses the trigger. Subsequent reversals
+                    through entry close the position at no loss.
+                  </p>
+                </div>
+
+                <div class="be-status small">
+                  @if (savingBe()) {
+                    <span class="muted">Saving…</span>
+                  } @else if (beSaveError()) {
+                    <span class="bad">{{ beSaveError() }}</span>
+                  } @else if (beSaved()) {
+                    <span class="ok">Saved · takes effect on next PositionWorker cycle</span>
+                  } @else if (beDirty()) {
+                    <span class="muted">Unsaved change</span>
+                  } @else {
+                    <span class="muted">Default · both off</span>
+                  }
+                </div>
+                <div class="be-buttons">
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    (click)="resetBe()"
+                    [disabled]="!beDirty() || savingBe()"
+                  >
+                    Revert
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-primary"
+                    (click)="saveBe()"
+                    [disabled]="!beDirty() || savingBe()"
+                  >
+                    {{ savingBe() ? 'Saving…' : 'Save' }}
+                  </button>
+                </div>
+              } @else {
+                <span class="muted small">Loading…</span>
+              }
+            </div>
+          </section>
+
+          <!-- ── Pending-signal re-validation ─────────────────────────────
              Engine-wide "park-and-revalidate" toggle for LLM signals
              whose entry is far from market at generation time (in ATR
              units). When enabled, the engine parks these signals in
@@ -520,255 +529,257 @@ interface ConfigForm {
              to Approved with rewritten entry, fills at market) or
              kill it. The URL is per-EA for UI placement only — the
              setting is engine-wide and affects every account. -->
-        <section class="be-panel" [attr.data-arm]="psrDraft()?.enabled ? 'on' : 'off'">
-          <div class="be-info">
-            <div class="be-headline">
-              <span class="be-label">Pending-signal re-validation</span>
-              <span
-                class="be-pill muted small"
-                title="Same setting affects every account on this engine."
-                >engine-wide</span
-              >
-              @if (psrServer() === null) {
-                <span class="be-pill muted">…</span>
-              } @else if (psrServer()?.enabled) {
-                <span class="be-pill warn">Armed</span>
-              } @else {
-                <span class="be-pill muted">Off</span>
-              }
-            </div>
-            <span class="be-desc muted small">
-              Park LLM recs whose entry is far from market and re-validate when price reaches it.
-              Threshold is a fraction of the signal-generation ATR. Hot-reloads on the next
-              gate/worker cycle. <strong>This is an engine-wide setting</strong> — flipping it from
-              any EA's detail page affects every account.
-            </span>
-          </div>
-          <div class="be-actions">
-            @if (psrDraft() !== null) {
-              <div class="be-section">
-                <label class="be-row">
-                  <input
-                    type="checkbox"
-                    [checked]="psrDraft()!.enabled"
-                    [disabled]="savingPsr()"
-                    (change)="
-                      updatePsrDraft({
-                        enabled: $any($event.target).checked,
-                      })
-                    "
-                  />
-                  <span class="be-section-name">Enable park &amp; re-validate</span>
-                </label>
-                <div class="be-fields" [class.disabled]="!psrDraft()!.enabled">
-                  <label class="be-field">
-                    <span>ATR trigger</span>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0.1"
-                      max="3.0"
-                      [value]="psrDraft()!.atrTrigger"
-                      [disabled]="!psrDraft()!.enabled || savingPsr()"
-                      (input)="
-                        updatePsrDraft({
-                          atrTrigger: $any($event.target).valueAsNumber,
-                        })
-                      "
-                    />
-                    <span class="be-unit">× ATR</span>
-                  </label>
-                  <label class="be-field">
-                    <span>TTL</span>
-                    <input
-                      type="number"
-                      step="1"
-                      min="1"
-                      max="24"
-                      [value]="psrDraft()!.ttlHours"
-                      [disabled]="!psrDraft()!.enabled || savingPsr()"
-                      (input)="
-                        updatePsrDraft({
-                          ttlHours: $any($event.target).valueAsNumber,
-                        })
-                      "
-                    />
-                    <span class="be-unit">h</span>
-                  </label>
-                  <label class="be-field">
-                    <span>Cooldown</span>
-                    <input
-                      type="number"
-                      step="1"
-                      min="1"
-                      max="60"
-                      [value]="psrDraft()!.cooldownMinutes"
-                      [disabled]="!psrDraft()!.enabled || savingPsr()"
-                      (input)="
-                        updatePsrDraft({
-                          cooldownMinutes: $any($event.target).valueAsNumber,
-                        })
-                      "
-                    />
-                    <span class="be-unit">min</span>
-                  </label>
-                  <label class="be-field">
-                    <span>Max attempts</span>
-                    <input
-                      type="number"
-                      step="1"
-                      min="1"
-                      max="10"
-                      [value]="psrDraft()!.maxAttempts"
-                      [disabled]="!psrDraft()!.enabled || savingPsr()"
-                      (input)="
-                        updatePsrDraft({
-                          maxAttempts: $any($event.target).valueAsNumber,
-                        })
-                      "
-                    />
-                    <span class="be-unit">tries</span>
-                  </label>
-                </div>
-                <p class="be-desc muted small">
-                  Park if <code>|entry − live| / ATR ≥ trigger</code>. Re-validate when price
-                  returns within trigger; cap retries with <em>Max attempts</em>; auto-expire after
-                  <em>TTL</em>.
-                </p>
-              </div>
-
-              <div class="be-status small">
-                @if (savingPsr()) {
-                  <span class="muted">Saving…</span>
-                } @else if (psrSaveError()) {
-                  <span class="bad">{{ psrSaveError() }}</span>
-                } @else if (psrSaved()) {
-                  <span class="ok">Saved · takes effect on next gate/worker cycle</span>
-                } @else if (psrDirty()) {
-                  <span class="muted">Unsaved change</span>
+          <section class="be-panel" [attr.data-arm]="psrDraft()?.enabled ? 'on' : 'off'">
+            <div class="be-info">
+              <div class="be-headline">
+                <span class="be-label">Pending-signal re-validation</span>
+                <span
+                  class="be-pill muted small"
+                  title="Same setting affects every account on this engine."
+                  >engine-wide</span
+                >
+                @if (psrServer() === null) {
+                  <span class="be-pill muted">…</span>
+                } @else if (psrServer()?.enabled) {
+                  <span class="be-pill warn">Armed</span>
                 } @else {
-                  <span class="muted">Default · off</span>
+                  <span class="be-pill muted">Off</span>
                 }
               </div>
-              <div class="be-buttons">
+              <span class="be-desc muted small">
+                Park LLM recs whose entry is far from market and re-validate when price reaches it.
+                Threshold is a fraction of the signal-generation ATR. Hot-reloads on the next
+                gate/worker cycle. <strong>This is an engine-wide setting</strong> — flipping it
+                from any EA's detail page affects every account.
+              </span>
+            </div>
+            <div class="be-actions">
+              @if (psrDraft() !== null) {
+                <div class="be-section">
+                  <label class="be-row">
+                    <input
+                      type="checkbox"
+                      [checked]="psrDraft()!.enabled"
+                      [disabled]="savingPsr()"
+                      (change)="
+                        updatePsrDraft({
+                          enabled: $any($event.target).checked,
+                        })
+                      "
+                    />
+                    <span class="be-section-name">Enable park &amp; re-validate</span>
+                  </label>
+                  <div class="be-fields" [class.disabled]="!psrDraft()!.enabled">
+                    <label class="be-field">
+                      <span>ATR trigger</span>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0.1"
+                        max="3.0"
+                        [value]="psrDraft()!.atrTrigger"
+                        [disabled]="!psrDraft()!.enabled || savingPsr()"
+                        (input)="
+                          updatePsrDraft({
+                            atrTrigger: $any($event.target).valueAsNumber,
+                          })
+                        "
+                      />
+                      <span class="be-unit">× ATR</span>
+                    </label>
+                    <label class="be-field">
+                      <span>TTL</span>
+                      <input
+                        type="number"
+                        step="1"
+                        min="1"
+                        max="24"
+                        [value]="psrDraft()!.ttlHours"
+                        [disabled]="!psrDraft()!.enabled || savingPsr()"
+                        (input)="
+                          updatePsrDraft({
+                            ttlHours: $any($event.target).valueAsNumber,
+                          })
+                        "
+                      />
+                      <span class="be-unit">h</span>
+                    </label>
+                    <label class="be-field">
+                      <span>Cooldown</span>
+                      <input
+                        type="number"
+                        step="1"
+                        min="1"
+                        max="60"
+                        [value]="psrDraft()!.cooldownMinutes"
+                        [disabled]="!psrDraft()!.enabled || savingPsr()"
+                        (input)="
+                          updatePsrDraft({
+                            cooldownMinutes: $any($event.target).valueAsNumber,
+                          })
+                        "
+                      />
+                      <span class="be-unit">min</span>
+                    </label>
+                    <label class="be-field">
+                      <span>Max attempts</span>
+                      <input
+                        type="number"
+                        step="1"
+                        min="1"
+                        max="10"
+                        [value]="psrDraft()!.maxAttempts"
+                        [disabled]="!psrDraft()!.enabled || savingPsr()"
+                        (input)="
+                          updatePsrDraft({
+                            maxAttempts: $any($event.target).valueAsNumber,
+                          })
+                        "
+                      />
+                      <span class="be-unit">tries</span>
+                    </label>
+                  </div>
+                  <p class="be-desc muted small">
+                    Park if <code>|entry − live| / ATR ≥ trigger</code>. Re-validate when price
+                    returns within trigger; cap retries with <em>Max attempts</em>; auto-expire
+                    after <em>TTL</em>.
+                  </p>
+                </div>
+
+                <div class="be-status small">
+                  @if (savingPsr()) {
+                    <span class="muted">Saving…</span>
+                  } @else if (psrSaveError()) {
+                    <span class="bad">{{ psrSaveError() }}</span>
+                  } @else if (psrSaved()) {
+                    <span class="ok">Saved · takes effect on next gate/worker cycle</span>
+                  } @else if (psrDirty()) {
+                    <span class="muted">Unsaved change</span>
+                  } @else {
+                    <span class="muted">Default · off</span>
+                  }
+                </div>
+                <div class="be-buttons">
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    (click)="resetPsr()"
+                    [disabled]="!psrDirty() || savingPsr()"
+                  >
+                    Revert
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-primary"
+                    (click)="savePsr()"
+                    [disabled]="!psrDirty() || savingPsr()"
+                  >
+                    {{ savingPsr() ? 'Saving…' : 'Save' }}
+                  </button>
+                </div>
+              } @else {
+                <span class="muted small">Loading…</span>
+              }
+            </div>
+          </section>
+
+          <!-- ── Daily profit target ──────────────────────────────────────
+             Prominent per-instance control. Reads the EA's echoed current
+             target (heartbeat v8.47.210+), lets the operator set/clear it
+             in one place, and badges when it's been reached today. -->
+          <section class="dpt-panel" [class.is-hit]="dptHit()">
+            <div class="dpt-info">
+              <div class="dpt-headline">
+                <span class="dpt-label">Daily profit target</span>
+                @if (dptHit()) {
+                  <span class="dpt-pill hit">Reached today</span>
+                } @else if (dptEnabled()) {
+                  <span class="dpt-pill on">Armed · {{ dptSummary() }}</span>
+                } @else {
+                  <span class="dpt-pill muted">Off</span>
+                }
+              </div>
+              <span class="dpt-desc muted small">
+                When this instance's daily P&amp;L (account equity vs start-of-day) reaches the
+                target, the EA cancels pending orders, flattens open positions, and parks in
+                SAFETY_STOP until the next trading day. Set a $ amount or a % of start-of-day equity
+                (% wins if both are set). 0 disables.
+              </span>
+            </div>
+            <div class="dpt-actions">
+              <div class="dpt-inputs">
+                <label class="dpt-field">
+                  <span>Target ($)</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputmode="decimal"
+                    [ngModel]="dptAbsDraft()"
+                    (ngModelChange)="onDptAbs($event)"
+                    [disabled]="savingDpt() || !dptLoaded()"
+                  />
+                </label>
+                <label class="dpt-field">
+                  <span>Target (% equity)</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    inputmode="decimal"
+                    [ngModel]="dptPctDraft()"
+                    (ngModelChange)="onDptPct($event)"
+                    [disabled]="savingDpt() || !dptLoaded()"
+                  />
+                </label>
+              </div>
+              <div class="dpt-status small">
+                @if (savingDpt()) {
+                  <span class="muted">Saving…</span>
+                } @else if (dptSaveError()) {
+                  <span class="bad">{{ dptSaveError() }}</span>
+                } @else if (dptSaved()) {
+                  <span class="ok">Saved · takes effect on next EA poll</span>
+                } @else if (dptDirty()) {
+                  <span class="muted">Unsaved change</span>
+                } @else if (!dptLoaded()) {
+                  <span class="muted">Loading current target…</span>
+                } @else if (dptEnabled()) {
+                  <span class="muted">Armed</span>
+                } @else {
+                  <span class="muted">Disabled</span>
+                }
+              </div>
+              <div class="dpt-buttons">
                 <button
                   type="button"
                   class="btn btn-secondary"
-                  (click)="resetPsr()"
-                  [disabled]="!psrDirty() || savingPsr()"
+                  (click)="disableDpt()"
+                  [disabled]="savingDpt() || !dptEnabled()"
+                >
+                  Disable
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  (click)="resetDpt()"
+                  [disabled]="savingDpt() || !dptDirty()"
                 >
                   Revert
                 </button>
                 <button
                   type="button"
                   class="btn btn-primary"
-                  (click)="savePsr()"
-                  [disabled]="!psrDirty() || savingPsr()"
+                  (click)="saveDpt()"
+                  [disabled]="savingDpt() || !dptDirty()"
                 >
-                  {{ savingPsr() ? 'Saving…' : 'Save' }}
+                  {{ savingDpt() ? 'Saving…' : 'Save' }}
                 </button>
               </div>
-            } @else {
-              <span class="muted small">Loading…</span>
-            }
-          </div>
-        </section>
-
-        <!-- ── Daily profit target ──────────────────────────────────────
-             Prominent per-instance control. Reads the EA's echoed current
-             target (heartbeat v8.47.210+), lets the operator set/clear it
-             in one place, and badges when it's been reached today. -->
-        <section class="dpt-panel" [class.is-hit]="dptHit()">
-          <div class="dpt-info">
-            <div class="dpt-headline">
-              <span class="dpt-label">Daily profit target</span>
-              @if (dptHit()) {
-                <span class="dpt-pill hit">Reached today</span>
-              } @else if (dptEnabled()) {
-                <span class="dpt-pill on">Armed · {{ dptSummary() }}</span>
-              } @else {
-                <span class="dpt-pill muted">Off</span>
-              }
             </div>
-            <span class="dpt-desc muted small">
-              When this instance's daily P&amp;L (account equity vs start-of-day) reaches the
-              target, the EA cancels pending orders, flattens open positions, and parks in
-              SAFETY_STOP until the next trading day. Set a $ amount or a % of start-of-day equity
-              (% wins if both are set). 0 disables.
-            </span>
-          </div>
-          <div class="dpt-actions">
-            <div class="dpt-inputs">
-              <label class="dpt-field">
-                <span>Target ($)</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  inputmode="decimal"
-                  [ngModel]="dptAbsDraft()"
-                  (ngModelChange)="onDptAbs($event)"
-                  [disabled]="savingDpt() || !dptLoaded()"
-                />
-              </label>
-              <label class="dpt-field">
-                <span>Target (% equity)</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.1"
-                  inputmode="decimal"
-                  [ngModel]="dptPctDraft()"
-                  (ngModelChange)="onDptPct($event)"
-                  [disabled]="savingDpt() || !dptLoaded()"
-                />
-              </label>
-            </div>
-            <div class="dpt-status small">
-              @if (savingDpt()) {
-                <span class="muted">Saving…</span>
-              } @else if (dptSaveError()) {
-                <span class="bad">{{ dptSaveError() }}</span>
-              } @else if (dptSaved()) {
-                <span class="ok">Saved · takes effect on next EA poll</span>
-              } @else if (dptDirty()) {
-                <span class="muted">Unsaved change</span>
-              } @else if (!dptLoaded()) {
-                <span class="muted">Loading current target…</span>
-              } @else if (dptEnabled()) {
-                <span class="muted">Armed</span>
-              } @else {
-                <span class="muted">Disabled</span>
-              }
-            </div>
-            <div class="dpt-buttons">
-              <button
-                type="button"
-                class="btn btn-secondary"
-                (click)="disableDpt()"
-                [disabled]="savingDpt() || !dptEnabled()"
-              >
-                Disable
-              </button>
-              <button
-                type="button"
-                class="btn btn-secondary"
-                (click)="resetDpt()"
-                [disabled]="savingDpt() || !dptDirty()"
-              >
-                Revert
-              </button>
-              <button
-                type="button"
-                class="btn btn-primary"
-                (click)="saveDpt()"
-                [disabled]="savingDpt() || !dptDirty()"
-              >
-                {{ savingDpt() ? 'Saving…' : 'Save' }}
-              </button>
-            </div>
-          </div>
-        </section>
+          </section>
+        </div>
+        <!-- /.ea-cards-grid -->
 
         <!-- ── Account snapshot ─────────────────────────────────────────
              Broker-synced balance/equity/margin envelope for the EA's
@@ -1414,6 +1425,19 @@ interface ConfigForm {
         border-radius: var(--radius-full);
         font-size: var(--text-xs);
         font-weight: var(--font-medium);
+      }
+      /* ── Control-panel grid ────────────────────────────────────────
+         Wraps the five operator panels (Trading, Fill mode, Breakeven
+         exit, Pending-signal re-validation, DPT) into a responsive
+         2-up grid so they don't each take a full row.  Collapses to
+         1-up below the min-cell width.  align-items:start so a short
+         panel in a row doesn't stretch to match a taller sibling
+         (avoids dead vertical space inside the short one). */
+      .ea-cards-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+        gap: var(--space-3);
+        align-items: start;
       }
       /* ── Trading enable/disable control ──────────────────────────── */
       .trading-control {
