@@ -7,6 +7,7 @@ import type {
   ClearSafetyStopRequest,
   EAAuditTimelineItem,
   EAAuditTimelineQuery,
+  EABreakevenExitConfig,
   EAFillModeConfig,
   EAFleetItem,
   EAInstanceDetail,
@@ -27,6 +28,7 @@ import type {
   ResetCircuitBreakerRequest,
   ResponseData,
   TriggerKillSwitchRequest,
+  UpdateEABreakevenExitRequest,
   UpdateEAFillModeRequest,
   UpdateInstanceConfigRequest,
 } from '@core/api/api.types';
@@ -262,6 +264,33 @@ export class EAAdminService {
   ): Observable<ResponseData<number>> {
     return this.api.put<ResponseData<number>>(
       `${this.base}/${encodeURIComponent(instanceId)}/fill-mode`,
+      this.withInstanceId(instanceId, body),
+    );
+  }
+
+  /**
+   * GET /admin/ea/{instanceId}/breakeven-exit — current rule-based BE config
+   * for the trading account that owns the EA + compile-time defaults.  Drives
+   * the BE panel on the EA detail page.
+   */
+  getBreakevenExit(instanceId: string): Observable<ResponseData<EABreakevenExitConfig>> {
+    return this.api.get<ResponseData<EABreakevenExitConfig>>(
+      `${this.base}/${encodeURIComponent(instanceId)}/breakeven-exit`,
+    );
+  }
+
+  /**
+   * PUT /admin/ea/{instanceId}/breakeven-exit — writes the five account-scoped
+   * EngineConfig rows that back the two BE mechanics.  Hot-reloads through
+   * EngineConfigCache; takes effect on the next PositionWorker cycle without
+   * a restart.
+   */
+  updateBreakevenExit(
+    instanceId: string,
+    body: UpdateEABreakevenExitRequest,
+  ): Observable<ResponseData<number>> {
+    return this.api.put<ResponseData<number>>(
+      `${this.base}/${encodeURIComponent(instanceId)}/breakeven-exit`,
       this.withInstanceId(instanceId, body),
     );
   }

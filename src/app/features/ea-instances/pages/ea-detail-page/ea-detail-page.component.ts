@@ -17,6 +17,7 @@ import { EAAdminService } from '@core/services/ea-admin.service';
 import { AuditTrailService } from '@core/services/audit-trail.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type {
+  EABreakevenExitConfig,
   EAFillMode,
   EAInstanceDetail,
   EAInstanceDto,
@@ -338,6 +339,173 @@ interface ConfigForm {
                 {{ savingFillMode() ? 'Saving…' : 'Save' }}
               </button>
             </div>
+          </div>
+        </section>
+
+        <!-- ── Breakeven exit ────────────────────────────────────────────
+             Per-account rule-based breakeven mechanics. Two independent
+             toggles + their respective trigger fractions (R-units), wired
+             through the engine's PositionWorker.  Defaults off — historical
+             data (Apr-Jun 2026) shows salvage is net-negative across every
+             reasonable threshold, so this is a deliberate opt-in lever
+             rather than a default behaviour. -->
+        <section
+          class="be-panel"
+          [attr.data-arm]="beDraft()?.salvageEnabled || beDraft()?.trailToBeEnabled ? 'on' : 'off'"
+        >
+          <div class="be-info">
+            <div class="be-headline">
+              <span class="be-label">Breakeven exit</span>
+              @if (beServer() === null) {
+                <span class="be-pill muted">…</span>
+              } @else if (beServer()?.salvageEnabled && beServer()?.trailToBeEnabled) {
+                <span class="be-pill warn">Salvage + Trail</span>
+              } @else if (beServer()?.salvageEnabled) {
+                <span class="be-pill warn">Salvage</span>
+              } @else if (beServer()?.trailToBeEnabled) {
+                <span class="be-pill warn">Trail</span>
+              } @else {
+                <span class="be-pill muted">Off</span>
+              }
+            </div>
+            <span class="be-desc muted small">
+              Two mechanics, both off by default. Triggers are fractions of the position's SL
+              distance (R-units). Hot-reloads on the next PositionWorker cycle.
+            </span>
+          </div>
+          <div class="be-actions">
+            @if (beDraft() !== null) {
+              <!-- Salvage section -->
+              <div class="be-section">
+                <label class="be-row">
+                  <input
+                    type="checkbox"
+                    [checked]="beDraft()!.salvageEnabled"
+                    [disabled]="savingBe()"
+                    (change)="
+                      updateBeDraft({
+                        salvageEnabled: $any($event.target).checked,
+                      })
+                    "
+                  />
+                  <span class="be-section-name">Salvage exit</span>
+                </label>
+                <div class="be-fields" [class.disabled]="!beDraft()!.salvageEnabled">
+                  <label class="be-field">
+                    <span>MAE trigger</span>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0.05"
+                      max="1.0"
+                      [value]="beDraft()!.salvageMaeTriggerR"
+                      [disabled]="!beDraft()!.salvageEnabled || savingBe()"
+                      (input)="
+                        updateBeDraft({
+                          salvageMaeTriggerR: $any($event.target).valueAsNumber,
+                        })
+                      "
+                    />
+                    <span class="be-unit">R</span>
+                  </label>
+                  <label class="be-field">
+                    <span>Tolerance</span>
+                    <input
+                      type="number"
+                      step="0.005"
+                      min="0.005"
+                      max="0.5"
+                      [value]="beDraft()!.salvageToleranceR"
+                      [disabled]="!beDraft()!.salvageEnabled || savingBe()"
+                      (input)="
+                        updateBeDraft({
+                          salvageToleranceR: $any($event.target).valueAsNumber,
+                        })
+                      "
+                    />
+                    <span class="be-unit">R</span>
+                  </label>
+                </div>
+                <p class="be-desc muted small">
+                  Close at the live price once MAE crosses the trigger AND price returns within the
+                  tolerance band around entry.
+                </p>
+              </div>
+
+              <!-- Trail to BE section -->
+              <div class="be-section">
+                <label class="be-row">
+                  <input
+                    type="checkbox"
+                    [checked]="beDraft()!.trailToBeEnabled"
+                    [disabled]="savingBe()"
+                    (change)="
+                      updateBeDraft({
+                        trailToBeEnabled: $any($event.target).checked,
+                      })
+                    "
+                  />
+                  <span class="be-section-name">Trail to breakeven</span>
+                </label>
+                <div class="be-fields" [class.disabled]="!beDraft()!.trailToBeEnabled">
+                  <label class="be-field">
+                    <span>MFE trigger</span>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0.05"
+                      max="2.0"
+                      [value]="beDraft()!.trailToBeMfeTriggerR"
+                      [disabled]="!beDraft()!.trailToBeEnabled || savingBe()"
+                      (input)="
+                        updateBeDraft({
+                          trailToBeMfeTriggerR: $any($event.target).valueAsNumber,
+                        })
+                      "
+                    />
+                    <span class="be-unit">R</span>
+                  </label>
+                </div>
+                <p class="be-desc muted small">
+                  One-shot SL→entry move once MFE crosses the trigger. Subsequent reversals through
+                  entry close the position at no loss.
+                </p>
+              </div>
+
+              <div class="be-status small">
+                @if (savingBe()) {
+                  <span class="muted">Saving…</span>
+                } @else if (beSaveError()) {
+                  <span class="bad">{{ beSaveError() }}</span>
+                } @else if (beSaved()) {
+                  <span class="ok">Saved · takes effect on next PositionWorker cycle</span>
+                } @else if (beDirty()) {
+                  <span class="muted">Unsaved change</span>
+                } @else {
+                  <span class="muted">Default · both off</span>
+                }
+              </div>
+              <div class="be-buttons">
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  (click)="resetBe()"
+                  [disabled]="!beDirty() || savingBe()"
+                >
+                  Revert
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-primary"
+                  (click)="saveBe()"
+                  [disabled]="!beDirty() || savingBe()"
+                >
+                  {{ savingBe() ? 'Saving…' : 'Save' }}
+                </button>
+              </div>
+            } @else {
+              <span class="muted small">Loading…</span>
+            }
           </div>
         </section>
 
@@ -1266,6 +1434,136 @@ interface ConfigForm {
         display: flex;
         gap: var(--space-2);
       }
+      /* ── Breakeven exit panel ─────────────────────────────────────── */
+      .be-panel {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: var(--space-4);
+        flex-wrap: wrap;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-left-width: 3px;
+        border-left-color: var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+      }
+      .be-panel[data-arm='on'] {
+        border-left-color: #ff9500;
+      }
+      .be-info {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 240px;
+        max-width: 32ch;
+      }
+      .be-headline {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .be-label {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      .be-pill {
+        font-size: var(--text-xs);
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .be-pill.warn {
+        background: rgba(255, 149, 0, 0.12);
+        color: #c93400;
+      }
+      .be-pill.muted {
+        background: rgba(0, 0, 0, 0.06);
+        color: var(--text-tertiary);
+      }
+      .be-desc {
+        max-width: 60ch;
+      }
+      .be-actions {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        flex-grow: 1;
+        min-width: 280px;
+        max-width: 520px;
+      }
+      .be-section {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 8px 12px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+      }
+      .be-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        cursor: pointer;
+        user-select: none;
+      }
+      .be-section-name {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      .be-fields {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-3);
+        padding-left: 24px;
+      }
+      .be-fields.disabled {
+        opacity: 0.5;
+      }
+      .be-field {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .be-field input {
+        width: 70px;
+        padding: 4px 6px;
+        font-size: var(--text-sm);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+      }
+      .be-field input:disabled {
+        background: var(--bg-secondary);
+        cursor: not-allowed;
+      }
+      .be-unit {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        font-weight: var(--font-medium);
+      }
+      .be-status {
+        min-height: 1.2em;
+      }
+      .be-status .ok {
+        color: #248a3d;
+      }
+      .be-status .bad {
+        color: #d70015;
+      }
+      .be-buttons {
+        display: flex;
+        gap: var(--space-2);
+        align-self: flex-end;
+      }
       /* ── Daily profit target card ── mirrors the fill-mode panel ── */
       .dpt-panel {
         display: flex;
@@ -2029,6 +2327,128 @@ export class EaDetailPageComponent {
             outcome: 'Saved',
             reason: null,
             contextJson: JSON.stringify({ instanceId: ea.instanceId, fillMode: draft }),
+            source: 'AdminUI',
+          })
+          .subscribe({ error: () => undefined });
+      });
+  }
+
+  // Breakeven exit ------------------------------------------------------
+  //
+  // Per-account rule-based BE config (5 EngineConfig rows behind a single
+  // PUT).  Server signal holds the last loaded snapshot; draft holds the
+  // operator's in-progress edit.  Both default to null until the first
+  // load resolves, gating the form on `beDraft() !== null` in the
+  // template.  Save round-trips the whole record and pins the new value
+  // into `beServer` so the UI doesn't need a re-fetch.
+  protected readonly beServer = signal<EABreakevenExitConfig | null>(null);
+  protected readonly beDraft = signal<{
+    salvageEnabled: boolean;
+    salvageMaeTriggerR: number;
+    salvageToleranceR: number;
+    trailToBeEnabled: boolean;
+    trailToBeMfeTriggerR: number;
+  } | null>(null);
+  protected readonly savingBe = signal(false);
+  protected readonly beSaved = signal(false);
+  protected readonly beSaveError = signal<string | null>(null);
+
+  private lastBeInstanceId: string | null = null;
+  private readonly _loadBe = effect(() => {
+    const instanceId = this.ea()?.instanceId ?? null;
+    if (!instanceId) return;
+    if (instanceId === this.lastBeInstanceId) return;
+    this.lastBeInstanceId = instanceId;
+    this.beServer.set(null);
+    this.beDraft.set(null);
+    this.beSaved.set(false);
+    this.beSaveError.set(null);
+    this.admin
+      .getBreakevenExit(instanceId)
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        const cfg = res?.data ?? null;
+        if (!cfg) return;
+        this.beServer.set(cfg);
+        this.beDraft.set({
+          salvageEnabled: cfg.salvageEnabled,
+          salvageMaeTriggerR: cfg.salvageMaeTriggerR,
+          salvageToleranceR: cfg.salvageToleranceR,
+          trailToBeEnabled: cfg.trailToBeEnabled,
+          trailToBeMfeTriggerR: cfg.trailToBeMfeTriggerR,
+        });
+      });
+  });
+
+  protected beDirty(): boolean {
+    const s = this.beServer();
+    const d = this.beDraft();
+    if (!s || !d) return false;
+    return (
+      s.salvageEnabled !== d.salvageEnabled ||
+      s.salvageMaeTriggerR !== d.salvageMaeTriggerR ||
+      s.salvageToleranceR !== d.salvageToleranceR ||
+      s.trailToBeEnabled !== d.trailToBeEnabled ||
+      s.trailToBeMfeTriggerR !== d.trailToBeMfeTriggerR
+    );
+  }
+
+  protected updateBeDraft(patch: Partial<NonNullable<ReturnType<typeof this.beDraft>>>): void {
+    const d = this.beDraft();
+    if (!d) return;
+    this.beDraft.set({ ...d, ...patch });
+    this.beSaved.set(false);
+    this.beSaveError.set(null);
+  }
+
+  protected resetBe(): void {
+    const s = this.beServer();
+    if (!s) return;
+    this.beDraft.set({
+      salvageEnabled: s.salvageEnabled,
+      salvageMaeTriggerR: s.salvageMaeTriggerR,
+      salvageToleranceR: s.salvageToleranceR,
+      trailToBeEnabled: s.trailToBeEnabled,
+      trailToBeMfeTriggerR: s.trailToBeMfeTriggerR,
+    });
+    this.beSaved.set(false);
+    this.beSaveError.set(null);
+  }
+
+  protected saveBe(): void {
+    const ea = this.ea();
+    const draft = this.beDraft();
+    const server = this.beServer();
+    if (!ea || !draft || !server || !this.beDirty()) return;
+    this.savingBe.set(true);
+    this.beSaveError.set(null);
+    this.admin
+      .updateBreakevenExit(ea.instanceId, draft)
+      .pipe(
+        finalize(() => this.savingBe.set(false)),
+        catchError((err) => {
+          this.beSaveError.set(err?.error?.message ?? 'Save failed.');
+          return of(null);
+        }),
+      )
+      .subscribe((res) => {
+        if (res === null) return;
+        if (!res.status) {
+          this.beSaveError.set(res.message ?? 'Save failed.');
+          return;
+        }
+        // Optimistically pin server to draft — next page load will reconcile.
+        this.beServer.set({ ...server, ...draft });
+        this.beSaved.set(true);
+        this.notify.success(`Breakeven exit settings saved for EA ${ea.instanceId}.`);
+        this.auditTrail
+          .create({
+            entityType: 'EAInstance',
+            entityId: ea.id,
+            decisionType: 'EAUpdateBreakevenExit',
+            outcome: 'Saved',
+            reason: null,
+            contextJson: JSON.stringify({ instanceId: ea.instanceId, ...draft }),
             source: 'AdminUI',
           })
           .subscribe({ error: () => undefined });

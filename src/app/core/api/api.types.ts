@@ -3358,6 +3358,52 @@ export interface UpdateEAFillModeRequest {
   fillMode: EAFillMode;
 }
 
+/**
+ * Per-account rule-based breakeven-exit configuration surfaced by
+ * GET /admin/ea/{instanceId}/breakeven-exit. Two mechanics that move a
+ * position toward a no-loss outcome under their respective conditions:
+ *
+ *  - **Salvage** — after MAE crossed the trigger fraction (× SL distance),
+ *    close the position at the live price once it returns within the
+ *    tolerance band around entry.
+ *  - **Trail-to-BE** — after MFE crossed the trigger fraction (× SL
+ *    distance), move SL to entry (one-shot).
+ *
+ * All thresholds are FRACTIONS of the position's SL distance (R-units) so
+ * the same values work across symbols with very different pip values.
+ * Storage is account-scoped; the route addresses the toggle per-instance
+ * to match the EA detail page's mental model and the engine resolves
+ * instance → account before reading/writing.  Hot-reloads via
+ * EngineConfigCache; takes effect on the next PositionWorker cycle.
+ *
+ * `tradingAccountId` is null when the route instance id doesn't resolve.
+ */
+export interface EABreakevenExitConfig {
+  instanceId: string;
+  tradingAccountId: number | null;
+
+  salvageEnabled: boolean;
+  salvageMaeTriggerR: number;
+  salvageToleranceR: number;
+  trailToBeEnabled: boolean;
+  trailToBeMfeTriggerR: number;
+
+  defaultSalvageEnabled: boolean;
+  defaultSalvageMaeTriggerR: number;
+  defaultSalvageToleranceR: number;
+  defaultTrailToBeEnabled: boolean;
+  defaultTrailToBeMfeTriggerR: number;
+}
+
+/** Body shape for PUT /admin/ea/{instanceId}/breakeven-exit. */
+export interface UpdateEABreakevenExitRequest {
+  salvageEnabled: boolean;
+  salvageMaeTriggerR: number;
+  salvageToleranceR: number;
+  trailToBeEnabled: boolean;
+  trailToBeMfeTriggerR: number;
+}
+
 export interface StrategyTemplateDto {
   id: number;
   name: string | null;
