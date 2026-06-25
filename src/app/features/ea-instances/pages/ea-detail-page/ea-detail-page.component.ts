@@ -1438,11 +1438,16 @@ interface ConfigForm {
         grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
         gap: var(--space-3);
       }
-      /* Ensure each child panel actually fills its grid cell vertically
-         (some panels use flex/content-driven heights — they need to
-         honour the cell's stretched height now). */
+      /* Ensure each child panel fills its grid cell vertically AND
+         pins its content to the top — otherwise the row-flex panels'
+         default align-items: center vertically centres their content
+         inside the stretched card, leaving even whitespace top and
+         bottom.  We want the whitespace at the bottom so the row
+         reads as a clean top-aligned card grid. */
       .ea-cards-grid > section {
         height: 100%;
+        align-items: flex-start;
+        align-content: flex-start;
       }
       /* ── Trading enable/disable control ──────────────────────────── */
       .trading-control {
