@@ -530,6 +530,30 @@ import {
               </label>
             </div>
 
+            <div class="field cap-field">
+              <label
+                >Max pending positions per symbol
+                <span class="muted small">(open + pending orders)</span></label
+              >
+              <input
+                type="number"
+                min="0"
+                max="50"
+                [value]="cfg.maxPendingPositionsPerSymbol"
+                (input)="
+                  patch({
+                    maxPendingPositionsPerSymbol: clampInt($any($event.target).value, 0, 50),
+                  })
+                "
+              />
+              <p class="muted small hint">
+                0 = no cap (legacy behaviour). When > 0, the sweep skips a symbol whose
+                <em>open positions + pending orders</em> count meets this number. When the two
+                boolean toggles above are on, the ANY-check fires first and this cap is unreachable
+                — uncheck them to use the cap as the binding constraint.
+              </p>
+            </div>
+
             <p class="sub-label">Hard caps</p>
             <div class="row-2">
               <div class="field">

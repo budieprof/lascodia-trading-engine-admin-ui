@@ -54,6 +54,15 @@ export interface SpotSweepConfig {
   excludePendingOrder: boolean;
   excludePendingSignal: boolean;
   requireActiveEaCoverage: boolean;
+  /**
+   * Per-symbol cap on (open positions + pending orders). When > 0, the sweep
+   * skips a symbol whose current exposure count meets this cap. Default 0 =
+   * no cap (legacy behaviour). When the matching boolean toggles above are
+   * true the ANY-check fires first and this cap is unreachable — set the
+   * relevant toggle to false to use the cap as the binding constraint.
+   * Range [0, 50].
+   */
+  maxPendingPositionsPerSymbol: number;
 
   // Hard caps — hitting any one parks the loop with an idleReason
   maxConcurrentSweepPositions: number;
@@ -198,6 +207,7 @@ export const DEFAULT_SWEEP_CONFIG: SpotSweepConfig = {
   minConfidence: 0.7,
   excludeOpenPosition: true,
   excludePendingOrder: true,
+  maxPendingPositionsPerSymbol: 0,
   excludePendingSignal: true,
   requireActiveEaCoverage: true,
   maxConcurrentSweepPositions: 3,
