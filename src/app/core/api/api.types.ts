@@ -3405,33 +3405,29 @@ export interface UpdateEABreakevenExitRequest {
 }
 
 /**
- * Per-account pending-signal-reval configuration surfaced by
+ * Engine-wide pending-signal-reval configuration surfaced by
  * GET /admin/ea/{instanceId}/pending-signal-reval.  When enabled, LLM
  * recommendations whose entry price is far from the current market at
  * signal-generation time (measured in ATR units) are parked in
  * PendingReval status rather than placed as stale limit orders.  When
- * price later reaches the recommended entry, a re-validation LLM call
- * decides whether to promote the signal (place as market) or kill it.
+ * price later reaches the recommended entry, a fresh condensed LLM
+ * analysis decides whether to promote the signal (back to Approved
+ * with rewritten entry, fills at market) or kill it.
  *
  * `atrTrigger` is the entry-distance threshold expressed as a fraction
  * of the signal-generation ATR (regime-aware, symbol-agnostic).  TTL,
  * cooldown, and max-attempts cap the wait + re-val cycle.  Off by
- * default.  Storage is account-scoped; the route addresses the toggle
- * per-instance to match the EA detail page's mental model and the
- * engine resolves instance → account before reading/writing.
- * Hot-reloads via EngineConfigCache.
+ * default.
  *
- * **Schema-first deferral.** Shipped ahead of the gate + worker logic
- * that read/mutate parked signals — operators can configure thresholds
- * in advance without the gate yet activating.  The follow-up session
- * wires in the park decision (SignalOrderBridgeWorker hook), the
- * re-validation LLM call, and the polling worker.
- *
- * `tradingAccountId` is null when the route instance id doesn't resolve.
+ * **Engine-wide (not per-account).** A TradeSignal is account-agnostic
+ * in this engine — Tier 1 approves intrinsically, then Tier 2 routes
+ * each approved signal to whichever EA polls for it.  Park-or-not is a
+ * single decision tied to the signal, not to any one account; flipping
+ * this on from any EA's detail page parks signals for every account.
+ * The per-instance URL is for UI placement only.
  */
 export interface EAPendingSignalRevalConfig {
   instanceId: string;
-  tradingAccountId: number | null;
 
   enabled: boolean;
   atrTrigger: number;

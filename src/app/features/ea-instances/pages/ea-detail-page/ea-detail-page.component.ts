@@ -511,19 +511,24 @@ interface ConfigForm {
         </section>
 
         <!-- ── Pending-signal re-validation ─────────────────────────────
-             Per-account "park-and-revalidate" toggle for LLM signals
-             whose entry price is far from market at generation time
-             (measured in ATR units). When enabled, the engine parks
-             these signals in PendingReval status instead of placing
-             stale limits; when price reaches the recommended entry,
-             a re-validation LLM call decides whether to promote the
-             signal (as a market order) or kill it. Off by default.
-             Schema-first deferral — operators can configure thresholds
-             now; the gate + worker land in a follow-up session. -->
+             Engine-wide "park-and-revalidate" toggle for LLM signals
+             whose entry is far from market at generation time (in ATR
+             units). When enabled, the engine parks these signals in
+             PendingReval status instead of placing stale limits; when
+             price reaches the recommended entry, a fresh condensed
+             LLM analysis decides whether to promote the signal (back
+             to Approved with rewritten entry, fills at market) or
+             kill it. The URL is per-EA for UI placement only — the
+             setting is engine-wide and affects every account. -->
         <section class="be-panel" [attr.data-arm]="psrDraft()?.enabled ? 'on' : 'off'">
           <div class="be-info">
             <div class="be-headline">
               <span class="be-label">Pending-signal re-validation</span>
+              <span
+                class="be-pill muted small"
+                title="Same setting affects every account on this engine."
+                >engine-wide</span
+              >
               @if (psrServer() === null) {
                 <span class="be-pill muted">…</span>
               } @else if (psrServer()?.enabled) {
@@ -535,8 +540,8 @@ interface ConfigForm {
             <span class="be-desc muted small">
               Park LLM recs whose entry is far from market and re-validate when price reaches it.
               Threshold is a fraction of the signal-generation ATR. Hot-reloads on the next
-              gate/worker cycle.
-              <em>Gate + worker land in a follow-up — configurable now, inert until then.</em>
+              gate/worker cycle. <strong>This is an engine-wide setting</strong> — flipping it from
+              any EA's detail page affects every account.
             </span>
           </div>
           <div class="be-actions">
