@@ -14,6 +14,19 @@ import { NotificationService } from '@core/notifications/notification.service';
 import type { PendingSignalRecDto } from '@core/api/api.types';
 
 /**
+ * One row of the per-attempt history `RevalidatePendingSignalCommand`
+ * appends to `PendingSignalRec.RevalAuditJson` (server-side shape mirrored
+ * here so the cockpit's drill-down popover can render it).
+ */
+interface AuditEntry {
+  at: string;
+  decision: string;
+  reason: string;
+  latencyMs: number;
+  llmInvocationId: number | null;
+}
+
+/**
  * Operator cockpit for the pending-signal-reval mechanic.  Shows the
  * held-rec table with state-aware badges, distance-to-entry / TTL
  * countdowns, attempt counter, and a per-row Cancel action for Parked
@@ -86,6 +99,7 @@ import type { PendingSignalRecDto } from '@core/api/api.types';
           <table class="grid">
             <thead>
               <tr>
+                <th class="expand-col"></th>
                 <th>Id</th>
                 <th>Symbol</th>
                 <th>Dir</th>
@@ -106,7 +120,19 @@ import type { PendingSignalRecDto } from '@core/api/api.types';
             </thead>
             <tbody>
               @for (r of rows(); track r.id) {
-                <tr [class.dim]="isTerminal(r.state)">
+                <tr [class.dim]="isTerminal(r.state)" [class.expanded]="isExpanded(r.id)">
+                  <td class="expand-cell">
+                    <button
+                      type="button"
+                      class="expand-btn"
+                      [class.on]="isExpanded(r.id)"
+                      (click)="toggleExpand(r.id)"
+                      [attr.aria-label]="isExpanded(r.id) ? 'Collapse audit' : 'Expand audit'"
+                      [attr.aria-expanded]="isExpanded(r.id)"
+                    >
+                      <span class="chev">▸</span>
+                    </button>
+                  </td>
                   <td class="num">
                     <code>{{ r.id }}</code>
                   </td>
@@ -165,6 +191,74 @@ import type { PendingSignalRecDto } from '@core/api/api.types';
                     }
                   </td>
                 </tr>
+                @if (isExpanded(r.id)) {
+                  <tr class="detail-row">
+                    <td colspan="17">
+                      <div class="audit-panel">
+                        <div class="audit-header">
+                          Re-validation history · {{ r.revalAttempts }} attempt{{
+                            r.revalAttempts === 1 ? '' : 's'
+                          }}
+                          @if (r.lastRevalAttemptAt) {
+                            · last
+                            <strong>{{ r.lastRevalAttemptAt | date: 'MMM d HH:mm:ss' }}</strong>
+                          }
+                        </div>
+                        @if (parseAudit(r.revalAuditJson); as entries) {
+                          @if (entries.length === 0) {
+                            <p class="muted small">No re-validation attempts recorded yet.</p>
+                          } @else {
+                            <table class="audit-grid">
+                              <thead>
+                                <tr>
+                                  <th>When</th>
+                                  <th>Decision</th>
+                                  <th>Reason</th>
+                                  <th class="num">Latency</th>
+                                  <th>LLM invocation</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                @for (e of entries; track $index) {
+                                  <tr>
+                                    <td class="ts">
+                                      {{ e.at | date: 'MMM d HH:mm:ss' }}
+                                    </td>
+                                    <td>
+                                      <span
+                                        class="decision-pill decision-{{
+                                          e.decision.toLowerCase()
+                                        }}"
+                                        >{{ e.decision }}</span
+                                      >
+                                    </td>
+                                    <td class="reason">{{ e.reason }}</td>
+                                    <td class="num">{{ e.latencyMs }}ms</td>
+                                    <td>
+                                      @if (e.llmInvocationId !== null) {
+                                        <code>{{ e.llmInvocationId }}</code>
+                                      } @else {
+                                        —
+                                      }
+                                    </td>
+                                  </tr>
+                                }
+                              </tbody>
+                            </table>
+                          }
+                        } @else {
+                          <p class="muted small">
+                            No audit recorded yet
+                            @if (r.revalAttempts > 0) {
+                              (attempts={{ r.revalAttempts }} but audit JSON could not be parsed)
+                            }
+                            .
+                          </p>
+                        }
+                      </div>
+                    </td>
+                  </tr>
+                }
               }
             </tbody>
           </table>
@@ -365,6 +459,99 @@ import type { PendingSignalRecDto } from '@core/api/api.types';
         font-family: var(--font-mono, monospace);
         font-size: 0.85em;
       }
+      /* ── Expand affordance + audit drill-down ─────────────────────── */
+      th.expand-col,
+      td.expand-cell {
+        width: 28px;
+        padding: 0;
+        text-align: center;
+      }
+      .expand-btn {
+        background: transparent;
+        border: none;
+        color: var(--text-muted, #888);
+        padding: 0.2rem 0.35rem;
+        cursor: pointer;
+        font-size: 0.85rem;
+        line-height: 1;
+        border-radius: 3px;
+      }
+      .expand-btn:hover {
+        background: var(--surface-3, #23262e);
+        color: inherit;
+      }
+      .expand-btn .chev {
+        display: inline-block;
+        transition: transform 0.12s ease;
+      }
+      .expand-btn.on .chev {
+        transform: rotate(90deg);
+        color: var(--accent, #4a8cff);
+      }
+      tr.expanded {
+        background: var(--surface-2, #1a1d23);
+      }
+      tr.detail-row td {
+        padding: 0;
+        background: var(--surface-2, #1a1d23);
+        border-bottom: 1px solid var(--border, #2a2d33);
+      }
+      .audit-panel {
+        padding: 0.65rem 1rem 0.85rem 2.6rem;
+      }
+      .audit-header {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-muted, #888);
+        margin-bottom: 0.45rem;
+      }
+      table.audit-grid {
+        width: auto;
+        max-width: 100%;
+        border-collapse: collapse;
+        font-size: 0.8rem;
+      }
+      table.audit-grid th,
+      table.audit-grid td {
+        padding: 0.3rem 0.65rem;
+        border-bottom: 1px solid var(--border, #2a2d33);
+        text-align: left;
+        white-space: nowrap;
+      }
+      table.audit-grid th {
+        background: transparent;
+        color: var(--text-muted, #888);
+        font-size: 0.68rem;
+        position: static;
+      }
+      table.audit-grid .reason {
+        max-width: 36rem;
+        white-space: normal;
+      }
+      .decision-pill {
+        display: inline-block;
+        padding: 0.1rem 0.5rem;
+        border-radius: 999px;
+        font-size: 0.68rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        background: var(--surface-3, #23262e);
+        color: var(--text-muted, #888);
+      }
+      .decision-approved {
+        background: #1e4d2b;
+        color: #4ade80;
+      }
+      .decision-rejected {
+        background: #4d1e1e;
+        color: #f87171;
+      }
+      .decision-retryparked {
+        background: #4a3a14;
+        color: #f7c365;
+      }
     `,
   ],
 })
@@ -387,6 +574,7 @@ export class PendingSignalRecsPageComponent implements OnInit, OnDestroy {
   protected readonly loading = signal(false);
   protected readonly loadError = signal<string | null>(null);
   protected readonly canceling = signal<Set<number>>(new Set());
+  protected readonly expandedRowIds = signal<Set<number>>(new Set());
 
   private pollHandle: ReturnType<typeof setInterval> | null = null;
   private static readonly POLL_INTERVAL_MS = 5_000;
@@ -418,6 +606,44 @@ export class PendingSignalRecsPageComponent implements OnInit, OnDestroy {
     return (
       state === 'Approved' || state === 'Rejected' || state === 'Expired' || state === 'Canceled'
     );
+  }
+
+  protected isExpanded(id: number): boolean {
+    return this.expandedRowIds().has(id);
+  }
+
+  protected toggleExpand(id: number): void {
+    const next = new Set(this.expandedRowIds());
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    this.expandedRowIds.set(next);
+  }
+
+  /**
+   * Parse the row's `revalAuditJson` (a JSON array of attempt entries
+   * appended by `RevalidatePendingSignalCommand`).  Returns the parsed
+   * list on success, or `null` when the JSON is missing / unparseable —
+   * the template distinguishes those two cases via the row's
+   * `revalAttempts` count.
+   */
+  protected parseAudit(json: string | null): AuditEntry[] | null {
+    if (json === null || json === undefined || json.trim().length === 0) return null;
+    try {
+      const arr = JSON.parse(json) as unknown;
+      if (!Array.isArray(arr)) return null;
+      return arr.map((raw): AuditEntry => {
+        const e = raw as Partial<AuditEntry>;
+        return {
+          at: typeof e.at === 'string' ? e.at : '',
+          decision: typeof e.decision === 'string' ? e.decision : 'Unknown',
+          reason: typeof e.reason === 'string' ? e.reason : '',
+          latencyMs: typeof e.latencyMs === 'number' ? e.latencyMs : 0,
+          llmInvocationId: typeof e.llmInvocationId === 'number' ? e.llmInvocationId : null,
+        };
+      });
+    } catch {
+      return null;
+    }
   }
 
   protected reload(): void {
