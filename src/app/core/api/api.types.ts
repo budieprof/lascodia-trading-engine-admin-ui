@@ -2938,6 +2938,33 @@ export interface ApplyPerSymbolShrinkageResult {
   rows: ApplyPerSymbolShrinkageRow[];
 }
 
+/**
+ * One active per-symbol shrinkage override as surfaced by
+ * GET /llm/settings/per-symbol-shrinkage. Each row groups the symbol's TP
+ * + SL EngineConfig rows (joined by symbol); either field is null when
+ * only one of the two is overridden — the policy falls back to the
+ * matching global in that case.
+ */
+export interface PerSymbolShrinkageOverrideDto {
+  symbol: string;
+  tpShrinkage: number | null;
+  slShrinkage: number | null;
+  lastUpdatedAt: string;
+  globalTpShrinkage: number;
+  globalSlShrinkage: number;
+}
+
+/** Body for POST /llm/settings/per-symbol-shrinkage/clear. */
+export interface ClearPerSymbolShrinkageRequest {
+  /** Null / empty = clear all active overrides. Case-insensitive. */
+  symbols?: string[] | null;
+}
+
+export interface ClearPerSymbolShrinkageResult {
+  rowsDeleted: number;
+  symbolsCleared: string[];
+}
+
 export interface TestLlmProviderTierResult {
   tier: 'Deep' | 'Quick';
   provider: string;

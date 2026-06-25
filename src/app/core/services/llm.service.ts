@@ -17,6 +17,9 @@ import {
   RationaleCoverageDto,
   ApplyPerSymbolShrinkagePick,
   ApplyPerSymbolShrinkageResult,
+  ClearPerSymbolShrinkageRequest,
+  ClearPerSymbolShrinkageResult,
+  PerSymbolShrinkageOverrideDto,
 } from '@core/api/api.types';
 
 /**
@@ -114,6 +117,27 @@ export class LlmService {
     picks: ApplyPerSymbolShrinkagePick[],
   ): Observable<ResponseData<ApplyPerSymbolShrinkageResult>> {
     return this.api.post(`/llm/settings/apply-per-symbol-shrinkage`, { picks });
+  }
+
+  /**
+   * GET /llm/settings/per-symbol-shrinkage — list currently-active per-symbol
+   * overrides (one row per symbol with TP/SL joined). Powers the "Per-symbol
+   * shrinkage" card on the LLM Settings page.
+   */
+  getPerSymbolShrinkageOverrides(): Observable<ResponseData<PerSymbolShrinkageOverrideDto[]>> {
+    return this.api.get(`/llm/settings/per-symbol-shrinkage`);
+  }
+
+  /**
+   * POST /llm/settings/per-symbol-shrinkage/clear — soft-delete per-symbol
+   * overrides. Empty / omitted `symbols` clears every active row;
+   * otherwise only the listed symbols. The engine reloads `LlmOptions`
+   * in-place so the next signal sees the new state.
+   */
+  clearPerSymbolShrinkage(
+    body: ClearPerSymbolShrinkageRequest = {},
+  ): Observable<ResponseData<ClearPerSymbolShrinkageResult>> {
+    return this.api.post(`/llm/settings/per-symbol-shrinkage/clear`, body);
   }
 
   /**

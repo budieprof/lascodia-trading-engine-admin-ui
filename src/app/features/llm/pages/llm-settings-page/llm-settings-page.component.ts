@@ -13,7 +13,12 @@ import { FormsModule } from '@angular/forms';
 import { catchError, of, switchMap } from 'rxjs';
 
 import { LlmService } from '@core/services/llm.service';
-import { LlmConfigEntryDto, ConfigDataType, TestLlmProviderResult } from '@core/api/api.types';
+import {
+  LlmConfigEntryDto,
+  ConfigDataType,
+  TestLlmProviderResult,
+  PerSymbolShrinkageOverrideDto,
+} from '@core/api/api.types';
 import { NotificationService } from '@core/notifications/notification.service';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -111,6 +116,88 @@ const OPTION_CATALOG: Record<string, readonly string[]> = {
           </div>
         </section>
       }
+
+      <!-- ── Per-symbol shrinkage overrides ─────────────────────── -->
+      <section class="card">
+        <header class="card-head">
+          <h3>Per-symbol shrinkage overrides</h3>
+          <div class="card-head-actions">
+            <button type="button" class="btn-refresh" (click)="psoLoad()" [disabled]="psoLoading()">
+              {{ psoLoading() ? '…' : '↻ Refresh' }}
+            </button>
+            <button
+              type="button"
+              class="btn-clear-all"
+              (click)="psoClearAll()"
+              [disabled]="psoBusy() || psoRows().length === 0"
+              title="Soft-delete every active per-symbol override and fall back to the global"
+            >
+              {{ psoClearing() ? 'Clearing…' : '🗑 Clear all' }}
+            </button>
+          </div>
+        </header>
+        @if (psoLoading()) {
+          <div class="note">Loading…</div>
+        } @else if (psoLoadError()) {
+          <div class="note error">{{ psoLoadError() }}</div>
+        } @else if (psoRows().length === 0) {
+          <div class="note">
+            No active per-symbol overrides — every SpotAnalysis signal uses the engine-wide global
+            TP / SL shrinkage. Set per-symbol values from the Signal Sensitivity page if you want to
+            override per pair.
+          </div>
+        } @else {
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>TP shrinkage</th>
+                <th>SL shrinkage</th>
+                <th>Last updated</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of psoRows(); track row.symbol) {
+                <tr>
+                  <td class="mono">{{ row.symbol }}</td>
+                  <td class="mono">
+                    @if (row.tpShrinkage !== null) {
+                      {{ row.tpShrinkage }}
+                    } @else {
+                      <span class="muted">— (global {{ row.globalTpShrinkage }})</span>
+                    }
+                  </td>
+                  <td class="mono">
+                    @if (row.slShrinkage !== null) {
+                      {{ row.slShrinkage }}
+                    } @else {
+                      <span class="muted">— (global {{ row.globalSlShrinkage }})</span>
+                    }
+                  </td>
+                  <td class="mono nowrap">{{ row.lastUpdatedAt | date: 'MMM d, HH:mm' }}</td>
+                  <td>
+                    <button
+                      type="button"
+                      class="btn-delete"
+                      (click)="psoDeleteSymbol(row.symbol)"
+                      [disabled]="psoSymbolBusy(row.symbol)"
+                      [title]="'Delete override for ' + row.symbol"
+                    >
+                      {{ psoSymbolBusy(row.symbol) ? '…' : '✕ Delete' }}
+                    </button>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+          <p class="muted small note-inline">
+            Deletions soft-delete the EngineConfig rows (<code>IsDeleted = true</code>) so an
+            operator can restore them with a single SQL UPDATE if needed. The engine reloads
+            LlmOptions in-place after each clear — no restart.
+          </p>
+        }
+      </section>
 
       @if (loading()) {
         <div class="note">Loading settings…</div>
@@ -238,6 +325,54 @@ const OPTION_CATALOG: Record<string, readonly string[]> = {
       .btn-save:disabled {
         opacity: 0.4;
         cursor: not-allowed;
+      }
+      /* ── Per-symbol shrinkage card actions ─────────────────────── */
+      .card-head-actions {
+        display: flex;
+        gap: var(--space-2);
+        align-items: center;
+      }
+      .btn-clear-all {
+        height: 28px;
+        padding: 0 var(--space-3);
+        border-radius: var(--radius-sm);
+        border: 1px solid #6e2424;
+        background: transparent;
+        color: #f87171;
+        font-size: var(--text-xs);
+        cursor: pointer;
+      }
+      .btn-clear-all:hover:not(:disabled) {
+        background: #4d1e1e;
+      }
+      .btn-clear-all:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      .btn-delete {
+        height: 24px;
+        padding: 0 var(--space-2);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: transparent;
+        color: #f87171;
+        font-size: var(--text-xs);
+        cursor: pointer;
+      }
+      .btn-delete:hover:not(:disabled) {
+        background: #4d1e1e;
+        border-color: #6e2424;
+      }
+      .btn-delete:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .note.error {
+        color: #f87171;
+      }
+      .note-inline {
+        padding: var(--space-2) var(--space-5);
+        margin: 0;
       }
       /* ── Test result card ─────────────────────────────────────── */
       .test-result .btn-dismiss {
@@ -468,6 +603,14 @@ export class LlmSettingsPageComponent implements OnInit {
   readonly testing = signal(false);
   readonly testResult = signal<TestLlmProviderResult | null>(null);
 
+  // ── Per-symbol shrinkage overrides card ────────────────────────────
+  readonly psoRows = signal<PerSymbolShrinkageOverrideDto[]>([]);
+  readonly psoLoading = signal(false);
+  readonly psoLoadError = signal<string | null>(null);
+  readonly psoClearing = signal(false);
+  readonly psoBusySymbols = signal<Set<string>>(new Set());
+  readonly psoBusy = computed(() => this.psoClearing() || this.psoBusySymbols().size > 0);
+
   readonly dirtyCount = computed(() => this.entries().filter((e) => e.isDirty).length);
 
   readonly groupedEntries = computed(() => {
@@ -495,6 +638,108 @@ export class LlmSettingsPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.reload();
+    this.psoLoad();
+  }
+
+  // ── Per-symbol shrinkage overrides ────────────────────────────────
+
+  psoSymbolBusy(symbol: string): boolean {
+    return this.psoBusySymbols().has(symbol);
+  }
+
+  psoLoad(): void {
+    this.psoLoading.set(true);
+    this.psoLoadError.set(null);
+    this.llm
+      .getPerSymbolShrinkageOverrides()
+      .pipe(
+        catchError((err) => {
+          this.psoLoadError.set(err?.error?.message ?? 'Failed to load per-symbol overrides.');
+          return of(null);
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((res) => {
+        this.psoLoading.set(false);
+        if (res === null) {
+          this.psoRows.set([]);
+          return;
+        }
+        if (!res.status) {
+          this.psoLoadError.set(res.message ?? 'Failed to load per-symbol overrides.');
+          this.psoRows.set([]);
+          return;
+        }
+        this.psoRows.set(res.data ?? []);
+      });
+  }
+
+  psoDeleteSymbol(symbol: string): void {
+    if (!confirm(`Delete the per-symbol shrinkage override for ${symbol}?`)) return;
+    this.psoMarkBusy(symbol, true);
+    this.llm
+      .clearPerSymbolShrinkage({ symbols: [symbol] })
+      .pipe(
+        catchError((err) => {
+          this.notifications.error(err?.error?.message ?? `Delete failed for ${symbol}.`);
+          return of(null);
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((res) => {
+        this.psoMarkBusy(symbol, false);
+        if (res === null) return;
+        if (!res.status) {
+          this.notifications.error(res.message ?? `Delete failed for ${symbol}.`);
+          return;
+        }
+        this.notifications.success(`Cleared override for ${symbol}.`);
+        this.psoLoad();
+      });
+  }
+
+  psoClearAll(): void {
+    const count = this.psoRows().length;
+    if (count === 0) return;
+    if (
+      !confirm(
+        `Soft-delete every active per-symbol shrinkage override (${count} symbol${
+          count === 1 ? '' : 's'
+        })? They can be restored via SQL.`,
+      )
+    )
+      return;
+    this.psoClearing.set(true);
+    this.llm
+      .clearPerSymbolShrinkage({})
+      .pipe(
+        catchError((err) => {
+          this.notifications.error(err?.error?.message ?? 'Clear-all failed.');
+          return of(null);
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((res) => {
+        this.psoClearing.set(false);
+        if (res === null) return;
+        if (!res.status) {
+          this.notifications.error(res.message ?? 'Clear-all failed.');
+          return;
+        }
+        this.notifications.success(
+          `Cleared ${res.data?.symbolsCleared.length ?? 0} symbol(s) (${
+            res.data?.rowsDeleted ?? 0
+          } rows).`,
+        );
+        this.psoLoad();
+      });
+  }
+
+  private psoMarkBusy(symbol: string, busy: boolean): void {
+    const next = new Set(this.psoBusySymbols());
+    if (busy) next.add(symbol);
+    else next.delete(symbol);
+    this.psoBusySymbols.set(next);
   }
 
   reload(): void {
