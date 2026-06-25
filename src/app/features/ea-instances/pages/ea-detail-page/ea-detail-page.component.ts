@@ -1429,15 +1429,20 @@ interface ConfigForm {
       /* ── Control-panel grid ────────────────────────────────────────
          Wraps the five operator panels (Trading, Fill mode, Breakeven
          exit, Pending-signal re-validation, DPT) into a responsive
-         2-up grid so they don't each take a full row.  Collapses to
-         1-up below the min-cell width.  align-items:start so a short
-         panel in a row doesn't stretch to match a taller sibling
-         (avoids dead vertical space inside the short one). */
+         multi-column grid so they don't each take a full row.  Cells
+         stretch to match the tallest sibling in the row (CSS Grid
+         default) — sacrifices some whitespace inside short panels for
+         visual uniformity across each row. */
       .ea-cards-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
         gap: var(--space-3);
-        align-items: start;
+      }
+      /* Ensure each child panel actually fills its grid cell vertically
+         (some panels use flex/content-driven heights — they need to
+         honour the cell's stretched height now). */
+      .ea-cards-grid > section {
+        height: 100%;
       }
       /* ── Trading enable/disable control ──────────────────────────── */
       .trading-control {
