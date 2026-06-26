@@ -127,11 +127,19 @@ import {
                   <th>When (UTC)</th>
                   <th>Account</th>
                   <th>Symbol</th>
+                  <th>Side</th>
                   <th>Position</th>
+                  <th class="num" title="Position's weighted-average entry price at change time">
+                    Entry
+                  </th>
+                  <th class="num" title="SL the position opened with (constant per position)">
+                    Initial SL
+                  </th>
                   <th>Source</th>
                   <th class="num">Old SL</th>
                   <th class="num">New SL</th>
-                  <th class="num">Δ</th>
+                  <th class="num" title="New SL − Old SL">Δ</th>
+                  <th class="num" title="New SL − Initial SL (signed)">Δ vs init</th>
                   <th class="num">Spread</th>
                   <th>Actor</th>
                   <th>Reason</th>
@@ -145,7 +153,35 @@ import {
                     </td>
                     <td class="mono small">{{ r.tradingAccountId }}</td>
                     <td class="mono">{{ r.symbol }}</td>
-                    <td class="mono small">{{ r.positionId }}</td>
+                    <td>
+                      <span class="side-pill" [attr.data-side]="r.direction">{{
+                        r.direction
+                      }}</span>
+                    </td>
+                    <td
+                      class="mono small"
+                      [title]="
+                        r.openedAt
+                          ? 'opened ' + (r.openedAt | date: 'yyyy-MM-dd HH:mm' : 'UTC') + ' UTC'
+                          : 'open time unknown'
+                      "
+                    >
+                      {{ r.positionId }}
+                    </td>
+                    <td class="num mono" [class.muted]="r.entryPrice === null">
+                      @if (r.entryPrice !== null) {
+                        {{ r.entryPrice | number: '1.5-5' }}
+                      } @else {
+                        —
+                      }
+                    </td>
+                    <td class="num mono" [class.muted]="r.initialSl === null">
+                      @if (r.initialSl !== null) {
+                        {{ r.initialSl | number: '1.5-5' }}
+                      } @else {
+                        —
+                      }
+                    </td>
                     <td>
                       <span [class]="'source-pill ' + sourceClass(r.source)">{{ r.source }}</span>
                     </td>
@@ -169,6 +205,14 @@ import {
                       [class.delta-neg]="delta(r) < 0"
                     >
                       {{ deltaStr(r) }}
+                    </td>
+                    <td
+                      class="num mono"
+                      [class.delta-pos]="deltaVsInit(r) > 0"
+                      [class.delta-neg]="deltaVsInit(r) < 0"
+                      [class.muted]="r.initialSl === null || r.newSl === null"
+                    >
+                      {{ deltaVsInitStr(r) }}
                     </td>
                     <td class="num mono" [class.muted]="r.spread === null">
                       @if (r.spread !== null) {
@@ -346,6 +390,22 @@ import {
         background: color-mix(in srgb, #9aa0a6 22%, transparent);
         color: #555e66;
       }
+      .side-pill {
+        padding: 2px 8px;
+        border-radius: 8px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
+      .side-pill[data-side='Long'] {
+        background: color-mix(in srgb, #1d8a3e 18%, transparent);
+        color: #1d8a3e;
+      }
+      .side-pill[data-side='Short'] {
+        background: color-mix(in srgb, #ff453a 18%, transparent);
+        color: #c93631;
+      }
       .row-spread {
         background: color-mix(in srgb, #ff9f0a 6%, transparent);
       }
@@ -464,6 +524,18 @@ export class SlAuditPageComponent {
   protected deltaStr(r: PositionSlChangeLog): string {
     if (r.oldSl === null || r.newSl === null) return '—';
     const d = r.newSl - r.oldSl;
+    const sign = d > 0 ? '+' : '';
+    return `${sign}${d.toFixed(5)}`;
+  }
+
+  protected deltaVsInit(r: PositionSlChangeLog): number {
+    if (r.initialSl === null || r.newSl === null) return 0;
+    return r.newSl - r.initialSl;
+  }
+
+  protected deltaVsInitStr(r: PositionSlChangeLog): string {
+    if (r.initialSl === null || r.newSl === null) return '—';
+    const d = r.newSl - r.initialSl;
     const sign = d > 0 ? '+' : '';
     return `${sign}${d.toFixed(5)}`;
   }
