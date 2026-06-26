@@ -339,17 +339,20 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
   styles: [
     `
       /*
-       * Wider max-width than the original 980px because the embedded
-       * SL audit table is 15 columns wide.  Matches the SL-audit-only
-       * variant that previously lived at /sl-audit.
+       * Fill the viewport width — no max-width cap, no centering.  The
+       * embedded SL audit table is wide (15 cols) and the operator
+       * wants the whole viewport for content.  Padding stays at
+       * var(--space-4) so content isn't pressed against the screen
+       * edges, and min-width: 0 lets the contained grid + table shrink
+       * past their natural intrinsic width when the viewport is narrow.
        */
       .page {
-        max-width: 1480px;
-        margin: 0 auto;
+        width: 100%;
         padding: var(--space-4, 16px);
         display: flex;
         flex-direction: column;
         gap: var(--space-4, 16px);
+        min-width: 0;
       }
       .muted {
         color: var(--text-secondary, var(--text-muted, #888));
