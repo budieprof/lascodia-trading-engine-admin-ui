@@ -660,38 +660,63 @@ const WINDOW_OPTIONS = [
           </article>
         </section>
 
-        <!-- ── 2D TP × SL heatmap ───────────────────────────────────────── -->
-        <section class="heatmap-card">
-          <header class="heatmap-header">
-            <h2>
-              TP × SL sweep <small>· cell colour = {{ heatmapMetricLabel() }}</small>
-            </h2>
-            <div class="heatmap-controls">
-              <label class="heatmap-control">
-                <span>Colour by</span>
-                <select [ngModel]="heatmapMetric()" (ngModelChange)="heatmapMetric.set($event)">
-                  <option value="realizedPnL">Realized P&amp;L</option>
-                  <option value="sumPnL">Total P&amp;L</option>
-                  <option value="winRatePct">Win rate %</option>
-                  <option value="profitFactor">Profit factor</option>
-                  <option value="expectancy">Expectancy / signal</option>
-                </select>
-              </label>
-            </div>
-          </header>
-          <div
-            echarts
-            [options]="heatmapOptions()"
-            [theme]="echartsTheme()"
-            [autoResize]="true"
-            class="heatmap-chart"
-          ></div>
-          <p class="heatmap-hint">
-            Operator-selected cell is highlighted. Cell tooltip shows full KPI set; click a cell to
-            see the heatmap diverge around it (lighter = neutral, deeper colour = better/worse than
-            the active cell).
-          </p>
-        </section>
+        <!-- ── 2D TP × SL heatmap + Daily breakdown (2-up grid) ───────────── -->
+        <div class="sweep-and-daily-grid">
+          <section class="heatmap-card">
+            <header class="heatmap-header">
+              <h2>
+                TP × SL sweep <small>· cell colour = {{ heatmapMetricLabel() }}</small>
+              </h2>
+              <div class="heatmap-controls">
+                <label class="heatmap-control">
+                  <span>Colour by</span>
+                  <select [ngModel]="heatmapMetric()" (ngModelChange)="heatmapMetric.set($event)">
+                    <option value="realizedPnL">Realized P&amp;L</option>
+                    <option value="sumPnL">Total P&amp;L</option>
+                    <option value="winRatePct">Win rate %</option>
+                    <option value="profitFactor">Profit factor</option>
+                    <option value="expectancy">Expectancy / signal</option>
+                  </select>
+                </label>
+              </div>
+            </header>
+            <div
+              echarts
+              [options]="heatmapOptions()"
+              [theme]="echartsTheme()"
+              [autoResize]="true"
+              class="heatmap-chart"
+            ></div>
+            <p class="heatmap-hint">
+              Operator-selected cell is highlighted. Cell tooltip shows full KPI set; click a cell
+              to see the heatmap diverge around it (lighter = neutral, deeper colour = better/worse
+              than the active cell).
+            </p>
+          </section>
+
+          <!-- ── Daily P&L + win-count bar chart ────────────────────────── -->
+          <section class="daily-breakdown-card">
+            <header class="heatmap-header">
+              <h2>Daily breakdown <small>· net P&amp;L and win-count per day</small></h2>
+            </header>
+            @if (dailyChartOptions(); as opts) {
+              <div
+                echarts
+                [options]="opts"
+                [theme]="echartsTheme()"
+                [autoResize]="true"
+                class="daily-chart"
+              ></div>
+            } @else {
+              <div class="daily-chart daily-chart--empty">No closed signals in the result yet.</div>
+            }
+            <p class="heatmap-hint">
+              Bars bucketed by signal <code>GeneratedAt</code> (UTC day). Left axis = net P&amp;L $;
+              right axis = count of <em>HitTP</em> wins.
+            </p>
+          </section>
+        </div>
+        <!-- /.sweep-and-daily-grid -->
 
         <!-- ── Distributions + streaks + risk metrics ─────────────────────── -->
         <section class="analytics-grid">
@@ -1509,6 +1534,32 @@ const WINDOW_OPTIONS = [
         width: 100%;
         height: 380px;
       }
+      /* ── Sweep + daily-breakdown 2-up grid ───────────────────────── */
+      .sweep-and-daily-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+        gap: 0.75rem;
+      }
+      .sweep-and-daily-grid > * {
+        min-width: 0;
+      }
+      .daily-breakdown-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+      }
+      .daily-chart {
+        width: 100%;
+        height: 380px;
+      }
+      .daily-chart--empty {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-tertiary, #888);
+        font-size: 0.85rem;
+      }
       .heatmap-hint {
         font-size: 0.78rem;
         opacity: 0.65;
@@ -2220,6 +2271,106 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly maxRCount = computed(() => {
     const buckets = this.result()?.rMultipleBuckets ?? [];
     return Math.max(1, ...buckets.map((b) => b.count));
+  });
+
+  /**
+   * Per-day rollup of the result's per-signal outcomes, bucketed by the
+   * signal's GeneratedAt UTC date (YYYY-MM-DD).  Powers the "Daily
+   * breakdown" bar chart beside the TP × SL heatmap.  Net P&L counts
+   * every closed signal; wins count only HitTP outcomes.
+   */
+  readonly dailyBreakdown = computed(() => {
+    const r = this.result();
+    if (!r?.signals?.length)
+      return [] as Array<{
+        date: string;
+        pnl: number;
+        wins: number;
+        losses: number;
+        total: number;
+      }>;
+    const map = new Map<string, { pnl: number; wins: number; losses: number; total: number }>();
+    for (const s of r.signals) {
+      if (!s.generatedAt) continue;
+      const date = s.generatedAt.slice(0, 10); // YYYY-MM-DD UTC
+      const entry = map.get(date) ?? { pnl: 0, wins: 0, losses: 0, total: 0 };
+      entry.pnl += s.scenarioPnL ?? 0;
+      if (s.outcome === 'HitTP') entry.wins += 1;
+      else if (s.outcome === 'HitSL') entry.losses += 1;
+      entry.total += 1;
+      map.set(date, entry);
+    }
+    return Array.from(map.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, v]) => ({ date, ...v }));
+  });
+
+  /**
+   * ECharts options for the Daily breakdown bar chart.  Dual-axis:
+   * P&L $ on the left (red/green by sign), Win count on the right
+   * (blue).  Same height as the heatmap so the two cards sit aligned.
+   */
+  readonly dailyChartOptions = computed<EChartsOption | null>(() => {
+    const days = this.dailyBreakdown();
+    if (!days.length) return null;
+    return {
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+      },
+      legend: {
+        data: ['Net P&L', 'Wins'],
+        top: 6,
+        right: 10,
+        textStyle: { fontSize: 10 },
+      },
+      grid: { left: 60, right: 60, top: 36, bottom: 32 },
+      xAxis: {
+        type: 'category',
+        data: days.map((d) => d.date),
+        axisLabel: {
+          fontSize: 10,
+          // MM-DD on every label so the row stays readable
+          formatter: (v: string) => (v.length >= 10 ? v.slice(5) : v),
+        },
+      },
+      yAxis: [
+        {
+          type: 'value',
+          name: 'P&L $',
+          position: 'left',
+          axisLabel: {
+            formatter: (v: number) =>
+              v >= 1000 || v <= -1000 ? `${(v / 1000).toFixed(1)}k` : v.toString(),
+          },
+        },
+        {
+          type: 'value',
+          name: 'Wins',
+          position: 'right',
+          minInterval: 1,
+          splitLine: { show: false },
+        },
+      ],
+      series: [
+        {
+          name: 'Net P&L',
+          type: 'bar',
+          yAxisIndex: 0,
+          data: days.map((d) => ({
+            value: Math.round(d.pnl * 100) / 100,
+            itemStyle: { color: d.pnl >= 0 ? '#34c759' : '#ff3b30' },
+          })),
+        },
+        {
+          name: 'Wins',
+          type: 'bar',
+          yAxisIndex: 1,
+          data: days.map((d) => d.wins),
+          itemStyle: { color: '#4a8cff' },
+        },
+      ],
+    };
   });
 
   /** Percent of the widest bar — used for inline distribution bars. */
