@@ -697,7 +697,9 @@ const WINDOW_OPTIONS = [
           <!-- ── Daily P&L + win-count bar chart ────────────────────────── -->
           <section class="daily-breakdown-card">
             <header class="heatmap-header">
-              <h2>Daily breakdown <small>· net P&amp;L and win-count per day</small></h2>
+              <h2>
+                Daily breakdown <small>· net P&amp;L, win-count and loss-count per day</small>
+              </h2>
             </header>
             @if (dailyChartOptions(); as opts) {
               <div
@@ -712,7 +714,7 @@ const WINDOW_OPTIONS = [
             }
             <p class="heatmap-hint">
               Bars bucketed by signal <code>GeneratedAt</code> (UTC day). Left axis = net P&amp;L $;
-              right axis = count of <em>HitTP</em> wins.
+              right axis = count of <em>HitTP</em> wins (blue) and <em>HitSL</em> losses (red).
             </p>
           </section>
         </div>
@@ -2319,7 +2321,7 @@ export class SignalSensitivityPageComponent implements OnInit {
         axisPointer: { type: 'shadow' },
       },
       legend: {
-        data: ['Net P&L', 'Wins'],
+        data: ['Net P&L', 'Wins', 'Losses'],
         top: 6,
         right: 10,
         textStyle: { fontSize: 10 },
@@ -2346,7 +2348,7 @@ export class SignalSensitivityPageComponent implements OnInit {
         },
         {
           type: 'value',
-          name: 'Wins',
+          name: 'W / L',
           position: 'right',
           minInterval: 1,
           splitLine: { show: false },
@@ -2368,6 +2370,13 @@ export class SignalSensitivityPageComponent implements OnInit {
           yAxisIndex: 1,
           data: days.map((d) => d.wins),
           itemStyle: { color: '#4a8cff' },
+        },
+        {
+          name: 'Losses',
+          type: 'bar',
+          yAxisIndex: 1,
+          data: days.map((d) => d.losses),
+          itemStyle: { color: '#c4290a' },
         },
       ],
     };
