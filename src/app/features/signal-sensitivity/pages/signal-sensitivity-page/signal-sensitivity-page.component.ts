@@ -70,12 +70,50 @@ const WINDOW_OPTIONS = [
       <form class="filter-card" (ngSubmit)="run()">
         <div class="filter-row">
           <label class="field">
-            <span>Window</span>
-            <select [(ngModel)]="windowDays" name="windowDays">
+            <span>
+              Window
+              @if (customRangeActive()) {
+                <small class="muted">(custom range overrides)</small>
+              }
+            </span>
+            <select [(ngModel)]="windowDays" name="windowDays" [disabled]="customRangeActive()">
               @for (w of windows; track w.days) {
                 <option [ngValue]="w.days">{{ w.label }}</option>
               }
             </select>
+          </label>
+          <label class="field">
+            <span> From <small class="muted">(custom)</small> </span>
+            <input
+              type="date"
+              [ngModel]="customFromDate()"
+              (ngModelChange)="customFromDate.set($event)"
+              name="customFromDate"
+              [max]="customToDate() || todayDate()"
+            />
+          </label>
+          <label class="field">
+            <span>
+              To <small class="muted">(custom)</small>
+              @if (customRangeActive()) {
+                <button
+                  type="button"
+                  class="link-button"
+                  (click)="clearCustomRange()"
+                  title="Clear custom range and use Window preset"
+                >
+                  clear
+                </button>
+              }
+            </span>
+            <input
+              type="date"
+              [ngModel]="customToDate()"
+              (ngModelChange)="customToDate.set($event)"
+              name="customToDate"
+              [min]="customFromDate() || null"
+              [max]="todayDate()"
+            />
           </label>
           <label class="field field--wide">
             <span>Symbols <small>(empty = all)</small></span>
@@ -1114,6 +1152,28 @@ const WINDOW_OPTIONS = [
       .field--wide {
         flex: 1 1 280px;
       }
+      .field .muted {
+        opacity: 0.55;
+        text-transform: none;
+        font-weight: 400;
+        margin-left: 0.25rem;
+      }
+      .link-button {
+        background: transparent;
+        border: none;
+        padding: 0;
+        margin-left: 0.45rem;
+        cursor: pointer;
+        text-decoration: underline;
+        font-size: 0.7rem;
+        color: var(--accent, #4a8cff);
+        text-transform: none;
+        letter-spacing: 0;
+        font-weight: 500;
+      }
+      .link-button:hover {
+        text-decoration: none;
+      }
       .field input,
       .field select {
         padding: 0.45rem 0.6rem;
@@ -1932,6 +1992,15 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly selectedTimeframe = signal<Timeframe>('M5');
 
   readonly windowDays = signal<number>(30);
+  /**
+   * Custom date-range overrides for the Window preset. When BOTH are set,
+   * the analyse call uses them verbatim instead of `now − windowDays`.
+   * HTML date inputs produce ISO `YYYY-MM-DD` strings; the run() handler
+   * converts to UTC bounds (00:00 for From, 23:59:59.999 for To).
+   */
+  readonly customFromDate = signal<string | null>(null);
+  readonly customToDate = signal<string | null>(null);
+  readonly customRangeActive = computed(() => !!this.customFromDate() && !!this.customToDate());
   /** Symbols the operator has committed to filter on. Empty = all symbols. */
   readonly selectedSymbols = signal<string[]>([]);
   /** Live free-text input — committed to selectedSymbols on Enter / comma / blur. */
@@ -2312,13 +2381,37 @@ export class SignalSensitivityPageComponent implements OnInit {
     this.selectedSymbols.set(this.selectedSymbols().filter((s) => s !== symbol));
   }
 
+  /** YYYY-MM-DD for today (UTC) — caps the From/To pickers' max attribute. */
+  todayDate(): string {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  /** Reset both custom-range inputs back to null so the Window preset re-applies. */
+  clearCustomRange(): void {
+    this.customFromDate.set(null);
+    this.customToDate.set(null);
+  }
+
   run() {
     if (this.loading()) return;
     this.loading.set(true);
     this.errorMessage.set(null);
 
+    // Custom range overrides the Window preset when BOTH dates are set.
+    // From → 00:00:00.000 UTC of the picked day; To → 23:59:59.999 UTC so
+    // signals generated through the end of that day are included.
     const now = new Date();
-    const fromUtc = new Date(now.getTime() - this.windowDays() * 24 * 60 * 60 * 1000);
+    let fromUtc: Date;
+    let toUtc: Date;
+    const cf = this.customFromDate();
+    const ct = this.customToDate();
+    if (cf && ct) {
+      fromUtc = new Date(cf + 'T00:00:00.000Z');
+      toUtc = new Date(ct + 'T23:59:59.999Z');
+    } else {
+      toUtc = now;
+      fromUtc = new Date(now.getTime() - this.windowDays() * 24 * 60 * 60 * 1000);
+    }
 
     const sweep = this.sweepInput()
       .split(',')
@@ -2340,7 +2433,7 @@ export class SignalSensitivityPageComponent implements OnInit {
         symbols: symbolList.length ? symbolList : undefined,
         directions: this.selectedDirections().length ? this.selectedDirections() : undefined,
         fromUtc: fromUtc.toISOString(),
-        toUtc: now.toISOString(),
+        toUtc: toUtc.toISOString(),
         tpMultiplier: this.tpMultiplier(),
         slMultiplier: this.slMultiplier(),
         tpSweepValues: sweep.length ? sweep : undefined,
