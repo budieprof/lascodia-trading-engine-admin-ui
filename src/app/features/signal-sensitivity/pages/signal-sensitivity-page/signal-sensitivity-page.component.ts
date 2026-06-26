@@ -356,148 +356,156 @@ const WINDOW_OPTIONS = [
           </div>
         </section>
 
-        <!-- ── Optimal per-symbol scenario (each symbol at its own best cell) ── -->
-        @if (optimalAggregate(); as opt) {
-          <section class="kpi-grid kpi-grid--optimal">
-            <div class="optimal-banner">
-              <div class="optimal-banner-title">Optimal per-symbol scenario</div>
-              <div class="optimal-banner-sub">
-                Each of {{ opt.symbolCount }} symbol(s) at its own best (TP×, SL×) from the heatmap
+        <!-- ── Optimal per-symbol scenario + Equity curve (2-up grid) ── -->
+        <div class="optimal-and-equity-grid">
+          @if (optimalAggregate(); as opt) {
+            <section class="kpi-grid kpi-grid--optimal">
+              <div class="optimal-banner">
+                <div class="optimal-banner-title">Optimal per-symbol scenario</div>
+                <div class="optimal-banner-sub">
+                  Each of {{ opt.symbolCount }} symbol(s) at its own best (TP×, SL×) from the
+                  heatmap
+                </div>
               </div>
-            </div>
-            <div class="kpi kpi--optimal">
-              <div class="kpi-label">Win rate</div>
-              <div
-                class="kpi-value"
-                [class.profit]="opt.winRatePct >= 50"
-                [class.loss]="opt.winRatePct < 50"
-              >
-                {{ opt.winRatePct | number: '1.1-1' }}%
+              <div class="kpi kpi--optimal">
+                <div class="kpi-label">Win rate</div>
+                <div
+                  class="kpi-value"
+                  [class.profit]="opt.winRatePct >= 50"
+                  [class.loss]="opt.winRatePct < 50"
+                >
+                  {{ opt.winRatePct | number: '1.1-1' }}%
+                </div>
+                <div class="kpi-sub">{{ opt.winCount }} W / {{ opt.lossCount }} L</div>
               </div>
-              <div class="kpi-sub">{{ opt.winCount }} W / {{ opt.lossCount }} L</div>
-            </div>
-            <div class="kpi kpi--optimal">
-              <div class="kpi-label">Realized P&amp;L</div>
-              <div
-                class="kpi-value"
-                [class.profit]="opt.realizedPnL > 0"
-                [class.loss]="opt.realizedPnL < 0"
-              >
-                {{ opt.realizedPnL | currency: 'USD' }}
+              <div class="kpi kpi--optimal">
+                <div class="kpi-label">Realized P&amp;L</div>
+                <div
+                  class="kpi-value"
+                  [class.profit]="opt.realizedPnL > 0"
+                  [class.loss]="opt.realizedPnL < 0"
+                >
+                  {{ opt.realizedPnL | currency: 'USD' }}
+                </div>
+                <div class="kpi-sub">from {{ opt.winCount + opt.lossCount }} closed</div>
               </div>
-              <div class="kpi-sub">from {{ opt.winCount + opt.lossCount }} closed</div>
-            </div>
-            <div class="kpi kpi--optimal">
-              <div class="kpi-label">Unrealized P&amp;L</div>
-              <div
-                class="kpi-value"
-                [class.profit]="opt.unrealizedPnL > 0"
-                [class.loss]="opt.unrealizedPnL < 0"
-              >
-                {{ opt.unrealizedPnL | currency: 'USD' }}
+              <div class="kpi kpi--optimal">
+                <div class="kpi-label">Unrealized P&amp;L</div>
+                <div
+                  class="kpi-value"
+                  [class.profit]="opt.unrealizedPnL > 0"
+                  [class.loss]="opt.unrealizedPnL < 0"
+                >
+                  {{ opt.unrealizedPnL | currency: 'USD' }}
+                </div>
+                <div class="kpi-sub">from {{ opt.expiredCount }} expired · mark-to-market</div>
               </div>
-              <div class="kpi-sub">from {{ opt.expiredCount }} expired · mark-to-market</div>
-            </div>
-            <div class="kpi kpi--optimal">
-              <div class="kpi-label">Total P&amp;L</div>
-              <div class="kpi-value" [class.profit]="opt.sumPnL > 0" [class.loss]="opt.sumPnL < 0">
-                {{ opt.sumPnL | currency: 'USD' }}
+              <div class="kpi kpi--optimal">
+                <div class="kpi-label">Total P&amp;L</div>
+                <div
+                  class="kpi-value"
+                  [class.profit]="opt.sumPnL > 0"
+                  [class.loss]="opt.sumPnL < 0"
+                >
+                  {{ opt.sumPnL | currency: 'USD' }}
+                </div>
+                <div class="kpi-sub">realized + unrealized</div>
               </div>
-              <div class="kpi-sub">realized + unrealized</div>
-            </div>
-            <div class="kpi kpi--optimal">
-              <div class="kpi-label">Profit factor</div>
-              <div class="kpi-value">{{ opt.profitFactor | number: '1.2-2' }}</div>
-              <div class="kpi-sub">
-                avg W {{ opt.avgWinPnL | currency: 'USD' }} / avg L
-                {{ opt.avgLossPnL | currency: 'USD' }}
+              <div class="kpi kpi--optimal">
+                <div class="kpi-label">Profit factor</div>
+                <div class="kpi-value">{{ opt.profitFactor | number: '1.2-2' }}</div>
+                <div class="kpi-sub">
+                  avg W {{ opt.avgWinPnL | currency: 'USD' }} / avg L
+                  {{ opt.avgLossPnL | currency: 'USD' }}
+                </div>
               </div>
-            </div>
-            <div class="kpi kpi--optimal">
-              <div class="kpi-label">Outcome mix</div>
-              <div class="kpi-value">{{ opt.walkable | number }}</div>
-              <div class="kpi-sub">
-                {{ opt.hitTpCount }} TP / {{ opt.hitSlCount }} SL / {{ opt.expiredCount }} exp
-                @if (opt.entryNotReachedCount > 0) {
-                  · {{ opt.entryNotReachedCount }} unfilled
-                }
-                @if (opt.noCandlesCount > 0) {
-                  · {{ opt.noCandlesCount }} no-data
-                }
+              <div class="kpi kpi--optimal">
+                <div class="kpi-label">Outcome mix</div>
+                <div class="kpi-value">{{ opt.walkable | number }}</div>
+                <div class="kpi-sub">
+                  {{ opt.hitTpCount }} TP / {{ opt.hitSlCount }} SL / {{ opt.expiredCount }} exp
+                  @if (opt.entryNotReachedCount > 0) {
+                    · {{ opt.entryNotReachedCount }} unfilled
+                  }
+                  @if (opt.noCandlesCount > 0) {
+                    · {{ opt.noCandlesCount }} no-data
+                  }
+                </div>
               </div>
-            </div>
-          </section>
-        }
+            </section>
+          }
 
-        <!-- ── Equity-curve KPIs + sparkline (when RiskProfile mode is on) ── -->
-        @if (r.riskProfileId !== null && r.riskProfileId !== undefined) {
-          <section class="equity-card">
-            <header class="equity-header">
-              <h2>
-                Equity curve
-                <small>
-                  · {{ r.riskProfileName }} · starting {{ r.startingBalance | currency: 'USD' }} ·
-                  realized only
-                </small>
-              </h2>
-              <div class="equity-kpis">
-                <div class="equity-kpi">
-                  <span class="equity-kpi-label">Final balance</span>
-                  <span
-                    class="equity-kpi-value"
-                    [class.profit]="(r.finalBalance ?? 0) > (r.startingBalance ?? 0)"
-                    [class.loss]="(r.finalBalance ?? 0) < (r.startingBalance ?? 0)"
-                  >
-                    {{ r.finalBalance | currency: 'USD' }}
-                  </span>
-                </div>
-                <div class="equity-kpi">
-                  <span class="equity-kpi-label">Floating equity</span>
-                  <span
-                    class="equity-kpi-value"
-                    [class.profit]="
-                      (r.finalBalance ?? 0) + r.aggregate.unrealizedPnL > (r.startingBalance ?? 0)
-                    "
-                    [class.loss]="
-                      (r.finalBalance ?? 0) + r.aggregate.unrealizedPnL < (r.startingBalance ?? 0)
-                    "
-                  >
-                    {{ (r.finalBalance ?? 0) + r.aggregate.unrealizedPnL | currency: 'USD' }}
-                  </span>
-                  <small class="equity-kpi-hint">
-                    incl. {{ r.aggregate.unrealizedPnL | currency: 'USD' }} unrealized
+          <!-- ── Equity-curve KPIs + sparkline (when RiskProfile mode is on) ── -->
+          @if (r.riskProfileId !== null && r.riskProfileId !== undefined) {
+            <section class="equity-card">
+              <header class="equity-header">
+                <h2>
+                  Equity curve
+                  <small>
+                    · {{ r.riskProfileName }} · starting {{ r.startingBalance | currency: 'USD' }} ·
+                    realized only
                   </small>
+                </h2>
+                <div class="equity-kpis">
+                  <div class="equity-kpi">
+                    <span class="equity-kpi-label">Final balance</span>
+                    <span
+                      class="equity-kpi-value"
+                      [class.profit]="(r.finalBalance ?? 0) > (r.startingBalance ?? 0)"
+                      [class.loss]="(r.finalBalance ?? 0) < (r.startingBalance ?? 0)"
+                    >
+                      {{ r.finalBalance | currency: 'USD' }}
+                    </span>
+                  </div>
+                  <div class="equity-kpi">
+                    <span class="equity-kpi-label">Floating equity</span>
+                    <span
+                      class="equity-kpi-value"
+                      [class.profit]="
+                        (r.finalBalance ?? 0) + r.aggregate.unrealizedPnL > (r.startingBalance ?? 0)
+                      "
+                      [class.loss]="
+                        (r.finalBalance ?? 0) + r.aggregate.unrealizedPnL < (r.startingBalance ?? 0)
+                      "
+                    >
+                      {{ (r.finalBalance ?? 0) + r.aggregate.unrealizedPnL | currency: 'USD' }}
+                    </span>
+                    <small class="equity-kpi-hint">
+                      incl. {{ r.aggregate.unrealizedPnL | currency: 'USD' }} unrealized
+                    </small>
+                  </div>
+                  <div class="equity-kpi">
+                    <span class="equity-kpi-label">Return</span>
+                    <span
+                      class="equity-kpi-value"
+                      [class.profit]="(r.returnPct ?? 0) > 0"
+                      [class.loss]="(r.returnPct ?? 0) < 0"
+                    >
+                      {{ r.returnPct | number: '1.2-2' }}%
+                    </span>
+                  </div>
+                  <div class="equity-kpi">
+                    <span class="equity-kpi-label">Max drawdown</span>
+                    <span class="equity-kpi-value loss">
+                      {{ r.maxDrawdown | currency: 'USD' }}
+                      <small>({{ r.maxDrawdownPct | number: '1.2-2' }}%)</small>
+                    </span>
+                  </div>
                 </div>
-                <div class="equity-kpi">
-                  <span class="equity-kpi-label">Return</span>
-                  <span
-                    class="equity-kpi-value"
-                    [class.profit]="(r.returnPct ?? 0) > 0"
-                    [class.loss]="(r.returnPct ?? 0) < 0"
-                  >
-                    {{ r.returnPct | number: '1.2-2' }}%
-                  </span>
-                </div>
-                <div class="equity-kpi">
-                  <span class="equity-kpi-label">Max drawdown</span>
-                  <span class="equity-kpi-value loss">
-                    {{ r.maxDrawdown | currency: 'USD' }}
-                    <small>({{ r.maxDrawdownPct | number: '1.2-2' }}%)</small>
-                  </span>
-                </div>
-              </div>
-            </header>
-            <svg
-              class="equity-spark"
-              [attr.viewBox]="equityViewBox()"
-              preserveAspectRatio="none"
-              aria-label="Equity curve"
-            >
-              <polyline class="equity-baseline" [attr.points]="equityBaselinePoints()" />
-              <polyline class="equity-line" [attr.points]="equityLinePoints()" />
-            </svg>
-          </section>
-        }
+              </header>
+              <svg
+                class="equity-spark"
+                [attr.viewBox]="equityViewBox()"
+                preserveAspectRatio="none"
+                aria-label="Equity curve"
+              >
+                <polyline class="equity-baseline" [attr.points]="equityBaselinePoints()" />
+                <polyline class="equity-line" [attr.points]="equityLinePoints()" />
+              </svg>
+            </section>
+          }
+        </div>
+        <!-- /.optimal-and-equity-grid -->
 
         <!-- ── Cohort breakdowns (symbol / direction / source) ──────────── -->
         <section class="breakdown-grid">
@@ -1543,6 +1551,15 @@ const WINDOW_OPTIONS = [
         gap: 0.75rem;
       }
       .sweep-and-daily-grid > * {
+        min-width: 0;
+      }
+      /* ── Optimal-scenario + Equity-curve 2-up grid ───────────────── */
+      .optimal-and-equity-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+        gap: 0.75rem;
+      }
+      .optimal-and-equity-grid > * {
         min-width: 0;
       }
       .daily-breakdown-card {
