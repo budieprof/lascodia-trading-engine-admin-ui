@@ -82,6 +82,7 @@ import {
                 <th class="num">TP</th>
                 <th class="num">PnL</th>
                 <th>Opened</th>
+                <th title="Time since the originating signal was generated">Signal age</th>
                 <th>Broker id</th>
               </tr>
             </thead>
@@ -112,6 +113,9 @@ import {
                   <td class="num mono">
                     @if (p.stopLoss !== null) {
                       {{ p.stopLoss | number: '1.5-5' }}
+                      @if (p.bumpedAt !== null && p.originalStopLoss !== null) {
+                        <span class="bumped-tag" [title]="bumpTooltip(p)">bumped</span>
+                      }
                     } @else {
                       <span class="muted">—</span>
                     }
@@ -131,6 +135,9 @@ import {
                     {{ p.unrealizedPnL | number: '1.2-2' }}
                   </td>
                   <td class="mono small">{{ p.openedAt | date: 'yyyy-MM-dd HH:mm' }}</td>
+                  <td class="mono small" [class.muted]="!p.signalGeneratedAt">
+                    {{ signalAge(p.signalGeneratedAt) }}
+                  </td>
                   <td class="mono small muted">{{ p.brokerPositionId ?? '—' }}</td>
                 </tr>
               }
@@ -296,6 +303,19 @@ import {
         margin: 0;
         font-size: var(--text-xs);
       }
+      .bumped-tag {
+        display: inline-block;
+        margin-left: 4px;
+        padding: 1px 6px;
+        border-radius: 8px;
+        background: color-mix(in srgb, #ff9f0a 22%, transparent);
+        color: #c97700;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        cursor: help;
+      }
     `,
   ],
 })
@@ -455,5 +475,44 @@ export class EAPositionsPanelComponent {
    */
   protected onSlTpModified(): void {
     this.resource.refresh();
+  }
+
+  /**
+   * Human-readable "minutes since the originating signal was generated".
+   * Reads `position.signalGeneratedAt` (joined engine-side via
+   * Position→Order→TradeSignal). Renders as "X min" under 60 minutes,
+   * "Hh Mm" above. The 10s poll cadence is the refresh granularity —
+   * between polls a row's age stays frozen at its last-computed value.
+   */
+  protected signalAge(iso: string | null): string {
+    if (!iso) return '—';
+    const t = new Date(iso).getTime();
+    if (Number.isNaN(t)) return '—';
+    const diffMs = Date.now() - t;
+    if (diffMs < 0) return '0 min';
+    const minutes = Math.floor(diffMs / 60_000);
+    if (minutes < 60) return `${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    const rem = minutes % 60;
+    return rem === 0 ? `${hours}h` : `${hours}h ${rem}m`;
+  }
+
+  /**
+   * Tooltip text for the "bumped" pill on a row whose SL was widened by
+   * the spread-reactive subsystem. Surfaces the pre-bump original SL,
+   * the reason tag, and when the bump fired.
+   */
+  protected bumpTooltip(p: {
+    originalStopLoss: number | null;
+    bumpedAt: string | null;
+    bumpedSpread: number | null;
+    bumpReason: string | null;
+  }): string {
+    const origin =
+      p.originalStopLoss !== null ? `original SL ${p.originalStopLoss}` : 'no original SL recorded';
+    const reason = p.bumpReason ?? 'SPREAD';
+    const when = p.bumpedAt ? new Date(p.bumpedAt).toISOString() : '—';
+    const spread = p.bumpedSpread !== null ? ` · spread at bump ${p.bumpedSpread}` : '';
+    return `${reason} bump — ${origin}${spread} · since ${when}`;
   }
 }

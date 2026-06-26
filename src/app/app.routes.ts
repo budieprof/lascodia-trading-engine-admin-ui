@@ -119,6 +119,14 @@ export const routes: Routes = [
           import('@features/spot-sweep/spot-sweep.routes').then((m) => m.SPOT_SWEEP_ROUTES),
       },
       {
+        path: 'spread-reactive',
+        data: { breadcrumb: 'Spread-Reactive' },
+        loadChildren: () =>
+          import('@features/spread-reactive/spread-reactive.routes').then(
+            (m) => m.SPREAD_REACTIVE_ROUTES,
+          ),
+      },
+      {
         path: 'viability-gates',
         data: { breadcrumb: 'Viability Gates' },
         loadChildren: () =>

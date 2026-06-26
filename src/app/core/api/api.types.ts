@@ -385,6 +385,13 @@ export interface OrderDto {
   isPaper: boolean;
   createdAt: string;
   filledAt: string | null;
+  /**
+   * UTC ISO timestamp the originating TradeSignal was generated, joined
+   * via Order.TradeSignalId → TradeSignal.GeneratedAt. Null when the
+   * order has no signal lineage. Drives the "Signal age" column in the
+   * EA detail pending-orders panel.
+   */
+  signalGeneratedAt: string | null;
 }
 
 export interface PositionDto {
@@ -407,6 +414,23 @@ export interface PositionDto {
   brokerPositionId: string | null;
   openedAt: string;
   closedAt: string | null;
+  /**
+   * UTC ISO timestamp the originating TradeSignal was generated, joined
+   * via Position.OpenOrderId → Order.TradeSignalId → TradeSignal.GeneratedAt.
+   * Null for positions without a signal lineage. Drives the "Signal age"
+   * column in the EA detail open-positions panel.
+   */
+  signalGeneratedAt: string | null;
+  /** Pre-bump SL preserved by SpreadMonitorWorker; null when no bump is active. */
+  originalStopLoss: number | null;
+  /** UTC ISO timestamp the active spread-spike bump was applied; null when no bump is active. */
+  bumpedAt: string | null;
+  /** Observed spread (price units) at the moment the bump was applied; null when no bump is active. */
+  bumpedSpread: number | null;
+  /** The bumped SL value the engine wrote; UI uses this to detect post-bump drift. Null when no bump is active. */
+  bumpedSlSnapshot: number | null;
+  /** Short tag for why the bump was applied (e.g. SPREAD_SPIKE); null when no bump is active. */
+  bumpReason: string | null;
 }
 
 /**

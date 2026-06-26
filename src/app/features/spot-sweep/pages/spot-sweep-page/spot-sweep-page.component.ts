@@ -325,7 +325,7 @@ import {
                 </p>
               </div>
               <div class="field">
-                <label>Hold cooldown (seconds)</label>
+                <label>Re-analysis cooldown (seconds)</label>
                 <input
                   type="number"
                   min="0"
@@ -337,9 +337,11 @@ import {
                   "
                 />
                 <p class="muted small">
-                  After an analysis returns no signal (Hold), skip that symbol for this many seconds
-                  before re-analysing it. 0 = disable; 1800 (30 min) is a good default. A
-                  signal-producing analysis clears the cooldown.
+                  After <em>any</em> completed analysis on a symbol — Hold, signal generated, or
+                  gate-rejected — skip that symbol for this many seconds before re-analysing it.
+                  Effectively a per-symbol rate limit: same-symbol signals are guaranteed at least
+                  this far apart. Analysis failures don't stamp the cooldown. 0 = disable; 1800 (30
+                  min) is a good default.
                 </p>
               </div>
             </div>
@@ -484,22 +486,90 @@ import {
                 />
                 Halt on kill switch
               </label>
-              <label>
+              <label [class.bypassed-line]="cfg.limitSignalsToAccountCapacity">
                 <input
                   type="checkbox"
                   [checked]="cfg.skipWhenInsufficientMargin"
+                  [disabled]="cfg.limitSignalsToAccountCapacity"
                   (change)="patch({ skipWhenInsufficientMargin: $any($event.target).checked })"
                 />
                 Skip when no margin for a new trade
+                @if (cfg.limitSignalsToAccountCapacity) {
+                  <span
+                    class="bypassed-tag"
+                    title="Per-account capacity check below supersedes this coarse skip."
+                    >superseded</span
+                  >
+                }
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  [checked]="cfg.limitSignalsToAccountCapacity"
+                  (change)="patch({ limitSignalsToAccountCapacity: $any($event.target).checked })"
+                />
+                Limit signals to active-account capacity
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  [checked]="cfg.suspendOnHighSpread"
+                  (change)="patch({ suspendOnHighSpread: $any($event.target).checked })"
+                />
+                Suspend on elevated spread
+                <span class="muted small"
+                  >skip pairs whose scoped accounts are all in high-spread state</span
+                >
               </label>
             </div>
 
-            <p class="sub-label">Skip a symbol when it has…</p>
-            <div class="field check">
+            @if (cfg.limitSignalsToAccountCapacity) {
+              <div class="field">
+                <label
+                  >Estimated margin per trade ($)
+                  <span class="muted small">drives per-account margin_room</span></label
+                >
+                <input
+                  type="number"
+                  min="1"
+                  max="10000"
+                  step="1"
+                  [value]="cfg.estimatedMarginPerTrade"
+                  (input)="
+                    patch({
+                      estimatedMarginPerTrade: clampInt($any($event.target).value, 1, 10000),
+                    })
+                  "
+                />
+                <p class="muted small hint">
+                  Per-tick signal budget = Σ over selected active accounts of
+                  <em>min(slot_room, margin_room)</em>, where
+                  <em>slot_room = max(0, RiskProfile.MaxOpenPositions − openCount)</em> and
+                  <em>margin_room = floor(MarginAvailable / EstimatedMarginPerTrade)</em>. Eligible
+                  pairs are trimmed to that budget (top-N by regime priority) <em>before</em> the
+                  LLM fan-out, and auto-approved orders are spread across accounts
+                  most-headroom-first.
+                </p>
+              </div>
+            }
+
+            <p class="sub-label">
+              Skip a symbol when it has…
+              @if (cfg.maxPendingPositionsPerSymbol > 0) {
+                <span
+                  class="bypassed-tag"
+                  title="Per-symbol cap is > 0, so it takes precedence — these ANY-toggles are ignored until the cap returns to 0."
+                >
+                  bypassed by cap
+                </span>
+              }
+            </p>
+            <div class="field check" [class.bypassed]="cfg.maxPendingPositionsPerSymbol > 0">
               <label>
                 <input
                   type="checkbox"
                   [checked]="cfg.excludeOpenPosition"
+                  [disabled]="cfg.maxPendingPositionsPerSymbol > 0"
                   (change)="patch({ excludeOpenPosition: $any($event.target).checked })"
                 />
                 an open position
@@ -508,11 +578,12 @@ import {
                 <input
                   type="checkbox"
                   [checked]="cfg.excludePendingOrder"
+                  [disabled]="cfg.maxPendingPositionsPerSymbol > 0"
                   (change)="patch({ excludePendingOrder: $any($event.target).checked })"
                 />
                 a pending/working order
               </label>
-              <label>
+              <label class="not-bypassed">
                 <input
                   type="checkbox"
                   [checked]="cfg.excludePendingSignal"
@@ -520,7 +591,7 @@ import {
                 />
                 a pending signal
               </label>
-              <label>
+              <label class="not-bypassed">
                 <input
                   type="checkbox"
                   [checked]="cfg.requireActiveEaCoverage"
@@ -547,10 +618,11 @@ import {
                 "
               />
               <p class="muted small hint">
-                0 = no cap (legacy behaviour). When > 0, the sweep skips a symbol whose
-                <em>open positions + pending orders</em> count meets this number. When the two
-                boolean toggles above are on, the ANY-check fires first and this cap is unreachable
-                — uncheck them to use the cap as the binding constraint.
+                0 = no cap (legacy behaviour — the two boolean toggles above apply). When > 0, the
+                cap is the binding constraint and those toggles are bypassed: the sweep counts
+                <em>open + pending orders per active account</em> and skips the symbol when any
+                single account hits this number. Two accounts each holding one position counts as 1,
+                not 2.
               </p>
             </div>
 
@@ -638,7 +710,7 @@ import {
             }
 
             <header class="card-head">
-              <h2>On hold</h2>
+              <h2>On cooldown</h2>
               <span class="muted small">
                 {{ holdCooldowns().length }} pair{{ holdCooldowns().length === 1 ? '' : 's' }}
               </span>
@@ -665,7 +737,7 @@ import {
                 }
               </ul>
             } @else {
-              <p class="muted small">No pairs currently on Hold cooldown.</p>
+              <p class="muted small">No pairs currently on cooldown.</p>
             }
 
             <header class="card-head"><h2>Recent activity</h2></header>
@@ -988,6 +1060,36 @@ import {
         color: var(--text-secondary);
         text-transform: uppercase;
         letter-spacing: 0.04em;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .bypassed-tag {
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        background: var(--state-warning-bg, rgba(234, 179, 8, 0.15));
+        color: var(--state-warning-fg, #b45309);
+        border: 1px solid var(--state-warning-border, rgba(234, 179, 8, 0.35));
+        cursor: help;
+      }
+      .field.check.bypassed > label:not(.not-bypassed) {
+        opacity: 0.45;
+        text-decoration: line-through;
+        cursor: not-allowed;
+      }
+      .field.check.bypassed > label:not(.not-bypassed) input {
+        cursor: not-allowed;
+      }
+      label.bypassed-line {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      label.bypassed-line input {
+        cursor: not-allowed;
       }
       .row-2 {
         display: grid;

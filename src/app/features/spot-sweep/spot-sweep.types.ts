@@ -74,6 +74,32 @@ export interface SpotSweepConfig {
   respectKillSwitch: boolean;
   /** Skip analysis when no in-scope account can open a new position. */
   skipWhenInsufficientMargin: boolean;
+  /**
+   * When on, cap the number of signals generated per tick to the sum of
+   * per-account headroom (slot_room ∧ margin_room) across the selected
+   * active accounts, AND distribute auto-approved orders across those
+   * accounts (most-headroom-first) instead of routing everything to a
+   * single picked account. Strictly stronger than
+   * {@link skipWhenInsufficientMargin}; opt-in default off.
+   */
+  limitSignalsToAccountCapacity: boolean;
+  /**
+   * Per-trade margin estimate (USD) used by
+   * {@link limitSignalsToAccountCapacity} to compute
+   * `margin_room = floor(MarginAvailable / EstimatedMarginPerTrade)`.
+   * Coarse heuristic — set near the average margin you observe a sweep
+   * order lock. Range [1, 10000]; default 50.
+   */
+  estimatedMarginPerTrade: number;
+  /**
+   * When on, drop any pair from this tick's eligible list whose scoped
+   * broker accounts are ALL currently in elevated-spread state per the
+   * spread-reactive subsystem. Saves LLM cost during NY-close / news /
+   * weekend gap windows. When at least one scoped account is still in
+   * normal spread, analysis proceeds — the order routes to the calm
+   * account. Default off — opt-in to preserve legacy behaviour.
+   */
+  suspendOnHighSpread: boolean;
   /** Entry-style bias for the LLM: 'Any' | 'Stop' (prefer breakout) | 'Limit'
    *  (prefer pullback). */
   entryPreference: EntryPreference;
@@ -216,6 +242,9 @@ export const DEFAULT_SWEEP_CONFIG: SpotSweepConfig = {
   maxRiskPerTrade: 0.1,
   respectKillSwitch: true,
   skipWhenInsufficientMargin: true,
+  limitSignalsToAccountCapacity: false,
+  estimatedMarginPerTrade: 50,
+  suspendOnHighSpread: false,
   entryPreference: 'Any',
   maxParallelAnalyses: 6,
   holdCooldownSeconds: 1800,

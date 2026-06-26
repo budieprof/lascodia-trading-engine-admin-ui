@@ -447,6 +447,7 @@ export class SidebarComponent {
         { label: 'Accounts', route: '/trading-accounts', icon: '🏦' },
         { label: 'Brokers', route: '/brokers', icon: '🔗' },
         { label: 'Risk Profiles', route: '/risk-profiles', icon: '🛡' },
+        { label: 'Spread-Reactive', route: '/spread-reactive', icon: '〰' },
         { label: 'Currency Pairs', route: '/currency-pairs', icon: '💱' },
         { label: 'Alerts', route: '/alerts', icon: '🔔' },
       ],
