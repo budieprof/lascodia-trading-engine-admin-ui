@@ -425,6 +425,7 @@ export class SidebarComponent {
         { label: 'Orders', route: '/orders', icon: '📋' },
         { label: 'Positions', route: '/positions', icon: '📊' },
         { label: 'Position Deltas', route: '/positions/deltas', icon: '🔄' },
+        { label: 'SL Audit', route: '/sl-audit', icon: '📜' },
         { label: 'Trade Signals', route: '/trade-signals', icon: '⚡' },
         { label: 'Signal Sensitivity', route: '/signal-sensitivity', icon: '🎛' },
         { label: 'Signal Exits', route: '/trade-signals/feedback', icon: '📨' },

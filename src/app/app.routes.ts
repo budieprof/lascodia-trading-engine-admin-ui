@@ -127,6 +127,12 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'sl-audit',
+        data: { breadcrumb: 'SL Audit' },
+        loadChildren: () =>
+          import('@features/sl-audit/sl-audit.routes').then((m) => m.SL_AUDIT_ROUTES),
+      },
+      {
         path: 'viability-gates',
         data: { breadcrumb: 'Viability Gates' },
         loadChildren: () =>

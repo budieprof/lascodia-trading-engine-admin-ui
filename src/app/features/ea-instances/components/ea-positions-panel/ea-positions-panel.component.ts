@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { catchError, finalize, map, of } from 'rxjs';
 
 import { PositionsService } from '@core/services/positions.service';
@@ -34,6 +35,7 @@ import {
   imports: [
     DatePipe,
     DecimalPipe,
+    RouterLink,
     ProgressBarComponent,
     EmptyStateComponent,
     EATradeChartModalComponent,
@@ -116,6 +118,14 @@ import {
                       @if (p.bumpedAt !== null && p.originalStopLoss !== null) {
                         <span class="bumped-tag" [title]="bumpTooltip(p)">bumped</span>
                       }
+                      <a
+                        class="sl-history-link"
+                        [routerLink]="['/sl-audit']"
+                        [queryParams]="{ positionId: p.id }"
+                        title="View SL change history for this position"
+                        (click)="$event.stopPropagation()"
+                        >history</a
+                      >
                     } @else {
                       <span class="muted">—</span>
                     }
@@ -315,6 +325,20 @@ import {
         text-transform: uppercase;
         letter-spacing: 0.4px;
         cursor: help;
+      }
+      .sl-history-link {
+        display: inline-block;
+        margin-left: 6px;
+        font-size: 10px;
+        color: var(--text-secondary, #888);
+        text-decoration: none;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        opacity: 0.7;
+      }
+      .sl-history-link:hover {
+        opacity: 1;
+        text-decoration: underline;
       }
     `,
   ],

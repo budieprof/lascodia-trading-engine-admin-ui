@@ -7,10 +7,12 @@ import {
   signal,
 } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import { catchError, of } from 'rxjs';
 
 import { SpreadReactiveService } from '@core/services/spread-reactive.service';
 import { createPolledResource } from '@core/polling/polled-resource';
+import { ApiError } from '@core/api/api.types';
 import {
   DEFAULT_SPREAD_REACTIVE_CONFIG,
   SpreadCondition,
@@ -650,8 +652,23 @@ export class SpreadReactivePageComponent {
   }
 
   private toMessage(e: unknown): string {
+    // Engine envelope error — surface the response code + message verbatim.
+    if (e instanceof ApiError) {
+      return `${e.message} (code ${e.code})`;
+    }
+    // HTTP-layer error from Angular HttpClient — surface status + URL so
+    // 404 / 401 / 500 are all immediately diagnosable (the previous
+    // generic "Request failed" left the operator guessing).
+    if (e instanceof HttpErrorResponse) {
+      const url = e.url ? new URL(e.url).pathname : '(unknown URL)';
+      const body =
+        typeof e.error === 'string' && e.error.length > 0 && e.error.length < 240
+          ? ` — ${e.error}`
+          : '';
+      return `HTTP ${e.status} ${e.statusText || ''} on ${url}${body}`.trim();
+    }
     if (e instanceof Error) return e.message;
-    return 'Request failed';
+    return 'Request failed (unknown error type)';
   }
 }
 
