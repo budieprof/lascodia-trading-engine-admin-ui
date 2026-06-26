@@ -955,11 +955,12 @@ interface ConfigForm {
           (configPushed)="onCommandQueued('configPush')"
         />
 
-        <!-- Phase-9 admin: live WARN/ERROR log tail forwarded from the EA -->
-        <app-ea-logs-panel [instanceId]="ea()!.instanceId" />
-
-        <!-- Phase-2A admin: per-instance safety-audit timeline -->
-        <app-ea-audit-timeline [instanceId]="ea()!.instanceId" />
+        <!-- Logs (Phase-9) + Audit timeline (Phase-2A) side-by-side on
+             wide screens; collapse to stacked below the min-cell width. -->
+        <div class="ea-logs-audit-grid">
+          <app-ea-logs-panel [instanceId]="ea()!.instanceId" />
+          <app-ea-audit-timeline [instanceId]="ea()!.instanceId" />
+        </div>
         <app-ea-rejections-panel [instanceId]="ea()!.instanceId" />
 
         <!--
@@ -1448,6 +1449,19 @@ interface ConfigForm {
         height: 100%;
         align-items: flex-start;
         align-content: flex-start;
+      }
+      /* ── Logs + Audit timeline side-by-side ────────────────────────
+         2-up grid wrapping the Phase-9 live log tail and the Phase-2A
+         safety-audit timeline so they share one row instead of each
+         taking full width.  Stretch heights so the two tables align;
+         collapse to 1-up below 720px combined min-cell width. */
+      .ea-logs-audit-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+        gap: var(--space-3);
+      }
+      .ea-logs-audit-grid > * {
+        min-width: 0;
       }
       /* ── Trading enable/disable control ──────────────────────────── */
       .trading-control {
