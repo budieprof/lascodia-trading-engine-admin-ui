@@ -86,27 +86,34 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
             </button>
           </span>
         </div>
-        @if (stateRows().length === 0) {
-          <p class="muted small">
-            No telemetry yet. State warms up as ticks arrive from active EA instances.
-          </p>
-        } @else {
-          <div class="state-table-wrap">
-            <table class="state-table">
-              <thead>
-                <tr>
-                  <th>Account</th>
-                  <th>Symbol</th>
-                  <th>Condition</th>
-                  <th class="num">Spread</th>
-                  <th class="num">Baseline</th>
-                  <th class="num">×</th>
-                  <th class="num">Samples</th>
-                  <th class="num">Calm run</th>
-                  <th>Last sample</th>
+        <!-- Table headers always visible — the empty-state hint sits
+             inside a colspan'd row so the operator never sees the
+             section's structure collapse on a freshly-restarted engine
+             (the store is in-memory and re-warms over ~30 s of ticks). -->
+        <div class="state-table-wrap">
+          <table class="state-table">
+            <thead>
+              <tr>
+                <th>Account</th>
+                <th>Symbol</th>
+                <th>Condition</th>
+                <th class="num">Spread</th>
+                <th class="num">Baseline</th>
+                <th class="num">×</th>
+                <th class="num">Samples</th>
+                <th class="num">Calm run</th>
+                <th>Last sample</th>
+              </tr>
+            </thead>
+            <tbody>
+              @if (stateRows().length === 0) {
+                <tr class="empty-row">
+                  <td colspan="9" class="muted small empty-cell">
+                    No telemetry yet. State warms up as ticks arrive from active EA instances —
+                    typically populates within 30 s of engine start.
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
+              } @else {
                 @for (r of stateRows(); track r.tradingAccountId + ':' + r.symbol) {
                   <tr [class.row-elevated]="r.condition === 'Elevated'">
                     <td class="mono small">{{ r.tradingAccountId }}</td>
@@ -138,10 +145,10 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
                     </td>
                   </tr>
                 }
-              </tbody>
-            </table>
-          </div>
-        }
+              }
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <!-- ───────── SL Audit ─────────
@@ -513,6 +520,11 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
       }
       .row-elevated {
         background: color-mix(in srgb, #ff453a 6%, transparent);
+      }
+      .empty-cell {
+        padding: var(--space-4, 16px);
+        text-align: center;
+        font-style: italic;
       }
       .btn.ghost {
         background: transparent;
