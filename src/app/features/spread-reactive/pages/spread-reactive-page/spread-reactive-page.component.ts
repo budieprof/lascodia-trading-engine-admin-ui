@@ -10,19 +10,25 @@ import { DecimalPipe } from '@angular/common';
 import { catchError, of } from 'rxjs';
 
 import { SpreadReactiveService } from '@core/services/spread-reactive.service';
+import { createPolledResource } from '@core/polling/polled-resource';
 import {
   DEFAULT_SPREAD_REACTIVE_CONFIG,
+  SpreadCondition,
   SpreadReactiveConfig,
+  SpreadStateEntry,
 } from '@features/spread-reactive/spread-reactive.types';
 
 /**
- * Spread-reactive subsystem config + (Phase 2) live state.  This phase 1
- * page is config only — the live status dashboard ships in the next step.
+ * Spread-reactive subsystem: config + live state dashboard.
  *
  * The subsystem watches per-`(TradingAccount, Symbol)` spread, widens
  * SL away from the noise band when spread spikes (NY close, news,
  * weekend gaps), and reverts when spread normalises.  Off by default —
  * the master toggle is the panic-on, not just a UI hint.
+ *
+ * <p>The status section polls `/spread-reactive/state` every 5s and
+ * shows the current condition per (account, symbol) so the operator
+ * can see at a glance whether bumps are currently active anywhere.</p>
  */
 @Component({
   selector: 'app-spread-reactive-page',
@@ -61,6 +67,85 @@ import {
       @if (saved()) {
         <div class="banner ok">Saved.</div>
       }
+
+      <!-- ───────── Live state ───────── -->
+      <section class="card">
+        <div class="status-head">
+          <h2>Live state</h2>
+          <span class="status-meta">
+            <span class="muted small"
+              >{{ stateRows().length }} pair{{ stateRows().length === 1 ? '' : 's' }} observed</span
+            >
+            @if (elevatedCount() > 0) {
+              <span class="condition-pill elevated">{{ elevatedCount() }} elevated</span>
+            }
+            <button
+              type="button"
+              class="btn ghost"
+              (click)="state.refresh()"
+              [disabled]="state.loading()"
+            >
+              {{ state.loading() ? 'Refreshing…' : 'Refresh' }}
+            </button>
+          </span>
+        </div>
+        @if (stateRows().length === 0) {
+          <p class="muted small">
+            No telemetry yet. State warms up as ticks arrive from active EA instances.
+          </p>
+        } @else {
+          <div class="state-table-wrap">
+            <table class="state-table">
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th>Symbol</th>
+                  <th>Condition</th>
+                  <th class="num">Spread</th>
+                  <th class="num">Baseline</th>
+                  <th class="num">×</th>
+                  <th class="num">Samples</th>
+                  <th class="num">Calm run</th>
+                  <th>Last sample</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (r of stateRows(); track r.tradingAccountId + ':' + r.symbol) {
+                  <tr [class.row-elevated]="r.condition === 'Elevated'">
+                    <td class="mono small">{{ r.tradingAccountId }}</td>
+                    <td class="mono">{{ r.symbol }}</td>
+                    <td>
+                      <span
+                        class="condition-pill"
+                        [class.warming]="r.condition === 'Warming'"
+                        [class.normal]="r.condition === 'Normal'"
+                        [class.elevated]="r.condition === 'Elevated'"
+                        >{{ r.condition }}</span
+                      >
+                    </td>
+                    <td class="num mono">{{ r.currentSpread | number: '1.5-5' }}</td>
+                    <td class="num mono">
+                      @if (r.baseline > 0) {
+                        {{ r.baseline | number: '1.5-5' }}
+                      } @else {
+                        <span class="muted">—</span>
+                      }
+                    </td>
+                    <td class="num mono" [class.muted]="r.baseline === 0">
+                      {{ ratioOf(r) }}
+                    </td>
+                    <td class="num mono">{{ r.sampleCount }}</td>
+                    <td class="num mono">{{ r.consecutiveCalmSamples }}</td>
+                    <td class="mono small" [class.muted]="staleRow(r)">
+                      {{ sampleAge(r.lastSampleAt) }}
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      </section>
 
       @if (config(); as cfg) {
         <section class="card">
@@ -341,6 +426,76 @@ import {
         background: var(--success-bg, #e7f5ec);
         color: var(--success, #2c8a3f);
       }
+      .status-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+      .status-head h2 {
+        margin: 0;
+      }
+      .status-meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .condition-pill {
+        padding: 2px 8px;
+        border-radius: 8px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        background: var(--bg-tertiary, #eee);
+        color: var(--text-secondary, #555);
+      }
+      .condition-pill.warming {
+        background: color-mix(in srgb, #9aa0a6 22%, transparent);
+        color: #555e66;
+      }
+      .condition-pill.normal {
+        background: color-mix(in srgb, #1d8a3e 22%, transparent);
+        color: #1d8a3e;
+      }
+      .condition-pill.elevated {
+        background: color-mix(in srgb, #ff453a 22%, transparent);
+        color: #c93631;
+      }
+      .state-table-wrap {
+        overflow-x: auto;
+        margin-top: 10px;
+      }
+      .state-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .state-table th,
+      .state-table td {
+        padding: 6px 10px;
+        text-align: left;
+        border-bottom: 1px solid var(--border, #eee);
+      }
+      .state-table th {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-secondary, #555);
+      }
+      .state-table .num {
+        text-align: right;
+      }
+      .state-table .mono {
+        font-family: var(--font-mono, ui-monospace, monospace);
+      }
+      .state-table .small {
+        font-size: 0.85em;
+      }
+      .row-elevated {
+        background: color-mix(in srgb, #ff453a 6%, transparent);
+      }
+      .btn.ghost {
+        background: transparent;
+      }
     `,
   ],
 })
@@ -359,6 +514,27 @@ export class SpreadReactivePageComponent {
     const s = this.serverConfig();
     return c !== null && s !== null && JSON.stringify(c) !== JSON.stringify(s);
   });
+
+  // Live spread-state polled from `/spread-reactive/state` every 5s.
+  // In-memory store on the engine — cheap to poll, no DB round-trip.
+  protected readonly state = createPolledResource<SpreadStateEntry[]>(
+    () => this.service.getState(),
+    { intervalMs: 5_000 },
+  );
+  protected readonly stateRows = computed<SpreadStateEntry[]>(() => {
+    const rows = this.state.value() ?? [];
+    // Surface elevated rows first, then by symbol — operator scans for trouble.
+    return [...rows].sort((a, b) => {
+      const ca = conditionWeight(a.condition);
+      const cb = conditionWeight(b.condition);
+      if (ca !== cb) return cb - ca;
+      if (a.symbol !== b.symbol) return a.symbol.localeCompare(b.symbol);
+      return a.tradingAccountId - b.tradingAccountId;
+    });
+  });
+  protected readonly elevatedCount = computed(
+    () => this.stateRows().filter((r) => r.condition === 'Elevated').length,
+  );
 
   constructor() {
     this.load();
@@ -445,8 +621,47 @@ export class SpreadReactivePageComponent {
     return Number.isFinite(n) ? n : fallback;
   }
 
+  /** current / baseline ratio for the table — "—" when baseline isn't ready. */
+  protected ratioOf(r: SpreadStateEntry): string {
+    if (r.baseline <= 0) return '—';
+    return (r.currentSpread / r.baseline).toFixed(2);
+  }
+
+  /**
+   * Rendered "last sample" age — "Xs" up to 60s, "Xm Ys" beyond.  Used
+   * to flag stale rows where bumps will freeze in place (the engine
+   * applies the TelemetryFreshnessSeconds gate at decision time).
+   */
+  protected sampleAge(iso: string): string {
+    const t = new Date(iso).getTime();
+    if (!Number.isFinite(t)) return '—';
+    const diffSec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+    if (diffSec < 60) return `${diffSec}s ago`;
+    const m = Math.floor(diffSec / 60);
+    const s = diffSec % 60;
+    return s === 0 ? `${m}m ago` : `${m}m ${s}s ago`;
+  }
+
+  /** Heuristic stale-row tag — last sample older than 2× the default freshness budget. */
+  protected staleRow(r: SpreadStateEntry): boolean {
+    const t = new Date(r.lastSampleAt).getTime();
+    if (!Number.isFinite(t)) return true;
+    return Date.now() - t > 120 * 1_000;
+  }
+
   private toMessage(e: unknown): string {
     if (e instanceof Error) return e.message;
     return 'Request failed';
+  }
+}
+
+function conditionWeight(c: SpreadCondition): number {
+  switch (c) {
+    case 'Elevated':
+      return 2;
+    case 'Normal':
+      return 1;
+    case 'Warming':
+      return 0;
   }
 }
