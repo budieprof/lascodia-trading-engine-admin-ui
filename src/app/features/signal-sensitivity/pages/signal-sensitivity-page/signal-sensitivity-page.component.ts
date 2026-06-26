@@ -855,6 +855,12 @@ const WINDOW_OPTIONS = [
                   <th class="num">TP</th>
                   <th>Outcome</th>
                   <th class="num">Exit</th>
+                  <th
+                    class="num"
+                    title="Hours between signal GeneratedAt and the resolving TP / SL hit (— for unresolved outcomes)"
+                  >
+                    Resolve&nbsp;(h)
+                  </th>
                   <th class="num">P&amp;L</th>
                 </tr>
               </thead>
@@ -889,6 +895,7 @@ const WINDOW_OPTIONS = [
                     <td class="num">
                       {{ s.exitPrice !== null ? (s.exitPrice | number: '1.5-5') : '—' }}
                     </td>
+                    <td class="num">{{ resolveHours(s) }}</td>
                     <td
                       class="num"
                       [class.profit]="s.scenarioPnL > 0"
@@ -2400,6 +2407,24 @@ export class SignalSensitivityPageComponent implements OnInit {
   clearCustomRange(): void {
     this.customFromDate.set(null);
     this.customToDate.set(null);
+  }
+
+  /**
+   * Hours between the signal's GeneratedAt and the resolving TP / SL hit.
+   * Returns '—' for outcomes that don't represent a TP/SL resolution
+   * (Expired, EntryNotReached, NoCandles) since "time to resolution" is
+   * only meaningful when the position actually closed at a barrier.
+   * Renders to one decimal place.
+   */
+  resolveHours(s: AnalyzeSignalSensitivitySignalDto): string {
+    if (s.outcome !== 'HitTP' && s.outcome !== 'HitSL') return '—';
+    if (!s.exitAt || !s.generatedAt) return '—';
+    const exitMs = new Date(s.exitAt).getTime();
+    const genMs = new Date(s.generatedAt).getTime();
+    if (!Number.isFinite(exitMs) || !Number.isFinite(genMs)) return '—';
+    const hours = (exitMs - genMs) / 3_600_000;
+    if (hours < 0) return '—';
+    return hours.toFixed(1);
   }
 
   run() {
