@@ -1,8 +1,10 @@
 import {
   Component,
   ChangeDetectionStrategy,
+  DestroyRef,
   OnInit,
   computed,
+  effect,
   inject,
   signal,
 } from '@angular/core';
@@ -839,7 +841,13 @@ const WINDOW_OPTIONS = [
         <!-- ── Per-signal table ────────────────────────────────────────────── -->
         <section class="signals-card">
           <h2>
-            Per-signal outcomes <small>({{ r.signals.length }} of {{ r.signalCount }})</small>
+            Per-signal outcomes
+            <small>
+              showing {{ visibleSignals().length }} of {{ r.signals.length }} streamed ({{
+                r.signalCount
+              }}
+              walked total)
+            </small>
           </h2>
           <div class="table-scroll">
             <table class="signal-table">
@@ -865,7 +873,7 @@ const WINDOW_OPTIONS = [
                 </tr>
               </thead>
               <tbody>
-                @for (s of r.signals; track s.signalId) {
+                @for (s of visibleSignals(); track s.signalId) {
                   <tr
                     class="signal-row"
                     [class.row--win]="s.outcome === 'HitTP'"
@@ -907,6 +915,16 @@ const WINDOW_OPTIONS = [
                 }
               </tbody>
             </table>
+            @if (canLoadMoreSignals()) {
+              <div
+                id="per-signal-load-more-sentinel"
+                class="per-signal-load-more"
+                role="status"
+                aria-live="polite"
+              >
+                Loading more signals…
+              </div>
+            }
           </div>
         </section>
       } @else if (loading()) {
@@ -1688,6 +1706,13 @@ const WINDOW_OPTIONS = [
       .signal-table tr.row--loss td {
         background: rgba(255, 69, 58, 0.08);
       }
+      .per-signal-load-more {
+        padding: 0.6rem 0.8rem;
+        text-align: center;
+        font-size: 0.8rem;
+        color: var(--text-tertiary, #888);
+        border-top: 1px dashed var(--border);
+      }
 
       .outcome-chip {
         font-size: 0.7rem;
@@ -2028,6 +2053,65 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly errorMessage = signal<string | null>(null);
   readonly result = signal<AnalyzeSignalSensitivityResultDto | null>(null);
   readonly riskProfiles = signal<RiskProfileDto[]>([]);
+
+  /**
+   * Lazy-load cursor for the per-signal outcomes table.  Starts at
+   * PerSignalChunkSize; the IntersectionObserver below bumps it by
+   * PerSignalChunkSize every time the sentinel scrolls into view.
+   * Reset on every analyse run so a fresh response always starts at
+   * the first chunk.
+   */
+  private static readonly PerSignalChunkSize = 100;
+  readonly visibleSignalCount = signal<number>(SignalSensitivityPageComponent.PerSignalChunkSize);
+  readonly visibleSignals = computed(() => {
+    const r = this.result();
+    if (!r?.signals?.length) return [];
+    return r.signals.slice(0, this.visibleSignalCount());
+  });
+  readonly canLoadMoreSignals = computed(() => {
+    const r = this.result();
+    if (!r?.signals?.length) return false;
+    return this.visibleSignalCount() < r.signals.length;
+  });
+  private perSignalLoadMoreObserver: IntersectionObserver | null = null;
+
+  /**
+   * Rewires an IntersectionObserver on the per-signal table's sentinel
+   * element every time the result signal changes.  When the sentinel
+   * scrolls into view (with a 300 px lead so the next chunk renders
+   * before the operator hits the bottom), bumps the visible count by
+   * one chunk.  Reads result() inside the observer callback rather than
+   * closing over `r` so a stale capture can't tick after the operator
+   * re-analyses.
+   */
+  private readonly _wirePerSignalLoadMore = effect(() => {
+    const r = this.result();
+    // Tear down whatever the previous render set up.
+    this.perSignalLoadMoreObserver?.disconnect();
+    this.perSignalLoadMoreObserver = null;
+    if (!r?.signals?.length) return;
+    queueMicrotask(() => {
+      const sentinel = document.getElementById('per-signal-load-more-sentinel');
+      if (!sentinel) return;
+      this.perSignalLoadMoreObserver = new IntersectionObserver(
+        (entries) => {
+          if (!entries[0]?.isIntersecting) return;
+          const total = this.result()?.signals?.length ?? 0;
+          this.visibleSignalCount.update((n) =>
+            Math.min(n + SignalSensitivityPageComponent.PerSignalChunkSize, total),
+          );
+        },
+        { rootMargin: '300px' },
+      );
+      this.perSignalLoadMoreObserver.observe(sentinel);
+    });
+  });
+
+  /** Ensure the observer is disconnected if the component is destroyed. */
+  private readonly _cleanupPerSignalObserver = inject(DestroyRef).onDestroy(() => {
+    this.perSignalLoadMoreObserver?.disconnect();
+    this.perSignalLoadMoreObserver = null;
+  });
 
   /** Metric the operator wants the heatmap to colour by. */
   readonly heatmapMetric = signal<
@@ -2474,7 +2558,10 @@ export class SignalSensitivityPageComponent implements OnInit {
         tpMultiplier: this.tpMultiplier(),
         slMultiplier: this.slMultiplier(),
         tpSweepValues: sweep.length ? sweep : undefined,
-        signalDetailCap: 200,
+        // 0 = no cap; the engine clamps to its hard ceiling (10k).  The
+        // client renders in 100-row chunks via IntersectionObserver below,
+        // so the full payload streams up but the DOM stays cheap.
+        signalDetailCap: 0,
         riskProfileId: riskProfileId ?? undefined,
         startingBalance,
         // Operator's what-if expiry override (hours). Empty/0 → omit so the
@@ -2493,6 +2580,9 @@ export class SignalSensitivityPageComponent implements OnInit {
       .subscribe((res) => {
         this.loading.set(false);
         if (res?.status && res.data) {
+          // Reset the lazy-load cursor BEFORE setting the result so the
+          // effect that wires the observer sees a fresh count + new data.
+          this.visibleSignalCount.set(SignalSensitivityPageComponent.PerSignalChunkSize);
           this.result.set(res.data);
           // Surface the per-symbol best-cell picks for confirmation. The
           // dialog stays closed when the cohort had no signals (the picks
