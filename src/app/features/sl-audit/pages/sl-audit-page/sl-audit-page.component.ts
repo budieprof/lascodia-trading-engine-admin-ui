@@ -23,10 +23,18 @@ import {
 } from '@features/sl-audit/sl-audit.types';
 
 /**
- * Fleet-wide SL audit page.  Reads <c>POST /position/sl-history/list</c>
+ * Embeddable SL audit section.  Renders the paged audit feed plus
+ * filter card; designed to drop into any page wrapper (currently lives
+ * inside `/spread-reactive`).  Reads `POST /position/sl-history/list`
  * with operator-tunable filters and renders the resulting paged feed.
- * The same endpoint backs the per-position drill-in modal — this page
- * just shows the firehose with no <c>positionId</c> filter set by default.
+ *
+ * Drill-in via `?positionId=N` query param: the component reads
+ * `ActivatedRoute.queryParamMap`, so a link with the param pre-fills
+ * the filter regardless of which parent page mounts it.  Multiple
+ * filters can be combined (`?positionId=…&source=…` etc.).
+ *
+ * <p>No outer `.page` chrome or `<h1>` — the parent owns the page
+ * frame so this fragment sits cleanly inside any other layout.</p>
  */
 @Component({
   selector: 'app-sl-audit-page',
@@ -34,11 +42,11 @@ import {
   imports: [DatePipe, DecimalPipe, FormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="page">
-      <header class="page-head">
+    <div class="sl-audit">
+      <header class="section-head">
         <div>
-          <h1>SL Audit</h1>
-          <p class="muted">
+          <h2>SL Audit</h2>
+          <p class="muted small">
             Every stop-loss change across the fleet — manual edits, trailing-stop ratchets,
             spread-bumps + reverts, breakeven moves, LLM exits. Retention is configurable via
             <code>SlAudit:RetentionDays</code> (default 90 days).
@@ -256,16 +264,14 @@ import {
   `,
   styles: [
     `
-      .page {
-        max-width: 1480px;
-        margin: 0 auto;
-        padding: 16px;
+      .sl-audit {
         display: flex;
         flex-direction: column;
         gap: 16px;
       }
-      .page-head h1 {
+      .section-head h2 {
         margin: 0 0 4px;
+        font-size: 1.15em;
       }
       .muted {
         color: var(--text-secondary, #888);

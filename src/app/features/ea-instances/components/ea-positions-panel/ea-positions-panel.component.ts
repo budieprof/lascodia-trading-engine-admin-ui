@@ -120,8 +120,9 @@ import {
                       }
                       <a
                         class="sl-history-link"
-                        [routerLink]="['/sl-audit']"
+                        [routerLink]="['/spread-reactive']"
                         [queryParams]="{ positionId: p.id }"
+                        fragment="sl-audit"
                         title="View SL change history for this position"
                         (click)="$event.stopPropagation()"
                         >history</a

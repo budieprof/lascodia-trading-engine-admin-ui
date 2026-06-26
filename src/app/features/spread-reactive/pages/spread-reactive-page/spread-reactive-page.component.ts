@@ -19,6 +19,7 @@ import {
   SpreadReactiveConfig,
   SpreadStateEntry,
 } from '@features/spread-reactive/spread-reactive.types';
+import { SlAuditPageComponent } from '@features/sl-audit/pages/sl-audit-page/sl-audit-page.component';
 
 /**
  * Spread-reactive subsystem: config + live state dashboard.
@@ -35,7 +36,7 @@ import {
 @Component({
   selector: 'app-spread-reactive-page',
   standalone: true,
-  imports: [DecimalPipe],
+  imports: [DecimalPipe, SlAuditPageComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -147,6 +148,16 @@ import {
             </table>
           </div>
         }
+      </section>
+
+      <!-- ───────── SL Audit ─────────
+           Embedded fleet-wide SL audit feed.  Drill-in via
+           ?positionId=N is handled inside the component (the section
+           reads ActivatedRoute.queryParamMap to pre-fill its filters).
+           id="sl-audit" anchors the section for fragment-based deep
+           links from the EA Positions panel. -->
+      <section class="card" id="sl-audit">
+        <app-sl-audit-page />
       </section>
 
       @if (config(); as cfg) {
