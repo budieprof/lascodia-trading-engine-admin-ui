@@ -931,15 +931,19 @@ interface ConfigForm {
              ownedSymbolsCsv input a sibling's detail page surfaces the
              parent's positions and pending orders, which mis-attributes
              P&L to the wrong instance.  See Phase-14. -->
-        <app-ea-positions-panel
-          [tradingAccountId]="ea()!.tradingAccountId"
-          [instanceId]="ea()!.instanceId"
-          [ownedSymbolsCsv]="ea()!.symbols"
-        />
-        <app-ea-pending-orders-panel
-          [tradingAccountId]="ea()!.tradingAccountId"
-          [ownedSymbolsCsv]="ea()!.symbols"
-        />
+        <!-- Open positions + Pending orders side-by-side on wide screens;
+             collapse to stacked below the min-cell width. -->
+        <div class="ea-positions-orders-grid">
+          <app-ea-positions-panel
+            [tradingAccountId]="ea()!.tradingAccountId"
+            [instanceId]="ea()!.instanceId"
+            [ownedSymbolsCsv]="ea()!.symbols"
+          />
+          <app-ea-pending-orders-panel
+            [tradingAccountId]="ea()!.tradingAccountId"
+            [ownedSymbolsCsv]="ea()!.symbols"
+          />
+        </div>
 
         <!-- Phase-1/2/3 admin: operator control surface (9 actions, inline confirm dialogs) -->
         <app-ea-control-panel
@@ -1461,6 +1465,18 @@ interface ConfigForm {
         gap: var(--space-3);
       }
       .ea-logs-audit-grid > * {
+        min-width: 0;
+      }
+      /* ── Open positions + Pending orders side-by-side ──────────────
+         Same shape as the logs/audit grid above — 2-up on wide,
+         collapse on narrow.  min-width: 0 on children keeps a wide
+         table column from busting the cell. */
+      .ea-positions-orders-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+        gap: var(--space-3);
+      }
+      .ea-positions-orders-grid > * {
         min-width: 0;
       }
       /* ── Trading enable/disable control ──────────────────────────── */
