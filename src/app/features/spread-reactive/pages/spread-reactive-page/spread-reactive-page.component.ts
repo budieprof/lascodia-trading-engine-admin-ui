@@ -20,6 +20,7 @@ import {
   SpreadStateEntry,
 } from '@features/spread-reactive/spread-reactive.types';
 import { SlAuditPageComponent } from '@features/sl-audit/pages/sl-audit-page/sl-audit-page.component';
+import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 
 /**
  * Spread-reactive subsystem: config + live state dashboard.
@@ -36,33 +37,26 @@ import { SlAuditPageComponent } from '@features/sl-audit/pages/sl-audit-page/sl-
 @Component({
   selector: 'app-spread-reactive-page',
   standalone: true,
-  imports: [DecimalPipe, SlAuditPageComponent],
+  imports: [DecimalPipe, SlAuditPageComponent, PageHeaderComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
-      <header class="page-head">
-        <div>
-          <h1>Spread-Reactive</h1>
-          <p class="muted">
-            Opt-in stop-loss widening when broker spread spikes — protects open positions during NY
-            close, news, and weekend gaps. Per-account baselines so Exness Raw vs Standard vs other
-            brokers don't share one wrong number.
-          </p>
-        </div>
+      <app-page-header
+        title="Spread-Reactive"
+        subtitle="Opt-in SL widening on broker spread spikes — protects open positions during NY close, news, and weekend gaps.  Per-account baselines so Exness Raw vs Standard vs other brokers don't share one wrong number."
+      >
         @if (config(); as cfg) {
-          <div class="head-actions">
-            <button
-              type="button"
-              class="power-btn"
-              [class.on]="cfg.enabled"
-              [disabled]="saving()"
-              (click)="toggleEnabled()"
-            >
-              {{ cfg.enabled ? '■ Disable' : '▶ Enable' }}
-            </button>
-          </div>
+          <button
+            type="button"
+            class="power-btn"
+            [class.on]="cfg.enabled"
+            [disabled]="saving()"
+            (click)="toggleEnabled()"
+          >
+            {{ cfg.enabled ? '■ Disable' : '▶ Enable' }}
+          </button>
         }
-      </header>
+      </app-page-header>
 
       @if (error(); as e) {
         <div class="banner error">{{ e }}</div>
@@ -161,155 +155,163 @@ import { SlAuditPageComponent } from '@features/sl-audit/pages/sl-audit-page/sl-
       </section>
 
       @if (config(); as cfg) {
-        <section class="card">
-          <h2>Detection</h2>
-          <p class="muted small">How the worker decides a pair is in elevated-spread state.</p>
-          <div class="grid-2">
-            <label class="field">
-              <span>Baseline window (minutes)</span>
-              <input
-                type="number"
-                min="1"
-                step="1"
-                [value]="cfg.baselineWindowMinutes"
-                (input)="patch({ baselineWindowMinutes: toInt($any($event.target).value, 1) })"
-              />
-              <small class="muted">Rolling window the worker uses for the median baseline.</small>
-            </label>
-            <label class="field">
-              <span>Min samples before triggering</span>
-              <input
-                type="number"
-                min="1"
-                step="1"
-                [value]="cfg.minSamplesBeforeTrigger"
-                (input)="patch({ minSamplesBeforeTrigger: toInt($any($event.target).value, 1) })"
-              />
-              <small class="muted"
-                >Warm-up gate — no bumps until this many samples collected.</small
-              >
-            </label>
-            <label class="field">
-              <span>Spread multiplier (k)</span>
-              <input
-                type="number"
-                min="1"
-                step="0.1"
-                [value]="cfg.spreadMultiplier"
-                (input)="patch({ spreadMultiplier: toFloat($any($event.target).value, 1) })"
-              />
-              <small class="muted">
-                Condition flips to Elevated when
-                <em>current ≥ baseline × {{ cfg.spreadMultiplier | number: '1.1-2' }}</em
-                >.
-              </small>
-            </label>
-          </div>
-        </section>
+        <!-- Configuration: 2x2 auto-fit grid so the 4 small panels
+             share horizontal space on wide screens, stacking only
+             below the per-cell minimum width.  Mirrors the EA detail
+             page's logs+audit + positions+orders grid pattern. -->
+        <div class="config-grid">
+          <section class="card">
+            <h2>Detection</h2>
+            <p class="muted small">How the worker decides a pair is in elevated-spread state.</p>
+            <div class="grid-2">
+              <label class="field">
+                <span>Baseline window (minutes)</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  [value]="cfg.baselineWindowMinutes"
+                  (input)="patch({ baselineWindowMinutes: toInt($any($event.target).value, 1) })"
+                />
+                <small class="muted">Rolling window the worker uses for the median baseline.</small>
+              </label>
+              <label class="field">
+                <span>Min samples before triggering</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  [value]="cfg.minSamplesBeforeTrigger"
+                  (input)="patch({ minSamplesBeforeTrigger: toInt($any($event.target).value, 1) })"
+                />
+                <small class="muted"
+                  >Warm-up gate — no bumps until this many samples collected.</small
+                >
+              </label>
+              <label class="field">
+                <span>Spread multiplier (k)</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="0.1"
+                  [value]="cfg.spreadMultiplier"
+                  (input)="patch({ spreadMultiplier: toFloat($any($event.target).value, 1) })"
+                />
+                <small class="muted">
+                  Condition flips to Elevated when
+                  <em>current ≥ baseline × {{ cfg.spreadMultiplier | number: '1.1-2' }}</em
+                  >.
+                </small>
+              </label>
+            </div>
+          </section>
 
-        <section class="card">
-          <h2>Action</h2>
-          <p class="muted small">How far the SL is widened, and the hard cap.</p>
-          <div class="grid-2">
-            <label class="field">
-              <span>Cushion multiplier</span>
-              <input
-                type="number"
-                min="0"
-                step="0.1"
-                [value]="cfg.cushionMultiplier"
-                (input)="patch({ cushionMultiplier: toFloat($any($event.target).value, 0) })"
-              />
-              <small class="muted">
-                Bump amount =
-                <em>current_spread × {{ cfg.cushionMultiplier | number: '1.1-2' }}</em>
-                in price units.
-              </small>
-            </label>
-            <label class="field">
-              <span>Max bump distance (pips)</span>
-              <input
-                type="number"
-                min="0"
-                step="1"
-                [value]="cfg.maxBumpDistancePips"
-                (input)="patch({ maxBumpDistancePips: toFloat($any($event.target).value, 0) })"
-              />
-              <small class="muted">
-                Hard floor — bump is clamped to this many pips × the symbol's PipSize.
-              </small>
-            </label>
-          </div>
-        </section>
+          <section class="card">
+            <h2>Action</h2>
+            <p class="muted small">How far the SL is widened, and the hard cap.</p>
+            <div class="grid-2">
+              <label class="field">
+                <span>Cushion multiplier</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  [value]="cfg.cushionMultiplier"
+                  (input)="patch({ cushionMultiplier: toFloat($any($event.target).value, 0) })"
+                />
+                <small class="muted">
+                  Bump amount =
+                  <em>current_spread × {{ cfg.cushionMultiplier | number: '1.1-2' }}</em>
+                  in price units.
+                </small>
+              </label>
+              <label class="field">
+                <span>Max bump distance (pips)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  [value]="cfg.maxBumpDistancePips"
+                  (input)="patch({ maxBumpDistancePips: toFloat($any($event.target).value, 0) })"
+                />
+                <small class="muted">
+                  Hard floor — bump is clamped to this many pips × the symbol's PipSize.
+                </small>
+              </label>
+            </div>
+          </section>
 
-        <section class="card">
-          <h2>Revert</h2>
-          <p class="muted small">When and how the worker restores the original SL.</p>
-          <div class="grid-2">
-            <label class="field">
-              <span>Revert ratio</span>
-              <input
-                type="number"
-                min="1"
-                step="0.1"
-                [value]="cfg.revertRatio"
-                (input)="patch({ revertRatio: toFloat($any($event.target).value, 1) })"
-              />
-              <small class="muted">
-                A sample counts as "calm" when
-                <em>current ≤ baseline × {{ cfg.revertRatio | number: '1.1-2' }}</em
-                >.
-              </small>
-            </label>
-            <label class="field">
-              <span>Consecutive calm samples to revert</span>
-              <input
-                type="number"
-                min="1"
-                step="1"
-                [value]="cfg.consecutiveCalmSamplesToRevert"
-                (input)="
-                  patch({ consecutiveCalmSamplesToRevert: toInt($any($event.target).value, 1) })
-                "
-              />
-              <small class="muted"
-                >Hysteresis — prevents flickering reverts when spread oscillates.</small
-              >
-            </label>
-          </div>
-        </section>
+          <section class="card">
+            <h2>Revert</h2>
+            <p class="muted small">When and how the worker restores the original SL.</p>
+            <div class="grid-2">
+              <label class="field">
+                <span>Revert ratio</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="0.1"
+                  [value]="cfg.revertRatio"
+                  (input)="patch({ revertRatio: toFloat($any($event.target).value, 1) })"
+                />
+                <small class="muted">
+                  A sample counts as "calm" when
+                  <em>current ≤ baseline × {{ cfg.revertRatio | number: '1.1-2' }}</em
+                  >.
+                </small>
+              </label>
+              <label class="field">
+                <span>Consecutive calm samples to revert</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  [value]="cfg.consecutiveCalmSamplesToRevert"
+                  (input)="
+                    patch({ consecutiveCalmSamplesToRevert: toInt($any($event.target).value, 1) })
+                  "
+                />
+                <small class="muted"
+                  >Hysteresis — prevents flickering reverts when spread oscillates.</small
+                >
+              </label>
+            </div>
+          </section>
 
-        <section class="card">
-          <h2>Safety</h2>
-          <p class="muted small">Watchdog + tick cadence.</p>
-          <div class="grid-2">
-            <label class="field">
-              <span>Telemetry freshness (seconds)</span>
-              <input
-                type="number"
-                min="10"
-                step="1"
-                [value]="cfg.telemetryFreshnessSeconds"
-                (input)="patch({ telemetryFreshnessSeconds: toInt($any($event.target).value, 10) })"
-              />
-              <small class="muted">
-                If no ticks arrive for this long, bump/revert decisions freeze — uncertain = stay
-                safe.
-              </small>
-            </label>
-            <label class="field">
-              <span>Loop interval (seconds)</span>
-              <input
-                type="number"
-                min="2"
-                step="1"
-                [value]="cfg.loopIntervalSeconds"
-                (input)="patch({ loopIntervalSeconds: toInt($any($event.target).value, 2) })"
-              />
-              <small class="muted">How often the worker re-evaluates conditions.</small>
-            </label>
-          </div>
-        </section>
+          <section class="card">
+            <h2>Safety</h2>
+            <p class="muted small">Watchdog + tick cadence.</p>
+            <div class="grid-2">
+              <label class="field">
+                <span>Telemetry freshness (seconds)</span>
+                <input
+                  type="number"
+                  min="10"
+                  step="1"
+                  [value]="cfg.telemetryFreshnessSeconds"
+                  (input)="
+                    patch({ telemetryFreshnessSeconds: toInt($any($event.target).value, 10) })
+                  "
+                />
+                <small class="muted">
+                  If no ticks arrive for this long, bump/revert decisions freeze — uncertain = stay
+                  safe.
+                </small>
+              </label>
+              <label class="field">
+                <span>Loop interval (seconds)</span>
+                <input
+                  type="number"
+                  min="2"
+                  step="1"
+                  [value]="cfg.loopIntervalSeconds"
+                  (input)="patch({ loopIntervalSeconds: toInt($any($event.target).value, 2) })"
+                />
+                <small class="muted">How often the worker re-evaluates conditions.</small>
+              </label>
+            </div>
+          </section>
+        </div>
 
         <div class="actions-row">
           <button
@@ -336,38 +338,30 @@ import { SlAuditPageComponent } from '@features/sl-audit/pages/sl-audit-page/sl-
   `,
   styles: [
     `
+      /*
+       * Wider max-width than the original 980px because the embedded
+       * SL audit table is 15 columns wide.  Matches the SL-audit-only
+       * variant that previously lived at /sl-audit.
+       */
       .page {
-        max-width: 980px;
+        max-width: 1480px;
         margin: 0 auto;
-        padding: 16px;
+        padding: var(--space-4, 16px);
         display: flex;
         flex-direction: column;
-        gap: 16px;
-      }
-      .page-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: 16px;
-      }
-      .page-head h1 {
-        margin: 0 0 4px;
+        gap: var(--space-4, 16px);
       }
       .muted {
-        color: var(--text-muted, #888);
+        color: var(--text-secondary, var(--text-muted, #888));
       }
       .small {
         font-size: 0.85em;
-      }
-      .head-actions {
-        display: flex;
-        gap: 8px;
       }
       .power-btn {
         padding: 8px 14px;
         border-radius: 6px;
         border: 1px solid var(--border, #ccc);
-        background: var(--surface, #fff);
+        background: var(--surface, var(--bg-primary, #fff));
         cursor: pointer;
         font-weight: 600;
       }
@@ -377,10 +371,21 @@ import { SlAuditPageComponent } from '@features/sl-audit/pages/sl-audit-page/sl-
         color: var(--success, #2c8a3f);
       }
       .card {
-        background: var(--card-bg, #fff);
+        background: var(--bg-secondary, var(--card-bg, #fff));
         border: 1px solid var(--border, #e3e3e3);
-        border-radius: 8px;
-        padding: 14px 16px;
+        border-radius: var(--radius-md, 8px);
+        padding: var(--card-padding, 14px 16px);
+      }
+      /* Configuration grid — 2 columns on wide screens, single-column
+         on narrow.  440px min-width matches the EA detail page's
+         positions+orders grid so cards feel consistent across pages. */
+      .config-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+        gap: var(--space-4, 16px);
+      }
+      .config-grid > .card {
+        margin: 0;
       }
       .card h2 {
         margin: 0 0 4px;
