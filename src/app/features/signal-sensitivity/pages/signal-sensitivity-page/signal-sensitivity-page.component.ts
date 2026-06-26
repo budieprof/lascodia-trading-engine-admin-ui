@@ -83,18 +83,18 @@ const WINDOW_OPTIONS = [
             </select>
           </label>
           <label class="field">
-            <span> From <small class="muted">(custom)</small> </span>
+            <span> From <small class="muted">(custom · local time)</small> </span>
             <input
-              type="date"
+              type="datetime-local"
               [ngModel]="customFromDate()"
               (ngModelChange)="customFromDate.set($event)"
               name="customFromDate"
-              [max]="customToDate() || todayDate()"
+              [max]="customToDate() || nowLocalDateTime()"
             />
           </label>
           <label class="field">
             <span>
-              To <small class="muted">(custom)</small>
+              To <small class="muted">(custom · local time)</small>
               @if (customRangeActive()) {
                 <button
                   type="button"
@@ -107,12 +107,12 @@ const WINDOW_OPTIONS = [
               }
             </span>
             <input
-              type="date"
+              type="datetime-local"
               [ngModel]="customToDate()"
               (ngModelChange)="customToDate.set($event)"
               name="customToDate"
               [min]="customFromDate() || null"
-              [max]="todayDate()"
+              [max]="nowLocalDateTime()"
             />
           </label>
           <label class="field field--wide">
@@ -2381,9 +2381,19 @@ export class SignalSensitivityPageComponent implements OnInit {
     this.selectedSymbols.set(this.selectedSymbols().filter((s) => s !== symbol));
   }
 
-  /** YYYY-MM-DD for today (UTC) — caps the From/To pickers' max attribute. */
-  todayDate(): string {
-    return new Date().toISOString().slice(0, 10);
+  /**
+   * Now formatted as the `YYYY-MM-DDTHH:mm` string a `<input type="datetime-local">`
+   * accepts.  Used to cap the From/To max attribute (can't pick a future
+   * moment).  Built from the LOCAL clock — the picker also operates in local
+   * time — so the cap matches the picker's frame of reference.
+   */
+  nowLocalDateTime(): string {
+    const d = new Date();
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    return (
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+      `T${pad(d.getHours())}:${pad(d.getMinutes())}`
+    );
   }
 
   /** Reset both custom-range inputs back to null so the Window preset re-applies. */
@@ -2397,17 +2407,19 @@ export class SignalSensitivityPageComponent implements OnInit {
     this.loading.set(true);
     this.errorMessage.set(null);
 
-    // Custom range overrides the Window preset when BOTH dates are set.
-    // From → 00:00:00.000 UTC of the picked day; To → 23:59:59.999 UTC so
-    // signals generated through the end of that day are included.
+    // Custom range overrides the Window preset when BOTH timestamps are set.
+    // `datetime-local` inputs produce `YYYY-MM-DDTHH:mm` strings in LOCAL
+    // time (no zone suffix).  `new Date(localString)` parses them as local
+    // time and produces a UTC-anchored Date — exactly what we want to send
+    // as an ISO UTC string.
     const now = new Date();
     let fromUtc: Date;
     let toUtc: Date;
     const cf = this.customFromDate();
     const ct = this.customToDate();
     if (cf && ct) {
-      fromUtc = new Date(cf + 'T00:00:00.000Z');
-      toUtc = new Date(ct + 'T23:59:59.999Z');
+      fromUtc = new Date(cf);
+      toUtc = new Date(ct);
     } else {
       toUtc = now;
       fromUtc = new Date(now.getTime() - this.windowDays() * 24 * 60 * 60 * 1000);
