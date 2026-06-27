@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   computed,
   effect,
   inject,
@@ -8,6 +9,8 @@ import {
 } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
+import { ActivatedRoute } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, of } from 'rxjs';
 
 import { SpreadReactiveService } from '@core/services/spread-reactive.service';
@@ -65,91 +68,131 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
         <div class="banner ok">Saved.</div>
       }
 
+      <!-- ───────── Monitoring tabs ─────────
+           Two views over the live subsystem: per-pair spread state
+           (the worker's own real-time read) and the SL audit feed
+           (historical record of every SL move).  Tab strip auto-
+           selects 'audit' when the operator lands via a drill-in
+           query param (?positionId=N from the EA Positions panel). -->
+      <nav class="tabs" role="tablist" aria-label="Spread-Reactive views">
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          [class.active]="activeTab() === 'state'"
+          [attr.aria-selected]="activeTab() === 'state'"
+          (click)="selectTab('state')"
+        >
+          Live state
+          @if (stateRows().length > 0) {
+            <span class="tab-count">{{ stateRows().length }}</span>
+          }
+          @if (elevatedCount() > 0) {
+            <span class="tab-badge elevated">{{ elevatedCount() }}</span>
+          }
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          [class.active]="activeTab() === 'audit'"
+          [attr.aria-selected]="activeTab() === 'audit'"
+          (click)="selectTab('audit')"
+        >
+          SL Audit
+        </button>
+      </nav>
+
       <!-- ───────── Live state ───────── -->
-      <section class="card">
-        <div class="status-head">
-          <h2>Live state</h2>
-          <span class="status-meta">
-            <span class="muted small"
-              >{{ stateRows().length }} pair{{ stateRows().length === 1 ? '' : 's' }} observed</span
-            >
-            @if (elevatedCount() > 0) {
-              <span class="condition-pill elevated">{{ elevatedCount() }} elevated</span>
-            }
-            <button
-              type="button"
-              class="btn ghost"
-              (click)="state.refresh()"
-              [disabled]="state.loading()"
-            >
-              {{ state.loading() ? 'Refreshing…' : 'Refresh' }}
-            </button>
-          </span>
-        </div>
-        <!-- Table headers always visible — the empty-state hint sits
+      @if (activeTab() === 'state') {
+        <section class="card">
+          <div class="status-head">
+            <h2>Live state</h2>
+            <span class="status-meta">
+              <span class="muted small"
+                >{{ stateRows().length }} pair{{
+                  stateRows().length === 1 ? '' : 's'
+                }}
+                observed</span
+              >
+              @if (elevatedCount() > 0) {
+                <span class="condition-pill elevated">{{ elevatedCount() }} elevated</span>
+              }
+              <button
+                type="button"
+                class="btn ghost"
+                (click)="state.refresh()"
+                [disabled]="state.loading()"
+              >
+                {{ state.loading() ? 'Refreshing…' : 'Refresh' }}
+              </button>
+            </span>
+          </div>
+          <!-- Table headers always visible — the empty-state hint sits
              inside a colspan'd row so the operator never sees the
              section's structure collapse on a freshly-restarted engine
              (the store is in-memory and re-warms over ~30 s of ticks). -->
-        <div class="state-table-wrap">
-          <table class="state-table">
-            <thead>
-              <tr>
-                <th>Account</th>
-                <th>Symbol</th>
-                <th>Condition</th>
-                <th class="num">Spread</th>
-                <th class="num">Baseline</th>
-                <th class="num">×</th>
-                <th class="num">Samples</th>
-                <th class="num">Calm run</th>
-                <th>Last sample</th>
-              </tr>
-            </thead>
-            <tbody>
-              @if (stateRows().length === 0) {
-                <tr class="empty-row">
-                  <td colspan="9" class="muted small empty-cell">
-                    No telemetry yet. State warms up as ticks arrive from active EA instances —
-                    typically populates within 30 s of engine start.
-                  </td>
+          <div class="state-table-wrap">
+            <table class="state-table">
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th>Symbol</th>
+                  <th>Condition</th>
+                  <th class="num">Spread</th>
+                  <th class="num">Baseline</th>
+                  <th class="num">×</th>
+                  <th class="num">Samples</th>
+                  <th class="num">Calm run</th>
+                  <th>Last sample</th>
                 </tr>
-              } @else {
-                @for (r of stateRows(); track r.tradingAccountId + ':' + r.symbol) {
-                  <tr [class.row-elevated]="r.condition === 'Elevated'">
-                    <td class="mono small">{{ r.tradingAccountId }}</td>
-                    <td class="mono">{{ r.symbol }}</td>
-                    <td>
-                      <span
-                        class="condition-pill"
-                        [class.warming]="r.condition === 'Warming'"
-                        [class.normal]="r.condition === 'Normal'"
-                        [class.elevated]="r.condition === 'Elevated'"
-                        >{{ r.condition }}</span
-                      >
-                    </td>
-                    <td class="num mono">{{ r.currentSpread | number: '1.5-5' }}</td>
-                    <td class="num mono">
-                      @if (r.baseline > 0) {
-                        {{ r.baseline | number: '1.5-5' }}
-                      } @else {
-                        <span class="muted">—</span>
-                      }
-                    </td>
-                    <td class="num mono" [class.muted]="r.baseline === 0">
-                      {{ ratioOf(r) }}
-                    </td>
-                    <td class="num mono">{{ r.sampleCount }}</td>
-                    <td class="num mono">{{ r.consecutiveCalmSamples }}</td>
-                    <td class="mono small" [class.muted]="staleRow(r)">
-                      {{ sampleAge(r.lastSampleAt) }}
+              </thead>
+              <tbody>
+                @if (stateRows().length === 0) {
+                  <tr class="empty-row">
+                    <td colspan="9" class="muted small empty-cell">
+                      No telemetry yet. State warms up as ticks arrive from active EA instances —
+                      typically populates within 30 s of engine start.
                     </td>
                   </tr>
+                } @else {
+                  @for (r of stateRows(); track r.tradingAccountId + ':' + r.symbol) {
+                    <tr [class.row-elevated]="r.condition === 'Elevated'">
+                      <td class="mono small">{{ r.tradingAccountId }}</td>
+                      <td class="mono">{{ r.symbol }}</td>
+                      <td>
+                        <span
+                          class="condition-pill"
+                          [class.warming]="r.condition === 'Warming'"
+                          [class.normal]="r.condition === 'Normal'"
+                          [class.elevated]="r.condition === 'Elevated'"
+                          >{{ r.condition }}</span
+                        >
+                      </td>
+                      <td class="num mono">{{ r.currentSpread | number: '1.5-5' }}</td>
+                      <td class="num mono">
+                        @if (r.baseline > 0) {
+                          {{ r.baseline | number: '1.5-5' }}
+                        } @else {
+                          <span class="muted">—</span>
+                        }
+                      </td>
+                      <td class="num mono" [class.muted]="r.baseline === 0">
+                        {{ ratioOf(r) }}
+                      </td>
+                      <td class="num mono">{{ r.sampleCount }}</td>
+                      <td class="num mono">{{ r.consecutiveCalmSamples }}</td>
+                      <td class="mono small" [class.muted]="staleRow(r)">
+                        {{ sampleAge(r.lastSampleAt) }}
+                      </td>
+                    </tr>
+                  }
                 }
-              }
-            </tbody>
-          </table>
-        </div>
-      </section>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      }
 
       <!-- ───────── SL Audit ─────────
            Embedded fleet-wide SL audit feed.  Drill-in via
@@ -157,9 +200,11 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
            reads ActivatedRoute.queryParamMap to pre-fill its filters).
            id="sl-audit" anchors the section for fragment-based deep
            links from the EA Positions panel. -->
-      <section class="card" id="sl-audit">
-        <app-sl-audit-page />
-      </section>
+      @if (activeTab() === 'audit') {
+        <section class="card" id="sl-audit">
+          <app-sl-audit-page />
+        </section>
+      }
 
       @if (config(); as cfg) {
         <!-- Configuration: 2x2 auto-fit grid so the 4 small panels
@@ -526,6 +571,61 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
         text-align: center;
         font-style: italic;
       }
+      /* Tabs — underline-style with the same accent the page-header uses.
+         Sits flush with the card below; the active tab's bottom border
+         pairs with the section card's top edge to feel like a single
+         continuous surface. */
+      .tabs {
+        display: flex;
+        gap: 4px;
+        border-bottom: 1px solid var(--border, #e3e3e3);
+        margin-bottom: calc(-1 * var(--space-4, 16px));
+        padding: 0;
+      }
+      .tab {
+        appearance: none;
+        background: transparent;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        padding: 10px 16px;
+        font-size: var(--text-sm, 14px);
+        font-weight: var(--font-medium, 500);
+        color: var(--text-secondary, #666);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition:
+          color 120ms,
+          border-color 120ms;
+      }
+      .tab:hover {
+        color: var(--text-primary, #222);
+      }
+      .tab.active {
+        color: var(--text-primary, #222);
+        border-bottom-color: var(--accent, #0a84ff);
+      }
+      .tab-count {
+        background: var(--bg-tertiary, #eee);
+        color: var(--text-secondary, #666);
+        font-size: 11px;
+        padding: 1px 7px;
+        border-radius: 999px;
+        font-weight: 600;
+      }
+      .tab-badge {
+        font-size: 10px;
+        padding: 1px 7px;
+        border-radius: 999px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
+      .tab-badge.elevated {
+        background: color-mix(in srgb, #ff453a 22%, transparent);
+        color: #c93631;
+      }
       .btn.ghost {
         background: transparent;
       }
@@ -569,6 +669,19 @@ export class SpreadReactivePageComponent {
     () => this.stateRows().filter((r) => r.condition === 'Elevated').length,
   );
 
+  /**
+   * Which of the two monitoring tabs (Live state / SL Audit) is visible.
+   * Defaults to 'state' on first load; auto-flips to 'audit' when a
+   * drill-in query param (positionId / source / symbol / accountId) is
+   * present — operators landing from the EA Positions panel
+   * `?positionId=N` link expect to see the audit pre-filtered to that
+   * position without having to click the tab.
+   */
+  protected readonly activeTab = signal<'state' | 'audit'>('state');
+
+  private readonly route = inject(ActivatedRoute);
+  private readonly destroyRef = inject(DestroyRef);
+
   constructor() {
     this.load();
     // Clear the saved banner 2s after it appears.
@@ -578,6 +691,22 @@ export class SpreadReactivePageComponent {
         onCleanup(() => clearTimeout(t));
       }
     });
+
+    // Drill-in detection: any of the SL-audit-specific query params being
+    // present means the operator came from the EA Positions panel's
+    // "history" link and expects the SL Audit tab to be active.
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      const drillIn =
+        params.has('positionId') ||
+        params.has('accountId') ||
+        params.has('symbol') ||
+        params.has('source');
+      if (drillIn) this.activeTab.set('audit');
+    });
+  }
+
+  protected selectTab(tab: 'state' | 'audit'): void {
+    this.activeTab.set(tab);
   }
 
   private load(): void {
