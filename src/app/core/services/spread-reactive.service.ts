@@ -4,8 +4,10 @@ import { map } from 'rxjs/operators';
 import { ApiService } from '@core/api/api.service';
 import {
   DEFAULT_SPREAD_REACTIVE_CONFIG,
+  SpreadBaselineFloor,
   SpreadReactiveConfig,
   SpreadStateEntry,
+  UpsertSpreadBaselineFloorRequest,
 } from '@features/spread-reactive/spread-reactive.types';
 
 /**
@@ -33,5 +35,36 @@ export class SpreadReactiveService {
 
   getState(): Observable<SpreadStateEntry[]> {
     return this.api.getEnvelope<SpreadStateEntry[]>('/spread-reactive/state');
+  }
+
+  /**
+   * Persistent floor-baseline rows.  One per `(TradingAccount, Symbol)`.
+   * Filters all serialise to query params — null/undefined → omitted.
+   */
+  getFloors(
+    filters: {
+      tradingAccountId?: number;
+      symbol?: string;
+      source?: 'AutoCapture' | 'OperatorOverride';
+    } = {},
+  ): Observable<SpreadBaselineFloor[]> {
+    const qs = new URLSearchParams();
+    if (filters.tradingAccountId != null)
+      qs.set('tradingAccountId', String(filters.tradingAccountId));
+    if (filters.symbol) qs.set('symbol', filters.symbol);
+    if (filters.source) qs.set('source', filters.source);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return this.api.getEnvelope<SpreadBaselineFloor[]>(`/spread-reactive/floors${suffix}`);
+  }
+
+  /** Operator override / first-time set of a floor for one pair. */
+  upsertFloor(body: UpsertSpreadBaselineFloorRequest): Observable<SpreadBaselineFloor> {
+    return this.api.putEnvelope<SpreadBaselineFloor>('/spread-reactive/floors', body);
+  }
+
+  /** Clear the floor for one pair — pair returns to stand-down. */
+  resetFloor(tradingAccountId: number, symbol: string): Observable<string> {
+    const qs = new URLSearchParams({ tradingAccountId: String(tradingAccountId), symbol });
+    return this.api.deleteEnvelope<string>(`/spread-reactive/floors?${qs.toString()}`);
   }
 }

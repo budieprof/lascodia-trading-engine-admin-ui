@@ -23,6 +23,7 @@ import {
   SpreadStateEntry,
 } from '@features/spread-reactive/spread-reactive.types';
 import { SlAuditPageComponent } from '@features/sl-audit/pages/sl-audit-page/sl-audit-page.component';
+import { BaselineFloorsTabComponent } from '@features/spread-reactive/components/baseline-floors-tab/baseline-floors-tab.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 
 /**
@@ -40,7 +41,7 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 @Component({
   selector: 'app-spread-reactive-page',
   standalone: true,
-  imports: [DecimalPipe, SlAuditPageComponent, PageHeaderComponent],
+  imports: [DecimalPipe, SlAuditPageComponent, BaselineFloorsTabComponent, PageHeaderComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -95,6 +96,16 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
           type="button"
           role="tab"
           class="tab"
+          [class.active]="activeTab() === 'floors'"
+          [attr.aria-selected]="activeTab() === 'floors'"
+          (click)="selectTab('floors')"
+        >
+          Baseline floors
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="tab"
           [class.active]="activeTab() === 'audit'"
           [attr.aria-selected]="activeTab() === 'audit'"
           (click)="selectTab('audit')"
@@ -140,8 +151,9 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
                   <th>Symbol</th>
                   <th>Condition</th>
                   <th class="num">Spread</th>
-                  <th class="num">Baseline</th>
-                  <th class="num">×</th>
+                  <th class="num">Floor</th>
+                  <th class="num">Baseline (median)</th>
+                  <th class="num">× floor</th>
                   <th class="num">Samples</th>
                   <th class="num">Calm run</th>
                   <th>Last sample</th>
@@ -150,7 +162,7 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
               <tbody>
                 @if (stateRows().length === 0) {
                   <tr class="empty-row">
-                    <td colspan="9" class="muted small empty-cell">
+                    <td colspan="10" class="muted small empty-cell">
                       No telemetry yet. State warms up as ticks arrive from active EA instances —
                       typically populates within 30 s of engine start.
                     </td>
@@ -171,13 +183,23 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
                       </td>
                       <td class="num mono">{{ r.currentSpread | number: '1.5-5' }}</td>
                       <td class="num mono">
+                        @if (r.floorBaseline !== null) {
+                          {{ r.floorBaseline | number: '1.5-5' }}
+                          @if (r.floorSource === 'OperatorOverride') {
+                            <span class="floor-source-tag" title="Operator override">OV</span>
+                          }
+                        } @else {
+                          <span class="muted" title="No floor — pair stands down">—</span>
+                        }
+                      </td>
+                      <td class="num mono">
                         @if (r.baseline > 0) {
                           {{ r.baseline | number: '1.5-5' }}
                         } @else {
                           <span class="muted">—</span>
                         }
                       </td>
-                      <td class="num mono" [class.muted]="r.baseline === 0">
+                      <td class="num mono" [class.muted]="r.floorBaseline === null">
                         {{ ratioOf(r) }}
                       </td>
                       <td class="num mono">{{ r.sampleCount }}</td>
@@ -192,6 +214,11 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
             </table>
           </div>
         </section>
+      }
+
+      <!-- ───────── Baseline floors ───────── -->
+      @if (activeTab() === 'floors') {
+        <app-baseline-floors-tab />
       }
 
       <!-- ───────── SL Audit ─────────
@@ -360,6 +387,64 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
                   (input)="patch({ loopIntervalSeconds: toInt($any($event.target).value, 2) })"
                 />
                 <small class="muted">How often the worker re-evaluates conditions.</small>
+              </label>
+            </div>
+          </section>
+
+          <section class="card">
+            <h2>Floor capture</h2>
+            <p class="muted small">
+              How persistent floor baselines are established and promoted. Pairs without a floor
+              stand down (no bumps / reverts) until one is captured or set manually on the Baseline
+              floors tab.
+            </p>
+            <div class="grid-2">
+              <label class="field">
+                <span>Auto-capture enabled</span>
+                <select
+                  [value]="cfg.floorAutoCaptureEnabled ? 'true' : 'false'"
+                  (change)="
+                    patch({ floorAutoCaptureEnabled: $any($event.target).value === 'true' })
+                  "
+                >
+                  <option value="true">Enabled</option>
+                  <option value="false">Disabled (operator overrides only)</option>
+                </select>
+                <small class="muted"
+                  >When off, only operator overrides can establish or change a floor.</small
+                >
+              </label>
+              <label class="field">
+                <span>Min calm samples to capture</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  [value]="cfg.floorMinCalmSamplesToCapture"
+                  (input)="
+                    patch({ floorMinCalmSamplesToCapture: toInt($any($event.target).value, 1) })
+                  "
+                />
+                <small class="muted"
+                  >Consecutive calm samples a pair must hold before its first floor (or a lower
+                  candidate) is captured.</small
+                >
+              </label>
+              <label class="field">
+                <span>Promotion window (minutes)</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  [value]="cfg.floorPromotionWindowMinutes"
+                  (input)="
+                    patch({ floorPromotionWindowMinutes: toInt($any($event.target).value, 1) })
+                  "
+                />
+                <small class="muted"
+                  >How long a lower candidate must hold before being promoted to the active
+                  floor.</small
+                >
               </label>
             </div>
           </section>
@@ -627,6 +712,15 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
       .btn.ghost {
         background: transparent;
       }
+      .floor-source-tag {
+        margin-left: 4px;
+        padding: 1px 4px;
+        border-radius: 4px;
+        background: color-mix(in srgb, #0a84ff 22%, transparent);
+        color: #0863c1;
+        font-size: 10px;
+        font-weight: 700;
+      }
     `,
   ],
 })
@@ -675,7 +769,7 @@ export class SpreadReactivePageComponent {
    * `?positionId=N` link expect to see the audit pre-filtered to that
    * position without having to click the tab.
    */
-  protected readonly activeTab = signal<'state' | 'audit'>('state');
+  protected readonly activeTab = signal<'state' | 'floors' | 'audit'>('state');
 
   private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
@@ -703,7 +797,7 @@ export class SpreadReactivePageComponent {
     });
   }
 
-  protected selectTab(tab: 'state' | 'audit'): void {
+  protected selectTab(tab: 'state' | 'floors' | 'audit'): void {
     this.activeTab.set(tab);
   }
 
@@ -781,10 +875,10 @@ export class SpreadReactivePageComponent {
     return Number.isFinite(n) ? n : fallback;
   }
 
-  /** current / baseline ratio for the table — "—" when baseline isn't ready. */
+  /** current / floor ratio for the table — "—" when no floor has been established. */
   protected ratioOf(r: SpreadStateEntry): string {
-    if (r.baseline <= 0) return '—';
-    return (r.currentSpread / r.baseline).toFixed(2);
+    if (r.floorBaseline == null || r.floorBaseline <= 0) return '—';
+    return (r.currentSpread / r.floorBaseline).toFixed(2);
   }
 
   /**

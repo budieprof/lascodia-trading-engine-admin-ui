@@ -25,6 +25,12 @@ export interface SpreadReactiveConfig {
   telemetryFreshnessSeconds: number;
   /** Worker tick interval (seconds). */
   loopIntervalSeconds: number;
+  /** Master switch for auto-capture of persistent floor baselines. */
+  floorAutoCaptureEnabled: boolean;
+  /** Consecutive calm samples required before a floor is captured / lower candidate staged. */
+  floorMinCalmSamplesToCapture: number;
+  /** Minutes a lower candidate must hold before being promoted to the active floor. */
+  floorPromotionWindowMinutes: number;
 }
 
 /** Coarse classification of the current spread state for an account+symbol. */
@@ -50,6 +56,43 @@ export interface SpreadStateEntry {
   lastNormalAt: string | null;
   /** Run-length of samples currently satisfying the revert ratio. */
   consecutiveCalmSamples: number;
+  /** Persistent floor value used for classification — null when no floor yet (pair stands down). */
+  floorBaseline: number | null;
+  floorSource: 'AutoCapture' | 'OperatorOverride' | null;
+  floorObservedAt: string | null;
+  sampleCountAtFloor: number | null;
+  lowerCandidate: number | null;
+  lowerCandidateObservedAt: string | null;
+}
+
+/**
+ * Persistent floor-baseline row.  One per `(TradingAccount, Symbol)` pair.
+ * The floor is the immutable anchor the worker uses for Elevated/Normal
+ * classification — its persistence is what protects against the rolling-
+ * median drift problem during long spread regimes and weekend reopens.
+ */
+export interface SpreadBaselineFloor {
+  id: number;
+  tradingAccountId: number;
+  symbol: string;
+  floorBaseline: number;
+  floorObservedAt: string;
+  sampleCountAtFloor: number;
+  lowerCandidate: number | null;
+  lowerCandidateObservedAt: string | null;
+  lastUpdatedAt: string;
+  source: 'AutoCapture' | 'OperatorOverride';
+  setByAdminUserId: number | null;
+  setByAdminUsername: string | null;
+  note: string | null;
+}
+
+/** Body for `PUT /spread-reactive/floors` — operator override upsert. */
+export interface UpsertSpreadBaselineFloorRequest {
+  tradingAccountId: number;
+  symbol: string;
+  floorBaseline: number;
+  note?: string | null;
 }
 
 /** Sensible defaults — match the engine's worker defaults. */
@@ -64,4 +107,7 @@ export const DEFAULT_SPREAD_REACTIVE_CONFIG: SpreadReactiveConfig = {
   maxBumpDistancePips: 30,
   telemetryFreshnessSeconds: 120,
   loopIntervalSeconds: 10,
+  floorAutoCaptureEnabled: true,
+  floorMinCalmSamplesToCapture: 30,
+  floorPromotionWindowMinutes: 60,
 };
