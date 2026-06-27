@@ -3555,6 +3555,11 @@ export interface PendingSignalRecDto {
   resultingTradeSignalId: number | null;
   llmInvocationId: number | null;
   revalAuditJson: string | null;
+
+  /** True when a same-direction sibling rec already pre-validated this row at park time. */
+  isSiblingValidated: boolean;
+  /** Id of the sibling rec that pre-validated this row (audit only). */
+  siblingValidatedByRecId: number | null;
 }
 
 /** Filter body for POST /admin/pending-signal-recs/query. */

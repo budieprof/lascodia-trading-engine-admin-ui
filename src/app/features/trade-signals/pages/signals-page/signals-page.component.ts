@@ -35,6 +35,7 @@ import {
   SpotRecChartComponent,
   SpotRecChartRec,
 } from '@shared/components/spot-rec-chart/spot-rec-chart.component';
+import { ParkedRecsCockpitComponent } from '@features/pending-signal-recs/components/parked-recs-cockpit/parked-recs-cockpit.component';
 
 type StatusChip = 'all' | TradeSignalStatus;
 type DirectionChip = 'all' | TradeDirection;
@@ -54,6 +55,7 @@ type DirectionChip = 'all' | TradeDirection;
     CreateSignalDialogComponent,
     RelativeTimePipe,
     SpotRecChartComponent,
+    ParkedRecsCockpitComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -74,131 +76,159 @@ type DirectionChip = 'all' | TradeDirection;
         />
       }
 
-      <!-- KPI strip (6 dense tiles) -->
-      <div class="kpi-grid">
-        <app-metric-card
-          label="Pending now"
-          [value]="pendingCount()"
-          format="number"
-          [dotColor]="pendingCount() > 0 ? '#FF9500' : '#34C759'"
-        />
-        <app-metric-card
-          label="Approved today"
-          [value]="approvedToday()"
-          format="number"
-          dotColor="#34C759"
-        />
-        <app-metric-card
-          label="Rejected today"
-          [value]="rejectedToday()"
-          format="number"
-          dotColor="#FF3B30"
-        />
-        <app-metric-card
-          label="Expired today"
-          [value]="expiredToday()"
-          format="number"
-          dotColor="#8E8E93"
-        />
-        <app-metric-card
-          label="Avg confidence (pending)"
-          [value]="avgPendingConfidence() * 100"
-          format="percent"
-          dotColor="#0071E3"
-        />
-        <app-metric-card
-          label="ML disagreements (24h)"
-          [value]="mlDisagreementCount()"
-          format="number"
-          [dotColor]="mlDisagreementCount() > 0 ? '#AF52DE' : '#8E8E93'"
-        />
-      </div>
+      <!-- View tabs — main signals queue vs. parked LLM recs awaiting touch -->
+      <nav class="view-tabs" role="tablist" aria-label="Signals view">
+        <button
+          type="button"
+          role="tab"
+          class="view-tab"
+          [class.active]="view() === 'signals'"
+          (click)="view.set('signals')"
+          [attr.aria-selected]="view() === 'signals'"
+        >
+          Signals
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="view-tab"
+          [class.active]="view() === 'parked'"
+          (click)="view.set('parked')"
+          [attr.aria-selected]="view() === 'parked'"
+        >
+          Parked recs
+        </button>
+      </nav>
 
-      <!-- Filter row -->
-      <div class="filter-row">
-        <div class="chip-group" role="tablist" aria-label="Filter by status">
-          @for (s of statusChips; track s) {
-            <button
-              type="button"
-              role="tab"
-              class="chip"
-              [attr.data-status]="s === 'all' ? null : s"
-              [class.active]="statusFilter() === s"
-              (click)="statusFilter.set(s)"
-              [attr.aria-selected]="statusFilter() === s"
-            >
-              {{ s === 'all' ? 'All' : s }}
-              <span class="chip-count">{{ statusCount(s) }}</span>
-            </button>
-          }
-        </div>
-
-        <div class="chip-group" role="tablist" aria-label="Filter by direction">
-          @for (d of directionChips; track d) {
-            <button
-              type="button"
-              role="tab"
-              class="chip"
-              [class.active]="directionFilter() === d"
-              [class.buy]="d === 'Buy'"
-              [class.sell]="d === 'Sell'"
-              (click)="directionFilter.set(d)"
-              [attr.aria-selected]="directionFilter() === d"
-            >
-              {{ d === 'all' ? 'All directions' : d }}
-            </button>
-          }
-        </div>
-
-        <input
-          type="search"
-          class="input search"
-          placeholder="Symbol or ID…"
-          [ngModel]="symbolFilter()"
-          (ngModelChange)="symbolFilter.set($event)"
-        />
-
-        <label class="toggle">
-          <input
-            type="checkbox"
-            [checked]="mlDisagreementOnly()"
-            (change)="mlDisagreementOnly.set($any($event.target).checked)"
+      @if (view() === 'parked') {
+        <app-parked-recs-cockpit />
+      } @else {
+        <!-- KPI strip (6 dense tiles) -->
+        <div class="kpi-grid">
+          <app-metric-card
+            label="Pending now"
+            [value]="pendingCount()"
+            format="number"
+            [dotColor]="pendingCount() > 0 ? '#FF9500' : '#34C759'"
           />
-          <span>ML disagrees only</span>
-        </label>
+          <app-metric-card
+            label="Approved today"
+            [value]="approvedToday()"
+            format="number"
+            dotColor="#34C759"
+          />
+          <app-metric-card
+            label="Rejected today"
+            [value]="rejectedToday()"
+            format="number"
+            dotColor="#FF3B30"
+          />
+          <app-metric-card
+            label="Expired today"
+            [value]="expiredToday()"
+            format="number"
+            dotColor="#8E8E93"
+          />
+          <app-metric-card
+            label="Avg confidence (pending)"
+            [value]="avgPendingConfidence() * 100"
+            format="percent"
+            dotColor="#0071E3"
+          />
+          <app-metric-card
+            label="ML disagreements (24h)"
+            [value]="mlDisagreementCount()"
+            format="number"
+            [dotColor]="mlDisagreementCount() > 0 ? '#AF52DE' : '#8E8E93'"
+          />
+        </div>
 
-        <span class="muted">{{ visibleSignals().length }} of {{ recentSignals().length }}</span>
-      </div>
+        <!-- Filter row -->
+        <div class="filter-row">
+          <div class="chip-group" role="tablist" aria-label="Filter by status">
+            @for (s of statusChips; track s) {
+              <button
+                type="button"
+                role="tab"
+                class="chip"
+                [attr.data-status]="s === 'all' ? null : s"
+                [class.active]="statusFilter() === s"
+                (click)="statusFilter.set(s)"
+                [attr.aria-selected]="statusFilter() === s"
+              >
+                {{ s === 'all' ? 'All' : s }}
+                <span class="chip-count">{{ statusCount(s) }}</span>
+              </button>
+            }
+          </div>
 
-      <!-- Charts row -->
-      <div class="charts-row">
-        <app-chart-card
-          title="Signal Flow (24h)"
-          subtitle="Hourly count by terminal status"
-          [options]="hourlyVolumeChart()"
-          height="220px"
-          [loading]="metricsLoading()"
-        />
-        <app-chart-card
-          title="By Symbol"
-          subtitle="Last 24h, count by direction"
-          [options]="bySymbolChart()"
-          height="220px"
-          [loading]="metricsLoading()"
-        />
-      </div>
+          <div class="chip-group" role="tablist" aria-label="Filter by direction">
+            @for (d of directionChips; track d) {
+              <button
+                type="button"
+                role="tab"
+                class="chip"
+                [class.active]="directionFilter() === d"
+                [class.buy]="d === 'Buy'"
+                [class.sell]="d === 'Sell'"
+                (click)="directionFilter.set(d)"
+                [attr.aria-selected]="directionFilter() === d"
+              >
+                {{ d === 'all' ? 'All directions' : d }}
+              </button>
+            }
+          </div>
 
-      <!-- Comprehensive table -->
-      <app-data-table [columnDefs]="columns" [fetchData]="fetchData" [selectable]="true">
-        <ng-template #bulkActions let-rows>
-          <button class="btn btn-success" (click)="bulkApprove(rows)" [disabled]="processing()">
-            Approve {{ pendingInSelection(rows) }} pending
-          </button>
-          <button class="btn btn-danger" (click)="bulkReject(rows)" [disabled]="processing()">
-            Reject {{ pendingInSelection(rows) }} pending
-          </button>
-        </ng-template>
-      </app-data-table>
+          <input
+            type="search"
+            class="input search"
+            placeholder="Symbol or ID…"
+            [ngModel]="symbolFilter()"
+            (ngModelChange)="symbolFilter.set($event)"
+          />
+
+          <label class="toggle">
+            <input
+              type="checkbox"
+              [checked]="mlDisagreementOnly()"
+              (change)="mlDisagreementOnly.set($any($event.target).checked)"
+            />
+            <span>ML disagrees only</span>
+          </label>
+
+          <span class="muted">{{ visibleSignals().length }} of {{ recentSignals().length }}</span>
+        </div>
+
+        <!-- Charts row -->
+        <div class="charts-row">
+          <app-chart-card
+            title="Signal Flow (24h)"
+            subtitle="Hourly count by terminal status"
+            [options]="hourlyVolumeChart()"
+            height="220px"
+            [loading]="metricsLoading()"
+          />
+          <app-chart-card
+            title="By Symbol"
+            subtitle="Last 24h, count by direction"
+            [options]="bySymbolChart()"
+            height="220px"
+            [loading]="metricsLoading()"
+          />
+        </div>
+
+        <!-- Comprehensive table -->
+        <app-data-table [columnDefs]="columns" [fetchData]="fetchData" [selectable]="true">
+          <ng-template #bulkActions let-rows>
+            <button class="btn btn-success" (click)="bulkApprove(rows)" [disabled]="processing()">
+              Approve {{ pendingInSelection(rows) }} pending
+            </button>
+            <button class="btn btn-danger" (click)="bulkReject(rows)" [disabled]="processing()">
+              Reject {{ pendingInSelection(rows) }} pending
+            </button>
+          </ng-template>
+        </app-data-table>
+      }
 
       <!-- Detail modal -->
       @if (selectedDetail(); as s) {
@@ -423,6 +453,36 @@ type DirectionChip = 'all' | TradeDirection;
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
+      }
+      /* View tabs — Signals queue vs. parked LLM recs cockpit. Visual style
+         mirrors the spread-reactive page so the affordance reads as the
+         same kind of "switch what the page shows" everywhere. */
+      .view-tabs {
+        display: flex;
+        gap: 4px;
+        border-bottom: 1px solid var(--border, #e3e3e3);
+        padding: 0;
+      }
+      .view-tab {
+        height: 34px;
+        padding: 0 14px;
+        border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        font-family: inherit;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+      }
+      .view-tab:hover:not(.active) {
+        color: var(--text-primary);
+      }
+      .view-tab.active {
+        color: var(--text-primary);
+        border-bottom-color: var(--accent, #0071e3);
+        font-weight: var(--font-semibold);
       }
       .kpi-grid {
         display: grid;
@@ -840,6 +900,9 @@ export class SignalsPageComponent {
   private readonly realtime = inject(RealtimeService);
   private readonly relativeTimePipe = new RelativeTimePipe();
   private readonly dataTable = viewChild(DataTableComponent<TradeSignalDto>);
+
+  // ── View tab — main signals queue vs. parked LLM recs cockpit ─────────
+  readonly view = signal<'signals' | 'parked'>('signals');
 
   // ── Filter signals ────────────────────────────────────────────────────
   readonly statusFilter = signal<StatusChip>('all');
