@@ -469,6 +469,32 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
           </section>
 
           <section class="card">
+            <h2>Signal-entry pad</h2>
+            <p class="muted small">
+              Direction-aware shift of signal entry/SL/TP by the persistent floor at order
+              placement. Long: entry + SL move down (same risk, more reward). Short: entry + TP move
+              up (smaller risk, same reward, lots resized). Order forced to Limit when applied —
+              fills only on a pullback to the padded entry, otherwise expires via the normal
+              signal-expiry sweep.
+            </p>
+            <div class="grid-2">
+              <label class="field">
+                <span>Pad enabled</span>
+                <select
+                  [value]="cfg.padEnabled ? 'true' : 'false'"
+                  (change)="patch({ padEnabled: $any($event.target).value === 'true' })"
+                >
+                  <option value="true">Enabled</option>
+                  <option value="false">Disabled (place at raw signal levels)</option>
+                </select>
+                <small class="muted"
+                  >Off → no pad applied; orders go in at signal entry/SL/TP as before.</small
+                >
+              </label>
+            </div>
+          </section>
+
+          <section class="card">
             <h2>Floor capture</h2>
             <p class="muted small">
               How persistent floor baselines are established and promoted. Pairs without a floor

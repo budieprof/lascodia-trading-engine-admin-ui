@@ -37,6 +37,8 @@ export interface SpreadReactiveConfig {
   preEmptiveTriggerHourUtc: number;
   /** Hours a pre-emptive bump is immune from the normal hysteresis revert. */
   preEmptiveProtectionHours: number;
+  /** Direction-aware spread pad applied per-signal at order placement. */
+  padEnabled: boolean;
 }
 
 /** Coarse classification of the current spread state for an account+symbol. */
@@ -119,4 +121,5 @@ export const DEFAULT_SPREAD_REACTIVE_CONFIG: SpreadReactiveConfig = {
   preEmptiveEnabled: false,
   preEmptiveTriggerHourUtc: 20,
   preEmptiveProtectionHours: 4,
+  padEnabled: true,
 };
