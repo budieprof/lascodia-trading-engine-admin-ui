@@ -80,6 +80,7 @@ import {
                 <th class="num">TP</th>
                 <th>Status</th>
                 <th>Created</th>
+                <th title="Time since the originating signal was generated">Signal age</th>
                 <th>Broker id</th>
               </tr>
             </thead>
@@ -125,6 +126,9 @@ import {
                     <span class="status-pill" [attr.data-status]="o.status">{{ o.status }}</span>
                   </td>
                   <td class="mono small">{{ o.createdAt | date: 'yyyy-MM-dd HH:mm' }}</td>
+                  <td class="mono small" [class.muted]="!o.signalGeneratedAt">
+                    {{ signalAge(o.signalGeneratedAt) }}
+                  </td>
                   <td class="mono small muted">{{ o.brokerOrderId ?? '—' }}</td>
                 </tr>
               }
@@ -480,5 +484,26 @@ export class EAPendingOrdersPanelComponent {
    */
   protected onSlTpModified(): void {
     this.resource.refresh();
+  }
+
+  /**
+   * Human-readable "minutes since the originating signal was generated".
+   * Reads `order.signalGeneratedAt` (joined engine-side via
+   * Order.TradeSignalId → TradeSignal.GeneratedAt). Renders as "X min"
+   * under 60 minutes, "Hh Mm" above. The 10s poll cadence is the refresh
+   * granularity — between polls a row's age stays frozen at its
+   * last-computed value.
+   */
+  protected signalAge(iso: string | null): string {
+    if (!iso) return '—';
+    const t = new Date(iso).getTime();
+    if (Number.isNaN(t)) return '—';
+    const diffMs = Date.now() - t;
+    if (diffMs < 0) return '0 min';
+    const minutes = Math.floor(diffMs / 60_000);
+    if (minutes < 60) return `${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    const rem = minutes % 60;
+    return rem === 0 ? `${hours}h` : `${hours}h ${rem}m`;
   }
 }
