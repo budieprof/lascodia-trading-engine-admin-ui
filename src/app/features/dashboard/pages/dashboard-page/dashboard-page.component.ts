@@ -210,27 +210,31 @@ interface ActivityEntry {
         />
       </div>
 
-      <!-- 3-up: P&L by symbol attribution, exposure, allocation. -->
+      <!-- 3-up: P&L by symbol attribution, exposure, allocation.
+           Height is 380px so P&L-by-Symbol's 30-day breakdown (often
+           15-20 symbols) gets ~22px per category slot — small enough to
+           fit, big enough for the bars to render at their full
+           barMaxWidth without ECharts auto-shrinking them. -->
       <div class="charts-3">
         <app-chart-card
           title="P&L by Symbol"
           subtitle="Realized contribution last 30 days"
           [options]="pnlBySymbolChart()"
-          height="280px"
+          height="380px"
           [loading]="loading()"
         />
         <app-chart-card
           title="Position Exposure"
           subtitle="Open lots by symbol"
           [options]="exposureChart()"
-          height="280px"
+          height="380px"
           [loading]="loading()"
         />
         <app-chart-card
           title="Strategy Allocation"
           subtitle="Active ensemble weights"
           [options]="allocationChart()"
-          height="280px"
+          height="380px"
           [loading]="loading()"
         />
       </div>
@@ -1654,7 +1658,11 @@ export class DashboardPageComponent implements OnInit {
               borderRadius: [0, 3, 3, 0],
             },
           })),
-          barWidth: 16,
+          // barMaxWidth — bar grows up to 18px when there's vertical room;
+          // ECharts auto-shrinks below this when the category slot is
+          // narrower (lots of symbols).  Without it, a tall card with few
+          // symbols ends up with chunky 40-50px bars.
+          barMaxWidth: 18,
         },
       ],
     };
@@ -1679,7 +1687,7 @@ export class DashboardPageComponent implements OnInit {
           type: 'bar',
           data: sorted.map(([, lots]) => +lots.toFixed(2)),
           itemStyle: { color: '#0071E3', borderRadius: [0, 3, 3, 0] },
-          barWidth: 16,
+          barMaxWidth: 18,
         },
       ],
     };
