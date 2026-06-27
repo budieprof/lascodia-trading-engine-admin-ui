@@ -357,105 +357,120 @@ interface AuditEntry {
         display: block;
       }
       .muted {
-        color: var(--text-muted, #888);
+        color: var(--text-tertiary);
       }
       .small {
-        font-size: 0.85rem;
+        font-size: var(--text-xs, 12px);
       }
       .bad {
-        color: var(--text-bad, #c0392b);
+        color: #d70015;
       }
       .link {
-        color: var(--link, #4a8cff);
+        color: var(--accent);
         text-decoration: none;
       }
       .link:hover {
         text-decoration: underline;
       }
+      /* Filter bar — matches the soft secondary surface used by other
+         operator-config cards (e.g. trading-window panel) so it reads as
+         part of the page in both themes. */
       .filters {
         display: flex;
-        gap: 1.5rem;
+        gap: var(--space-4);
         align-items: flex-end;
         flex-wrap: wrap;
-        margin-bottom: 1rem;
-        padding: 0.75rem;
-        background: var(--surface-2, #1a1d23);
-        border-radius: 6px;
+        margin-bottom: var(--space-3);
+        padding: var(--space-3);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
       }
       .filter-group {
         display: flex;
         flex-direction: column;
-        gap: 0.35rem;
+        gap: 6px;
       }
       .filter-group.toggles {
         flex-direction: row;
         align-items: center;
-        gap: 1rem;
+        gap: var(--space-3);
       }
       .filter-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs, 12px);
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        color: var(--text-muted, #888);
+        color: var(--text-tertiary);
+        font-weight: var(--font-semibold, 600);
       }
       .state-chips {
         display: flex;
-        gap: 0.4rem;
+        gap: 6px;
         flex-wrap: wrap;
       }
       .chip {
         display: inline-flex;
         align-items: center;
-        gap: 0.3rem;
-        padding: 0.25rem 0.6rem;
-        background: var(--surface-3, #23262e);
-        border-radius: 999px;
+        gap: 6px;
+        padding: 4px 10px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
         cursor: pointer;
-        font-size: 0.8rem;
+        font-size: var(--text-xs, 12px);
+        color: var(--text-secondary);
+        user-select: none;
       }
       .chip input {
-        accent-color: var(--accent, #4a8cff);
+        accent-color: var(--accent);
       }
       .chip.on {
-        background: var(--accent-soft, #2a3a55);
+        background: rgba(0, 113, 227, 0.12);
+        color: var(--accent);
+        border-color: rgba(0, 113, 227, 0.25);
       }
       .inline-check {
         display: inline-flex;
         align-items: center;
-        gap: 0.4rem;
-        font-size: 0.85rem;
+        gap: 6px;
+        font-size: var(--text-sm, 13px);
+        color: var(--text-primary);
         cursor: pointer;
       }
       .symbol-group .symbol-input {
         width: 12rem;
-        padding: 0.35rem 0.5rem;
-        background: var(--surface-3, #23262e);
-        border: 1px solid var(--border, #333);
-        color: inherit;
-        border-radius: 4px;
+        padding: 6px 10px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        color: var(--text-primary);
+        border-radius: var(--radius-sm);
+        font-size: var(--text-sm, 13px);
       }
       .table-wrap {
         overflow-x: auto;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
       }
       table.grid {
         width: 100%;
         border-collapse: collapse;
-        font-size: 0.85rem;
+        font-size: var(--text-sm, 13px);
       }
       table.grid th,
       table.grid td {
-        padding: 0.45rem 0.5rem;
-        border-bottom: 1px solid var(--border, #2a2d33);
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
         text-align: left;
         white-space: nowrap;
       }
       table.grid th {
-        font-weight: 600;
-        font-size: 0.75rem;
+        font-weight: var(--font-semibold, 600);
+        font-size: var(--text-xs, 12px);
         text-transform: uppercase;
-        letter-spacing: 0.03em;
-        color: var(--text-muted, #888);
-        background: var(--surface-2, #1a1d23);
+        letter-spacing: 0.04em;
+        color: var(--text-tertiary);
+        background: var(--bg-secondary);
         position: sticky;
         top: 0;
       }
@@ -467,60 +482,60 @@ interface AuditEntry {
         font-variant-numeric: tabular-nums;
       }
       tr.dim {
-        opacity: 0.6;
+        opacity: 0.55;
       }
       .dir-buy {
-        color: var(--good, #4ade80);
-        font-weight: 600;
+        color: #248a3d;
+        font-weight: var(--font-semibold, 600);
       }
       .dir-sell {
-        color: var(--bad, #f87171);
-        font-weight: 600;
+        color: #d70015;
+        font-weight: var(--font-semibold, 600);
       }
       .state {
         display: inline-block;
-        padding: 0.1rem 0.5rem;
-        border-radius: 999px;
-        font-size: 0.7rem;
-        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold, 600);
         text-transform: uppercase;
-        letter-spacing: 0.03em;
-        background: var(--surface-3, #23262e);
-        color: var(--text-muted, #888);
+        letter-spacing: 0.04em;
+        background: var(--bg-tertiary);
+        color: var(--text-tertiary);
       }
       .state-parked {
-        background: #2a3a55;
-        color: #8ab4f8;
+        background: rgba(0, 113, 227, 0.12);
+        color: var(--accent);
       }
       .state-revalidating {
-        background: #4a3a14;
-        color: #f7c365;
+        background: rgba(255, 149, 0, 0.14);
+        color: #c93400;
       }
       .state-approved {
-        background: #1e4d2b;
-        color: #4ade80;
+        background: rgba(52, 199, 89, 0.16);
+        color: #248a3d;
       }
       .state-rejected,
       .state-expired,
       .state-canceled {
-        background: #4d1e1e;
-        color: #f87171;
+        background: rgba(255, 59, 48, 0.12);
+        color: #d70015;
       }
       .validation .badge {
         display: inline-block;
-        padding: 0.1rem 0.5rem;
-        border-radius: 999px;
-        font-size: 0.7rem;
-        font-weight: 600;
-        letter-spacing: 0.03em;
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold, 600);
+        letter-spacing: 0.04em;
       }
       .badge.sibling {
-        background: #2a4d3a;
-        color: #6ee7b7;
+        background: rgba(52, 199, 89, 0.16);
+        color: #248a3d;
       }
       .badge.llm {
-        background: var(--surface-3, #23262e);
-        color: var(--text-muted, #888);
+        background: var(--bg-tertiary);
+        color: var(--text-tertiary);
       }
       .terminal {
         max-width: 14rem;
@@ -528,35 +543,37 @@ interface AuditEntry {
         text-overflow: ellipsis;
       }
       .btn {
-        padding: 0.4rem 0.85rem;
-        font-size: 0.85rem;
-        border-radius: 4px;
-        border: 1px solid var(--border, #333);
-        background: var(--surface-3, #23262e);
-        color: inherit;
+        padding: 6px 14px;
+        font-size: var(--text-xs, 12px);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-family: inherit;
+        font-weight: var(--font-semibold, 600);
         cursor: pointer;
       }
       .btn[disabled] {
-        opacity: 0.5;
+        opacity: 0.55;
         cursor: not-allowed;
       }
       .btn-secondary:hover:not([disabled]) {
-        background: var(--surface-4, #2e3138);
+        background: var(--bg-tertiary);
       }
       .btn-mini {
-        padding: 0.2rem 0.55rem;
-        font-size: 0.75rem;
+        padding: 3px 8px;
+        font-size: 11px;
       }
       .btn-danger {
-        border-color: #6e2424;
-        color: #f87171;
+        border-color: rgba(255, 59, 48, 0.4);
+        color: #d70015;
       }
       .btn-danger:hover:not([disabled]) {
-        background: #4d1e1e;
+        background: rgba(255, 59, 48, 0.08);
       }
       code {
-        font-family: var(--font-mono, monospace);
-        font-size: 0.85em;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.92em;
       }
       /* expand affordance + audit drilldown */
       th.expand-col,
@@ -568,16 +585,16 @@ interface AuditEntry {
       .expand-btn {
         background: transparent;
         border: none;
-        color: var(--text-muted, #888);
-        padding: 0.2rem 0.35rem;
+        color: var(--text-tertiary);
+        padding: 4px 6px;
         cursor: pointer;
-        font-size: 0.85rem;
+        font-size: var(--text-sm, 13px);
         line-height: 1;
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
       }
       .expand-btn:hover {
-        background: var(--surface-3, #23262e);
-        color: inherit;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
       }
       .expand-btn .chev {
         display: inline-block;
@@ -585,67 +602,71 @@ interface AuditEntry {
       }
       .expand-btn.on .chev {
         transform: rotate(90deg);
-        color: var(--accent, #4a8cff);
+        color: var(--accent);
       }
       tr.expanded {
-        background: var(--surface-2, #1a1d23);
+        background: var(--bg-tertiary);
       }
       tr.detail-row td {
         padding: 0;
-        background: var(--surface-2, #1a1d23);
-        border-bottom: 1px solid var(--border, #2a2d33);
+        background: var(--bg-tertiary);
+        border-bottom: 1px solid var(--border);
       }
       .audit-panel {
-        padding: 0.65rem 1rem 0.85rem 2.6rem;
+        padding: 12px 16px 14px 44px;
         display: flex;
         flex-direction: column;
-        gap: 0.65rem;
+        gap: 10px;
       }
       .kv-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 0.4rem 1.5rem;
+        gap: 6px 24px;
         margin: 0;
         padding: 0;
       }
       .kv-grid > div {
         display: flex;
         flex-direction: column;
-        gap: 0.15rem;
+        gap: 2px;
       }
       .kv-grid dt {
-        font-size: 0.68rem;
+        font-size: 10.5px;
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        color: var(--text-muted, #888);
+        color: var(--text-tertiary);
+        font-weight: var(--font-semibold, 600);
       }
       .kv-grid dd {
         margin: 0;
-        font-size: 0.85rem;
+        font-size: var(--text-sm, 13px);
+        color: var(--text-primary);
       }
       .audit-header {
-        font-size: 0.75rem;
+        font-size: var(--text-xs, 12px);
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        color: var(--text-muted, #888);
+        color: var(--text-tertiary);
+        font-weight: var(--font-semibold, 600);
       }
       table.audit-grid {
         width: auto;
         max-width: 100%;
         border-collapse: collapse;
-        font-size: 0.8rem;
+        font-size: var(--text-xs, 12px);
       }
       table.audit-grid th,
       table.audit-grid td {
-        padding: 0.3rem 0.65rem;
-        border-bottom: 1px solid var(--border, #2a2d33);
+        padding: 5px 10px;
+        border-bottom: 1px solid var(--border);
         text-align: left;
         white-space: nowrap;
+        color: var(--text-primary);
       }
       table.audit-grid th {
         background: transparent;
-        color: var(--text-muted, #888);
-        font-size: 0.68rem;
+        color: var(--text-tertiary);
+        font-size: 10.5px;
         position: static;
       }
       table.audit-grid .reason {
@@ -654,27 +675,27 @@ interface AuditEntry {
       }
       .decision-pill {
         display: inline-block;
-        padding: 0.1rem 0.5rem;
-        border-radius: 999px;
-        font-size: 0.68rem;
-        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold, 600);
         text-transform: uppercase;
-        letter-spacing: 0.03em;
-        background: var(--surface-3, #23262e);
-        color: var(--text-muted, #888);
+        letter-spacing: 0.04em;
+        background: var(--bg-tertiary);
+        color: var(--text-tertiary);
       }
       .decision-approved,
       .decision-approvedbysiblingrec {
-        background: #1e4d2b;
-        color: #4ade80;
+        background: rgba(52, 199, 89, 0.16);
+        color: #248a3d;
       }
       .decision-rejected {
-        background: #4d1e1e;
-        color: #f87171;
+        background: rgba(255, 59, 48, 0.12);
+        color: #d70015;
       }
       .decision-retryparked {
-        background: #4a3a14;
-        color: #f7c365;
+        background: rgba(255, 149, 0, 0.14);
+        color: #c93400;
       }
     `,
   ],
