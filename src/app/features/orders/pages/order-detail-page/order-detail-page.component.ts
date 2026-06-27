@@ -296,6 +296,60 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                 </div>
               </div>
 
+              <!-- Spread pad card — only visible when the SpreadPadder
+                   shifted this order's entry/SL/TP at placement time. -->
+              @if (order()!.spreadPadFloorUsed !== null) {
+                <div class="detail-card pad-card">
+                  <div class="card-header">
+                    <span class="card-title">Spread pad applied</span>
+                    <span class="pad-pill">Floor padded</span>
+                  </div>
+                  <p class="pad-blurb">
+                    The signal-entry pad shifted this order toward the SL by the persistent
+                    spread-baseline floor for {{ order()!.symbol }}/{{ order()!.tradingAccountId }}.
+                    Compare the analyser's original entry against the broker-placed price below.
+                  </p>
+                  <div class="detail-grid-3">
+                    <div class="detail-item">
+                      <span class="detail-label">Original signal entry</span>
+                      <span class="detail-value mono">{{
+                        order()!.originalSignalEntry !== null
+                          ? (order()!.originalSignalEntry! | number: '1.5-5')
+                          : '-'
+                      }}</span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="detail-label">Padded entry (placed)</span>
+                      <span class="detail-value mono">{{ order()!.price | number: '1.5-5' }}</span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="detail-label">Floor used</span>
+                      <span class="detail-value mono">{{
+                        order()!.spreadPadFloorUsed! | number: '1.5-5'
+                      }}</span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="detail-label">Pad direction</span>
+                      <span class="detail-value">
+                        @if (
+                          order()!.originalSignalEntry !== null &&
+                          order()!.price > order()!.originalSignalEntry!
+                        ) {
+                          Entry &amp; TP shifted up (Short)
+                        } @else if (
+                          order()!.originalSignalEntry !== null &&
+                          order()!.price < order()!.originalSignalEntry!
+                        ) {
+                          Entry &amp; SL shifted down (Long)
+                        } @else {
+                          -
+                        }
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              }
+
               <!-- Rejection Reason Card -->
               @if (order()!.rejectionReason) {
                 <div class="rejection-card">

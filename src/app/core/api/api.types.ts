@@ -392,6 +392,18 @@ export interface OrderDto {
    * EA detail pending-orders panel.
    */
   signalGeneratedAt: string | null;
+  /**
+   * Spread-baseline-floor value (price units) used to pad this order's
+   * entry/SL/TP at placement time. Null when no pad was applied (no floor
+   * row for the pair, or `SpreadReactive:Pad:Enabled` off).
+   */
+  spreadPadFloorUsed: number | null;
+  /**
+   * The signal's original entry price BEFORE the spread pad shifted it.
+   * Null when no pad was applied. Compare against `price` to see how
+   * analyser intent and broker placement diverge.
+   */
+  originalSignalEntry: number | null;
 }
 
 export interface PositionDto {
