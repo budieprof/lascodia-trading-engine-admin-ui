@@ -127,10 +127,10 @@ const ALL_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         padding: var(--space-4);
-        margin-bottom: var(--space-3);
         display: flex;
         flex-direction: column;
         gap: var(--space-3);
+        height: 100%;
       }
       .panel-head {
         display: flex;

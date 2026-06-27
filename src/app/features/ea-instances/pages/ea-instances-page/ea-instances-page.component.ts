@@ -24,6 +24,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 
 import { FleetActionsBarComponent } from '../../components/fleet-actions-bar/fleet-actions-bar.component';
 import { EATradingWindowPanelComponent } from '../../components/ea-trading-window-panel/ea-trading-window-panel.component';
+import { EAPendingSignalRevalPanelComponent } from '../../components/ea-pending-signal-reval-panel/ea-pending-signal-reval-panel.component';
 
 type StatusFilter = 'all' | EAInstanceStatus;
 type ViewMode = 'cards' | 'table';
@@ -45,6 +46,7 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
     RouterLink,
     FleetActionsBarComponent,
     EATradingWindowPanelComponent,
+    EAPendingSignalRevalPanelComponent,
   ],
   template: `
     <div class="page">
@@ -56,9 +58,17 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
       <!-- Phase-3A: fleet bulk-ops bar above the per-instance grid -->
       <app-fleet-actions-bar (commandQueued)="onFleetCommandQueued($event)" />
 
-      <!-- Fleet-wide trading window — auto-rejects signals + optionally
-           flattens positions at window exit. UTC-clock, fleet-scoped. -->
-      <app-ea-trading-window-panel />
+      <!-- Engine-wide fleet config row: trading window + pending-signal
+           re-validation. 2-up on wide screens, stacks on narrow. -->
+      <div class="fleet-config-row">
+        <!-- Fleet-wide trading window — auto-rejects signals + optionally
+             flattens positions at window exit. UTC-clock, fleet-scoped. -->
+        <app-ea-trading-window-panel />
+
+        <!-- Engine-wide pending-signal re-validation — park LLM recs whose
+             entry is far from market and re-validate when price returns. -->
+        <app-ea-pending-signal-reval-panel />
+      </div>
 
       @if (loading()) {
         <app-card-skeleton [lines]="6" />
@@ -469,6 +479,19 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: var(--space-3);
+      }
+
+      /* Fleet config row: trading window + pending-signal re-validation
+         side-by-side on wide screens; auto-fit collapses to a single
+         column when neither will fit at min width. */
+      .fleet-config-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+        gap: var(--space-3);
+        align-items: stretch;
+      }
+      .fleet-config-row > * {
+        min-width: 0;
       }
       @media (max-width: 1100px) {
         .chart-row {

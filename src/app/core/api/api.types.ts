@@ -3486,11 +3486,22 @@ export interface EAPendingSignalRevalConfig {
   cooldownMinutes: number;
   maxAttempts: number;
 
+  /** Sibling-validation cheap-path master toggle. */
+  siblingValidationEnabled: boolean;
+  /** How recent (in minutes) the validating sibling must be at the check point. */
+  siblingWindowMinutes: number;
+  /** Confidence floor on the validating sibling (0–1). */
+  minSiblingConfidence: number;
+
   defaultEnabled: boolean;
   defaultAtrTrigger: number;
   defaultTtlHours: number;
   defaultCooldownMinutes: number;
   defaultMaxAttempts: number;
+
+  defaultSiblingValidationEnabled: boolean;
+  defaultSiblingWindowMinutes: number;
+  defaultMinSiblingConfidence: number;
 }
 
 /** Body shape for PUT /admin/ea/{instanceId}/pending-signal-reval. */
@@ -3500,6 +3511,10 @@ export interface UpdateEAPendingSignalRevalRequest {
   ttlHours: number;
   cooldownMinutes: number;
   maxAttempts: number;
+
+  siblingValidationEnabled: boolean;
+  siblingWindowMinutes: number;
+  minSiblingConfidence: number;
 }
 
 /**
