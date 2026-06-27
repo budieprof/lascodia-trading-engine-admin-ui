@@ -31,6 +31,12 @@ export interface SpreadReactiveConfig {
   floorMinCalmSamplesToCapture: number;
   /** Minutes a lower candidate must hold before being promoted to the active floor. */
   floorPromotionWindowMinutes: number;
+  /** Master switch for the daily pre-emptive SL-widening pass. */
+  preEmptiveEnabled: boolean;
+  /** UTC hour (0-23) at which the daily pre-emption fires. 20 = 9pm WAT. */
+  preEmptiveTriggerHourUtc: number;
+  /** Hours a pre-emptive bump is immune from the normal hysteresis revert. */
+  preEmptiveProtectionHours: number;
 }
 
 /** Coarse classification of the current spread state for an account+symbol. */
@@ -110,4 +116,7 @@ export const DEFAULT_SPREAD_REACTIVE_CONFIG: SpreadReactiveConfig = {
   floorAutoCaptureEnabled: true,
   floorMinCalmSamplesToCapture: 30,
   floorPromotionWindowMinutes: 60,
+  preEmptiveEnabled: false,
+  preEmptiveTriggerHourUtc: 20,
+  preEmptiveProtectionHours: 4,
 };

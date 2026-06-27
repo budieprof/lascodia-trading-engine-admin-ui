@@ -392,6 +392,83 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
           </section>
 
           <section class="card">
+            <h2>Pre-emptive widening</h2>
+            <p class="muted small">
+              Schedules a daily SL widening on every open position BEFORE expected spread-widening
+              windows (e.g. nightly NY close, Sunday-night Monday-open gap). Bumps widen by the same
+              MaxBumpDistancePips cap a reactive bump would use, then revert normally once spreads
+              normalise after the protection window closes.
+            </p>
+            <div class="grid-2">
+              <label class="field">
+                <span>Pre-emption enabled</span>
+                <select
+                  [value]="cfg.preEmptiveEnabled ? 'true' : 'false'"
+                  (change)="patch({ preEmptiveEnabled: $any($event.target).value === 'true' })"
+                >
+                  <option value="true">Enabled</option>
+                  <option value="false">Disabled</option>
+                </select>
+                <small class="muted"
+                  >Off → no scheduled bumps; reactive bumps still active when master switch is
+                  on.</small
+                >
+              </label>
+              <label class="field">
+                <span>Trigger hour (UTC)</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="23"
+                  step="1"
+                  [value]="cfg.preEmptiveTriggerHourUtc"
+                  (input)="
+                    patch({ preEmptiveTriggerHourUtc: toInt($any($event.target).value, 20) })
+                  "
+                />
+                <small class="muted">
+                  Fires once per UTC day at the start of this hour. 20 = 9pm WAT (1h before NY-close
+                  widening at 10pm WAT).
+                </small>
+              </label>
+              <label class="field">
+                <span>Protection window (hours)</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  [value]="cfg.preEmptiveProtectionHours"
+                  (input)="
+                    patch({ preEmptiveProtectionHours: toInt($any($event.target).value, 4) })
+                  "
+                />
+                <small class="muted">
+                  How long bumps are immune from the normal hysteresis revert. Normal revert takes
+                  over after this window closes.
+                </small>
+              </label>
+              <div class="field">
+                <span>Fire now</span>
+                <button
+                  type="button"
+                  class="btn primary"
+                  [disabled]="firingPreEmptive()"
+                  (click)="firePreEmptiveNow()"
+                >
+                  {{ firingPreEmptive() ? 'Firing…' : 'Fire pre-emption now' }}
+                </button>
+                <small class="muted">
+                  Same code path as the daily schedule. Idempotent — only acts on positions WITHOUT
+                  an active bump.
+                </small>
+                @if (preEmptiveFireResult(); as r) {
+                  <small class="banner ok small">{{ r }}</small>
+                }
+              </div>
+            </div>
+          </section>
+
+          <section class="card">
             <h2>Floor capture</h2>
             <p class="muted small">
               How persistent floor baselines are established and promoted. Pairs without a floor
@@ -733,6 +810,8 @@ export class SpreadReactivePageComponent {
   protected readonly saving = signal(false);
   protected readonly saved = signal(false);
   protected readonly error = signal<string | null>(null);
+  protected readonly firingPreEmptive = signal(false);
+  protected readonly preEmptiveFireResult = signal<string | null>(null);
 
   protected readonly dirty = computed(() => {
     const c = this.config();
@@ -860,6 +939,28 @@ export class SpreadReactivePageComponent {
   protected reset(): void {
     const s = this.serverConfig();
     if (s) this.config.set({ ...s });
+  }
+
+  protected firePreEmptiveNow(): void {
+    if (this.firingPreEmptive()) return;
+    this.firingPreEmptive.set(true);
+    this.preEmptiveFireResult.set(null);
+    this.service
+      .firePreEmptiveNow()
+      .pipe(
+        catchError((e) => {
+          this.error.set(this.toMessage(e));
+          this.firingPreEmptive.set(false);
+          return of(null);
+        }),
+      )
+      .subscribe((bumped) => {
+        this.firingPreEmptive.set(false);
+        if (bumped !== null) {
+          this.preEmptiveFireResult.set(`Fired — bumped ${bumped} position(s).`);
+          setTimeout(() => this.preEmptiveFireResult.set(null), 6000);
+        }
+      });
   }
 
   // Template input coercion — Angular templates can't call the global

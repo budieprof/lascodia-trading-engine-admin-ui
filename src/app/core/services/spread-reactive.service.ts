@@ -67,4 +67,14 @@ export class SpreadReactiveService {
     const qs = new URLSearchParams({ tradingAccountId: String(tradingAccountId), symbol });
     return this.api.deleteEnvelope<string>(`/spread-reactive/floors?${qs.toString()}`);
   }
+
+  /**
+   * Manually trigger the pre-emptive widening pass.  Same code path as the
+   * daily schedule — returns the number of positions bumped.
+   */
+  firePreEmptiveNow(triggerLabel?: string): Observable<number> {
+    return this.api.postEnvelope<number>('/spread-reactive/pre-emption/fire', {
+      triggerLabel: triggerLabel ?? 'manual',
+    });
+  }
 }
