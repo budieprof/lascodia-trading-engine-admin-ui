@@ -572,14 +572,12 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
         font-style: italic;
       }
       /* Tabs — underline-style with the same accent the page-header uses.
-         Sits flush with the card below; the active tab's bottom border
-         pairs with the section card's top edge to feel like a single
-         continuous surface. */
+         The page's flex gap (var(--space-4)) handles the breathing room
+         between this strip and the section card below; no negative margin. */
       .tabs {
         display: flex;
         gap: 4px;
         border-bottom: 1px solid var(--border, #e3e3e3);
-        margin-bottom: calc(-1 * var(--space-4, 16px));
         padding: 0;
       }
       .tab {
