@@ -10,6 +10,7 @@ import type {
   EABreakevenExitConfig,
   EAFillModeConfig,
   EAPendingSignalRevalConfig,
+  EASpreadPadConfig,
   EAFleetItem,
   EAInstanceDetail,
   EALogTimelineItem,
@@ -32,6 +33,7 @@ import type {
   UpdateEABreakevenExitRequest,
   UpdateEAFillModeRequest,
   UpdateEAPendingSignalRevalRequest,
+  UpdateEASpreadPadRequest,
   UpdateInstanceConfigRequest,
 } from '@core/api/api.types';
 
@@ -266,6 +268,33 @@ export class EAAdminService {
   ): Observable<ResponseData<number>> {
     return this.api.put<ResponseData<number>>(
       `${this.base}/${encodeURIComponent(instanceId)}/fill-mode`,
+      this.withInstanceId(instanceId, body),
+    );
+  }
+
+  /**
+   * GET /admin/ea/{instanceId}/spread-pad — current per-EA spread-pad toggle
+   * and the compile-time default. AND-ed under the hood with the engine-wide
+   * SpreadReactive:Pad:Enabled master.
+   */
+  getSpreadPad(instanceId: string): Observable<ResponseData<EASpreadPadConfig>> {
+    return this.api.get<ResponseData<EASpreadPadConfig>>(
+      `${this.base}/${encodeURIComponent(instanceId)}/spread-pad`,
+    );
+  }
+
+  /**
+   * PUT /admin/ea/{instanceId}/spread-pad — writes one EngineConfig row
+   * (`EA:SpreadPad:Account:{accountId}`). Hot-reloads through
+   * EngineConfigCache; takes effect on the next pad evaluation without a
+   * restart.
+   */
+  updateSpreadPad(
+    instanceId: string,
+    body: UpdateEASpreadPadRequest,
+  ): Observable<ResponseData<number>> {
+    return this.api.put<ResponseData<number>>(
+      `${this.base}/${encodeURIComponent(instanceId)}/spread-pad`,
       this.withInstanceId(instanceId, body),
     );
   }

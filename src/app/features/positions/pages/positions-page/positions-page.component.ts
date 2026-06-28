@@ -15,6 +15,7 @@ import { catchError, map, merge, Observable, of, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
 
+import { MarketDataService } from '@core/services/market-data.service';
 import { PositionsService } from '@core/services/positions.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import { NotificationService } from '@core/notifications/notification.service';
@@ -1122,6 +1123,7 @@ import {
 })
 export class PositionsPageComponent implements OnInit, OnDestroy {
   private readonly positionsService = inject(PositionsService);
+  private readonly marketData = inject(MarketDataService);
   protected readonly accountScope = inject(AccountScopeService);
   private readonly router = inject(Router);
   private readonly realtime = inject(RealtimeService);
@@ -1624,11 +1626,39 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       // Closed: `currentPrice` carries the exit fill price (same convention
       // the drawer uses); open: `currentPrice` is the live tick.
       currentPrice: isClosed ? null : p.currentPrice,
+      // Closed positions have no meaningful "now" — the trade is done. Open
+      // positions get patched once the account-aware live-price fetch lands.
+      currentAsk: null,
       exitPrice: isClosed ? p.currentPrice : null,
       exitTime: isClosed ? p.closedAt : null,
       action: null,
     });
     this.chartOpen.set(true);
+
+    // Account-aware live bid/ask for open positions — draws the BID + ASK
+    // pair using this broker's current spread.  Skipped for closed positions
+    // (the chart is a post-mortem, not a live view).
+    if (!isClosed) {
+      this.marketData
+        .getAccountLivePrice(p.tradingAccountId, p.symbol)
+        .pipe(catchError(() => of(null)))
+        .subscribe((res) => {
+          if (!res?.status || !res.data) return;
+          if (this.selectedChartPositionId !== p.id) return;
+          const cur = this.chartSelection();
+          if (!cur) return;
+          const bid = res.data.bid ?? cur.currentPrice;
+          const ask =
+            bid !== null && res.data.perAccountSpread !== null
+              ? bid + res.data.perAccountSpread
+              : res.data.ask;
+          this.chartSelection.set({
+            ...cur,
+            currentPrice: bid,
+            currentAsk: ask,
+          });
+        });
+    }
 
     // Patch the selection with signal→order timing once the service responds.
     // Wrapped in a try/catch via `catchError` so a timing-endpoint failure

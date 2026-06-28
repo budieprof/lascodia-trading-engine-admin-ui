@@ -40,9 +40,15 @@ import type { CandleDto, Timeframe } from '@core/api/api.types';
  * dashed scenario lines are dead weight here.
  *
  * Inputs are shaped to accept either origin:
- *   - Open position  → referenceLabel='ENTRY',  exitPrice=null,   currentPrice=set
- *   - Pending order  → referenceLabel='TRIGGER',exitPrice=null,   currentPrice=null
- *   - Closed trade   → referenceLabel='ENTRY',  exitPrice=set,    currentPrice=null
+ *   - Open position  → referenceLabel='ENTRY',  exitPrice=null,   currentPrice=set, currentAsk=set
+ *   - Pending order  → referenceLabel='TRIGGER',exitPrice=null,   currentPrice=set, currentAsk=set
+ *   - Closed trade   → referenceLabel='ENTRY',  exitPrice=set,    currentPrice=null,currentAsk=null
+ *
+ * `currentPrice` is treated as the Bid (MT5 candle convention). `currentAsk`
+ * is the account-aware Ask = Bid + per-(account, symbol) live spread from
+ * SpreadStateStore. Both are drawn as dotted full-width lines with right-edge
+ * pills so the operator can see exactly where a BUY (Ask) vs SELL (Bid)
+ * would fill on this specific broker right now.
  */
 export interface TradeChartSelection {
   /** Human-readable title shown in the modal header. */
@@ -61,8 +67,20 @@ export interface TradeChartSelection {
   stopLoss: number | null;
   /** TP price or null when not set. */
   takeProfit: number | null;
-  /** Current market price (positions only) — drawn as a separate horizontal line. */
+  /**
+   * Current market price drawn as the "Now · Bid" horizontal line. Treated
+   * as the Bid side (MT5 candle convention). Null hides the line entirely.
+   * Positions populate this from PositionDto.currentPrice; pending orders
+   * fetch the live tick on modal open.
+   */
   currentPrice: number | null;
+  /**
+   * Account-aware current Ask drawn as a second "Now · Ask" horizontal
+   * line. Derived by the caller as `currentPrice + perAccountSpread`
+   * from GET /market-data/account-live-price/{accountId}/{symbol}.
+   * Null hides the Ask line (e.g. when no per-account spread is available).
+   */
+  currentAsk: number | null;
   /** Optional exit dot (rare here; included for parity with sensitivity chart). */
   exitPrice: number | null;
   exitTime: string | null;
@@ -197,8 +215,14 @@ export interface SlTpModifiedEvent {
               }
               @if (selection?.currentPrice !== null) {
                 <span class="legend-item">
-                  <span class="dot dot--now"></span>Now
+                  <span class="dot dot--now"></span>Bid
                   {{ selection!.currentPrice | number: '1.5-5' }}
+                </span>
+              }
+              @if (selection?.currentAsk !== null) {
+                <span class="legend-item">
+                  <span class="dot dot--ask"></span>Ask
+                  {{ selection!.currentAsk | number: '1.5-5' }}
                 </span>
               }
               @if (selection?.exitPrice !== null) {
@@ -399,6 +423,9 @@ export interface SlTpModifiedEvent {
       }
       .dot--now {
         background: #0071e3;
+      }
+      .dot--ask {
+        background: #5ac8fa;
       }
       .dot--exit {
         background: #5e5ce6;
@@ -1212,8 +1239,10 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
       });
     }
     if (s.currentPrice !== null) {
+      // Bid line — what MT5 candles render against. Where a SELL fills and
+      // where SL/TP fire for SELL positions.
       refSeries.push({
-        name: 'Now',
+        name: 'Bid',
         type: 'line',
         // Current price is "live" — span the full chart width to anchor
         // operator attention regardless of where the trade started.
@@ -1224,8 +1253,33 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
         z: 8,
         endLabel: {
           show: true,
-          formatter: `NOW ${fmt(s.currentPrice)}`,
+          formatter: `BID ${fmt(s.currentPrice)}`,
           backgroundColor: '#0071e3',
+          color: '#fff',
+          padding: [3, 7],
+          borderRadius: 3,
+          fontWeight: 'bold',
+          fontSize: 11,
+        },
+      });
+    }
+    if (s.currentAsk !== null) {
+      // Ask line — Bid + per-(account, symbol) live spread. Where a BUY
+      // fills and where SL/TP fire for BUY positions. Lighter colour than
+      // the Bid so the pair reads as the same "now" overlay rather than two
+      // independent levels.
+      refSeries.push({
+        name: 'Ask',
+        type: 'line',
+        data: fullLine(s.currentAsk),
+        symbol: 'none',
+        lineStyle: { color: '#5ac8fa', width: 1.5, type: 'dotted' },
+        tooltip: { show: false },
+        z: 8,
+        endLabel: {
+          show: true,
+          formatter: `ASK ${fmt(s.currentAsk)}`,
+          backgroundColor: '#5ac8fa',
           color: '#fff',
           padding: [3, 7],
           borderRadius: 3,
@@ -1244,6 +1298,7 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
       ...(s.stopLoss !== null ? [s.stopLoss] : []),
       ...(s.takeProfit !== null ? [s.takeProfit] : []),
       ...(s.currentPrice !== null ? [s.currentPrice] : []),
+      ...(s.currentAsk !== null ? [s.currentAsk] : []),
       ...(s.exitPrice !== null ? [s.exitPrice] : []),
     ];
     const yMin = Math.min(...allYs);

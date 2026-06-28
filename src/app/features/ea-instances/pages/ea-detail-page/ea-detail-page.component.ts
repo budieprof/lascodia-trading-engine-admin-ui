@@ -348,6 +348,109 @@ interface ConfigForm {
             </div>
           </section>
 
+          <!-- ── Spread pad toggle ────────────────────────────────────────
+             Per-account opt-out for SpreadPadder. AND-ed under the hood
+             with the engine-wide SpreadReactive:Pad:Enabled master — either
+             off skips the pad for this account. Defaults on. Hot-reloads
+             via EngineConfigCache on the next pad evaluation. -->
+          <section
+            class="fill-mode-panel"
+            [attr.data-mode]="
+              (spreadPadDraft() ?? spreadPadServer()) === null
+                ? null
+                : (spreadPadDraft() ?? spreadPadServer())
+                  ? 'On'
+                  : 'Off'
+            "
+          >
+            <div class="fm-info">
+              <div class="fm-headline">
+                <span class="fm-label">Spread pad</span>
+                @if (spreadPadServer() === true) {
+                  <span class="fm-pill ok">On</span>
+                } @else if (spreadPadServer() === false) {
+                  <span class="fm-pill warn">Off</span>
+                } @else {
+                  <span class="fm-pill muted">…</span>
+                }
+              </div>
+              <span class="fm-desc muted small">
+                @if ((spreadPadDraft() ?? spreadPadServer()) === true) {
+                  SpreadPadder shifts entry/SL/TP by the per-(account, symbol) floor before
+                  placement (long pads entry+SL down, short pads entry+TP up). Engine-wide master
+                  must also be on for the pad to fire.
+                } @else if ((spreadPadDraft() ?? spreadPadServer()) === false) {
+                  Padding disabled for this account — signals reach the broker at the analyser's
+                  original levels regardless of the engine-wide master.
+                } @else {
+                  Loading…
+                }
+              </span>
+            </div>
+            <div class="fm-actions">
+              <div
+                class="fm-toggle"
+                role="radiogroup"
+                aria-label="Spread pad enabled"
+                [class.is-loading]="spreadPadServer() === null"
+              >
+                <button
+                  type="button"
+                  role="radio"
+                  class="fm-opt"
+                  [class.active]="(spreadPadDraft() ?? spreadPadServer()) === true"
+                  [attr.aria-checked]="(spreadPadDraft() ?? spreadPadServer()) === true"
+                  [disabled]="spreadPadServer() === null || savingSpreadPad()"
+                  (click)="setSpreadPad(true)"
+                >
+                  On
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  class="fm-opt"
+                  [class.active]="(spreadPadDraft() ?? spreadPadServer()) === false"
+                  [attr.aria-checked]="(spreadPadDraft() ?? spreadPadServer()) === false"
+                  [disabled]="spreadPadServer() === null || savingSpreadPad()"
+                  (click)="setSpreadPad(false)"
+                >
+                  Off
+                </button>
+              </div>
+              <div class="fm-status small">
+                @if (savingSpreadPad()) {
+                  <span class="muted">Saving…</span>
+                } @else if (spreadPadSaveError()) {
+                  <span class="bad">{{ spreadPadSaveError() }}</span>
+                } @else if (spreadPadSaved()) {
+                  <span class="ok">Saved · takes effect on next pad evaluation</span>
+                } @else if (spreadPadDirty()) {
+                  <span class="muted">Unsaved change</span>
+                } @else {
+                  <span class="muted">Default · Off</span>
+                }
+              </div>
+              <div class="fm-buttons">
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  (click)="resetSpreadPad()"
+                  [disabled]="!spreadPadDirty() || savingSpreadPad()"
+                >
+                  Revert
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-primary"
+                  (click)="saveSpreadPad()"
+                  [disabled]="!spreadPadDirty() || savingSpreadPad()"
+                >
+                  {{ savingSpreadPad() ? 'Saving…' : 'Save' }}
+                </button>
+              </div>
+            </div>
+          </section>
+
           <!-- ── Breakeven exit ────────────────────────────────────────────
              Per-account rule-based breakeven mechanics. Two independent
              toggles + their respective trigger fractions (R-units), wired
@@ -1405,6 +1508,12 @@ interface ConfigForm {
       .fill-mode-panel[data-mode='Limit'] {
         border-left-color: #ff9500;
       }
+      .fill-mode-panel[data-mode='On'] {
+        border-left-color: #34c759;
+      }
+      .fill-mode-panel[data-mode='Off'] {
+        border-left-color: #8e8e93;
+      }
       .fm-info {
         display: flex;
         flex-direction: column;
@@ -2390,6 +2499,97 @@ export class EaDetailPageComponent {
             outcome: 'Saved',
             reason: null,
             contextJson: JSON.stringify({ instanceId: ea.instanceId, fillMode: draft }),
+            source: 'AdminUI',
+          })
+          .subscribe({ error: () => undefined });
+      });
+  }
+
+  // Spread-pad toggle ---------------------------------------------------
+  //
+  // Per-account opt-in for SpreadPadder. The engine AND-s this with the
+  // engine-wide SpreadReactive:Pad:Enabled master, so this toggle is purely
+  // an opt-in for an individual account (defaults to off — operator must
+  // explicitly flip each account on).  Same draft/server/saving signal
+  // pattern as the fill-mode card above.
+  protected readonly spreadPadServer = signal<boolean | null>(null);
+  protected readonly spreadPadDraft = signal<boolean | null>(null);
+  protected readonly savingSpreadPad = signal(false);
+  protected readonly spreadPadSaved = signal(false);
+  protected readonly spreadPadSaveError = signal<string | null>(null);
+
+  private lastSpreadPadInstanceId: string | null = null;
+  private readonly _loadSpreadPad = effect(() => {
+    const instanceId = this.ea()?.instanceId ?? null;
+    if (!instanceId) return;
+    if (instanceId === this.lastSpreadPadInstanceId) return;
+    this.lastSpreadPadInstanceId = instanceId;
+    this.spreadPadServer.set(null);
+    this.spreadPadDraft.set(null);
+    this.spreadPadSaved.set(false);
+    this.spreadPadSaveError.set(null);
+    this.admin
+      .getSpreadPad(instanceId)
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        const enabled = res?.data?.enabled ?? false;
+        this.spreadPadServer.set(enabled);
+        this.spreadPadDraft.set(enabled);
+      });
+  });
+
+  protected spreadPadDirty(): boolean {
+    const s = this.spreadPadServer();
+    const d = this.spreadPadDraft();
+    return s !== null && d !== null && s !== d;
+  }
+
+  protected setSpreadPad(enabled: boolean): void {
+    this.spreadPadDraft.set(enabled);
+    this.spreadPadSaved.set(false);
+    this.spreadPadSaveError.set(null);
+  }
+
+  protected resetSpreadPad(): void {
+    this.spreadPadDraft.set(this.spreadPadServer());
+    this.spreadPadSaved.set(false);
+    this.spreadPadSaveError.set(null);
+  }
+
+  protected saveSpreadPad(): void {
+    const ea = this.ea();
+    const draft = this.spreadPadDraft();
+    if (!ea || draft === null || draft === this.spreadPadServer()) return;
+    this.savingSpreadPad.set(true);
+    this.spreadPadSaveError.set(null);
+    this.admin
+      .updateSpreadPad(ea.instanceId, { enabled: draft })
+      .pipe(
+        finalize(() => this.savingSpreadPad.set(false)),
+        catchError((err) => {
+          this.spreadPadSaveError.set(err?.error?.message ?? 'Save failed.');
+          return of(null);
+        }),
+      )
+      .subscribe((res) => {
+        if (res === null) return;
+        if (!res.status) {
+          this.spreadPadSaveError.set(res.message ?? 'Save failed.');
+          return;
+        }
+        this.spreadPadServer.set(draft);
+        this.spreadPadSaved.set(true);
+        this.notify.success(
+          `Spread pad ${draft ? 'enabled' : 'disabled'} for EA ${ea.instanceId}.`,
+        );
+        this.auditTrail
+          .create({
+            entityType: 'EAInstance',
+            entityId: ea.id,
+            decisionType: 'EAUpdateSpreadPad',
+            outcome: 'Saved',
+            reason: null,
+            contextJson: JSON.stringify({ instanceId: ea.instanceId, enabled: draft }),
             source: 'AdminUI',
           })
           .subscribe({ error: () => undefined });

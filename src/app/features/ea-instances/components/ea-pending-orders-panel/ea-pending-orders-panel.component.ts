@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input, signal } f
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { catchError, finalize, map, of } from 'rxjs';
 
+import { MarketDataService } from '@core/services/market-data.service';
 import { OrdersService } from '@core/services/orders.service';
 import type { OrderDto, OrderStatus } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
@@ -413,7 +414,10 @@ export class EAPendingOrdersPanelComponent {
       referenceLabel: o.executionType === 'Market' ? 'PLACED' : 'TRIGGER',
       stopLoss: o.stopLoss,
       takeProfit: o.takeProfit,
+      // Filled in by the account-aware live-price fetch below — null on
+      // initial render so the modal opens immediately without blocking.
       currentPrice: null,
+      currentAsk: null,
       exitPrice: null,
       exitTime: null,
       action: {
@@ -428,6 +432,34 @@ export class EAPendingOrdersPanelComponent {
       editable: { kind: 'order', id: o.id },
     });
     this.chartOpen.set(true);
+
+    // Account-aware live bid/ask — draws BID + ASK horizontal lines using
+    // the spread this specific broker is currently quoting.  Pending orders
+    // don't carry a per-row currentPrice, so this fetch is the only source
+    // of a "now" overlay on this surface.
+    if (o.tradingAccountId !== undefined && o.tradingAccountId !== null) {
+      this.marketData
+        .getAccountLivePrice(o.tradingAccountId, o.symbol)
+        .pipe(catchError(() => of(null)))
+        .subscribe((res) => {
+          if (!res?.status || !res.data) return;
+          if (this.selectedOrderId !== o.id) return;
+          const cur = this.chartSelection();
+          if (!cur) return;
+          // Pending orders have no per-row currentPrice. Best Bid available
+          // is the symbol-cache value; without it we can't draw either line.
+          const bid = res.data.bid;
+          const ask =
+            bid !== null && res.data.perAccountSpread !== null
+              ? bid + res.data.perAccountSpread
+              : res.data.ask;
+          this.chartSelection.set({
+            ...cur,
+            currentPrice: bid,
+            currentAsk: ask,
+          });
+        });
+    }
 
     // Fetch signal → order-placement timing and patch the selection when it
     // lands (new object → the modal's OnChanges shows the delta). GeneratedAt
@@ -454,6 +486,7 @@ export class EAPendingOrdersPanelComponent {
   protected readonly actionBusy = signal(false);
   private selectedOrderId: number | null = null;
   private readonly ordersSvc = inject(OrdersService);
+  private readonly marketData = inject(MarketDataService);
   private readonly notify = inject(NotificationService);
 
   protected onCancelOrder(): void {

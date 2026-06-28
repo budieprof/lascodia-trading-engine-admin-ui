@@ -3,6 +3,7 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { catchError, finalize, map, of } from 'rxjs';
 
+import { MarketDataService } from '@core/services/market-data.service';
 import { PositionsService } from '@core/services/positions.service';
 import type { PositionDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
@@ -416,6 +417,9 @@ export class EAPositionsPanelComponent {
       stopLoss: p.stopLoss,
       takeProfit: p.takeProfit,
       currentPrice: p.currentPrice,
+      // Filled in by the account-aware live-price fetch below — null on
+      // initial render so the modal opens immediately without blocking.
+      currentAsk: null,
       // Closed positions are filtered out at the resource level so exitPrice
       // never applies here; left null for forward-compat if we widen the
       // panel later to include "recently closed".
@@ -433,6 +437,33 @@ export class EAPositionsPanelComponent {
       editable: { kind: 'position', id: p.id },
     });
     this.chartOpen.set(true);
+
+    // Account-aware live bid/ask — used to draw both the BID and ASK
+    // horizontal lines on the chart with the spread this specific broker is
+    // currently quoting (not whichever broker last fed the symbol cache).
+    this.marketData
+      .getAccountLivePrice(p.tradingAccountId, p.symbol)
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        if (!res?.status || !res.data) return;
+        if (this.selectedPositionId !== p.id) return;
+        const cur = this.chartSelection();
+        if (!cur) return;
+        const bid = res.data.bid ?? cur.currentPrice;
+        // Derive Ask from whichever Bid we have + the per-account spread.
+        // Falls back to res.data.ask (already computed engine-side when the
+        // symbol cache had a tick) so we still draw an Ask line even when
+        // the spread cascade landed on "SymbolFallback".
+        const ask =
+          bid !== null && res.data.perAccountSpread !== null
+            ? bid + res.data.perAccountSpread
+            : res.data.ask;
+        this.chartSelection.set({
+          ...cur,
+          currentPrice: bid,
+          currentAsk: ask,
+        });
+      });
 
     // Fetch signal → order-placement timing and patch the selection when it
     // lands (new object → the modal's OnChanges picks it up and shows the delta).
@@ -467,6 +498,7 @@ export class EAPositionsPanelComponent {
   protected readonly actionBusy = signal(false);
   private selectedPositionId: number | null = null;
   private readonly positionsSvc = inject(PositionsService);
+  private readonly marketData = inject(MarketDataService);
   private readonly notify = inject(NotificationService);
 
   protected onClosePosition(): void {

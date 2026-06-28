@@ -5,6 +5,7 @@ import {
   ResponseData,
   PagedData,
   PagerRequest,
+  AccountLivePriceDto,
   LivePriceDto,
   CandleDto,
   CandleCoverageDto,
@@ -19,6 +20,22 @@ export class MarketDataService {
 
   getLivePrice(symbol: string): Observable<ResponseData<LivePriceDto>> {
     return this.api.get(`/market-data/live-price/${this.formatSymbol(symbol)}`);
+  }
+
+  /**
+   * GET /market-data/account-live-price/{tradingAccountId}/{symbol} —
+   * account-aware bid/ask. Layers the per-(account, symbol) live spread
+   * from SpreadStateStore on the symbol tick cache so the Ask reflects
+   * this account's broker, not whichever broker last fed the symbol cache.
+   * Drives the chart modal's Now·Bid / Now·Ask markLines.
+   */
+  getAccountLivePrice(
+    tradingAccountId: number,
+    symbol: string,
+  ): Observable<ResponseData<AccountLivePriceDto>> {
+    return this.api.get(
+      `/market-data/account-live-price/${tradingAccountId}/${this.formatSymbol(symbol)}`,
+    );
   }
 
   getLatestCandle(symbol: string, timeframe: string): Observable<ResponseData<CandleDto>> {

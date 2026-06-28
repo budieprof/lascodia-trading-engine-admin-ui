@@ -1346,6 +1346,25 @@ export interface LivePriceDto {
   timestamp: string;
 }
 
+/**
+ * Account-aware live bid/ask snapshot for one (tradingAccountId, symbol)
+ * pair. Returned by GET /market-data/account-live-price/{accountId}/{symbol}.
+ * The Bid is sourced from the broker-agnostic symbol tick cache; the Ask
+ * is derived as `bid + perAccountSpread` when SpreadStateStore has live
+ * state for the account, falling back to the symbol-cache's Ask otherwise.
+ * `source` makes the provenance explicit so the UI can label the lines.
+ */
+export interface AccountLivePriceDto {
+  tradingAccountId: number;
+  symbol: string;
+  bid: number | null;
+  ask: number | null;
+  perAccountSpread: number | null;
+  /** "AccountAware" | "SymbolFallback" | "None". */
+  source: string;
+  timestamp: string | null;
+}
+
 /** A single price/volume entry inside an OrderBookSnapshot's `levelsJson` payload. */
 export interface OrderBookLevel {
   /** Price for this depth level. */
@@ -3419,6 +3438,26 @@ export interface EAFillModeConfig {
 /** Body shape for PUT /admin/ea/{instanceId}/fill-mode. */
 export interface UpdateEAFillModeRequest {
   fillMode: EAFillMode;
+}
+
+/**
+ * Per-account spread-pad toggle surfaced by
+ * GET /admin/ea/{instanceId}/spread-pad. AND-ed under the hood with the
+ * engine-wide SpreadReactive:Pad:Enabled master switch — either being off
+ * skips the pad on this account. Defaults to disabled (per-account toggle
+ * is opt-in only — operator must flip each account on explicitly).
+ * `tradingAccountId` is null when the route instance id doesn't resolve.
+ */
+export interface EASpreadPadConfig {
+  instanceId: string;
+  tradingAccountId: number | null;
+  enabled: boolean;
+  enabledDefault: boolean;
+}
+
+/** Body shape for PUT /admin/ea/{instanceId}/spread-pad. */
+export interface UpdateEASpreadPadRequest {
+  enabled: boolean;
 }
 
 /**
