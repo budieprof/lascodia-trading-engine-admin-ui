@@ -25,6 +25,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 import { FleetActionsBarComponent } from '../../components/fleet-actions-bar/fleet-actions-bar.component';
 import { EATradingWindowPanelComponent } from '../../components/ea-trading-window-panel/ea-trading-window-panel.component';
 import { EAPendingSignalRevalPanelComponent } from '../../components/ea-pending-signal-reval-panel/ea-pending-signal-reval-panel.component';
+import { EASpreadPadMasterPanelComponent } from '../../components/ea-spread-pad-master-panel/ea-spread-pad-master-panel.component';
 
 type StatusFilter = 'all' | EAInstanceStatus;
 type ViewMode = 'cards' | 'table';
@@ -47,6 +48,7 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
     FleetActionsBarComponent,
     EATradingWindowPanelComponent,
     EAPendingSignalRevalPanelComponent,
+    EASpreadPadMasterPanelComponent,
   ],
   template: `
     <div class="page">
@@ -59,7 +61,7 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
       <app-fleet-actions-bar (commandQueued)="onFleetCommandQueued($event)" />
 
       <!-- Engine-wide fleet config row: trading window + pending-signal
-           re-validation. 2-up on wide screens, stacks on narrow. -->
+           re-validation + spread-pad master. Auto-fit grid (stacks on narrow). -->
       <div class="fleet-config-row">
         <!-- Fleet-wide trading window — auto-rejects signals + optionally
              flattens positions at window exit. UTC-clock, fleet-scoped. -->
@@ -68,6 +70,10 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
         <!-- Engine-wide pending-signal re-validation — park LLM recs whose
              entry is far from market and re-validate when price returns. -->
         <app-ea-pending-signal-reval-panel />
+
+        <!-- Engine-wide master for SpreadPadder — AND-ed with each account's
+             per-EA toggle on the EA detail page. -->
+        <app-ea-spread-pad-master-panel />
       </div>
 
       @if (loading()) {
