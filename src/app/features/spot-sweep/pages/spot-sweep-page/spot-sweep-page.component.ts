@@ -551,6 +551,36 @@ import {
                   most-headroom-first.
                 </p>
               </div>
+              <div class="field">
+                <label
+                  >Direction-skew penalty weight
+                  <span class="muted small">0 = legacy routing · 1 = max bias</span></label
+                >
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  [value]="cfg.directionSkewPenaltyWeight"
+                  (input)="
+                    patch({
+                      directionSkewPenaltyWeight: clampFloat($any($event.target).value, 0, 1),
+                    })
+                  "
+                />
+                <span class="muted small"
+                  >current: {{ cfg.directionSkewPenaltyWeight.toFixed(2) }}</span
+                >
+                <p class="muted small hint">
+                  Bias the auto-approve router AGAINST accounts whose open book is already skewed in
+                  the same direction as the signal. For each candidate account the router computes
+                  <em>skew = (sameDir − oppositeDir) / max(1, sameDir + oppositeDir)</em>; effective
+                  headroom is scaled by <em>1 − max(0, skew) × weight</em>. So at 0.5 a
+                  100%-same-direction account loses half its score; an opposite-skew account gets no
+                  penalty (the new entry diversifies). 0 disables and routing reverts to pure
+                  headroom-first.
+                </p>
+              </div>
             }
 
             <p class="sub-label">

@@ -92,6 +92,17 @@ export interface SpotSweepConfig {
    */
   estimatedMarginPerTrade: number;
   /**
+   * Bias the auto-approve router AGAINST accounts whose open book is
+   * already skewed in the same direction as the signal being placed.
+   * Range [0, 1]; 0 disables (legacy headroom-only routing). Penalty =
+   * `max(0, skew) × weight`, where `skew = (sameDir − oppositeDir) /
+   * max(1, sameDir + oppositeDir)`. Default 0.5: a 100% same-direction
+   * account loses half its effective headroom; a 50/50 split account
+   * is unaffected. Only consulted when
+   * {@link limitSignalsToAccountCapacity} is on.
+   */
+  directionSkewPenaltyWeight: number;
+  /**
    * When on, drop any pair from this tick's eligible list whose scoped
    * broker accounts are ALL currently in elevated-spread state per the
    * spread-reactive subsystem. Saves LLM cost during NY-close / news /
@@ -244,6 +255,7 @@ export const DEFAULT_SWEEP_CONFIG: SpotSweepConfig = {
   skipWhenInsufficientMargin: true,
   limitSignalsToAccountCapacity: false,
   estimatedMarginPerTrade: 50,
+  directionSkewPenaltyWeight: 0.5,
   suspendOnHighSpread: false,
   entryPreference: 'Any',
   maxParallelAnalyses: 6,
