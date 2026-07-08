@@ -659,19 +659,6 @@ import {
             <p class="sub-label">Hard caps</p>
             <div class="row-2">
               <div class="field">
-                <label>Max concurrent sweep positions</label>
-                <input
-                  type="number"
-                  min="0"
-                  [value]="cfg.maxConcurrentSweepPositions"
-                  (input)="
-                    patch({
-                      maxConcurrentSweepPositions: clampInt($any($event.target).value, 0, 999),
-                    })
-                  "
-                />
-              </div>
-              <div class="field">
                 <label>Max new orders / day</label>
                 <input
                   type="number"

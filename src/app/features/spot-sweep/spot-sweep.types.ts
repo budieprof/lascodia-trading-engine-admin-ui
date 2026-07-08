@@ -65,7 +65,6 @@ export interface SpotSweepConfig {
   maxPendingPositionsPerSymbol: number;
 
   // Hard caps — hitting any one parks the loop with an idleReason
-  maxConcurrentSweepPositions: number;
   maxNewOrdersPerDay: number;
   maxDailyLlmCostUsd: number;
   /** Per-trade risk ceiling (lots; engine may map to a RiskProfile). */
@@ -247,7 +246,6 @@ export const DEFAULT_SWEEP_CONFIG: SpotSweepConfig = {
   maxPendingPositionsPerSymbol: 0,
   excludePendingSignal: true,
   requireActiveEaCoverage: true,
-  maxConcurrentSweepPositions: 3,
   maxNewOrdersPerDay: 10,
   maxDailyLlmCostUsd: 5,
   maxRiskPerTrade: 0.1,
