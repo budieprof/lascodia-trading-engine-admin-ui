@@ -1,10 +1,12 @@
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { map, Observable } from 'rxjs';
 import { ApiService } from '@core/api/api.service';
+import { ApiError, ResponseData } from '@core/api/api.types';
 import {
   GhostOutcomeConfig,
   UpdateGhostOutcomeConfigRequest,
   UpdateViabilityGateRequest,
+  UpdateViabilityGateResult,
   ViabilityGatesList,
 } from '@features/viability-gates/viability-gates.types';
 
@@ -26,10 +28,26 @@ export class ViabilityGatesService {
   /**
    * Update a single gate.  `body.mode` and `body.thresholds` are both
    * optional — supply only what you want to change.  Returns the number of
-   * EngineConfig rows the backend wrote.
+   * EngineConfig rows written PLUS the engine's message: a risk-loosening
+   * mode change with a `reason` is QUEUED for the 24h cooling-off period
+   * (unless `immediate` breaks glass) and the message says so — the raw
+   * envelope is read here instead of `putEnvelope` so that message
+   * survives the unwrap.
    */
-  update(gateName: string, body: UpdateViabilityGateRequest): Observable<number> {
-    return this.api.putEnvelope<number>(`/viability-gates/${encodeURIComponent(gateName)}`, body);
+  update(
+    gateName: string,
+    body: UpdateViabilityGateRequest,
+  ): Observable<UpdateViabilityGateResult> {
+    return this.api
+      .put<ResponseData<number>>(`/viability-gates/${encodeURIComponent(gateName)}`, body)
+      .pipe(
+        map((res) => {
+          if (!res.status) {
+            throw new ApiError(res.responseCode ?? 'UNKNOWN', res.message ?? 'Request failed', res);
+          }
+          return { written: res.data ?? 0, message: res.message ?? null };
+        }),
+      );
   }
 
   /**

@@ -81,11 +81,30 @@ export interface ViabilityGatesList {
 export interface UpdateViabilityGateRequest {
   mode?: ViabilityGateMode | null;
   thresholds?: UpdateViabilityGateThresholdItem[] | null;
+  /**
+   * Why this change is being made. REQUIRED for risk-LOOSENING mode changes
+   * (Enforce→Advisory/Off) — the engine's governance layer queues those for
+   * a 24h cooling-off period and refuses them without a reason.
+   */
+  reason?: string | null;
+  /** Break-glass: apply a risk-loosening change immediately (requires `reason`). */
+  immediate?: boolean;
 }
 
 export interface UpdateViabilityGateThresholdItem {
   key: string;
   value: number;
+}
+
+/**
+ * Result of a gate update. `message` carries the governance outcome when a
+ * risk-loosening change was QUEUED for cooling-off instead of applied —
+ * the UI must surface it so the operator doesn't read the unchanged mode
+ * as a failed save.
+ */
+export interface UpdateViabilityGateResult {
+  written: number;
+  message: string | null;
 }
 
 /** Mode picker options — used by the UI dropdown. */

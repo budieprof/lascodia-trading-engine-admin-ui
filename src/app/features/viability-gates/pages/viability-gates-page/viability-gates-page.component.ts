@@ -310,6 +310,31 @@ import {
                   </select>
                 </label>
 
+                @if (draftMode(gate.name) !== gate.mode) {
+                  <label class="field">
+                    <span class="field-label">Change reason</span>
+                    <input
+                      class="control"
+                      type="text"
+                      [ngModel]="draftReason(gate.name)"
+                      (ngModelChange)="setDraftReason(gate.name, $event)"
+                      placeholder="Why is this gate's mode changing?"
+                    />
+                    <span class="field-help muted">
+                      Loosening (Enforce → Advisory / Off) requires a reason and is queued for the
+                      24h cooling-off period unless applied immediately.
+                    </span>
+                  </label>
+                  <label class="field checkbox-field">
+                    <input
+                      type="checkbox"
+                      [ngModel]="draftImmediate(gate.name)"
+                      (ngModelChange)="setDraftImmediate(gate.name, $event)"
+                    />
+                    <span class="field-label">Apply immediately (break-glass)</span>
+                  </label>
+                }
+
                 @for (t of gate.thresholds; track t.key) {
                   <label class="field">
                     <span class="field-label">
@@ -342,6 +367,8 @@ import {
                   <span class="muted">Saving…</span>
                 } @else if (savedGate() === gate.name) {
                   <span class="ok">Saved.</span>
+                } @else if (saveNotice(gate.name); as notice) {
+                  <span class="notice">{{ notice }}</span>
                 } @else if (saveError(gate.name); as err) {
                   <span class="err">{{ err }}</span>
                 } @else if (isDirty(gate.name)) {
@@ -564,9 +591,18 @@ import {
       }
       .actions .muted,
       .actions .ok,
-      .actions .err {
+      .actions .err,
+      .actions .notice {
         margin-right: auto;
         font-size: var(--text-xs);
+      }
+      .notice {
+        color: var(--warning, #b45309);
+      }
+      .checkbox-field {
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
       }
       .ok {
         color: var(--success, #2e8d4a);
@@ -608,6 +644,13 @@ export class ViabilityGatesPageComponent {
   readonly savingGate = signal<string | null>(null);
   readonly savedGate = signal<string | null>(null);
   private readonly saveErrors = signal<Record<string, string>>({});
+  /**
+   * Per-gate governance notice from the last save — set when a
+   * risk-loosening mode change was QUEUED for cooling-off instead of
+   * applied, so the operator doesn't read the unchanged mode as a
+   * failed save.
+   */
+  private readonly saveNotices = signal<Record<string, string>>({});
   readonly windowStartUtc = signal<string>('');
 
   readonly ghostRunning = signal<boolean>(false);
@@ -818,6 +861,43 @@ export class ViabilityGatesPageComponent {
     return this.saveErrors()[name] ?? null;
   }
 
+  saveNotice(name: string): string | null {
+    return this.saveNotices()[name] ?? null;
+  }
+
+  draftReason(name: string): string {
+    return this.drafts()[name]?.reason ?? '';
+  }
+
+  setDraftReason(name: string, reason: string): void {
+    const cur = this.drafts();
+    if (!cur[name]) return;
+    this.drafts.set({ ...cur, [name]: { ...cur[name], reason } });
+  }
+
+  draftImmediate(name: string): boolean {
+    return this.drafts()[name]?.immediate ?? false;
+  }
+
+  setDraftImmediate(name: string, immediate: boolean): void {
+    const cur = this.drafts();
+    if (!cur[name]) return;
+    this.drafts.set({ ...cur, [name]: { ...cur[name], immediate } });
+  }
+
+  /**
+   * True when the staged mode change loosens the gate (Enforce → Advisory /
+   * Off, or Advisory → Off). Mirrors the engine's RiskSensitiveConfigCatalog
+   * classification so the reason requirement surfaces before the round-trip.
+   */
+  private modeChangeLoosening(name: string): boolean {
+    const gate = this.serverGates().find((g) => g.name === name);
+    const draft = this.drafts()[name];
+    if (!gate || !draft || draft.mode === gate.mode) return false;
+    const rank: Record<ViabilityGateMode, number> = { Enforce: 0, Advisory: 1, Off: 2 };
+    return rank[draft.mode] > rank[gate.mode];
+  }
+
   draftMode(name: string): ViabilityGateMode {
     return this.drafts()[name]?.mode ?? 'Enforce';
   }
@@ -892,8 +972,22 @@ export class ViabilityGatesPageComponent {
     const body: {
       mode?: ViabilityGateMode | null;
       thresholds?: UpdateViabilityGateThresholdItem[];
+      reason?: string;
+      immediate?: boolean;
     } = {};
-    if (draft.mode !== gate.mode) body.mode = draft.mode;
+    if (draft.mode !== gate.mode) {
+      body.mode = draft.mode;
+      const reason = (draft.reason ?? '').trim();
+      if (reason) body.reason = reason;
+      if (draft.immediate) body.immediate = true;
+      if (this.modeChangeLoosening(name) && !reason) {
+        this.setSaveError(
+          name,
+          'A change reason is required when loosening a gate (Enforce → Advisory / Off) — it is queued for the 24h cooling-off period unless applied immediately.',
+        );
+        return;
+      }
+    }
 
     const changes: UpdateViabilityGateThresholdItem[] = [];
     for (const t of gate.thresholds) {
@@ -914,6 +1008,7 @@ export class ViabilityGatesPageComponent {
     }
 
     this.clearSaveError(name);
+    this.clearSaveNotice(name);
     this.savingGate.set(name);
     this.svc
       .update(name, body)
@@ -924,10 +1019,16 @@ export class ViabilityGatesPageComponent {
           return of(null);
         }),
       )
-      .subscribe((written) => {
+      .subscribe((result) => {
         this.savingGate.set(null);
-        if (written === null) return;
-        this.savedGate.set(name);
+        if (result === null) return;
+        if (result.message && result.message.toLowerCase().includes('cooling-off')) {
+          // The mode change was queued, not applied — surface the governance
+          // message so the stale mode badge isn't read as a failed save.
+          this.saveNotices.set({ ...this.saveNotices(), [name]: result.message });
+        } else {
+          this.savedGate.set(name);
+        }
         // Refresh from server so stats counts and any server-side clamping
         // surface immediately, instead of waiting for a manual reload.
         this.reload();
@@ -979,7 +1080,7 @@ export class ViabilityGatesPageComponent {
   private buildDraftForGate(g: ViabilityGate): GateDraft {
     const thresholds: Record<string, number> = {};
     for (const t of g.thresholds) thresholds[t.key] = t.value;
-    return { mode: g.mode, thresholds };
+    return { mode: g.mode, thresholds, reason: '', immediate: false };
   }
 
   private setSaveError(name: string, msg: string): void {
@@ -990,6 +1091,12 @@ export class ViabilityGatesPageComponent {
     const cur = { ...this.saveErrors() };
     delete cur[name];
     this.saveErrors.set(cur);
+  }
+
+  private clearSaveNotice(name: string): void {
+    const cur = { ...this.saveNotices() };
+    delete cur[name];
+    this.saveNotices.set(cur);
   }
 
   private formatWindowStart(iso: string): string {
@@ -1003,6 +1110,10 @@ export class ViabilityGatesPageComponent {
 interface GateDraft {
   mode: ViabilityGateMode;
   thresholds: Record<string, number>;
+  /** Operator-entered justification for a staged mode change (governance). */
+  reason?: string;
+  /** Break-glass: apply a loosening mode change immediately. */
+  immediate?: boolean;
 }
 
 // Local helper for the threshold input: each draft.threshold[key] is a number
