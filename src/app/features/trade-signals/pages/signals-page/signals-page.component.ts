@@ -39,6 +39,7 @@ import {
 } from '@shared/components/spot-rec-chart/spot-rec-chart.component';
 import { ParkedRecsCockpitComponent } from '@features/pending-signal-recs/components/parked-recs-cockpit/parked-recs-cockpit.component';
 import { EARejectionsPanelComponent } from '@features/ea-instances/components/ea-rejections-panel/ea-rejections-panel.component';
+import { SignalPickupsPanelComponent } from '../../components/signal-pickups-panel/signal-pickups-panel.component';
 
 type StatusChip = 'all' | TradeSignalStatus;
 type DirectionChip = 'all' | TradeDirection;
@@ -60,6 +61,7 @@ type DirectionChip = 'all' | TradeDirection;
     SpotRecChartComponent,
     ParkedRecsCockpitComponent,
     EARejectionsPanelComponent,
+    SignalPickupsPanelComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -112,6 +114,16 @@ type DirectionChip = 'all' | TradeDirection;
         >
           Account Rejections
         </button>
+        <button
+          type="button"
+          role="tab"
+          class="view-tab"
+          [class.active]="view() === 'pickups'"
+          (click)="openPickupsTab()"
+          [attr.aria-selected]="view() === 'pickups'"
+        >
+          Signals Picked Up
+        </button>
       </nav>
 
       @if (view() === 'parked') {
@@ -152,6 +164,46 @@ type DirectionChip = 'all' | TradeDirection;
           } @else {
             <p class="muted picker-hint">
               Select an active trading account to see the signals it rejected and why.
+            </p>
+          }
+        </div>
+      } @else if (view() === 'pickups') {
+        <!-- Per-account pick-up view: pick an active account, see the
+             signals it DID pick up (created an order from). Exact inverse
+             of the Account Rejections tab. Reuses the same shared active-
+             account list; a separate selected-account signal keeps the two
+             tabs' selections independent. -->
+        <div class="rejections-view">
+          <div class="account-picker">
+            <label class="picker-label" for="pickup-account">Trading account</label>
+            <select
+              id="pickup-account"
+              class="input"
+              [ngModel]="pickupAccountId()"
+              (ngModelChange)="pickupAccountId.set(+$event)"
+            >
+              <option [ngValue]="null" disabled>Select an active account…</option>
+              @for (a of activeAccounts(); track a.id) {
+                <option [ngValue]="a.id">
+                  {{ a.accountName || a.accountId || 'Account #' + a.id }}
+                  @if (a.brokerName) {
+                    · {{ a.brokerName }}
+                  }
+                </option>
+              }
+            </select>
+            @if (accountsLoading()) {
+              <span class="muted">Loading accounts…</span>
+            } @else if (activeAccounts().length === 0) {
+              <span class="muted">No active trading accounts.</span>
+            }
+          </div>
+
+          @if (pickupAccountId(); as accId) {
+            <app-signal-pickups-panel [tradingAccountId]="accId" />
+          } @else {
+            <p class="muted picker-hint">
+              Select an active trading account to see the signals it picked up.
             </p>
           }
         </div>
@@ -982,13 +1034,16 @@ export class SignalsPageComponent {
   private readonly relativeTimePipe = new RelativeTimePipe();
   private readonly dataTable = viewChild(DataTableComponent<TradeSignalDto>);
 
-  // ── View tab — signals queue / parked LLM recs / per-account rejections ─
-  readonly view = signal<'signals' | 'parked' | 'rejections'>('signals');
+  // ── View tab — signals queue / parked recs / rejections / pick-ups ─────
+  readonly view = signal<'signals' | 'parked' | 'rejections' | 'pickups'>('signals');
 
-  // ── Account Rejections tab state ──────────────────────────────────────
+  // ── Account Rejections + Signals-Picked-Up tab state ──────────────────
+  // Both tabs share the same active-account list (loaded once); each keeps
+  // its own selected-account signal so switching tabs preserves selection.
   readonly activeAccounts = signal<TradingAccountDto[]>([]);
   readonly accountsLoading = signal(false);
   readonly selectedAccountId = signal<number | null>(null);
+  readonly pickupAccountId = signal<number | null>(null);
   private accountsLoaded = false;
 
   // ── Filter signals ────────────────────────────────────────────────────
@@ -1224,15 +1279,30 @@ export class SignalsPageComponent {
       });
   }
 
-  /**
-   * Switches to the Account Rejections tab and lazily loads the active
-   * trading accounts on first open. Accounts are sourced from the same
-   * `/trading-account/list` endpoint the Accounts page uses, filtered
-   * client-side to `isActive` — the operator only rejects/picks-up on
-   * live accounts.
-   */
+  /** Switches to the Account Rejections tab (shared active-account load). */
   openRejectionsTab(): void {
     this.view.set('rejections');
+    this.ensureAccountsLoaded();
+  }
+
+  /**
+   * Switches to the Signals-Picked-Up tab. Exact inverse of the rejections
+   * tab — same active-account list, but the account-scoped panel lists the
+   * orders (i.e. picked-up signals) instead of the rejections.
+   */
+  openPickupsTab(): void {
+    this.view.set('pickups');
+    this.ensureAccountsLoaded();
+  }
+
+  /**
+   * Lazily loads the active trading accounts on first open of either the
+   * rejections or pick-ups tab. Accounts are sourced from the same
+   * `/trading-account/list` endpoint the Accounts page uses, filtered
+   * client-side to `isActive` — the operator only rejects/picks-up on
+   * live accounts. Shared by both tabs so the fetch runs at most once.
+   */
+  private ensureAccountsLoaded(): void {
     if (this.accountsLoaded) return;
     this.accountsLoaded = true;
     this.accountsLoading.set(true);
@@ -1245,9 +1315,12 @@ export class SignalsPageComponent {
       .subscribe((accts) => {
         this.activeAccounts.set(accts);
         this.accountsLoading.set(false);
-        // Auto-select the sole active account so the panel populates
-        // without an extra click.
-        if (accts.length === 1) this.selectedAccountId.set(accts[0].id);
+        // Auto-select the sole active account on both tabs so the panels
+        // populate without an extra click.
+        if (accts.length === 1) {
+          this.selectedAccountId.set(accts[0].id);
+          this.pickupAccountId.set(accts[0].id);
+        }
       });
   }
 
