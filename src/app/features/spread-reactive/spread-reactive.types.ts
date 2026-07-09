@@ -39,6 +39,15 @@ export interface SpreadReactiveConfig {
   preEmptiveProtectionHours: number;
   /** Direction-aware spread pad applied per-signal at order placement. */
   padEnabled: boolean;
+  /**
+   * Multiplier applied to the persistent floor before it is used as the
+   * pad amount. The floor captures p50 spread; spikes routinely hit
+   * 2-3× the floor on real brokers, so a 1.0× pad gets blown through.
+   * Raise to absorb spikes without re-calibrating the floor table.
+   * Range [1.0, 10.0]; default 1.0 (legacy behaviour). 2.5–3.5 is a
+   * sensible starting point on live broker accounts.
+   */
+  padFloorMultiplier: number;
 }
 
 /** Coarse classification of the current spread state for an account+symbol. */
@@ -122,4 +131,5 @@ export const DEFAULT_SPREAD_REACTIVE_CONFIG: SpreadReactiveConfig = {
   preEmptiveTriggerHourUtc: 20,
   preEmptiveProtectionHours: 4,
   padEnabled: true,
+  padFloorMultiplier: 1.0,
 };

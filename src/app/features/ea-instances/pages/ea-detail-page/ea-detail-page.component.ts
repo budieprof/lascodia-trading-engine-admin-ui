@@ -417,6 +417,38 @@ interface ConfigForm {
                   Off
                 </button>
               </div>
+              @if (spreadPadMultiplierServer() !== null) {
+                <div class="fm-multiplier">
+                  <label class="fm-mult-label">
+                    <span class="fm-mult-name">Floor multiplier</span>
+                    <input
+                      class="fm-mult-input"
+                      type="number"
+                      min="1"
+                      max="10"
+                      step="0.1"
+                      [value]="spreadPadMultiplierDraft() ?? spreadPadMultiplierServer()"
+                      [disabled]="savingSpreadPad()"
+                      (input)="setSpreadPadMultiplier($any($event.target).value)"
+                    />
+                  </label>
+                  <span class="muted small fm-mult-hint">
+                    Effective pad = floor × multiplier. Engine-wide default
+                    <strong>{{ spreadPadEngineWideMultiplier() ?? 1 }}</strong
+                    >; this account currently
+                    @if (spreadPadMultiplierIsOverridden()) {
+                      <strong>overrides</strong> the default at
+                      <strong>{{ spreadPadMultiplierServer() }}</strong
+                      >.
+                    } @else {
+                      <strong>inherits</strong> the default. Saving a value here writes a
+                      per-account override.
+                    }
+                    Floor captures the calm spread (≈p50); spikes hit 2-3× on real brokers, so raise
+                    to 2.5-3.5 on live broker accounts to absorb upper-tail spread.
+                  </span>
+                </div>
+              }
               <div class="fm-status small">
                 @if (savingSpreadPad()) {
                   <span class="muted">Saving…</span>
@@ -1593,6 +1625,36 @@ interface ConfigForm {
         cursor: not-allowed;
         opacity: 0.55;
       }
+      .fm-multiplier {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        align-items: flex-end;
+        max-width: 360px;
+      }
+      .fm-mult-label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .fm-mult-name {
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        color: var(--text-secondary);
+      }
+      .fm-mult-input {
+        width: 80px;
+        padding: 6px 8px;
+        font-size: var(--text-sm);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .fm-mult-hint {
+        text-align: right;
+        line-height: 1.4;
+      }
       .fm-status {
         min-height: 1.2em;
       }
@@ -2517,6 +2579,13 @@ export class EaDetailPageComponent {
   protected readonly savingSpreadPad = signal(false);
   protected readonly spreadPadSaved = signal(false);
   protected readonly spreadPadSaveError = signal<string | null>(null);
+  // Multiplier draft/server pair runs in parallel with the toggle so a
+  // single Save round-trips both. The engine-wide default is surfaced
+  // for the "default X.X" hint next to the input.
+  protected readonly spreadPadMultiplierServer = signal<number | null>(null);
+  protected readonly spreadPadMultiplierDraft = signal<number | null>(null);
+  protected readonly spreadPadEngineWideMultiplier = signal<number | null>(null);
+  protected readonly spreadPadMultiplierIsOverridden = signal<boolean>(false);
 
   private lastSpreadPadInstanceId: string | null = null;
   private readonly _loadSpreadPad = effect(() => {
@@ -2526,6 +2595,10 @@ export class EaDetailPageComponent {
     this.lastSpreadPadInstanceId = instanceId;
     this.spreadPadServer.set(null);
     this.spreadPadDraft.set(null);
+    this.spreadPadMultiplierServer.set(null);
+    this.spreadPadMultiplierDraft.set(null);
+    this.spreadPadEngineWideMultiplier.set(null);
+    this.spreadPadMultiplierIsOverridden.set(false);
     this.spreadPadSaved.set(false);
     this.spreadPadSaveError.set(null);
     this.admin
@@ -2533,15 +2606,26 @@ export class EaDetailPageComponent {
       .pipe(catchError(() => of(null)))
       .subscribe((res) => {
         const enabled = res?.data?.enabled ?? false;
+        const multiplier = res?.data?.multiplier ?? 1;
+        const engineWide = res?.data?.engineWideMultiplier ?? 1;
+        const overridden = res?.data?.multiplierIsOverridden ?? false;
         this.spreadPadServer.set(enabled);
         this.spreadPadDraft.set(enabled);
+        this.spreadPadMultiplierServer.set(multiplier);
+        this.spreadPadMultiplierDraft.set(multiplier);
+        this.spreadPadEngineWideMultiplier.set(engineWide);
+        this.spreadPadMultiplierIsOverridden.set(overridden);
       });
   });
 
   protected spreadPadDirty(): boolean {
     const s = this.spreadPadServer();
     const d = this.spreadPadDraft();
-    return s !== null && d !== null && s !== d;
+    const enabledDirty = s !== null && d !== null && s !== d;
+    const ms = this.spreadPadMultiplierServer();
+    const md = this.spreadPadMultiplierDraft();
+    const multDirty = ms !== null && md !== null && ms !== md;
+    return enabledDirty || multDirty;
   }
 
   protected setSpreadPad(enabled: boolean): void {
@@ -2550,8 +2634,21 @@ export class EaDetailPageComponent {
     this.spreadPadSaveError.set(null);
   }
 
+  protected setSpreadPadMultiplier(raw: string | number): void {
+    const v = typeof raw === 'number' ? raw : Number.parseFloat(String(raw));
+    if (!Number.isFinite(v)) return;
+    // Mirror the engine's [1.0, 10.0] clamp so the displayed value matches
+    // what will be persisted; below 1 is meaningless (pad smaller than
+    // calm spread is worse than no pad), above 10 is almost certainly a typo.
+    const clamped = Math.max(1, Math.min(10, v));
+    this.spreadPadMultiplierDraft.set(clamped);
+    this.spreadPadSaved.set(false);
+    this.spreadPadSaveError.set(null);
+  }
+
   protected resetSpreadPad(): void {
     this.spreadPadDraft.set(this.spreadPadServer());
+    this.spreadPadMultiplierDraft.set(this.spreadPadMultiplierServer());
     this.spreadPadSaved.set(false);
     this.spreadPadSaveError.set(null);
   }
@@ -2559,11 +2656,19 @@ export class EaDetailPageComponent {
   protected saveSpreadPad(): void {
     const ea = this.ea();
     const draft = this.spreadPadDraft();
-    if (!ea || draft === null || draft === this.spreadPadServer()) return;
+    const multDraft = this.spreadPadMultiplierDraft();
+    const multServer = this.spreadPadMultiplierServer();
+    if (!ea || draft === null) return;
+    if (!this.spreadPadDirty()) return;
+    // Only PUT the multiplier when it actually changed — otherwise leave
+    // the per-account row untouched (preserves the inherit-from-engine-wide
+    // semantics for accounts that have never been overridden).
+    const multiplier =
+      multDraft !== null && multServer !== null && multDraft !== multServer ? multDraft : null;
     this.savingSpreadPad.set(true);
     this.spreadPadSaveError.set(null);
     this.admin
-      .updateSpreadPad(ea.instanceId, { enabled: draft })
+      .updateSpreadPad(ea.instanceId, { enabled: draft, multiplier })
       .pipe(
         finalize(() => this.savingSpreadPad.set(false)),
         catchError((err) => {
@@ -2578,9 +2683,15 @@ export class EaDetailPageComponent {
           return;
         }
         this.spreadPadServer.set(draft);
+        if (multiplier !== null) {
+          this.spreadPadMultiplierServer.set(multiplier);
+          this.spreadPadMultiplierIsOverridden.set(true);
+        }
         this.spreadPadSaved.set(true);
         this.notify.success(
-          `Spread pad ${draft ? 'enabled' : 'disabled'} for EA ${ea.instanceId}.`,
+          `Spread pad ${draft ? 'enabled' : 'disabled'} for EA ${ea.instanceId}` +
+            (multiplier !== null ? ` (multiplier ${multiplier.toFixed(2)})` : '') +
+            '.',
         );
         this.auditTrail
           .create({
@@ -2589,7 +2700,11 @@ export class EaDetailPageComponent {
             decisionType: 'EAUpdateSpreadPad',
             outcome: 'Saved',
             reason: null,
-            contextJson: JSON.stringify({ instanceId: ea.instanceId, enabled: draft }),
+            contextJson: JSON.stringify({
+              instanceId: ea.instanceId,
+              enabled: draft,
+              multiplier,
+            }),
             source: 'AdminUI',
           })
           .subscribe({ error: () => undefined });

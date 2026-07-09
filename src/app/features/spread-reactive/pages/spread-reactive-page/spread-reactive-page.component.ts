@@ -491,6 +491,23 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
                   >Off → no pad applied; orders go in at signal entry/SL/TP as before.</small
                 >
               </label>
+              <label class="field">
+                <span>Floor multiplier</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  step="0.1"
+                  [value]="cfg.padFloorMultiplier"
+                  (input)="patch({ padFloorMultiplier: toFloat($any($event.target).value, 1) })"
+                />
+                <small class="muted">
+                  Effective pad = floor × multiplier. 1.0 = legacy (pad = floor exactly). The floor
+                  captures the calm-period spread (≈ p50), but spread spikes routinely hit 2-3× the
+                  floor on real brokers — that's when SL gets touched even though Bid never reached
+                  it. Raise to 2.5–3.5 on live broker accounts to absorb upper-tail spread.
+                </small>
+              </label>
             </div>
           </section>
 

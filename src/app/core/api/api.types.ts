@@ -3453,11 +3453,27 @@ export interface EASpreadPadConfig {
   tradingAccountId: number | null;
   enabled: boolean;
   enabledDefault: boolean;
+  /** Effective floor multiplier the pad will apply (per-account override
+   *  if set, otherwise the engine-wide default). */
+  multiplier: number;
+  /** Engine-wide multiplier — shown as the "default" hint next to the input. */
+  engineWideMultiplier: number;
+  /** True when this account has its own multiplier row; false means
+   *  the effective value is inherited from the engine-wide default. */
+  multiplierIsOverridden: boolean;
 }
 
-/** Body shape for PUT /admin/ea/{instanceId}/spread-pad. */
+/**
+ * Body shape for PUT /admin/ea/{instanceId}/spread-pad.
+ *
+ * `multiplier` is optional: omit (or send null) to leave the per-account
+ * multiplier row untouched and inherit the engine-wide default. Send a
+ * value ≥ 1.0 to write a per-account override (clamped server-side to
+ * [1.0, 10.0]).
+ */
 export interface UpdateEASpreadPadRequest {
   enabled: boolean;
+  multiplier?: number | null;
 }
 
 /**
