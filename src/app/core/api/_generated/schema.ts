@@ -20748,6 +20748,8 @@ export interface components {
       expiresAt?: string;
       isManual?: boolean;
       source?: components['schemas']['LascodiaTradingEngine_Domain_Enums_TradeSignalSource'];
+      /** Format: int32 */
+      accountsPickedUpCount?: number;
     };
     LascodiaTradingEngine_Application_TradeSignals_Queries_GetPagedTradeSignals_GetPagedTradeSignalsQuery: {
       /**

@@ -14,10 +14,12 @@ import type { EChartsOption } from 'echarts';
 import { catchError, map, of, throttleTime } from 'rxjs';
 
 import { TradeSignalsService } from '@core/services/trade-signals.service';
+import { TradingAccountsService } from '@core/services/trading-accounts.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import type {
   TradeSignalDto,
+  TradingAccountDto,
   PagedData,
   PagerRequest,
   TradeSignalStatus,
@@ -36,6 +38,7 @@ import {
   SpotRecChartRec,
 } from '@shared/components/spot-rec-chart/spot-rec-chart.component';
 import { ParkedRecsCockpitComponent } from '@features/pending-signal-recs/components/parked-recs-cockpit/parked-recs-cockpit.component';
+import { EARejectionsPanelComponent } from '@features/ea-instances/components/ea-rejections-panel/ea-rejections-panel.component';
 
 type StatusChip = 'all' | TradeSignalStatus;
 type DirectionChip = 'all' | TradeDirection;
@@ -56,6 +59,7 @@ type DirectionChip = 'all' | TradeDirection;
     RelativeTimePipe,
     SpotRecChartComponent,
     ParkedRecsCockpitComponent,
+    EARejectionsPanelComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -98,10 +102,59 @@ type DirectionChip = 'all' | TradeDirection;
         >
           Parked recs
         </button>
+        <button
+          type="button"
+          role="tab"
+          class="view-tab"
+          [class.active]="view() === 'rejections'"
+          (click)="openRejectionsTab()"
+          [attr.aria-selected]="view() === 'rejections'"
+        >
+          Account Rejections
+        </button>
       </nav>
 
       @if (view() === 'parked') {
         <app-parked-recs-cockpit />
+      } @else if (view() === 'rejections') {
+        <!-- Per-account rejection view: pick an active account, see the
+             signals it did NOT pick up and why. Reuses the exact
+             presentation of the per-instance rejection panel via its
+             account-scoped mode. -->
+        <div class="rejections-view">
+          <div class="account-picker">
+            <label class="picker-label" for="rej-account">Trading account</label>
+            <select
+              id="rej-account"
+              class="input"
+              [ngModel]="selectedAccountId()"
+              (ngModelChange)="selectedAccountId.set(+$event)"
+            >
+              <option [ngValue]="null" disabled>Select an active account…</option>
+              @for (a of activeAccounts(); track a.id) {
+                <option [ngValue]="a.id">
+                  {{ a.accountName || a.accountId || 'Account #' + a.id }}
+                  @if (a.brokerName) {
+                    · {{ a.brokerName }}
+                  }
+                </option>
+              }
+            </select>
+            @if (accountsLoading()) {
+              <span class="muted">Loading accounts…</span>
+            } @else if (activeAccounts().length === 0) {
+              <span class="muted">No active trading accounts.</span>
+            }
+          </div>
+
+          @if (selectedAccountId(); as accId) {
+            <app-ea-rejections-panel [tradingAccountId]="accId" />
+          } @else {
+            <p class="muted picker-hint">
+              Select an active trading account to see the signals it rejected and why.
+            </p>
+          }
+        </div>
       } @else {
         <!-- KPI strip (6 dense tiles) -->
         <div class="kpi-grid">
@@ -483,6 +536,33 @@ type DirectionChip = 'all' | TradeDirection;
         color: var(--text-primary);
         border-bottom-color: var(--accent, #0071e3);
         font-weight: var(--font-semibold);
+      }
+      /* Account Rejections tab */
+      .rejections-view {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
+      .account-picker {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        flex-wrap: wrap;
+      }
+      .picker-label {
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .account-picker .input {
+        min-width: 280px;
+      }
+      .picker-hint {
+        margin: 0;
+        padding: var(--space-4);
+        text-align: center;
       }
       .kpi-grid {
         display: grid;
@@ -896,13 +976,20 @@ type DirectionChip = 'all' | TradeDirection;
 })
 export class SignalsPageComponent {
   private readonly signalsService = inject(TradeSignalsService);
+  private readonly accountsService = inject(TradingAccountsService);
   private readonly notifications = inject(NotificationService);
   private readonly realtime = inject(RealtimeService);
   private readonly relativeTimePipe = new RelativeTimePipe();
   private readonly dataTable = viewChild(DataTableComponent<TradeSignalDto>);
 
-  // ── View tab — main signals queue vs. parked LLM recs cockpit ─────────
-  readonly view = signal<'signals' | 'parked'>('signals');
+  // ── View tab — signals queue / parked LLM recs / per-account rejections ─
+  readonly view = signal<'signals' | 'parked' | 'rejections'>('signals');
+
+  // ── Account Rejections tab state ──────────────────────────────────────
+  readonly activeAccounts = signal<TradingAccountDto[]>([]);
+  readonly accountsLoading = signal(false);
+  readonly selectedAccountId = signal<number | null>(null);
+  private accountsLoaded = false;
 
   // ── Filter signals ────────────────────────────────────────────────────
   readonly statusFilter = signal<StatusChip>('all');
@@ -1137,6 +1224,33 @@ export class SignalsPageComponent {
       });
   }
 
+  /**
+   * Switches to the Account Rejections tab and lazily loads the active
+   * trading accounts on first open. Accounts are sourced from the same
+   * `/trading-account/list` endpoint the Accounts page uses, filtered
+   * client-side to `isActive` — the operator only rejects/picks-up on
+   * live accounts.
+   */
+  openRejectionsTab(): void {
+    this.view.set('rejections');
+    if (this.accountsLoaded) return;
+    this.accountsLoaded = true;
+    this.accountsLoading.set(true);
+    this.accountsService
+      .list({ currentPage: 1, itemCountPerPage: 200, filter: null })
+      .pipe(
+        map((r) => (r.data?.data ?? []).filter((a) => a.isActive)),
+        catchError(() => of([] as TradingAccountDto[])),
+      )
+      .subscribe((accts) => {
+        this.activeAccounts.set(accts);
+        this.accountsLoading.set(false);
+        // Auto-select the sole active account so the panel populates
+        // without an extra click.
+        if (accts.length === 1) this.selectedAccountId.set(accts[0].id);
+      });
+  }
+
   private loadRecent(): void {
     this.metricsLoading.set(true);
     // Big page so KPIs cover today's activity without paginating. Capped at
@@ -1272,6 +1386,19 @@ export class SignalsPageComponent {
             ? ` title="${escapeHtml(p.data.rejectionReason)}"`
             : '';
         return `<span${reason} style="background:${s.bg};color:${s.color};padding:2px 10px;border-radius:999px;font-size:11px;font-weight:600">${p.value}</span>`;
+      },
+    },
+    {
+      headerName: 'Accounts',
+      headerTooltip: 'Distinct accounts that created an order from this signal',
+      field: 'accountsPickedUpCount',
+      width: 90,
+      sortable: true,
+      cellRenderer: (p: { value: number | null | undefined }) => {
+        const n = p.value ?? 0;
+        const color = n > 0 ? '#248A3D' : '#8E8E93';
+        const bg = n > 0 ? 'rgba(52,199,89,0.12)' : 'rgba(142,142,147,0.12)';
+        return `<span title="Distinct accounts that created an order from this signal" style="color:${color};background:${bg};padding:2px 10px;border-radius:999px;font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">${n}</span>`;
       },
     },
     {

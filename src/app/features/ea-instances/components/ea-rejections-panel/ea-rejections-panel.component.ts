@@ -226,10 +226,7 @@ const STAGE_ORDER: Record<SignalRejectionStage, number> = {
           (retry)="resource.refresh()"
         />
       } @else if (rows().length === 0) {
-        <app-empty-state
-          title="No rejections in the last 24h"
-          message="EA is processing every eligible signal — no local gate, engine check, or broker retcode has fired against this account."
-        />
+        <app-empty-state [title]="emptyTitle()" [description]="emptyMessage()" />
       } @else if (viewMode() === 'grouped') {
         @if (incidentGroups().length === 0) {
           <p class="empty-line muted">No rejections match the current filters.</p>
@@ -858,6 +855,10 @@ export class EARejectionsPanelComponent {
   // The fetcher's `if (!id)` guard handles the empty first tick and
   // picks up the real instance id on the next polling cycle.
   readonly instanceId = input<string>('');
+  // Optional account-scoped mode: when set (> 0), the panel lists rejections
+  // for a trading account instead of an EA instance. Used by the signals-page
+  // "Account Rejections" tab, which reuses this exact presentation.
+  readonly tradingAccountId = input<number | null>(null);
   readonly stageOptions = STAGE_OPTIONS;
 
   readonly stageFilter = signal<StageFilter>('all');
@@ -900,13 +901,18 @@ export class EARejectionsPanelComponent {
   protected readonly resource = createPolledResource(
     () => {
       const id = this.instanceId();
-      if (!id) return of<SignalRejectionEventDto[]>([]);
+      const accountId = this.tradingAccountId();
+      // Account-scoped mode takes precedence when an account id is supplied;
+      // otherwise fall back to the original EA-instance scope.
+      const accountScoped = accountId != null && accountId > 0;
+      if (!accountScoped && !id) return of<SignalRejectionEventDto[]>([]);
       const stage = this.stageFilter();
       const subStage = this.committedSubStage();
       const symbol = this.committedSymbol();
       return this.rejectionsService
         .list({
-          eaInstanceId: id,
+          eaInstanceId: accountScoped ? undefined : id,
+          tradingAccountId: accountScoped ? accountId : undefined,
           stage: stage === 'all' ? undefined : stage,
           subStage: subStage || undefined,
           symbol: symbol || undefined,
@@ -924,6 +930,21 @@ export class EARejectionsPanelComponent {
   readonly rows = computed(() => this.resource.value() ?? []);
   readonly loading = computed(
     () => this.resource.loading() && (this.resource.value() ?? null) === null,
+  );
+
+  private readonly accountScoped = computed(() => {
+    const id = this.tradingAccountId();
+    return id != null && id > 0;
+  });
+  readonly emptyTitle = computed(() =>
+    this.accountScoped()
+      ? 'No rejections for this account in the window.'
+      : 'No rejections in the last 24h',
+  );
+  readonly emptyMessage = computed(() =>
+    this.accountScoped()
+      ? 'This account picked up every eligible signal — no local gate, engine check, or broker retcode declined a signal for it.'
+      : 'EA is processing every eligible signal — no local gate, engine check, or broker retcode has fired against this account.',
   );
 
   // ── Summary metrics ────────────────────────────────────────────

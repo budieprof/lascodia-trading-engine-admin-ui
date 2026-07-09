@@ -535,6 +535,9 @@ export interface TradeSignalDto {
   /** Provenance of the signal. SpotAnalysis = auto-generated from an LLM
    *  spot analysis (owned by the seeded sentinel strategy). */
   source: TradeSignalSource;
+  /** Number of distinct trading accounts that created an order from this
+   *  signal. 0 = no account picked it up (rejected/expired everywhere). */
+  accountsPickedUpCount: number;
 }
 
 /** Trade-signal provenance. Mirrors the backend TradeSignalSource enum. */
