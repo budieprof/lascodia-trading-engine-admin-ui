@@ -602,6 +602,13 @@ export interface RiskProfileDto {
   minStopLossDistancePips: number;
   minTakeProfitDistancePips: number;
   minRiskRewardRatio: number;
+  maxTotalExposurePct: number;
+  maxAbsoluteRiskPerTrade: number;
+  maxPositionsPerSymbol: number;
+  maxConsecutiveLosses: number;
+  weekendGapRiskMultiplier: number;
+  maxCorrelatedPositions: number;
+  minEquityFloor: number;
 }
 
 export interface CurrencyPairDto {
@@ -3897,6 +3904,13 @@ export interface CreateRiskProfileRequest {
   minStopLossDistancePips?: number;
   minTakeProfitDistancePips?: number;
   minRiskRewardRatio?: number;
+  maxTotalExposurePct?: number;
+  maxAbsoluteRiskPerTrade?: number;
+  maxPositionsPerSymbol?: number;
+  maxConsecutiveLosses?: number;
+  weekendGapRiskMultiplier?: number;
+  maxCorrelatedPositions?: number;
+  minEquityFloor?: number;
 }
 
 export interface UpdateRiskProfileRequest {
@@ -3917,6 +3931,13 @@ export interface UpdateRiskProfileRequest {
   minStopLossDistancePips: number;
   minTakeProfitDistancePips: number;
   minRiskRewardRatio: number;
+  maxTotalExposurePct: number;
+  maxAbsoluteRiskPerTrade: number;
+  maxPositionsPerSymbol: number;
+  maxConsecutiveLosses: number;
+  weekendGapRiskMultiplier: number;
+  maxCorrelatedPositions: number;
+  minEquityFloor: number;
 }
 
 export interface CreateCurrencyPairRequest {
@@ -4019,6 +4040,13 @@ export interface UpsertConfigRequest {
   description?: string | null;
   dataType?: string;
   isHotReloadable?: boolean;
+  /**
+   * Governance note for risk-loosening changes. Cooling-off / break-glass
+   * flows on the engine may require this to accept a change immediately.
+   */
+  reason?: string | null;
+  /** Break-glass — apply immediately, bypassing the cooling-off queue. */
+  immediate?: boolean;
 }
 
 export interface CreateEconomicEventRequest {

@@ -18935,6 +18935,20 @@ export interface components {
       minTakeProfitDistancePips?: number;
       /** Format: double */
       minRiskRewardRatio?: number;
+      /** Format: double */
+      maxTotalExposurePct?: number;
+      /** Format: double */
+      maxAbsoluteRiskPerTrade?: number;
+      /** Format: int32 */
+      maxPositionsPerSymbol?: number;
+      /** Format: int32 */
+      maxConsecutiveLosses?: number;
+      /** Format: double */
+      weekendGapRiskMultiplier?: number;
+      /** Format: int32 */
+      maxCorrelatedPositions?: number;
+      /** Format: double */
+      minEquityFloor?: number;
     };
     LascodiaTradingEngine_Application_RiskProfiles_Commands_UpdateRiskProfile_UpdateRiskProfileCommand: {
       name: string | null;
@@ -18967,6 +18981,20 @@ export interface components {
       minTakeProfitDistancePips?: number;
       /** Format: double */
       minRiskRewardRatio?: number;
+      /** Format: double */
+      maxTotalExposurePct?: number;
+      /** Format: double */
+      maxAbsoluteRiskPerTrade?: number;
+      /** Format: int32 */
+      maxPositionsPerSymbol?: number;
+      /** Format: int32 */
+      maxConsecutiveLosses?: number;
+      /** Format: double */
+      weekendGapRiskMultiplier?: number;
+      /** Format: int32 */
+      maxCorrelatedPositions?: number;
+      /** Format: double */
+      minEquityFloor?: number;
     };
     LascodiaTradingEngine_Application_RiskProfiles_Queries_DTOs_RiskProfileDto: {
       /** Format: int64 */
@@ -19001,6 +19029,20 @@ export interface components {
       minTakeProfitDistancePips?: number;
       /** Format: double */
       minRiskRewardRatio?: number;
+      /** Format: double */
+      maxTotalExposurePct?: number;
+      /** Format: double */
+      maxAbsoluteRiskPerTrade?: number;
+      /** Format: int32 */
+      maxPositionsPerSymbol?: number;
+      /** Format: int32 */
+      maxConsecutiveLosses?: number;
+      /** Format: double */
+      weekendGapRiskMultiplier?: number;
+      /** Format: int32 */
+      maxCorrelatedPositions?: number;
+      /** Format: double */
+      minEquityFloor?: number;
     };
     LascodiaTradingEngine_Application_RiskProfiles_Queries_GetPagedRiskProfiles_GetPagedRiskProfilesQuery: {
       /**

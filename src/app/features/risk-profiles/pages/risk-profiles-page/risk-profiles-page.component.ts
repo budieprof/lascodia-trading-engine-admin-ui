@@ -9,7 +9,7 @@ import {
   OnInit,
 } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
-import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
+import { ReactiveFormsModule, FormBuilder, Validators, FormsModule } from '@angular/forms';
 import { map, Observable } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
@@ -17,15 +17,18 @@ import type { EChartsOption } from 'echarts';
 import { RiskProfilesService } from '@core/services/risk-profiles.service';
 import { StrategiesService } from '@core/services/strategies.service';
 import { PositionsService } from '@core/services/positions.service';
+import { ConfigService } from '@core/services/config.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type {
   CreateRiskProfileRequest,
+  EngineConfigDto,
   PagedData,
   PagerRequest,
   PositionDto,
   RiskProfileDto,
   StrategyDto,
   UpdateRiskProfileRequest,
+  UpsertConfigRequest,
 } from '@core/api/api.types';
 
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
@@ -48,6 +51,7 @@ import {
     ConfirmDialogComponent,
     TabsComponent,
     ReactiveFormsModule,
+    FormsModule,
     FormFieldComponent,
     FormFieldControlDirective,
     MetricCardComponent,
@@ -265,6 +269,96 @@ import {
                     formControlName="minRiskRewardRatio"
                     type="number"
                     step="0.1"
+                    min="0"
+                  />
+                </app-form-field>
+
+                <div class="section-divider">Tier-2 exposure &amp; position limits</div>
+                <app-form-field
+                  label="Max total exposure %"
+                  hint="0 = no limit. Aggregate open exposure across all symbols."
+                  [control]="form.controls.maxTotalExposurePct"
+                >
+                  <input
+                    appFormFieldControl
+                    formControlName="maxTotalExposurePct"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                  />
+                </app-form-field>
+                <app-form-field
+                  label="Max absolute risk / trade"
+                  hint="0 = no limit. Hard currency cap on per-trade risk."
+                  [control]="form.controls.maxAbsoluteRiskPerTrade"
+                >
+                  <input
+                    appFormFieldControl
+                    formControlName="maxAbsoluteRiskPerTrade"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                  />
+                </app-form-field>
+                <app-form-field
+                  label="Max positions / symbol"
+                  hint="0 = no limit. Caps concurrent positions on a single symbol."
+                  [control]="form.controls.maxPositionsPerSymbol"
+                >
+                  <input
+                    appFormFieldControl
+                    formControlName="maxPositionsPerSymbol"
+                    type="number"
+                    min="0"
+                  />
+                </app-form-field>
+                <app-form-field
+                  label="Max correlated positions"
+                  hint="0 = no limit. Caps positions on correlated instruments."
+                  [control]="form.controls.maxCorrelatedPositions"
+                >
+                  <input
+                    appFormFieldControl
+                    formControlName="maxCorrelatedPositions"
+                    type="number"
+                    min="0"
+                  />
+                </app-form-field>
+                <app-form-field
+                  label="Max consecutive losses"
+                  hint="0 = no limit. Pauses trading after this many losses in a row."
+                  [control]="form.controls.maxConsecutiveLosses"
+                >
+                  <input
+                    appFormFieldControl
+                    formControlName="maxConsecutiveLosses"
+                    type="number"
+                    min="0"
+                  />
+                </app-form-field>
+                <app-form-field
+                  label="Weekend-gap risk multiplier"
+                  hint="0 = no adjustment. Scales sizing to hedge weekend gap risk."
+                  [control]="form.controls.weekendGapRiskMultiplier"
+                >
+                  <input
+                    appFormFieldControl
+                    formControlName="weekendGapRiskMultiplier"
+                    type="number"
+                    step="0.05"
+                    min="0"
+                  />
+                </app-form-field>
+                <app-form-field
+                  label="Min equity floor"
+                  hint="0 = no floor. Halts new entries when equity drops below this."
+                  [control]="form.controls.minEquityFloor"
+                >
+                  <input
+                    appFormFieldControl
+                    formControlName="minEquityFloor"
+                    type="number"
+                    step="0.01"
                     min="0"
                   />
                 </app-form-field>
@@ -715,6 +809,131 @@ import {
             }
           </section>
         }
+
+        @if (activeTab() === 'global') {
+          <section class="rp-matrix">
+            <header class="rp-matrix-head gt2-head">
+              <div>
+                <h3>Global Tier-2 Options</h3>
+                <span class="muted">
+                  Fleet-wide RiskCheckerOptions — applied to every account. Changes that loosen risk
+                  are governed: supply a reason; saves go through as break-glass (immediate), and
+                  the engine may still queue them for cooling-off.
+                </span>
+              </div>
+              <div class="gt2-actions">
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  (click)="reloadGlobalOptions()"
+                  [disabled]="globalLoading()"
+                >
+                  Reload
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-primary"
+                  (click)="saveAllGlobalDirty()"
+                  [disabled]="globalBulkSaving() || globalDirtyCount() === 0"
+                >
+                  @if (globalBulkSaving()) {
+                    <span class="spin"></span>
+                  } @else {
+                    Save all ({{ globalDirtyCount() }})
+                  }
+                </button>
+              </div>
+            </header>
+
+            <div class="gt2-reason">
+              <label for="gt2Reason">Reason (governance)</label>
+              <input
+                id="gt2Reason"
+                class="input"
+                type="text"
+                placeholder="Why is this change being made? (recorded for risk-loosening audit)"
+                [ngModel]="globalReason()"
+                (ngModelChange)="globalReason.set($event)"
+              />
+            </div>
+
+            @if (globalLoading()) {
+              <p class="muted" style="padding: var(--space-4)">Loading global options…</p>
+            } @else if (globalError()) {
+              <p class="gt2-error" style="padding: var(--space-4)">
+                {{ globalError() }} ·
+                <button type="button" class="link-btn" (click)="reloadGlobalOptions()">
+                  Retry
+                </button>
+              </p>
+            } @else if (globalRows().length === 0) {
+              <p class="muted" style="padding: var(--space-4)">No options to show.</p>
+            } @else {
+              <table class="rp-matrix-table gt2-table">
+                <thead>
+                  <tr>
+                    <th>Option</th>
+                    <th>Key</th>
+                    <th>Type</th>
+                    <th class="num">Value</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of globalRows(); track row.key) {
+                    <tr [class.dirty-row]="row.editValue !== row.value">
+                      <td class="mono">
+                        {{ row.label }}
+                        @if (!row.exists) {
+                          <span class="rp-pill" style="margin-left:6px">default</span>
+                        }
+                      </td>
+                      <td class="mono muted">{{ row.key }}</td>
+                      <td>
+                        <span class="type-badge">{{ row.dataType }}</span>
+                      </td>
+                      <td class="num">
+                        <input
+                          class="input gt2-input"
+                          type="number"
+                          [step]="row.dataType === 'Int' ? '1' : 'any'"
+                          [ngModel]="row.editValue"
+                          (ngModelChange)="onGlobalEdit(row, $event)"
+                        />
+                      </td>
+                      <td class="num">
+                        <div class="gt2-row-actions">
+                          @if (row.editValue !== row.value) {
+                            <button
+                              type="button"
+                              class="link-btn"
+                              (click)="resetGlobalRow(row)"
+                              [disabled]="row.saving"
+                            >
+                              Reset
+                            </button>
+                          }
+                          <button
+                            type="button"
+                            class="btn btn-primary btn-sm"
+                            (click)="saveGlobalRow(row)"
+                            [disabled]="row.saving || row.editValue === row.value"
+                          >
+                            @if (row.saving) {
+                              <span class="spin"></span>
+                            } @else {
+                              Save
+                            }
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            }
+          </section>
+        }
       </ui-tabs>
 
       <app-confirm-dialog
@@ -1009,6 +1228,82 @@ import {
           transform: rotate(360deg);
         }
       }
+
+      /* Global Tier-2 Options tab */
+      .gt2-head {
+        justify-content: space-between;
+        align-items: flex-start;
+      }
+      .gt2-actions {
+        display: flex;
+        gap: var(--space-2);
+        flex-shrink: 0;
+      }
+      .gt2-reason {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .gt2-reason label {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-weight: var(--font-medium);
+      }
+      .gt2-table td {
+        vertical-align: middle;
+      }
+      .gt2-input {
+        height: 30px;
+        width: 140px;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .gt2-row-actions {
+        display: inline-flex;
+        gap: var(--space-2);
+        align-items: center;
+        justify-content: flex-end;
+      }
+      .gt2-table tr.dirty-row td {
+        background: rgba(255, 149, 0, 0.06);
+      }
+      .btn-sm {
+        height: 28px;
+        padding: 0 var(--space-3);
+        font-size: var(--text-xs);
+      }
+      .link-btn {
+        background: transparent;
+        border: none;
+        color: var(--accent);
+        cursor: pointer;
+        font-size: var(--text-xs);
+        padding: 0;
+      }
+      .link-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .gt2-error {
+        color: var(--loss);
+        font-size: var(--text-sm);
+      }
+      .type-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
     `,
   ],
 })
@@ -1016,6 +1311,7 @@ export class RiskProfilesPageComponent implements OnInit {
   private readonly service = inject(RiskProfilesService);
   private readonly strategiesService = inject(StrategiesService);
   private readonly positionsService = inject(PositionsService);
+  private readonly configService = inject(ConfigService);
   private readonly notifications = inject(NotificationService);
   private readonly fb = inject(FormBuilder);
 
@@ -1028,6 +1324,10 @@ export class RiskProfilesPageComponent implements OnInit {
     effect(() => {
       if (this.activeTab() === 'monitor') this.loadMonitorData();
     });
+    // Lazy-load the global Tier-2 option keys the first time the tab opens.
+    effect(() => {
+      if (this.activeTab() === 'global') this.loadGlobalOptions();
+    });
   }
 
   @ViewChild('table') table?: DataTableComponent<RiskProfileDto>;
@@ -1035,6 +1335,7 @@ export class RiskProfilesPageComponent implements OnInit {
   readonly tabs: TabItem[] = [
     { label: 'Risk Profiles', value: 'profiles' },
     { label: 'Risk Monitor', value: 'monitor' },
+    { label: 'Global Tier-2 Options', value: 'global' },
   ];
   readonly activeTab = signal('profiles');
 
@@ -1345,6 +1646,255 @@ export class RiskProfilesPageComponent implements OnInit {
     ),
   );
 
+  // ── Global Tier-2 Options (RiskCheckerOptions:*) ─────────────────
+  // Curated, editable view over the global EngineConfig keys under the
+  // `RiskCheckerOptions:` prefix. These are fleet-wide (not per-account) and
+  // travel through the generic /config endpoint. Risk-loosening changes are
+  // governed: each save carries an operator `reason` + `immediate:true`
+  // break-glass so the engine either applies it now or queues it for
+  // cooling-off (the returned message tells us which).
+  readonly globalOptionSpecs: GlobalOptionSpec[] = [
+    {
+      label: 'Max same-direction currency legs',
+      key: 'RiskCheckerOptions:MaxSameDirectionCurrencyLegs',
+      dataType: 'Int',
+      default: '3',
+    },
+    {
+      label: 'Correlation threshold',
+      key: 'RiskCheckerOptions:CorrelationThreshold',
+      dataType: 'Decimal',
+      default: '0.75',
+    },
+    {
+      label: 'Min margin level %',
+      key: 'RiskCheckerOptions:MinMarginLevelPct',
+      dataType: 'Decimal',
+      default: '150',
+    },
+    {
+      label: 'Max spread (pips)',
+      key: 'RiskCheckerOptions:MaxSpreadPips',
+      dataType: 'Decimal',
+      default: '0',
+    },
+    {
+      label: 'Consecutive-loss cooldown (min)',
+      key: 'RiskCheckerOptions:ConsecutiveLossCooldownMinutes',
+      dataType: 'Int',
+      default: '60',
+    },
+    {
+      label: 'Weekend-gap window (hours)',
+      key: 'RiskCheckerOptions:WeekendGapWindowHours',
+      dataType: 'Int',
+      default: '4',
+    },
+    {
+      label: 'Stop-out buffer multiplier',
+      key: 'RiskCheckerOptions:StopOutBufferMultiplier',
+      dataType: 'Decimal',
+      default: '2.0',
+    },
+    {
+      label: 'Slippage buffer multiplier',
+      key: 'RiskCheckerOptions:SlippageBufferMultiplier',
+      dataType: 'Decimal',
+      default: '1.02',
+    },
+    {
+      label: 'Clock-skew tolerance (s)',
+      key: 'RiskCheckerOptions:ClockSkewToleranceSeconds',
+      dataType: 'Int',
+      default: '5',
+    },
+    {
+      label: 'ML-disagreement min confidence',
+      key: 'RiskCheckerOptions:MLDisagreementMinConfidence',
+      dataType: 'Decimal',
+      default: '0.70',
+    },
+    {
+      label: 'Max entry-price drift %',
+      key: 'RiskCheckerOptions:MaxEntryPriceDriftPct',
+      dataType: 'Decimal',
+      default: '0',
+    },
+    {
+      label: 'Entry tolerance band %',
+      key: 'RiskCheckerOptions:EntryToleranceBandPct',
+      dataType: 'Decimal',
+      default: '0.0010',
+    },
+    {
+      label: 'Entry tolerance TP frac',
+      key: 'RiskCheckerOptions:EntryToleranceTpFrac',
+      dataType: 'Decimal',
+      default: '0.03',
+    },
+    {
+      label: 'Reduced-mode drawdown %',
+      key: 'RiskCheckerOptions:ReducedDrawdownPct',
+      dataType: 'Decimal',
+      default: '10',
+    },
+    {
+      label: 'Halted-mode drawdown %',
+      key: 'RiskCheckerOptions:HaltedDrawdownPct',
+      dataType: 'Decimal',
+      default: '20',
+    },
+  ];
+
+  readonly globalRows = signal<GlobalOptionRow[]>([]);
+  readonly globalLoading = signal(false);
+  readonly globalError = signal<string | null>(null);
+  readonly globalBulkSaving = signal(false);
+  readonly globalReason = signal('');
+  private globalLoaded = false;
+
+  readonly globalDirtyCount = computed(
+    () => this.globalRows().filter((r) => r.editValue !== r.value).length,
+  );
+
+  private loadGlobalOptions(force = false): void {
+    if (this.globalLoaded && !force) return;
+    this.globalLoaded = true;
+    this.globalLoading.set(true);
+    this.globalError.set(null);
+    this.configService.getAll().subscribe({
+      next: (res) => {
+        this.globalLoading.set(false);
+        if (!res.status) {
+          this.globalError.set(res.message ?? 'Failed to load configuration');
+          this.globalLoaded = false;
+          return;
+        }
+        const byKey = new Map<string, EngineConfigDto>();
+        for (const c of res.data ?? []) {
+          if (c.key) byKey.set(c.key, c);
+        }
+        this.globalRows.set(
+          this.globalOptionSpecs.map((spec) => {
+            const existing = byKey.get(spec.key);
+            const value = existing?.value ?? spec.default;
+            return {
+              ...spec,
+              value,
+              editValue: value,
+              exists: existing != null,
+              saving: false,
+            };
+          }),
+        );
+      },
+      error: () => {
+        this.globalLoading.set(false);
+        this.globalLoaded = false;
+        this.globalError.set('Failed to load configuration');
+      },
+    });
+  }
+
+  reloadGlobalOptions(): void {
+    this.loadGlobalOptions(true);
+  }
+
+  onGlobalEdit(row: GlobalOptionRow, value: string): void {
+    row.editValue = value;
+    this.globalRows.set([...this.globalRows()]);
+  }
+
+  resetGlobalRow(row: GlobalOptionRow): void {
+    row.editValue = row.value;
+    this.globalRows.set([...this.globalRows()]);
+  }
+
+  saveGlobalRow(row: GlobalOptionRow): void {
+    if (row.editValue === row.value || row.saving) return;
+    row.saving = true;
+    this.globalRows.set([...this.globalRows()]);
+    const reason = this.globalReason().trim();
+    const request: UpsertConfigRequest = {
+      key: row.key,
+      value: row.editValue,
+      dataType: row.dataType,
+      reason: reason || null,
+      immediate: true,
+    };
+    this.configService.upsert(request).subscribe({
+      next: (res) => {
+        row.saving = false;
+        if (res.status) {
+          // Break-glass may still queue for cooling-off — trust the returned
+          // value if present, else optimistically adopt the edited value.
+          row.value = res.data?.value ?? row.editValue;
+          row.editValue = row.value;
+          row.exists = true;
+          this.notifications.success(res.message ?? `"${row.label}" applied`);
+        } else {
+          this.notifications.error(res.message ?? `Failed to update "${row.label}"`);
+        }
+        this.globalRows.set([...this.globalRows()]);
+      },
+      error: () => {
+        row.saving = false;
+        this.globalRows.set([...this.globalRows()]);
+        this.notifications.error(`Failed to update "${row.label}"`);
+      },
+    });
+  }
+
+  saveAllGlobalDirty(): void {
+    const dirty = this.globalRows().filter((r) => r.editValue !== r.value);
+    if (dirty.length === 0 || this.globalBulkSaving()) return;
+    this.globalBulkSaving.set(true);
+    const reason = this.globalReason().trim();
+    let remaining = dirty.length;
+    let failures = 0;
+    for (const row of dirty) {
+      row.saving = true;
+      const request: UpsertConfigRequest = {
+        key: row.key,
+        value: row.editValue,
+        dataType: row.dataType,
+        reason: reason || null,
+        immediate: true,
+      };
+      this.configService.upsert(request).subscribe({
+        next: (res) => {
+          row.saving = false;
+          if (res.status) {
+            row.value = res.data?.value ?? row.editValue;
+            row.editValue = row.value;
+            row.exists = true;
+          } else {
+            failures++;
+          }
+          remaining--;
+          this.globalRows.set([...this.globalRows()]);
+          if (remaining === 0) this.finishGlobalBulk(dirty.length, failures);
+        },
+        error: () => {
+          row.saving = false;
+          failures++;
+          remaining--;
+          this.globalRows.set([...this.globalRows()]);
+          if (remaining === 0) this.finishGlobalBulk(dirty.length, failures);
+        },
+      });
+    }
+  }
+
+  private finishGlobalBulk(total: number, failures: number): void {
+    this.globalBulkSaving.set(false);
+    if (failures === 0) {
+      this.notifications.success(`Saved ${total} option${total === 1 ? '' : 's'}`);
+    } else {
+      this.notifications.error(`Saved ${total - failures} of ${total} · ${failures} failed`);
+    }
+  }
+
   ngOnInit(): void {
     this.loadProfilesSample();
   }
@@ -1402,6 +1952,13 @@ export class RiskProfilesPageComponent implements OnInit {
     minStopLossDistancePips: [0, [Validators.min(0)]],
     minTakeProfitDistancePips: [0, [Validators.min(0)]],
     minRiskRewardRatio: [0, [Validators.min(0)]],
+    maxTotalExposurePct: [0, [Validators.min(0)]],
+    maxAbsoluteRiskPerTrade: [0, [Validators.min(0)]],
+    maxPositionsPerSymbol: [0, [Validators.min(0)]],
+    maxConsecutiveLosses: [0, [Validators.min(0)]],
+    weekendGapRiskMultiplier: [0, [Validators.min(0)]],
+    maxCorrelatedPositions: [0, [Validators.min(0)]],
+    minEquityFloor: [0, [Validators.min(0)]],
   });
 
   readonly columns: ColDef<RiskProfileDto>[] = [
@@ -1514,6 +2071,13 @@ export class RiskProfilesPageComponent implements OnInit {
       minStopLossDistancePips: 0,
       minTakeProfitDistancePips: 0,
       minRiskRewardRatio: 0,
+      maxTotalExposurePct: 0,
+      maxAbsoluteRiskPerTrade: 0,
+      maxPositionsPerSymbol: 0,
+      maxConsecutiveLosses: 0,
+      weekendGapRiskMultiplier: 0,
+      maxCorrelatedPositions: 0,
+      minEquityFloor: 0,
     });
     this.editing.set({});
   }
@@ -1537,6 +2101,13 @@ export class RiskProfilesPageComponent implements OnInit {
       minStopLossDistancePips: row.minStopLossDistancePips,
       minTakeProfitDistancePips: row.minTakeProfitDistancePips,
       minRiskRewardRatio: row.minRiskRewardRatio,
+      maxTotalExposurePct: row.maxTotalExposurePct ?? 0,
+      maxAbsoluteRiskPerTrade: row.maxAbsoluteRiskPerTrade ?? 0,
+      maxPositionsPerSymbol: row.maxPositionsPerSymbol ?? 0,
+      maxConsecutiveLosses: row.maxConsecutiveLosses ?? 0,
+      weekendGapRiskMultiplier: row.weekendGapRiskMultiplier ?? 0,
+      maxCorrelatedPositions: row.maxCorrelatedPositions ?? 0,
+      minEquityFloor: row.minEquityFloor ?? 0,
     });
     this.editing.set(row);
   }
@@ -1567,6 +2138,13 @@ export class RiskProfilesPageComponent implements OnInit {
       minStopLossDistancePips: v.minStopLossDistancePips,
       minTakeProfitDistancePips: v.minTakeProfitDistancePips,
       minRiskRewardRatio: v.minRiskRewardRatio,
+      maxTotalExposurePct: v.maxTotalExposurePct,
+      maxAbsoluteRiskPerTrade: v.maxAbsoluteRiskPerTrade,
+      maxPositionsPerSymbol: v.maxPositionsPerSymbol,
+      maxConsecutiveLosses: v.maxConsecutiveLosses,
+      weekendGapRiskMultiplier: v.weekendGapRiskMultiplier,
+      maxCorrelatedPositions: v.maxCorrelatedPositions,
+      minEquityFloor: v.minEquityFloor,
     };
     const op =
       editing && 'id' in editing && editing.id != null
@@ -1613,6 +2191,23 @@ export class RiskProfilesPageComponent implements OnInit {
       },
     });
   }
+}
+
+interface GlobalOptionSpec {
+  label: string;
+  key: string;
+  dataType: 'Int' | 'Decimal';
+  default: string;
+}
+
+interface GlobalOptionRow extends GlobalOptionSpec {
+  /** Last known persisted (or default) value. */
+  value: string;
+  /** Bound to the input; dirty when it diverges from `value`. */
+  editValue: string;
+  /** Whether the key already exists in EngineConfig (vs showing the default). */
+  exists: boolean;
+  saving: boolean;
 }
 
 function emptyPager() {
