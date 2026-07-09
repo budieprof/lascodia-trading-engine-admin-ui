@@ -9,12 +9,9 @@ import {
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { SpotSweepService } from '@core/services/spot-sweep.service';
-import { AccountScopeService } from '@core/scope/account-scope.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 import {
-  ALL_ACTIVE_SCOPE,
-  ALL_SWEEP_SESSIONS,
   SpotSweepConfig,
   SweepBarPosition,
   SweepLastResult,
@@ -44,7 +41,6 @@ import {
 
         @if (config(); as cfg) {
           <div class="head-actions">
-            <span class="mode-badge" [class.live]="cfg.mode === 'Live'">{{ cfg.mode }}</span>
             <button
               type="button"
               class="power-btn"
@@ -166,42 +162,6 @@ import {
               }
             </header>
 
-            <!-- Mode -->
-            <div class="field">
-              <label>Mode</label>
-              <div class="seg">
-                <button
-                  type="button"
-                  [class.active]="cfg.mode === 'Paper'"
-                  (click)="setMode('Paper')"
-                >
-                  Paper
-                </button>
-                <button
-                  type="button"
-                  class="live-opt"
-                  [class.active]="cfg.mode === 'Live'"
-                  (click)="requestLive()"
-                >
-                  Live
-                </button>
-              </div>
-            </div>
-            @if (pendingLiveConfirm()) {
-              <div class="confirm-live">
-                <p>
-                  <strong>Live mode places real orders.</strong> The sweep will auto-approve and
-                  execute signals on your live accounts. Confirm you want this.
-                </p>
-                <div class="confirm-actions">
-                  <button type="button" class="danger" (click)="confirmLive()">
-                    Enable Live mode
-                  </button>
-                  <button type="button" class="ghost" (click)="cancelLive()">Cancel</button>
-                </div>
-              </div>
-            }
-
             <!-- Pairs -->
             <div class="field">
               <label>Pairs ({{ cfg.pairs.length }} selected)</label>
@@ -241,47 +201,6 @@ import {
                 <p class="muted small">Loading currency pairs…</p>
               } @else {
                 <p class="muted small">No active currency pairs found in the catalogue.</p>
-              }
-            </div>
-
-            <!-- Account scope -->
-            <div class="field">
-              <label>Accounts in scope</label>
-              <label class="inline-check">
-                <input
-                  type="checkbox"
-                  [checked]="isAllActive()"
-                  (change)="setAllActive($any($event.target).checked)"
-                />
-                All active accounts
-              </label>
-              @if (!isAllActive()) {
-                @if (liveAccounts().length > 0) {
-                  <ul class="acct-list">
-                    @for (a of liveAccounts(); track a.id) {
-                      <li>
-                        <label class="inline-check">
-                          <input
-                            type="checkbox"
-                            [checked]="isAccountSelected(a.id)"
-                            (change)="toggleAccount(a.id)"
-                          />
-                          <span class="mono">{{ a.accountName || a.accountId }}</span>
-                          @if (a.isPaper) {
-                            <span class="chip">paper</span>
-                          }
-                        </label>
-                      </li>
-                    }
-                  </ul>
-                  @if (selectedAccountCount() === 0) {
-                    <span class="muted small">
-                      No accounts selected — the sweep will have nothing to act on.
-                    </span>
-                  }
-                } @else {
-                  <span class="muted small">No active accounts available.</span>
-                }
               }
             </div>
 
@@ -325,26 +244,6 @@ import {
                 <p class="muted small">
                   Caps concurrent LLM calls per tick. 1 = legacy one-pair-per-tick; 6 is a good
                   default; > 10 will usually hit provider rate limits.
-                </p>
-              </div>
-              <div class="field">
-                <label>Re-analysis cooldown (seconds)</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="86400"
-                  step="60"
-                  [value]="cfg.holdCooldownSeconds"
-                  (input)="
-                    patch({ holdCooldownSeconds: clampInt($any($event.target).value, 0, 86400) })
-                  "
-                />
-                <p class="muted small">
-                  After <em>any</em> completed analysis on a symbol — Hold, signal generated, or
-                  gate-rejected — skip that symbol for this many seconds before re-analysing it.
-                  Effectively a per-symbol rate limit: same-symbol signals are guaranteed at least
-                  this far apart. Analysis failures don't stamp the cooldown. 0 = disable; 1800 (30
-                  min) is a good default.
                 </p>
               </div>
             </div>
@@ -436,36 +335,6 @@ import {
               </span>
             </div>
 
-            <!-- Automation -->
-            <div class="field check">
-              <label>
-                <input
-                  type="checkbox"
-                  [checked]="cfg.autoApprove"
-                  (change)="patch({ autoApprove: $any($event.target).checked })"
-                />
-                Auto-approve &amp; place orders
-              </label>
-            </div>
-            @if (cfg.autoApprove) {
-              <div class="field">
-                <label
-                  >Min confidence to auto-trade: {{ cfg.minConfidence | number: '1.2-2' }}</label
-                >
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  [value]="cfg.minConfidence"
-                  (input)="patch({ minConfidence: +$any($event.target).value })"
-                />
-                <span class="muted small">
-                  Signals below this confidence stay Pending for manual review.
-                </span>
-              </div>
-            }
-
             <button
               type="button"
               class="save-btn"
@@ -489,240 +358,6 @@ import {
                 />
                 Halt on kill switch
               </label>
-              <label [class.bypassed-line]="cfg.limitSignalsToAccountCapacity">
-                <input
-                  type="checkbox"
-                  [checked]="cfg.skipWhenInsufficientMargin"
-                  [disabled]="cfg.limitSignalsToAccountCapacity"
-                  (change)="patch({ skipWhenInsufficientMargin: $any($event.target).checked })"
-                />
-                Skip when no margin for a new trade
-                @if (cfg.limitSignalsToAccountCapacity) {
-                  <span
-                    class="bypassed-tag"
-                    title="Per-account capacity check below supersedes this coarse skip."
-                    >superseded</span
-                  >
-                }
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  [checked]="cfg.limitSignalsToAccountCapacity"
-                  (change)="patch({ limitSignalsToAccountCapacity: $any($event.target).checked })"
-                />
-                Limit signals to active-account capacity
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  [checked]="cfg.suspendOnHighSpread"
-                  (change)="patch({ suspendOnHighSpread: $any($event.target).checked })"
-                />
-                Suspend on elevated spread
-                <span class="muted small"
-                  >skip pairs whose scoped accounts are all in high-spread state</span
-                >
-              </label>
-            </div>
-
-            @if (cfg.limitSignalsToAccountCapacity) {
-              <div class="field">
-                <label
-                  >Estimated margin per trade ($)
-                  <span class="muted small">drives per-account margin_room</span></label
-                >
-                <input
-                  type="number"
-                  min="1"
-                  max="10000"
-                  step="1"
-                  [value]="cfg.estimatedMarginPerTrade"
-                  (input)="
-                    patch({
-                      estimatedMarginPerTrade: clampInt($any($event.target).value, 1, 10000),
-                    })
-                  "
-                />
-                <p class="muted small hint">
-                  Per-tick signal budget = Σ over selected active accounts of
-                  <em>min(slot_room, margin_room)</em>, where
-                  <em>slot_room = max(0, RiskProfile.MaxOpenPositions − openCount)</em> and
-                  <em>margin_room = floor(MarginAvailable / EstimatedMarginPerTrade)</em>. Eligible
-                  pairs are trimmed to that budget (top-N by regime priority) <em>before</em> the
-                  LLM fan-out, and auto-approved orders are spread across accounts
-                  most-headroom-first.
-                </p>
-              </div>
-              <div class="field">
-                <label
-                  >Direction-skew penalty weight
-                  <span class="muted small">0 = legacy routing · 1 = max bias</span></label
-                >
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  [value]="cfg.directionSkewPenaltyWeight"
-                  (input)="
-                    patch({
-                      directionSkewPenaltyWeight: clampFloat($any($event.target).value, 0, 1),
-                    })
-                  "
-                />
-                <span class="muted small"
-                  >current: {{ cfg.directionSkewPenaltyWeight.toFixed(2) }}</span
-                >
-                <p class="muted small hint">
-                  Bias the auto-approve router AGAINST accounts whose open book is already skewed in
-                  the same direction as the signal. For each candidate account the router computes
-                  <em>skew = (sameDir − oppositeDir) / max(1, sameDir + oppositeDir)</em>; effective
-                  headroom is scaled by <em>1 − max(0, skew) × weight</em>. So at 0.5 a
-                  100%-same-direction account loses half its score; an opposite-skew account gets no
-                  penalty (the new entry diversifies). 0 disables and routing reverts to pure
-                  headroom-first.
-                </p>
-              </div>
-            }
-
-            <p class="sub-label">
-              Skip a symbol when it has…
-              @if (cfg.maxPendingPositionsPerSymbol > 0) {
-                <span
-                  class="bypassed-tag"
-                  title="Per-symbol cap is > 0, so it takes precedence — these ANY-toggles are ignored until the cap returns to 0."
-                >
-                  bypassed by cap
-                </span>
-              }
-            </p>
-            <div class="field check" [class.bypassed]="cfg.maxPendingPositionsPerSymbol > 0">
-              <label>
-                <input
-                  type="checkbox"
-                  [checked]="cfg.excludeOpenPosition"
-                  [disabled]="cfg.maxPendingPositionsPerSymbol > 0"
-                  (change)="patch({ excludeOpenPosition: $any($event.target).checked })"
-                />
-                an open position
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  [checked]="cfg.excludePendingOrder"
-                  [disabled]="cfg.maxPendingPositionsPerSymbol > 0"
-                  (change)="patch({ excludePendingOrder: $any($event.target).checked })"
-                />
-                a pending/working order
-              </label>
-              <label class="not-bypassed">
-                <input
-                  type="checkbox"
-                  [checked]="cfg.excludePendingSignal"
-                  (change)="patch({ excludePendingSignal: $any($event.target).checked })"
-                />
-                a pending signal
-              </label>
-              <label class="not-bypassed">
-                <input
-                  type="checkbox"
-                  [checked]="cfg.requireActiveEaCoverage"
-                  (change)="patch({ requireActiveEaCoverage: $any($event.target).checked })"
-                />
-                no active EA covering it
-              </label>
-            </div>
-
-            <div class="field cap-field">
-              <label
-                >Max pending positions per symbol
-                <span class="muted small">(open + pending orders)</span></label
-              >
-              <input
-                type="number"
-                min="0"
-                max="50"
-                [value]="cfg.maxPendingPositionsPerSymbol"
-                (input)="
-                  patch({
-                    maxPendingPositionsPerSymbol: clampInt($any($event.target).value, 0, 50),
-                  })
-                "
-              />
-              <p class="muted small hint">
-                0 = no cap (legacy behaviour — the two boolean toggles above apply). When > 0, the
-                cap is the binding constraint and those toggles are bypassed: the sweep counts
-                <em>open + pending orders per active account</em> and skips the symbol when any
-                single account hits this number. Two accounts each holding one position counts as 1,
-                not 2.
-              </p>
-              @if (capLoosening()) {
-                <div class="governance-box">
-                  <p class="muted small">
-                    Raising this cap (or setting it to 0) <strong>loosens risk</strong> — a change
-                    reason is required and the change is queued for the 24&nbsp;h cooling-off period
-                    unless applied immediately (break-glass).
-                  </p>
-                  <div class="field">
-                    <label>Change reason</label>
-                    <input
-                      type="text"
-                      maxlength="1000"
-                      placeholder="Why is the higher cap safe now?"
-                      [value]="capReason()"
-                      (input)="capReason.set($any($event.target).value)"
-                    />
-                  </div>
-                  <label class="small">
-                    <input
-                      type="checkbox"
-                      [checked]="capBreakGlass()"
-                      (change)="capBreakGlass.set($any($event.target).checked)"
-                    />
-                    Apply immediately (break-glass — audit-flagged)
-                  </label>
-                </div>
-              }
-            </div>
-
-            <p class="sub-label">Hard caps</p>
-            <div class="row-2">
-              <div class="field">
-                <label>Max new orders / day</label>
-                <input
-                  type="number"
-                  min="0"
-                  [value]="cfg.maxNewOrdersPerDay"
-                  (input)="
-                    patch({ maxNewOrdersPerDay: clampInt($any($event.target).value, 0, 9999) })
-                  "
-                />
-              </div>
-              <div class="field">
-                <label>Max LLM cost / day ($)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.5"
-                  [value]="cfg.maxDailyLlmCostUsd"
-                  (input)="
-                    patch({ maxDailyLlmCostUsd: clampFloat($any($event.target).value, 0, 1000) })
-                  "
-                />
-              </div>
-              <div class="field">
-                <label>Max risk / trade (lots)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  [value]="cfg.maxRiskPerTrade"
-                  (input)="
-                    patch({ maxRiskPerTrade: clampFloat($any($event.target).value, 0, 100) })
-                  "
-                />
-              </div>
             </div>
 
             <header class="card-head">
@@ -1485,11 +1120,7 @@ import {
 })
 export class SpotSweepPageComponent implements OnDestroy {
   private readonly svc = inject(SpotSweepService);
-  private readonly accountScope = inject(AccountScopeService);
   private readonly currencyPairs = inject(CurrencyPairsService);
-
-  /** Live (active-EA) accounts, used to populate the scope picker. */
-  readonly liveAccounts = this.accountScope.liveAccounts;
 
   readonly timeframes = ['M5', 'M15', 'M30', 'H1', 'H4', 'D1'];
   readonly barPositions: SweepBarPosition[] = ['closed', 'mid_25', 'mid_50', 'mid_75'];
@@ -1501,25 +1132,6 @@ export class SpotSweepPageComponent implements OnDestroy {
   /** Non-error outcome banner — e.g. "queued for cooling-off" governance verdicts. */
   readonly notice = signal<string | null>(null);
   readonly dirty = signal(false);
-  readonly pendingLiveConfirm = signal(false);
-
-  /**
-   * Last PERSISTED per-symbol cap, snapshotted on load/save. Raising the cap
-   * above this (or zeroing a non-zero cap — 0 disables it entirely) is a
-   * risk-LOOSENING change: the engine's governance layer refuses it without
-   * a reason and queues it for the 24h cooling-off unless break-glassed.
-   */
-  private readonly savedCap = signal<number | null>(null);
-  readonly capReason = signal('');
-  readonly capBreakGlass = signal(false);
-
-  readonly capLoosening = computed<boolean>(() => {
-    const cfg = this.config();
-    const saved = this.savedCap();
-    if (!cfg || saved === null) return false;
-    const next = cfg.maxPendingPositionsPerSymbol;
-    return next > saved || (next === 0 && saved !== 0);
-  });
 
   /** Active currency-pair symbols from the catalogue (the checkbox list). */
   readonly availableSymbols = signal<string[]>([]);
@@ -1688,7 +1300,6 @@ export class SpotSweepPageComponent implements OnDestroy {
     this.svc.getConfig().subscribe({
       next: (cfg) => {
         this.config.set(cfg);
-        this.savedCap.set(cfg.maxPendingPositionsPerSymbol);
         // Seed the timeframe selector from existing pairs (uniform timeframe).
         if (cfg.pairs.length > 0) this.sweepTimeframe.set(cfg.pairs[0].timeframe);
         this.dirty.set(false);
@@ -1723,23 +1334,6 @@ export class SpotSweepPageComponent implements OnDestroy {
     if (!cur) return;
     this.config.set({ ...cur, ...partial });
     this.dirty.set(true);
-  }
-
-  setMode(mode: 'Paper'): void {
-    this.pendingLiveConfirm.set(false);
-    this.patch({ mode });
-  }
-
-  requestLive(): void {
-    if (this.config()?.mode === 'Live') return;
-    this.pendingLiveConfirm.set(true);
-  }
-  confirmLive(): void {
-    this.pendingLiveConfirm.set(false);
-    this.patch({ mode: 'Live' });
-  }
-  cancelLive(): void {
-    this.pendingLiveConfirm.set(false);
   }
 
   /**
@@ -1818,47 +1412,9 @@ export class SpotSweepPageComponent implements OnDestroy {
     this.patch({ pairs: cur.pairs.map((p) => ({ ...p, timeframe: tf })) });
   }
 
-  // ── Account scope ────────────────────────────────────────────────
-  isAllActive(): boolean {
-    return this.config()?.accountScope === ALL_ACTIVE_SCOPE;
-  }
-  selectedAccountCount(): number {
-    const s = this.config()?.accountScope;
-    return Array.isArray(s) ? s.length : 0;
-  }
-  isAccountSelected(id: number): boolean {
-    const s = this.config()?.accountScope;
-    return Array.isArray(s) && s.includes(id);
-  }
-  setAllActive(on: boolean): void {
-    // Leaving "all active" seeds the explicit list with every live account so
-    // the operator trims down rather than starting from nothing.
-    this.patch({
-      accountScope: on ? ALL_ACTIVE_SCOPE : this.liveAccounts().map((a) => a.id),
-    });
-  }
-  toggleAccount(id: number): void {
-    const s = this.config()?.accountScope;
-    const arr = Array.isArray(s) ? [...s] : [];
-    const i = arr.indexOf(id);
-    if (i >= 0) arr.splice(i, 1);
-    else arr.push(id);
-    this.patch({ accountScope: arr });
-  }
-
   save(): void {
     const cfg = this.config();
     if (!cfg) return;
-    // Pre-flight the governance requirement so the operator gets the
-    // explanation before a round-trip that would refuse the change anyway.
-    if (this.capLoosening() && !this.capReason().trim()) {
-      this.error.set(
-        'Raising the per-symbol cap (or setting it to 0) is a risk-loosening change — enter a ' +
-          'change reason below the cap field. It will be queued for the 24h cooling-off period ' +
-          'unless you tick "Apply immediately".',
-      );
-      return;
-    }
     this.saveInternal(cfg, 'Failed to save configuration.');
   }
 
@@ -1873,46 +1429,35 @@ export class SpotSweepPageComponent implements OnDestroy {
     this.saving.set(true);
     this.error.set(null);
     this.notice.set(null);
-    this.svc
-      .saveConfig(cfg, { reason: this.capReason(), immediate: this.capBreakGlass() })
-      .subscribe({
-        next: (result) => {
-          // result.config is PERSISTED state — a cap change queued for
-          // cooling-off comes back at its current (unchanged) value, with
-          // the verdict in result.message.
-          this.config.set(result.config);
-          this.savedCap.set(result.config.maxPendingPositionsPerSymbol);
-          this.capReason.set('');
-          this.capBreakGlass.set(false);
-          this.dirty.set(false);
-          this.saving.set(false);
-          if (result.message && result.message.toLowerCase().includes('cooling-off')) {
-            this.notice.set(result.message);
-          }
-          this.statusResource.refresh();
-          this.historyResource.refresh();
-        },
-        error: (err: unknown) => {
-          // Surface the engine's governance message verbatim — the common
-          // case is "risk-loosening change requires a Reason", which the
-          // operator can act on. A generic wrapper here is what made cap
-          // changes appear to silently revert.
-          const message = err instanceof Error && err.message ? err.message : null;
-          this.error.set(message ?? errorFallback);
-          this.saving.set(false);
-          // The draft is kept (form stays dirty) so the operator can add the
-          // missing reason and retry without re-entering their changes.
-        },
-      });
+    this.svc.saveConfig(cfg).subscribe({
+      next: (result) => {
+        // result.config is PERSISTED state — the engine echoes back what
+        // the worker will actually run with, with any verdict in result.message.
+        this.config.set(result.config);
+        this.dirty.set(false);
+        this.saving.set(false);
+        if (result.message && result.message.toLowerCase().includes('cooling-off')) {
+          this.notice.set(result.message);
+        }
+        this.statusResource.refresh();
+        this.historyResource.refresh();
+      },
+      error: (err: unknown) => {
+        // Surface the engine's governance message verbatim — the common
+        // case is "risk-loosening change requires a Reason", which the
+        // operator can act on. A generic wrapper here is what made cap
+        // changes appear to silently revert.
+        const message = err instanceof Error && err.message ? err.message : null;
+        this.error.set(message ?? errorFallback);
+        this.saving.set(false);
+        // The draft is kept (form stays dirty) so the operator can add the
+        // missing reason and retry without re-entering their changes.
+      },
+    });
   }
 
   clampInt(v: string, min: number, max: number): number {
     const n = Math.round(Number(v));
-    if (Number.isNaN(n)) return min;
-    return Math.min(max, Math.max(min, n));
-  }
-  clampFloat(v: string, min: number, max: number): number {
-    const n = Number(v);
     if (Number.isNaN(n)) return min;
     return Math.min(max, Math.max(min, n));
   }

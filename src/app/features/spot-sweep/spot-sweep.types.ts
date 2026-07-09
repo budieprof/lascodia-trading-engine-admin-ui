@@ -23,7 +23,6 @@ export interface SweepPair {
 
 export interface SpotSweepConfig {
   enabled: boolean;
-  mode: SweepMode;
   pairs: SweepPair[];
   barPosition: SweepBarPosition;
   /** Pause between consecutive analyses (one analysis is ever in flight). */
@@ -41,75 +40,8 @@ export interface SpotSweepConfig {
    * sweeps run on.
    */
   signalExpirationSeconds: number;
-  /** Explicit account ids, or the all-active sentinel. */
-  accountScope: number[] | typeof ALL_ACTIVE_SCOPE;
-
-  // Automation
-  autoApprove: boolean;
-  /** 0..1 — below this the signal stays Pending instead of auto-trading. */
-  minConfidence: number;
-
-  // Eligibility exclusions (a symbol is skipped when any enabled rule matches)
-  excludeOpenPosition: boolean;
-  excludePendingOrder: boolean;
-  excludePendingSignal: boolean;
-  requireActiveEaCoverage: boolean;
-  /**
-   * Per-symbol cap on (open positions + pending orders). When > 0, the sweep
-   * skips a symbol whose current exposure count meets this cap. Default 0 =
-   * no cap (legacy behaviour). When the matching boolean toggles above are
-   * true the ANY-check fires first and this cap is unreachable — set the
-   * relevant toggle to false to use the cap as the binding constraint.
-   * Range [0, 50].
-   */
-  maxPendingPositionsPerSymbol: number;
-
-  // Hard caps — hitting any one parks the loop with an idleReason
-  maxNewOrdersPerDay: number;
-  maxDailyLlmCostUsd: number;
-  /** Per-trade risk ceiling (lots; engine may map to a RiskProfile). */
-  maxRiskPerTrade: number;
 
   respectKillSwitch: boolean;
-  /** Skip analysis when no in-scope account can open a new position. */
-  skipWhenInsufficientMargin: boolean;
-  /**
-   * When on, cap the number of signals generated per tick to the sum of
-   * per-account headroom (slot_room ∧ margin_room) across the selected
-   * active accounts, AND distribute auto-approved orders across those
-   * accounts (most-headroom-first) instead of routing everything to a
-   * single picked account. Strictly stronger than
-   * {@link skipWhenInsufficientMargin}; opt-in default off.
-   */
-  limitSignalsToAccountCapacity: boolean;
-  /**
-   * Per-trade margin estimate (USD) used by
-   * {@link limitSignalsToAccountCapacity} to compute
-   * `margin_room = floor(MarginAvailable / EstimatedMarginPerTrade)`.
-   * Coarse heuristic — set near the average margin you observe a sweep
-   * order lock. Range [1, 10000]; default 50.
-   */
-  estimatedMarginPerTrade: number;
-  /**
-   * Bias the auto-approve router AGAINST accounts whose open book is
-   * already skewed in the same direction as the signal being placed.
-   * Range [0, 1]; 0 disables (legacy headroom-only routing). Penalty =
-   * `max(0, skew) × weight`, where `skew = (sameDir − oppositeDir) /
-   * max(1, sameDir + oppositeDir)`. Default 0.5: a 100% same-direction
-   * account loses half its effective headroom; a 50/50 split account
-   * is unaffected. Only consulted when
-   * {@link limitSignalsToAccountCapacity} is on.
-   */
-  directionSkewPenaltyWeight: number;
-  /**
-   * When on, drop any pair from this tick's eligible list whose scoped
-   * broker accounts are ALL currently in elevated-spread state per the
-   * spread-reactive subsystem. Saves LLM cost during NY-close / news /
-   * weekend gap windows. When at least one scoped account is still in
-   * normal spread, analysis proceeds — the order routes to the calm
-   * account. Default off — opt-in to preserve legacy behaviour.
-   */
-  suspendOnHighSpread: boolean;
   /** Entry-style bias for the LLM: 'Any' | 'Stop' (prefer breakout) | 'Limit'
    *  (prefer pullback). */
   entryPreference: EntryPreference;
@@ -121,14 +53,6 @@ export interface SpotSweepConfig {
    * hit them.
    */
   maxParallelAnalyses: number;
-  /**
-   * How long a pair stays excluded after an analysis returned no trade
-   * signal (LLM Hold). Avoids paying for repeat calls on a symbol whose
-   * structure won't have changed inside the same bar. Set to 0 to disable;
-   * default 1800 (30 min). A signal-producing analysis clears any prior
-   * cooldown on that pair.
-   */
-  holdCooldownSeconds: number;
   /**
    * Trading sessions the sweep is active in. Empty = always-on (no session
    * restriction). Otherwise the worker parks whenever UTC time falls
@@ -233,31 +157,13 @@ export interface SweepHistoryItem {
 /** Sensible defaults for a fresh config (Phase 1 — Paper, no auto-order). */
 export const DEFAULT_SWEEP_CONFIG: SpotSweepConfig = {
   enabled: false,
-  mode: 'Paper',
   pairs: [],
   barPosition: 'closed',
   intervalSeconds: 60,
   signalExpirationSeconds: 3600,
-  accountScope: ALL_ACTIVE_SCOPE,
-  autoApprove: false,
-  minConfidence: 0.7,
-  excludeOpenPosition: true,
-  excludePendingOrder: true,
-  maxPendingPositionsPerSymbol: 0,
-  excludePendingSignal: true,
-  requireActiveEaCoverage: true,
-  maxNewOrdersPerDay: 10,
-  maxDailyLlmCostUsd: 5,
-  maxRiskPerTrade: 0.1,
   respectKillSwitch: true,
-  skipWhenInsufficientMargin: true,
-  limitSignalsToAccountCapacity: false,
-  estimatedMarginPerTrade: 50,
-  directionSkewPenaltyWeight: 0.5,
-  suspendOnHighSpread: false,
   entryPreference: 'Any',
   maxParallelAnalyses: 6,
-  holdCooldownSeconds: 1800,
   // Empty = always-on (no session restriction). Operators opt in by ticking
   // sessions on the cockpit; sessions overlap so e.g. picking London+NewYork
   // covers 08:00-22:00 UTC including the 13-16 overlap.

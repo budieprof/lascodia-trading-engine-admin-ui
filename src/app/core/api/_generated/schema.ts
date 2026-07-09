@@ -19175,29 +19175,14 @@ export interface components {
     };
     LascodiaTradingEngine_Application_SpotSweep_SpotSweepConfigDto: {
       enabled?: boolean;
-      mode?: string | null;
       pairs?:
         | components['schemas']['LascodiaTradingEngine_Application_SpotSweep_SweepPairDto'][]
         | null;
       barPosition?: string | null;
       /** Format: int32 */
       intervalSeconds?: number;
-      accountScope?: unknown;
-      autoApprove?: boolean;
-      /** Format: double */
-      minConfidence?: number;
-      excludeOpenPosition?: boolean;
-      excludePendingOrder?: boolean;
-      excludePendingSignal?: boolean;
-      requireActiveEaCoverage?: boolean;
       /** Format: int32 */
       maxConcurrentSweepPositions?: number;
-      /** Format: int32 */
-      maxNewOrdersPerDay?: number;
-      /** Format: double */
-      maxDailyLlmCostUsd?: number;
-      /** Format: double */
-      maxRiskPerTrade?: number;
       respectKillSwitch?: boolean;
     };
     LascodiaTradingEngine_Application_SpotSweep_SpotSweepHistoryItemDto: {

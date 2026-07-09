@@ -75,11 +75,10 @@ export class SpotSweepService {
       return of({ config: structuredClone(next), message: null }).pipe(delay(180));
     }
     // reason / immediate feed the engine's risk-loosening governance:
-    // raising (or zeroing) MaxPendingPositionsPerSymbol requires a reason
-    // and is queued for the cooling-off period unless immediate=true
-    // (break-glass). The raw envelope is kept — the cooling-off outcome
-    // arrives in `message` on a status=true response, which putEnvelope
-    // would discard.
+    // a risk-loosening change requires a reason and is queued for the
+    // cooling-off period unless immediate=true (break-glass). The raw
+    // envelope is kept — the cooling-off outcome arrives in `message` on a
+    // status=true response, which putEnvelope would discard.
     const params = new URLSearchParams();
     if (opts?.reason?.trim()) params.set('reason', opts.reason.trim());
     if (opts?.immediate) params.set('immediate', 'true');
@@ -158,7 +157,7 @@ export class SpotSweepService {
     const i = tick % pairs.length;
     const current = pairs[i];
     const prev = pairs[(i - 1 + pairs.length) % pairs.length];
-    const autoApproved = cfg.autoApprove && cfg.minConfidence <= 0.75;
+    const autoApproved = false;
     const phase: SpotSweepStatus['phase'] = tick % 2 === 0 ? 'Analyzing' : 'Cooldown';
     // In the mock, alternate 6s ticks pretend each phase consumed the
     // configured interval. Cooldown shows a live countdown; Analyzing is null.
@@ -245,7 +244,7 @@ export class SpotSweepService {
       const p = pairs[k % pairs.length];
       const outcome = outcomes[k % outcomes.length];
       const created = outcome === 'SignalCreated';
-      const autoApproved = created && cfg.autoApprove && cfg.minConfidence <= 0.75 && k % 2 === 0;
+      const autoApproved = created && k % 2 === 0;
       items.push({
         id: 5000 - k,
         at: new Date(base - k * step).toISOString(),
@@ -256,7 +255,7 @@ export class SpotSweepService {
         signalId: created ? 4200 - k : null,
         orderId: autoApproved ? 8800 - k : null,
         autoApproved,
-        mode: cfg.mode,
+        mode: 'Paper',
         costUsd: +(0.01 + (k % 5) * 0.002).toFixed(3),
       });
     }
