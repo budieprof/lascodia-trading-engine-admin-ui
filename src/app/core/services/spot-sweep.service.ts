@@ -1,13 +1,24 @@
 import { Injectable, inject } from '@angular/core';
 import { BehaviorSubject, Observable, of } from 'rxjs';
 import { delay, map } from 'rxjs/operators';
-import { ApiService } from '@core/api/api.service';
+import { ApiService, unwrapResponse } from '@core/api/api.service';
+import { ResponseData } from '@core/api/api.types';
 import {
   DEFAULT_SWEEP_CONFIG,
   SpotSweepConfig,
   SpotSweepStatus,
   SweepHistoryItem,
 } from '@features/spot-sweep/spot-sweep.types';
+
+/**
+ * Outcome of a config save. `message` carries the engine's governance
+ * verdict when a risk-loosening change was queued for cooling-off —
+ * `config` is always the PERSISTED state, not the requested one.
+ */
+export interface SpotSweepSaveResult {
+  config: SpotSweepConfig;
+  message: string | null;
+}
 
 /**
  * Data access for the Spot Sweep cockpit — the autonomous spot-analysis loop's
@@ -54,21 +65,44 @@ export class SpotSweepService {
       .pipe(map((c) => ({ ...DEFAULT_SWEEP_CONFIG, ...c })));
   }
 
-  saveConfig(config: SpotSweepConfig): Observable<SpotSweepConfig> {
+  saveConfig(
+    config: SpotSweepConfig,
+    opts?: { reason?: string; immediate?: boolean },
+  ): Observable<SpotSweepSaveResult> {
     if (SpotSweepService.USE_MOCK) {
       const next = structuredClone(config);
       this.mockConfig$.next(next);
-      return of(structuredClone(next)).pipe(delay(180));
+      return of({ config: structuredClone(next), message: null }).pipe(delay(180));
     }
-    // Symmetric backfill with getConfig: the engine's PUT response can
-    // strip fields it doesn't yet understand (or echo them through with
-    // server-side defaults that override what we just sent). Merging the
-    // ORIGINAL config the caller sent over the response keeps fields
-    // the engine drops — so a save round-trip never silently clears
-    // operator-typed values for not-yet-recognised fields.
+    // reason / immediate feed the engine's risk-loosening governance:
+    // raising (or zeroing) MaxPendingPositionsPerSymbol requires a reason
+    // and is queued for the cooling-off period unless immediate=true
+    // (break-glass). The raw envelope is kept — the cooling-off outcome
+    // arrives in `message` on a status=true response, which putEnvelope
+    // would discard.
+    const params = new URLSearchParams();
+    if (opts?.reason?.trim()) params.set('reason', opts.reason.trim());
+    if (opts?.immediate) params.set('immediate', 'true');
+    const qs = params.toString();
     return this.api
-      .putEnvelope<SpotSweepConfig>('/market-data/spot-sweep/config', config)
-      .pipe(map((saved) => ({ ...DEFAULT_SWEEP_CONFIG, ...config, ...saved })));
+      .put<
+        ResponseData<SpotSweepConfig>
+      >(`/market-data/spot-sweep/config${qs ? `?${qs}` : ''}`, config)
+      .pipe(
+        map((res) => {
+          const saved = unwrapResponse(res);
+          // Symmetric backfill with getConfig, but PERSISTED state wins for
+          // fields the engine knows: the response reflects what the worker
+          // will actually run with (a queued cooling-off cap keeps its
+          // current value). The ORIGINAL config only fills fields the
+          // engine doesn't recognise yet, so a save round-trip never
+          // silently clears operator-typed values for newer UI fields.
+          return {
+            config: { ...DEFAULT_SWEEP_CONFIG, ...config, ...saved },
+            message: res.message ?? null,
+          };
+        }),
+      );
   }
 
   getStatus(): Observable<SpotSweepStatus> {

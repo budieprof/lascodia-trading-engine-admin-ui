@@ -61,6 +61,9 @@ import {
       @if (error(); as e) {
         <div class="banner error">{{ e }}</div>
       }
+      @if (notice(); as n) {
+        <div class="banner info">{{ n }}</div>
+      }
       @if (status()?.killSwitchActive) {
         <div class="banner warn">
           Kill switch is active — the sweep is halted regardless of its enabled state.
@@ -654,6 +657,33 @@ import {
                 single account hits this number. Two accounts each holding one position counts as 1,
                 not 2.
               </p>
+              @if (capLoosening()) {
+                <div class="governance-box">
+                  <p class="muted small">
+                    Raising this cap (or setting it to 0) <strong>loosens risk</strong> — a change
+                    reason is required and the change is queued for the 24&nbsp;h cooling-off period
+                    unless applied immediately (break-glass).
+                  </p>
+                  <div class="field">
+                    <label>Change reason</label>
+                    <input
+                      type="text"
+                      maxlength="1000"
+                      placeholder="Why is the higher cap safe now?"
+                      [value]="capReason()"
+                      (input)="capReason.set($any($event.target).value)"
+                    />
+                  </div>
+                  <label class="small">
+                    <input
+                      type="checkbox"
+                      [checked]="capBreakGlass()"
+                      (change)="capBreakGlass.set($any($event.target).checked)"
+                    />
+                    Apply immediately (break-glass — audit-flagged)
+                  </label>
+                </div>
+              }
             </div>
 
             <p class="sub-label">Hard caps</p>
@@ -927,6 +957,20 @@ import {
       .banner.warn {
         background: rgba(255, 149, 0, 0.14);
         color: #b25e00;
+      }
+      .banner.info {
+        background: rgba(0, 122, 255, 0.1);
+        color: var(--accent, #0a66c2);
+      }
+      .governance-box {
+        margin-top: var(--space-2);
+        padding: var(--space-3);
+        border: 1px solid rgba(255, 149, 0, 0.4);
+        border-radius: var(--radius-md);
+        background: rgba(255, 149, 0, 0.06);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
       }
       .card {
         background: var(--bg-secondary);
@@ -1454,8 +1498,28 @@ export class SpotSweepPageComponent implements OnDestroy {
   readonly loading = signal(true);
   readonly saving = signal(false);
   readonly error = signal<string | null>(null);
+  /** Non-error outcome banner — e.g. "queued for cooling-off" governance verdicts. */
+  readonly notice = signal<string | null>(null);
   readonly dirty = signal(false);
   readonly pendingLiveConfirm = signal(false);
+
+  /**
+   * Last PERSISTED per-symbol cap, snapshotted on load/save. Raising the cap
+   * above this (or zeroing a non-zero cap — 0 disables it entirely) is a
+   * risk-LOOSENING change: the engine's governance layer refuses it without
+   * a reason and queues it for the 24h cooling-off unless break-glassed.
+   */
+  private readonly savedCap = signal<number | null>(null);
+  readonly capReason = signal('');
+  readonly capBreakGlass = signal(false);
+
+  readonly capLoosening = computed<boolean>(() => {
+    const cfg = this.config();
+    const saved = this.savedCap();
+    if (!cfg || saved === null) return false;
+    const next = cfg.maxPendingPositionsPerSymbol;
+    return next > saved || (next === 0 && saved !== 0);
+  });
 
   /** Active currency-pair symbols from the catalogue (the checkbox list). */
   readonly availableSymbols = signal<string[]>([]);
@@ -1624,6 +1688,7 @@ export class SpotSweepPageComponent implements OnDestroy {
     this.svc.getConfig().subscribe({
       next: (cfg) => {
         this.config.set(cfg);
+        this.savedCap.set(cfg.maxPendingPositionsPerSymbol);
         // Seed the timeframe selector from existing pairs (uniform timeframe).
         if (cfg.pairs.length > 0) this.sweepTimeframe.set(cfg.pairs[0].timeframe);
         this.dirty.set(false);
@@ -1784,42 +1849,61 @@ export class SpotSweepPageComponent implements OnDestroy {
   save(): void {
     const cfg = this.config();
     if (!cfg) return;
-    this.saving.set(true);
-    this.error.set(null);
-    this.svc.saveConfig(cfg).subscribe({
-      next: (saved) => {
-        this.config.set(saved);
-        this.dirty.set(false);
-        this.saving.set(false);
-        this.statusResource.refresh();
-        this.historyResource.refresh();
-      },
-      error: () => {
-        this.error.set('Failed to save configuration.');
-        this.saving.set(false);
-      },
-    });
+    // Pre-flight the governance requirement so the operator gets the
+    // explanation before a round-trip that would refuse the change anyway.
+    if (this.capLoosening() && !this.capReason().trim()) {
+      this.error.set(
+        'Raising the per-symbol cap (or setting it to 0) is a risk-loosening change — enter a ' +
+          'change reason below the cap field. It will be queued for the 24h cooling-off period ' +
+          'unless you tick "Apply immediately".',
+      );
+      return;
+    }
+    this.saveInternal(cfg, 'Failed to save configuration.');
   }
 
   /** Start/stop applies immediately (persisted), unlike the rest of the form. */
   toggleEnabled(): void {
     const cfg = this.config();
     if (!cfg) return;
-    const next = { ...cfg, enabled: !cfg.enabled };
+    this.saveInternal({ ...cfg, enabled: !cfg.enabled }, 'Failed to toggle sweep.');
+  }
+
+  private saveInternal(cfg: SpotSweepConfig, errorFallback: string): void {
     this.saving.set(true);
-    this.svc.saveConfig(next).subscribe({
-      next: (saved) => {
-        this.config.set(saved);
-        this.dirty.set(false);
-        this.saving.set(false);
-        this.statusResource.refresh();
-        this.historyResource.refresh();
-      },
-      error: () => {
-        this.error.set('Failed to toggle sweep.');
-        this.saving.set(false);
-      },
-    });
+    this.error.set(null);
+    this.notice.set(null);
+    this.svc
+      .saveConfig(cfg, { reason: this.capReason(), immediate: this.capBreakGlass() })
+      .subscribe({
+        next: (result) => {
+          // result.config is PERSISTED state — a cap change queued for
+          // cooling-off comes back at its current (unchanged) value, with
+          // the verdict in result.message.
+          this.config.set(result.config);
+          this.savedCap.set(result.config.maxPendingPositionsPerSymbol);
+          this.capReason.set('');
+          this.capBreakGlass.set(false);
+          this.dirty.set(false);
+          this.saving.set(false);
+          if (result.message && result.message.toLowerCase().includes('cooling-off')) {
+            this.notice.set(result.message);
+          }
+          this.statusResource.refresh();
+          this.historyResource.refresh();
+        },
+        error: (err: unknown) => {
+          // Surface the engine's governance message verbatim — the common
+          // case is "risk-loosening change requires a Reason", which the
+          // operator can act on. A generic wrapper here is what made cap
+          // changes appear to silently revert.
+          const message = err instanceof Error && err.message ? err.message : null;
+          this.error.set(message ?? errorFallback);
+          this.saving.set(false);
+          // The draft is kept (form stays dirty) so the operator can add the
+          // missing reason and retry without re-entering their changes.
+        },
+      });
   }
 
   clampInt(v: string, min: number, max: number): number {
