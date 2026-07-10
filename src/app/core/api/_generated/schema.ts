@@ -18949,6 +18949,24 @@ export interface components {
       maxCorrelatedPositions?: number;
       /** Format: double */
       minEquityFloor?: number;
+      /** Format: int32 */
+      maxSameDirectionCurrencyLegs?: number;
+      /** Format: double */
+      correlationThreshold?: number;
+      /** Format: double */
+      minMarginLevelPct?: number;
+      /** Format: double */
+      stopOutBufferMultiplier?: number;
+      /** Format: double */
+      maxSpreadPips?: number;
+      /** Format: int32 */
+      consecutiveLossCooldownMinutes?: number;
+      /** Format: int32 */
+      weekendGapWindowHours?: number;
+      /** Format: double */
+      slippageBufferMultiplier?: number;
+      /** Format: double */
+      maxVaR95Pct?: number;
     };
     LascodiaTradingEngine_Application_RiskProfiles_Commands_UpdateRiskProfile_UpdateRiskProfileCommand: {
       name: string | null;
@@ -18995,6 +19013,24 @@ export interface components {
       maxCorrelatedPositions?: number;
       /** Format: double */
       minEquityFloor?: number;
+      /** Format: int32 */
+      maxSameDirectionCurrencyLegs?: number;
+      /** Format: double */
+      correlationThreshold?: number;
+      /** Format: double */
+      minMarginLevelPct?: number;
+      /** Format: double */
+      stopOutBufferMultiplier?: number;
+      /** Format: double */
+      maxSpreadPips?: number;
+      /** Format: int32 */
+      consecutiveLossCooldownMinutes?: number;
+      /** Format: int32 */
+      weekendGapWindowHours?: number;
+      /** Format: double */
+      slippageBufferMultiplier?: number;
+      /** Format: double */
+      maxVaR95Pct?: number;
     };
     LascodiaTradingEngine_Application_RiskProfiles_Queries_DTOs_RiskProfileDto: {
       /** Format: int64 */
@@ -19043,6 +19079,24 @@ export interface components {
       maxCorrelatedPositions?: number;
       /** Format: double */
       minEquityFloor?: number;
+      /** Format: int32 */
+      maxSameDirectionCurrencyLegs?: number;
+      /** Format: double */
+      correlationThreshold?: number;
+      /** Format: double */
+      minMarginLevelPct?: number;
+      /** Format: double */
+      stopOutBufferMultiplier?: number;
+      /** Format: double */
+      maxSpreadPips?: number;
+      /** Format: int32 */
+      consecutiveLossCooldownMinutes?: number;
+      /** Format: int32 */
+      weekendGapWindowHours?: number;
+      /** Format: double */
+      slippageBufferMultiplier?: number;
+      /** Format: double */
+      maxVaR95Pct?: number;
     };
     LascodiaTradingEngine_Application_RiskProfiles_Queries_GetPagedRiskProfiles_GetPagedRiskProfilesQuery: {
       /**

@@ -609,6 +609,15 @@ export interface RiskProfileDto {
   weekendGapRiskMultiplier: number;
   maxCorrelatedPositions: number;
   minEquityFloor: number;
+  maxSameDirectionCurrencyLegs: number;
+  correlationThreshold: number;
+  minMarginLevelPct: number;
+  stopOutBufferMultiplier: number;
+  maxSpreadPips: number;
+  consecutiveLossCooldownMinutes: number;
+  weekendGapWindowHours: number;
+  slippageBufferMultiplier: number;
+  maxVaR95Pct: number;
 }
 
 export interface CurrencyPairDto {
@@ -3911,6 +3920,15 @@ export interface CreateRiskProfileRequest {
   weekendGapRiskMultiplier?: number;
   maxCorrelatedPositions?: number;
   minEquityFloor?: number;
+  maxSameDirectionCurrencyLegs?: number;
+  correlationThreshold?: number;
+  minMarginLevelPct?: number;
+  stopOutBufferMultiplier?: number;
+  maxSpreadPips?: number;
+  consecutiveLossCooldownMinutes?: number;
+  weekendGapWindowHours?: number;
+  slippageBufferMultiplier?: number;
+  maxVaR95Pct?: number;
 }
 
 export interface UpdateRiskProfileRequest {
@@ -3938,6 +3956,15 @@ export interface UpdateRiskProfileRequest {
   weekendGapRiskMultiplier: number;
   maxCorrelatedPositions: number;
   minEquityFloor: number;
+  maxSameDirectionCurrencyLegs: number;
+  correlationThreshold: number;
+  minMarginLevelPct: number;
+  stopOutBufferMultiplier: number;
+  maxSpreadPips: number;
+  consecutiveLossCooldownMinutes: number;
+  weekendGapWindowHours: number;
+  slippageBufferMultiplier: number;
+  maxVaR95Pct: number;
 }
 
 export interface CreateCurrencyPairRequest {

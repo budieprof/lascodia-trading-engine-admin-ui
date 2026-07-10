@@ -362,6 +362,122 @@ import {
                     min="0"
                   />
                 </app-form-field>
+
+                <div class="section-divider">Per-account Tier-2 gates (was global)</div>
+                <app-form-field
+                  label="Max same-direction currency legs"
+                  hint="Max same-direction currency legs (0 = no cap)"
+                  [control]="form.controls.maxSameDirectionCurrencyLegs"
+                >
+                  <input
+                    appFormFieldControl
+                    formControlName="maxSameDirectionCurrencyLegs"
+                    type="number"
+                    min="0"
+                  />
+                </app-form-field>
+                <app-form-field
+                  label="Correlation threshold"
+                  hint="Correlation coefficient [0..1] for grouping (default 0.75)"
+                  [control]="form.controls.correlationThreshold"
+                >
+                  <input
+                    appFormFieldControl
+                    formControlName="correlationThreshold"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                  />
+                </app-form-field>
+                <app-form-field
+                  label="Min margin level %"
+                  hint="Min margin level % to allow new orders (0 = no gate)"
+                  [control]="form.controls.minMarginLevelPct"
+                >
+                  <input
+                    appFormFieldControl
+                    formControlName="minMarginLevelPct"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                  />
+                </app-form-field>
+                <app-form-field
+                  label="Stop-out buffer multiplier"
+                  hint="Broker stop-out buffer × (default 2.0)"
+                  [control]="form.controls.stopOutBufferMultiplier"
+                >
+                  <input
+                    appFormFieldControl
+                    formControlName="stopOutBufferMultiplier"
+                    type="number"
+                    step="0.05"
+                    min="0"
+                  />
+                </app-form-field>
+                <app-form-field
+                  label="Max spread (pips)"
+                  hint="Max spread in pips (0 = no cap)"
+                  [control]="form.controls.maxSpreadPips"
+                >
+                  <input
+                    appFormFieldControl
+                    formControlName="maxSpreadPips"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                  />
+                </app-form-field>
+                <app-form-field
+                  label="Consecutive-loss cooldown (min)"
+                  hint="Cooldown after consecutive losses, min (0 = off)"
+                  [control]="form.controls.consecutiveLossCooldownMinutes"
+                >
+                  <input
+                    appFormFieldControl
+                    formControlName="consecutiveLossCooldownMinutes"
+                    type="number"
+                    min="0"
+                  />
+                </app-form-field>
+                <app-form-field
+                  label="Weekend-gap window (hours)"
+                  hint="Weekend/holiday gap window, hours (default 4)"
+                  [control]="form.controls.weekendGapWindowHours"
+                >
+                  <input
+                    appFormFieldControl
+                    formControlName="weekendGapWindowHours"
+                    type="number"
+                    min="0"
+                  />
+                </app-form-field>
+                <app-form-field
+                  label="Slippage buffer multiplier"
+                  hint="Slippage buffer × for risk sizing (default 1.02)"
+                  [control]="form.controls.slippageBufferMultiplier"
+                >
+                  <input
+                    appFormFieldControl
+                    formControlName="slippageBufferMultiplier"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                  />
+                </app-form-field>
+                <app-form-field
+                  label="Max portfolio VaR95 %"
+                  hint="Max portfolio VaR95 as % of equity (higher = looser; e.g. 5)"
+                  [control]="form.controls.maxVaR95Pct"
+                >
+                  <input
+                    appFormFieldControl
+                    formControlName="maxVaR95Pct"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                  />
+                </app-form-field>
                 <div class="actions">
                   @if (editing()?.id) {
                     <button
@@ -845,6 +961,11 @@ import {
               </div>
             </header>
 
+            <p class="gt2-note">
+              Currency-leg, margin, spread, correlation, cooldown, weekend-gap, slippage/stop-out
+              buffers and portfolio VaR are now PER-ACCOUNT — edit them on each risk profile above.
+            </p>
+
             <div class="gt2-reason">
               <label for="gt2Reason">Reason (governance)</label>
               <input
@@ -1238,6 +1359,14 @@ import {
         display: flex;
         gap: var(--space-2);
         flex-shrink: 0;
+      }
+      .gt2-note {
+        margin: 0;
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        background: rgba(0, 113, 227, 0.05);
       }
       .gt2-reason {
         display: flex;
@@ -1655,54 +1784,6 @@ export class RiskProfilesPageComponent implements OnInit {
   // cooling-off (the returned message tells us which).
   readonly globalOptionSpecs: GlobalOptionSpec[] = [
     {
-      label: 'Max same-direction currency legs',
-      key: 'RiskCheckerOptions:MaxSameDirectionCurrencyLegs',
-      dataType: 'Int',
-      default: '3',
-    },
-    {
-      label: 'Correlation threshold',
-      key: 'RiskCheckerOptions:CorrelationThreshold',
-      dataType: 'Decimal',
-      default: '0.75',
-    },
-    {
-      label: 'Min margin level %',
-      key: 'RiskCheckerOptions:MinMarginLevelPct',
-      dataType: 'Decimal',
-      default: '150',
-    },
-    {
-      label: 'Max spread (pips)',
-      key: 'RiskCheckerOptions:MaxSpreadPips',
-      dataType: 'Decimal',
-      default: '0',
-    },
-    {
-      label: 'Consecutive-loss cooldown (min)',
-      key: 'RiskCheckerOptions:ConsecutiveLossCooldownMinutes',
-      dataType: 'Int',
-      default: '60',
-    },
-    {
-      label: 'Weekend-gap window (hours)',
-      key: 'RiskCheckerOptions:WeekendGapWindowHours',
-      dataType: 'Int',
-      default: '4',
-    },
-    {
-      label: 'Stop-out buffer multiplier',
-      key: 'RiskCheckerOptions:StopOutBufferMultiplier',
-      dataType: 'Decimal',
-      default: '2.0',
-    },
-    {
-      label: 'Slippage buffer multiplier',
-      key: 'RiskCheckerOptions:SlippageBufferMultiplier',
-      dataType: 'Decimal',
-      default: '1.02',
-    },
-    {
       label: 'Clock-skew tolerance (s)',
       key: 'RiskCheckerOptions:ClockSkewToleranceSeconds',
       dataType: 'Int',
@@ -1959,6 +2040,15 @@ export class RiskProfilesPageComponent implements OnInit {
     weekendGapRiskMultiplier: [0, [Validators.min(0)]],
     maxCorrelatedPositions: [0, [Validators.min(0)]],
     minEquityFloor: [0, [Validators.min(0)]],
+    maxSameDirectionCurrencyLegs: [3, [Validators.min(0)]],
+    correlationThreshold: [0.75, [Validators.min(0)]],
+    minMarginLevelPct: [150, [Validators.min(0)]],
+    stopOutBufferMultiplier: [2.0, [Validators.min(0)]],
+    maxSpreadPips: [0, [Validators.min(0)]],
+    consecutiveLossCooldownMinutes: [60, [Validators.min(0)]],
+    weekendGapWindowHours: [4, [Validators.min(0)]],
+    slippageBufferMultiplier: [1.02, [Validators.min(0)]],
+    maxVaR95Pct: [5, [Validators.min(0)]],
   });
 
   readonly columns: ColDef<RiskProfileDto>[] = [
@@ -2078,6 +2168,15 @@ export class RiskProfilesPageComponent implements OnInit {
       weekendGapRiskMultiplier: 0,
       maxCorrelatedPositions: 0,
       minEquityFloor: 0,
+      maxSameDirectionCurrencyLegs: 3,
+      correlationThreshold: 0.75,
+      minMarginLevelPct: 150,
+      stopOutBufferMultiplier: 2.0,
+      maxSpreadPips: 0,
+      consecutiveLossCooldownMinutes: 60,
+      weekendGapWindowHours: 4,
+      slippageBufferMultiplier: 1.02,
+      maxVaR95Pct: 5,
     });
     this.editing.set({});
   }
@@ -2108,6 +2207,15 @@ export class RiskProfilesPageComponent implements OnInit {
       weekendGapRiskMultiplier: row.weekendGapRiskMultiplier ?? 0,
       maxCorrelatedPositions: row.maxCorrelatedPositions ?? 0,
       minEquityFloor: row.minEquityFloor ?? 0,
+      maxSameDirectionCurrencyLegs: row.maxSameDirectionCurrencyLegs ?? 3,
+      correlationThreshold: row.correlationThreshold ?? 0.75,
+      minMarginLevelPct: row.minMarginLevelPct ?? 150,
+      stopOutBufferMultiplier: row.stopOutBufferMultiplier ?? 2.0,
+      maxSpreadPips: row.maxSpreadPips ?? 0,
+      consecutiveLossCooldownMinutes: row.consecutiveLossCooldownMinutes ?? 60,
+      weekendGapWindowHours: row.weekendGapWindowHours ?? 4,
+      slippageBufferMultiplier: row.slippageBufferMultiplier ?? 1.02,
+      maxVaR95Pct: row.maxVaR95Pct ?? 5,
     });
     this.editing.set(row);
   }
@@ -2145,6 +2253,15 @@ export class RiskProfilesPageComponent implements OnInit {
       weekendGapRiskMultiplier: v.weekendGapRiskMultiplier,
       maxCorrelatedPositions: v.maxCorrelatedPositions,
       minEquityFloor: v.minEquityFloor,
+      maxSameDirectionCurrencyLegs: v.maxSameDirectionCurrencyLegs,
+      correlationThreshold: v.correlationThreshold,
+      minMarginLevelPct: v.minMarginLevelPct,
+      stopOutBufferMultiplier: v.stopOutBufferMultiplier,
+      maxSpreadPips: v.maxSpreadPips,
+      consecutiveLossCooldownMinutes: v.consecutiveLossCooldownMinutes,
+      weekendGapWindowHours: v.weekendGapWindowHours,
+      slippageBufferMultiplier: v.slippageBufferMultiplier,
+      maxVaR95Pct: v.maxVaR95Pct,
     };
     const op =
       editing && 'id' in editing && editing.id != null
