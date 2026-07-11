@@ -3,6 +3,7 @@ import {
   Component,
   OnDestroy,
   OnInit,
+  computed,
   inject,
   signal,
 } from '@angular/core';
@@ -58,7 +59,7 @@ interface AuditEntry {
           placeholder="e.g. EURUSD"
           [value]="symbolFilter()"
           (input)="symbolFilter.set($any($event.target).value)"
-          (keydown.enter)="reload()"
+          (keydown.enter)="applyFilters()"
           class="symbol-input"
         />
       </div>
@@ -346,6 +347,70 @@ interface AuditEntry {
           </tbody>
         </table>
       }
+      @if (totalItemCount() > 0) {
+        <nav class="pager-bar" aria-label="Parked recs pagination">
+          <div class="pager-info">
+            Showing <strong>{{ rangeStart() }}</strong
+            >–<strong>{{ rangeEnd() }}</strong> of
+            <strong>{{ totalItemCount() }}</strong>
+          </div>
+          <div class="pager-size">
+            <label for="parkedPageSize">Rows</label>
+            <select
+              id="parkedPageSize"
+              [value]="pageSize()"
+              (change)="setPageSize(+$any($event.target).value)"
+            >
+              @for (n of pageSizeOptions; track n) {
+                <option [value]="n">{{ n }}</option>
+              }
+            </select>
+          </div>
+          <div class="pager-nav">
+            <button
+              type="button"
+              class="pager-btn"
+              (click)="goToPage(1)"
+              [disabled]="currentPage() <= 1"
+              title="First page"
+              aria-label="First page"
+            >
+              «
+            </button>
+            <button
+              type="button"
+              class="pager-btn"
+              (click)="goToPage(currentPage() - 1)"
+              [disabled]="currentPage() <= 1"
+              title="Previous page"
+              aria-label="Previous page"
+            >
+              ‹
+            </button>
+            <span class="pager-page">Page {{ currentPage() }} of {{ totalPages() }}</span>
+            <button
+              type="button"
+              class="pager-btn"
+              (click)="goToPage(currentPage() + 1)"
+              [disabled]="currentPage() >= totalPages()"
+              title="Next page"
+              aria-label="Next page"
+            >
+              ›
+            </button>
+            <button
+              type="button"
+              class="pager-btn"
+              (click)="goToPage(totalPages())"
+              [disabled]="currentPage() >= totalPages()"
+              title="Last page"
+              aria-label="Last page"
+            >
+              »
+            </button>
+          </div>
+        </nav>
+      }
       @if (loading() && visibleRows().length > 0) {
         <p class="muted small">Refreshing…</p>
       }
@@ -364,6 +429,68 @@ interface AuditEntry {
       }
       .bad {
         color: #d70015;
+      }
+
+      /* Pagination bar */
+      .pager-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4, 16px);
+        flex-wrap: wrap;
+        padding: 10px 4px 2px;
+        margin-top: 6px;
+        border-top: 1px solid var(--border);
+        font-size: var(--text-xs, 12px);
+        color: var(--text-secondary);
+      }
+      .pager-info strong {
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+      }
+      .pager-size {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .pager-size select {
+        height: 26px;
+        padding: 0 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm, 6px);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-size: var(--text-xs, 12px);
+      }
+      .pager-nav {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .pager-page {
+        min-width: 96px;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+      }
+      .pager-btn {
+        min-width: 28px;
+        height: 26px;
+        padding: 0 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm, 6px);
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+      }
+      .pager-btn:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+      .pager-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
       }
       .link {
         color: var(--accent);
@@ -722,6 +849,22 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
   protected readonly canceling = signal<Set<number>>(new Set());
   protected readonly expandedRowIds = signal<Set<number>>(new Set());
 
+  // ── Pagination ─────────────────────────────────────────────────────────
+  protected readonly pageSizeOptions = [25, 50, 100, 200] as const;
+  protected readonly currentPage = signal(1);
+  protected readonly pageSize = signal<number>(50);
+  protected readonly totalItemCount = signal(0);
+  protected readonly totalPages = computed(() =>
+    Math.max(1, Math.ceil(this.totalItemCount() / this.pageSize())),
+  );
+  /** 1-based index of the first row on the current page (for "N–M of T"). */
+  protected readonly rangeStart = computed(() =>
+    this.totalItemCount() === 0 ? 0 : (this.currentPage() - 1) * this.pageSize() + 1,
+  );
+  protected readonly rangeEnd = computed(() =>
+    Math.min(this.currentPage() * this.pageSize(), this.totalItemCount()),
+  );
+
   private pollHandle: ReturnType<typeof setInterval> | null = null;
   private static readonly POLL_INTERVAL_MS = 5_000;
 
@@ -748,7 +891,7 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
     if (on) next.add(state);
     else next.delete(state);
     this.selectedStates.set(next);
-    this.reload();
+    this.applyFilters();
   }
 
   protected isTerminal(state: string): boolean {
@@ -798,8 +941,8 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
     const symbol = this.symbolFilter().trim();
     this.svc
       .query({
-        pageNumber: 1,
-        pageSize: 100,
+        currentPage: this.currentPage(),
+        itemCountPerPage: this.pageSize(),
         states: states.length > 0 ? states : null,
         search: symbol.length > 0 ? symbol : null,
       })
@@ -817,7 +960,38 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
           return;
         }
         this.rows.set(res.data?.data ?? []);
+        this.totalItemCount.set(res.data?.pager?.totalItemCount ?? 0);
+        // Guard against landing past the last page after a filter/size change
+        // (e.g. was on page 6, new filter yields 2 pages) — clamp + refetch.
+        const pages = this.totalPages();
+        if (this.currentPage() > pages) {
+          this.currentPage.set(pages);
+          this.reload();
+        }
       });
+  }
+
+  // ── Pagination controls ──────────────────────────────────────────────────
+
+  /** Re-run the query for a fresh filter set from page 1 (keeps poll on the
+   *  current page while filter changes always reset to the first page). */
+  protected applyFilters(): void {
+    this.currentPage.set(1);
+    this.reload();
+  }
+
+  protected goToPage(page: number): void {
+    const clamped = Math.min(Math.max(1, page), this.totalPages());
+    if (clamped === this.currentPage()) return;
+    this.currentPage.set(clamped);
+    this.reload();
+  }
+
+  protected setPageSize(size: number): void {
+    if (size === this.pageSize()) return;
+    this.pageSize.set(size);
+    this.currentPage.set(1);
+    this.reload();
   }
 
   protected cancel(row: PendingSignalRecDto): void {

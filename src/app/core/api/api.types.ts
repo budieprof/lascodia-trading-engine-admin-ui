@@ -3661,8 +3661,12 @@ export interface PendingSignalRecQueryFilter {
  * Combines the standard paging envelope with the filter.
  */
 export interface PendingSignalRecQueryRequest extends PendingSignalRecQueryFilter {
-  pageNumber?: number;
-  pageSize?: number;
+  // NOTE: the engine's shared Pager binds `currentPage` / `itemCountPerPage`
+  // (see GetPagedTradeSignals etc.). Sending `pageNumber` / `pageSize` was
+  // silently ignored, so the query always fell back to the default page size
+  // (5 rows) — the cause of the "capped at 5" cockpit. Match the Pager here.
+  currentPage?: number;
+  itemCountPerPage?: number;
   orderBy?: string | null;
   orderDirection?: string | null;
 }
