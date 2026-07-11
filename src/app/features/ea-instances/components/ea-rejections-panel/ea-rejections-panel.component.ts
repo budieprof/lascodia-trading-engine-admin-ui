@@ -125,6 +125,15 @@ const STAGE_OPTIONS: ReadonlyArray<{ value: StageFilter; label: string }> = [
       <div class="filters">
         <select
           class="input"
+          aria-label="Time range"
+          (change)="onRangeChange(+$any($event.target).value)"
+        >
+          @for (r of rangeOptions; track r.hours) {
+            <option [value]="r.hours" [selected]="r.hours === rangeHours()">{{ r.label }}</option>
+          }
+        </select>
+        <select
+          class="input"
           [ngModel]="stageFilter()"
           (ngModelChange)="onStageChange($event)"
           aria-label="Filter by stage"
@@ -749,6 +758,23 @@ export class EARejectionsPanelComponent {
   readonly currentPage = signal(1);
   readonly pageSize = signal<number>(50);
 
+  // Time window. The engine defaults to the last 24h when no createdFrom is
+  // sent — so on a quiet day the log looks empty even though history exists.
+  // Default to 30 days so the table is populated; operator can narrow/widen.
+  readonly rangeOptions = [
+    { label: 'Last 24h', hours: 24 },
+    { label: 'Last 7 days', hours: 168 },
+    { label: 'Last 30 days', hours: 720 },
+    { label: 'Last 90 days', hours: 2160 },
+    { label: 'All time', hours: 0 },
+  ] as const;
+  readonly rangeHours = signal<number>(720);
+
+  onRangeChange(hours: number): void {
+    this.rangeHours.set(hours);
+    this.applyFilterChange();
+  }
+
   private readonly rejectionsService = inject(SignalRejectionsService);
   private readonly notifications = inject(NotificationService);
 
@@ -796,6 +822,11 @@ export class EARejectionsPanelComponent {
       const stage = this.stageFilter();
       const subStage = this.committedSubStage();
       const symbol = this.committedSymbol();
+      // Explicit lower bound overrides the engine's 24h default. 'All time'
+      // sends a far-past date so nothing is filtered out.
+      const hrs = this.rangeHours();
+      const createdFrom =
+        hrs > 0 ? new Date(Date.now() - hrs * 3_600_000).toISOString() : '2000-01-01T00:00:00.000Z';
       return this.rejectionsService
         .list({
           eaInstanceId: allMode ? undefined : accountScoped ? undefined : id,
@@ -803,6 +834,7 @@ export class EARejectionsPanelComponent {
           stage: stage === 'all' ? undefined : stage,
           subStage: subStage || undefined,
           symbol: symbol || undefined,
+          createdFrom,
           currentPage: this.currentPage(),
           itemCountPerPage: this.pageSize(),
         })
