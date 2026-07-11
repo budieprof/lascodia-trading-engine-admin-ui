@@ -181,7 +181,7 @@ const STAGE_ORDER: Record<SignalRejectionStage, number> = {
         <select
           class="input"
           [ngModel]="stageFilter()"
-          (ngModelChange)="stageFilter.set($event)"
+          (ngModelChange)="onStageChange($event)"
           aria-label="Filter by stage"
         >
           @for (opt of stageOptions; track opt.value) {
@@ -379,6 +379,62 @@ const STAGE_ORDER: Record<SignalRejectionStage, number> = {
           </ul>
         </div>
       }
+
+      @if (totalItemCount() > pageSize() || currentPage() > 1) {
+        <nav class="pager-bar" aria-label="Rejection log pagination">
+          <div class="pager-info">
+            Showing <strong>{{ rangeStart() }}</strong
+            >–<strong>{{ rangeEnd() }}</strong> of <strong>{{ totalItemCount() }}</strong> events
+          </div>
+          <div class="pager-size">
+            <label for="rejPageSize">Rows</label>
+            <select id="rejPageSize" (change)="setPageSize(+$any($event.target).value)">
+              @for (n of pageSizeOptions; track n) {
+                <option [value]="n" [selected]="n === pageSize()">{{ n }}</option>
+              }
+            </select>
+          </div>
+          <div class="pager-nav">
+            <button
+              type="button"
+              class="pager-btn"
+              (click)="goToPage(1)"
+              [disabled]="currentPage() <= 1"
+              aria-label="First page"
+            >
+              «
+            </button>
+            <button
+              type="button"
+              class="pager-btn"
+              (click)="goToPage(currentPage() - 1)"
+              [disabled]="currentPage() <= 1"
+              aria-label="Previous page"
+            >
+              ‹
+            </button>
+            <span class="pager-page">Page {{ currentPage() }} of {{ totalPages() }}</span>
+            <button
+              type="button"
+              class="pager-btn"
+              (click)="goToPage(currentPage() + 1)"
+              [disabled]="currentPage() >= totalPages()"
+              aria-label="Next page"
+            >
+              ›
+            </button>
+            <button
+              type="button"
+              class="pager-btn"
+              (click)="goToPage(totalPages())"
+              [disabled]="currentPage() >= totalPages()"
+              aria-label="Last page"
+            >
+              »
+            </button>
+          </div>
+        </nav>
+      }
     </section>
   `,
   styles: [
@@ -569,6 +625,65 @@ const STAGE_ORDER: Record<SignalRejectionStage, number> = {
       }
       .input:focus {
         border-color: var(--accent, #0071e3);
+      }
+
+      /* ── Pagination bar ──────────────────────────────────────── */
+      .pager-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4, 16px);
+        flex-wrap: wrap;
+        font-size: var(--text-xs, 12px);
+        color: var(--text-secondary);
+      }
+      .pager-info strong {
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+      }
+      .pager-size {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .pager-size select {
+        height: 26px;
+        padding: 0 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-size: var(--text-xs);
+      }
+      .pager-nav {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .pager-page {
+        min-width: 96px;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+      }
+      .pager-btn {
+        min-width: 28px;
+        height: 26px;
+        padding: 0 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+      }
+      .pager-btn:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+      .pager-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
       }
 
       /* ── Scroll surface ──────────────────────────────────────── */
@@ -869,6 +984,12 @@ export class EARejectionsPanelComponent {
   /** Incident keys (stage::subStage) the operator has expanded. */
   readonly openGroups = signal<Set<string>>(new Set());
 
+  // ── Pagination (uncaps the log; each page is a window of events the
+  //    grouped/flat views render). ─────────────────────────────────────────
+  readonly pageSizeOptions = [50, 100, 200, 500] as const;
+  readonly currentPage = signal(1);
+  readonly pageSize = signal<number>(100);
+
   private readonly rejectionsService = inject(SignalRejectionsService);
   private readonly notifications = inject(NotificationService);
 
@@ -895,17 +1016,21 @@ export class EARejectionsPanelComponent {
     this.debounceHandle = setTimeout(() => {
       this.committedSubStage.set(this.subStageFilter().trim());
       this.committedSymbol.set(this.symbolFilter().trim());
+      this.applyFilterChange();
     }, 350);
   }
 
-  protected readonly resource = createPolledResource(
+  protected readonly resource = createPolledResource<{
+    rows: SignalRejectionEventDto[];
+    total: number;
+  }>(
     () => {
       const id = this.instanceId();
       const accountId = this.tradingAccountId();
       // Account-scoped mode takes precedence when an account id is supplied;
       // otherwise fall back to the original EA-instance scope.
       const accountScoped = accountId != null && accountId > 0;
-      if (!accountScoped && !id) return of<SignalRejectionEventDto[]>([]);
+      if (!accountScoped && !id) return of({ rows: [] as SignalRejectionEventDto[], total: 0 });
       const stage = this.stageFilter();
       const subStage = this.committedSubStage();
       const symbol = this.committedSymbol();
@@ -916,21 +1041,60 @@ export class EARejectionsPanelComponent {
           stage: stage === 'all' ? undefined : stage,
           subStage: subStage || undefined,
           symbol: symbol || undefined,
-          currentPage: 1,
-          itemCountPerPage: 100,
+          currentPage: this.currentPage(),
+          itemCountPerPage: this.pageSize(),
         })
         .pipe(
-          map((res) => res.data?.data ?? []),
-          catchError(() => of<SignalRejectionEventDto[]>([])),
+          map((res) => ({
+            rows: res.data?.data ?? [],
+            total: res.data?.pager?.totalItemCount ?? 0,
+          })),
+          catchError(() => of({ rows: [] as SignalRejectionEventDto[], total: 0 })),
         );
     },
     { intervalMs: 15_000 },
   );
 
-  readonly rows = computed(() => this.resource.value() ?? []);
+  readonly rows = computed(() => this.resource.value()?.rows ?? []);
+  readonly totalItemCount = computed(() => this.resource.value()?.total ?? 0);
+  readonly totalPages = computed(() =>
+    Math.max(1, Math.ceil(this.totalItemCount() / this.pageSize())),
+  );
+  readonly rangeStart = computed(() =>
+    this.totalItemCount() === 0 ? 0 : (this.currentPage() - 1) * this.pageSize() + 1,
+  );
+  readonly rangeEnd = computed(() =>
+    Math.min(this.currentPage() * this.pageSize(), this.totalItemCount()),
+  );
   readonly loading = computed(
     () => this.resource.loading() && (this.resource.value() ?? null) === null,
   );
+
+  goToPage(page: number): void {
+    const clamped = Math.min(Math.max(1, page), this.totalPages());
+    if (clamped === this.currentPage()) return;
+    this.currentPage.set(clamped);
+    this.resource.refresh();
+  }
+
+  setPageSize(size: number): void {
+    if (size === this.pageSize()) return;
+    this.pageSize.set(size);
+    this.currentPage.set(1);
+    this.resource.refresh();
+  }
+
+  /** A filter changed — jump back to page 1 and re-fetch immediately (the
+   *  poll would otherwise apply the new filter only on its next 15s tick). */
+  private applyFilterChange(): void {
+    this.currentPage.set(1);
+    this.resource.refresh();
+  }
+
+  onStageChange(value: StageFilter): void {
+    this.stageFilter.set(value);
+    this.applyFilterChange();
+  }
 
   private readonly accountScoped = computed(() => {
     const id = this.tradingAccountId();
@@ -1019,12 +1183,14 @@ export class EARejectionsPanelComponent {
     this.symbolFilter.set('');
     this.committedSubStage.set('');
     this.committedSymbol.set('');
+    this.applyFilterChange();
   }
 
   filterBySymbol(symbol: string): void {
     if (!symbol || symbol === '—') return;
     this.symbolFilter.set(symbol);
     this.committedSymbol.set(symbol);
+    this.applyFilterChange();
   }
 
   // ── Grouped view actions ───────────────────────────────────────

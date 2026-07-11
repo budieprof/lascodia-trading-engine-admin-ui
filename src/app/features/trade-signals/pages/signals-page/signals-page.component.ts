@@ -1315,11 +1315,14 @@ export class SignalsPageComponent {
       .subscribe((accts) => {
         this.activeAccounts.set(accts);
         this.accountsLoading.set(false);
-        // Auto-select the sole active account on both tabs so the panels
-        // populate without an extra click.
-        if (accts.length === 1) {
-          this.selectedAccountId.set(accts[0].id);
-          this.pickupAccountId.set(accts[0].id);
+        // Auto-select the first active account on both tabs so the panels
+        // populate immediately — never land on an empty "select an account"
+        // page. (Previously only auto-selected when there was exactly one
+        // account, so with multiple accounts both tabs opened blank.) Guard
+        // against clobbering a selection the operator already made.
+        if (accts.length > 0) {
+          if (this.selectedAccountId() === null) this.selectedAccountId.set(accts[0].id);
+          if (this.pickupAccountId() === null) this.pickupAccountId.set(accts[0].id);
         }
       });
   }

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { catchError, map, of } from 'rxjs';
@@ -12,6 +12,12 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ProgressBarComponent } from '@shared/components/ui/progress-bar/progress-bar.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
+
+interface PickupsPage {
+  rows: OrderDto[];
+  total: number;
+}
 
 /**
  * Per-account "Signals Picked Up" panel — the exact inverse of the
@@ -37,6 +43,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     EmptyStateComponent,
     ProgressBarComponent,
     RelativeTimePipe,
+    MetricCardComponent,
   ],
   template: `
     <section class="panel" aria-label="Signals this account picked up">
@@ -67,6 +74,54 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       </header>
 
       <ui-progress-bar [active]="resource.loading()" />
+
+      @if (mTotal() > 0) {
+        <div class="kpi-grid" [class.loading]="metricsLoading()">
+          <app-metric-card
+            label="Total orders"
+            [value]="mTotal()"
+            format="number"
+            dotColor="#0071E3"
+          />
+          <app-metric-card label="Filled" [value]="mFilled()" format="number" dotColor="#34C759" />
+          <app-metric-card
+            label="Partial fills"
+            [value]="mPartial()"
+            format="number"
+            dotColor="#30B0C7"
+          />
+          <app-metric-card
+            label="Pending / in-flight"
+            [value]="mPending()"
+            format="number"
+            [dotColor]="mPending() > 0 ? '#FF9500' : '#8E8E93'"
+          />
+          <app-metric-card
+            label="Rejected / cancelled"
+            [value]="mRejectedCancelled()"
+            format="number"
+            dotColor="#FF3B30"
+          />
+          <app-metric-card
+            label="Fill rate"
+            [value]="mFillRate()"
+            format="percent"
+            dotColor="#34C759"
+          />
+          <app-metric-card
+            label="Total lots (filled)"
+            [value]="mTotalLots()"
+            format="number"
+            dotColor="#0071E3"
+          />
+          <app-metric-card
+            label="Symbols"
+            [value]="mDistinctSymbols()"
+            format="number"
+            dotColor="#AF52DE"
+          />
+        </div>
+      }
 
       @if (loading()) {
         <app-card-skeleton [lines]="6" />
@@ -146,6 +201,62 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             </tbody>
           </table>
         </div>
+        @if (totalItemCount() > 0) {
+          <nav class="pager-bar" aria-label="Picked-up signals pagination">
+            <div class="pager-info">
+              Showing <strong>{{ rangeStart() }}</strong
+              >–<strong>{{ rangeEnd() }}</strong> of
+              <strong>{{ totalItemCount() }}</strong>
+            </div>
+            <div class="pager-size">
+              <label for="pickupPageSize">Rows</label>
+              <select id="pickupPageSize" (change)="setPageSize(+$any($event.target).value)">
+                @for (n of pageSizeOptions; track n) {
+                  <option [value]="n" [selected]="n === pageSize()">{{ n }}</option>
+                }
+              </select>
+            </div>
+            <div class="pager-nav">
+              <button
+                type="button"
+                class="pager-btn"
+                (click)="goToPage(1)"
+                [disabled]="currentPage() <= 1"
+                aria-label="First page"
+              >
+                «
+              </button>
+              <button
+                type="button"
+                class="pager-btn"
+                (click)="goToPage(currentPage() - 1)"
+                [disabled]="currentPage() <= 1"
+                aria-label="Previous page"
+              >
+                ‹
+              </button>
+              <span class="pager-page">Page {{ currentPage() }} of {{ totalPages() }}</span>
+              <button
+                type="button"
+                class="pager-btn"
+                (click)="goToPage(currentPage() + 1)"
+                [disabled]="currentPage() >= totalPages()"
+                aria-label="Next page"
+              >
+                ›
+              </button>
+              <button
+                type="button"
+                class="pager-btn"
+                (click)="goToPage(totalPages())"
+                [disabled]="currentPage() >= totalPages()"
+                aria-label="Last page"
+              >
+                »
+              </button>
+            </div>
+          </nav>
+        }
       }
     </section>
   `,
@@ -204,6 +315,86 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       .btn-ghost:hover:not(:disabled) {
         background: var(--bg-tertiary);
         color: var(--text-primary);
+      }
+
+      /* Analysis KPI strip — fixed responsive columns so cards fill the width. */
+      .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(8, minmax(0, 1fr));
+        gap: var(--space-3, 12px);
+      }
+      @media (max-width: 1500px) {
+        .kpi-grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 720px) {
+        .kpi-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      .kpi-grid.loading {
+        opacity: 0.55;
+      }
+
+      /* Pagination bar */
+      .pager-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4, 16px);
+        flex-wrap: wrap;
+        padding: 8px 2px 0;
+        font-size: var(--text-xs, 12px);
+        color: var(--text-secondary);
+      }
+      .pager-info strong {
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+      }
+      .pager-size {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .pager-size select {
+        height: 26px;
+        padding: 0 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm, 6px);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-size: var(--text-xs, 12px);
+      }
+      .pager-nav {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .pager-page {
+        min-width: 96px;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+      }
+      .pager-btn {
+        min-width: 28px;
+        height: 26px;
+        padding: 0 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm, 6px);
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+      }
+      .pager-btn:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+      .pager-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
       }
 
       .pickup-scroll {
@@ -312,29 +503,109 @@ export class SignalPickupsPanelComponent {
 
   private readonly orders = inject(OrdersService);
 
-  protected readonly resource = createPolledResource(
+  // ── Pagination ─────────────────────────────────────────────────────────
+  readonly pageSizeOptions = [25, 50, 100, 200] as const;
+  readonly currentPage = signal(1);
+  readonly pageSize = signal<number>(25);
+
+  protected readonly resource = createPolledResource<PickupsPage>(
     () => {
       const accountId = this.tradingAccountId();
-      if (!accountId || accountId <= 0) return of<OrderDto[]>([]);
+      if (!accountId || accountId <= 0) return of<PickupsPage>({ rows: [], total: 0 });
       return this.orders
         .list({
-          currentPage: 1,
-          itemCountPerPage: 100,
+          currentPage: this.currentPage(),
+          itemCountPerPage: this.pageSize(),
           sortBy: 'CreatedAt',
           sortDirection: 'desc',
           filter: { tradingAccountId: accountId },
         })
         .pipe(
-          map((res) => res.data?.data ?? []),
-          catchError(() => of<OrderDto[]>([])),
+          map((res) => ({
+            rows: res.data?.data ?? [],
+            total: res.data?.pager?.totalItemCount ?? 0,
+          })),
+          catchError(() => of<PickupsPage>({ rows: [], total: 0 })),
         );
     },
     { intervalMs: 15_000 },
   );
 
-  readonly rows = computed(() => this.resource.value() ?? []);
+  readonly rows = computed(() => this.resource.value()?.rows ?? []);
+  readonly totalItemCount = computed(() => this.resource.value()?.total ?? 0);
+  readonly totalPages = computed(() =>
+    Math.max(1, Math.ceil(this.totalItemCount() / this.pageSize())),
+  );
+  readonly rangeStart = computed(() =>
+    this.totalItemCount() === 0 ? 0 : (this.currentPage() - 1) * this.pageSize() + 1,
+  );
+  readonly rangeEnd = computed(() =>
+    Math.min(this.currentPage() * this.pageSize(), this.totalItemCount()),
+  );
   readonly loading = computed(
     () => this.resource.loading() && (this.resource.value() ?? null) === null,
+  );
+
+  goToPage(page: number): void {
+    const clamped = Math.min(Math.max(1, page), this.totalPages());
+    if (clamped === this.currentPage()) return;
+    this.currentPage.set(clamped);
+    this.resource.refresh();
+  }
+
+  setPageSize(size: number): void {
+    if (size === this.pageSize()) return;
+    this.pageSize.set(size);
+    this.currentPage.set(1);
+    this.resource.refresh();
+  }
+
+  // ── Analysis metrics ─────────────────────────────────────────────────────
+  // Over ALL of the account's orders (wide cap), independent of the table page.
+  protected readonly metricsResource = createPolledResource<{ rows: OrderDto[]; total: number }>(
+    () => {
+      const accountId = this.tradingAccountId();
+      if (!accountId || accountId <= 0) return of({ rows: [] as OrderDto[], total: 0 });
+      return this.orders
+        .list({
+          currentPage: 1,
+          itemCountPerPage: 1000,
+          sortBy: 'CreatedAt',
+          sortDirection: 'desc',
+          filter: { tradingAccountId: accountId },
+        })
+        .pipe(
+          map((res) => ({
+            rows: res.data?.data ?? [],
+            total: res.data?.pager?.totalItemCount ?? 0,
+          })),
+          catchError(() => of({ rows: [] as OrderDto[], total: 0 })),
+        );
+    },
+    { intervalMs: 30_000 },
+  );
+  private readonly metricsRows = computed(() => this.metricsResource.value()?.rows ?? []);
+  private countTones(tone: 'good' | 'bad' | 'neutral'): number {
+    return this.metricsRows().filter((o) => this.statusTone(o.status) === tone).length;
+  }
+  readonly metricsLoading = computed(() => this.metricsRows().length === 0);
+  readonly mTotal = computed(() => this.metricsResource.value()?.total ?? 0);
+  readonly mFilled = computed(() => this.metricsRows().filter((o) => o.status === 'Filled').length);
+  readonly mPartial = computed(
+    () => this.metricsRows().filter((o) => o.status === 'PartialFill').length,
+  );
+  readonly mPending = computed(() => this.countTones('neutral'));
+  readonly mRejectedCancelled = computed(() => this.countTones('bad'));
+  readonly mFillRate = computed(() => {
+    const rows = this.metricsRows();
+    if (rows.length === 0) return 0;
+    return (this.countTones('good') / rows.length) * 100;
+  });
+  readonly mTotalLots = computed(() =>
+    this.metricsRows().reduce((acc, o) => acc + (o.filledQuantity ?? 0), 0),
+  );
+  readonly mDistinctSymbols = computed(
+    () => new Set(this.metricsRows().map((o) => o.symbol ?? '—')).size,
   );
 
   /**
