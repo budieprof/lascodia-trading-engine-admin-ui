@@ -25,30 +25,6 @@ const STAGE_OPTIONS: ReadonlyArray<{ value: StageFilter; label: string }> = [
 ];
 
 /**
- * One operator-actionable "rejection incident": a bucket of events that
- * share a (stage, subStage). A single SafetyGate.MaxLotsPerOrder
- * misconfig will fire 20+ events per polling window — grouping them
- * collapses that wall into one row with a count, symbol chips, and an
- * expand-to-see-events affordance.
- */
-interface RejectionIncident {
-  key: string;
-  stage: SignalRejectionStage;
-  subStage: string;
-  count: number;
-  events: SignalRejectionEventDto[];
-  topSymbols: string[];
-  symbolOverflow: number;
-  latestAt: string;
-}
-
-const STAGE_ORDER: Record<SignalRejectionStage, number> = {
-  Local: 0,
-  Engine: 1,
-  Broker: 2,
-};
-
-/**
  * v8.47.172 — per-instance rejection log.  Answers "why didn't this EA
  * take signal X?" in one click without VNC-ing into MT5.  Polls
  * `/signal-rejection` filtered by `eaInstanceId` every 15 s; admin can
@@ -84,43 +60,14 @@ const STAGE_ORDER: Record<SignalRejectionStage, number> = {
         <div class="panel-title">
           <h3>Rejection log</h3>
           <span class="muted small">
-            @if (rows().length > 0) {
-              {{ rows().length }} event{{ rows().length === 1 ? '' : 's' }}
-              @if (viewMode() === 'grouped') {
-                · {{ incidentGroups().length }} incident{{
-                  incidentGroups().length === 1 ? '' : 's'
-                }}
-              }
+            @if (totalItemCount() > 0) {
+              {{ totalItemCount() }} event{{ totalItemCount() === 1 ? '' : 's' }}
             } @else {
               no events
             }
           </span>
         </div>
         <div class="panel-tools">
-          <div class="view-toggle" role="tablist" aria-label="Rejection view mode">
-            <button
-              type="button"
-              role="tab"
-              class="vt-btn"
-              [class.active]="viewMode() === 'grouped'"
-              [attr.aria-selected]="viewMode() === 'grouped'"
-              (click)="viewMode.set('grouped')"
-              title="Group by stage + sub-stage — collapses repeated rejections"
-            >
-              Grouped
-            </button>
-            <button
-              type="button"
-              role="tab"
-              class="vt-btn"
-              [class.active]="viewMode() === 'flat'"
-              [attr.aria-selected]="viewMode() === 'flat'"
-              (click)="viewMode.set('flat')"
-              title="One row per event — for raw inspection"
-            >
-              Flat
-            </button>
-          </div>
           <button
             type="button"
             class="btn btn-ghost"
@@ -207,14 +154,6 @@ const STAGE_ORDER: Record<SignalRejectionStage, number> = {
         @if (hasFilters()) {
           <button type="button" class="link-btn" (click)="clearFilters()">Clear filters</button>
         }
-        @if (viewMode() === 'grouped' && incidentGroups().length > 0) {
-          <div class="link-group">
-            <button type="button" class="link-btn" (click)="expandAllGroups()">Expand all</button>
-            <button type="button" class="link-btn" (click)="collapseAllGroups()">
-              Collapse all
-            </button>
-          </div>
-        }
       </div>
 
       @if (loading()) {
@@ -227,156 +166,95 @@ const STAGE_ORDER: Record<SignalRejectionStage, number> = {
         />
       } @else if (rows().length === 0) {
         <app-empty-state [title]="emptyTitle()" [description]="emptyMessage()" />
-      } @else if (viewMode() === 'grouped') {
-        @if (incidentGroups().length === 0) {
-          <p class="empty-line muted">No rejections match the current filters.</p>
-        } @else {
-          <div class="rejection-scroll">
-            <div class="incident-list">
-              @for (g of incidentGroups(); track g.key) {
-                <article class="incident" [attr.data-stage]="g.stage">
-                  <header
-                    class="incident-head"
-                    (click)="toggleGroup(g.key)"
-                    role="button"
-                    [attr.aria-expanded]="isGroupOpen(g.key)"
-                  >
-                    <span class="incident-chev" [class.open]="isGroupOpen(g.key)">&#9654;</span>
-                    <span class="stage-pill" [attr.data-stage]="g.stage">{{ g.stage }}</span>
-                    <span class="substage mono">{{ g.subStage }}</span>
-                    <span class="incident-count">×&nbsp;{{ g.count }}</span>
-                    <span class="incident-symbols">
-                      @for (s of g.topSymbols; track s) {
-                        <button
-                          type="button"
-                          class="sym-chip"
-                          (click)="filterBySymbol(s); $event.stopPropagation()"
-                          [title]="'Filter by ' + s"
-                        >
-                          {{ s }}
-                        </button>
-                      }
-                      @if (g.symbolOverflow > 0) {
-                        <span class="sym-overflow muted">+{{ g.symbolOverflow }}</span>
-                      }
-                    </span>
-                    <span class="incident-time muted">
-                      latest {{ g.latestAt | relativeTime }}
-                    </span>
-                  </header>
-                  @if (isGroupOpen(g.key)) {
-                    <div class="incident-body">
-                      @for (row of g.events; track row.id) {
-                        <div class="event-row">
-                          <div
-                            class="event-head"
-                            (click)="toggle(row.id)"
-                            role="button"
-                            [attr.aria-expanded]="expanded() === row.id"
-                          >
-                            <span class="time" [title]="row.createdAt | date: 'medium'">{{
-                              row.createdAt | relativeTime
-                            }}</span>
-                            <a
-                              class="signal mono"
-                              [routerLink]="['/trade-signals', row.tradeSignalId]"
-                              (click)="$event.stopPropagation()"
-                              title="Open signal detail — cross-account attempts"
-                              >#{{ row.tradeSignalId }}</a
-                            >
-                            <span class="symbol mono">{{ row.symbol ?? '—' }}</span>
-                            <span class="reason">{{ row.reason }}</span>
-                            <span class="event-chev" [class.open]="expanded() === row.id"
-                              >&#9654;</span
-                            >
-                          </div>
-                          @if (expanded() === row.id) {
-                            <div class="metadata-wrap">
-                              <div class="metadata-bar">
-                                <span class="muted small">Metadata</span>
-                                <button
-                                  type="button"
-                                  class="link-btn"
-                                  (click)="copyMetadata(row.metadataJson)"
-                                >
-                                  Copy JSON
-                                </button>
-                              </div>
-                              <pre class="metadata">{{ formatMetadata(row.metadataJson) }}</pre>
-                            </div>
-                          }
-                        </div>
-                      }
-                    </div>
-                  }
-                </article>
-              }
-            </div>
-          </div>
-        }
       } @else {
-        <!-- Flat view -->
         <div class="rejection-scroll">
-          <ul class="rejection-list" role="list">
-            <li class="rejection-row legend" aria-hidden="true">
-              <div class="row-head row-legend">
-                <span>Time</span>
-                <span>Signal</span>
-                <span>Symbol</span>
-                <span>Stage</span>
-                <span>Sub-stage</span>
-                <span>Reason</span>
-              </div>
-            </li>
-            @for (row of rows(); track row.id) {
-              <li class="rejection-row" [attr.data-stage]="row.stage">
-                <div
-                  class="row-head"
-                  (click)="toggle(row.id)"
-                  role="button"
-                  [attr.aria-expanded]="expanded() === row.id"
+          <table class="grid">
+            <thead>
+              <tr>
+                <th class="expand-col"></th>
+                <th>Time</th>
+                <th>Signal</th>
+                <th>Account</th>
+                <th>Symbol</th>
+                <th>Stage</th>
+                <th>Sub-stage</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of rows(); track row.id) {
+                <tr
+                  class="rej-row"
+                  [attr.data-stage]="row.stage"
+                  [class.expanded]="expanded() === row.id"
                 >
-                  <span class="time" [title]="row.createdAt | date: 'medium'">
+                  <td class="expand-cell">
+                    <button
+                      type="button"
+                      class="expand-btn"
+                      [class.on]="expanded() === row.id"
+                      (click)="toggle(row.id)"
+                      [attr.aria-label]="
+                        expanded() === row.id ? 'Collapse metadata' : 'Expand metadata'
+                      "
+                      [attr.aria-expanded]="expanded() === row.id"
+                    >
+                      <span class="chev">&#9654;</span>
+                    </button>
+                  </td>
+                  <td class="time" [title]="row.createdAt | date: 'medium'">
                     {{ row.createdAt | relativeTime }}
-                  </span>
-                  <a
-                    class="signal mono"
-                    [routerLink]="['/trade-signals', row.tradeSignalId]"
-                    (click)="$event.stopPropagation()"
-                    title="Open signal detail — cross-account attempts"
-                    >#{{ row.tradeSignalId }}</a
-                  >
-                  <button
-                    type="button"
-                    class="symbol-btn mono"
-                    (click)="filterBySymbol(row.symbol ?? ''); $event.stopPropagation()"
-                    [title]="row.symbol ? 'Filter by ' + row.symbol : ''"
-                    [disabled]="!row.symbol"
-                  >
-                    {{ row.symbol ?? '—' }}
-                  </button>
-                  <span class="stage-pill" [attr.data-stage]="row.stage">{{ row.stage }}</span>
-                  <span class="substage mono">{{ row.subStage }}</span>
-                  <span class="reason">{{ row.reason }}</span>
-                </div>
+                  </td>
+                  <td class="mono">
+                    <a
+                      class="signal"
+                      [routerLink]="['/trade-signals', row.tradeSignalId]"
+                      title="Open signal detail — cross-account attempts"
+                      >#{{ row.tradeSignalId }}</a
+                    >
+                  </td>
+                  <td class="acct" [title]="accountLabel(row.tradingAccountId)">
+                    {{ accountLabel(row.tradingAccountId) }}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      class="symbol-btn mono"
+                      (click)="filterBySymbol(row.symbol ?? '')"
+                      [title]="row.symbol ? 'Filter by ' + row.symbol : ''"
+                      [disabled]="!row.symbol"
+                    >
+                      {{ row.symbol ?? '—' }}
+                    </button>
+                  </td>
+                  <td>
+                    <span class="stage-pill" [attr.data-stage]="row.stage">{{ row.stage }}</span>
+                  </td>
+                  <td class="mono substage">{{ row.subStage }}</td>
+                  <td class="reason" [title]="row.reason">{{ row.reason }}</td>
+                </tr>
                 @if (expanded() === row.id) {
-                  <div class="metadata-wrap">
-                    <div class="metadata-bar">
-                      <span class="muted small">Metadata</span>
-                      <button
-                        type="button"
-                        class="link-btn"
-                        (click)="copyMetadata(row.metadataJson)"
-                      >
-                        Copy JSON
-                      </button>
-                    </div>
-                    <pre class="metadata">{{ formatMetadata(row.metadataJson) }}</pre>
-                  </div>
+                  <tr class="meta-row">
+                    <td colspan="8">
+                      <div class="metadata-wrap">
+                        <div class="metadata-bar">
+                          <span class="muted small">Metadata</span>
+                          <button
+                            type="button"
+                            class="link-btn"
+                            (click)="copyMetadata(row.metadataJson)"
+                          >
+                            Copy JSON
+                          </button>
+                        </div>
+                        <pre class="metadata">{{ formatMetadata(row.metadataJson) }}</pre>
+                      </div>
+                    </td>
+                  </tr>
                 }
-              </li>
-            }
-          </ul>
+              }
+            </tbody>
+          </table>
         </div>
       }
 
@@ -475,38 +353,6 @@ const STAGE_ORDER: Record<SignalRejectionStage, number> = {
       }
       .muted {
         color: var(--text-tertiary);
-      }
-
-      /* ── View toggle ──────────────────────────────────────────── */
-      .view-toggle {
-        display: inline-flex;
-        gap: 2px;
-        padding: 2px;
-        background: var(--bg-tertiary);
-        border-radius: var(--radius-full);
-      }
-      .vt-btn {
-        appearance: none;
-        border: none;
-        background: transparent;
-        color: var(--text-secondary);
-        font-family: inherit;
-        font-size: 11px;
-        font-weight: var(--font-semibold);
-        padding: 3px 10px;
-        border-radius: var(--radius-full);
-        cursor: pointer;
-        transition:
-          background 0.12s ease,
-          color 0.12s ease;
-      }
-      .vt-btn:hover {
-        color: var(--text-primary);
-      }
-      .vt-btn.active {
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-        box-shadow: 0 0 0 1px var(--border);
       }
 
       /* ── Buttons ──────────────────────────────────────────────── */
@@ -688,11 +534,82 @@ const STAGE_ORDER: Record<SignalRejectionStage, number> = {
 
       /* ── Scroll surface ──────────────────────────────────────── */
       .rejection-scroll {
-        max-height: 480px;
+        max-height: 520px;
         overflow: auto;
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
         background: var(--bg-primary);
+      }
+
+      /* ── Table (tabular rejection log) ───────────────────────── */
+      .grid {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      .grid thead th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: var(--bg-secondary);
+        text-align: left;
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 7px var(--space-3);
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+      }
+      .grid tbody td {
+        padding: 6px var(--space-3);
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+      }
+      .rej-row:hover td {
+        background: var(--bg-secondary);
+      }
+      .rej-row[data-stage='Local'] td:first-child {
+        box-shadow: inset 3px 0 0 #cb8a17;
+      }
+      .rej-row[data-stage='Engine'] td:first-child {
+        box-shadow: inset 3px 0 0 #0058b8;
+      }
+      .rej-row[data-stage='Broker'] td:first-child {
+        box-shadow: inset 3px 0 0 #c93631;
+      }
+      .expand-col,
+      .expand-cell {
+        width: 26px;
+      }
+      .expand-btn {
+        appearance: none;
+        background: transparent;
+        border: none;
+        color: var(--text-tertiary);
+        cursor: pointer;
+        padding: 2px;
+        display: inline-flex;
+      }
+      .chev {
+        font-size: 9px;
+        transition: transform 0.15s ease;
+        display: inline-block;
+      }
+      .expand-btn.on .chev {
+        transform: rotate(90deg);
+      }
+      .acct {
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text-secondary);
+      }
+      .meta-row td {
+        padding: 0 var(--space-3) 6px;
+        background: var(--bg-secondary);
       }
       .empty-line {
         margin: 0;
@@ -729,174 +646,11 @@ const STAGE_ORDER: Record<SignalRejectionStage, number> = {
       .mono {
         font-family: var(--font-mono, ui-monospace, monospace);
       }
-
-      /* ── Incident cards (grouped view) ───────────────────────── */
-      .incident-list {
-        display: flex;
-        flex-direction: column;
-        gap: 1px;
-        background: var(--border);
-      }
-      .incident {
-        background: var(--bg-primary);
-      }
-      .incident-head {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-        padding: 8px var(--space-3);
-        cursor: pointer;
-        user-select: none;
-        flex-wrap: wrap;
-        border-left: 3px solid transparent;
-        transition: background 0.1s ease;
-      }
-      .incident-head:hover {
-        background: var(--bg-secondary);
-      }
-      .incident[data-stage='Local'] .incident-head {
-        border-left-color: #cb8a17;
-      }
-      .incident[data-stage='Engine'] .incident-head {
-        border-left-color: #0058b8;
-      }
-      .incident[data-stage='Broker'] .incident-head {
-        border-left-color: #c93631;
-      }
-      .incident-chev,
-      .event-chev {
-        font-size: 9px;
-        color: var(--text-tertiary);
-        transition: transform 0.15s ease;
-        flex-shrink: 0;
-      }
-      .incident-chev.open,
-      .event-chev.open {
-        transform: rotate(90deg);
-      }
       .substage {
         font-size: var(--text-xs);
         font-weight: var(--font-semibold);
         color: var(--text-primary);
         word-break: break-all;
-      }
-      .incident-count {
-        font-size: 11px;
-        font-weight: var(--font-bold);
-        color: var(--text-primary);
-        background: var(--bg-tertiary);
-        padding: 1px 8px;
-        border-radius: var(--radius-full);
-        font-variant-numeric: tabular-nums;
-      }
-      .incident-symbols {
-        display: inline-flex;
-        flex-wrap: wrap;
-        gap: 4px;
-        align-items: center;
-        max-width: 360px;
-      }
-      .sym-chip {
-        appearance: none;
-        border: 1px solid var(--border);
-        background: var(--bg-secondary);
-        color: var(--text-secondary);
-        font-family: var(--font-mono, monospace);
-        font-size: 10.5px;
-        padding: 1px 6px;
-        border-radius: var(--radius-sm);
-        cursor: pointer;
-        transition:
-          background 0.1s ease,
-          color 0.1s ease;
-      }
-      .sym-chip:hover {
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-      }
-      .sym-overflow {
-        font-size: 10.5px;
-      }
-      .incident-time {
-        margin-left: auto;
-        font-size: 11px;
-        white-space: nowrap;
-      }
-      .incident-body {
-        background: var(--bg-secondary);
-        border-top: 1px solid var(--border);
-        padding: 4px 8px 4px 28px;
-        display: flex;
-        flex-direction: column;
-        gap: 1px;
-      }
-      .event-row {
-        background: var(--bg-primary);
-        border-radius: var(--radius-sm);
-      }
-      .event-head {
-        display: grid;
-        grid-template-columns: 80px 80px 80px 1fr 16px;
-        gap: var(--space-2);
-        align-items: center;
-        padding: 6px var(--space-2);
-        cursor: pointer;
-        font-size: 12px;
-      }
-      .event-head:hover {
-        background: var(--bg-secondary);
-      }
-
-      /* ── Flat list (unchanged shape, refreshed tokens) ────────── */
-      .rejection-list {
-        list-style: none;
-        padding: 0;
-        margin: 0;
-      }
-      .rejection-row {
-        border-bottom: 1px solid var(--border);
-        padding: 0;
-      }
-      .rejection-row:last-child {
-        border-bottom: 0;
-      }
-      .row-head {
-        display: grid;
-        grid-template-columns: 90px 70px 90px 80px 160px 1fr;
-        gap: var(--space-2);
-        cursor: pointer;
-        align-items: center;
-        font-size: 12px;
-        padding: 6px var(--space-3);
-        border-left: 3px solid transparent;
-      }
-      .row-head:hover {
-        background: var(--bg-secondary);
-      }
-      .rejection-row[data-stage='Local'] .row-head {
-        border-left-color: #cb8a17;
-      }
-      .rejection-row[data-stage='Engine'] .row-head {
-        border-left-color: #0058b8;
-      }
-      .rejection-row[data-stage='Broker'] .row-head {
-        border-left-color: #c93631;
-      }
-      .rejection-row.legend .row-head {
-        background: var(--bg-secondary);
-        cursor: default;
-        position: sticky;
-        top: 0;
-        z-index: 1;
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        border-left-color: transparent;
-      }
-      .row-legend span {
-        white-space: nowrap;
       }
       .time {
         color: var(--text-tertiary);
@@ -977,15 +731,19 @@ export class EARejectionsPanelComponent {
   // Aggregate across ALL accounts (ignore instance + account scope). Used by the
   // signals-page "Account Rejections" tab's "All accounts" default.
   readonly allAccounts = input<boolean>(false);
+  /** id → display label for the Account column in aggregate mode. */
+  readonly accountNames = input<Record<number, string>>({});
   readonly stageOptions = STAGE_OPTIONS;
+
+  accountLabel(id: number | null | undefined): string {
+    if (id == null) return '—';
+    return this.accountNames()[id] ?? `#${id}`;
+  }
 
   readonly stageFilter = signal<StageFilter>('all');
   readonly subStageFilter = signal<string>('');
   readonly symbolFilter = signal<string>('');
   readonly expanded = signal<number | null>(null);
-  readonly viewMode = signal<'grouped' | 'flat'>('grouped');
-  /** Incident keys (stage::subStage) the operator has expanded. */
-  readonly openGroups = signal<Set<string>>(new Set());
 
   // ── Pagination (uncaps the log; each page is a window of events the
   //    grouped/flat views render). ─────────────────────────────────────────
@@ -1134,51 +892,6 @@ export class EARejectionsPanelComponent {
     return xs.reduce((max, r) => (r.createdAt > max ? r.createdAt : max), xs[0].createdAt);
   });
 
-  /**
-   * Events bucketed by `stage × subStage`. Drives the grouped view.
-   * Sort: stage (Local → Engine → Broker), then count desc, then most
-   * recent. The intuition: same-stage incidents stay together; the
-   * loudest noise sits at the top of each stage's group.
-   */
-  readonly incidentGroups = computed<RejectionIncident[]>(() => {
-    const buckets = new Map<string, SignalRejectionEventDto[]>();
-    for (const r of this.rows()) {
-      const key = `${r.stage}::${r.subStage}`;
-      const list = buckets.get(key) ?? [];
-      list.push(r);
-      buckets.set(key, list);
-    }
-    const out: RejectionIncident[] = [];
-    for (const [key, events] of buckets.entries()) {
-      const [stage, subStage] = key.split('::') as [SignalRejectionStage, string];
-      const symbols: string[] = [];
-      let latestAt = '';
-      const sortedEvents = [...events].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-      for (const e of sortedEvents) {
-        const s = e.symbol ?? '—';
-        if (!symbols.includes(s)) symbols.push(s);
-        if (e.createdAt > latestAt) latestAt = e.createdAt;
-      }
-      out.push({
-        key,
-        stage,
-        subStage,
-        count: events.length,
-        events: sortedEvents,
-        topSymbols: symbols.slice(0, 5),
-        symbolOverflow: Math.max(0, symbols.length - 5),
-        latestAt,
-      });
-    }
-    return out.sort((a, b) => {
-      const sa = STAGE_ORDER[a.stage];
-      const sb = STAGE_ORDER[b.stage];
-      if (sa !== sb) return sa - sb;
-      if (a.count !== b.count) return b.count - a.count;
-      return (b.latestAt ?? '').localeCompare(a.latestAt ?? '');
-    });
-  });
-
   hasFilters(): boolean {
     return (
       this.stageFilter() !== 'all' ||
@@ -1201,26 +914,6 @@ export class EARejectionsPanelComponent {
     this.symbolFilter.set(symbol);
     this.committedSymbol.set(symbol);
     this.applyFilterChange();
-  }
-
-  // ── Grouped view actions ───────────────────────────────────────
-  toggleGroup(key: string): void {
-    const next = new Set(this.openGroups());
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    this.openGroups.set(next);
-  }
-
-  isGroupOpen(key: string): boolean {
-    return this.openGroups().has(key);
-  }
-
-  expandAllGroups(): void {
-    this.openGroups.set(new Set(this.incidentGroups().map((g) => g.key)));
-  }
-
-  collapseAllGroups(): void {
-    this.openGroups.set(new Set());
   }
 
   // ── Per-event actions ──────────────────────────────────────────

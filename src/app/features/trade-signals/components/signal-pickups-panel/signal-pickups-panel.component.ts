@@ -146,6 +146,7 @@ interface PickupsPage {
             <thead>
               <tr>
                 <th>Signal</th>
+                <th>Account</th>
                 <th>Symbol</th>
                 <th>Type</th>
                 <th>Status</th>
@@ -168,6 +169,9 @@ interface PickupsPage {
                     } @else {
                       <span class="muted">—</span>
                     }
+                  </td>
+                  <td class="acct" [title]="accountLabel(o.tradingAccountId)">
+                    {{ accountLabel(o.tradingAccountId) }}
                   </td>
                   <td class="mono">{{ o.symbol ?? '—' }}</td>
                   <td>
@@ -446,6 +450,13 @@ interface PickupsPage {
       .mono {
         font-family: var(--font-mono, ui-monospace, monospace);
       }
+      .acct {
+        max-width: 160px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text-secondary);
+      }
       .signal {
         color: var(--text-secondary);
         text-decoration: none;
@@ -506,6 +517,13 @@ export class SignalPickupsPanelComponent {
   readonly tradingAccountId = input<number | null>(null);
   /** When true, aggregate across ALL accounts (ignore tradingAccountId). */
   readonly allAccounts = input<boolean>(false);
+  /** id → display label, so the aggregate view can name each order's account. */
+  readonly accountNames = input<Record<number, string>>({});
+
+  accountLabel(id: number | null | undefined): string {
+    if (id == null) return '—';
+    return this.accountNames()[id] ?? `#${id}`;
+  }
 
   private readonly orders = inject(OrdersService);
 

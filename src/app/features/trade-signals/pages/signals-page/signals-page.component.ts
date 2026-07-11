@@ -162,6 +162,7 @@ type DirectionChip = 'all' | TradeDirection;
           <app-ea-rejections-panel
             [allAccounts]="selectedAccountId() === 'all'"
             [tradingAccountId]="accountIdParam(selectedAccountId())"
+            [accountNames]="accountNames()"
           />
         </div>
       } @else if (view() === 'pickups') {
@@ -199,6 +200,7 @@ type DirectionChip = 'all' | TradeDirection;
           <app-signal-pickups-panel
             [allAccounts]="pickupAccountId() === 'all'"
             [tradingAccountId]="accountIdParam(pickupAccountId())"
+            [accountNames]="accountNames()"
           />
         </div>
       } @else {
@@ -1035,10 +1037,21 @@ export class SignalsPageComponent {
   // Both tabs share the same active-account list (loaded once); each keeps
   // its own selected-account signal so switching tabs preserves selection.
   readonly activeAccounts = signal<TradingAccountDto[]>([]);
+  /** Full accounts list (incl. inactive) — used only to label rows by account. */
+  readonly allAccountsList = signal<TradingAccountDto[]>([]);
   readonly accountsLoading = signal(false);
   // 'all' = aggregate across every account (the default); a number selects one.
   readonly selectedAccountId = signal<number | 'all'>('all');
   readonly pickupAccountId = signal<number | 'all'>('all');
+
+  /** id → display label, for the account column in the aggregate panels. */
+  readonly accountNames = computed<Record<number, string>>(() => {
+    const map: Record<number, string> = {};
+    for (const a of this.allAccountsList()) {
+      map[a.id] = a.accountName || a.accountId || `#${a.id}`;
+    }
+    return map;
+  });
 
   /** Map the picker value to the panel's tradingAccountId input (null in 'all' mode). */
   protected accountIdParam(v: number | 'all'): number | null {
@@ -1307,13 +1320,14 @@ export class SignalsPageComponent {
     this.accountsLoaded = true;
     this.accountsLoading.set(true);
     this.accountsService
-      .list({ currentPage: 1, itemCountPerPage: 200, filter: null })
+      .list({ currentPage: 1, itemCountPerPage: 500, filter: null })
       .pipe(
-        map((r) => (r.data?.data ?? []).filter((a) => a.isActive)),
+        map((r) => r.data?.data ?? []),
         catchError(() => of([] as TradingAccountDto[])),
       )
-      .subscribe((accts) => {
-        this.activeAccounts.set(accts);
+      .subscribe((all) => {
+        this.allAccountsList.set(all);
+        this.activeAccounts.set(all.filter((a) => a.isActive));
         this.accountsLoading.set(false);
         // Both tabs default to 'all' (aggregate) so they populate immediately —
         // no empty "select an account" page and no per-account guessing.
