@@ -909,7 +909,7 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
   // ── Pagination ─────────────────────────────────────────────────────────
   protected readonly pageSizeOptions = [25, 50, 100, 200] as const;
   protected readonly currentPage = signal(1);
-  protected readonly pageSize = signal<number>(50);
+  protected readonly pageSize = signal<number>(25);
   protected readonly totalItemCount = signal(0);
   protected readonly totalPages = computed(() =>
     Math.max(1, Math.ceil(this.totalItemCount() / this.pageSize())),
