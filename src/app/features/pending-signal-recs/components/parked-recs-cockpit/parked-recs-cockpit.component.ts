@@ -13,6 +13,7 @@ import { catchError, finalize, of } from 'rxjs';
 import { PendingSignalRecsService } from '@core/services/pending-signal-recs.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { PendingSignalRecDto } from '@core/api/api.types';
+import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 
 interface AuditEntry {
   at: string;
@@ -33,9 +34,46 @@ interface AuditEntry {
 @Component({
   selector: 'app-parked-recs-cockpit',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, RouterLink],
+  imports: [DatePipe, DecimalPipe, RouterLink, MetricCardComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    <!-- Analysis KPI strip — funnel breakdown across all states (symbol-scoped). -->
+    <div class="kpi-grid" [class.loading]="metricsLoading() && mTotal() === 0">
+      <app-metric-card label="Total recs" [value]="mTotal()" format="number" dotColor="#0071E3" />
+      <app-metric-card
+        label="Active (parked / reval)"
+        [value]="mActive()"
+        format="number"
+        [dotColor]="mActive() > 0 ? '#FF9500' : '#34C759'"
+      />
+      <app-metric-card
+        label="Approved → signal"
+        [value]="mApproved()"
+        format="number"
+        dotColor="#34C759"
+      />
+      <app-metric-card label="Rejected" [value]="mRejected()" format="number" dotColor="#FF3B30" />
+      <app-metric-card label="Expired" [value]="mExpired()" format="number" dotColor="#8E8E93" />
+      <app-metric-card
+        label="Conversion rate"
+        [value]="mConversionPct()"
+        format="percent"
+        dotColor="#34C759"
+      />
+      <app-metric-card
+        label="Avg confidence"
+        [value]="mAvgConfidence()"
+        format="percent"
+        dotColor="#0071E3"
+      />
+      <app-metric-card
+        label="Sibling-validated"
+        [value]="mSiblingValidated()"
+        format="number"
+        dotColor="#AF52DE"
+      />
+    </div>
+
     <section class="filters">
       <div class="filter-group">
         <label class="filter-label">State</label>
@@ -429,6 +467,17 @@ interface AuditEntry {
       }
       .bad {
         color: #d70015;
+      }
+
+      /* Analysis KPI strip */
+      .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: var(--space-3, 12px);
+        margin-bottom: var(--space-4, 16px);
+      }
+      .kpi-grid.loading {
+        opacity: 0.55;
       }
 
       /* Pagination bar */
@@ -865,18 +914,71 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
     Math.min(this.currentPage() * this.pageSize(), this.totalItemCount()),
   );
 
+  // ── Analysis metrics ─────────────────────────────────────────────────────
+  // Computed over ALL recs matching the symbol filter, across EVERY state
+  // (independent of the table's state filter + paging) so the KPI strip is a
+  // true breakdown of the parked-rec funnel. Fetched separately from the table.
+  protected readonly metricsRows = signal<PendingSignalRecDto[]>([]);
+  protected readonly metricsTotal = signal(0);
+  protected readonly metricsLoading = signal(true);
+
+  private countState(state: string): number {
+    return this.metricsRows().filter((r) => r.state === state).length;
+  }
+  /** Total across all states (accurate — from the pager, not the fetched slice). */
+  protected readonly mTotal = computed(() => this.metricsTotal());
+  protected readonly mActive = computed(
+    () => this.countState('Parked') + this.countState('Revalidating'),
+  );
+  protected readonly mApproved = computed(() => this.countState('Approved'));
+  protected readonly mRejected = computed(() => this.countState('Rejected'));
+  protected readonly mExpired = computed(() => this.countState('Expired'));
+  protected readonly mSiblingValidated = computed(
+    () => this.metricsRows().filter((r) => r.isSiblingValidated).length,
+  );
+  /** % of terminal recs that converted into a trade signal (Approved / terminal). */
+  protected readonly mConversionPct = computed(() => {
+    const terminal =
+      this.mApproved() + this.mRejected() + this.mExpired() + this.countState('Canceled');
+    return terminal === 0 ? 0 : (this.mApproved() / terminal) * 100;
+  });
+  /** Average generation confidence across the fetched recs (0–1 → percent). */
+  protected readonly mAvgConfidence = computed(() => {
+    const rows = this.metricsRows();
+    if (rows.length === 0) return 0;
+    return (rows.reduce((acc, r) => acc + (r.confidence ?? 0), 0) / rows.length) * 100;
+  });
+  /** Average re-validation attempts per rec. */
+  protected readonly mAvgAttempts = computed(() => {
+    const rows = this.metricsRows();
+    if (rows.length === 0) return 0;
+    return rows.reduce((acc, r) => acc + (r.revalAttempts ?? 0), 0) / rows.length;
+  });
+
   private pollHandle: ReturnType<typeof setInterval> | null = null;
+  private metricsHandle: ReturnType<typeof setInterval> | null = null;
   private static readonly POLL_INTERVAL_MS = 5_000;
+  private static readonly METRICS_INTERVAL_MS = 20_000;
 
   ngOnInit(): void {
     this.reload();
+    this.loadMetrics();
     this.pollHandle = setInterval(() => this.reload(), ParkedRecsCockpitComponent.POLL_INTERVAL_MS);
+    // Metrics change slowly + scan the whole table — poll them less often.
+    this.metricsHandle = setInterval(
+      () => this.loadMetrics(),
+      ParkedRecsCockpitComponent.METRICS_INTERVAL_MS,
+    );
   }
 
   ngOnDestroy(): void {
     if (this.pollHandle !== null) {
       clearInterval(this.pollHandle);
       this.pollHandle = null;
+    }
+    if (this.metricsHandle !== null) {
+      clearInterval(this.metricsHandle);
+      this.metricsHandle = null;
     }
   }
 
@@ -978,6 +1080,7 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
   protected applyFilters(): void {
     this.currentPage.set(1);
     this.reload();
+    this.loadMetrics();
   }
 
   protected goToPage(page: number): void {
@@ -992,6 +1095,29 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
     this.pageSize.set(size);
     this.currentPage.set(1);
     this.reload();
+  }
+
+  /** Refresh the analysis KPI strip — all states, symbol-scoped, wide cap so the
+   *  breakdown reflects the whole funnel rather than the current table page. */
+  protected loadMetrics(): void {
+    const symbol = this.symbolFilter().trim();
+    this.metricsLoading.set(true);
+    this.svc
+      .query({
+        currentPage: 1,
+        itemCountPerPage: 1000,
+        states: null,
+        search: symbol.length > 0 ? symbol : null,
+      })
+      .pipe(
+        finalize(() => this.metricsLoading.set(false)),
+        catchError(() => of(null)),
+      )
+      .subscribe((res) => {
+        if (res === null || !res.status) return;
+        this.metricsRows.set(res.data?.data ?? []);
+        this.metricsTotal.set(res.data?.pager?.totalItemCount ?? 0);
+      });
   }
 
   protected cancel(row: PendingSignalRecDto): void {
