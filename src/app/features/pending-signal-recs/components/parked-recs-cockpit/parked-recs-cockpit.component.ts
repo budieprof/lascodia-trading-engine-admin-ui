@@ -394,13 +394,9 @@ interface AuditEntry {
           </div>
           <div class="pager-size">
             <label for="parkedPageSize">Rows</label>
-            <select
-              id="parkedPageSize"
-              [value]="pageSize()"
-              (change)="setPageSize(+$any($event.target).value)"
-            >
+            <select id="parkedPageSize" (change)="setPageSize(+$any($event.target).value)">
               @for (n of pageSizeOptions; track n) {
-                <option [value]="n">{{ n }}</option>
+                <option [value]="n" [selected]="n === pageSize()">{{ n }}</option>
               }
             </select>
           </div>
@@ -469,12 +465,24 @@ interface AuditEntry {
         color: #d70015;
       }
 
-      /* Analysis KPI strip */
+      /* Analysis KPI strip — fixed columns (like the Signals tab) so the 8
+         cards stretch to fill the page width evenly instead of leaving a
+         ragged trailing gap. Collapses to 4 then 2 columns as width shrinks. */
       .kpi-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        grid-template-columns: repeat(8, minmax(0, 1fr));
         gap: var(--space-3, 12px);
         margin-bottom: var(--space-4, 16px);
+      }
+      @media (max-width: 1500px) {
+        .kpi-grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 720px) {
+        .kpi-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
       .kpi-grid.loading {
         opacity: 0.55;
