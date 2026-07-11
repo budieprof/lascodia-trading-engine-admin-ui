@@ -31,14 +31,12 @@ const STAGE_OPTIONS: ReadonlyArray<{ value: StageFilter; label: string }> = [
  * narrow by stage, sub-stage substring, or symbol.
  *
  * Empty state is the healthy default — most EAs reject 0 signals in
- * any given 24h window once the safety stack is tuned.  Two view modes:
- *   - **Grouped** (default): events bucketed by `stage::subStage` so
- *     recurring noise collapses to one row with a count.
- *   - **Flat**: one row per event, for raw inspection.
- *
- * Click a row (in either view) to expand the metadata blob (gate-
+ * any given 24h window once the safety stack is tuned.  Rendered as a
+ * dense paginated table (Time · Signal · Account · Symbol · Stage ·
+ * Sub-stage · Reason); expand a row to see the metadata blob (gate-
  * specific context like drift fraction, notional projection, broker
- * retcode params).
+ * retcode params). Also reused account-scoped + all-accounts by the
+ * signals-page "Account Rejections" tab.
  */
 @Component({
   selector: 'app-ea-rejections-panel',
