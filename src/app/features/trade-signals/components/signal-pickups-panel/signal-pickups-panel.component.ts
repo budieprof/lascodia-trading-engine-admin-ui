@@ -134,7 +134,11 @@ interface PickupsPage {
       } @else if (rows().length === 0) {
         <app-empty-state
           title="No picked-up signals"
-          description="This account hasn't picked up any signals in the window."
+          [description]="
+            allAccounts()
+              ? 'No account has created an order from a signal yet.'
+              : 'This account has not picked up any signals in the window.'
+          "
         />
       } @else {
         <div class="pickup-scroll">
@@ -500,6 +504,8 @@ interface PickupsPage {
 export class SignalPickupsPanelComponent {
   /** Trading account whose picked-up signals (created orders) to list. */
   readonly tradingAccountId = input<number | null>(null);
+  /** When true, aggregate across ALL accounts (ignore tradingAccountId). */
+  readonly allAccounts = input<boolean>(false);
 
   private readonly orders = inject(OrdersService);
 
@@ -510,15 +516,17 @@ export class SignalPickupsPanelComponent {
 
   protected readonly resource = createPolledResource<PickupsPage>(
     () => {
+      const allMode = this.allAccounts();
       const accountId = this.tradingAccountId();
-      if (!accountId || accountId <= 0) return of<PickupsPage>({ rows: [], total: 0 });
+      if (!allMode && (!accountId || accountId <= 0))
+        return of<PickupsPage>({ rows: [], total: 0 });
       return this.orders
         .list({
           currentPage: this.currentPage(),
           itemCountPerPage: this.pageSize(),
           sortBy: 'CreatedAt',
           sortDirection: 'desc',
-          filter: { tradingAccountId: accountId },
+          filter: allMode ? null : { tradingAccountId: accountId },
         })
         .pipe(
           map((res) => ({
@@ -564,15 +572,17 @@ export class SignalPickupsPanelComponent {
   // Over ALL of the account's orders (wide cap), independent of the table page.
   protected readonly metricsResource = createPolledResource<{ rows: OrderDto[]; total: number }>(
     () => {
+      const allMode = this.allAccounts();
       const accountId = this.tradingAccountId();
-      if (!accountId || accountId <= 0) return of({ rows: [] as OrderDto[], total: 0 });
+      if (!allMode && (!accountId || accountId <= 0))
+        return of({ rows: [] as OrderDto[], total: 0 });
       return this.orders
         .list({
           currentPage: 1,
-          itemCountPerPage: 1000,
+          itemCountPerPage: 500,
           sortBy: 'CreatedAt',
           sortDirection: 'desc',
-          filter: { tradingAccountId: accountId },
+          filter: allMode ? null : { tradingAccountId: accountId },
         })
         .pipe(
           map((res) => ({

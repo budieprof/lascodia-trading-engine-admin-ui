@@ -140,9 +140,9 @@ type DirectionChip = 'all' | TradeDirection;
               id="rej-account"
               class="input"
               [ngModel]="selectedAccountId()"
-              (ngModelChange)="selectedAccountId.set(+$event)"
+              (ngModelChange)="selectedAccountId.set($event)"
             >
-              <option [ngValue]="null" disabled>Select an active account…</option>
+              <option [ngValue]="'all'">All accounts</option>
               @for (a of activeAccounts(); track a.id) {
                 <option [ngValue]="a.id">
                   {{ a.accountName || a.accountId || 'Account #' + a.id }}
@@ -159,13 +159,10 @@ type DirectionChip = 'all' | TradeDirection;
             }
           </div>
 
-          @if (selectedAccountId(); as accId) {
-            <app-ea-rejections-panel [tradingAccountId]="accId" />
-          } @else {
-            <p class="muted picker-hint">
-              Select an active trading account to see the signals it rejected and why.
-            </p>
-          }
+          <app-ea-rejections-panel
+            [allAccounts]="selectedAccountId() === 'all'"
+            [tradingAccountId]="accountIdParam(selectedAccountId())"
+          />
         </div>
       } @else if (view() === 'pickups') {
         <!-- Per-account pick-up view: pick an active account, see the
@@ -180,9 +177,9 @@ type DirectionChip = 'all' | TradeDirection;
               id="pickup-account"
               class="input"
               [ngModel]="pickupAccountId()"
-              (ngModelChange)="pickupAccountId.set(+$event)"
+              (ngModelChange)="pickupAccountId.set($event)"
             >
-              <option [ngValue]="null" disabled>Select an active account…</option>
+              <option [ngValue]="'all'">All accounts</option>
               @for (a of activeAccounts(); track a.id) {
                 <option [ngValue]="a.id">
                   {{ a.accountName || a.accountId || 'Account #' + a.id }}
@@ -199,13 +196,10 @@ type DirectionChip = 'all' | TradeDirection;
             }
           </div>
 
-          @if (pickupAccountId(); as accId) {
-            <app-signal-pickups-panel [tradingAccountId]="accId" />
-          } @else {
-            <p class="muted picker-hint">
-              Select an active trading account to see the signals it picked up.
-            </p>
-          }
+          <app-signal-pickups-panel
+            [allAccounts]="pickupAccountId() === 'all'"
+            [tradingAccountId]="accountIdParam(pickupAccountId())"
+          />
         </div>
       } @else {
         <!-- KPI strip (6 dense tiles) -->
@@ -1042,8 +1036,14 @@ export class SignalsPageComponent {
   // its own selected-account signal so switching tabs preserves selection.
   readonly activeAccounts = signal<TradingAccountDto[]>([]);
   readonly accountsLoading = signal(false);
-  readonly selectedAccountId = signal<number | null>(null);
-  readonly pickupAccountId = signal<number | null>(null);
+  // 'all' = aggregate across every account (the default); a number selects one.
+  readonly selectedAccountId = signal<number | 'all'>('all');
+  readonly pickupAccountId = signal<number | 'all'>('all');
+
+  /** Map the picker value to the panel's tradingAccountId input (null in 'all' mode). */
+  protected accountIdParam(v: number | 'all'): number | null {
+    return v === 'all' ? null : v;
+  }
   private accountsLoaded = false;
 
   // ── Filter signals ────────────────────────────────────────────────────
@@ -1315,15 +1315,8 @@ export class SignalsPageComponent {
       .subscribe((accts) => {
         this.activeAccounts.set(accts);
         this.accountsLoading.set(false);
-        // Auto-select the first active account on both tabs so the panels
-        // populate immediately — never land on an empty "select an account"
-        // page. (Previously only auto-selected when there was exactly one
-        // account, so with multiple accounts both tabs opened blank.) Guard
-        // against clobbering a selection the operator already made.
-        if (accts.length > 0) {
-          if (this.selectedAccountId() === null) this.selectedAccountId.set(accts[0].id);
-          if (this.pickupAccountId() === null) this.pickupAccountId.set(accts[0].id);
-        }
+        // Both tabs default to 'all' (aggregate) so they populate immediately —
+        // no empty "select an account" page and no per-account guessing.
       });
   }
 
