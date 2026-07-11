@@ -146,7 +146,7 @@ interface PickupsPage {
             <thead>
               <tr>
                 <th>Signal</th>
-                <th>Account</th>
+                <th>Trading account</th>
                 <th>Symbol</th>
                 <th>Type</th>
                 <th>Status</th>
