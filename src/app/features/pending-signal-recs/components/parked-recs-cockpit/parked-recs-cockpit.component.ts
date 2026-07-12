@@ -15,9 +15,9 @@ import { NotificationService } from '@core/notifications/notification.service';
 import type { PendingSignalRecDto } from '@core/api/api.types';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import {
-  SpotRecChartComponent,
-  SpotRecChartRec,
-} from '@shared/components/spot-rec-chart/spot-rec-chart.component';
+  EATradeChartModalComponent,
+  TradeChartSelection,
+} from '@features/ea-instances/components/ea-trade-chart-modal/ea-trade-chart-modal.component';
 
 interface AuditEntry {
   at: string;
@@ -38,7 +38,7 @@ interface AuditEntry {
 @Component({
   selector: 'app-parked-recs-cockpit',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, RouterLink, MetricCardComponent, SpotRecChartComponent],
+  imports: [DatePipe, DecimalPipe, RouterLink, MetricCardComponent, EATradeChartModalComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- Analysis KPI strip — funnel breakdown across all states (symbol-scoped). -->
@@ -465,107 +465,17 @@ interface AuditEntry {
       }
     </section>
 
-    <!-- Chart drawer — opens on row click. Renders the same shared
-         SpotRecChart the Trade Signals detail drawer uses: a candle window
-         straddling the rec's generation time with Entry / SL / TP overlays. -->
-    @if (selectedRec(); as r) {
-      <div class="drawer-backdrop" (click)="selectedRec.set(null)">
-        <aside class="drawer" (click)="$event.stopPropagation()" aria-label="Parked rec chart">
-          <header class="drawer-head">
-            <div class="head-titles">
-              <h2 class="head-title">
-                <span class="signal-id">Rec #{{ r.id }}</span>
-                <span class="symbol">{{ r.symbol }}</span>
-                <span
-                  class="dir-chip"
-                  [class.dir-chip--buy]="r.direction === 'Buy'"
-                  [class.dir-chip--sell]="r.direction === 'Sell'"
-                >
-                  {{ r.direction === 'Buy' ? '↑ Buy' : '↓ Sell' }}
-                </span>
-                <span class="state state-{{ r.state.toLowerCase() }}">{{ r.state }}</span>
-              </h2>
-              <div class="head-sub">
-                Parked {{ r.createdAt | date: 'MMM d, HH:mm' }} UTC · expires
-                {{ r.parkExpiresAt | date: 'MMM d, HH:mm' }} UTC
-              </div>
-            </div>
-            <button class="btn-close" (click)="selectedRec.set(null)" aria-label="Close">×</button>
-          </header>
-
-          @if (canChart(r)) {
-            <section class="drawer-section">
-              <h4>Chart — Entry / SL / TP overlay</h4>
-              <app-spot-rec-chart
-                [symbol]="r.symbol"
-                [timeframe]="r.timeframe || 'H1'"
-                [asOfUtc]="r.createdAt"
-                [recommendations]="chartRecsFor(r)"
-              />
-            </section>
-          } @else {
-            <section class="drawer-section">
-              <p class="muted small">
-                This rec is missing the entry / SL / TP triple needed to draw the overlay.
-              </p>
-            </section>
-          }
-
-          <section class="drawer-section">
-            <h4>Pricing</h4>
-            <dl class="drawer-grid">
-              <div>
-                <dt>Entry</dt>
-                <dd class="mono">{{ r.recommendedEntryPrice | number: '1.0-5' }}</dd>
-              </div>
-              <div>
-                <dt>Stop loss</dt>
-                <dd class="mono">
-                  {{ r.stopLoss === null ? '—' : (r.stopLoss | number: '1.0-5') }}
-                </dd>
-              </div>
-              <div>
-                <dt>Take profit</dt>
-                <dd class="mono">
-                  {{ r.takeProfit === null ? '—' : (r.takeProfit | number: '1.0-5') }}
-                </dd>
-              </div>
-              <div>
-                <dt>ATR @ generation</dt>
-                <dd class="mono">{{ r.atrAtGeneration | number: '1.0-5' }}</dd>
-              </div>
-              <div>
-                <dt>Confidence</dt>
-                <dd class="mono">{{ (r.confidence * 100 | number: '1.1-1') + '%' }}</dd>
-              </div>
-              <div>
-                <dt>Timeframe</dt>
-                <dd class="mono">{{ r.timeframe || '—' }}</dd>
-              </div>
-              <div>
-                <dt>Reval attempts</dt>
-                <dd class="mono">{{ r.revalAttempts }}</dd>
-              </div>
-              <div>
-                <dt>Resulting signal</dt>
-                <dd class="mono">
-                  @if (r.resultingTradeSignalId !== null) {
-                    <a
-                      [routerLink]="['/trade-signals', r.resultingTradeSignalId]"
-                      class="link"
-                      (click)="selectedRec.set(null)"
-                      >#{{ r.resultingTradeSignalId }}</a
-                    >
-                  } @else {
-                    —
-                  }
-                </dd>
-              </div>
-            </dl>
-          </section>
-        </aside>
-      </div>
-    }
+    <!-- Chart modal — opens on row click. Reuses the EA-detail trade-chart
+         modal (centred dialog, timeframe tabs, candlestick with entry / SL /
+         TP zones + a right-edge NOW line). Parked rows also get a "Cancel rec"
+         action in the footer, mirroring the pending-order Cancel modal. -->
+    <app-ea-trade-chart-modal
+      [selection]="chartSelection()"
+      [open]="chartOpen()"
+      [busy]="chartBusy()"
+      (openChange)="onChartOpenChange($event)"
+      (actionConfirmed)="onChartCancelConfirmed()"
+    />
   `,
   styles: [
     `
@@ -999,133 +909,12 @@ interface AuditEntry {
         color: #c93400;
       }
 
-      /* Row click affordance for the chart drawer. */
+      /* Row click affordance for the chart modal. */
       tr.row-clickable[role='button'] {
         cursor: pointer;
       }
       tr.row-clickable[role='button']:hover > td {
         background: var(--bg-tertiary);
-      }
-
-      /* ── Chart drawer (mirrors the Trade Signals detail drawer) ─────────── */
-      .drawer-backdrop {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.4);
-        display: flex;
-        justify-content: flex-end;
-        z-index: 1000;
-      }
-      .drawer {
-        width: min(720px, 96vw);
-        height: 100%;
-        overflow-y: auto;
-        background: var(--bg-primary);
-        border-left: 1px solid var(--border);
-        box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
-        display: flex;
-        flex-direction: column;
-      }
-      .drawer-head {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: var(--space-3, 12px);
-        padding: var(--space-4, 16px);
-        border-bottom: 1px solid var(--border);
-        position: sticky;
-        top: 0;
-        background: var(--bg-primary);
-        z-index: 1;
-      }
-      .head-title {
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 8px;
-        margin: 0;
-        font-size: var(--text-lg, 17px);
-      }
-      .head-title .signal-id {
-        color: var(--text-tertiary);
-        font-weight: var(--font-semibold, 600);
-      }
-      .head-title .symbol {
-        font-weight: var(--font-bold, 700);
-      }
-      .dir-chip {
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        font-size: 11px;
-        font-weight: var(--font-semibold, 600);
-      }
-      .dir-chip--buy {
-        background: rgba(52, 199, 89, 0.16);
-        color: #248a3d;
-      }
-      .dir-chip--sell {
-        background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
-      }
-      .head-sub {
-        margin-top: 4px;
-        font-size: var(--text-xs, 12px);
-        color: var(--text-tertiary);
-      }
-      .btn-close {
-        flex: none;
-        width: 32px;
-        height: 32px;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm, 6px);
-        background: var(--bg-primary);
-        color: var(--text-secondary);
-        font-size: 20px;
-        line-height: 1;
-        cursor: pointer;
-      }
-      .btn-close:hover {
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-      }
-      .drawer-section {
-        padding: var(--space-4, 16px);
-        border-bottom: 1px solid var(--border);
-      }
-      .drawer-section h4 {
-        margin: 0 0 var(--space-3, 12px);
-        font-size: var(--text-xs, 12px);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-tertiary);
-        font-weight: var(--font-semibold, 600);
-      }
-      .drawer-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-        gap: var(--space-3, 12px) var(--space-4, 16px);
-        margin: 0;
-      }
-      .drawer-grid > div {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .drawer-grid dt {
-        font-size: 10.5px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-tertiary);
-        font-weight: var(--font-semibold, 600);
-      }
-      .drawer-grid dd {
-        margin: 0;
-        font-size: var(--text-sm, 13px);
-        color: var(--text-primary);
-      }
-      .mono {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-variant-numeric: tabular-nums;
       }
     `,
   ],
@@ -1152,8 +941,45 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
   protected readonly canceling = signal<Set<number>>(new Set());
   protected readonly expandedRowIds = signal<Set<number>>(new Set());
 
-  /** Rec whose chart drawer is open (null = closed). */
+  // ── Chart modal (reuses the EA-detail trade-chart modal) ─────────────────
+  /** Rec whose chart modal is open (null = closed). Also the target of the
+   *  modal's "Cancel rec" action for Parked rows. */
   protected readonly selectedRec = signal<PendingSignalRecDto | null>(null);
+  /** Whether the chart dialog is shown. Bound to the modal's `open` input. */
+  protected readonly chartOpen = signal(false);
+  /** True while a modal-driven cancel is in flight (disables the footer). */
+  protected readonly chartBusy = signal(false);
+  /** Selection payload the modal consumes — rebuilt from `selectedRec`. */
+  protected readonly chartSelection = computed<TradeChartSelection | null>(() => {
+    const r = this.selectedRec();
+    if (r === null || !this.canChart(r)) return null;
+    const isParked = r.state === 'Parked';
+    return {
+      title: `Rec #${r.id} · ${r.symbol} · ${r.direction}`,
+      symbol: r.symbol,
+      direction: r.direction,
+      referencePrice: r.recommendedEntryPrice,
+      referenceTime: r.createdAt,
+      referenceLabel: 'ENTRY',
+      stopLoss: r.stopLoss,
+      takeProfit: r.takeProfit,
+      // No live tick is fetched for parked recs — the overlay is the
+      // recommended geometry (Entry / SL / TP) against the historical candles.
+      currentPrice: null,
+      currentAsk: null,
+      exitPrice: null,
+      exitTime: null,
+      // Only Parked recs are cancelable; terminal recs render read-only.
+      action: isParked
+        ? {
+            label: 'Cancel rec',
+            confirmLabel: 'Confirm cancel',
+            description: `Cancels parked rec #${r.id} (${r.direction} ${r.symbol}). It will not be re-validated or promoted to a trade signal.`,
+            busyLabel: 'Canceling…',
+          }
+        : null,
+    };
+  });
 
   // ── Pagination ─────────────────────────────────────────────────────────
   protected readonly pageSizeOptions = [25, 50, 100, 200] as const;
@@ -1263,10 +1089,12 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
     return this.expandedRowIds().has(id);
   }
 
-  /** Open the chart drawer for a rec (no-op if it can't be charted). */
+  /** Open the chart modal for a rec (no-op if it can't be charted). */
   protected openChart(row: PendingSignalRecDto): void {
     if (!this.canChart(row)) return;
     this.selectedRec.set(row);
+    this.chartBusy.set(false);
+    this.chartOpen.set(true);
   }
 
   /** A rec is chartable once it carries the entry / SL / TP triple. */
@@ -1276,20 +1104,40 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
     );
   }
 
-  /**
-   * Wraps the parked rec into the shared chart's rec-shape (singular array —
-   * the rec carries one Entry / SL / TP triple, same as a TradeSignal).
-   */
-  protected chartRecsFor(r: PendingSignalRecDto): SpotRecChartRec[] {
-    return [
-      {
-        label: `Rec #${r.id} ${r.direction}`,
-        action: r.direction,
-        entryPrice: r.recommendedEntryPrice,
-        stopLoss: r.stopLoss,
-        takeProfit: r.takeProfit,
-      },
-    ];
+  /** Modal closed (× / Esc / backdrop) — reset our open flag + selection. */
+  protected onChartOpenChange(open: boolean): void {
+    this.chartOpen.set(open);
+    if (!open) {
+      this.selectedRec.set(null);
+      this.chartBusy.set(false);
+    }
+  }
+
+  /** Footer "Confirm cancel" clicked — cancel the parked rec, then close. */
+  protected onChartCancelConfirmed(): void {
+    const row = this.selectedRec();
+    if (row === null || this.chartBusy()) return;
+    this.chartBusy.set(true);
+    this.svc
+      .cancel(row.id)
+      .pipe(
+        finalize(() => this.chartBusy.set(false)),
+        catchError((err) => {
+          this.notify.error(err?.error?.message ?? 'Cancel failed.');
+          return of(null);
+        }),
+      )
+      .subscribe((res) => {
+        if (res === null) return;
+        if (!res.status) {
+          this.notify.error(res.message ?? 'Cancel failed.');
+          return;
+        }
+        this.notify.success(`Cancelled rec #${row.id}.`);
+        this.chartOpen.set(false);
+        this.selectedRec.set(null);
+        this.reload();
+      });
   }
 
   protected toggleExpand(id: number): void {
