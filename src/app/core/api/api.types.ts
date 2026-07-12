@@ -3969,6 +3969,18 @@ export interface UpdateRiskProfileRequest {
   weekendGapWindowHours: number;
   slippageBufferMultiplier: number;
   maxVaR95Pct: number;
+  /**
+   * Governance reason — required by the engine when a change LOOSENS a
+   * risk-sensitive field (e.g. lowering MinRiskRewardRatio, raising
+   * MaxLotSizePerTrade). Ignored for tightening / no-op saves.
+   */
+  reason?: string | null;
+  /**
+   * Break-glass: when true, a loosening change applies immediately (audit
+   * flagged) instead of being held for the cooling-off window. Requires
+   * `reason`.
+   */
+  immediate?: boolean;
 }
 
 export interface CreateCurrencyPairRequest {

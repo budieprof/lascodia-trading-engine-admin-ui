@@ -478,6 +478,21 @@ import {
                     min="0"
                   />
                 </app-form-field>
+
+                <div class="section-divider">Governance</div>
+                <app-form-field
+                  label="Reason (required to loosen a risk-sensitive field)"
+                  hint="Lowering Min risk-reward ratio or raising Max lot size / Max risk-per-trade are governed changes. Supply a reason and they apply immediately as a break-glass (audit-flagged). Tightening or unchanged values need no reason."
+                  [control]="form.controls.reason"
+                >
+                  <textarea
+                    appFormFieldControl
+                    formControlName="reason"
+                    rows="2"
+                    placeholder="e.g. Unrestricted demo profile — disabling the R:R floor for account 22 testing."
+                  ></textarea>
+                </app-form-field>
+
                 <div class="actions">
                   @if (editing()?.id) {
                     <button
@@ -2049,6 +2064,8 @@ export class RiskProfilesPageComponent implements OnInit {
     weekendGapWindowHours: [4, [Validators.min(0)]],
     slippageBufferMultiplier: [1.02, [Validators.min(0)]],
     maxVaR95Pct: [5, [Validators.min(0)]],
+    // Governance reason — only sent to the engine; not a profile field.
+    reason: [''],
   });
 
   readonly columns: ColDef<RiskProfileDto>[] = [
@@ -2177,6 +2194,7 @@ export class RiskProfilesPageComponent implements OnInit {
       weekendGapWindowHours: 4,
       slippageBufferMultiplier: 1.02,
       maxVaR95Pct: 5,
+      reason: '',
     });
     this.editing.set({});
   }
@@ -2216,6 +2234,7 @@ export class RiskProfilesPageComponent implements OnInit {
       weekendGapWindowHours: row.weekendGapWindowHours ?? 4,
       slippageBufferMultiplier: row.slippageBufferMultiplier ?? 1.02,
       maxVaR95Pct: row.maxVaR95Pct ?? 5,
+      reason: '',
     });
     this.editing.set(row);
   }
@@ -2262,6 +2281,12 @@ export class RiskProfilesPageComponent implements OnInit {
       weekendGapWindowHours: v.weekendGapWindowHours,
       slippageBufferMultiplier: v.slippageBufferMultiplier,
       maxVaR95Pct: v.maxVaR95Pct,
+      // Governance: a reason authorizes loosening a risk-sensitive field.
+      // When present we break-glass (immediate) so the change applies now
+      // rather than waiting out the cooling-off window. The engine ignores
+      // both for tightening / unchanged saves.
+      reason: v.reason?.trim() ? v.reason.trim() : null,
+      immediate: !!v.reason?.trim(),
     };
     const op =
       editing && 'id' in editing && editing.id != null
