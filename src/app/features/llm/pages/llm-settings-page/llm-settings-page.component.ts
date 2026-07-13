@@ -44,8 +44,8 @@ interface EditableEntry extends LlmConfigEntryDto {
  * Anything not in this map renders as a free-text input.
  */
 const OPTION_CATALOG: Record<string, readonly string[]> = {
-  'Llm:DeepProvider': ['anthropic', 'openai', 'google', 'deepseek'],
-  'Llm:QuickProvider': ['anthropic', 'openai', 'google', 'deepseek'],
+  'Llm:DeepProvider': ['anthropic', 'openai', 'google', 'deepseek', 'claudecode'],
+  'Llm:QuickProvider': ['anthropic', 'openai', 'google', 'deepseek', 'claudecode'],
   'Llm:Anthropic:Effort': ['high', 'medium', 'low', 'off'],
   'Llm:OpenAi:ReasoningEffort': ['high', 'medium', 'low'],
   'Llm:Google:ThinkingLevel': ['high', 'medium', 'minimal'],
@@ -628,6 +628,7 @@ export class LlmSettingsPageComponent implements OnInit {
       'OpenAI',
       'Google',
       'DeepSeek',
+      'Claude Code',
       'Strategy proposer',
       'Other',
     ];
@@ -874,6 +875,7 @@ function groupFor(key: string): string {
   if (key.startsWith('Llm:OpenAi:')) return 'OpenAI';
   if (key.startsWith('Llm:Google:')) return 'Google';
   if (key.startsWith('Llm:DeepSeek:')) return 'DeepSeek';
+  if (key.startsWith('Llm:ClaudeCode:')) return 'Claude Code';
   if (key.startsWith('Llm:')) return 'Llm (top-level)';
   return 'Other';
 }
