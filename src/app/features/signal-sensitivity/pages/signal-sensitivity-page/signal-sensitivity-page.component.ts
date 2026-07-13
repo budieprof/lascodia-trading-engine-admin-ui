@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { CurrencyPipe, DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { catchError, of } from 'rxjs';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import type { EChartsOption } from 'echarts';
@@ -177,21 +178,61 @@ const WINDOW_OPTIONS = [
               }
             </div>
           </label>
-          <label class="field field--wide">
-            <span>Sources</span>
-            <div class="source-chips">
-              @for (s of sourcesAvail; track s) {
-                <label class="chip-checkbox">
-                  <input
-                    type="checkbox"
-                    [checked]="selectedSources().includes(s)"
-                    (change)="toggleSource(s)"
-                  />
-                  {{ s }}
-                </label>
-              }
+          <label class="field">
+            <span>Data source</span>
+            <div class="source-toggle" role="group" aria-label="Data source">
+              <button
+                type="button"
+                class="ds-btn"
+                [class.ds-btn--active]="dataSource() === 'signals'"
+                (click)="setDataSource('signals')"
+              >
+                Trade Signals
+              </button>
+              <button
+                type="button"
+                class="ds-btn"
+                [class.ds-btn--active]="dataSource() === 'recs'"
+                (click)="setDataSource('recs')"
+                title="Analyse parked recs — includes Rejected / Expired recs that never became signals"
+              >
+                Parked Recs
+              </button>
             </div>
           </label>
+          @if (dataSource() === 'signals') {
+            <label class="field field--wide">
+              <span>Sources</span>
+              <div class="source-chips">
+                @for (s of sourcesAvail; track s) {
+                  <label class="chip-checkbox">
+                    <input
+                      type="checkbox"
+                      [checked]="selectedSources().includes(s)"
+                      (change)="toggleSource(s)"
+                    />
+                    {{ s }}
+                  </label>
+                }
+              </div>
+            </label>
+          } @else {
+            <label class="field field--wide">
+              <span>Rec states <em class="hint-inline">(empty = all)</em></span>
+              <div class="source-chips">
+                @for (s of recStateOptions; track s) {
+                  <label class="chip-checkbox">
+                    <input
+                      type="checkbox"
+                      [checked]="selectedRecStates().includes(s)"
+                      (change)="toggleRecState(s)"
+                    />
+                    {{ s }}
+                  </label>
+                }
+              </div>
+            </label>
+          }
         </div>
         <div class="filter-row">
           <label class="field">
@@ -1256,6 +1297,36 @@ const WINDOW_OPTIONS = [
         gap: 0.4rem;
         flex-wrap: wrap;
       }
+      .source-toggle {
+        display: inline-flex;
+        gap: 2px;
+        background: var(--bg-tertiary);
+        padding: 3px;
+        border-radius: var(--radius-sm, 6px);
+      }
+      .ds-btn {
+        padding: 5px 12px;
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        font-size: var(--text-sm, 13px);
+        font-weight: var(--font-medium, 500);
+        cursor: pointer;
+        border-radius: 4px;
+      }
+      .ds-btn:hover {
+        color: var(--text-primary);
+      }
+      .ds-btn--active {
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        box-shadow: var(--shadow-sm);
+      }
+      .hint-inline {
+        color: var(--text-tertiary);
+        font-style: normal;
+        font-size: 0.85em;
+      }
       .chip-checkbox {
         display: inline-flex;
         align-items: center;
@@ -2055,6 +2126,7 @@ const WINDOW_OPTIONS = [
 })
 export class SignalSensitivityPageComponent implements OnInit {
   private readonly svc = inject(SignalSensitivityService);
+  private readonly route = inject(ActivatedRoute);
   private readonly riskProfilesSvc = inject(RiskProfilesService);
   private readonly marketDataSvc = inject(MarketDataService);
   private readonly currencyPairsSvc = inject(CurrencyPairsService);
@@ -2111,6 +2183,24 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly availableSymbols = signal<string[]>([]);
   readonly selectedSources = signal<string[]>(['SpotAnalysis']);
   readonly selectedDirections = signal<string[]>([]);
+  /**
+   * Data source for the walk: 'signals' = live TradeSignal rows (default),
+   * 'recs' = PendingSignalRec (parked recs — includes Rejected/Expired that
+   * never became signals). In 'recs' mode the "source" cohort groups by rec
+   * State and the rec-state chips below filter the input set.
+   */
+  readonly dataSource = signal<'signals' | 'recs'>('signals');
+  /** All parked-rec States for the recs-mode filter chips. */
+  readonly recStateOptions = [
+    'Parked',
+    'Revalidating',
+    'Approved',
+    'Rejected',
+    'Expired',
+    'Canceled',
+  ] as const;
+  /** Selected rec States (empty = all states). */
+  readonly selectedRecStates = signal<string[]>([]);
   readonly tpMultiplier = signal<number>(1.0);
   readonly slMultiplier = signal<number>(1.0);
   readonly sweepInput = signal<string>('0.5, 0.75, 1.0, 1.25, 1.5');
@@ -2576,6 +2666,33 @@ export class SignalSensitivityPageComponent implements OnInit {
   });
 
   ngOnInit() {
+    // Deep-link from the Parked Recs cockpit: ?source=parked pre-selects the
+    // parked-recs data source (optionally &recStates=Rejected,Expired) so the
+    // operator lands ready to run the walk over recs.
+    const qp = this.route.snapshot.queryParamMap;
+    if (qp.get('source') === 'parked') {
+      this.dataSource.set('recs');
+      const states = qp.get('recStates');
+      if (states) {
+        const valid = new Set<string>(this.recStateOptions);
+        this.selectedRecStates.set(
+          states
+            .split(',')
+            .map((s) => s.trim())
+            .filter((s) => valid.has(s)),
+        );
+      }
+      const syms = qp.get('symbols');
+      if (syms) {
+        this.selectedSymbols.set(
+          syms
+            .split(',')
+            .map((s) => s.trim().toUpperCase())
+            .filter((s) => s.length > 0),
+        );
+      }
+    }
+
     // Load risk profiles for the dropdown — wide page size since the profile
     // catalogue is small (operator-curated). Failure is non-fatal: the
     // dropdown stays empty and the operator can still run sweep-only mode.
@@ -2618,6 +2735,17 @@ export class SignalSensitivityPageComponent implements OnInit {
     const current = this.selectedDirections();
     this.selectedDirections.set(
       current.includes(d) ? current.filter((x) => x !== d) : [...current, d],
+    );
+  }
+
+  setDataSource(src: 'signals' | 'recs') {
+    this.dataSource.set(src);
+  }
+
+  toggleRecState(s: string) {
+    const current = this.selectedRecStates();
+    this.selectedRecStates.set(
+      current.includes(s) ? current.filter((x) => x !== s) : [...current, s],
     );
   }
 
@@ -2726,9 +2854,15 @@ export class SignalSensitivityPageComponent implements OnInit {
     if (this.symbolInput().trim().length > 0) this.commitSymbolInput();
     const symbolList = this.selectedSymbols();
 
+    const recsMode = this.dataSource() === 'recs';
     this.svc
       .analyze({
-        sources: this.selectedSources().length ? this.selectedSources() : undefined,
+        // Parked-recs mode sources rows from PendingSignalRec; the TradeSignal
+        // `sources` filter doesn't apply there (rec State is the cohort).
+        analyzePendingRecs: recsMode || undefined,
+        recStates:
+          recsMode && this.selectedRecStates().length ? this.selectedRecStates() : undefined,
+        sources: !recsMode && this.selectedSources().length ? this.selectedSources() : undefined,
         symbols: symbolList.length ? symbolList : undefined,
         directions: this.selectedDirections().length ? this.selectedDirections() : undefined,
         fromUtc: fromUtc.toISOString(),

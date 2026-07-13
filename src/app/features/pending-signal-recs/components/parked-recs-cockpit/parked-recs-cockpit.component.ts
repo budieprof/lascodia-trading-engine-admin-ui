@@ -117,6 +117,14 @@ interface AuditEntry {
         <button type="button" class="btn btn-secondary" (click)="reload()" [disabled]="loading()">
           {{ loading() ? 'Refreshing…' : 'Refresh' }}
         </button>
+        <a
+          class="btn btn-secondary"
+          [routerLink]="['/signal-sensitivity']"
+          [queryParams]="sensitivityQueryParams()"
+          title="Run TP/SL what-if sensitivity analysis over these parked recs (any state)"
+        >
+          Sensitivity analysis →
+        </a>
       </div>
     </section>
 
@@ -1070,6 +1078,20 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
     const rows = this.rows();
     return this.siblingValidatedOnly() ? rows.filter((r) => r.isSiblingValidated) : rows;
   };
+
+  /**
+   * Deep-link params for the "Sensitivity analysis →" button: opens the Signal
+   * Sensitivity page in parked-recs mode, carrying the current state filter (or
+   * a symbol filter if set) so the walk runs over exactly what's on screen.
+   */
+  protected sensitivityQueryParams(): Record<string, string> {
+    const params: Record<string, string> = { source: 'parked' };
+    const states = Array.from(this.selectedStates());
+    if (states.length > 0) params['recStates'] = states.join(',');
+    const symbol = this.symbolFilter().trim();
+    if (symbol.length > 0) params['symbols'] = symbol.toUpperCase();
+    return params;
+  }
 
   protected toggleState(state: string, on: boolean): void {
     const next = new Set(this.selectedStates());

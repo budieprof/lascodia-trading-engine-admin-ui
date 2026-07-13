@@ -4759,4 +4759,15 @@ export interface AnalyzeSignalSensitivityRequest {
    * ExpiresAt.
    */
   expiryOverrideHours?: number;
+  /**
+   * When true, analyse PendingSignalRec (parked recs) instead of TradeSignal
+   * rows — so recs that never became signals (Rejected/Expired/Parked) are
+   * included. The "source" cohort breakdown then groups by rec State.
+   */
+  analyzePendingRecs?: boolean;
+  /**
+   * Parked-rec State name filter (e.g. ["Rejected","Expired"]). Empty = all
+   * states. Only used when analyzePendingRecs is true.
+   */
+  recStates?: string[];
 }
