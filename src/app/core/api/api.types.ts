@@ -3567,8 +3567,6 @@ export interface EAPendingSignalRevalConfig {
   instanceId: string;
 
   enabled: boolean;
-  /** Master switch for parked-rec → live TradeSignal conversion. false = park-for-analysis-only. */
-  conversionEnabled: boolean;
   atrTrigger: number;
   ttlHours: number;
   cooldownMinutes: number;
@@ -3587,7 +3585,6 @@ export interface EAPendingSignalRevalConfig {
   defaultCooldownMinutes: number;
   defaultMaxAttempts: number;
 
-  defaultConversionEnabled: boolean;
   defaultSiblingValidationEnabled: boolean;
   defaultSiblingWindowMinutes: number;
   defaultMinSiblingConfidence: number;
@@ -3596,8 +3593,6 @@ export interface EAPendingSignalRevalConfig {
 /** Body shape for PUT /admin/ea/{instanceId}/pending-signal-reval. */
 export interface UpdateEAPendingSignalRevalRequest {
   enabled: boolean;
-  /** Master switch for parked-rec → live TradeSignal conversion. */
-  conversionEnabled: boolean;
   atrTrigger: number;
   ttlHours: number;
   cooldownMinutes: number;
@@ -3651,6 +3646,22 @@ export interface PendingSignalRecDto {
   isSiblingValidated: boolean;
   /** Id of the sibling rec that pre-validated this row (audit only). */
   siblingValidatedByRecId: number | null;
+}
+
+/**
+ * GET /admin/pending-signal-recs/conversion — engine-wide "convert approved
+ * parked recs → live signals" master switch (global config).
+ */
+export interface PendingRecConversionDto {
+  /** true = approved recs materialise into live signals; false = park-for-analysis-only. */
+  enabled: boolean;
+  /** Compile-time default (true). */
+  defaultEnabled: boolean;
+}
+
+/** Body for PUT /admin/pending-signal-recs/conversion. */
+export interface SetPendingRecConversionRequest {
+  enabled: boolean;
 }
 
 /** Filter body for POST /admin/pending-signal-recs/query. */

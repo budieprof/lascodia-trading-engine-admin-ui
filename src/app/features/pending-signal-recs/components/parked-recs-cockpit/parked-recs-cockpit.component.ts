@@ -41,6 +41,36 @@ interface AuditEntry {
   imports: [DatePipe, DecimalPipe, RouterLink, MetricCardComponent, EATradeChartModalComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    <!-- Global config: parked-rec → live-signal conversion master switch.
+         Engine-wide (not per-EA). Off = park & re-validate for analysis only. -->
+    <div class="conv-bar" [class.conv-off]="conversionEnabled() === false">
+      <div class="conv-text">
+        <span class="conv-title">
+          Convert approved recs → live signals
+          <span class="conv-scope">global</span>
+        </span>
+        <span class="conv-desc">
+          @if (conversionEnabled() === false) {
+            <strong>Off</strong> — recs are parked &amp; re-validated for analysis only; approved
+            recs end Canceled/&ldquo;ConversionDisabled&rdquo; and never become orders.
+          } @else {
+            <strong>On</strong> — approved parked recs are promoted to live signals and traded.
+          }
+        </span>
+      </div>
+      <label class="conv-switch" [class.busy]="conversionSaving()">
+        <input
+          type="checkbox"
+          [checked]="conversionEnabled() === true"
+          [disabled]="conversionEnabled() === null || conversionSaving()"
+          (change)="setConversion($any($event.target).checked)"
+        />
+        <span>{{
+          conversionSaving() ? 'Saving…' : conversionEnabled() ? 'Enabled' : 'Disabled'
+        }}</span>
+      </label>
+    </div>
+
     <!-- Analysis KPI strip — funnel breakdown across all states (symbol-scoped). -->
     <div class="kpi-grid" [class.loading]="metricsLoading() && mTotal() === 0">
       <app-metric-card label="Total recs" [value]="mTotal()" format="number" dotColor="#0071E3" />
@@ -489,6 +519,69 @@ interface AuditEntry {
     `
       :host {
         display: block;
+      }
+      /* Global conversion switch bar */
+      .conv-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4, 16px);
+        padding: 10px 14px;
+        margin-bottom: var(--space-3, 12px);
+        border: 1px solid var(--border);
+        border-left: 3px solid #34c759;
+        border-radius: var(--radius-md, 8px);
+        background: var(--bg-secondary);
+      }
+      .conv-bar.conv-off {
+        border-left-color: #ff9500;
+        background: rgba(255, 149, 0, 0.06);
+      }
+      .conv-text {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      .conv-title {
+        font-weight: var(--font-semibold, 600);
+        font-size: var(--text-sm, 13px);
+        color: var(--text-primary);
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .conv-scope {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        padding: 1px 6px;
+        border-radius: var(--radius-full, 999px);
+        background: var(--bg-tertiary);
+        color: var(--text-tertiary);
+        font-weight: var(--font-semibold, 600);
+      }
+      .conv-desc {
+        font-size: var(--text-xs, 12px);
+        color: var(--text-secondary);
+      }
+      .conv-switch {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: var(--text-sm, 13px);
+        color: var(--text-primary);
+        cursor: pointer;
+        user-select: none;
+      }
+      .conv-switch input {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--accent);
+      }
+      .conv-switch.busy {
+        opacity: 0.6;
       }
       .muted {
         color: var(--text-tertiary);
@@ -953,6 +1046,11 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
   /** Rec whose chart modal is open (null = closed). Also the target of the
    *  modal's "Cancel rec" action for Parked rows. */
   protected readonly selectedRec = signal<PendingSignalRecDto | null>(null);
+
+  // ── Global conversion switch (engine-wide) ───────────────────────────────
+  /** null = not yet loaded; true/false = current global setting. */
+  protected readonly conversionEnabled = signal<boolean | null>(null);
+  protected readonly conversionSaving = signal(false);
   /** Whether the chart dialog is shown. Bound to the modal's `open` input. */
   protected readonly chartOpen = signal(false);
   /** True while a modal-driven cancel is in flight (disables the footer). */
@@ -1054,6 +1152,7 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.reload();
     this.loadMetrics();
+    this.loadConversion();
     this.pollHandle = setInterval(() => this.reload(), ParkedRecsCockpitComponent.POLL_INTERVAL_MS);
     // Metrics change slowly + scan the whole table — poll them less often.
     this.metricsHandle = setInterval(
@@ -1091,6 +1190,47 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
     const symbol = this.symbolFilter().trim();
     if (symbol.length > 0) params['symbols'] = symbol.toUpperCase();
     return params;
+  }
+
+  /** Load the engine-wide conversion switch. */
+  private loadConversion(): void {
+    this.svc
+      .getConversion()
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        if (res?.status && res.data) this.conversionEnabled.set(res.data.enabled);
+      });
+  }
+
+  /** Flip the global "convert approved recs → live signals" switch. */
+  protected setConversion(enabled: boolean): void {
+    if (this.conversionSaving()) return;
+    const prev = this.conversionEnabled();
+    this.conversionSaving.set(true);
+    this.conversionEnabled.set(enabled); // optimistic
+    this.svc
+      .setConversion(enabled)
+      .pipe(
+        finalize(() => this.conversionSaving.set(false)),
+        catchError((err) => {
+          this.conversionEnabled.set(prev); // revert on failure
+          this.notify.error(err?.error?.message ?? 'Failed to update conversion setting.');
+          return of(null);
+        }),
+      )
+      .subscribe((res) => {
+        if (res === null) return;
+        if (!res.status) {
+          this.conversionEnabled.set(prev);
+          this.notify.error(res.message ?? 'Failed to update conversion setting.');
+          return;
+        }
+        this.notify.success(
+          enabled
+            ? 'Parked recs will now convert to live signals.'
+            : 'Parked-rec conversion disabled — recs are analysis-only.',
+        );
+      });
   }
 
   protected toggleState(state: string, on: boolean): void {

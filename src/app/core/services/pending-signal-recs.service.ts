@@ -4,9 +4,11 @@ import { ApiService } from '@core/api/api.service';
 import type {
   CancelPendingSignalRecRequest,
   PagedData,
+  PendingRecConversionDto,
   PendingSignalRecDto,
   PendingSignalRecQueryRequest,
   ResponseData,
+  SetPendingRecConversionRequest,
 } from '@core/api/api.types';
 
 /**
@@ -39,5 +41,19 @@ export class PendingSignalRecsService {
    */
   cancel(id: number, body: CancelPendingSignalRecRequest = {}): Observable<ResponseData<string>> {
     return this.api.post<ResponseData<string>>(`${this.base}/${id}/cancel`, body);
+  }
+
+  /**
+   * GET /admin/pending-signal-recs/conversion — engine-wide "convert approved
+   * parked recs → live signals" master switch (global config).
+   */
+  getConversion(): Observable<ResponseData<PendingRecConversionDto>> {
+    return this.api.get<ResponseData<PendingRecConversionDto>>(`${this.base}/conversion`);
+  }
+
+  /** PUT /admin/pending-signal-recs/conversion — flip the global conversion switch. */
+  setConversion(enabled: boolean): Observable<ResponseData<boolean>> {
+    const body: SetPendingRecConversionRequest = { enabled };
+    return this.api.put<ResponseData<boolean>>(`${this.base}/conversion`, body);
   }
 }
