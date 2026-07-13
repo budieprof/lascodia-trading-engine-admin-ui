@@ -3567,6 +3567,8 @@ export interface EAPendingSignalRevalConfig {
   instanceId: string;
 
   enabled: boolean;
+  /** Master switch for parked-rec → live TradeSignal conversion. false = park-for-analysis-only. */
+  conversionEnabled: boolean;
   atrTrigger: number;
   ttlHours: number;
   cooldownMinutes: number;
@@ -3585,6 +3587,7 @@ export interface EAPendingSignalRevalConfig {
   defaultCooldownMinutes: number;
   defaultMaxAttempts: number;
 
+  defaultConversionEnabled: boolean;
   defaultSiblingValidationEnabled: boolean;
   defaultSiblingWindowMinutes: number;
   defaultMinSiblingConfidence: number;
@@ -3593,6 +3596,8 @@ export interface EAPendingSignalRevalConfig {
 /** Body shape for PUT /admin/ea/{instanceId}/pending-signal-reval. */
 export interface UpdateEAPendingSignalRevalRequest {
   enabled: boolean;
+  /** Master switch for parked-rec → live TradeSignal conversion. */
+  conversionEnabled: boolean;
   atrTrigger: number;
   ttlHours: number;
   cooldownMinutes: number;

@@ -75,6 +75,23 @@ import type { EAPendingSignalRevalConfig } from '@core/api/api.types';
               />
               <span class="psr-section-name">Enable park &amp; re-validate</span>
             </label>
+            <label class="psr-row" [class.disabled]="!draft()!.enabled">
+              <input
+                type="checkbox"
+                [checked]="draft()!.conversionEnabled"
+                [disabled]="!draft()!.enabled || saving()"
+                (change)="
+                  updateDraft({
+                    conversionEnabled: $any($event.target).checked,
+                  })
+                "
+              />
+              <span class="psr-section-name">Convert approved recs → live signals</span>
+              <span class="muted small psr-hint">
+                Off = park &amp; re-validate for analysis only; approved recs end
+                Canceled/&ldquo;ConversionDisabled&rdquo; and never become orders.
+              </span>
+            </label>
             <div class="psr-fields" [class.disabled]="!draft()!.enabled">
               <label class="psr-field">
                 <span>ATR trigger</span>
@@ -423,6 +440,7 @@ export class EAPendingSignalRevalPanelComponent implements OnInit {
   protected readonly server = signal<EAPendingSignalRevalConfig | null>(null);
   protected readonly draft = signal<{
     enabled: boolean;
+    conversionEnabled: boolean;
     atrTrigger: number;
     ttlHours: number;
     cooldownMinutes: number;
@@ -447,6 +465,7 @@ export class EAPendingSignalRevalPanelComponent implements OnInit {
     if (!s || !d) return false;
     return (
       s.enabled !== d.enabled ||
+      s.conversionEnabled !== d.conversionEnabled ||
       s.atrTrigger !== d.atrTrigger ||
       s.ttlHours !== d.ttlHours ||
       s.cooldownMinutes !== d.cooldownMinutes ||
@@ -481,6 +500,7 @@ export class EAPendingSignalRevalPanelComponent implements OnInit {
         this.server.set(cfg);
         this.draft.set({
           enabled: cfg.enabled,
+          conversionEnabled: cfg.conversionEnabled,
           atrTrigger: cfg.atrTrigger,
           ttlHours: cfg.ttlHours,
           cooldownMinutes: cfg.cooldownMinutes,
@@ -505,6 +525,7 @@ export class EAPendingSignalRevalPanelComponent implements OnInit {
     if (!s) return;
     this.draft.set({
       enabled: s.enabled,
+      conversionEnabled: s.conversionEnabled,
       atrTrigger: s.atrTrigger,
       ttlHours: s.ttlHours,
       cooldownMinutes: s.cooldownMinutes,
