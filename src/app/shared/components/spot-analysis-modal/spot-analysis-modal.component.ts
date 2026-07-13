@@ -10,6 +10,7 @@ import {
 import { NgxEchartsDirective } from 'ngx-echarts';
 import type { EChartsOption } from 'echarts';
 import { catchError, of } from 'rxjs';
+import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import { MarketDataService } from '@core/services/market-data.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type {
@@ -31,7 +32,7 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
   selector: 'app-spot-analysis-modal',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgxEchartsDirective],
+  imports: [NgxEchartsDirective, MarkdownPipe],
   template: `
     <div class="backdrop" (click)="closed.emit()">
       <div class="modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true">
@@ -199,9 +200,9 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
             }
 
             @if (r.analysis) {
-              <details class="analysis">
+              <details class="analysis" open>
                 <summary>Full analysis</summary>
-                <pre>{{ r.analysis }}</pre>
+                <div class="md" [innerHTML]="r.analysis | markdown"></div>
               </details>
             }
           } @else {
@@ -477,6 +478,52 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
         max-height: 240px;
         overflow: auto;
       }
+      .analysis .md {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        padding: var(--space-3);
+        border-radius: var(--radius-sm);
+        margin-top: var(--space-2);
+        max-height: 320px;
+        overflow: auto;
+        line-height: 1.55;
+      }
+      .md h3,
+      .md h4,
+      .md h5 {
+        margin: 0.9em 0 0.35em;
+        color: var(--text-primary);
+        font-weight: var(--font-semibold, 600);
+      }
+      .md h4 {
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        font-size: var(--text-xs);
+      }
+      .md p {
+        margin: 0 0 0.6em;
+      }
+      .md ul {
+        margin: 0 0 0.6em;
+        padding-left: 1.1em;
+      }
+      .md li {
+        margin: 0.1em 0;
+      }
+      .md code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        background: var(--bg-secondary);
+        padding: 1px 4px;
+        border-radius: 3px;
+      }
+      .md strong {
+        color: var(--text-primary);
+        font-weight: var(--font-semibold, 600);
+      }
+      .md > :first-child {
+        margin-top: 0;
+      }
       .spinner {
         width: 14px;
         height: 14px;
@@ -640,16 +687,23 @@ export class SpotAnalysisModalComponent {
     };
 
     for (const idx of indices) {
-      this.marketData.persistSignalFromAnalysis(r.llmInvocationId, idx).subscribe({
-        next: (res) => {
-          if (res?.status && res.data != null) {
-            this.createdByIndex.update((m) => ({ ...m, [idx]: res.data as number }));
-            created.push(res.data as number);
-          }
-          done();
-        },
-        error: () => done(),
-      });
+      const rec = this.recommendations(r)[idx];
+      this.marketData
+        .persistSignalFromAnalysis(r.llmInvocationId, idx, {
+          entryPrice: rec?.entryPrice,
+          stopLoss: rec?.stopLoss,
+          takeProfit: rec?.takeProfit,
+        })
+        .subscribe({
+          next: (res) => {
+            if (res?.status && res.data != null) {
+              this.createdByIndex.update((m) => ({ ...m, [idx]: res.data as number }));
+              created.push(res.data as number);
+            }
+            done();
+          },
+          error: () => done(),
+        });
     }
   }
 
@@ -657,21 +711,28 @@ export class SpotAnalysisModalComponent {
   protected createSignal(r: MarketAnalysisResultDto, index: number): void {
     if (this.creatingIndex() !== null || this.createdSignal(index) !== null) return;
     this.creatingIndex.set(index);
-    this.marketData.persistSignalFromAnalysis(r.llmInvocationId, index).subscribe({
-      next: (res) => {
-        this.creatingIndex.set(null);
-        if (res?.status && res.data != null) {
-          this.createdByIndex.update((m) => ({ ...m, [index]: res.data as number }));
-          this.notify.success(`Signal #${res.data} created`);
-        } else {
-          this.notify.error(res?.message || 'Could not create signal from this recommendation.');
-        }
-      },
-      error: (err) => {
-        this.creatingIndex.set(null);
-        this.notify.error(err?.message ?? 'Failed to create signal.');
-      },
-    });
+    const rec = this.recommendations(r)[index];
+    this.marketData
+      .persistSignalFromAnalysis(r.llmInvocationId, index, {
+        entryPrice: rec?.entryPrice,
+        stopLoss: rec?.stopLoss,
+        takeProfit: rec?.takeProfit,
+      })
+      .subscribe({
+        next: (res) => {
+          this.creatingIndex.set(null);
+          if (res?.status && res.data != null) {
+            this.createdByIndex.update((m) => ({ ...m, [index]: res.data as number }));
+            this.notify.success(`Signal #${res.data} created`);
+          } else {
+            this.notify.error(res?.message || 'Could not create signal from this recommendation.');
+          }
+        },
+        error: (err) => {
+          this.creatingIndex.set(null);
+          this.notify.error(err?.message ?? 'Failed to create signal.');
+        },
+      });
   }
 
   protected fmt(price: number | null): string {

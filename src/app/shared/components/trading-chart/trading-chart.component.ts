@@ -17,6 +17,7 @@ import { FormsModule } from '@angular/forms';
 import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { NgxEchartsDirective } from 'ngx-echarts';
+import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import type { EChartsOption } from 'echarts';
 import { Subject, timer, switchMap, takeUntil, catchError, of } from 'rxjs';
 import { MarketDataService } from '@core/services/market-data.service';
@@ -305,7 +306,7 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
   selector: 'app-trading-chart',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgxEchartsDirective, FormsModule, DatePipe, RouterLink],
+  imports: [NgxEchartsDirective, FormsModule, DatePipe, RouterLink, MarkdownPipe],
   template: `
     <div class="trading-chart">
       <!-- Toolbar -->
@@ -969,7 +970,7 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
                 </ul>
               </section>
             }
-            <div class="analysis-body">{{ ar.analysis }}</div>
+            <div class="analysis-body md" [innerHTML]="ar.analysis | markdown"></div>
           } @else if (analysisError(); as err) {
             <header class="analysis-head">
               <h3 id="analysis-title">Analysis failed</h3>
@@ -1060,7 +1061,7 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
                 </p>
               </section>
             }
-            <div class="analysis-body">{{ mr.analysis }}</div>
+            <div class="analysis-body md" [innerHTML]="mr.analysis | markdown"></div>
           } @else if (macroAnalysisError(); as merr) {
             <header class="analysis-head">
               <h3 id="macro-analysis-title">Macro analysis failed</h3>
@@ -1627,6 +1628,52 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
         line-height: 1.6;
         color: var(--text-primary);
         white-space: pre-wrap;
+      }
+      /* Rendered-markdown narrative (overrides pre-wrap; block tags do spacing). */
+      .analysis-body.md {
+        white-space: normal;
+      }
+      .md h3,
+      .md h4,
+      .md h5 {
+        margin: 1em 0 0.4em;
+        font-weight: var(--font-semibold, 600);
+        line-height: 1.3;
+      }
+      .md h3 {
+        font-size: var(--text-md, 15px);
+      }
+      .md h4 {
+        font-size: var(--text-sm, 13px);
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: var(--text-secondary);
+      }
+      .md h5 {
+        font-size: var(--text-sm, 13px);
+      }
+      .md p {
+        margin: 0 0 0.7em;
+      }
+      .md ul {
+        margin: 0 0 0.7em;
+        padding-left: 1.2em;
+      }
+      .md li {
+        margin: 0.15em 0;
+      }
+      .md code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.9em;
+        background: var(--bg-tertiary);
+        padding: 1px 4px;
+        border-radius: 3px;
+      }
+      .md strong {
+        font-weight: var(--font-semibold, 600);
+      }
+      .md > :first-child {
+        margin-top: 0;
       }
       dialog.analysis-dialog.error .analysis-body {
         color: #ff3b30;
@@ -3338,8 +3385,16 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   createSignalFromAnalysis(ar: MarketAnalysisResultDto): void {
     if (this.creatingSignal()) return;
     this.creatingSignal.set(true);
+    // Pass the displayed (derived) geometry of the primary rec — thin-framework
+    // recs carry a null entry in the raw LLM response, so the server can't
+    // reconstruct it from the audit alone.
+    const rec = ar.recommendations?.[0];
     this.marketData
-      .persistSignalFromAnalysis(ar.llmInvocationId, 0)
+      .persistSignalFromAnalysis(ar.llmInvocationId, 0, {
+        entryPrice: rec?.entryPrice,
+        stopLoss: rec?.stopLoss,
+        takeProfit: rec?.takeProfit,
+      })
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (res) => {

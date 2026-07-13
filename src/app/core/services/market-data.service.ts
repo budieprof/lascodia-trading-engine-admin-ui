@@ -176,9 +176,20 @@ export class MarketDataService {
   persistSignalFromAnalysis(
     llmInvocationId: number,
     recommendationIndex = 0,
+    geometry?: { entryPrice?: number | null; stopLoss?: number | null; takeProfit?: number | null },
   ): Observable<ResponseData<number>> {
     const qs = new URLSearchParams({ recommendationIndex: String(recommendationIndex) }).toString();
-    return this.api.post(`/market-data/analyze/${llmInvocationId}/persist-signal?${qs}`, {});
+    // Send the modal-displayed (derived) entry/SL/TP so thin-framework recs —
+    // whose raw LLM response carries a null entry — persist exactly what the
+    // operator saw. The server falls back to its re-parse when omitted.
+    const body = geometry
+      ? {
+          entryPrice: geometry.entryPrice ?? null,
+          stopLoss: geometry.stopLoss ?? null,
+          takeProfit: geometry.takeProfit ?? null,
+        }
+      : {};
+    return this.api.post(`/market-data/analyze/${llmInvocationId}/persist-signal?${qs}`, body);
   }
 
   /**
