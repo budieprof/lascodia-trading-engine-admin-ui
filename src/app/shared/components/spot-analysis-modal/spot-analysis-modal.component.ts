@@ -478,6 +478,8 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
         max-height: 240px;
         overflow: auto;
       }
+      /* Container only — child element styles (h4/p/ul/…) live in global
+         styles.scss (emulated encapsulation can't style [innerHTML] children). */
       .analysis .md {
         font-size: var(--text-xs);
         color: var(--text-secondary);
@@ -488,41 +490,6 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
         max-height: 320px;
         overflow: auto;
         line-height: 1.55;
-      }
-      .md h3,
-      .md h4,
-      .md h5 {
-        margin: 0.9em 0 0.35em;
-        color: var(--text-primary);
-        font-weight: var(--font-semibold, 600);
-      }
-      .md h4 {
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-        font-size: var(--text-xs);
-      }
-      .md p {
-        margin: 0 0 0.6em;
-      }
-      .md ul {
-        margin: 0 0 0.6em;
-        padding-left: 1.1em;
-      }
-      .md li {
-        margin: 0.1em 0;
-      }
-      .md code {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        background: var(--bg-secondary);
-        padding: 1px 4px;
-        border-radius: 3px;
-      }
-      .md strong {
-        color: var(--text-primary);
-        font-weight: var(--font-semibold, 600);
-      }
-      .md > :first-child {
-        margin-top: 0;
       }
       .spinner {
         width: 14px;

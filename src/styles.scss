@@ -270,3 +270,61 @@ html[data-view-transition='slide-left']::view-transition-new(root) {
     animation-name: none;
   }
 }
+
+// ── Rendered-markdown narrative (MarkdownPipe → [innerHTML]) ────────────────
+// GLOBAL (not component-scoped) on purpose: content injected via [innerHTML]
+// does not carry the emulated-encapsulation attribute, so component styles for
+// `.md h4`, `.md p`, … never match it. These rules style the LLM analysis
+// blocks (spot analysis, rationales) wherever `| markdown` is used. Section
+// titles (## …) render bold with clear spacing between paragraphs/sections.
+.md {
+  > :first-child {
+    margin-top: 0;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    margin: 1.1em 0 0.35em;
+    font-weight: var(--font-semibold, 600);
+    color: var(--text-primary);
+    line-height: 1.3;
+  }
+  h1,
+  h2,
+  h3 {
+    font-size: var(--text-md, 15px);
+  }
+  h4,
+  h5,
+  h6 {
+    font-size: var(--text-sm, 13px);
+  }
+  p {
+    margin: 0 0 0.75em;
+  }
+  ul,
+  ol {
+    margin: 0 0 0.75em;
+    padding-left: 1.3em;
+  }
+  li {
+    margin: 0.2em 0;
+  }
+  strong {
+    font-weight: var(--font-semibold, 600);
+    color: var(--text-primary);
+  }
+  em {
+    font-style: italic;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    background: var(--bg-tertiary);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+}

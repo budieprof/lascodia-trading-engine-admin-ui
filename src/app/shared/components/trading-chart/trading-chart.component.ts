@@ -1629,51 +1629,11 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
         color: var(--text-primary);
         white-space: pre-wrap;
       }
-      /* Rendered-markdown narrative (overrides pre-wrap; block tags do spacing). */
+      /* Rendered-markdown narrative overrides pre-wrap; the child element
+         styles (h3/p/ul/…) live in GLOBAL styles.scss because [innerHTML]
+         content isn't reached by emulated-encapsulation component styles. */
       .analysis-body.md {
         white-space: normal;
-      }
-      .md h3,
-      .md h4,
-      .md h5 {
-        margin: 1em 0 0.4em;
-        font-weight: var(--font-semibold, 600);
-        line-height: 1.3;
-      }
-      .md h3 {
-        font-size: var(--text-md, 15px);
-      }
-      .md h4 {
-        font-size: var(--text-sm, 13px);
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-        color: var(--text-secondary);
-      }
-      .md h5 {
-        font-size: var(--text-sm, 13px);
-      }
-      .md p {
-        margin: 0 0 0.7em;
-      }
-      .md ul {
-        margin: 0 0 0.7em;
-        padding-left: 1.2em;
-      }
-      .md li {
-        margin: 0.15em 0;
-      }
-      .md code {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size: 0.9em;
-        background: var(--bg-tertiary);
-        padding: 1px 4px;
-        border-radius: 3px;
-      }
-      .md strong {
-        font-weight: var(--font-semibold, 600);
-      }
-      .md > :first-child {
-        margin-top: 0;
       }
       dialog.analysis-dialog.error .analysis-body {
         color: #ff3b30;
