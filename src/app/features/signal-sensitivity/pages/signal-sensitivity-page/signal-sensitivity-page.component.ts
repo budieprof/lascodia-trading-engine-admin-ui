@@ -283,10 +283,11 @@ const WINDOW_OPTIONS = [
               type="number"
               step="0.05"
               min="0"
-              max="1"
+              max="100"
               [(ngModel)]="minConfidence"
               name="minConfidence"
-              placeholder="no floor"
+              placeholder="0.70 or 70"
+              title="Confidence floor for the cohort. Accepts 0–1 (fraction) or 1–100 (percent): 70 = 0.70."
             />
           </label>
         </div>
@@ -2220,8 +2221,16 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly sweepInput = signal<string>('0.5, 0.75, 1.0, 1.25, 1.5');
   /** Hours override for signal validity. null = use signal's persisted ExpiresAt. */
   readonly expiryOverrideHours = signal<number | null>(null);
-  /** Minimum signal confidence (0–1) for cohort membership. null = no floor. */
+  /** Minimum signal confidence for cohort membership. null = no floor. Accepts 0–1 (fraction) or 1–100 (percent). */
   readonly minConfidence = signal<number | null>(null);
+
+  /** Normalises the min-confidence input to the 0–1 scale (70 → 0.70); null/0 → undefined (no floor). */
+  private normalizedMinConfidence(): number | undefined {
+    const raw = this.minConfidence();
+    if (!raw || raw <= 0) return undefined;
+    const asFraction = raw > 1 ? raw / 100 : raw;
+    return Math.min(asFraction, 1);
+  }
   readonly riskProfileId = signal<number | null>(null);
   readonly startingBalance = signal<number>(10000);
 
@@ -2899,8 +2908,9 @@ export class SignalSensitivityPageComponent implements OnInit {
             ? this.expiryOverrideHours()!
             : undefined,
         // Confidence floor for cohort membership. Empty/0 → omit (no floor).
-        minConfidence:
-          this.minConfidence() && this.minConfidence()! > 0 ? this.minConfidence()! : undefined,
+        // Percent-scale input normalises client-side too (70 → 0.70) so the
+        // request reads unambiguously in logs; the server applies the same rule.
+        minConfidence: this.normalizedMinConfidence(),
       })
       .pipe(
         catchError((err) => {

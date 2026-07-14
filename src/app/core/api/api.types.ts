@@ -4761,8 +4761,9 @@ export interface AnalyzeSignalSensitivityRequest {
   /** Direction filter ('Buy' / 'Sell'). Empty/omitted = both. */
   directions?: string[];
   /**
-   * Minimum signal confidence (0.00–1.00) for cohort membership. Omitted/0 =
-   * no floor. Server clamps values above 1 to 1.
+   * Minimum signal confidence for cohort membership. Omitted/0 = no floor.
+   * Server accepts both scales: (0, 1] as a fraction, (1, 100] as a percent
+   * (70 → 0.70).
    */
   minConfidence?: number;
   fromUtc?: string;
