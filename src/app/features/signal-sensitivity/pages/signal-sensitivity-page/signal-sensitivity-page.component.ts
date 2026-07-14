@@ -3063,19 +3063,34 @@ export class SignalSensitivityPageComponent implements OnInit {
     const tf = this.selectedTimeframe();
     const tfMin = this.timeframeMinutes(tf);
     const generated = new Date(s.generatedAt);
-    const expires = new Date(s.expiresAt);
-    const durationMin = Math.max(
-      (expires.getTime() - generated.getTime()) / 60_000,
-      tfMin, // floor so duration-scaled padding is never zero
+    const generatedMs = generated.getTime();
+    const nowMs = Date.now();
+
+    // End-of-interest for the window: the resolving exit when the walk
+    // resolved, otherwise the expiry — clamped to "now". A what-if expiry
+    // override can push ExpiresAt decades out (e.g. a 5,000,000h override
+    // lands in 2096), which previously made this window span centuries and
+    // the candle endpoint reject it with a 400.
+    const exitMs = s.exitAt ? new Date(s.exitAt).getTime() : NaN;
+    const endMs = Math.min(
+      Number.isFinite(exitMs) && exitMs > generatedMs ? exitMs : new Date(s.expiresAt).getTime(),
+      nowMs,
     );
 
-    // Target ~75 bars before signal fire, 75 bars after expiry. Also expand
-    // to whichever is wider: bar-count-driven window or duration-driven window.
+    // Duration-scaled padding, capped at 30 days so even a long-lived
+    // signal can't blow the window past what the endpoint accepts.
+    const durationMin = Math.min(
+      Math.max((endMs - generatedMs) / 60_000, tfMin), // floor: never zero
+      30 * 24 * 60,
+    );
+
+    // Target ~75 bars before signal fire, 75 bars after resolution. Also
+    // expand to whichever is wider: bar-count-driven or duration-driven.
     const preMin = Math.max(75 * tfMin, durationMin * 4);
     const postMin = Math.max(75 * tfMin, durationMin * 2);
 
-    const from = new Date(generated.getTime() - preMin * 60_000);
-    const to = new Date(expires.getTime() + postMin * 60_000);
+    const from = new Date(generatedMs - preMin * 60_000);
+    const to = new Date(Math.min(endMs + postMin * 60_000, nowMs));
 
     this.marketDataSvc
       .listCandles({
