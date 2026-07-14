@@ -277,6 +277,18 @@ const WINDOW_OPTIONS = [
               placeholder="use signal's own"
             />
           </label>
+          <label class="field">
+            <span>Min confidence</span>
+            <input
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              [(ngModel)]="minConfidence"
+              name="minConfidence"
+              placeholder="no floor"
+            />
+          </label>
         </div>
         <div class="filter-row">
           <label class="field field--wide">
@@ -934,6 +946,7 @@ const WINDOW_OPTIONS = [
                   <th>Symbol</th>
                   <th>Source</th>
                   <th>Dir</th>
+                  <th class="num" title="LLM/strategy confidence persisted on the signal">Conf</th>
                   <th class="num">Entry</th>
                   <th class="num">SL</th>
                   <th class="num">TP</th>
@@ -962,6 +975,7 @@ const WINDOW_OPTIONS = [
                     <td>{{ s.symbol }}</td>
                     <td>{{ s.source }}</td>
                     <td>{{ s.direction }}</td>
+                    <td class="num">{{ s.confidence | number: '1.2-2' }}</td>
                     <td class="num">{{ s.entryPrice | number: '1.5-5' }}</td>
                     <td class="num">{{ s.originalSL | number: '1.5-5' }}</td>
                     <td class="num">{{ s.originalTP | number: '1.5-5' }}</td>
@@ -2206,6 +2220,8 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly sweepInput = signal<string>('0.5, 0.75, 1.0, 1.25, 1.5');
   /** Hours override for signal validity. null = use signal's persisted ExpiresAt. */
   readonly expiryOverrideHours = signal<number | null>(null);
+  /** Minimum signal confidence (0–1) for cohort membership. null = no floor. */
+  readonly minConfidence = signal<number | null>(null);
   readonly riskProfileId = signal<number | null>(null);
   readonly startingBalance = signal<number>(10000);
 
@@ -2882,6 +2898,9 @@ export class SignalSensitivityPageComponent implements OnInit {
           this.expiryOverrideHours() && this.expiryOverrideHours()! > 0
             ? this.expiryOverrideHours()!
             : undefined,
+        // Confidence floor for cohort membership. Empty/0 → omit (no floor).
+        minConfidence:
+          this.minConfidence() && this.minConfidence()! > 0 ? this.minConfidence()! : undefined,
       })
       .pipe(
         catchError((err) => {

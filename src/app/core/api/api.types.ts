@@ -4684,6 +4684,8 @@ export interface AnalyzeSignalSensitivitySignalDto {
   exitAt: string;
   scenarioPnL: number;
   lotSize: number;
+  /** LLM/strategy confidence (0.00–1.00) persisted on the signal / rec row. */
+  confidence: number;
 }
 
 /** One point on the equity curve produced when RiskProfile-based sizing is on. */
@@ -4758,6 +4760,11 @@ export interface AnalyzeSignalSensitivityRequest {
   symbols?: string[];
   /** Direction filter ('Buy' / 'Sell'). Empty/omitted = both. */
   directions?: string[];
+  /**
+   * Minimum signal confidence (0.00–1.00) for cohort membership. Omitted/0 =
+   * no floor. Server clamps values above 1 to 1.
+   */
+  minConfidence?: number;
   fromUtc?: string;
   toUtc?: string;
   tpMultiplier?: number;
