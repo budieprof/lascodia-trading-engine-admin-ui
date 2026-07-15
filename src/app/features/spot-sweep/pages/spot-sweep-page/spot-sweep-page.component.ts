@@ -298,17 +298,32 @@ import {
               </label>
               @if (cfg.blackoutEnabled) {
                 <div class="blackout-row">
+                  <span class="muted small">from</span>
                   <input
                     type="time"
                     [value]="cfg.blackoutStart"
-                    (change)="patch({ blackoutStart: $any($event.target).value || '22:00' })"
+                    (change)="setBlackoutStart($any($event.target).value)"
                   />
-                  <span class="muted small">to</span>
+                  <span class="muted small">for</span>
                   <input
-                    type="time"
-                    [value]="cfg.blackoutEnd"
-                    (change)="patch({ blackoutEnd: $any($event.target).value || '00:00' })"
+                    type="number"
+                    class="dur-input"
+                    min="0"
+                    max="23"
+                    [value]="blackoutDurationHours()"
+                    (change)="setBlackoutDuration($any($event.target).value, null)"
                   />
+                  <span class="muted small">h</span>
+                  <input
+                    type="number"
+                    class="dur-input"
+                    min="0"
+                    max="59"
+                    step="5"
+                    [value]="blackoutDurationMinutesPart()"
+                    (change)="setBlackoutDuration(null, $any($event.target).value)"
+                  />
+                  <span class="muted small">m</span>
                   <select
                     [value]="cfg.blackoutTimezone"
                     (change)="patch({ blackoutTimezone: $any($event.target).value })"
@@ -319,12 +334,13 @@ import {
                       </option>
                     }
                   </select>
+                  <span class="muted small mono">ends {{ cfg.blackoutEnd }}</span>
                 </div>
               }
               <span class="muted small">
                 During this window each day the sweep parks entirely — no LLM analyses, no signal
-                generation. Overrides the session windows; an end at or before the start wraps past
-                midnight (22:00 → 00:00 = 10 PM to midnight). Manual Spot Analysis is unaffected.
+                generation. Overrides the session windows and wraps past midnight when needed (22:00
+                for 2h = 10 PM to midnight). Manual Spot Analysis is unaffected.
               </span>
             </div>
 
@@ -942,6 +958,9 @@ import {
       .blackout-row input[type='time'] {
         width: auto;
       }
+      .blackout-row .dur-input {
+        width: 64px;
+      }
       .blackout-row select {
         width: auto;
         min-width: 180px;
@@ -1433,6 +1452,68 @@ export class SpotSweepPageComponent implements OnDestroy {
     { id: 'Asia/Tokyo', label: 'Asia/Tokyo' },
     { id: 'Australia/Sydney', label: 'Australia/Sydney' },
   ];
+
+  // ── Daily blackout: the operator sets start + EXACT duration; the end
+  // time the engine persists is derived (start + duration, mod 24h). The
+  // duration is clamped to [5 min, 23h55m] so a zero/24h window — which the
+  // engine would read as an always-on blackout — cannot be produced from
+  // the UI.
+  private static hhmmToMinutes(v: string | undefined): number {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(v ?? '');
+    return m ? ((+m[1] % 24) * 60 + (+m[2] % 60)) % 1440 : 0;
+  }
+
+  private static minutesToHHmm(total: number): string {
+    const t = ((total % 1440) + 1440) % 1440;
+    return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+  }
+
+  /** Exact blackout duration in minutes, derived from start/end (wraps midnight). */
+  blackoutDurationTotalMin(): number {
+    const c = this.config();
+    if (!c) return 120;
+    const d =
+      (SpotSweepPageComponent.hhmmToMinutes(c.blackoutEnd) -
+        SpotSweepPageComponent.hhmmToMinutes(c.blackoutStart) +
+        1440) %
+      1440;
+    return d === 0 ? 120 : d;
+  }
+
+  blackoutDurationHours(): number {
+    return Math.floor(this.blackoutDurationTotalMin() / 60);
+  }
+
+  blackoutDurationMinutesPart(): number {
+    return this.blackoutDurationTotalMin() % 60;
+  }
+
+  /** Move the start; the configured DURATION is preserved and the end re-derived. */
+  setBlackoutStart(raw: string): void {
+    const start = /^(\d{1,2}):(\d{2})$/.test(raw) ? raw : '22:00';
+    const dur = this.blackoutDurationTotalMin();
+    this.patch({
+      blackoutStart: start,
+      blackoutEnd: SpotSweepPageComponent.minutesToHHmm(
+        SpotSweepPageComponent.hhmmToMinutes(start) + dur,
+      ),
+    });
+  }
+
+  /** Set the exact duration (either field may change); the end is re-derived from start. */
+  setBlackoutDuration(hoursRaw: string | null, minutesRaw: string | null): void {
+    const c = this.config();
+    if (!c) return;
+    const hours = hoursRaw === null ? this.blackoutDurationHours() : Math.trunc(+hoursRaw) || 0;
+    const mins =
+      minutesRaw === null ? this.blackoutDurationMinutesPart() : Math.trunc(+minutesRaw) || 0;
+    const total = Math.min(Math.max(hours * 60 + mins, 5), 1435);
+    this.patch({
+      blackoutEnd: SpotSweepPageComponent.minutesToHHmm(
+        SpotSweepPageComponent.hhmmToMinutes(c.blackoutStart) + total,
+      ),
+    });
+  }
 
   isSessionSelected(name: SweepSession): boolean {
     return this.config()?.activeSessions?.includes(name) ?? false;
