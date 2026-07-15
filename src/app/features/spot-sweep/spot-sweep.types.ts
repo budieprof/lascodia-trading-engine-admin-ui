@@ -59,6 +59,20 @@ export interface SpotSweepConfig {
    * outside every selected session window.
    */
   activeSessions: SweepSession[];
+  /**
+   * Daily signal blackout: while the local time (in blackoutTimezone) is
+   * inside [blackoutStart, blackoutEnd) the sweep parks entirely — no LLM
+   * analyses, no signal generation — overriding the session windows. An end
+   * at or before the start wraps past midnight ("22:00"→"00:00" = 10 PM to
+   * midnight). Operator-initiated Spot Analysis is unaffected.
+   */
+  blackoutEnabled: boolean;
+  /** "HH:mm" local time in blackoutTimezone. */
+  blackoutStart: string;
+  /** "HH:mm" local time; <= start wraps past midnight. */
+  blackoutEnd: string;
+  /** IANA timezone id, e.g. "Africa/Lagos" (WAT) or "UTC". */
+  blackoutTimezone: string;
 }
 
 export type SweepSession = 'Sydney' | 'Tokyo' | 'London' | 'NewYork';
@@ -168,4 +182,10 @@ export const DEFAULT_SWEEP_CONFIG: SpotSweepConfig = {
   // sessions on the cockpit; sessions overlap so e.g. picking London+NewYork
   // covers 08:00-22:00 UTC including the 13-16 overlap.
   activeSessions: [],
+  // Daily blackout ships disabled; the window defaults mirror the operator's
+  // "10 PM – 12 AM WAT" request so enabling is a single checkbox.
+  blackoutEnabled: false,
+  blackoutStart: '22:00',
+  blackoutEnd: '00:00',
+  blackoutTimezone: 'Africa/Lagos',
 };

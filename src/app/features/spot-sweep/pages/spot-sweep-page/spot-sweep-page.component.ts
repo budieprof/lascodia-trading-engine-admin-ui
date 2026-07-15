@@ -283,6 +283,51 @@ import {
               </p>
             </div>
 
+            <!-- Daily signal blackout — an operator-defined quiet window
+                 (local time in the chosen timezone, wraps midnight) during
+                 which the sweep parks entirely: no LLM analyses, no signal
+                 generation. Overrides the session windows above. -->
+            <div class="field">
+              <label class="inline-check">
+                <input
+                  type="checkbox"
+                  [checked]="cfg.blackoutEnabled"
+                  (change)="patch({ blackoutEnabled: $any($event.target).checked })"
+                />
+                <span><strong>Daily signal blackout</strong></span>
+              </label>
+              @if (cfg.blackoutEnabled) {
+                <div class="blackout-row">
+                  <input
+                    type="time"
+                    [value]="cfg.blackoutStart"
+                    (change)="patch({ blackoutStart: $any($event.target).value || '22:00' })"
+                  />
+                  <span class="muted small">to</span>
+                  <input
+                    type="time"
+                    [value]="cfg.blackoutEnd"
+                    (change)="patch({ blackoutEnd: $any($event.target).value || '00:00' })"
+                  />
+                  <select
+                    [value]="cfg.blackoutTimezone"
+                    (change)="patch({ blackoutTimezone: $any($event.target).value })"
+                  >
+                    @for (tz of blackoutTimezones; track tz.id) {
+                      <option [value]="tz.id" [selected]="cfg.blackoutTimezone === tz.id">
+                        {{ tz.label }}
+                      </option>
+                    }
+                  </select>
+                </div>
+              }
+              <span class="muted small">
+                During this window each day the sweep parks entirely — no LLM analyses, no signal
+                generation. Overrides the session windows; an end at or before the start wraps past
+                midnight (22:00 → 00:00 = 10 PM to midnight). Manual Spot Analysis is unaffected.
+              </span>
+            </div>
+
             <!-- Signal expiration — how long a sweep-created signal lives
                  before the engine auto-cancels it. Stored in seconds to
                  match the rest of this config; the helper line below
@@ -888,6 +933,19 @@ import {
       .session-check-list li {
         display: flex;
       }
+      .blackout-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 6px 0;
+      }
+      .blackout-row input[type='time'] {
+        width: auto;
+      }
+      .blackout-row select {
+        width: auto;
+        min-width: 180px;
+      }
       .inline-check {
         display: flex;
         align-items: center;
@@ -1299,7 +1357,15 @@ export class SpotSweepPageComponent implements OnDestroy {
     this.loading.set(true);
     this.svc.getConfig().subscribe({
       next: (cfg) => {
-        this.config.set(cfg);
+        // Normalise blackout fields for configs saved before the feature
+        // existed so the inputs always have concrete values.
+        this.config.set({
+          ...cfg,
+          blackoutEnabled: cfg.blackoutEnabled ?? false,
+          blackoutStart: cfg.blackoutStart || '22:00',
+          blackoutEnd: cfg.blackoutEnd || '00:00',
+          blackoutTimezone: cfg.blackoutTimezone || 'Africa/Lagos',
+        });
         // Seed the timeframe selector from existing pairs (uniform timeframe).
         if (cfg.pairs.length > 0) this.sweepTimeframe.set(cfg.pairs[0].timeframe);
         this.dirty.set(false);
@@ -1356,6 +1422,16 @@ export class SpotSweepPageComponent implements OnDestroy {
     { name: 'Tokyo', label: 'Tokyo', window: '00:00 → 09:00', startHour: 0, endHour: 9 },
     { name: 'London', label: 'London', window: '08:00 → 17:00', startHour: 8, endHour: 17 },
     { name: 'NewYork', label: 'New York', window: '13:00 → 22:00', startHour: 13, endHour: 22 },
+  ];
+
+  /** Timezone choices for the daily blackout window (IANA ids the engine resolves). */
+  readonly blackoutTimezones: { id: string; label: string }[] = [
+    { id: 'Africa/Lagos', label: 'WAT — Africa/Lagos (UTC+1)' },
+    { id: 'UTC', label: 'UTC' },
+    { id: 'Europe/London', label: 'Europe/London' },
+    { id: 'America/New_York', label: 'America/New_York' },
+    { id: 'Asia/Tokyo', label: 'Asia/Tokyo' },
+    { id: 'Australia/Sydney', label: 'Australia/Sydney' },
   ];
 
   isSessionSelected(name: SweepSession): boolean {
