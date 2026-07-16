@@ -290,6 +290,32 @@ const WINDOW_OPTIONS = [
               title="Confidence floor for the cohort. Accepts 0–1 (fraction) or 1–100 (percent): 70 = 0.70."
             />
           </label>
+          <label class="field">
+            <span>Early exit at adverse (R)</span>
+            <input
+              type="number"
+              step="0.05"
+              min="0.05"
+              max="0.95"
+              [(ngModel)]="earlyExitAdverseR"
+              name="earlyExitAdverseR"
+              placeholder="off"
+              title="Signal-level cut: close the first time adverse excursion reaches this fraction of the SL distance. Blank = off."
+            />
+          </label>
+          <label class="field">
+            <span>… unless MFE ≥ (R)</span>
+            <input
+              type="number"
+              step="0.05"
+              min="0"
+              max="3"
+              [(ngModel)]="earlyExitMfeGuardR"
+              name="earlyExitMfeGuardR"
+              placeholder="0.2"
+              title="Went-green exemption: once the signal's favourable excursion has reached this many R, the early cut is disarmed. 0 = cut purely on adverse excursion."
+            />
+          </label>
         </div>
         <div class="filter-row">
           <label class="field field--wide">
@@ -400,6 +426,9 @@ const WINDOW_OPTIONS = [
             <div class="kpi-sub">
               {{ r.aggregate.hitTpCount }} TP / {{ r.aggregate.hitSlCount }} SL /
               {{ r.aggregate.expiredCount }} exp
+              @if (r.aggregate.earlyExitCount > 0) {
+                · {{ r.aggregate.earlyExitCount }} early-exit
+              }
               @if (r.aggregate.entryNotReachedCount > 0) {
                 · {{ r.aggregate.entryNotReachedCount }} unfilled
               }
@@ -985,6 +1014,7 @@ const WINDOW_OPTIONS = [
                         class="outcome-chip"
                         [class.chip--tp]="s.outcome === 'HitTP'"
                         [class.chip--sl]="s.outcome === 'HitSL'"
+                        [class.chip--early]="s.outcome === 'EarlyExit'"
                         [class.chip--exp]="s.outcome === 'Expired'"
                         [class.chip--unfilled]="s.outcome === 'EntryNotReached'"
                       >
@@ -1139,6 +1169,7 @@ const WINDOW_OPTIONS = [
                     class="outcome-chip"
                     [class.chip--tp]="s.outcome === 'HitTP'"
                     [class.chip--sl]="s.outcome === 'HitSL'"
+                    [class.chip--early]="s.outcome === 'EarlyExit'"
                     [class.chip--exp]="s.outcome === 'Expired'"
                   >
                     {{ s.outcome }}
@@ -1888,6 +1919,10 @@ const WINDOW_OPTIONS = [
         background: rgba(255, 69, 58, 0.18);
         color: #c4290a;
       }
+      .chip--early {
+        background: rgba(255, 159, 10, 0.2);
+        color: #9a5b00;
+      }
       .chip--exp {
         background: rgba(142, 142, 147, 0.18);
         color: var(--text-secondary);
@@ -2223,6 +2258,10 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly expiryOverrideHours = signal<number | null>(null);
   /** Minimum signal confidence for cohort membership. null = no floor. Accepts 0–1 (fraction) or 1–100 (percent). */
   readonly minConfidence = signal<number | null>(null);
+  /** Early-exit simulation: cut at this adverse excursion (R of SL distance). null = rule off. */
+  readonly earlyExitAdverseR = signal<number | null>(null);
+  /** Early-exit "went green" exemption: once MFE ≥ this (R), the cut is disarmed. */
+  readonly earlyExitMfeGuardR = signal<number | null>(0.2);
 
   /** Normalises the min-confidence input to the 0–1 scale (70 → 0.70); null/0 → undefined (no floor). */
   private normalizedMinConfidence(): number | undefined {
@@ -2911,6 +2950,15 @@ export class SignalSensitivityPageComponent implements OnInit {
         // Percent-scale input normalises client-side too (70 → 0.70) so the
         // request reads unambiguously in logs; the server applies the same rule.
         minConfidence: this.normalizedMinConfidence(),
+        // Signal-level early-exit simulation. Blank threshold → rule off.
+        earlyExitAdverseR:
+          this.earlyExitAdverseR() && this.earlyExitAdverseR()! > 0
+            ? this.earlyExitAdverseR()!
+            : undefined,
+        earlyExitMfeGuardR:
+          this.earlyExitAdverseR() && this.earlyExitAdverseR()! > 0
+            ? Math.max(this.earlyExitMfeGuardR() ?? 0, 0)
+            : undefined,
       })
       .pipe(
         catchError((err) => {

@@ -4570,6 +4570,8 @@ export interface AnalyzeSignalSensitivityAggregateDto {
   walkable: number;
   hitTpCount: number;
   hitSlCount: number;
+  /** Signals cut by the early-exit rule (adverse ≥ threshold before MFE guard). */
+  earlyExitCount: number;
   expiredCount: number;
   /** Signals where market never touched entry price within validity window. */
   entryNotReachedCount: number;
@@ -4766,6 +4768,14 @@ export interface AnalyzeSignalSensitivityRequest {
    * (70 → 0.70).
    */
   minConfidence?: number;
+  /**
+   * Signal-level early-exit simulation: close the first time adverse
+   * excursion reaches this fraction of the SL distance (0 < x < 1), unless
+   * running MFE already reached earlyExitMfeGuardR. Omitted = rule off.
+   */
+  earlyExitAdverseR?: number;
+  /** "Went green" exemption for the early exit, in R. 0 = no exemption. */
+  earlyExitMfeGuardR?: number;
   fromUtc?: string;
   toUtc?: string;
   tpMultiplier?: number;
