@@ -4776,6 +4776,14 @@ export interface AnalyzeSignalSensitivityRequest {
   earlyExitAdverseR?: number;
   /** "Went green" exemption for the early exit, in R. 0 = no exemption. */
   earlyExitMfeGuardR?: number;
+  /**
+   * Thesis-flip exit: close a filled signal at the first later
+   * opposite-direction cohort signal on the same symbol (the analyser
+   * contradicting the open thesis).
+   */
+  exitOnOppositeSignal?: boolean;
+  /** Confidence floor for the opposite signal. Omitted/0 = any. */
+  oppositeSignalMinConfidence?: number;
   fromUtc?: string;
   toUtc?: string;
   tpMultiplier?: number;

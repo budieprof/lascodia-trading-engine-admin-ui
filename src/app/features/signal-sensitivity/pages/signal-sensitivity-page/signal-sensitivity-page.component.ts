@@ -316,6 +316,28 @@ const WINDOW_OPTIONS = [
               title="Went-green exemption: once the signal's favourable excursion has reached this many R, the early cut is disarmed. 0 = cut purely on adverse excursion."
             />
           </label>
+          <label class="field field--check">
+            <span>Thesis-flip exit</span>
+            <span class="flip-row">
+              <input
+                type="checkbox"
+                [(ngModel)]="exitOnOppositeSignal"
+                name="exitOnOppositeSignal"
+                title="Close a filled signal when a LATER signal on the same symbol is generated in the OPPOSITE direction — the analyser contradicting the open thesis."
+              />
+              <input
+                type="number"
+                step="0.05"
+                min="0"
+                max="1"
+                [(ngModel)]="oppositeSignalMinConfidence"
+                name="oppositeSignalMinConfidence"
+                placeholder="any conf"
+                [disabled]="!exitOnOppositeSignal"
+                title="Minimum confidence the opposite signal must carry. Blank/0 = any opposite signal triggers the exit."
+              />
+            </span>
+          </label>
         </div>
         <div class="filter-row">
           <label class="field field--wide">
@@ -1296,6 +1318,18 @@ const WINDOW_OPTIONS = [
         opacity: 0.7;
         font-weight: 600;
       }
+      .flip-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        text-transform: none;
+        letter-spacing: normal;
+        opacity: 1;
+        font-weight: 400;
+      }
+      .flip-row input[type='number'] {
+        width: 90px;
+      }
       .field--wide {
         flex: 1 1 280px;
       }
@@ -2262,6 +2296,10 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly earlyExitAdverseR = signal<number | null>(null);
   /** Early-exit "went green" exemption: once MFE ≥ this (R), the cut is disarmed. */
   readonly earlyExitMfeGuardR = signal<number | null>(0.2);
+  /** Thesis-flip exit: close when a later opposite-direction signal appears on the symbol. */
+  readonly exitOnOppositeSignal = signal<boolean>(false);
+  /** Confidence floor for the opposite signal. null/0 = any. */
+  readonly oppositeSignalMinConfidence = signal<number | null>(null);
 
   /** Normalises the min-confidence input to the 0–1 scale (70 → 0.70); null/0 → undefined (no floor). */
   private normalizedMinConfidence(): number | undefined {
@@ -2958,6 +2996,12 @@ export class SignalSensitivityPageComponent implements OnInit {
         earlyExitMfeGuardR:
           this.earlyExitAdverseR() && this.earlyExitAdverseR()! > 0
             ? Math.max(this.earlyExitMfeGuardR() ?? 0, 0)
+            : undefined,
+        // Thesis-flip exit: analyser contradiction closes the signal.
+        exitOnOppositeSignal: this.exitOnOppositeSignal() || undefined,
+        oppositeSignalMinConfidence:
+          this.exitOnOppositeSignal() && (this.oppositeSignalMinConfidence() ?? 0) > 0
+            ? this.oppositeSignalMinConfidence()!
             : undefined,
       })
       .pipe(
