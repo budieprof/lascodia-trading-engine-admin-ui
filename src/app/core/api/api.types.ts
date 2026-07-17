@@ -4572,6 +4572,8 @@ export interface AnalyzeSignalSensitivityAggregateDto {
   hitSlCount: number;
   /** Signals cut by the early-exit rule (adverse ≥ threshold before MFE guard). */
   earlyExitCount: number;
+  /** Signals refused by the auto direction-bias simulation (direction blocked at generation). */
+  biasBlockedCount: number;
   expiredCount: number;
   /** Signals where market never touched entry price within validity window. */
   entryNotReachedCount: number;
@@ -4784,6 +4786,23 @@ export interface AnalyzeSignalSensitivityRequest {
   exitOnOppositeSignal?: boolean;
   /** Confidence floor for the opposite signal. Omitted/0 = any. */
   oppositeSignalMinConfidence?: number;
+  /**
+   * Auto direction-bias simulation (mirrors DirectionBiasAutoWorker):
+   * chronological replay blocking/unblocking each direction from its rolling
+   * signal expectancy. Blocked signals become BiasBlocked (zero P&L) but
+   * still feed the feedback window like live ghosts.
+   */
+  autoDirectionBias?: boolean;
+  /** Rolling lookback hours (default 24 — validated optimum). */
+  autoBiasLookbackHours?: number;
+  /** Min resolved outcomes before a flip (default 15). */
+  autoBiasMinResolved?: number;
+  /** Block a direction below this rolling expectancy in R (default −0.05). */
+  autoBiasBlockBelowExpR?: number;
+  /** Unblock above this rolling expectancy in R (default +0.05). */
+  autoBiasUnblockAboveExpR?: number;
+  /** Anti-flap dwell between simulated flips, minutes (default 240). */
+  autoBiasMinDwellMinutes?: number;
   fromUtc?: string;
   toUtc?: string;
   tpMultiplier?: number;

@@ -317,6 +317,29 @@ const WINDOW_OPTIONS = [
             />
           </label>
           <label class="field field--check">
+            <span>Auto direction bias</span>
+            <span class="flip-row">
+              <input
+                type="checkbox"
+                [(ngModel)]="autoDirectionBias"
+                name="autoDirectionBias"
+                title="Simulate the live DirectionBiasAutoWorker: block a direction when its rolling signal expectancy turns negative, unblock when it recovers (hysteresis + dwell). Blocked signals show as BiasBlocked with zero P&L but still feed the feedback window, like live ghosts."
+              />
+              <input
+                type="number"
+                step="1"
+                min="4"
+                max="168"
+                [(ngModel)]="autoBiasLookbackHours"
+                name="autoBiasLookbackHours"
+                placeholder="24"
+                [disabled]="!autoDirectionBias"
+                title="Rolling expectancy lookback in hours (24 validated best on the 30-day replay). Other knobs use the live worker's defaults."
+              />
+              <span class="muted small">h</span>
+            </span>
+          </label>
+          <label class="field field--check">
             <span>Thesis-flip exit</span>
             <span class="flip-row">
               <input
@@ -450,6 +473,9 @@ const WINDOW_OPTIONS = [
               {{ r.aggregate.expiredCount }} exp
               @if (r.aggregate.earlyExitCount > 0) {
                 · {{ r.aggregate.earlyExitCount }} early-exit
+              }
+              @if (r.aggregate.biasBlockedCount > 0) {
+                · {{ r.aggregate.biasBlockedCount }} bias-blocked
               }
               @if (r.aggregate.entryNotReachedCount > 0) {
                 · {{ r.aggregate.entryNotReachedCount }} unfilled
@@ -1037,6 +1063,7 @@ const WINDOW_OPTIONS = [
                         [class.chip--tp]="s.outcome === 'HitTP'"
                         [class.chip--sl]="s.outcome === 'HitSL'"
                         [class.chip--early]="s.outcome === 'EarlyExit'"
+                        [class.chip--blocked]="s.outcome === 'BiasBlocked'"
                         [class.chip--exp]="s.outcome === 'Expired'"
                         [class.chip--unfilled]="s.outcome === 'EntryNotReached'"
                       >
@@ -1957,6 +1984,10 @@ const WINDOW_OPTIONS = [
         background: rgba(255, 159, 10, 0.2);
         color: #9a5b00;
       }
+      .chip--blocked {
+        background: rgba(120, 120, 128, 0.16);
+        color: #5b5b66;
+      }
       .chip--exp {
         background: rgba(142, 142, 147, 0.18);
         color: var(--text-secondary);
@@ -2296,6 +2327,10 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly earlyExitAdverseR = signal<number | null>(null);
   /** Early-exit "went green" exemption: once MFE ≥ this (R), the cut is disarmed. */
   readonly earlyExitMfeGuardR = signal<number | null>(0.2);
+  /** Auto direction-bias simulation (mirrors DirectionBiasAutoWorker). */
+  readonly autoDirectionBias = signal<boolean>(false);
+  /** Rolling-expectancy lookback for the auto-bias simulation, hours. */
+  readonly autoBiasLookbackHours = signal<number | null>(24);
   /** Thesis-flip exit: close when a later opposite-direction signal appears on the symbol. */
   readonly exitOnOppositeSignal = signal<boolean>(false);
   /** Confidence floor for the opposite signal. null/0 = any. */
@@ -2996,6 +3031,12 @@ export class SignalSensitivityPageComponent implements OnInit {
         earlyExitMfeGuardR:
           this.earlyExitAdverseR() && this.earlyExitAdverseR()! > 0
             ? Math.max(this.earlyExitMfeGuardR() ?? 0, 0)
+            : undefined,
+        // Auto direction-bias simulation (worker-parity defaults except lookback).
+        autoDirectionBias: this.autoDirectionBias() || undefined,
+        autoBiasLookbackHours:
+          this.autoDirectionBias() && (this.autoBiasLookbackHours() ?? 0) >= 4
+            ? Math.trunc(this.autoBiasLookbackHours()!)
             : undefined,
         // Thesis-flip exit: analyser contradiction closes the signal.
         exitOnOppositeSignal: this.exitOnOppositeSignal() || undefined,
