@@ -267,17 +267,6 @@ const WINDOW_OPTIONS = [
             />
           </label>
           <label class="field">
-            <span>Expiry override (hours)</span>
-            <input
-              type="number"
-              step="0.5"
-              min="0"
-              [(ngModel)]="expiryOverrideHours"
-              name="expiryOverrideHours"
-              placeholder="use signal's own"
-            />
-          </label>
-          <label class="field">
             <span>Min confidence</span>
             <input
               type="number"
@@ -444,7 +433,7 @@ const WINDOW_OPTIONS = [
             >
               {{ r.aggregate.unrealizedPnL | currency: 'USD' }}
             </div>
-            <div class="kpi-sub">from {{ r.aggregate.expiredCount }} expired · mark-to-market</div>
+            <div class="kpi-sub">from {{ r.aggregate.expiredCount }} open · mark-to-market</div>
           </div>
           <div class="kpi">
             <div class="kpi-label">Total P&amp;L</div>
@@ -470,7 +459,7 @@ const WINDOW_OPTIONS = [
             <div class="kpi-value">{{ r.aggregate.walkable | number }}</div>
             <div class="kpi-sub">
               {{ r.aggregate.hitTpCount }} TP / {{ r.aggregate.hitSlCount }} SL /
-              {{ r.aggregate.expiredCount }} exp
+              {{ r.aggregate.expiredCount }} open
               @if (r.aggregate.earlyExitCount > 0) {
                 · {{ r.aggregate.earlyExitCount }} early-exit
               }
@@ -529,7 +518,7 @@ const WINDOW_OPTIONS = [
                 >
                   {{ opt.unrealizedPnL | currency: 'USD' }}
                 </div>
-                <div class="kpi-sub">from {{ opt.expiredCount }} expired · mark-to-market</div>
+                <div class="kpi-sub">from {{ opt.expiredCount }} open · mark-to-market</div>
               </div>
               <div class="kpi kpi--optimal">
                 <div class="kpi-label">Total P&amp;L</div>
@@ -554,7 +543,7 @@ const WINDOW_OPTIONS = [
                 <div class="kpi-label">Outcome mix</div>
                 <div class="kpi-value">{{ opt.walkable | number }}</div>
                 <div class="kpi-sub">
-                  {{ opt.hitTpCount }} TP / {{ opt.hitSlCount }} SL / {{ opt.expiredCount }} exp
+                  {{ opt.hitTpCount }} TP / {{ opt.hitSlCount }} SL / {{ opt.expiredCount }} open
                   @if (opt.entryNotReachedCount > 0) {
                     · {{ opt.entryNotReachedCount }} unfilled
                   }
@@ -655,7 +644,7 @@ const WINDOW_OPTIONS = [
                     <th class="num">Win%</th>
                     <th class="num">TP</th>
                     <th class="num">SL</th>
-                    <th class="num">Exp</th>
+                    <th class="num">Open</th>
                     <th class="num">Realized</th>
                     <th class="num">Unrealized</th>
                     <th class="num">PF</th>
@@ -875,7 +864,7 @@ const WINDOW_OPTIONS = [
                   <th class="num">Win%</th>
                   <th class="num">TP</th>
                   <th class="num">SL</th>
-                  <th class="num">Exp</th>
+                  <th class="num">Open</th>
                   <th class="num">Avg P&amp;L</th>
                 </tr>
               </thead>
@@ -1064,7 +1053,7 @@ const WINDOW_OPTIONS = [
                         [class.chip--sl]="s.outcome === 'HitSL'"
                         [class.chip--early]="s.outcome === 'EarlyExit'"
                         [class.chip--blocked]="s.outcome === 'BiasBlocked'"
-                        [class.chip--exp]="s.outcome === 'Expired'"
+                        [class.chip--exp]="s.outcome === 'Open'"
                         [class.chip--unfilled]="s.outcome === 'EntryNotReached'"
                       >
                         {{ s.outcome }}
@@ -1219,15 +1208,14 @@ const WINDOW_OPTIONS = [
                     [class.chip--tp]="s.outcome === 'HitTP'"
                     [class.chip--sl]="s.outcome === 'HitSL'"
                     [class.chip--early]="s.outcome === 'EarlyExit'"
-                    [class.chip--exp]="s.outcome === 'Expired'"
+                    [class.chip--exp]="s.outcome === 'Open'"
                   >
                     {{ s.outcome }}
                   </span>
                 </h2>
                 <p class="modal-sub">
                   Triggered {{ s.triggeredAt | date: 'medium' }} · Generated
-                  {{ s.generatedAt | date: 'medium' }} → expires {{ s.expiresAt | date: 'short' }} ·
-                  {{ s.source }} · scenario P&amp;L
+                  {{ s.generatedAt | date: 'medium' }} · {{ s.source }} · scenario P&amp;L
                   <strong [class.profit]="s.scenarioPnL > 0" [class.loss]="s.scenarioPnL < 0">
                     {{ s.scenarioPnL | currency: 'USD' }}
                   </strong>
@@ -2320,7 +2308,6 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly slMultiplier = signal<number>(1.0);
   readonly sweepInput = signal<string>('0.5, 0.75, 1.0, 1.25, 1.5');
   /** Hours override for signal validity. null = use signal's persisted ExpiresAt. */
-  readonly expiryOverrideHours = signal<number | null>(null);
   /** Minimum signal confidence for cohort membership. null = no floor. Accepts 0–1 (fraction) or 1–100 (percent). */
   readonly minConfidence = signal<number | null>(null);
   /** Early-exit simulation: cut at this adverse excursion (R of SL distance). null = rule off. */
@@ -2722,7 +2709,7 @@ export class SignalSensitivityPageComponent implements OnInit {
             Realized: ${cur(a.realizedPnL)}<br/>
             Unrealized: ${cur(a.unrealizedPnL)}<br/>
             Profit factor: ${fmt(a.profitFactor)}<br/>
-            Walkable: ${a.walkable} · Expired: ${a.expiredCount}
+            Walkable: ${a.walkable} · Open: ${a.expiredCount}
           `;
         },
       },
@@ -2938,7 +2925,7 @@ export class SignalSensitivityPageComponent implements OnInit {
   /**
    * Hours between the signal's GeneratedAt and the resolving TP / SL hit.
    * Returns '—' for outcomes that don't represent a TP/SL resolution
-   * (Expired, EntryNotReached, NoCandles) since "time to resolution" is
+   * (Open, EntryNotReached, NoCandles) since "time to resolution" is
    * only meaningful when the position actually closed at a barrier.
    * Renders to one decimal place.
    */
@@ -3013,12 +3000,6 @@ export class SignalSensitivityPageComponent implements OnInit {
         signalDetailCap: 0,
         riskProfileId: riskProfileId ?? undefined,
         startingBalance,
-        // Operator's what-if expiry override (hours). Empty/0 → omit so the
-        // walker uses each signal's persisted ExpiresAt.
-        expiryOverrideHours:
-          this.expiryOverrideHours() && this.expiryOverrideHours()! > 0
-            ? this.expiryOverrideHours()!
-            : undefined,
         // Confidence floor for cohort membership. Empty/0 → omit (no floor).
         // Percent-scale input normalises client-side too (70 → 0.70) so the
         // request reads unambiguously in logs; the server applies the same rule.
@@ -3200,10 +3181,9 @@ export class SignalSensitivityPageComponent implements OnInit {
     const nowMs = Date.now();
 
     // End-of-interest for the window: the resolving exit when the walk
-    // resolved, otherwise the expiry — clamped to "now". A what-if expiry
-    // override can push ExpiresAt decades out (e.g. a 5,000,000h override
-    // lands in 2096), which previously made this window span centuries and
-    // the candle endpoint reject it with a 400.
+    // resolved (still-Open outcomes carry the last-marked candle as exitAt),
+    // falling back to the fill-window expiry for unfilled rows — clamped to
+    // "now" so the candle endpoint never sees a future-dated window.
     const exitMs = s.exitAt ? new Date(s.exitAt).getTime() : NaN;
     const endMs = Math.min(
       Number.isFinite(exitMs) && exitMs > generatedMs ? exitMs : new Date(s.expiresAt).getTime(),

@@ -4574,8 +4574,11 @@ export interface AnalyzeSignalSensitivityAggregateDto {
   earlyExitCount: number;
   /** Signals refused by the auto direction-bias simulation (direction blocked at generation). */
   biasBlockedCount: number;
+  /** Still-OPEN positions: filled but neither TP nor SL touched yet, marked-
+   *  to-market at the last available candle. Field name kept for wire
+   *  back-compat with the LLM-backtest walker's genuine expiry semantics. */
   expiredCount: number;
-  /** Signals where market never touched entry price within validity window. */
+  /** Signals where market never touched entry price within the fill window. */
   entryNotReachedCount: number;
   noCandlesCount: number;
   winCount: number;
@@ -4584,7 +4587,7 @@ export interface AnalyzeSignalSensitivityAggregateDto {
   winRatePct: number;
   /** Realized P&L: sum of HitTP + HitSL outcomes. */
   realizedPnL: number;
-  /** Unrealized P&L: sum of Expired outcomes (mark-to-market at expiry). */
+  /** Unrealized P&L: sum of still-Open outcomes (mark-to-market at the last candle). */
   unrealizedPnL: number;
   /** Total = realizedPnL + unrealizedPnL. */
   sumPnL: number;
@@ -4813,13 +4816,6 @@ export interface AnalyzeSignalSensitivityRequest {
   signalDetailCap?: number;
   riskProfileId?: number;
   startingBalance?: number;
-  /**
-   * What-if expiry override in HOURS. When set, the walker replaces each
-   * signal's ExpiresAt with `generatedAt + this hours`. Floor of 0.5h
-   * enforced server-side; no upper bound. Blank/0 = use signal's persisted
-   * ExpiresAt.
-   */
-  expiryOverrideHours?: number;
   /**
    * When true, analyse PendingSignalRec (parked recs) instead of TradeSignal
    * rows — so recs that never became signals (Rejected/Expired/Parked) are
