@@ -34,6 +34,14 @@ import {
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 
 const SOURCES = ['SpotAnalysis', 'Strategy', 'Manual', 'SyntheticAnalyser'] as const;
+
+// The operator works in WAT (West Africa Time = UTC+1, no DST). The custom
+// From/To pickers are entered and displayed in WAT; the engine speaks UTC, so
+// submit-time conversion appends the fixed offset and the range echo renders
+// with it. Single source of truth for the offset in both forms.
+const WAT_OFFSET_MINUTES = 60;
+const WAT_OFFSET_ISO = '+01:00';
+
 const WINDOW_OPTIONS = [
   { label: '7d', days: 7 },
   { label: '30d', days: 30 },
@@ -86,18 +94,18 @@ const WINDOW_OPTIONS = [
             </select>
           </label>
           <label class="field">
-            <span> From <small class="muted">(custom · UTC)</small> </span>
+            <span> From <small class="muted">(custom · WAT)</small> </span>
             <input
               type="datetime-local"
               [ngModel]="customFromDate()"
               (ngModelChange)="customFromDate.set($event)"
               name="customFromDate"
-              [max]="customToDate() || nowUtcDateTime()"
+              [max]="customToDate() || nowWatDateTime()"
             />
           </label>
           <label class="field">
             <span>
-              To <small class="muted">(custom · UTC)</small>
+              To <small class="muted">(custom · WAT)</small>
               @if (customRangeActive()) {
                 <button
                   type="button"
@@ -115,7 +123,7 @@ const WINDOW_OPTIONS = [
               (ngModelChange)="customToDate.set($event)"
               name="customToDate"
               [min]="customFromDate() || null"
-              [max]="nowUtcDateTime()"
+              [max]="nowWatDateTime()"
             />
           </label>
           <label class="field field--wide">
@@ -387,8 +395,8 @@ const WINDOW_OPTIONS = [
 
       @if (result(); as r) {
         <section class="window-meta">
-          {{ r.fromUtc | date: 'short' }} → {{ r.toUtc | date: 'short' }} ·
-          {{ r.signalCount | number }} signals
+          {{ r.fromUtc | date: 'short' : watOffset }} →
+          {{ r.toUtc | date: 'short' : watOffset }} WAT · {{ r.signalCount | number }} signals
           @if (r.symbol) {
             · {{ r.symbol }}
           }
@@ -2272,12 +2280,14 @@ export class SignalSensitivityPageComponent implements OnInit {
   /**
    * Custom date-range overrides for the Window preset. When BOTH are set,
    * the analyse call uses them verbatim instead of `now − windowDays`.
-   * HTML date inputs produce ISO `YYYY-MM-DD` strings; the run() handler
-   * converts to UTC bounds (00:00 for From, 23:59:59.999 for To).
+   * The `datetime-local` inputs are entered in WAT (UTC+1); run() converts
+   * them to the correct UTC instant before calling the API (see WAT_OFFSET_ISO).
    */
   readonly customFromDate = signal<string | null>(null);
   readonly customToDate = signal<string | null>(null);
   readonly customRangeActive = computed(() => !!this.customFromDate() && !!this.customToDate());
+  /** WAT (UTC+1) offset in the Angular `date` pipe's ±HHmm form, for the range echo. */
+  readonly watOffset = '+0100';
   /** Symbols the operator has committed to filter on. Empty = all symbols. */
   readonly selectedSymbols = signal<string[]>([]);
   /** Live free-text input — committed to selectedSymbols on Enter / comma / blur. */
@@ -2902,13 +2912,14 @@ export class SignalSensitivityPageComponent implements OnInit {
   }
 
   /**
-   * Now formatted as a `YYYY-MM-DDTHH:mm` string in UTC.  Used to cap the
-   * From/To max attribute (can't pick a future moment).  The picker
-   * itself is operated as UTC (its raw value is interpreted as UTC at
-   * submit time, see run()), so the cap is also in UTC for consistency.
+   * Now formatted as a `YYYY-MM-DDTHH:mm` string in WAT (West Africa Time,
+   * UTC+1, no DST).  Used to cap the From/To max attribute (can't pick a
+   * future moment).  The picker is operated in WAT (its raw value is
+   * interpreted as WAT at submit time, see run()), so the cap is WAT too.
+   * WAT wall-clock = UTC + 1h; add the offset then read UTC components.
    */
-  nowUtcDateTime(): string {
-    const d = new Date();
+  nowWatDateTime(): string {
+    const d = new Date(Date.now() + WAT_OFFSET_MINUTES * 60_000);
     const pad = (n: number) => n.toString().padStart(2, '0');
     return (
       `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}` +
@@ -2947,18 +2958,18 @@ export class SignalSensitivityPageComponent implements OnInit {
 
     // Custom range overrides the Window preset when BOTH timestamps are
     // set.  `datetime-local` inputs produce `YYYY-MM-DDTHH:mm` strings
-    // with no zone suffix; we want them interpreted as UTC (operator
-    // cross-references engine timestamps which are UTC).  Append ':00Z'
-    // so the parser treats the value as UTC verbatim — picking "14:30"
-    // on the picker now means 14:30 UTC, not local 14:30.
+    // with no zone suffix; the operator enters them in WAT (West Africa
+    // Time, UTC+1, no DST).  Append ':00+01:00' so the parser reads the
+    // value as WAT and yields the correct UTC instant — picking "14:30"
+    // means 14:30 WAT = 13:30 UTC.  The API still receives UTC (toISOString).
     const now = new Date();
     let fromUtc: Date;
     let toUtc: Date;
     const cf = this.customFromDate();
     const ct = this.customToDate();
     if (cf && ct) {
-      fromUtc = new Date(cf + ':00Z');
-      toUtc = new Date(ct + ':00Z');
+      fromUtc = new Date(cf + ':00' + WAT_OFFSET_ISO);
+      toUtc = new Date(ct + ':00' + WAT_OFFSET_ISO);
     } else {
       toUtc = now;
       fromUtc = new Date(now.getTime() - this.windowDays() * 24 * 60 * 60 * 1000);
