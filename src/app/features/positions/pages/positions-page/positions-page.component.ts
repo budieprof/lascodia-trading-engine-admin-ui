@@ -10,7 +10,6 @@ import {
   ViewChild,
   effect,
 } from '@angular/core';
-import { Router } from '@angular/router';
 import { catchError, forkJoin, map, merge, Observable, of, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
@@ -548,168 +547,10 @@ import {
         }
       </ui-tabs>
 
-      <!-- Detail drawer -->
-      @if (selectedDetail(); as p) {
-        <div class="drawer-backdrop" (click)="selectedDetail.set(null)">
-          <aside class="drawer" (click)="$event.stopPropagation()" aria-label="Position details">
-            <header class="drawer-head">
-              <div>
-                <h3>Position #{{ p.id }}</h3>
-                <span class="muted">
-                  {{ p.symbol }} · {{ p.direction }} · {{ p.status }}
-                  @if (p.isPaper) {
-                    · paper
-                  }
-                </span>
-              </div>
-              <div class="drawer-head-actions">
-                <!-- Same chart modal used by the EA detail page; renders the
-                     position's entry/SL/TP against the bar history. -->
-                <button
-                  type="button"
-                  class="btn-chart"
-                  (click)="openChartFor(p)"
-                  title="Visualise this position on a candle chart"
-                >
-                  View chart
-                </button>
-                <button class="btn-close" (click)="selectedDetail.set(null)" aria-label="Close">
-                  ×
-                </button>
-              </div>
-            </header>
-
-            <section class="drawer-section">
-              <h4>Pricing</h4>
-              <dl class="drawer-grid">
-                <div>
-                  <dt>Entry</dt>
-                  <dd class="mono">{{ p.averageEntryPrice.toFixed(5) }}</dd>
-                </div>
-                <div>
-                  <dt>{{ p.status === 'Closed' ? 'Exit' : 'Current' }}</dt>
-                  <dd class="mono">
-                    {{ p.currentPrice !== null ? p.currentPrice.toFixed(5) : '—' }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Stop loss</dt>
-                  <dd class="mono">
-                    {{ p.stopLoss !== null ? p.stopLoss.toFixed(5) : '—' }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Take profit</dt>
-                  <dd class="mono">
-                    {{ p.takeProfit !== null ? p.takeProfit.toFixed(5) : '—' }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Trailing</dt>
-                  <dd class="mono">
-                    {{ p.trailingStopLevel !== null ? p.trailingStopLevel.toFixed(5) : '—' }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Lots</dt>
-                  <dd class="mono">{{ p.openLots.toFixed(2) }}</dd>
-                </div>
-              </dl>
-            </section>
-
-            <section class="drawer-section">
-              <h4>Performance</h4>
-              <dl class="drawer-grid">
-                <div>
-                  <dt>Unrealized P&L</dt>
-                  <dd
-                    class="mono"
-                    [class.profit]="p.unrealizedPnL > 0"
-                    [class.loss]="p.unrealizedPnL < 0"
-                  >
-                    {{ p.unrealizedPnL >= 0 ? '+' : '' }}{{ p.unrealizedPnL.toFixed(2) }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Realized P&L</dt>
-                  <dd
-                    class="mono"
-                    [class.profit]="p.realizedPnL > 0"
-                    [class.loss]="p.realizedPnL < 0"
-                  >
-                    {{ p.realizedPnL >= 0 ? '+' : '' }}{{ p.realizedPnL.toFixed(2) }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>P&L %</dt>
-                  <dd
-                    class="mono"
-                    [class.profit]="pnlPctValue(p) !== null && pnlPctValue(p)! > 0"
-                    [class.loss]="pnlPctValue(p) !== null && pnlPctValue(p)! < 0"
-                  >
-                    {{ pnlPctLabel(p) }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>R-multiple</dt>
-                  <dd
-                    class="mono"
-                    [class.profit]="rMultipleValue(p) !== null && rMultipleValue(p)! > 0"
-                    [class.loss]="rMultipleValue(p) !== null && rMultipleValue(p)! < 0"
-                  >
-                    {{ rMultipleLabel(p) }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>To SL</dt>
-                  <dd class="mono">{{ pipsToSlLabel(p) }}</dd>
-                </div>
-                <div>
-                  <dt>To TP</dt>
-                  <dd class="mono">{{ pipsToTpLabel(p) }}</dd>
-                </div>
-              </dl>
-            </section>
-
-            <section class="drawer-section">
-              <h4>Lifecycle</h4>
-              <dl class="drawer-grid">
-                <div>
-                  <dt>Broker id</dt>
-                  <dd class="mono">{{ p.brokerPositionId ?? '—' }}</dd>
-                </div>
-                <div>
-                  <dt>Mode</dt>
-                  <dd>{{ p.isPaper ? 'Paper' : 'Live' }}</dd>
-                </div>
-                <div>
-                  <dt>Opened</dt>
-                  <dd>{{ formatTs(p.openedAt) }}</dd>
-                </div>
-                <div>
-                  <dt>Closed</dt>
-                  <dd>{{ p.closedAt ? formatTs(p.closedAt) : '—' }}</dd>
-                </div>
-                <div>
-                  <dt>Hold duration</dt>
-                  <dd>{{ holdDurationLabel(p) }}</dd>
-                </div>
-              </dl>
-            </section>
-
-            <footer class="drawer-actions">
-              <button type="button" class="btn btn-link" (click)="goToDetail(p)">
-                Open detail page →
-              </button>
-            </footer>
-          </aside>
-        </div>
-      }
-
-      <!-- Shared trade-chart modal: closed-row clicks open it directly; the
-           open-position drawer also has a "View chart" button that triggers
-           the same modal. action=null suppresses the destructive footer
-           that the EA panel uses for Close/Cancel actions. -->
+      <!-- Shared trade-chart modal: every position row click opens it directly
+           (open or closed), visualising entry / SL / TP / exit against the bar
+           history. action=null keeps it read-only — closing is an inline row
+           action, so the modal doesn't need the EA panel's destructive footer. -->
       <app-ea-trade-chart-modal
         [selection]="chartSelection()"
         [open]="chartOpen()"
@@ -993,120 +834,6 @@ import {
         font-variant-numeric: tabular-nums;
       }
 
-      /* Detail drawer */
-      .drawer-backdrop {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.35);
-        z-index: 100;
-        display: flex;
-        justify-content: flex-end;
-      }
-      .drawer {
-        width: 100%;
-        max-width: 460px;
-        background: var(--bg-secondary);
-        border-left: 1px solid var(--border);
-        box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
-        display: flex;
-        flex-direction: column;
-        overflow-y: auto;
-      }
-      .drawer-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: var(--space-4) var(--space-5);
-        border-bottom: 1px solid var(--border);
-      }
-      .drawer-head h3 {
-        margin: 0;
-        font-size: var(--text-base);
-        font-weight: var(--font-semibold);
-      }
-      .drawer-head .muted {
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-      }
-      .btn-close {
-        background: transparent;
-        border: none;
-        font-size: 22px;
-        cursor: pointer;
-        color: var(--text-tertiary);
-      }
-      .drawer-head-actions {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-      }
-      .btn-chart {
-        height: 28px;
-        padding: 0 12px;
-        border-radius: var(--radius-sm);
-        background: transparent;
-        border: 1px solid var(--border);
-        color: var(--accent);
-        font-size: 12px;
-        font-weight: var(--font-semibold);
-        cursor: pointer;
-        font-family: inherit;
-      }
-      .btn-chart:hover {
-        background: rgba(0, 113, 227, 0.08);
-        border-color: var(--accent);
-      }
-      .drawer-section {
-        padding: var(--space-3) var(--space-5);
-        border-bottom: 1px solid var(--border);
-      }
-      .drawer-section h4 {
-        margin: 0 0 var(--space-2);
-        font-size: var(--text-xs);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--text-tertiary);
-        font-weight: var(--font-semibold);
-      }
-      .drawer-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: var(--space-2) var(--space-3);
-        margin: 0;
-      }
-      .drawer-grid dt {
-        font-size: 10.5px;
-        color: var(--text-tertiary);
-        margin: 0;
-      }
-      .drawer-grid dd {
-        margin: 2px 0 0;
-        font-size: var(--text-sm);
-        color: var(--text-primary);
-      }
-      .drawer-grid dd.mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        font-size: var(--text-xs);
-      }
-      .drawer-grid dd.profit {
-        color: var(--profit);
-      }
-      .drawer-grid dd.loss {
-        color: var(--loss);
-      }
-      .drawer-actions {
-        padding: var(--space-4) var(--space-5);
-        display: flex;
-        gap: var(--space-2);
-      }
-      .drawer-actions .btn {
-        flex: 1;
-        height: 36px;
-        border: none;
-        border-radius: var(--radius-full);
-        cursor: pointer;
-        font-weight: var(--font-medium);
-      }
       .btn-secondary {
         background: var(--bg-tertiary);
         color: var(--text-primary);
@@ -1125,7 +852,6 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   private readonly positionsService = inject(PositionsService);
   private readonly marketData = inject(MarketDataService);
   protected readonly accountScope = inject(AccountScopeService);
-  private readonly router = inject(Router);
   private readonly realtime = inject(RealtimeService);
   private readonly notifications = inject(NotificationService);
   private readonly destroyRef = inject(DestroyRef);
@@ -1247,10 +973,6 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   }
 
   @ViewChild('closedTable') closedTable?: DataTableComponent<PositionDto>;
-
-  goToDetail(row: PositionDto): void {
-    if (row?.id != null) this.router.navigate(['/positions', row.id]);
-  }
 
   @ViewChild('openTable') openTable?: DataTableComponent<PositionDto>;
 
@@ -1571,8 +1293,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
     },
   ];
 
-  // ── Selection / drawer / filters ──────────────────────────────────
-  readonly selectedDetail = signal<PositionDto | null>(null);
+  // ── Filters ────────────────────────────────────────────────────────
   readonly closedFilter = signal<'all' | 'wins' | 'losses' | 'today'>('all');
 
   readonly closedWinsCount = computed(
@@ -1590,17 +1311,11 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   });
 
   onRowClick(p: PositionDto): void {
-    // Closed positions → open the chart modal directly so the operator sees
-    // entry / SL / TP / exit visualised against the bar history (matches
-    // the EA detail page behaviour). The side drawer's pricing fields are
-    // strictly a subset of what the chart shows.
-    // Open positions → keep the existing drawer (rich live state: trailing
-    // SL, broker ticket, lifecycle, etc. — none of which the chart shows).
-    if (p.status === 'Closed') {
-      this.openChartFor(p);
-      return;
-    }
-    this.selectedDetail.set(p);
+    // Every row click opens the chart modal directly — entry / SL / TP / exit
+    // (or live price) visualised against the bar history. Operator preference
+    // (2026-07-21): no side drawer. Closing a position is available inline via
+    // the row's Actions button, so the chart stays a focused read view.
+    this.openChartFor(p);
   }
 
   // ── Click-to-chart for closed positions ────────────────────────────────
@@ -1709,28 +1424,6 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   pipsToTpLabel(p: PositionDto): string {
     const v = pipsToTp(p);
     return v !== null ? `${v.toFixed(1)}p` : '—';
-  }
-  formatTs(iso: string): string {
-    try {
-      return new Date(iso).toLocaleString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return iso;
-    }
-  }
-  holdDurationLabel(p: PositionDto): string {
-    if (!p.openedAt) return '—';
-    const end = p.closedAt ? new Date(p.closedAt).getTime() : Date.now();
-    const ms = end - new Date(p.openedAt).getTime();
-    if (ms < 0) return '—';
-    if (ms < 60_000) return `${Math.floor(ms / 1000)}s`;
-    if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`;
-    if (ms < 86_400_000) return `${(ms / 3_600_000).toFixed(1)}h`;
-    return `${(ms / 86_400_000).toFixed(1)}d`;
   }
 
   // ── Closed-tab quick stats ───────────────────────────────────────
