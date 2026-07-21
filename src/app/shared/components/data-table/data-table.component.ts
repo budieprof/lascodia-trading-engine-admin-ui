@@ -520,9 +520,21 @@ export class DataTableComponent<T> implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (result) => {
+          const totalPages = result.pager.pageNo || 1;
+          // Guard against a stale out-of-range page: if the dataset shrank
+          // below the current page (account-scope switch, a filter that
+          // narrows the set, positions closing, etc.) the page would render
+          // empty ("Showing 26–7 of 7"). Snap back to the last valid page and
+          // refetch instead of showing nothing. Converges in one hop because
+          // the refetch runs with currentPage == totalPages.
+          if (this.currentPage() > totalPages) {
+            this.currentPage.set(totalPages);
+            this.loadData();
+            return;
+          }
           this.rowData.set(result.data);
           this.totalItems.set(result.pager.totalItemCount);
-          this.totalPages.set(result.pager.pageNo || 1);
+          this.totalPages.set(totalPages);
           this.startItem.set((this.currentPage() - 1) * this.pageSize() + 1);
           this.endItem.set(
             Math.min(this.currentPage() * this.pageSize(), result.pager.totalItemCount),
