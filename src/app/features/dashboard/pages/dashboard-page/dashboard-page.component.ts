@@ -1243,7 +1243,6 @@ export class DashboardPageComponent implements OnInit {
 
   // ── Data signals ──────────────────────────────────────────────────────
   readonly loading = signal(true);
-  readonly equity = signal<number | null>(null);
   // Derived from openPositions() — re-derives when scope changes.
   readonly unrealizedPnl = computed<number | null>(() => {
     const open = this.openPositions();
@@ -1291,6 +1290,12 @@ export class DashboardPageComponent implements OnInit {
     if (match) return match;
     return DashboardPageComponent.aggregateReal(live.filter((a) => !a.isPaper));
   });
+
+  // Account Equity tile — derived from the scoped account() so it re-computes
+  // the instant the header dropdown changes, exactly like the other
+  // account-scoped KPIs. (Previously an imperative signal set only inside
+  // refresh(), so switching accounts left it stale until the next 15s poll.)
+  readonly equity = computed<number | null>(() => this.account()?.equity ?? null);
 
   readonly realAccountCount = computed(() => this.liveAccounts().filter((a) => !a.isPaper).length);
 
@@ -1844,9 +1849,9 @@ export class DashboardPageComponent implements OnInit {
         this.accountScope.eaInstances.set(eaInstances);
         // Selection-staleness fallback is owned by AccountScopeService —
         // it already snaps to the real-aggregate when the persisted
-        // selection points at a no-longer-live account.
-        const acc = this.account();
-        if (acc) this.equity.set(acc.equity);
+        // selection points at a no-longer-live account. Account Equity is a
+        // computed off account(), so it needs no imperative set here — it
+        // re-derives reactively from the refreshed accounts + the scope.
 
         this.allocations.set(allocations);
         this.alerts.set(alerts);
