@@ -11,7 +11,7 @@ import {
   effect,
 } from '@angular/core';
 import { Router } from '@angular/router';
-import { catchError, map, merge, Observable, of, throttleTime } from 'rxjs';
+import { catchError, forkJoin, map, merge, Observable, of, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
 
@@ -115,7 +115,7 @@ import {
           dotColor="#5AC8FA"
         />
         <app-metric-card
-          label="Long / Short"
+          label="Long exposure (lots)"
           [value]="longShortRatioPct()"
           format="percent"
           dotColor="#34C759"
@@ -1222,23 +1222,26 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
         this.loadSummaryData();
       });
 
-    // Re-fetch the closed table whenever the chip filter changes so the
-    // visible page reflects the new bucket. Filtering itself happens
-    // client-side inside fetchClosedPositions; this just kicks the reload.
+    // Re-slice the closed table whenever the chip filter changes OR the
+    // underlying window refreshes (loadSummaryData is async + polls, and the
+    // table client-paginates closedPositions()). Reading both signals here
+    // registers the dependency; loadData() re-runs fetchClosedPositions which
+    // re-filters/sorts/slices the current window. No fetch — pure client work.
     effect(() => {
       this.closedFilter();
+      this.closedPositions();
       if (this.activeTab() === 'closed') {
         this.closedTable?.loadData();
       }
     });
 
-    // Re-fetch both tables (and the summary) whenever the operator
-    // flips the global account-scope dropdown.  Reads the signal
-    // inside the effect to register the dependency.
+    // Re-fetch the summary window whenever the operator flips the global
+    // account-scope dropdown; the open table re-queries too (it still
+    // server-paginates). The closed table re-slices via the effect above once
+    // the fresh window lands.
     effect(() => {
       this.accountScope.accountIds();
       this.openTable?.loadData();
-      this.closedTable?.loadData();
       this.loadSummaryData();
     });
   }
@@ -2467,51 +2470,60 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   // Decorating in one helper keeps the open / closed paths consistent
   // and makes future scope semantics (e.g. include-paper toggle) a
   // one-line change.
-  private scoped(params: PagerRequest): PagerRequest {
+  // Decorate a paged table request with the current account scope AND a
+  // status filter so the grid narrows server-side. The table fetchers below
+  // are for the GRID ONLY — they no longer write the KPI window signals (those
+  // are owned exclusively by loadSummaryData), so a page change can't corrupt
+  // the headline metrics.
+  private scoped(params: PagerRequest, status: 'Open' | 'Closed'): PagerRequest {
     const scopedIds = this.accountScope.accountIds();
-    if (scopedIds.length === 0) return params;
     const filter = {
       ...((params.filter as object | null) ?? {}),
-      tradingAccountIds: Array.from(scopedIds),
+      status,
+      ...(scopedIds.length > 0 ? { tradingAccountIds: Array.from(scopedIds) } : {}),
     };
     return { ...params, filter };
   }
 
   readonly fetchOpenPositions = (params: PagerRequest): Observable<PagedData<PositionDto>> => {
-    return this.positionsService.list(this.scoped(params)).pipe(
+    return this.positionsService.list(this.scoped(params, 'Open')).pipe(
       map((response) => {
         const pagedData = response.data!;
+        // Defensive re-filter for older builds where the status filter no-ops.
         const openOnly = pagedData.data.filter(
           (p) => p.status === 'Open' || p.status === 'Closing',
         );
-        this.openPositions.set(openOnly);
         return { ...pagedData, data: openOnly };
       }),
     );
   };
 
+  // The closed table CLIENT-paginates the loadSummaryData window rather than
+  // issuing its own server query. This is deliberate: the wins/losses/today
+  // chips can't be expressed as PositionQueryFilter, and the engine clamps
+  // page size (~500), so a server-paginated full-history table could never
+  // agree with the window-scoped chip counts + KPIs sitting right above it.
+  // Paginating the same window makes the table, chips, counts, and KPIs one
+  // coherent story (the recent closed window). Filter → search → sort → slice.
   readonly fetchClosedPositions = (params: PagerRequest): Observable<PagedData<PositionDto>> => {
-    return this.positionsService.list(this.scoped(params)).pipe(
-      map((response) => {
-        const pagedData = response.data!;
-        const closedOnly = pagedData.data.filter((p) => p.status === 'Closed');
-        this.closedPositions.set(closedOnly);
-        // Apply the chip filter client-side. Server-side support would need a
-        // bool/today filter on PagerRequestWithFilterType<PositionQueryFilter>.
-        const f = this.closedFilter();
-        let view = closedOnly;
-        if (f === 'wins') view = view.filter((p) => p.realizedPnL > 0);
-        else if (f === 'losses') view = view.filter((p) => p.realizedPnL < 0);
-        else if (f === 'today') {
-          const start = new Date();
-          start.setHours(0, 0, 0, 0);
-          view = view.filter(
-            (p) => p.closedAt && new Date(p.closedAt).getTime() >= start.getTime(),
-          );
-        }
-        return { ...pagedData, data: view };
-      }),
-    );
+    let rows = this.closedPositions();
+
+    const f = this.closedFilter();
+    if (f === 'wins') rows = rows.filter((p) => p.realizedPnL > 0);
+    else if (f === 'losses') rows = rows.filter((p) => p.realizedPnL < 0);
+    else if (f === 'today') {
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      rows = rows.filter((p) => p.closedAt && new Date(p.closedAt).getTime() >= start.getTime());
+    }
+
+    const search = ((params.filter as { search?: string } | null)?.search ?? '')
+      .trim()
+      .toLowerCase();
+    if (search) rows = rows.filter((p) => (p.symbol ?? '').toLowerCase().includes(search));
+
+    rows = sortClosedWindow(rows, params.sortBy, params.sortDirection);
+    return of(pageOf(rows, params));
   };
 
   // ── Analytics Charts (computed from closed positions) ──
@@ -2569,8 +2581,10 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       const sym = p.symbol ?? 'Unknown';
       if (!symbolMap.has(sym)) symbolMap.set(sym, { wins: 0, losses: 0 });
       const entry = symbolMap.get(sym)!;
-      if (p.realizedPnL >= 0) entry.wins++;
-      else entry.losses++;
+      // Consistent with winRatePct / closedWinsCount / per-symbol breakdown:
+      // > 0 is a win, < 0 a loss, exactly 0 is flat (counted as neither).
+      if (p.realizedPnL > 0) entry.wins++;
+      else if (p.realizedPnL < 0) entry.losses++;
     });
 
     const symbols = Array.from(symbolMap.keys());
@@ -2620,59 +2634,6 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
           symbolSize: 8,
           itemStyle: {
             color: (params: any) => (params.value[1] >= 0 ? '#34C759' : '#FF3B30'),
-          },
-        },
-      ],
-      grid: { left: 60, right: 20, bottom: 50, top: 20 },
-    };
-  });
-
-  readonly cumulativePnlChart = computed<EChartsOption>(() => {
-    const positions = this.closedPositions();
-    if (positions.length === 0) return this.emptyChartOption('No data');
-
-    const sorted = [...positions]
-      .filter((p) => p.closedAt)
-      .sort((a, b) => new Date(a.closedAt!).getTime() - new Date(b.closedAt!).getTime());
-
-    let cumulative = 0;
-    const dates: string[] = [];
-    const values: number[] = [];
-
-    sorted.forEach((p) => {
-      cumulative += p.realizedPnL;
-      dates.push(
-        new Date(p.closedAt!).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      );
-      values.push(parseFloat(cumulative.toFixed(2)));
-    });
-
-    const lastVal = values[values.length - 1] ?? 0;
-    const lineColor = lastVal >= 0 ? '#34C759' : '#FF3B30';
-
-    return {
-      tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 10, rotate: 30 } },
-      yAxis: { type: 'value', name: 'Cumulative P&L ($)' },
-      series: [
-        {
-          type: 'line',
-          data: values,
-          smooth: true,
-          lineStyle: { color: lineColor, width: 2 },
-          itemStyle: { color: lineColor },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: lastVal >= 0 ? 'rgba(52,199,89,0.3)' : 'rgba(255,59,48,0.3)' },
-                { offset: 1, color: 'rgba(0,0,0,0)' },
-              ],
-            } as any,
           },
         },
       ],
@@ -2730,14 +2691,11 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
     const positions = this.closedPositions();
     if (positions.length === 0) return this.emptyChartOption('No data');
 
-    // Simulate R-multiples: P&L / risk (using SL distance as proxy for risk)
-    const rValues = positions
-      .filter((p) => p.stopLoss != null)
-      .map((p) => {
-        const risk = Math.abs(p.averageEntryPrice - p.stopLoss!) * p.openLots;
-        if (risk === 0) return 0;
-        return parseFloat((p.realizedPnL / risk).toFixed(2));
-      });
+    // R-multiple = dimensionless price ratio (exit − entry)/(entry − SL),
+    // direction-aware — the same unit-safe measure the table's R column uses
+    // (rMultipleClosed). NOT realizedPnL/price-distance, which mixes currency
+    // with price units and blows the distribution up to ±100,000R.
+    const rValues = positions.map((p) => rMultipleClosed(p)).filter((r): r is number => r !== null);
 
     if (rValues.length === 0) return this.emptyChartOption('No SL data for R-calc');
 
@@ -2801,21 +2759,49 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
 
   // ── Helpers ──
 
+  // SOLE writer of the openPositions / closedPositions signals — the window
+  // every KPI, chart, and chip count reads. Fetched INDEPENDENTLY of the paged
+  // ag-grid tables so paginating a table can never reshape the headline
+  // numbers (the previous design let both the tables and this method write the
+  // same signals, so the last HTTP response won — flipping every KPI between
+  // "current page" and "500-row window").
+  //
+  // Open and closed are fetched as SEPARATE status-filtered queries: a single
+  // 500-row mixed pull could return 500 open positions and zero closed (or an
+  // arbitrary truncation of closed), silently starving the win-rate / equity
+  // curve. Closed is ordered by closedAt desc so the window is the most-recent
+  // trades, not whatever the server's default sort yields.
   private loadSummaryData(): void {
-    // Analytics summary uses the same scoping as the live tables so
-    // every figure on the page tells the same story.  The filter map
-    // is the engine-side PositionQueryFilter — passing
-    // tradingAccountIds restricts to the scope.
     const scopedIds = this.accountScope.accountIds();
-    const filter = scopedIds.length > 0 ? { tradingAccountIds: Array.from(scopedIds) } : null;
-    this.positionsService
-      .list({ currentPage: 1, itemCountPerPage: 500, filter })
-      .pipe(map((r) => r.data?.data ?? []))
-      .subscribe((positions) => {
-        const open = positions.filter((p) => p.status === 'Open' || p.status === 'Closing');
-        const closed = positions.filter((p) => p.status === 'Closed');
-        this.openPositions.set(open);
-        this.closedPositions.set(closed);
+    const base = scopedIds.length > 0 ? { tradingAccountIds: Array.from(scopedIds) } : {};
+
+    this.analyticsLoading.set(true);
+    forkJoin({
+      open: this.positionsService
+        .list({ currentPage: 1, itemCountPerPage: 500, filter: { ...base, status: 'Open' } })
+        .pipe(
+          map((r) => r.data?.data ?? []),
+          catchError(() => of([] as PositionDto[])),
+        ),
+      closed: this.positionsService
+        .list({
+          currentPage: 1,
+          itemCountPerPage: 500,
+          filter: { ...base, status: 'Closed' },
+          sortBy: 'closedAt',
+          sortDirection: 'desc',
+        })
+        .pipe(
+          map((r) => r.data?.data ?? []),
+          catchError(() => of([] as PositionDto[])),
+        ),
+    })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(({ open, closed }) => {
+        // Defensive status re-filter: the status query filter may be a no-op on
+        // older engine builds, so we still partition client-side.
+        this.openPositions.set(open.filter((p) => p.status === 'Open' || p.status === 'Closing'));
+        this.closedPositions.set(closed.filter((p) => p.status === 'Closed'));
         this.analyticsLoading.set(false);
       });
   }
@@ -2839,6 +2825,79 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
 function pipSizeFor(symbol: string | null): number {
   if (!symbol) return 0.0001;
   return symbol.toUpperCase().includes('JPY') ? 0.01 : 0.0001;
+}
+
+/** Client-side page a fully-filtered+sorted array into the DataTable's PagedData shape. */
+function pageOf(rows: PositionDto[], params: PagerRequest): PagedData<PositionDto> {
+  const size = params.itemCountPerPage ?? 25;
+  const page = Math.max(1, params.currentPage ?? 1);
+  const start = (page - 1) * size;
+  return {
+    data: rows.slice(start, start + size),
+    pager: {
+      totalItemCount: rows.length,
+      currentPage: page,
+      itemCountPerPage: size,
+      pageNo: Math.max(1, Math.ceil(rows.length / size)),
+      pageSize: size,
+      filter: null,
+    },
+  };
+}
+
+/** Value accessor per closed-table colId, for cross-window client sort. */
+function closedSortAccessor(colId: string): ((p: PositionDto) => number | string) | null {
+  switch (colId) {
+    case 'wl':
+    case 'realizedPnL':
+      return (p) => p.realizedPnL;
+    case 'symbol':
+      return (p) => p.symbol ?? '';
+    case 'direction':
+      return (p) => p.direction ?? '';
+    case 'averageEntryPrice':
+      return (p) => p.averageEntryPrice;
+    case 'currentPrice':
+      return (p) => p.currentPrice ?? 0;
+    case 'openLots':
+      return (p) => p.openLots;
+    case 'rMultipleClosed':
+      return (p) => rMultipleClosed(p) ?? 0;
+    case 'hold':
+      return (p) =>
+        p.openedAt && p.closedAt
+          ? new Date(p.closedAt).getTime() - new Date(p.openedAt).getTime()
+          : 0;
+    case 'openedAt':
+      return (p) => (p.openedAt ? new Date(p.openedAt).getTime() : 0);
+    case 'closedAt':
+      return (p) => (p.closedAt ? new Date(p.closedAt).getTime() : 0);
+    default:
+      return null;
+  }
+}
+
+/**
+ * Sort the closed window across ALL rows (not just the visible page) so
+ * header-click sort behaves like the old server sort. Falls back to the
+ * window's native order (closedAt desc) for unmapped columns / no sort.
+ */
+function sortClosedWindow(
+  rows: PositionDto[],
+  sortBy: string | undefined,
+  dir: string | undefined,
+): PositionDto[] {
+  if (!sortBy) return rows;
+  const acc = closedSortAccessor(sortBy);
+  if (!acc) return rows;
+  const sign = dir === 'asc' ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const va = acc(a);
+    const vb = acc(b);
+    if (va < vb) return -sign;
+    if (va > vb) return sign;
+    return 0;
+  });
 }
 
 /**
@@ -2875,17 +2934,28 @@ function rMultiple(p: PositionDto | null | undefined): number | null {
 }
 
 /**
- * R-multiple for a closed position: realizedPnL / (initial risk). Initial
- * risk = |entry − SL| × lots × pip-value approximation. We approximate
- * pip-value with `lots` since absolute pip value depends on broker contract
- * size; treating realized P&L's denominator as `risk × lots` keeps the
- * relative R-shape correct.
+ * R-multiple for a closed position — the dimensionless price ratio
+ * (exit − entry) / (entry − SL), direction-aware. For a closed position the
+ * exit price lives on <c>currentPrice</c> (the last observed = close price;
+ * see the Exit column + exitPrice mapping). Identical in shape to the open
+ * <see cref="rMultiple"/>; kept as a named function for call-site clarity.
+ *
+ * The previous version divided realizedPnL (account currency) by
+ * |entry − SL| × lots (price-units × lots) — mismatched units that produced
+ * absurd values (e.g. +101,867R) and null-ed out any row whose lots read 0.
+ * A true dollar-based R would need each symbol's contract/pip VALUE (not just
+ * pip SIZE), which the UI can't reliably resolve; the price ratio is the
+ * standard, unit-safe R and matches the live geometry the engine trades.
  */
 function rMultipleClosed(p: PositionDto | null | undefined): number | null {
-  if (!p || p.stopLoss === null) return null;
-  const risk = Math.abs(p.averageEntryPrice - p.stopLoss) * p.openLots;
+  if (!p || p.stopLoss === null || p.currentPrice === null) return null;
+  const risk = Math.abs(p.averageEntryPrice - p.stopLoss);
   if (risk === 0) return null;
-  return p.realizedPnL / risk;
+  const move =
+    p.direction === 'Long'
+      ? p.currentPrice - p.averageEntryPrice
+      : p.averageEntryPrice - p.currentPrice;
+  return move / risk;
 }
 
 /**
