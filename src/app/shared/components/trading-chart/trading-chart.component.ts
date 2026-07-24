@@ -925,6 +925,41 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
                 </p>
               </section>
             }
+
+            <!-- Rejected recommendations — surfaced so a proposal is NEVER
+                 silently dropped. Shows what the model proposed + the exact
+                 reason the engine couldn't file it (TradeSpec geometry,
+                 directed-side mismatch, viability gate). -->
+            @if (ar.rejectedRecommendations && ar.rejectedRecommendations.length > 0) {
+              <section class="rejected-card">
+                <div class="rejected-head">
+                  Proposed but not tradeable ({{ ar.rejectedRecommendations.length }}) — surfaced so
+                  nothing is silently dropped:
+                </div>
+                @for (rej of ar.rejectedRecommendations; track $index) {
+                  <div class="rej" [attr.data-action]="rej.recommendation.action">
+                    <div class="rej-top">
+                      <span class="rec-action">{{ rej.recommendation.action }}</span>
+                      <span class="rej-conf mono"
+                        >{{ (rej.recommendation.confidence * 100).toFixed(0) }}%</span
+                      >
+                      <span class="rej-code mono" [title]="rej.reasonCode">{{
+                        rej.reasonCode
+                      }}</span>
+                    </div>
+                    @if (
+                      rej.recommendation.action !== 'Hold' && rej.recommendation.entryPrice != null
+                    ) {
+                      <div class="rej-levels mono">
+                        Entry {{ rej.recommendation.entryPrice }} · SL
+                        {{ rej.recommendation.stopLoss }} · TP {{ rej.recommendation.takeProfit }}
+                      </div>
+                    }
+                    <p class="rej-reason">{{ rej.reasonDetail }}</p>
+                  </div>
+                }
+              </section>
+            }
             <!-- Position management — LLM exit instructions, including
                  server-rejected ones so the operator sees the model's full
                  intent. Outcome chip is the source of truth (green = acted,
@@ -1814,6 +1849,59 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
         line-height: 1.5;
         color: var(--text-secondary);
         font-style: italic;
+      }
+      .rejected-card {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        margin-top: var(--space-3);
+      }
+      .rejected-head {
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+      }
+      .rejected-card .rej {
+        border: 1px dashed var(--border);
+        border-left: 3px solid var(--text-tertiary);
+        border-radius: var(--radius-sm);
+        padding: var(--space-2) var(--space-3);
+        background: var(--bg-primary);
+      }
+      .rejected-card .rej[data-action='Buy'] {
+        border-left-color: #1d8a3e;
+      }
+      .rejected-card .rej[data-action='Sell'] {
+        border-left-color: #c93631;
+      }
+      .rejected-card .rej-top {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        margin-bottom: 4px;
+      }
+      .rejected-card .rej-conf {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .rejected-card .rej-code {
+        margin-left: auto;
+        font-size: 10px;
+        color: var(--loss);
+        background: color-mix(in srgb, var(--loss) 10%, transparent);
+        padding: 1px 6px;
+        border-radius: var(--radius-full);
+      }
+      .rejected-card .rej-levels {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        margin-bottom: 4px;
+      }
+      .rejected-card .rej-reason {
+        margin: 0;
+        font-size: var(--text-xs);
+        line-height: 1.5;
+        color: var(--text-primary);
       }
 
       /* Promote-to-signal action row at the bottom of the recommendation card.

@@ -3122,6 +3122,12 @@ export interface MarketAnalysisResultDto {
   /** Ids of trade signals persisted from the viable subset when the
    *  auto-generate-signals toggle was on. Empty/absent otherwise. */
   generatedSignalIds?: number[] | null;
+  /** Recommendations the model made that the engine could NOT turn into a
+   *  viable/tradeable setup (TradeSpec geometry failure, directed-proposal
+   *  side/direction mismatch, viability-gate rejection). Always surfaced so a
+   *  recommendation is never silently dropped — the modal shows each with its
+   *  reason. Empty/absent when every rec was viable. */
+  rejectedRecommendations?: MarketAnalysisRejectedRecommendationDto[] | null;
   /** LLM-emitted position-management instructions for any open
    *  SpotAnalysis-source positions on this symbol. Every instruction the
    *  model emitted is mirrored here, including ones the server rejected
@@ -3372,6 +3378,23 @@ export interface MarketAnalysisRecommendationDto {
    *  liquidity wall", "TP capped at reach", "TP haircut: counter-trend",
    *  "TP re-widened". */
   appliedAdjustments?: string[] | null;
+}
+
+/** A recommendation the model made that the engine could not turn into a
+ *  viable/tradeable setup. Surfaced (never silently dropped) so the operator
+ *  always sees the full proposal set with a per-item reason. */
+export interface MarketAnalysisRejectedRecommendationDto {
+  /** The model's original recommendation, unaltered (levels may be null for
+   *  thesis-only recs whose geometry failed to derive). */
+  recommendation: MarketAnalysisRecommendationDto;
+  /** Stable reason code — e.g. TradeSpec_TpSideInvertedPostAdjust,
+   *  DirectedStopMismatch, RewardRiskTooThin, EntryTooFar. */
+  reasonCode: string;
+  /** Human-readable explanation of why it wasn't tradeable. */
+  reasonDetail: string;
+  /** Id of the terminal-rejected audit TradeSignal, when one was written
+   *  (auto-gen path). 0 when no signal was persisted (directed proposals). */
+  persistedSignalId: number;
 }
 
 /** Structured multi-week → multi-month posture parsed from the macro

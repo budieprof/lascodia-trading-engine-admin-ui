@@ -196,7 +196,50 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
                   </div>
                 }
               </div>
-            } @else {
+            }
+
+            @if (r.rejectedRecommendations && r.rejectedRecommendations.length > 0) {
+              <div class="rejected-recs">
+                <div class="rejected-head">
+                  Not tradeable ({{ r.rejectedRecommendations.length }}) — the model proposed
+                  {{ r.rejectedRecommendations.length === 1 ? 'this' : 'these' }}, but the engine
+                  couldn't file {{ r.rejectedRecommendations.length === 1 ? 'it' : 'them' }}:
+                </div>
+                @for (rej of r.rejectedRecommendations; track $index) {
+                  <div class="rej" [attr.data-action]="rej.recommendation.action">
+                    <div class="rej-top">
+                      <span class="action" [attr.data-action]="rej.recommendation.action">{{
+                        rej.recommendation.action
+                      }}</span>
+                      <span class="conf"
+                        >{{ (rej.recommendation.confidence * 100).toFixed(0) }}% confidence</span
+                      >
+                      <span class="rej-code" [title]="rej.reasonCode">{{ rej.reasonCode }}</span>
+                    </div>
+                    @if (rej.recommendation.action !== 'Hold') {
+                      <div class="levels">
+                        <span><label>Entry</label>{{ fmt(rej.recommendation.entryPrice) }}</span>
+                        <span class="sl"
+                          ><label>SL</label>{{ fmt(rej.recommendation.stopLoss) }}</span
+                        >
+                        <span class="tp"
+                          ><label>TP</label>{{ fmt(rej.recommendation.takeProfit) }}</span
+                        >
+                      </div>
+                    }
+                    <p class="rej-reason">{{ rej.reasonDetail }}</p>
+                    @if (rej.recommendation.rationale) {
+                      <p class="rationale">{{ rej.recommendation.rationale }}</p>
+                    }
+                  </div>
+                }
+              </div>
+            }
+
+            @if (
+              recommendations(r).length === 0 &&
+              (!r.rejectedRecommendations || r.rejectedRecommendations.length === 0)
+            ) {
               <div class="state muted">No actionable setup — the model returned analysis only.</div>
             }
 
@@ -463,6 +506,52 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
         margin: 0;
         font-size: var(--text-sm);
         color: var(--text-secondary);
+        line-height: 1.45;
+      }
+      .rejected-recs {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        margin-top: var(--space-3);
+      }
+      .rejected-head {
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+      }
+      .rej {
+        border: 1px dashed var(--border);
+        border-left: 3px solid var(--text-tertiary);
+        border-radius: var(--radius-sm);
+        padding: var(--space-3);
+        background: var(--bg-primary);
+        opacity: 0.92;
+      }
+      .rej[data-action='Buy'] {
+        border-left-color: #1d8a3e;
+      }
+      .rej[data-action='Sell'] {
+        border-left-color: #c93631;
+      }
+      .rej-top {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        margin-bottom: var(--space-2);
+      }
+      .rej-code {
+        margin-left: auto;
+        font-size: 10px;
+        font-family: var(--font-mono, monospace);
+        color: var(--loss);
+        background: color-mix(in srgb, var(--loss) 10%, transparent);
+        padding: 1px 6px;
+        border-radius: var(--radius-full);
+      }
+      .rej-reason {
+        margin: 0 0 var(--space-1);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
         line-height: 1.45;
       }
       .analysis {
