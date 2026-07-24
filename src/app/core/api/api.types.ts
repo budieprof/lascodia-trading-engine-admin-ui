@@ -1769,6 +1769,37 @@ export interface EAFleetItem {
   deregisteredAt: string | null;
 }
 
+/** One EA instance selectable as a candle-stream source. */
+export interface CandleStreamInstance {
+  instanceId: string;
+  accountId: number;
+  accountName: string | null;
+  brokerName: string | null;
+  status: number;
+  chartSymbol: string | null;
+  symbols: string | null;
+  lastHeartbeat: string | null;
+}
+
+/** A per-symbol candle-source override. */
+export interface CandleStreamOverride {
+  symbol: string;
+  instanceId: string;
+}
+
+/** Returned by GET /admin/ea/candle-source — current single-source selection + fleet. */
+export interface CandleStreamSource {
+  globalInstanceId: string | null;
+  perSymbol: CandleStreamOverride[];
+  fleet: CandleStreamInstance[];
+}
+
+/** Body for PUT /admin/ea/candle-source. Omit `symbol` for the global default; empty `instanceId` clears. */
+export interface SetCandleStreamSourceRequest {
+  symbol?: string | null;
+  instanceId?: string | null;
+}
+
 /** Returned by GET /admin/ea/{instanceId} — single-instance detail incl. state envelope. */
 export interface EAInstanceDetail {
   instanceId: string;

@@ -26,6 +26,7 @@ import { FleetActionsBarComponent } from '../../components/fleet-actions-bar/fle
 import { EATradingWindowPanelComponent } from '../../components/ea-trading-window-panel/ea-trading-window-panel.component';
 import { EAPendingSignalRevalPanelComponent } from '../../components/ea-pending-signal-reval-panel/ea-pending-signal-reval-panel.component';
 import { EASpreadPadMasterPanelComponent } from '../../components/ea-spread-pad-master-panel/ea-spread-pad-master-panel.component';
+import { EACandleSourcePanelComponent } from '../../components/ea-candle-source-panel/ea-candle-source-panel.component';
 
 type StatusFilter = 'all' | EAInstanceStatus;
 type ViewMode = 'cards' | 'table';
@@ -49,6 +50,7 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
     EATradingWindowPanelComponent,
     EAPendingSignalRevalPanelComponent,
     EASpreadPadMasterPanelComponent,
+    EACandleSourcePanelComponent,
   ],
   template: `
     <div class="page">
@@ -74,6 +76,10 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
         <!-- Engine-wide master for SpreadPadder — AND-ed with each account's
              per-EA toggle on the EA detail page. -->
         <app-ea-spread-pad-master-panel />
+
+        <!-- Single-source candle guard — designate which instance streams each
+             symbol's candles so cross-broker feeds can't collide into dup bars. -->
+        <app-ea-candle-source-panel />
       </div>
 
       @if (loading()) {

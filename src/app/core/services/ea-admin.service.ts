@@ -4,6 +4,8 @@ import { ApiService } from '@core/api/api.service';
 import type {
   AdminCommandQueueResult,
   AdminFleetCommandResult,
+  CandleStreamSource,
+  SetCandleStreamSourceRequest,
   ClearSafetyStopRequest,
   EAAuditTimelineItem,
   EAAuditTimelineQuery,
@@ -401,5 +403,18 @@ export class EAAdminService {
 
   fleetRestart(body: FleetRestartRequest): Observable<ResponseData<AdminFleetCommandResult>> {
     return this.api.post<ResponseData<AdminFleetCommandResult>>(`${this.base}/all/restart`, body);
+  }
+
+  /** GET /admin/ea/candle-source — current single-source selection + pickable fleet. */
+  getCandleSource(): Observable<ResponseData<CandleStreamSource>> {
+    return this.api.get<ResponseData<CandleStreamSource>>(`${this.base}/candle-source`);
+  }
+
+  /**
+   * PUT /admin/ea/candle-source — designate (or clear) the candle-stream
+   * instance.  Omit `symbol` for the global default; empty `instanceId` clears.
+   */
+  setCandleSource(body: SetCandleStreamSourceRequest): Observable<ResponseData<string>> {
+    return this.api.put<ResponseData<string>>(`${this.base}/candle-source`, body);
   }
 }
