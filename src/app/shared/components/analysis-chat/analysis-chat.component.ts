@@ -32,7 +32,7 @@ import type { SpotAnalysisFollowUpTurnDto, AnalysisMonitorDto } from '@core/api/
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [MarkdownPipe],
   template: `
-    <section class="chat" aria-label="Analysis follow-up chat">
+    <section class="chat" [class.fill]="fillHeight()" aria-label="Analysis follow-up chat">
       @if (monitors().length > 0) {
         <div class="monitors">
           <div class="monitors-head">👁 Active monitors ({{ monitors().length }})</div>
@@ -71,6 +71,12 @@ import type { SpotAnalysisFollowUpTurnDto, AnalysisMonitorDto } from '@core/api/
       <div class="chat-log" #log>
         @if (loading()) {
           <div class="chat-state"><span class="spinner"></span> Loading conversation…</div>
+        }
+
+        @if (opener(); as op) {
+          <div class="msg">
+            <div class="bubble md opener" [innerHTML]="op | markdown"></div>
+          </div>
         }
 
         @for (m of messages(); track m.id) {
@@ -160,7 +166,7 @@ import type { SpotAnalysisFollowUpTurnDto, AnalysisMonitorDto } from '@core/api/
           <div class="chat-state error">{{ error() }}</div>
         }
 
-        @if (!loading() && messages().length === 0 && !sending() && !error()) {
+        @if (!loading() && messages().length === 0 && !sending() && !error() && !opener()) {
           <div class="chat-empty">
             Ask a follow-up about this analysis — e.g. “Why refuse the sell-stop?” or “What would
             flip you to a long?”
@@ -193,6 +199,24 @@ import type { SpotAnalysisFollowUpTurnDto, AnalysisMonitorDto } from '@core/api/
         border-radius: var(--radius-sm);
         background: var(--bg-primary);
         overflow: hidden;
+      }
+      /* Full-page mode: fill the container; the log grows instead of capping. */
+      .chat.fill {
+        height: 100%;
+        border: none;
+        border-radius: 0;
+      }
+      .chat.fill .chat-log {
+        flex: 1;
+        max-height: none;
+      }
+      /* Opener (analysis brief) reads as prose, not a chat bubble. */
+      .bubble.opener {
+        max-width: 100%;
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: var(--space-3);
       }
       .chat-log {
         display: flex;
@@ -498,6 +522,15 @@ export class AnalysisChatComponent {
   /** LlmInvocation id of the analysis being discussed (the thread anchor).
    *  When it changes (operator re-ran the analysis) the thread reloads. */
   readonly llmInvocationId = input.required<number>();
+
+  /** Optional analysis brief rendered as the conversation opener (first
+   *  assistant message) — used by the full-page chat so the brief + follow-ups
+   *  scroll as one thread. */
+  readonly opener = input<string | null>(null);
+
+  /** When true the chat fills its container height (full-page use) instead of
+   *  the default capped log height (embedded-in-modal use). */
+  readonly fillHeight = input<boolean>(false);
 
   protected readonly messages = signal<SpotAnalysisFollowUpTurnDto[]>([]);
   protected readonly question = signal('');

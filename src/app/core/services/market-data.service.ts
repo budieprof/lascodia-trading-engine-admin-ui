@@ -14,6 +14,8 @@ import {
   MarketMacroAnalysisResultDto,
   SpotAnalysisFollowUpTurnDto,
   AnalysisMonitorDto,
+  AnalysisConversationsPageDto,
+  AnalysisConversationDetailDto,
 } from '@core/api/api.types';
 
 @Injectable({ providedIn: 'root' })
@@ -257,6 +259,28 @@ export class MarketDataService {
   /** POST /market-data/analysis-monitors/{id}/cancel — deactivate a monitor. */
   cancelAnalysisMonitor(monitorId: number): Observable<ResponseData<AnalysisMonitorDto>> {
     return this.api.post(`/market-data/analysis-monitors/${monitorId}/cancel`, {});
+  }
+
+  /**
+   * GET /market-data/analysis-conversations — paged list of analysis
+   * conversations (every spot/limit/stop/macro analysis), newest first, for
+   * the chat page's sidebar.
+   */
+  listAnalysisConversations(
+    symbol: string | null,
+    page = 1,
+    pageSize = 30,
+  ): Observable<ResponseData<AnalysisConversationsPageDto>> {
+    const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    if (symbol) params.set('symbol', this.formatSymbol(symbol));
+    return this.api.get(`/market-data/analysis-conversations?${params.toString()}`);
+  }
+
+  /** GET /market-data/analysis-conversations/{id} — one conversation's opening brief. */
+  getAnalysisConversation(
+    llmInvocationId: number,
+  ): Observable<ResponseData<AnalysisConversationDetailDto>> {
+    return this.api.get(`/market-data/analysis-conversations/${llmInvocationId}`);
   }
 
   /**

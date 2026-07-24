@@ -113,6 +113,14 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'conversations',
+        data: { breadcrumb: 'Conversations' },
+        loadChildren: () =>
+          import('@features/conversations/conversations.routes').then(
+            (m) => m.CONVERSATIONS_ROUTES,
+          ),
+      },
+      {
         path: 'spot-sweep',
         data: { breadcrumb: 'Spot Sweep' },
         loadChildren: () =>

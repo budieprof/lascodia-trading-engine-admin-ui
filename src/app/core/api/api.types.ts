@@ -3397,6 +3397,45 @@ export interface MarketAnalysisRejectedRecommendationDto {
   persistedSignalId: number;
 }
 
+/** One conversation in the chat page's sidebar — every LLM analysis is a
+ *  resumable conversation anchored by its `llmInvocationId`. */
+export interface AnalysisConversationSummaryDto {
+  llmInvocationId: number;
+  symbol: string;
+  timeframe: string;
+  purpose: string;
+  /** Short badge: Spot | Limit | Stop | Macro. */
+  kind: string;
+  /** First-line snippet of the analysis prose. */
+  preview: string;
+  model: string;
+  provider: string;
+  invokedAt: string;
+  lastActivityAtUtc: string;
+  followUpCount: number;
+  activeMonitorCount: number;
+}
+
+export interface AnalysisConversationsPageDto {
+  items: AnalysisConversationSummaryDto[];
+  currentPage: number;
+  pageSize: number;
+  totalItems: number;
+}
+
+/** The opening brief of a conversation — analysis prose (blocks stripped) + metadata. */
+export interface AnalysisConversationDetailDto {
+  llmInvocationId: number;
+  symbol: string;
+  timeframe: string;
+  purpose: string;
+  kind: string;
+  model: string;
+  provider: string;
+  invokedAt: string;
+  analysis: string;
+}
+
 /** A chat-created live-market monitor: a background watch that, when its
  *  condition fires, re-runs the spot analysis + notifies. Returned by the
  *  /market-data/analysis-monitors endpoints. */
