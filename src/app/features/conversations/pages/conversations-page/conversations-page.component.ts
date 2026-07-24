@@ -1,10 +1,20 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  linkedSignal,
+  signal,
+} from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { AnalysisChatComponent } from '@shared/components/analysis-chat/analysis-chat.component';
-import { AnalysisRecommendationsComponent } from '@shared/components/analysis-recommendations/analysis-recommendations.component';
+import {
+  SpotRecChartComponent,
+  type SpotRecChartRec,
+} from '@shared/components/spot-rec-chart/spot-rec-chart.component';
 import { MarketDataService } from '@core/services/market-data.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type {
@@ -29,7 +39,7 @@ import type {
     MarkdownPipe,
     RelativeTimePipe,
     AnalysisChatComponent,
-    AnalysisRecommendationsComponent,
+    SpotRecChartComponent,
   ],
   template: `
     <div class="conv-page">
@@ -131,12 +141,24 @@ import type {
             <header class="conv-header"><span class="spinner"></span> Loading…</header>
           }
           @if (detail(); as d) {
-            @if (d.recommendations && d.recommendations.length > 0) {
+            @if (chartRecs().length > 0) {
               <div class="conv-recs">
-                <app-analysis-recommendations
+                <div class="rec-tf">
+                  @for (tf of chartTimeframes; track tf) {
+                    <button
+                      type="button"
+                      [class.active]="chartTf() === tf"
+                      (click)="chartTf.set(tf)"
+                    >
+                      {{ tf }}
+                    </button>
+                  }
+                </div>
+                <app-spot-rec-chart
                   [symbol]="d.symbol"
-                  [timeframe]="d.timeframe"
-                  [recommendations]="d.recommendations"
+                  [timeframe]="chartTf()"
+                  [asOfUtc]="d.invokedAt"
+                  [recommendations]="chartRecs()"
                 />
               </div>
             }
@@ -364,11 +386,37 @@ import type {
       }
       .conv-recs {
         flex: none;
-        max-height: 320px;
-        overflow-y: auto;
         padding: var(--space-3) var(--space-4);
         border-bottom: 1px solid var(--border);
         background: var(--bg-secondary);
+      }
+      .rec-tf {
+        display: flex;
+        gap: 2px;
+        margin-bottom: var(--space-2);
+      }
+      .rec-tf button {
+        font: inherit;
+        font-size: var(--text-xs);
+        padding: 3px 10px;
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        cursor: pointer;
+      }
+      .rec-tf button:first-child {
+        border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+      }
+      .rec-tf button:last-child {
+        border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      }
+      .rec-tf button:not(:first-child) {
+        border-left: none;
+      }
+      .rec-tf button.active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
       }
       .conv-chat {
         flex: 1;
@@ -434,6 +482,25 @@ export class ConversationsPageComponent {
 
   protected readonly hasMore = computed(() => this.conversations().length < this.totalItems());
   protected readonly openerText = computed(() => this.detail()?.analysis ?? null);
+
+  // ── Recommendation chart ──
+  protected readonly chartTimeframes = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
+  /** Chart timeframe — defaults to (and resets with) the analysis timeframe. */
+  protected readonly chartTf = linkedSignal(() => this.detail()?.timeframe ?? 'H1');
+  /** Actionable recs mapped for the reusable spot-rec chart (Hold/no-entry dropped). */
+  protected readonly chartRecs = computed<SpotRecChartRec[]>(() => {
+    const d = this.detail();
+    if (!d?.recommendations) return [];
+    return d.recommendations
+      .filter((r) => r.action !== 'Hold' && r.entryPrice != null)
+      .map((r, i) => ({
+        label: `#${i + 1} ${r.action}`,
+        action: r.action,
+        entryPrice: r.entryPrice,
+        stopLoss: r.stopLoss,
+        takeProfit: r.takeProfit,
+      }));
+  });
 
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
 
