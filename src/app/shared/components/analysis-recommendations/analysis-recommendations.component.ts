@@ -8,6 +8,7 @@ import {
   linkedSignal,
   signal,
 } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import { catchError, of } from 'rxjs';
 import { MarketDataService } from '@core/services/market-data.service';
@@ -25,23 +26,23 @@ import { buildRecPreviewChartOption, priceDecimals } from './rec-preview-chart';
   selector: 'app-analysis-recommendations',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgxEchartsDirective],
+  imports: [NgxEchartsDirective, FormsModule],
   template: `
     @if (chartableRecs().length > 0) {
       <div class="rec-controls">
         <label>
           <span>TF</span>
-          <select [value]="selectedTf()" (change)="setTf($event)">
+          <select [ngModel]="selectedTf()" (ngModelChange)="selectedTf.set($event)">
             @for (tf of timeframes; track tf) {
-              <option [value]="tf">{{ tf }}</option>
+              <option [ngValue]="tf">{{ tf }}</option>
             }
           </select>
         </label>
         <label>
           <span>Bars</span>
-          <select [value]="barCount()" (change)="setBars($event)">
+          <select [ngModel]="barCount()" (ngModelChange)="barCount.set($event)">
             @for (n of barCounts; track n) {
-              <option [value]="n">{{ n }}</option>
+              <option [ngValue]="n">{{ n }}</option>
             }
           </select>
         </label>
@@ -247,14 +248,6 @@ export class AnalysisRecommendationsComponent {
       }
       this.loadCandles(sym, tf, count);
     });
-  }
-
-  protected setTf(ev: Event): void {
-    this.selectedTf.set((ev.target as HTMLSelectElement).value);
-  }
-
-  protected setBars(ev: Event): void {
-    this.barCount.set(Number((ev.target as HTMLSelectElement).value));
   }
 
   protected fmt(price: number | null): string {
