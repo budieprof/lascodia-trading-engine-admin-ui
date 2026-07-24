@@ -134,8 +134,9 @@ export function buildRecPreviewChartOption(
       splitLine: { show: false },
     },
     yAxis: {
+      // Exact explicit range — NO `scale` (scale lets ECharts round the bounds,
+      // which desynced the markLine y-position from the candlesticks).
       type: 'value',
-      scale: true,
       min: yMin - yPad,
       max: yMax + yPad,
       axisLabel: { fontSize: 9, color: '#888', formatter: (v: number) => fmt(v) },

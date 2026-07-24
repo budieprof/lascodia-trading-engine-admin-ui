@@ -5,10 +5,10 @@ import {
   effect,
   inject,
   input,
+  linkedSignal,
   signal,
 } from '@angular/core';
 import { NgxEchartsDirective } from 'ngx-echarts';
-import type { EChartsOption } from 'echarts';
 import { catchError, of } from 'rxjs';
 import { MarketDataService } from '@core/services/market-data.service';
 import type { CandleDto, MarketAnalysisRecommendationDto } from '@core/api/api.types';
@@ -17,8 +17,8 @@ import { buildRecPreviewChartOption, priceDecimals } from './rec-preview-chart';
 /**
  * Renders an analysis's actionable recommendations as cards with an inline
  * candle chart visualising entry / SL / TP (+ profit/risk zones and the TP
- * shrinkage gap when applied). Loads a recent bar window once for the
- * (symbol, timeframe). Hold / geometry-less recs are skipped. Reused by the
+ * shrinkage gap when applied). The operator can switch the chart timeframe and
+ * bar count (up to 1000). Hold / geometry-less recs are skipped. Reused by the
  * conversations page and the spot-analysis modal.
  */
 @Component({
@@ -28,49 +28,90 @@ import { buildRecPreviewChartOption, priceDecimals } from './rec-preview-chart';
   imports: [NgxEchartsDirective],
   template: `
     @if (chartableRecs().length > 0) {
-      <div class="recs">
-        @for (rec of chartableRecs(); track $index) {
-          <div class="rec" [attr.data-action]="rec.action">
-            <div class="rec-head">
-              <span class="action" [attr.data-action]="rec.action">{{ rec.action }}</span>
-              <span class="conf">{{ (rec.confidence * 100).toFixed(0) }}% confidence</span>
-              <span class="levels">
-                <span><label>Entry</label>{{ fmt(rec.entryPrice) }}</span>
-                <span class="sl"><label>SL</label>{{ fmt(rec.stopLoss) }}</span>
-                <span class="tp">
-                  <label>TP</label>{{ fmt(rec.takeProfit) }}
-                  @if (
-                    rec.originalTakeProfit !== null &&
-                    rec.originalTakeProfit !== undefined &&
-                    rec.originalTakeProfit !== rec.takeProfit
-                  ) {
-                    <span class="shrink" [title]="'LLM TP ' + fmt(rec.originalTakeProfit)"
-                      >shrunk</span
-                    >
-                  }
-                </span>
-              </span>
-            </div>
-            <div class="chart-wrap">
-              @if (candlesLoading()) {
-                <div class="chart-state">Loading bars…</div>
-              } @else if (chartFor(rec); as opts) {
-                <div echarts [options]="opts" [autoResize]="true" class="chart"></div>
-              } @else {
-                <div class="chart-state">No candle data to preview.</div>
-              }
-            </div>
-          </div>
+      <div class="rec-controls">
+        <label>
+          <span>TF</span>
+          <select [value]="selectedTf()" (change)="setTf($event)">
+            @for (tf of timeframes; track tf) {
+              <option [value]="tf">{{ tf }}</option>
+            }
+          </select>
+        </label>
+        <label>
+          <span>Bars</span>
+          <select [value]="barCount()" (change)="setBars($event)">
+            @for (n of barCounts; track n) {
+              <option [value]="n">{{ n }}</option>
+            }
+          </select>
+        </label>
+        @if (candlesLoading()) {
+          <span class="loading">loading…</span>
         }
       </div>
+
+      @for (item of charts(); track item.key) {
+        <div class="rec" [attr.data-action]="item.rec.action">
+          <div class="rec-head">
+            <span class="action" [attr.data-action]="item.rec.action">{{ item.rec.action }}</span>
+            <span class="conf">{{ (item.rec.confidence * 100).toFixed(0) }}% confidence</span>
+            <span class="levels">
+              <span><label>Entry</label>{{ fmt(item.rec.entryPrice) }}</span>
+              <span class="sl"><label>SL</label>{{ fmt(item.rec.stopLoss) }}</span>
+              <span class="tp">
+                <label>TP</label>{{ fmt(item.rec.takeProfit) }}
+                @if (
+                  item.rec.originalTakeProfit !== null &&
+                  item.rec.originalTakeProfit !== undefined &&
+                  item.rec.originalTakeProfit !== item.rec.takeProfit
+                ) {
+                  <span class="shrink" [title]="'LLM TP ' + fmt(item.rec.originalTakeProfit)"
+                    >shrunk</span
+                  >
+                }
+              </span>
+            </span>
+          </div>
+          <div class="chart-wrap">
+            @if (item.option) {
+              <div echarts [options]="item.option" [autoResize]="true" class="chart"></div>
+            } @else {
+              <div class="chart-state">
+                {{ candlesLoading() ? 'Loading bars…' : 'No candle data to preview.' }}
+              </div>
+            }
+          </div>
+        </div>
+      }
     }
   `,
   styles: [
     `
-      .recs {
+      .rec-controls {
         display: flex;
-        flex-direction: column;
+        align-items: center;
         gap: var(--space-3);
+        margin-bottom: var(--space-2);
+      }
+      .rec-controls label {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .rec-controls select {
+        font: inherit;
+        font-size: var(--text-xs);
+        padding: 3px 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+      }
+      .rec-controls .loading {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
       }
       .rec {
         border: 1px solid var(--border);
@@ -78,6 +119,7 @@ import { buildRecPreviewChartOption, priceDecimals } from './rec-preview-chart';
         border-radius: var(--radius-sm);
         padding: var(--space-3);
         background: var(--bg-primary);
+        margin-bottom: var(--space-3);
       }
       .rec[data-action='Buy'] {
         border-left-color: #1d8a3e;
@@ -143,7 +185,7 @@ import { buildRecPreviewChartOption, priceDecimals } from './rec-preview-chart';
       }
       .chart {
         width: 100%;
-        height: 220px;
+        height: 300px;
       }
       .chart-state {
         padding: var(--space-3);
@@ -161,26 +203,58 @@ export class AnalysisRecommendationsComponent {
   readonly timeframe = input.required<string>();
   readonly recommendations = input<MarketAnalysisRecommendationDto[]>([]);
 
+  protected readonly timeframes = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
+  protected readonly barCounts = [60, 120, 250, 500, 1000];
+
+  /** Chart timeframe — defaults to (and resets with) the analysis timeframe,
+   *  but the operator can switch it to view the same levels on another TF. */
+  protected readonly selectedTf = linkedSignal(() => this.timeframe());
+  protected readonly barCount = signal(250);
+
   protected readonly candles = signal<CandleDto[]>([]);
   protected readonly candlesLoading = signal(false);
+  /** Bumped on every candle (re)load so chart keys change → ECharts re-inits
+   *  fresh (its markLine merge otherwise caches a stale y-position). */
+  private readonly candleVersion = signal(0);
 
-  /** Only Buy/Sell recs with a derived entry can be charted. */
   protected readonly chartableRecs = computed(() =>
     this.recommendations().filter((r) => r.action !== 'Hold' && r.entryPrice != null),
   );
 
+  /** Stable per-(candles,recs) chart options, keyed by candle version so a
+   *  reload recreates the ECharts element instead of merge-patching it. */
+  protected readonly charts = computed(() => {
+    const cs = this.candles();
+    const sym = this.symbol();
+    const ver = this.candleVersion();
+    return this.chartableRecs().map((rec, i) => ({
+      rec,
+      key: `${i}#${ver}`,
+      option: buildRecPreviewChartOption(rec, cs, sym),
+    }));
+  });
+
   constructor() {
-    // (Re)load bars whenever there's something chartable for a (symbol, timeframe).
+    // (Re)load bars whenever symbol / timeframe / bar-count / chartability change.
     effect(() => {
       const sym = this.symbol();
-      const tf = this.timeframe();
+      const tf = this.selectedTf();
+      const count = this.barCount();
       const hasChartable = this.chartableRecs().length > 0;
       if (!sym || !tf || !hasChartable) {
         this.candles.set([]);
         return;
       }
-      this.loadCandles(sym, tf);
+      this.loadCandles(sym, tf, count);
     });
+  }
+
+  protected setTf(ev: Event): void {
+    this.selectedTf.set((ev.target as HTMLSelectElement).value);
+  }
+
+  protected setBars(ev: Event): void {
+    this.barCount.set(Number((ev.target as HTMLSelectElement).value));
   }
 
   protected fmt(price: number | null): string {
@@ -188,14 +262,10 @@ export class AnalysisRecommendationsComponent {
     return price.toFixed(priceDecimals(this.symbol()));
   }
 
-  protected chartFor(rec: MarketAnalysisRecommendationDto): EChartsOption | null {
-    return buildRecPreviewChartOption(rec, this.candles(), this.symbol());
-  }
-
-  private loadCandles(symbol: string, timeframe: string): void {
+  private loadCandles(symbol: string, timeframe: string, count: number): void {
     this.candlesLoading.set(true);
     this.marketData
-      .listCandles({ currentPage: 1, itemCountPerPage: 60, filter: { symbol, timeframe } })
+      .listCandles({ currentPage: 1, itemCountPerPage: count, filter: { symbol, timeframe } })
       .pipe(catchError(() => of(null)))
       .subscribe((res) => {
         this.candlesLoading.set(false);
@@ -205,6 +275,7 @@ export class AnalysisRecommendationsComponent {
             (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
           ),
         );
+        this.candleVersion.update((v) => v + 1);
       });
   }
 }
