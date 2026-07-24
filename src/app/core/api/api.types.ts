@@ -3423,7 +3423,8 @@ export interface AnalysisConversationsPageDto {
   totalItems: number;
 }
 
-/** The opening brief of a conversation — analysis prose (blocks stripped) + metadata. */
+/** The opening brief of a conversation — analysis prose (blocks stripped) +
+ *  metadata + parsed recommendations (for the entry/SL/TP chart). */
 export interface AnalysisConversationDetailDto {
   llmInvocationId: number;
   symbol: string;
@@ -3434,6 +3435,8 @@ export interface AnalysisConversationDetailDto {
   provider: string;
   invokedAt: string;
   analysis: string;
+  /** Parsed recommendations with resolved entry/SL/TP; empty for Hold-only analyses. */
+  recommendations: MarketAnalysisRecommendationDto[];
 }
 
 /** A chat-created live-market monitor: a background watch that, when its

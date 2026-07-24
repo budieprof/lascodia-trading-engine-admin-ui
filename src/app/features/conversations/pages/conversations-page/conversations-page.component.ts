@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { AnalysisChatComponent } from '@shared/components/analysis-chat/analysis-chat.component';
+import { AnalysisRecommendationsComponent } from '@shared/components/analysis-recommendations/analysis-recommendations.component';
 import { MarketDataService } from '@core/services/market-data.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type {
@@ -22,7 +23,14 @@ import type {
   selector: 'app-conversations-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FormsModule, MarkdownPipe, RelativeTimePipe, AnalysisChatComponent],
+  imports: [
+    DatePipe,
+    FormsModule,
+    MarkdownPipe,
+    RelativeTimePipe,
+    AnalysisChatComponent,
+    AnalysisRecommendationsComponent,
+  ],
   template: `
     <div class="conv-page">
       <!-- ── Left rail: conversation list ── -->
@@ -121,6 +129,17 @@ import type {
             </header>
           } @else if (detailLoading()) {
             <header class="conv-header"><span class="spinner"></span> Loading…</header>
+          }
+          @if (detail(); as d) {
+            @if (d.recommendations && d.recommendations.length > 0) {
+              <div class="conv-recs">
+                <app-analysis-recommendations
+                  [symbol]="d.symbol"
+                  [timeframe]="d.timeframe"
+                  [recommendations]="d.recommendations"
+                />
+              </div>
+            }
           }
           <div class="conv-chat">
             <app-analysis-chat [llmInvocationId]="id" [opener]="openerText()" [fillHeight]="true" />
@@ -342,6 +361,14 @@ import type {
         color: var(--text-tertiary);
         font-size: var(--text-xs);
         font-weight: var(--font-normal);
+      }
+      .conv-recs {
+        flex: none;
+        max-height: 320px;
+        overflow-y: auto;
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-secondary);
       }
       .conv-chat {
         flex: 1;
