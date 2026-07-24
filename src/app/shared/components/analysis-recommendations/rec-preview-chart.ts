@@ -73,46 +73,39 @@ export function buildRecPreviewChartOption(
     ]);
   }
 
-  const label = (text: string, bg: string, fontSize = 10) => ({
-    show: true,
-    position: 'insideEndTop' as const,
-    formatter: text,
-    backgroundColor: bg,
-    color: '#fff',
-    padding: [2, 6] as [number, number],
-    borderRadius: 3,
-    fontSize,
-    fontWeight: 'bold' as const,
+  // Draw entry/SL/TP as flat LINE SERIES (not markLine): a line series renders
+  // at its own data values, side-stepping ECharts' markLine merge cache that
+  // desynced the horizontal lines from the candlesticks.
+  const levelSeries = (
+    value: number,
+    color: string,
+    name: string,
+    dashed = false,
+  ): Record<string, unknown> => ({
+    type: 'line',
+    name,
+    data: candles.map(() => value),
+    showSymbol: false,
+    silent: true,
+    animation: false,
+    z: 3,
+    lineStyle: { color, width: dashed ? 1.2 : 1.6, type: dashed ? 'dashed' : 'solid' },
+    endLabel: {
+      show: true,
+      formatter: `${name} ${fmt(value)}`,
+      color: '#fff',
+      backgroundColor: color,
+      padding: [2, 6],
+      borderRadius: 3,
+      fontSize: dashed ? 9 : 10,
+      fontWeight: 'bold',
+    },
   });
 
-  const markLineData: unknown[] = [
-    {
-      yAxis: entry,
-      lineStyle: { color: '#000', width: 1.6, type: 'solid' },
-      label: label(`ENTRY ${fmt(entry)}`, '#000'),
-    },
-  ];
-  if (sl !== null)
-    markLineData.push({
-      yAxis: sl,
-      lineStyle: { color: '#c4290a', width: 1.4, type: 'solid' },
-      label: label(`SL ${fmt(sl)}`, '#c4290a'),
-    });
-  if (tp !== null)
-    markLineData.push({
-      yAxis: tp,
-      lineStyle: { color: '#1f8a3d', width: 1.6, type: 'solid' },
-      label: label(`TP ${fmt(tp)}`, '#1f8a3d'),
-    });
-  if (showShrinkage)
-    markLineData.push({
-      yAxis: originalTp!,
-      lineStyle: { color: '#1f8a3d', width: 1.2, type: 'dashed', opacity: 0.75 },
-      label: {
-        ...label(`LLM TP ${fmt(originalTp!)}`, '#1f8a3d', 9),
-        offset: [0, 14] as [number, number],
-      },
-    });
+  const levelLines: Record<string, unknown>[] = [levelSeries(entry, '#111', 'ENTRY')];
+  if (sl !== null) levelLines.push(levelSeries(sl, '#c4290a', 'SL'));
+  if (tp !== null) levelLines.push(levelSeries(tp, '#1f8a3d', 'TP'));
+  if (showShrinkage) levelLines.push(levelSeries(originalTp!, '#1f8a3d', 'LLM TP', true));
 
   return {
     animation: false,
@@ -169,8 +162,8 @@ export function buildRecPreviewChartOption(
           borderColor0: '#c4290a',
         },
         markArea: { silent: true, z: 0, data: markAreaData },
-        markLine: { silent: true, symbol: 'none', animation: false, data: markLineData },
       },
+      ...levelLines,
     ],
   } as EChartsOption;
 }
