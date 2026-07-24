@@ -12,6 +12,7 @@ import {
   OrderBookSnapshotDto,
   MarketAnalysisResultDto,
   MarketMacroAnalysisResultDto,
+  SpotAnalysisFollowUpTurnDto,
 } from '@core/api/api.types';
 
 @Injectable({ providedIn: 'root' })
@@ -190,6 +191,34 @@ export class MarketDataService {
         }
       : {};
     return this.api.post(`/market-data/analyze/${llmInvocationId}/persist-signal?${qs}`, body);
+  }
+
+  /**
+   * GET /market-data/analyze/{llmInvocationId}/follow-up — reload the full
+   * follow-up conversation thread for a spot analysis, chronological order.
+   * Read-only, no LLM spend — lets the analysis chat panel rehydrate when the
+   * operator re-opens a previously-discussed analysis. Empty list when the
+   * analysis has never been discussed.
+   */
+  getAnalysisFollowUps(
+    llmInvocationId: number,
+  ): Observable<ResponseData<SpotAnalysisFollowUpTurnDto[]>> {
+    return this.api.get(`/market-data/analyze/${llmInvocationId}/follow-up`);
+  }
+
+  /**
+   * POST /market-data/analyze/{llmInvocationId}/follow-up — ask a free-text
+   * follow-up question about an existing spot analysis. The deep-tier LLM is
+   * re-prompted statelessly with the original snapshot + analysis + prior Q&A
+   * stitched into context, so it answers the question in full context even
+   * though the provider keeps no session. Both the question and the reply are
+   * persisted; the returned turn is the new assistant reply.
+   */
+  askAnalysisFollowUp(
+    llmInvocationId: number,
+    question: string,
+  ): Observable<ResponseData<SpotAnalysisFollowUpTurnDto>> {
+    return this.api.post(`/market-data/analyze/${llmInvocationId}/follow-up`, { question });
   }
 
   /**

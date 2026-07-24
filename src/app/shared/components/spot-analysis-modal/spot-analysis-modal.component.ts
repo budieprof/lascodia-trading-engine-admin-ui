@@ -11,6 +11,7 @@ import { NgxEchartsDirective } from 'ngx-echarts';
 import type { EChartsOption } from 'echarts';
 import { catchError, of } from 'rxjs';
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
+import { AnalysisChatComponent } from '@shared/components/analysis-chat/analysis-chat.component';
 import { MarketDataService } from '@core/services/market-data.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type {
@@ -32,7 +33,7 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
   selector: 'app-spot-analysis-modal',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgxEchartsDirective, MarkdownPipe],
+  imports: [NgxEchartsDirective, MarkdownPipe, AnalysisChatComponent],
   template: `
     <div class="backdrop" (click)="closed.emit()">
       <div class="modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true">
@@ -205,6 +206,11 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
                 <div class="md" [innerHTML]="r.analysis | markdown"></div>
               </details>
             }
+
+            <details class="followup" open>
+              <summary>Follow-up chat</summary>
+              <app-analysis-chat [llmInvocationId]="r.llmInvocationId" />
+            </details>
           } @else {
             <div class="state muted">Pick an analysis type above to begin.</div>
           }
@@ -462,10 +468,18 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
       .analysis {
         margin-top: var(--space-3);
       }
-      .analysis summary {
+      .analysis summary,
+      .followup summary {
         cursor: pointer;
         font-size: var(--text-xs);
         color: var(--text-secondary);
+      }
+      .followup {
+        margin-top: var(--space-3);
+      }
+      .followup > app-analysis-chat {
+        display: block;
+        margin-top: var(--space-2);
       }
       .analysis pre {
         white-space: pre-wrap;

@@ -3131,6 +3131,22 @@ export interface MarketAnalysisResultDto {
   exitInstructions?: MarketAnalysisExitInstructionDto[] | null;
 }
 
+/** One persisted turn in a spot-analysis follow-up conversation. Threads hang
+ *  off the original analysis via {@link llmInvocationId} (the analysis result's
+ *  `llmInvocationId`), so the chat panel reloads when the modal reopens.
+ *  Returned by GET/POST /market-data/analyze/{llmInvocationId}/follow-up. */
+export interface SpotAnalysisFollowUpTurnDto {
+  id: number;
+  /** LlmInvocation id of the analysis being discussed (the thread anchor). */
+  llmInvocationId: number;
+  /** 'User' (operator question) or 'Assistant' (model reply). */
+  role: 'User' | 'Assistant';
+  content: string;
+  /** Audit-row id of the re-prompt that produced an assistant turn; null for user turns. */
+  followUpInvocationId?: number | null;
+  createdAtUtc: string;
+}
+
 /** One row of the Spot Analysis Report — a single spot-analysis run enriched
  *  with the trade outcomes attributed to it (signals it created, the positions
  *  those signals opened, and the realised/unrealised P&L of those positions).

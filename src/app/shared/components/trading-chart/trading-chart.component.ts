@@ -18,6 +18,7 @@ import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
+import { AnalysisChatComponent } from '@shared/components/analysis-chat/analysis-chat.component';
 import type { EChartsOption } from 'echarts';
 import { Subject, timer, switchMap, takeUntil, catchError, of } from 'rxjs';
 import { MarketDataService } from '@core/services/market-data.service';
@@ -306,7 +307,14 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
   selector: 'app-trading-chart',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgxEchartsDirective, FormsModule, DatePipe, RouterLink, MarkdownPipe],
+  imports: [
+    NgxEchartsDirective,
+    FormsModule,
+    DatePipe,
+    RouterLink,
+    MarkdownPipe,
+    AnalysisChatComponent,
+  ],
   template: `
     <div class="trading-chart">
       <!-- Toolbar -->
@@ -971,6 +979,11 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
               </section>
             }
             <div class="analysis-body md" [innerHTML]="ar.analysis | markdown"></div>
+
+            <section class="analysis-followup">
+              <h4 class="analysis-followup-title">Follow-up chat</h4>
+              <app-analysis-chat [llmInvocationId]="ar.llmInvocationId" />
+            </section>
           } @else if (analysisError(); as err) {
             <header class="analysis-head">
               <h3 id="analysis-title">Analysis failed</h3>
@@ -1634,6 +1647,17 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
          content isn't reached by emulated-encapsulation component styles. */
       .analysis-body.md {
         white-space: normal;
+      }
+      .analysis-followup {
+        padding: 0 var(--space-5) var(--space-5);
+      }
+      .analysis-followup-title {
+        margin: 0 0 var(--space-2);
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-secondary);
       }
       dialog.analysis-dialog.error .analysis-body {
         color: #ff3b30;
