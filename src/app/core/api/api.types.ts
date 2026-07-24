@@ -3139,9 +3139,18 @@ export interface SpotAnalysisFollowUpTurnDto {
   id: number;
   /** LlmInvocation id of the analysis being discussed (the thread anchor). */
   llmInvocationId: number;
-  /** 'User' (operator question) or 'Assistant' (model reply). */
-  role: 'User' | 'Assistant';
+  /** 'User' question, 'Assistant' reply, 'Tool' (a read tool the model ran),
+   *  or 'ActionProposal' (a mutating call awaiting operator confirmation). */
+  role: 'User' | 'Assistant' | 'Tool' | 'ActionProposal';
   content: string;
+  /** Tool name (Tool turn) or 'http_action' (ActionProposal). Null otherwise. */
+  toolName?: string | null;
+  /** JSON of the tool args / proposed call (method/path/body/summary). Null on User/Assistant. */
+  toolArgsJson?: string | null;
+  /** JSON of the tool result / executed-action response. Null until run. */
+  toolResultJson?: string | null;
+  /** ActionProposal lifecycle: 'Pending' | 'Confirmed' | 'Failed' | 'Dismissed'. Null otherwise. */
+  actionStatus?: string | null;
   /** Audit-row id of the re-prompt that produced an assistant turn; null for user turns. */
   followUpInvocationId?: number | null;
   createdAtUtc: string;

@@ -38,14 +38,81 @@ import type { SpotAnalysisFollowUpTurnDto } from '@core/api/api.types';
           <div class="chat-state"><span class="spinner"></span> Loading conversation…</div>
         }
 
-        @for (m of messages(); track m.id ?? $index) {
-          <div class="msg" [class.user]="m.role === 'User'">
-            @if (m.role === 'Assistant') {
-              <div class="bubble md" [innerHTML]="m.content | markdown"></div>
-            } @else {
-              <div class="bubble">{{ m.content }}</div>
+        @for (m of messages(); track m.id) {
+          @switch (m.role) {
+            @case ('Assistant') {
+              <div class="msg">
+                <div class="bubble md" [innerHTML]="m.content | markdown"></div>
+              </div>
             }
-          </div>
+            @case ('User') {
+              <div class="msg user">
+                <div class="bubble">{{ m.content }}</div>
+              </div>
+            }
+            @case ('Tool') {
+              <div class="msg">
+                <details class="tool">
+                  <summary>
+                    🔧 {{ m.toolName }} <span class="tool-hint">pulled live data</span>
+                  </summary>
+                  <div class="tool-body">
+                    @if (m.toolArgsJson && m.toolArgsJson !== '{}') {
+                      <pre class="tool-pre">args: {{ m.toolArgsJson }}</pre>
+                    }
+                    <pre class="tool-pre">{{ m.toolResultJson }}</pre>
+                  </div>
+                </details>
+              </div>
+            }
+            @case ('ActionProposal') {
+              <div class="msg">
+                <div
+                  class="action-card"
+                  [attr.data-status]="(m.actionStatus || 'Pending').toLowerCase()"
+                >
+                  <div class="action-head">
+                    <span class="action-badge">⚡ Proposed action</span>
+                    <span class="action-status">{{ m.actionStatus }}</span>
+                  </div>
+                  @if (parseAction(m); as pa) {
+                    @if (pa.summary) {
+                      <p class="action-summary">{{ pa.summary }}</p>
+                    }
+                    <code class="action-call">{{ pa.method }} {{ pa.path }}</code>
+                    @if (pa.body) {
+                      <pre class="tool-pre">{{ pa.body }}</pre>
+                    }
+                  }
+                  @if (m.actionStatus === 'Pending') {
+                    <div class="action-actions">
+                      <button
+                        type="button"
+                        class="confirm"
+                        [disabled]="resolvingId() !== null"
+                        (click)="resolve(m, true)"
+                      >
+                        {{ resolvingId() === m.id ? 'Running…' : 'Confirm & run' }}
+                      </button>
+                      <button
+                        type="button"
+                        class="dismiss"
+                        [disabled]="resolvingId() !== null"
+                        (click)="resolve(m, false)"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  } @else if (m.toolResultJson) {
+                    <details class="tool">
+                      <summary>result ({{ m.actionStatus }})</summary>
+                      <pre class="tool-pre">{{ m.toolResultJson }}</pre>
+                    </details>
+                  }
+                </div>
+              </div>
+            }
+          }
         }
 
         @if (sending()) {
@@ -153,6 +220,116 @@ import type { SpotAnalysisFollowUpTurnDto } from '@core/api/api.types';
         color: var(--text-secondary);
         background: var(--bg-tertiary);
       }
+      /* Tool turn — a collapsible, low-emphasis note that the model pulled data. */
+      .tool {
+        width: 100%;
+        border: 1px dashed var(--border);
+        border-radius: 8px;
+        background: var(--bg-secondary);
+        font-size: var(--text-xs);
+      }
+      .tool > summary {
+        cursor: pointer;
+        padding: 5px 9px;
+        color: var(--text-secondary);
+        list-style: none;
+      }
+      .tool-hint {
+        color: var(--text-tertiary);
+        font-size: 10px;
+      }
+      .tool-body {
+        padding: 0 9px 8px;
+      }
+      .tool-pre {
+        margin: 4px 0 0;
+        padding: 7px 9px;
+        background: var(--bg-tertiary);
+        border-radius: 6px;
+        font-size: 11px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 220px;
+        overflow: auto;
+      }
+      /* Action proposal — an operator-gated card. */
+      .action-card {
+        width: 100%;
+        border: 1px solid var(--accent);
+        border-radius: 10px;
+        padding: 9px 11px;
+        background: color-mix(in srgb, var(--accent) 7%, transparent);
+      }
+      .action-card[data-status='dismissed'] {
+        border-color: var(--border);
+        background: var(--bg-secondary);
+        opacity: 0.7;
+      }
+      .action-card[data-status='confirmed'] {
+        border-color: #1d8a3e;
+        background: rgba(29, 138, 62, 0.08);
+      }
+      .action-card[data-status='failed'] {
+        border-color: var(--loss);
+        background: color-mix(in srgb, var(--loss) 8%, transparent);
+      }
+      .action-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 5px;
+      }
+      .action-badge {
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+      }
+      .action-status {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-secondary);
+      }
+      .action-summary {
+        margin: 0 0 6px;
+        font-size: var(--text-sm);
+        line-height: 1.45;
+      }
+      .action-call {
+        display: block;
+        font-family: var(--font-mono, monospace);
+        font-size: 11px;
+        padding: 5px 8px;
+        background: var(--bg-tertiary);
+        border-radius: 6px;
+        word-break: break-all;
+      }
+      .action-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 9px;
+      }
+      .action-actions button {
+        padding: 6px 13px;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        border-radius: var(--radius-full);
+        cursor: pointer;
+      }
+      .action-actions .confirm {
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: #fff;
+      }
+      .action-actions .dismiss {
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+      }
+      .action-actions button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
       /* Markdown children are rendered via [innerHTML]; emulated encapsulation
          can't reach them, so keep only container-level rules here — the global
          .md styles in styles.scss handle headings/lists/etc. */
@@ -230,6 +407,8 @@ export class AnalysisChatComponent {
   protected readonly loading = signal(false);
   protected readonly sending = signal(false);
   protected readonly error = signal<string | null>(null);
+  /** Id of the action proposal currently being confirmed/dismissed, or null. */
+  protected readonly resolvingId = signal<number | null>(null);
 
   private readonly logEl = viewChild<ElementRef<HTMLDivElement>>('log');
 
@@ -300,17 +479,78 @@ export class AnalysisChatComponent {
 
     this.marketData.askAnalysisFollowUp(id, q).subscribe({
       next: (res) => {
-        this.sending.set(false);
-        if (this.llmInvocationId() !== id) return; // anchor changed mid-flight
+        if (this.llmInvocationId() !== id) {
+          this.sending.set(false);
+          return; // anchor changed mid-flight
+        }
         if (res?.status && res.data) {
-          this.messages.update((m) => [...m, res.data as SpotAnalysisFollowUpTurnDto]);
+          // Reload the whole thread so any tool turns and a pending action
+          // proposal appear — the ask endpoint returns only the final turn.
+          this.marketData.getAnalysisFollowUps(id).subscribe({
+            next: (t) => {
+              this.sending.set(false);
+              if (this.llmInvocationId() !== id) return;
+              if (t?.status && t.data) this.messages.set(t.data);
+            },
+            error: () => this.sending.set(false),
+          });
         } else {
+          this.sending.set(false);
           this.error.set(res?.message || 'The model did not return a response. Try again.');
         }
       },
       error: (err) => {
         this.sending.set(false);
         this.error.set(err?.message ?? 'Follow-up failed. Is the engine reachable?');
+      },
+    });
+  }
+
+  /** Parse an ActionProposal's args JSON into a display-friendly call spec. */
+  protected parseAction(
+    m: SpotAnalysisFollowUpTurnDto,
+  ): { method: string; path: string; body: string | null; summary: string } | null {
+    if (!m.toolArgsJson) return null;
+    try {
+      const a = JSON.parse(m.toolArgsJson) as {
+        method?: string;
+        path?: string;
+        summary?: string;
+        body?: unknown;
+      };
+      return {
+        method: (a.method || 'POST').toUpperCase(),
+        path: a.path || '',
+        summary: a.summary || '',
+        body:
+          a.body == null
+            ? null
+            : typeof a.body === 'string'
+              ? a.body
+              : JSON.stringify(a.body, null, 2),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Confirm (execute) or dismiss a proposed action; the engine returns the
+   *  full refreshed thread. */
+  protected resolve(m: SpotAnalysisFollowUpTurnDto, confirm: boolean): void {
+    if (this.resolvingId() !== null) return;
+    const id = this.llmInvocationId();
+    this.resolvingId.set(m.id);
+    this.error.set(null);
+    this.marketData.resolveFollowUpAction(m.id, confirm).subscribe({
+      next: (res) => {
+        this.resolvingId.set(null);
+        if (this.llmInvocationId() !== id) return;
+        if (res?.status && res.data) this.messages.set(res.data);
+        else this.error.set(res?.message || 'Could not resolve the action.');
+      },
+      error: (err) => {
+        this.resolvingId.set(null);
+        this.error.set(err?.message ?? 'Action failed. Is the engine reachable?');
       },
     });
   }

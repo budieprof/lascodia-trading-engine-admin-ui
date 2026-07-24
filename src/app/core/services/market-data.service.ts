@@ -222,6 +222,24 @@ export class MarketDataService {
   }
 
   /**
+   * POST /market-data/analyze/follow-up/{followUpId}/resolve?confirm=… —
+   * confirm (execute) or dismiss a mutating action the follow-up chat LLM
+   * proposed. Confirm runs the proposed engine call with the operator's auth
+   * and appends the model's outcome summary; dismiss just marks it dismissed.
+   * Returns the full refreshed thread. This is the ONLY path by which a
+   * chat-proposed action executes.
+   */
+  resolveFollowUpAction(
+    followUpId: number,
+    confirm: boolean,
+  ): Observable<ResponseData<SpotAnalysisFollowUpTurnDto[]>> {
+    return this.api.post(
+      `/market-data/analyze/follow-up/${followUpId}/resolve?confirm=${confirm}`,
+      {},
+    );
+  }
+
+  /**
    * GET /market-data/analyze/latest — most recent COMPLETED spot analysis
    * for a (symbol, timeframe), replayed server-side from the stored
    * LlmInvocation audit row. NO new LLM call / no spend. Used to default
