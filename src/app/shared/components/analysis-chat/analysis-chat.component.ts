@@ -10,7 +10,7 @@ import {
 } from '@angular/core';
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import { MarketDataService } from '@core/services/market-data.service';
-import type { SpotAnalysisFollowUpTurnDto } from '@core/api/api.types';
+import type { SpotAnalysisFollowUpTurnDto, AnalysisMonitorDto } from '@core/api/api.types';
 
 /**
  * Interactive follow-up chat for an LLM spot analysis. Given the analysis's
@@ -33,6 +33,41 @@ import type { SpotAnalysisFollowUpTurnDto } from '@core/api/api.types';
   imports: [MarkdownPipe],
   template: `
     <section class="chat" aria-label="Analysis follow-up chat">
+      @if (monitors().length > 0) {
+        <div class="monitors">
+          <div class="monitors-head">👁 Active monitors ({{ monitors().length }})</div>
+          @for (mon of monitors(); track mon.id) {
+            <div class="monitor">
+              <div class="monitor-text">
+                <span class="monitor-intent">{{ mon.intentText }}</span>
+                <span class="monitor-meta">
+                  {{ mon.symbol }} {{ mon.timeframe }} ·
+                  {{ mon.evaluationMode === 'LlmAssisted' ? 'LLM-judged' : 'live check' }} ·
+                  {{ mon.recurring ? 'recurring' : 'one-shot' }} · fired {{ mon.triggerCount }}/{{
+                    mon.maxTriggers
+                  }}
+                  @if (mon.lastEvalNote) {
+                    ·
+                    <span class="monitor-note" [title]="mon.lastEvalNote">{{
+                      mon.lastEvalNote
+                    }}</span>
+                  }
+                </span>
+              </div>
+              <button
+                type="button"
+                class="monitor-cancel"
+                [disabled]="cancellingId() === mon.id"
+                (click)="cancelMonitor(mon)"
+                title="Cancel this monitor"
+              >
+                {{ cancellingId() === mon.id ? '…' : '✕' }}
+              </button>
+            </div>
+          }
+        </div>
+      }
+
       <div class="chat-log" #log>
         @if (loading()) {
           <div class="chat-state"><span class="spinner"></span> Loading conversation…</div>
@@ -166,6 +201,68 @@ import type { SpotAnalysisFollowUpTurnDto } from '@core/api/api.types';
         padding: var(--space-3);
         max-height: 320px;
         overflow-y: auto;
+      }
+      .monitors {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: var(--space-2) var(--space-3);
+        border-bottom: 1px solid var(--border);
+        background: color-mix(in srgb, var(--accent) 5%, transparent);
+      }
+      .monitors-head {
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-secondary);
+      }
+      .monitor {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .monitor-text {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .monitor-intent {
+        font-size: var(--text-xs);
+        color: var(--text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .monitor-meta {
+        font-size: 10px;
+        color: var(--text-tertiary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .monitor-note {
+        font-style: italic;
+      }
+      .monitor-cancel {
+        flex: none;
+        width: 22px;
+        height: 22px;
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-tertiary);
+        border-radius: 50%;
+        cursor: pointer;
+        line-height: 1;
+      }
+      .monitor-cancel:hover {
+        color: var(--loss);
+        border-color: var(--loss);
+      }
+      .monitor-cancel:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
       }
       .chat-empty {
         font-size: var(--text-xs);
@@ -409,15 +506,20 @@ export class AnalysisChatComponent {
   protected readonly error = signal<string | null>(null);
   /** Id of the action proposal currently being confirmed/dismissed, or null. */
   protected readonly resolvingId = signal<number | null>(null);
+  /** Active monitors created from this analysis. */
+  protected readonly monitors = signal<AnalysisMonitorDto[]>([]);
+  /** Monitor id currently being cancelled, or null. */
+  protected readonly cancellingId = signal<number | null>(null);
 
   private readonly logEl = viewChild<ElementRef<HTMLDivElement>>('log');
 
   constructor() {
-    // Load (or reload) the thread whenever the anchor id changes — including
-    // the first render and after the operator re-runs the analysis.
+    // Load (or reload) the thread + monitors whenever the anchor id changes —
+    // including the first render and after the operator re-runs the analysis.
     effect(() => {
       const id = this.llmInvocationId();
       this.loadThread(id);
+      this.loadMonitors(id);
     });
 
     // Keep the log pinned to the latest turn as messages arrive / while thinking.
@@ -547,10 +649,46 @@ export class AnalysisChatComponent {
         if (this.llmInvocationId() !== id) return;
         if (res?.status && res.data) this.messages.set(res.data);
         else this.error.set(res?.message || 'Could not resolve the action.');
+        // A confirmed action may have created a monitor — refresh the strip.
+        this.loadMonitors(id);
       },
       error: (err) => {
         this.resolvingId.set(null);
         this.error.set(err?.message ?? 'Action failed. Is the engine reachable?');
+      },
+    });
+  }
+
+  /** Load the active monitors created from this analysis. */
+  private loadMonitors(llmInvocationId: number): void {
+    if (!llmInvocationId) {
+      this.monitors.set([]);
+      return;
+    }
+    this.marketData.getAnalysisMonitors(llmInvocationId, true).subscribe({
+      next: (res) => {
+        if (this.llmInvocationId() !== llmInvocationId) return;
+        this.monitors.set(res?.status && res.data ? res.data : []);
+      },
+      error: () => {
+        /* non-fatal — the monitors strip just stays empty */
+      },
+    });
+  }
+
+  /** Cancel (deactivate) a monitor, then refresh the strip. */
+  protected cancelMonitor(mon: AnalysisMonitorDto): void {
+    if (this.cancellingId() !== null) return;
+    const id = this.llmInvocationId();
+    this.cancellingId.set(mon.id);
+    this.marketData.cancelAnalysisMonitor(mon.id).subscribe({
+      next: () => {
+        this.cancellingId.set(null);
+        this.monitors.update((list) => list.filter((x) => x.id !== mon.id));
+      },
+      error: () => {
+        this.cancellingId.set(null);
+        this.loadMonitors(id);
       },
     });
   }

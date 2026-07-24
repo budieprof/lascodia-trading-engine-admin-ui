@@ -13,6 +13,7 @@ import {
   MarketAnalysisResultDto,
   MarketMacroAnalysisResultDto,
   SpotAnalysisFollowUpTurnDto,
+  AnalysisMonitorDto,
 } from '@core/api/api.types';
 
 @Injectable({ providedIn: 'root' })
@@ -237,6 +238,25 @@ export class MarketDataService {
       `/market-data/analyze/follow-up/${followUpId}/resolve?confirm=${confirm}`,
       {},
     );
+  }
+
+  /**
+   * GET /market-data/analysis-monitors — chat-created live monitors for an
+   * analysis (the thread anchor). A background worker evaluates them and, on
+   * fire, re-runs the analysis + posts the outcome into the chat thread.
+   */
+  getAnalysisMonitors(
+    anchorLlmInvocationId: number,
+    activeOnly = true,
+  ): Observable<ResponseData<AnalysisMonitorDto[]>> {
+    return this.api.get(
+      `/market-data/analysis-monitors?anchorLlmInvocationId=${anchorLlmInvocationId}&activeOnly=${activeOnly}`,
+    );
+  }
+
+  /** POST /market-data/analysis-monitors/{id}/cancel — deactivate a monitor. */
+  cancelAnalysisMonitor(monitorId: number): Observable<ResponseData<AnalysisMonitorDto>> {
+    return this.api.post(`/market-data/analysis-monitors/${monitorId}/cancel`, {});
   }
 
   /**

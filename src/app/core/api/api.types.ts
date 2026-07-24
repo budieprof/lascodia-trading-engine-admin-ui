@@ -3397,6 +3397,36 @@ export interface MarketAnalysisRejectedRecommendationDto {
   persistedSignalId: number;
 }
 
+/** A chat-created live-market monitor: a background watch that, when its
+ *  condition fires, re-runs the spot analysis + notifies. Returned by the
+ *  /market-data/analysis-monitors endpoints. */
+export interface AnalysisMonitorDto {
+  id: number;
+  anchorLlmInvocationId: number;
+  symbol: string;
+  timeframe: string;
+  /** The operator's request, verbatim. */
+  intentText: string;
+  /** 'Deterministic' (cheap structured check) or 'LlmAssisted' (throttled LLM judgment). */
+  evaluationMode: string;
+  triggerSpecJson: string;
+  actionSpecJson: string;
+  /** 'Active' | 'Triggered' | 'Cancelled' | 'Expired' | 'Error'. */
+  status: string;
+  recurring: boolean;
+  triggerCount: number;
+  maxTriggers: number;
+  cooldownSeconds: number;
+  createdAtUtc: string;
+  expiresAtUtc: string;
+  lastCheckedAtUtc?: string | null;
+  lastTriggeredAtUtc?: string | null;
+  /** LlmInvocation id of the most recent re-run this monitor produced. */
+  lastResultLlmInvocationId?: number | null;
+  /** Last evaluation note (why it did / didn't fire). */
+  lastEvalNote?: string | null;
+}
+
 /** Structured multi-week → multi-month posture parsed from the macro
  *  analysis tail block. NOT a tactical trade (no entry/SL/TP) — a directional
  *  bias plus the D1 levels that confirm or invalidate it. */
