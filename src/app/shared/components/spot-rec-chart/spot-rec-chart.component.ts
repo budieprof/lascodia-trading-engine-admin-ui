@@ -201,13 +201,13 @@ export interface SpotRecChartMarker {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 18px;
-        height: 18px;
+        width: 26px;
+        height: 26px;
         padding: 0;
-        border: none;
-        background: transparent;
-        color: var(--text-secondary);
-        font-size: 0.7rem;
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-size: 1.05rem;
         line-height: 1;
         cursor: pointer;
         border-radius: var(--radius-sm, 4px);
@@ -216,6 +216,7 @@ export interface SpotRecChartMarker {
       .legend-collapse:hover {
         color: var(--text-primary);
         background: var(--bg-tertiary, rgba(0, 0, 0, 0.05));
+        border-color: var(--accent);
       }
       .legend-collapse.is-collapsed {
         transform: rotate(-90deg);
