@@ -150,12 +150,15 @@ export interface SpotRecChartMarker {
         height: 440px;
         min-height: 440px;
       }
-      /* Legend as a header above the chart, separated by a hairline; presents
-         each rec's full spec in one row so it reads before the candles. */
+      /* Legend as a header above the chart, separated by a hairline; a single
+         horizontal row (asOfUtc + each rec's full spec) that wraps only when
+         the container is too narrow. */
       .chart-legend {
         display: flex;
-        flex-direction: column;
-        gap: 0.4rem;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.35rem 1.1rem;
         font-size: 0.78rem;
         color: var(--text-secondary);
         padding: 0 0 0.65rem;

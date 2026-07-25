@@ -180,10 +180,6 @@ import type {
                         [class.sell]="item.r.action === 'Sell'"
                         >#{{ item.index + 1 }} {{ item.r.action }}</span
                       >
-                      <span class="rs-levels"
-                        >Entry {{ item.r.entryPrice }} · SL {{ item.r.stopLoss }} · TP
-                        {{ item.r.takeProfit }}</span
-                      >
                       @if (filedFor(item.r); as f) {
                         <span class="rs-filed" [attr.data-status]="f.status.toLowerCase()"
                           >✓ Signal #{{ f.signalId }} · {{ f.status }}</span
@@ -467,10 +463,6 @@ import type {
       }
       .rs-label.sell {
         color: var(--danger, #dc2626);
-      }
-      .rs-levels {
-        color: var(--text-secondary);
-        font-variant-numeric: tabular-nums;
       }
       .rs-create {
         margin-left: auto;
