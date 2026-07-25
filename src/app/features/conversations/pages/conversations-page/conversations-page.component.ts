@@ -17,6 +17,7 @@ import {
 } from '@shared/components/spot-rec-chart/spot-rec-chart.component';
 import { MarketDataService } from '@core/services/market-data.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import type {
   AnalysisConversationSummaryDto,
   AnalysisConversationDetailDto,
@@ -60,14 +61,21 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell' |
             </button>
           } @else {
             <form class="new-form" (submit)="runNew($event)">
-              <input
+              <select
                 class="new-symbol"
-                placeholder="Symbol e.g. EURUSD"
                 [(ngModel)]="newSymbol"
                 name="sym"
-                [disabled]="running()"
-                autocomplete="off"
-              />
+                [disabled]="running() || symbols().length === 0"
+              >
+                @if (symbols().length === 0) {
+                  <option value="" disabled>Loading symbols…</option>
+                } @else {
+                  <option value="" disabled>Symbol…</option>
+                  @for (s of symbols(); track s) {
+                    <option [value]="s">{{ s }}</option>
+                  }
+                }
+              </select>
               <select class="new-mode" [(ngModel)]="newMode" name="mode" [disabled]="running()">
                 @for (m of analysisModes; track m.value) {
                   <option [value]="m.value">{{ m.label }}</option>
@@ -561,8 +569,13 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell' |
 export class ConversationsPageComponent {
   private readonly marketData = inject(MarketDataService);
   private readonly notify = inject(NotificationService);
+  private readonly pairsService = inject(CurrencyPairsService);
 
   protected readonly timeframes = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
+
+  /** Active currency-pair symbols for the New-analysis dropdown (from the
+   *  engine's CurrencyPair catalogue). */
+  protected readonly symbols = signal<readonly string[]>([]);
 
   protected readonly conversations = signal<AnalysisConversationSummaryDto[]>([]);
   protected readonly loading = signal(false);
@@ -686,6 +699,28 @@ export class ConversationsPageComponent {
 
   constructor() {
     this.load(true);
+    this.loadSymbols();
+  }
+
+  /** Load active currency-pair symbols for the New-analysis dropdown. */
+  private loadSymbols(): void {
+    this.pairsService.list({ currentPage: 1, itemCountPerPage: 500 }).subscribe({
+      next: (res) => {
+        const syms = Array.from(
+          new Set(
+            (res?.data?.data ?? [])
+              .filter((p) => p.isActive && (p.symbol ?? '').trim().length > 0)
+              .map((p) => (p.symbol ?? '').trim().toUpperCase()),
+          ),
+        ).sort();
+        this.symbols.set(syms);
+        // Default the launcher to the first symbol so Run is immediately usable.
+        if (!this.newSymbol && syms.length > 0) this.newSymbol = syms[0];
+      },
+      error: () => {
+        /* leave the dropdown empty — the operator can still type via search */
+      },
+    });
   }
 
   private load(reset: boolean): void {
@@ -734,7 +769,8 @@ export class ConversationsPageComponent {
 
   protected closeNew(): void {
     this.newOpen.set(false);
-    this.newSymbol = '';
+    const syms = this.symbols();
+    this.newSymbol = syms.length > 0 ? syms[0] : '';
   }
 
   protected runNew(ev: Event): void {
