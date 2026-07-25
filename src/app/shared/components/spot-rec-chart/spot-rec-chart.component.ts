@@ -71,7 +71,19 @@ export interface SpotRecChartMarker {
            Entry / SL / TP prices with colour swatches matching the chart
            lines. Rendered as a HEADER above the chart so the spec reads at a
            glance and the chart's x-axis sits flush at the bottom. -->
-      <div class="chart-legend">
+      <div class="chart-legend" [class.collapsed]="collapsible() && collapsed()">
+        @if (collapsible()) {
+          <button
+            type="button"
+            class="legend-collapse"
+            [class.is-collapsed]="collapsed()"
+            [attr.aria-expanded]="!collapsed()"
+            [title]="collapsed() ? 'Expand chart' : 'Collapse chart'"
+            (click)="collapsed.set(!collapsed())"
+          >
+            ▾
+          </button>
+        }
         <span class="legend-item legend-item--asof">
           <span class="dot dot--asof"></span> asOfUtc bar
         </span>
@@ -126,13 +138,15 @@ export interface SpotRecChartMarker {
              pushed to the right of the legend row. -->
         <span class="legend-actions"><ng-content select="[legendActions]"></ng-content></span>
       </div>
-      <div
-        echarts
-        [options]="opts"
-        [theme]="echartsTheme()"
-        [autoResize]="true"
-        class="chart-instance"
-      ></div>
+      @if (!collapsible() || !collapsed()) {
+        <div
+          echarts
+          [options]="opts"
+          [theme]="echartsTheme()"
+          [autoResize]="true"
+          class="chart-instance"
+        ></div>
+      }
     } @else {
       <div class="empty small muted">No candles available for this window.</div>
     }
@@ -180,6 +194,38 @@ export interface SpotRecChartMarker {
         display: inline-flex;
         align-items: center;
         gap: 8px;
+      }
+      /* Accordion-style collapse toggle: a chevron that rotates to a right-
+         pointing caret when the chart is collapsed. */
+      .legend-collapse {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: 0.7rem;
+        line-height: 1;
+        cursor: pointer;
+        border-radius: var(--radius-sm, 4px);
+        transition: transform 0.15s ease;
+      }
+      .legend-collapse:hover {
+        color: var(--text-primary);
+        background: var(--bg-tertiary, rgba(0, 0, 0, 0.05));
+      }
+      .legend-collapse.is-collapsed {
+        transform: rotate(-90deg);
+      }
+      /* When collapsed there is no chart beneath — drop the header's separating
+         rule + spacing so it reads as a plain compact strip. */
+      .chart-legend.collapsed {
+        border-bottom: none;
+        margin-bottom: 0;
+        padding-bottom: 0;
       }
       .legend-item--asof {
         margin-right: 0.4rem;
@@ -277,6 +323,14 @@ export class SpotRecChartComponent {
   readonly fillMarker = input<SpotRecChartMarker | null>(null);
   /** Optional "exited at" mark-point for closed-trade chart. */
   readonly exitMarker = input<SpotRecChartMarker | null>(null);
+  /** Show an accordion-style collapse toggle on the legend header so the
+   *  operator can hide the ~440px chart pane to free up space. Off by default;
+   *  the legend (spec + projected actions) stays visible when collapsed. */
+  readonly collapsible = input<boolean>(false);
+
+  /** Whether the chart pane is currently collapsed (only meaningful when
+   *  `collapsible` is true). */
+  protected readonly collapsed = signal(false);
 
   readonly candles = signal<CandleDto[]>([]);
   readonly loading = signal(false);

@@ -178,6 +178,7 @@ import type {
                   [recommendations]="chartRecs()"
                   [historyBars]="chartBars()"
                   [fullWidthLevels]="true"
+                  [collapsible]="true"
                 >
                   <div legendActions class="rec-signals">
                     @for (item of actionableRecs(); track item.index) {
