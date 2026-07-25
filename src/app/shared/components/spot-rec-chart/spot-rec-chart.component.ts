@@ -252,6 +252,9 @@ export class SpotRecChartComponent {
    * per-timeframe default (≈ 6h of forward window for TFs ≤ H1).
    */
   readonly ttlBars = input<number | null>(null);
+  /** Leading (history) bars shown before `asOfUtc`. Default 48; callers with a
+   *  bar-count control (e.g. the conversations chart) override it. */
+  readonly historyBars = input<number>(48);
   /** Optional "filled at" mark-point for signal-detail chart. */
   readonly fillMarker = input<SpotRecChartMarker | null>(null);
   /** Optional "exited at" mark-point for closed-trade chart. */
@@ -292,11 +295,12 @@ export class SpotRecChartComponent {
       const tf = this.timeframe();
       const at = this.asOfUtc();
       const ttl = this.ttlBars();
+      const hb = this.historyBars();
       if (!sym || tf == null || !at) return;
-      const key = `${sym}|${tf}|${at}|${ttl ?? '?'}`;
+      const key = `${sym}|${tf}|${at}|${ttl ?? '?'}|${hb}`;
       if (this.lastFetchedKey === key) return;
       this.lastFetchedKey = key;
-      this.fetchCandles(sym, tf, at, ttl);
+      this.fetchCandles(sym, tf, at, ttl, hb);
     });
   }
 
@@ -312,9 +316,10 @@ export class SpotRecChartComponent {
     tf: number | string,
     asOfUtc: string,
     ttlBars: number | null,
+    historyBars: number,
   ): void {
     this.loading.set(true);
-    const HISTORY_BARS = 48;
+    const HISTORY_BARS = Math.max(20, historyBars);
     const forward = Math.min(40, Math.max(8, ttlBars ?? this.defaultForwardBars(tf)));
     const itemCount = HISTORY_BARS + forward;
     this.marketData

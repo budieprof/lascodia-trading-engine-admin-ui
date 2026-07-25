@@ -143,22 +143,38 @@ import type {
           @if (detail(); as d) {
             @if (chartRecs().length > 0) {
               <div class="conv-recs">
-                <div class="rec-tf">
-                  @for (tf of chartTimeframes; track tf) {
-                    <button
-                      type="button"
-                      [class.active]="chartTf() === tf"
-                      (click)="chartTf.set(tf)"
-                    >
-                      {{ tf }}
-                    </button>
-                  }
+                <div class="rec-controls">
+                  <div class="rec-seg">
+                    <span class="rec-lbl">TF</span>
+                    @for (tf of chartTimeframes; track tf) {
+                      <button
+                        type="button"
+                        [class.active]="chartTf() === tf"
+                        (click)="chartTf.set(tf)"
+                      >
+                        {{ tf }}
+                      </button>
+                    }
+                  </div>
+                  <div class="rec-seg">
+                    <span class="rec-lbl">Bars</span>
+                    @for (n of barCountOptions; track n) {
+                      <button
+                        type="button"
+                        [class.active]="chartBars() === n"
+                        (click)="chartBars.set(n)"
+                      >
+                        {{ n }}
+                      </button>
+                    }
+                  </div>
                 </div>
                 <app-spot-rec-chart
                   [symbol]="d.symbol"
                   [timeframe]="chartTf()"
                   [asOfUtc]="d.invokedAt"
                   [recommendations]="chartRecs()"
+                  [historyBars]="chartBars()"
                 />
               </div>
             }
@@ -390,12 +406,26 @@ import type {
         border-bottom: 1px solid var(--border);
         background: var(--bg-secondary);
       }
-      .rec-tf {
+      .rec-controls {
         display: flex;
-        gap: 2px;
+        align-items: center;
+        gap: var(--space-4);
         margin-bottom: var(--space-2);
+        flex-wrap: wrap;
       }
-      .rec-tf button {
+      .rec-seg {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+      }
+      .rec-lbl {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-tertiary);
+        margin-right: 4px;
+      }
+      .rec-seg button {
         font: inherit;
         font-size: var(--text-xs);
         padding: 3px 10px;
@@ -404,16 +434,16 @@ import type {
         color: var(--text-secondary);
         cursor: pointer;
       }
-      .rec-tf button:first-child {
-        border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-      }
-      .rec-tf button:last-child {
-        border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-      }
-      .rec-tf button:not(:first-child) {
+      .rec-seg button:not(:first-of-type) {
         border-left: none;
       }
-      .rec-tf button.active {
+      .rec-seg button:first-of-type {
+        border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+      }
+      .rec-seg button:last-of-type {
+        border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      }
+      .rec-seg button.active {
         background: var(--accent);
         border-color: var(--accent);
         color: #fff;
@@ -485,8 +515,11 @@ export class ConversationsPageComponent {
 
   // ── Recommendation chart ──
   protected readonly chartTimeframes = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
+  protected readonly barCountOptions = [60, 120, 240, 500];
   /** Chart timeframe — defaults to (and resets with) the analysis timeframe. */
   protected readonly chartTf = linkedSignal(() => this.detail()?.timeframe ?? 'H1');
+  /** History bars shown before the signal-fire line. */
+  protected readonly chartBars = signal(120);
   /** Actionable recs mapped for the reusable spot-rec chart (Hold/no-entry dropped). */
   protected readonly chartRecs = computed<SpotRecChartRec[]>(() => {
     const d = this.detail();
