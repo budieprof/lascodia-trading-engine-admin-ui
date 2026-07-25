@@ -67,17 +67,10 @@ export interface SpotRecChartMarker {
     @if (loading()) {
       <div class="empty small muted">Loading candles…</div>
     } @else if (chartOptions(); as opts) {
-      <div
-        echarts
-        [options]="opts"
-        [theme]="echartsTheme()"
-        [autoResize]="true"
-        class="chart-instance"
-      ></div>
       <!-- Sensitivity-style legend: one row per rec showing the full
            Entry / SL / TP prices with colour swatches matching the chart
-           lines. Operator can read the spec at a glance without looking
-           up the values on the underlying detail panel. -->
+           lines. Rendered as a HEADER above the chart so the spec reads at a
+           glance and the chart's x-axis sits flush at the bottom. -->
       <div class="chart-legend">
         <span class="legend-item legend-item--asof">
           <span class="dot dot--asof"></span> asOfUtc bar
@@ -130,6 +123,13 @@ export interface SpotRecChartMarker {
           </span>
         }
       </div>
+      <div
+        echarts
+        [options]="opts"
+        [theme]="echartsTheme()"
+        [autoResize]="true"
+        class="chart-instance"
+      ></div>
     } @else {
       <div class="empty small muted">No candles available for this window.</div>
     }
@@ -150,17 +150,17 @@ export interface SpotRecChartMarker {
         height: 440px;
         min-height: 440px;
       }
-      /* Legend separated from the chart by a hairline; sits beneath the
-         x-axis labels and presents each rec's full spec in one row. */
+      /* Legend as a header above the chart, separated by a hairline; presents
+         each rec's full spec in one row so it reads before the candles. */
       .chart-legend {
         display: flex;
         flex-direction: column;
         gap: 0.4rem;
         font-size: 0.78rem;
         color: var(--text-secondary);
-        padding: 0.65rem 0 0;
-        margin-top: 0.4rem;
-        border-top: 1px solid var(--border);
+        padding: 0 0 0.65rem;
+        margin-bottom: 0.4rem;
+        border-bottom: 1px solid var(--border);
       }
       .legend-item {
         display: inline-flex;
