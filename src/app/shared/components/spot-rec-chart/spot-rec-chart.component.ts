@@ -255,6 +255,10 @@ export class SpotRecChartComponent {
   /** Leading (history) bars shown before `asOfUtc`. Default 48; callers with a
    *  bar-count control (e.g. the conversations chart) override it. */
   readonly historyBars = input<number>(48);
+  /** When true, the Entry/SL/TP lines span the FULL chart width and the TP/SL
+   *  zones also extend LEFT of the signal-fire line (fainter, "pre-signal").
+   *  Default false keeps the post-signal-only envelope other callers rely on. */
+  readonly fullWidthLevels = input<boolean>(false);
   /** Optional "filled at" mark-point for signal-detail chart. */
   readonly fillMarker = input<SpotRecChartMarker | null>(null);
   /** Optional "exited at" mark-point for closed-trade chart. */
@@ -406,8 +410,12 @@ export class SpotRecChartComponent {
     const yMax = Math.max(...allYs);
     const yPad = (yMax - yMin) * 0.15;
 
+    // Levels span from the signal bar to the right edge by default; full-width
+    // mode extends them back to the first bar.
+    const full = this.fullWidthLevels();
+    const lineStart = full ? 0 : signalIdx;
     const flat = (y: number): [number, number][] => [
-      [signalIdx, y],
+      [lineStart, y],
       [lastIdx, y],
     ];
 
@@ -492,26 +500,40 @@ export class SpotRecChartComponent {
       // Only the primary rec gets the shaded TP / SL zones — drawing zones
       // for every rec would overlap into mud.
       if (isPrimary && rec.entryPrice != null && rec.takeProfit != null) {
+        // Post-signal (right) zone — full colour + label.
         markAreaData.push([
           {
             yAxis: rec.entryPrice,
             xAxis: signalIdx,
-            itemStyle: { color: 'rgba(31, 138, 61, 0.10)' },
+            itemStyle: { color: 'rgba(31, 138, 61, 0.14)' },
             name: 'TP zone',
           },
           { yAxis: rec.takeProfit, xAxis: lastIdx },
         ]);
+        // Pre-signal (left) zone — fainter, no label.
+        if (full) {
+          markAreaData.push([
+            { yAxis: rec.entryPrice, xAxis: 0, itemStyle: { color: 'rgba(31, 138, 61, 0.05)' } },
+            { yAxis: rec.takeProfit, xAxis: signalIdx },
+          ]);
+        }
       }
       if (isPrimary && rec.entryPrice != null && rec.stopLoss != null) {
         markAreaData.push([
           {
             yAxis: rec.entryPrice,
             xAxis: signalIdx,
-            itemStyle: { color: 'rgba(196, 41, 10, 0.10)' },
+            itemStyle: { color: 'rgba(196, 41, 10, 0.14)' },
             name: 'SL zone',
           },
           { yAxis: rec.stopLoss, xAxis: lastIdx },
         ]);
+        if (full) {
+          markAreaData.push([
+            { yAxis: rec.entryPrice, xAxis: 0, itemStyle: { color: 'rgba(196, 41, 10, 0.05)' } },
+            { yAxis: rec.stopLoss, xAxis: signalIdx },
+          ]);
+        }
       }
     });
 

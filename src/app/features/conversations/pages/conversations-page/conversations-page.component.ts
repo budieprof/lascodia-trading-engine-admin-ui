@@ -175,6 +175,7 @@ import type {
                   [asOfUtc]="d.invokedAt"
                   [recommendations]="chartRecs()"
                   [historyBars]="chartBars()"
+                  [fullWidthLevels]="true"
                 />
               </div>
             }
