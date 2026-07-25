@@ -20,6 +20,8 @@ import { NotificationService } from '@core/notifications/notification.service';
 import type {
   AnalysisConversationSummaryDto,
   AnalysisConversationDetailDto,
+  AnalysisFiledSignalDto,
+  MarketAnalysisRecommendationDto,
 } from '@core/api/api.types';
 
 /**
@@ -177,6 +179,36 @@ import type {
                   [historyBars]="chartBars()"
                   [fullWidthLevels]="true"
                 />
+                <div class="rec-signals">
+                  @for (item of actionableRecs(); track item.index) {
+                    <div class="rec-signal-row">
+                      <span
+                        class="rs-label"
+                        [class.buy]="item.r.action === 'Buy'"
+                        [class.sell]="item.r.action === 'Sell'"
+                        >#{{ item.index + 1 }} {{ item.r.action }}</span
+                      >
+                      <span class="rs-levels"
+                        >Entry {{ item.r.entryPrice }} · SL {{ item.r.stopLoss }} · TP
+                        {{ item.r.takeProfit }}</span
+                      >
+                      @if (filedFor(item.r); as f) {
+                        <span class="rs-filed" [attr.data-status]="f.status.toLowerCase()"
+                          >✓ Signal #{{ f.signalId }} · {{ f.status }}</span
+                        >
+                      } @else {
+                        <button
+                          type="button"
+                          class="rs-create"
+                          [disabled]="creatingIndex() !== null"
+                          (click)="createSignal(item.r, item.index)"
+                        >
+                          {{ creatingIndex() === item.index ? 'Creating…' : '⚡ Create signal' }}
+                        </button>
+                      }
+                    </div>
+                  }
+                </div>
               </div>
             }
           }
@@ -414,6 +446,57 @@ import type {
         margin-bottom: var(--space-2);
         flex-wrap: wrap;
       }
+      .rec-signals {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: var(--space-3);
+      }
+      .rec-signal-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        font-size: var(--text-xs);
+      }
+      .rs-label {
+        font-weight: var(--font-semibold, 600);
+      }
+      .rs-label.buy {
+        color: var(--success, #16a34a);
+      }
+      .rs-label.sell {
+        color: var(--danger, #dc2626);
+      }
+      .rs-levels {
+        color: var(--text-secondary);
+        font-variant-numeric: tabular-nums;
+      }
+      .rs-create {
+        margin-left: auto;
+        padding: 5px 13px;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        border-radius: var(--radius-full);
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: #fff;
+        cursor: pointer;
+      }
+      .rs-create:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .rs-filed {
+        margin-left: auto;
+        font-weight: var(--font-medium);
+        color: var(--success, #16a34a);
+      }
+      .rs-filed[data-status='expired'],
+      .rs-filed[data-status='rejected'],
+      .rs-filed[data-status='cancelled'] {
+        color: var(--text-tertiary, var(--text-secondary));
+      }
       .rec-seg {
         display: flex;
         align-items: center;
@@ -535,6 +618,70 @@ export class ConversationsPageComponent {
         takeProfit: r.takeProfit,
       }));
   });
+
+  /** Actionable recommendations paired with their ORIGINAL index in the full
+   *  recommendation list — the index the persist-signal endpoint expects. */
+  protected readonly actionableRecs = computed<
+    { r: MarketAnalysisRecommendationDto; index: number }[]
+  >(() => {
+    const d = this.detail();
+    if (!d?.recommendations) return [];
+    return d.recommendations
+      .map((r, index) => ({ r, index }))
+      .filter(({ r }) => r.action !== 'Hold' && r.entryPrice != null);
+  });
+
+  /** Recommendation index currently being filed as a signal, or null. */
+  protected readonly creatingIndex = signal<number | null>(null);
+
+  /** The signal already filed for a recommendation (matched by direction +
+   *  entry, the same keys the create path dedupes on), or null. */
+  protected filedFor(rec: MarketAnalysisRecommendationDto): AnalysisFiledSignalDto | null {
+    const filed = this.detail()?.filedSignals;
+    if (!filed?.length || rec.entryPrice == null) return null;
+    const tol = Math.abs(rec.entryPrice) * 1e-5 + 1e-9;
+    return (
+      filed.find(
+        (f) => f.direction === rec.action && Math.abs(f.entryPrice - rec.entryPrice!) <= tol,
+      ) ?? null
+    );
+  }
+
+  /** File one analysis recommendation as a live signal through the risk gates,
+   *  then refetch the detail so the "Signal #N" badge replaces the button. */
+  protected createSignal(rec: MarketAnalysisRecommendationDto, index: number): void {
+    if (this.creatingIndex() !== null) return;
+    const id = this.detail()?.llmInvocationId;
+    if (!id) return;
+    this.creatingIndex.set(index);
+    this.marketData
+      .persistSignalFromAnalysis(id, index, {
+        entryPrice: rec.entryPrice,
+        stopLoss: rec.stopLoss,
+        takeProfit: rec.takeProfit,
+      })
+      .subscribe({
+        next: (res) => {
+          this.creatingIndex.set(null);
+          if (res?.status && res.data != null) {
+            this.notify.success(`Signal #${res.data} created`);
+            // Refetch so filedSignals + status reflect the new signal.
+            this.marketData.getAnalysisConversation(id).subscribe({
+              next: (d) => {
+                if (this.detail()?.llmInvocationId === id && d?.status && d.data)
+                  this.detail.set(d.data);
+              },
+            });
+          } else {
+            this.notify.error(res?.message || 'Could not create signal from this recommendation.');
+          }
+        },
+        error: (err) => {
+          this.creatingIndex.set(null);
+          this.notify.error(err?.message ?? 'Failed to create signal.');
+        },
+      });
+  }
 
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
 

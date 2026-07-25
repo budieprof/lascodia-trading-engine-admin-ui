@@ -3437,6 +3437,16 @@ export interface AnalysisConversationDetailDto {
   analysis: string;
   /** Parsed recommendations with resolved entry/SL/TP; empty for Hold-only analyses. */
   recommendations: MarketAnalysisRecommendationDto[];
+  /** Signals already filed from this analysis (matched to a rec by direction + entry). */
+  filedSignals?: AnalysisFiledSignalDto[];
+}
+
+/** A trade signal already created from an analysis recommendation. */
+export interface AnalysisFiledSignalDto {
+  signalId: number;
+  direction: string;
+  entryPrice: number;
+  status: string;
 }
 
 /** A chat-created live-market monitor: a background watch that, when its
