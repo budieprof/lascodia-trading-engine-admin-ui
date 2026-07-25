@@ -242,6 +242,12 @@ export class MarketDataService {
     );
   }
 
+  /** File a chat-generated "recommend" turn as a live trade signal through the
+   *  risk gates. Operator-gated. Returns the full refreshed thread. */
+  fileFollowUpSignal(followUpId: number): Observable<ResponseData<SpotAnalysisFollowUpTurnDto[]>> {
+    return this.api.post(`/market-data/analyze/follow-up/${followUpId}/file-signal`, {});
+  }
+
   /**
    * GET /market-data/analysis-monitors — chat-created live monitors for an
    * analysis (the thread anchor). A background worker evaluates them and, on

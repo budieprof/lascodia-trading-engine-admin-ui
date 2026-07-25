@@ -11,6 +11,26 @@ import {
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import { MarketDataService } from '@core/services/market-data.service';
 import type { SpotAnalysisFollowUpTurnDto, AnalysisMonitorDto } from '@core/api/api.types';
+import {
+  SpotRecChartComponent,
+  type SpotRecChartRec,
+} from '@shared/components/spot-rec-chart/spot-rec-chart.component';
+
+/** A chat-generated recommendation parsed from a "recommend" tool turn. */
+interface ParsedChatRec {
+  symbol: string;
+  timeframe: string;
+  asOfUtc: string;
+  action: 'Buy' | 'Sell';
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  confidencePct: number;
+  riskRewardRatio: number | null;
+  rationale: string;
+  filedSignalId: number | null;
+  chartRecs: SpotRecChartRec[];
+}
 
 /**
  * Interactive follow-up chat for an LLM spot analysis. Given the analysis's
@@ -30,7 +50,7 @@ import type { SpotAnalysisFollowUpTurnDto, AnalysisMonitorDto } from '@core/api/
   selector: 'app-analysis-chat',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MarkdownPipe],
+  imports: [MarkdownPipe, SpotRecChartComponent],
   template: `
     <section class="chat" [class.fill]="fillHeight()" aria-label="Analysis follow-up chat">
       @if (monitors().length > 0) {
@@ -92,19 +112,71 @@ import type { SpotAnalysisFollowUpTurnDto, AnalysisMonitorDto } from '@core/api/
               </div>
             }
             @case ('Tool') {
-              <div class="msg">
-                <details class="tool">
-                  <summary>
-                    🔧 {{ m.toolName }} <span class="tool-hint">pulled live data</span>
-                  </summary>
-                  <div class="tool-body">
-                    @if (m.toolArgsJson && m.toolArgsJson !== '{}') {
-                      <pre class="tool-pre">args: {{ m.toolArgsJson }}</pre>
+              @if (m.toolName === 'recommend' && parseRec(m); as rec) {
+                <div class="msg">
+                  <div class="rec-card" [attr.data-filed]="rec.filedSignalId !== null">
+                    <div class="rec-head">
+                      <span
+                        class="rec-badge"
+                        [class.buy]="rec.action === 'Buy'"
+                        [class.sell]="rec.action === 'Sell'"
+                        >📌 {{ rec.action }} {{ rec.symbol }} · {{ rec.timeframe }}</span
+                      >
+                      <span class="rec-conf"
+                        >conf {{ rec.confidencePct }}%
+                        @if (rec.riskRewardRatio !== null) {
+                          · R:R {{ rec.riskRewardRatio }}
+                        }
+                      </span>
+                    </div>
+                    <div class="rec-levels">
+                      <span class="lvl entry">Entry {{ rec.entryPrice }}</span>
+                      <span class="lvl sl">SL {{ rec.stopLoss }}</span>
+                      <span class="lvl tp">TP {{ rec.takeProfit }}</span>
+                    </div>
+                    <app-spot-rec-chart
+                      [symbol]="rec.symbol"
+                      [timeframe]="rec.timeframe"
+                      [asOfUtc]="rec.asOfUtc"
+                      [recommendations]="rec.chartRecs"
+                      [historyBars]="80"
+                      [fullWidthLevels]="true"
+                    />
+                    @if (rec.rationale) {
+                      <p class="rec-rationale">{{ rec.rationale }}</p>
                     }
-                    <pre class="tool-pre">{{ m.toolResultJson }}</pre>
+                    @if (rec.filedSignalId !== null) {
+                      <div class="rec-filed">✓ Filed as signal #{{ rec.filedSignalId }}</div>
+                    } @else {
+                      <div class="rec-actions">
+                        <button
+                          type="button"
+                          class="file-signal"
+                          [disabled]="filingId() !== null"
+                          (click)="fileSignal(m)"
+                        >
+                          {{ filingId() === m.id ? 'Filing…' : '⚡ File as signal' }}
+                        </button>
+                        <span class="rec-hint">passes through the risk gates</span>
+                      </div>
+                    }
                   </div>
-                </details>
-              </div>
+                </div>
+              } @else {
+                <div class="msg">
+                  <details class="tool">
+                    <summary>
+                      🔧 {{ m.toolName }} <span class="tool-hint">pulled live data</span>
+                    </summary>
+                    <div class="tool-body">
+                      @if (m.toolArgsJson && m.toolArgsJson !== '{}') {
+                        <pre class="tool-pre">args: {{ m.toolArgsJson }}</pre>
+                      }
+                      <pre class="tool-pre">{{ m.toolResultJson }}</pre>
+                    </div>
+                  </details>
+                </div>
+              }
             }
             @case ('ActionProposal') {
               <div class="msg">
@@ -451,6 +523,92 @@ import type { SpotAnalysisFollowUpTurnDto, AnalysisMonitorDto } from '@core/api/
         opacity: 0.5;
         cursor: not-allowed;
       }
+      /* ── Chat-generated recommendation card ─────────────────────────────── */
+      .rec-card {
+        border: 1px solid var(--accent);
+        border-radius: var(--radius-lg, 10px);
+        background: var(--bg-primary);
+        padding: 11px 13px;
+        max-width: 96%;
+        box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
+      }
+      .rec-card[data-filed='true'] {
+        border-color: var(--success, #16a34a);
+      }
+      .rec-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 7px;
+      }
+      .rec-badge {
+        font-weight: var(--font-semibold, 600);
+        font-size: var(--text-sm);
+      }
+      .rec-badge.buy {
+        color: var(--success, #16a34a);
+      }
+      .rec-badge.sell {
+        color: var(--danger, #dc2626);
+      }
+      .rec-conf {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .rec-levels {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 12px;
+        margin-bottom: 8px;
+        font-size: var(--text-xs);
+        font-variant-numeric: tabular-nums;
+      }
+      .rec-levels .lvl.entry {
+        color: var(--text-primary);
+      }
+      .rec-levels .lvl.sl {
+        color: var(--danger, #dc2626);
+      }
+      .rec-levels .lvl.tp {
+        color: var(--success, #16a34a);
+      }
+      .rec-rationale {
+        margin: 8px 0 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        line-height: 1.45;
+      }
+      .rec-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 10px;
+      }
+      .rec-actions .file-signal {
+        padding: 6px 14px;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        border-radius: var(--radius-full);
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: #fff;
+        cursor: pointer;
+      }
+      .rec-actions .file-signal:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .rec-hint {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary, var(--text-secondary));
+      }
+      .rec-filed {
+        margin-top: 10px;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        color: var(--success, #16a34a);
+      }
       /* Markdown children are rendered via [innerHTML]; emulated encapsulation
          can't reach them, so keep only container-level rules here — the global
          .md styles in styles.scss handle headings/lists/etc. */
@@ -543,6 +701,13 @@ export class AnalysisChatComponent {
   protected readonly monitors = signal<AnalysisMonitorDto[]>([]);
   /** Monitor id currently being cancelled, or null. */
   protected readonly cancellingId = signal<number | null>(null);
+  /** Id of the recommendation turn currently being filed as a signal, or null. */
+  protected readonly filingId = signal<number | null>(null);
+
+  /** Memoised parsed recommendations, keyed by turn id + payload so the chart's
+   *  inputs stay reference-stable across change detection (a fresh array every
+   *  CD would make the self-fetching chart re-query candles each cycle). */
+  private readonly recCache = new Map<string, ParsedChatRec | null>();
 
   private readonly logEl = viewChild<ElementRef<HTMLDivElement>>('log');
 
@@ -688,6 +853,100 @@ export class AnalysisChatComponent {
       error: (err) => {
         this.resolvingId.set(null);
         this.error.set(err?.message ?? 'Action failed. Is the engine reachable?');
+      },
+    });
+  }
+
+  /** Parse a "recommend" tool turn's payload into a chart-ready recommendation.
+   *  Returns null when the payload is missing/invalid so the caller falls back
+   *  to the generic tool rendering. Memoised for input stability. */
+  protected parseRec(m: SpotAnalysisFollowUpTurnDto): ParsedChatRec | null {
+    if (m.toolName !== 'recommend' || !m.toolResultJson) return null;
+    const key = `${m.id}:${m.toolResultJson}`;
+    const cached = this.recCache.get(key);
+    if (cached !== undefined) return cached;
+
+    let parsed: ParsedChatRec | null = null;
+    try {
+      const r = JSON.parse(m.toolResultJson) as {
+        symbol?: string;
+        timeframe?: string;
+        asOfUtc?: string;
+        action?: string;
+        entryPrice?: number;
+        stopLoss?: number;
+        takeProfit?: number;
+        confidence?: number;
+        riskRewardRatio?: number | null;
+        rationale?: string;
+        filedSignalId?: number | null;
+      };
+      const action = r.action === 'Buy' || r.action === 'Sell' ? r.action : null;
+      if (
+        action &&
+        r.symbol &&
+        typeof r.entryPrice === 'number' &&
+        typeof r.stopLoss === 'number' &&
+        typeof r.takeProfit === 'number'
+      ) {
+        parsed = {
+          symbol: r.symbol,
+          timeframe: r.timeframe || 'H1',
+          asOfUtc: r.asOfUtc || new Date().toISOString(),
+          action,
+          entryPrice: r.entryPrice,
+          stopLoss: r.stopLoss,
+          takeProfit: r.takeProfit,
+          confidencePct: Math.round((r.confidence ?? 0) * 100),
+          riskRewardRatio: r.riskRewardRatio ?? null,
+          rationale: r.rationale || '',
+          filedSignalId: r.filedSignalId ?? null,
+          chartRecs: [
+            {
+              label: `${action} ${r.symbol}`,
+              action,
+              entryPrice: r.entryPrice,
+              stopLoss: r.stopLoss,
+              takeProfit: r.takeProfit,
+            },
+          ],
+        };
+      }
+    } catch {
+      parsed = null;
+    }
+    this.recCache.set(key, parsed);
+    return parsed;
+  }
+
+  /** File a chat-generated recommendation as a live signal through the risk
+   *  gates. Operator-gated by an explicit confirm; the engine returns the full
+   *  refreshed thread (the rec turn comes back stamped "Filed"). */
+  protected fileSignal(m: SpotAnalysisFollowUpTurnDto): void {
+    if (this.filingId() !== null) return;
+    if (
+      !confirm(
+        'File this recommendation as a live trade signal?\nIt will pass through the engine risk gates and can be executed by an EA.',
+      )
+    )
+      return;
+    const id = this.llmInvocationId();
+    this.filingId.set(m.id);
+    this.error.set(null);
+    this.marketData.fileFollowUpSignal(m.id).subscribe({
+      next: (res) => {
+        this.filingId.set(null);
+        if (this.llmInvocationId() !== id) return;
+        if (res?.status && res.data) {
+          this.recCache.clear(); // filed turn re-parses with its new filedSignalId
+          this.messages.set(res.data);
+        } else {
+          this.error.set(res?.message || 'Could not file the signal.');
+        }
+      },
+      error: (err) => {
+        this.filingId.set(null);
+        this.error.set(err?.message ?? 'Filing failed. Is the engine reachable?');
       },
     });
   }
