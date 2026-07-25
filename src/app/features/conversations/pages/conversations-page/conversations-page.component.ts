@@ -174,12 +174,6 @@ import type {
                 <div class="rec-signals">
                   @for (item of actionableRecs(); track item.index) {
                     <div class="rec-signal-row">
-                      <span
-                        class="rs-label"
-                        [class.buy]="item.r.action === 'Buy'"
-                        [class.sell]="item.r.action === 'Sell'"
-                        >#{{ item.index + 1 }} {{ item.r.action }}</span
-                      >
                       @if (filedFor(item.r); as f) {
                         <span class="rs-filed" [attr.data-status]="f.status.toLowerCase()"
                           >✓ Signal #{{ f.signalId }} · {{ f.status }}</span
@@ -455,17 +449,7 @@ import type {
         flex-wrap: wrap;
         font-size: var(--text-xs);
       }
-      .rs-label {
-        font-weight: var(--font-semibold, 600);
-      }
-      .rs-label.buy {
-        color: var(--success, #16a34a);
-      }
-      .rs-label.sell {
-        color: var(--danger, #dc2626);
-      }
       .rs-create {
-        margin-left: auto;
         padding: 5px 13px;
         font-size: var(--text-xs);
         font-weight: var(--font-medium);
@@ -480,7 +464,6 @@ import type {
         cursor: not-allowed;
       }
       .rs-filed {
-        margin-left: auto;
         font-weight: var(--font-medium);
         color: var(--success, #16a34a);
       }
