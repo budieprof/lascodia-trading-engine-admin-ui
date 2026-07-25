@@ -171,14 +171,6 @@ import type {
                     }
                   </div>
                 </div>
-                <app-spot-rec-chart
-                  [symbol]="d.symbol"
-                  [timeframe]="chartTf()"
-                  [asOfUtc]="d.invokedAt"
-                  [recommendations]="chartRecs()"
-                  [historyBars]="chartBars()"
-                  [fullWidthLevels]="true"
-                />
                 <div class="rec-signals">
                   @for (item of actionableRecs(); track item.index) {
                     <div class="rec-signal-row">
@@ -209,6 +201,14 @@ import type {
                     </div>
                   }
                 </div>
+                <app-spot-rec-chart
+                  [symbol]="d.symbol"
+                  [timeframe]="chartTf()"
+                  [asOfUtc]="d.invokedAt"
+                  [recommendations]="chartRecs()"
+                  [historyBars]="chartBars()"
+                  [fullWidthLevels]="true"
+                />
               </div>
             }
           }
@@ -450,7 +450,7 @@ import type {
         display: flex;
         flex-direction: column;
         gap: 6px;
-        margin-top: var(--space-3);
+        margin: var(--space-3) 0;
       }
       .rec-signal-row {
         display: flex;
