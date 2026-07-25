@@ -171,9 +171,16 @@ import type {
                     }
                   </div>
                 </div>
-                <div class="rec-signals">
-                  @for (item of actionableRecs(); track item.index) {
-                    <div class="rec-signal-row">
+                <app-spot-rec-chart
+                  [symbol]="d.symbol"
+                  [timeframe]="chartTf()"
+                  [asOfUtc]="d.invokedAt"
+                  [recommendations]="chartRecs()"
+                  [historyBars]="chartBars()"
+                  [fullWidthLevels]="true"
+                >
+                  <div legendActions class="rec-signals">
+                    @for (item of actionableRecs(); track item.index) {
                       @if (filedFor(item.r); as f) {
                         <span class="rs-filed" [attr.data-status]="f.status.toLowerCase()"
                           >✓ Signal #{{ f.signalId }} · {{ f.status }}</span
@@ -188,17 +195,9 @@ import type {
                           {{ creatingIndex() === item.index ? 'Creating…' : '⚡ Create signal' }}
                         </button>
                       }
-                    </div>
-                  }
-                </div>
-                <app-spot-rec-chart
-                  [symbol]="d.symbol"
-                  [timeframe]="chartTf()"
-                  [asOfUtc]="d.invokedAt"
-                  [recommendations]="chartRecs()"
-                  [historyBars]="chartBars()"
-                  [fullWidthLevels]="true"
-                />
+                    }
+                  </div>
+                </app-spot-rec-chart>
               </div>
             }
           }
@@ -437,16 +436,9 @@ import type {
         flex-wrap: wrap;
       }
       .rec-signals {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        margin: var(--space-3) 0;
-      }
-      .rec-signal-row {
-        display: flex;
+        display: inline-flex;
         align-items: center;
-        gap: 10px;
-        flex-wrap: wrap;
+        gap: 8px;
         font-size: var(--text-xs);
       }
       .rs-create {

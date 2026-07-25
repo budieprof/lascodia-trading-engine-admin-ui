@@ -122,6 +122,9 @@ export interface SpotRecChartMarker {
             {{ em.label }}
           </span>
         }
+        <!-- Optional host-projected actions (e.g. a Create-signal button),
+             pushed to the right of the legend row. -->
+        <span class="legend-actions"><ng-content select="[legendActions]"></ng-content></span>
       </div>
       <div
         echarts
@@ -169,6 +172,14 @@ export interface SpotRecChartMarker {
         display: inline-flex;
         align-items: center;
         gap: 0.4rem;
+      }
+      /* Host-projected actions sit at the far right of the legend row. Empty
+         when nothing is projected (margin-left:auto is harmless then). */
+      .legend-actions {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
       }
       .legend-item--asof {
         margin-right: 0.4rem;
