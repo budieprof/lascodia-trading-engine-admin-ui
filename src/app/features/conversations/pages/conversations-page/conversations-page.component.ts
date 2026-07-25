@@ -22,7 +22,13 @@ import type {
   AnalysisConversationDetailDto,
   AnalysisFiledSignalDto,
   MarketAnalysisRecommendationDto,
+  ResponseData,
 } from '@core/api/api.types';
+import type { Observable } from 'rxjs';
+
+/** Analysis types the New-analysis launcher supports (spot + directed
+ *  limit/stop proposals + the longer-horizon macro brief). */
+type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell' | 'macro';
 
 /**
  * ChatGPT-style full-page conversation view. Every LLM analysis is a resumable
@@ -62,7 +68,18 @@ import type {
                 [disabled]="running()"
                 autocomplete="off"
               />
-              <select class="new-tf" [(ngModel)]="newTimeframe" name="tf" [disabled]="running()">
+              <select class="new-mode" [(ngModel)]="newMode" name="mode" [disabled]="running()">
+                @for (m of analysisModes; track m.value) {
+                  <option [value]="m.value">{{ m.label }}</option>
+                }
+              </select>
+              <select
+                class="new-tf"
+                [(ngModel)]="newTimeframe"
+                name="tf"
+                [disabled]="running() || newMode === 'macro'"
+                [title]="newMode === 'macro' ? 'Macro analysis always anchors on D1' : ''"
+              >
                 @for (tf of timeframes; track tf) {
                   <option [value]="tf">{{ tf }}</option>
                 }
@@ -271,6 +288,7 @@ import type {
       }
       .new-symbol,
       .new-tf,
+      .new-mode,
       .conv-search {
         font: inherit;
         font-size: var(--text-sm);
@@ -560,7 +578,20 @@ export class ConversationsPageComponent {
   protected readonly newOpen = signal(false);
   protected newSymbol = '';
   protected newTimeframe = 'H1';
+  protected newMode: AnalysisMode = 'spot';
   protected readonly running = signal(false);
+
+  /** Analysis types the "New analysis" launcher supports — mirrors the
+   *  spot-analysis modal / watchlist actions (spot + directed limit/stop
+   *  proposals + the longer-horizon macro brief). */
+  protected readonly analysisModes: { value: AnalysisMode; label: string }[] = [
+    { value: 'spot', label: 'Spot' },
+    { value: 'limitBuy', label: 'Limit Buy' },
+    { value: 'limitSell', label: 'Limit Sell' },
+    { value: 'stopBuy', label: 'Stop Buy' },
+    { value: 'stopSell', label: 'Stop Sell' },
+    { value: 'macro', label: 'Macro' },
+  ];
 
   protected readonly hasMore = computed(() => this.conversations().length < this.totalItems());
   protected readonly openerText = computed(() => this.detail()?.analysis ?? null);
@@ -710,24 +741,36 @@ export class ConversationsPageComponent {
     ev.preventDefault();
     const sym = this.newSymbol.trim().toUpperCase();
     if (!sym || this.running()) return;
+    const tf = this.newTimeframe;
+    const mode = this.newMode;
     this.running.set(true);
-    this.marketData.analyzeMarket(sym, this.newTimeframe, false, 'closed').subscribe({
+
+    // Route to the matching analysis endpoint. All variants return a result
+    // carrying llmInvocationId, so the success path is shared.
+    const call$ = (
+      mode === 'limitBuy'
+        ? this.marketData.proposeLimit(sym, tf, 'Buy', 'closed')
+        : mode === 'limitSell'
+          ? this.marketData.proposeLimit(sym, tf, 'Sell', 'closed')
+          : mode === 'stopBuy'
+            ? this.marketData.proposeStop(sym, tf, 'Buy', 'closed')
+            : mode === 'stopSell'
+              ? this.marketData.proposeStop(sym, tf, 'Sell', 'closed')
+              : mode === 'macro'
+                ? this.marketData.analyzeMacro(sym, tf)
+                : this.marketData.analyzeMarket(sym, tf, false, 'closed')
+    ) as Observable<ResponseData<{ llmInvocationId: number }>>;
+
+    const label = this.analysisModes.find((m) => m.value === mode)?.label ?? 'Analysis';
+
+    call$.subscribe({
       next: (res) => {
         this.running.set(false);
         if (res?.status && res.data) {
-          this.notify.success(`Analysis ready — ${sym} ${this.newTimeframe}`);
+          this.notify.success(`${label} ready — ${sym}${mode === 'macro' ? '' : ' ' + tf}`);
           this.closeNew();
-          // Prepend the new conversation and open it.
-          this.load(true);
-          this.selectedId.set(res.data.llmInvocationId);
-          this.detailLoading.set(true);
-          this.marketData.getAnalysisConversation(res.data.llmInvocationId).subscribe({
-            next: (d) => {
-              this.detailLoading.set(false);
-              if (d?.status && d.data) this.detail.set(d.data);
-            },
-            error: () => this.detailLoading.set(false),
-          });
+          this.load(true); // prepend the new conversation to the list
+          this.openConversation(res.data.llmInvocationId);
         } else {
           this.notify.error(res?.message || 'Analysis returned no result.');
         }
@@ -736,6 +779,19 @@ export class ConversationsPageComponent {
         this.running.set(false);
         this.notify.error(err?.message ?? 'Analysis failed. Is the engine reachable?');
       },
+    });
+  }
+
+  /** Select + load a conversation by its anchor invocation id. */
+  private openConversation(llmInvocationId: number): void {
+    this.selectedId.set(llmInvocationId);
+    this.detailLoading.set(true);
+    this.marketData.getAnalysisConversation(llmInvocationId).subscribe({
+      next: (d) => {
+        this.detailLoading.set(false);
+        if (d?.status && d.data) this.detail.set(d.data);
+      },
+      error: () => this.detailLoading.set(false),
     });
   }
 }
