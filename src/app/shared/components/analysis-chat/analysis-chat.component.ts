@@ -8,8 +8,10 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import { MarketDataService } from '@core/services/market-data.service';
+import { RealtimeService } from '@core/realtime/realtime.service';
 import type { SpotAnalysisFollowUpTurnDto, AnalysisMonitorDto } from '@core/api/api.types';
 import {
   SpotRecChartComponent,
@@ -53,13 +55,47 @@ interface ParsedChatRec {
   imports: [MarkdownPipe, SpotRecChartComponent],
   template: `
     <section class="chat" [class.fill]="fillHeight()" aria-label="Analysis follow-up chat">
+      @if (llmInvocationId()) {
+        <div class="chat-idbar">
+          <span class="idbar-label">Conversation ID</span>
+          <button
+            type="button"
+            class="idbar-id"
+            (click)="copyId()"
+            [title]="
+              copied()
+                ? 'Copied to clipboard'
+                : 'Click to copy — share this to have a conversation reviewed'
+            "
+          >
+            <span class="idbar-hash">#{{ llmInvocationId() }}</span>
+            <span class="idbar-copy">{{ copied() ? '✓ copied' : '⧉ copy' }}</span>
+          </button>
+        </div>
+      }
+
       @if (monitors().length > 0) {
         <div class="monitors">
           <div class="monitors-head">👁 Active monitors ({{ monitors().length }})</div>
           @for (mon of monitors(); track mon.id) {
             <div class="monitor">
               <div class="monitor-text">
-                <span class="monitor-intent">{{ mon.intentText }}</span>
+                <span class="monitor-intent-line">
+                  @if (mon.origin === 'hunter') {
+                    <span class="hunter-badge" title="Armed by the SpotSweep patient hunter"
+                      >hunter</span
+                    >
+                    @if (mon.plannedDirection) {
+                      <span
+                        class="mon-dir"
+                        [class.buy]="mon.plannedDirection === 'Buy'"
+                        [class.sell]="mon.plannedDirection === 'Sell'"
+                        >{{ mon.plannedDirection }}</span
+                      >
+                    }
+                  }
+                  <span class="monitor-intent" [title]="mon.intentText">{{ mon.intentText }}</span>
+                </span>
                 <span class="monitor-meta">
                   {{ mon.symbol }} {{ mon.timeframe }} ·
                   {{ mon.evaluationMode === 'LlmAssisted' ? 'LLM-judged' : 'live check' }} ·
@@ -272,6 +308,49 @@ interface ParsedChatRec {
         background: var(--bg-primary);
         overflow: hidden;
       }
+      /* Shareable conversation id — pinned to the top of every chat so an
+         operator can quote it ("take a look at #12345") for a review. */
+      .chat-idbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+        padding: 5px var(--space-3);
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-secondary);
+      }
+      .idbar-label {
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-tertiary);
+      }
+      .idbar-id {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 2px 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        cursor: pointer;
+        font-variant-numeric: tabular-nums;
+      }
+      .idbar-id:hover {
+        border-color: var(--accent);
+        color: var(--text-primary);
+      }
+      .idbar-hash {
+        font-weight: var(--font-semibold);
+        font-family: var(--font-mono, monospace);
+      }
+      .idbar-copy {
+        font-size: 10px;
+        color: var(--text-tertiary);
+      }
       /* Full-page mode: fill the container; the log grows instead of capping. */
       .chat.fill {
         height: 100%;
@@ -324,12 +403,49 @@ interface ParsedChatRec {
         display: flex;
         flex-direction: column;
       }
+      .monitor-intent-line {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
       .monitor-intent {
+        flex: 1;
+        min-width: 0;
         font-size: var(--text-xs);
         color: var(--text-primary);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+      /* Patient-hunter provenance badge — violet, matching the sweep cockpit. */
+      .hunter-badge {
+        flex: none;
+        font-size: 9px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 1px 6px;
+        border-radius: var(--radius-full);
+        background: rgba(175, 82, 222, 0.16);
+        color: #8944b8;
+      }
+      .mon-dir {
+        flex: none;
+        font-size: 9px;
+        font-weight: var(--font-semibold);
+        padding: 1px 6px;
+        border-radius: var(--radius-full);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+      }
+      .mon-dir.buy {
+        background: rgba(52, 199, 89, 0.16);
+        color: var(--success, #16a34a);
+      }
+      .mon-dir.sell {
+        background: rgba(255, 59, 48, 0.14);
+        color: var(--danger, #dc2626);
       }
       .monitor-meta {
         font-size: 10px;
@@ -676,6 +792,7 @@ interface ParsedChatRec {
 })
 export class AnalysisChatComponent {
   private readonly marketData = inject(MarketDataService);
+  private readonly realtime = inject(RealtimeService);
 
   /** LlmInvocation id of the analysis being discussed (the thread anchor).
    *  When it changes (operator re-ran the analysis) the thread reloads. */
@@ -703,6 +820,8 @@ export class AnalysisChatComponent {
   protected readonly cancellingId = signal<number | null>(null);
   /** Id of the recommendation turn currently being filed as a signal, or null. */
   protected readonly filingId = signal<number | null>(null);
+  /** Brief "copied" confirmation after the operator copies the conversation id. */
+  protected readonly copied = signal(false);
 
   /** Memoised parsed recommendations, keyed by turn id + payload so the chart's
    *  inputs stay reference-stable across change detection (a fresh array every
@@ -710,6 +829,10 @@ export class AnalysisChatComponent {
   private readonly recCache = new Map<string, ParsedChatRec | null>();
 
   private readonly logEl = viewChild<ElementRef<HTMLDivElement>>('log');
+
+  /** Debounce timer coalescing a burst of realtime tickles (the agentic ask loop
+   *  persists several turns in quick succession) into one silent thread refresh. */
+  private liveReloadTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     // Load (or reload) the thread + monitors whenever the anchor id changes —
@@ -728,6 +851,50 @@ export class AnalysisChatComponent {
         const el = this.logEl()?.nativeElement;
         if (el) el.scrollTop = el.scrollHeight;
       });
+    });
+
+    // Live updates: the engine tickles `analysisConversationChanged` with the
+    // anchor id whenever a turn is added / resolved / filed on ANY conversation
+    // (by this operator in another tab, by another operator, or by a monitor
+    // firing). When it's the thread we're showing, silently refresh so new turns,
+    // flipped action statuses, and filed-signal badges appear without a reload.
+    this.realtime.connect();
+    this.realtime
+      .on<{ llmInvocationId: number }>('analysisConversationChanged')
+      .pipe(takeUntilDestroyed())
+      .subscribe((p) => {
+        if (!p || p.llmInvocationId !== this.llmInvocationId()) return;
+        this.scheduleLiveReload();
+      });
+  }
+
+  /** Coalesce tickles and refresh the open thread — but never while the operator's
+   *  own send is in flight (that path reloads the thread itself; a concurrent
+   *  fetch would just flicker). */
+  private scheduleLiveReload(): void {
+    if (this.liveReloadTimer) clearTimeout(this.liveReloadTimer);
+    this.liveReloadTimer = setTimeout(() => {
+      const id = this.llmInvocationId();
+      if (!id || this.sending()) return;
+      this.refreshThreadSilently(id);
+      this.loadMonitors(id);
+    }, 400);
+  }
+
+  /** Refetch the thread WITHOUT the clear-and-spinner of loadThread, so a live
+   *  update swaps the list in place rather than blanking the log. */
+  private refreshThreadSilently(id: number): void {
+    this.marketData.getAnalysisFollowUps(id).subscribe({
+      next: (res) => {
+        if (this.llmInvocationId() !== id) return;
+        if (res?.status && res.data) {
+          this.recCache.clear(); // a rec turn may have been stamped Filed
+          this.messages.set(res.data);
+        }
+      },
+      error: () => {
+        /* transient — the next tickle or a manual action will refresh */
+      },
     });
   }
 
@@ -748,6 +915,22 @@ export class AnalysisChatComponent {
         this.loading.set(false);
       },
     });
+  }
+
+  /** Copy the conversation id (the LlmInvocation id) to the clipboard so the
+   *  operator can quote it when asking for a conversation to be reviewed. */
+  protected copyId(): void {
+    const id = this.llmInvocationId();
+    if (!id) return;
+    navigator.clipboard
+      ?.writeText(String(id))
+      .then(() => {
+        this.copied.set(true);
+        setTimeout(() => this.copied.set(false), 1500);
+      })
+      .catch(() => {
+        /* clipboard blocked (e.g. insecure context) — the id stays visible */
+      });
   }
 
   protected onKeydown(ev: KeyboardEvent): void {

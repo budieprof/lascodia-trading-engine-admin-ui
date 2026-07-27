@@ -143,6 +143,20 @@ import {
               <dt>Gate rejected</dt>
               <dd class="mono">{{ st.today.gateRejected }}</dd>
             </div>
+            @if (showHunterCounters()) {
+              <div>
+                <dt>Armed</dt>
+                <dd class="mono">{{ st.today.monitorsArmed }}</dd>
+              </div>
+              <div>
+                <dt>Fired</dt>
+                <dd class="mono">{{ st.today.monitorsFired }}</dd>
+              </div>
+              <div>
+                <dt>Invalidated</dt>
+                <dd class="mono">{{ st.today.monitorsInvalidated }}</dd>
+              </div>
+            }
             <div>
               <dt>LLM cost today</dt>
               <dd class="mono">{{ st.today.costUsd | number: '1.3-3' }} $</dd>
@@ -185,7 +199,7 @@ import {
               @if (availableSymbols().length > 0) {
                 <ul class="pair-check-list">
                   @for (sym of availableSymbols(); track sym) {
-                    <li>
+                    <li class="pair-row">
                       <label class="inline-check">
                         <input
                           type="checkbox"
@@ -194,6 +208,17 @@ import {
                         />
                         <span class="mono">{{ sym }}</span>
                       </label>
+                      @if (isPairSelected(sym)) {
+                        <button
+                          type="button"
+                          class="hunter-toggle"
+                          [class.on]="isPairHunter(sym)"
+                          (click)="togglePairHunter(sym)"
+                          title="Patient-hunter mode: only A-grade setups trade immediately; forming setups arm a documented watch"
+                        >
+                          H
+                        </button>
+                      }
                     </li>
                   }
                 </ul>
@@ -344,6 +369,109 @@ import {
               </span>
             </div>
 
+            <!-- Patient hunter — quality-over-quantity mode for opted-in
+                 pairs (the "H" toggle in the pair list). The sweep LLM only
+                 recommends A-grade setups immediately; forming-but-incomplete
+                 setups instead arm a documented watch (intent + trigger +
+                 invalidation + expiry) that re-runs the analysis when the
+                 market gets there. -->
+            <div class="field">
+              <label class="inline-check">
+                <input
+                  type="checkbox"
+                  [checked]="cfg.hunterEnabled"
+                  (change)="patch({ hunterEnabled: $any($event.target).checked })"
+                />
+                <span><strong>Patient hunter</strong></span>
+              </label>
+              @if (cfg.hunterEnabled) {
+                <div class="hunter-box">
+                  <div class="row-2">
+                    <div class="field">
+                      <label>Max active watches (fleet)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        [value]="cfg.hunterMaxActiveMonitors"
+                        (change)="
+                          patch({
+                            hunterMaxActiveMonitors: clampInt($any($event.target).value, 1, 100),
+                          })
+                        "
+                      />
+                    </div>
+                    <div class="field">
+                      <label>Max active watches per symbol</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        [value]="cfg.hunterMaxActiveMonitorsPerSymbol"
+                        (change)="
+                          patch({
+                            hunterMaxActiveMonitorsPerSymbol: clampInt(
+                              $any($event.target).value,
+                              1,
+                              10
+                            ),
+                          })
+                        "
+                      />
+                    </div>
+                    <div class="field">
+                      <label>Max re-arm depth</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="5"
+                        [value]="cfg.hunterMaxRearmDepth"
+                        (change)="
+                          patch({
+                            hunterMaxRearmDepth: clampInt($any($event.target).value, 0, 5),
+                          })
+                        "
+                      />
+                      <p class="muted small">
+                        How many times a fired watch's re-analysis may arm a successor ("keep
+                        waiting"). 0 = never re-arm.
+                      </p>
+                    </div>
+                    <div class="field">
+                      <label>Max watch expiry (hours)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="168"
+                        [value]="cfg.hunterMaxExpiryHours"
+                        (change)="
+                          patch({
+                            hunterMaxExpiryHours: clampInt($any($event.target).value, 1, 168),
+                          })
+                        "
+                      />
+                      <p class="muted small">
+                        Ceiling on the expiry the LLM may request for a watch.
+                      </p>
+                    </div>
+                  </div>
+                  <label class="inline-check">
+                    <input
+                      type="checkbox"
+                      [checked]="cfg.hunterSkipWhileArmed"
+                      (change)="patch({ hunterSkipWhileArmed: $any($event.target).checked })"
+                    />
+                    <span>Skip scheduled sweeps while a watch is armed for the pair</span>
+                  </label>
+                </div>
+              }
+              <span class="muted small">
+                For pairs flagged <strong>H</strong> in the list above, only A-grade setups trade
+                immediately — forming setups arm a documented watch that re-analyses the pair when
+                the market reaches its trigger (or drops it on invalidation / expiry).
+              </span>
+            </div>
+
             <!-- Signal expiration — how long a sweep-created signal lives
                  before the engine auto-cancels it. Stored in seconds to
                  match the rest of this config; the helper line below
@@ -481,6 +609,56 @@ import {
               </ul>
             } @else {
               <p class="muted small">No pairs currently on cooldown.</p>
+            }
+
+            @if (cfg.hunterEnabled || armedMonitors().length > 0) {
+              <header class="card-head">
+                <h2>Armed watches</h2>
+                <span class="muted small">
+                  {{ armedMonitors().length }} watch{{ armedMonitors().length === 1 ? '' : 'es' }}
+                </span>
+              </header>
+              @if (armedMonitors().length > 0) {
+                <ul class="watch-list">
+                  @for (m of armedMonitors(); track m.monitorId) {
+                    <li class="watch-row">
+                      <span class="cool-symbol mono">
+                        {{ m.symbol }}
+                        <span class="cool-tf">· {{ m.timeframe }}</span>
+                      </span>
+                      @if (m.direction) {
+                        <span
+                          class="dir-chip"
+                          [class.buy]="m.direction === 'Buy'"
+                          [class.sell]="m.direction === 'Sell'"
+                        >
+                          {{ m.direction }}
+                        </span>
+                      }
+                      <span class="watch-intent" [title]="m.intent">{{ m.intent }}</span>
+                      @if (m.rearmDepth > 0) {
+                        <span
+                          class="depth-badge"
+                          title="Re-armed after a previous watch fired; 0 = original watch"
+                        >
+                          depth {{ m.rearmDepth }}
+                        </span>
+                      }
+                      <span
+                        class="cool-countdown mono"
+                        [class.imminent]="cooldownExpirySec(m)! <= 300"
+                        [title]="
+                          'Expires ' + (m.expiresAtUtc | date: 'MMM d HH:mm' : 'UTC') + ' UTC'
+                        "
+                      >
+                        {{ formatLongCountdown(cooldownExpirySec(m)!) }}
+                      </span>
+                    </li>
+                  }
+                </ul>
+              } @else {
+                <p class="muted small">No hunter watches armed.</p>
+              }
             }
 
             <header class="card-head"><h2>Recent activity</h2></header>
@@ -664,6 +842,16 @@ import {
         border: 1px solid rgba(255, 149, 0, 0.4);
         border-radius: var(--radius-md);
         background: rgba(255, 149, 0, 0.06);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .hunter-box {
+        margin-top: var(--space-2);
+        padding: var(--space-3);
+        border: 1px solid rgba(175, 82, 222, 0.35);
+        border-radius: var(--radius-md);
+        background: rgba(175, 82, 222, 0.05);
         display: flex;
         flex-direction: column;
         gap: var(--space-2);
@@ -935,6 +1123,31 @@ import {
       .pair-check-list li {
         display: flex;
       }
+      .pair-row {
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+      }
+      /* Per-pair patient-hunter opt-in — a tiny "H" chip on selected pairs. */
+      .hunter-toggle {
+        flex: none;
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
+        background: var(--bg-secondary);
+        color: var(--text-tertiary);
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        line-height: 1;
+        cursor: pointer;
+      }
+      .hunter-toggle.on {
+        background: rgba(175, 82, 222, 0.16);
+        border-color: rgba(175, 82, 222, 0.4);
+        color: #8944b8;
+      }
       .session-check-list {
         list-style: none;
         margin: 0;
@@ -1082,6 +1295,63 @@ import {
         background: rgba(52, 199, 89, 0.18);
         color: #15803d;
       }
+      .watch-list {
+        list-style: none;
+        margin: 0 0 var(--space-3);
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .watch-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-xs);
+        padding: 5px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .watch-row:last-child {
+        border-bottom: none;
+      }
+      .watch-intent {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text-secondary);
+      }
+      .dir-chip {
+        flex: none;
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+      }
+      .dir-chip.buy {
+        background: rgba(52, 199, 89, 0.16);
+        color: #15803d;
+      }
+      .dir-chip.sell {
+        background: rgba(255, 59, 48, 0.14);
+        color: var(--loss);
+      }
+      .depth-badge {
+        flex: none;
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        padding: 2px 7px;
+        border-radius: var(--radius-full);
+        background: rgba(175, 82, 222, 0.14);
+        color: #8944b8;
+        cursor: help;
+      }
+      .watch-row .cool-countdown {
+        flex: none;
+      }
       .excluded-list {
         list-style: none;
         margin: 0 0 var(--space-3);
@@ -1187,6 +1457,16 @@ import {
       .oc-Skipped {
         background: rgba(255, 149, 0, 0.14);
         color: #b25e00;
+      }
+      /* Patient hunter armed a watch instead of trading — violet "watching". */
+      .oc-MonitorArmed {
+        background: rgba(175, 82, 222, 0.16);
+        color: #8944b8;
+      }
+      /* Pair skipped because a hunter watch is already armed — muted/neutral. */
+      .oc-Waiting {
+        background: rgba(142, 142, 147, 0.14);
+        color: var(--text-tertiary);
       }
       .small-badge {
         font-size: 10px;
@@ -1330,6 +1610,35 @@ export class SpotSweepPageComponent implements OnDestroy {
       .sort((a, b) => new Date(a.expiresAtUtc).getTime() - new Date(b.expiresAtUtc).getTime());
   });
 
+  /**
+   * Active patient-hunter watches (armed monitors), soonest-expiring first.
+   * Re-evaluates on the 1Hz `now` tick so expired watches drop out client-
+   * side immediately, matching the Hold-cooldown list behaviour.
+   */
+  readonly armedMonitors = computed(() => {
+    const list = this.status()?.hunterMonitors ?? [];
+    const nowMs = this.now();
+    return list
+      .filter((m) => new Date(m.expiresAtUtc).getTime() > nowMs)
+      .sort((a, b) => new Date(a.expiresAtUtc).getTime() - new Date(b.expiresAtUtc).getTime());
+  });
+
+  /**
+   * Whether the hunter counters (Armed / Fired / Invalidated) render in the
+   * today strip: always when the mode is on, and also when any counter is
+   * non-zero (the mode was on earlier today) so activity is never hidden.
+   */
+  readonly showHunterCounters = computed(() => {
+    const t = this.status()?.today;
+    if (!t) return false;
+    return (
+      (this.config()?.hunterEnabled ?? false) ||
+      (t.monitorsArmed ?? 0) > 0 ||
+      (t.monitorsFired ?? 0) > 0 ||
+      (t.monitorsInvalidated ?? 0) > 0
+    );
+  });
+
   /** Seconds remaining on a single Hold cooldown row. */
   cooldownExpirySec(c: { expiresAtUtc: string }): number | null {
     const remainingMs = new Date(c.expiresAtUtc).getTime() - this.now();
@@ -1384,6 +1693,13 @@ export class SpotSweepPageComponent implements OnDestroy {
           blackoutStart: cfg.blackoutStart || '22:00',
           blackoutEnd: cfg.blackoutEnd || '00:00',
           blackoutTimezone: cfg.blackoutTimezone || 'Africa/Lagos',
+          // Patient-hunter fields for configs saved before the feature existed.
+          hunterEnabled: cfg.hunterEnabled ?? false,
+          hunterMaxActiveMonitors: cfg.hunterMaxActiveMonitors ?? 20,
+          hunterMaxActiveMonitorsPerSymbol: cfg.hunterMaxActiveMonitorsPerSymbol ?? 2,
+          hunterMaxRearmDepth: cfg.hunterMaxRearmDepth ?? 1,
+          hunterSkipWhileArmed: cfg.hunterSkipWhileArmed ?? true,
+          hunterMaxExpiryHours: cfg.hunterMaxExpiryHours ?? 72,
         });
         // Seed the timeframe selector from existing pairs (uniform timeframe).
         if (cfg.pairs.length > 0) this.sweepTimeframe.set(cfg.pairs[0].timeframe);
@@ -1543,6 +1859,19 @@ export class SpotSweepPageComponent implements OnDestroy {
     } else {
       this.patch({ pairs: [...cur.pairs, { symbol, timeframe: this.sweepTimeframe() }] });
     }
+  }
+
+  isPairHunter(symbol: string): boolean {
+    return this.config()?.pairs.some((p) => p.symbol === symbol && p.hunter === true) ?? false;
+  }
+
+  /** Flip a selected pair's patient-hunter opt-in (needs hunterEnabled too). */
+  togglePairHunter(symbol: string): void {
+    const cur = this.config();
+    if (!cur) return;
+    this.patch({
+      pairs: cur.pairs.map((p) => (p.symbol === symbol ? { ...p, hunter: !p.hunter } : p)),
+    });
   }
 
   allPairsSelected(): boolean {

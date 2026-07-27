@@ -3414,6 +3414,11 @@ export interface AnalysisConversationSummaryDto {
   lastActivityAtUtc: string;
   followUpCount: number;
   activeMonitorCount: number;
+  /** Why this row matched an id search (e.g. "Conversation #8565" or "From
+   *  signal #8565") — shown as a badge so an ambiguous numeric search that hits
+   *  both a conversation-id and a signal-id is disambiguated. Null for symbol/
+   *  unfiltered listings. */
+  matchReason?: string | null;
 }
 
 export interface AnalysisConversationsPageDto {
@@ -3439,6 +3444,23 @@ export interface AnalysisConversationDetailDto {
   recommendations: MarketAnalysisRecommendationDto[];
   /** Signals already filed from this analysis (matched to a rec by direction + entry). */
   filedSignals?: AnalysisFiledSignalDto[];
+  /** Chart window anchor. Null for a normal analysis (chart centres on invokedAt). For a
+   *  signal-review journal, the SIGNAL's generation time — the chart straddles when the
+   *  signal fired, not when the post-mortem was written. */
+  chartAsOfUtc?: string | null;
+  /** Where the signal filled, for a journal chart. Null otherwise. */
+  fillMarker?: AnalysisChartMarkerDto | null;
+  /** Where the signal exited (TP/SL/expiry), for a journal chart. Null otherwise. */
+  exitMarker?: AnalysisChartMarkerDto | null;
+}
+
+/** A single point annotation on a conversation's chart (fill / exit marker). */
+export interface AnalysisChartMarkerDto {
+  timeUtc: string;
+  price: number;
+  label: string;
+  /** "fill" | "tp" | "sl". */
+  kind: string;
 }
 
 /** A trade signal already created from an analysis recommendation. */
@@ -3477,6 +3499,18 @@ export interface AnalysisMonitorDto {
   lastResultLlmInvocationId?: number | null;
   /** Last evaluation note (why it did / didn't fire). */
   lastEvalNote?: string | null;
+  /** 'operator' (chat-created) or 'hunter' (armed by the SpotSweep patient hunter). */
+  origin?: string;
+  /** Sweep run that armed this monitor, when origin is 'hunter'. */
+  sweepRunId?: string | null;
+  /** 'Buy' | 'Sell' | null — the hunter's planned trade direction. */
+  plannedDirection?: string | null;
+  /** Documented invalidation condition (hunter monitors). */
+  invalidationSpecJson?: string | null;
+  /** Predecessor monitor when this watch was re-armed after a fire. */
+  parentMonitorId?: number | null;
+  /** How many re-arms deep this watch is (0 = original). */
+  rearmDepth?: number;
 }
 
 /** Structured multi-week → multi-month posture parsed from the macro

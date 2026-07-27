@@ -19,6 +19,13 @@ export interface SweepPair {
   symbol: string;
   /** Timeframe code, e.g. "H1". */
   timeframe: string;
+  /**
+   * Opt this pair into patient-hunter mode (needs the global hunterEnabled
+   * master switch too). Hunter pairs only get recs for A-grade setups; for
+   * forming setups the LLM arms a monitor (documented intent + trigger +
+   * invalidation + expiry) and the signal is created when it fires.
+   */
+  hunter?: boolean;
 }
 
 export interface SpotSweepConfig {
@@ -73,6 +80,20 @@ export interface SpotSweepConfig {
   blackoutEnd: string;
   /** IANA timezone id, e.g. "Africa/Lagos" (WAT) or "UTC". */
   blackoutTimezone: string;
+
+  // ── Patient-hunter mode ────────────────────────────────────────────────
+  /** Master switch; per-pair opt-in via {@link SweepPair.hunter}. */
+  hunterEnabled: boolean;
+  /** Fleet-wide cap on Active hunter monitors (arming requests over it are skipped). */
+  hunterMaxActiveMonitors: number;
+  /** Per-symbol cap on Active hunter monitors (e.g. one per direction). */
+  hunterMaxActiveMonitorsPerSymbol: number;
+  /** How many times a fired monitor's re-analysis may re-arm a successor ("keep waiting"). */
+  hunterMaxRearmDepth: number;
+  /** Skip the scheduled sweep for a hunter pair while one of its monitors is armed. */
+  hunterSkipWhileArmed: boolean;
+  /** Ceiling (hours) on monitor expiry the LLM may request; clamped to [1, this]. */
+  hunterMaxExpiryHours: number;
 }
 
 export type SweepSession = 'Sydney' | 'Tokyo' | 'London' | 'NewYork';
@@ -99,6 +120,12 @@ export interface SweepTodayCounters {
   manualPending: number;
   gateRejected: number;
   costUsd: number;
+  /** Hunter monitors armed today (UTC day). */
+  monitorsArmed: number;
+  /** Hunter monitors that fired today. */
+  monitorsFired: number;
+  /** Hunter monitors whose invalidation condition hit today. */
+  monitorsInvalidated: number;
 }
 
 export interface SpotSweepStatus {
@@ -131,6 +158,23 @@ export interface SpotSweepStatus {
    * {@link holdCooldowns}.
    */
   excludedPairs: SweepExcludedPair[];
+  /** Active patient-hunter watches (armed monitors), soonest expiry first. */
+  hunterMonitors: HunterArmedMonitor[];
+}
+
+/** One armed hunter monitor surfaced on the sweep cockpit. */
+export interface HunterArmedMonitor {
+  monitorId: number;
+  symbol: string;
+  timeframe: string;
+  /** 'Buy' | 'Sell' | null (direction-agnostic plan). */
+  direction: string | null;
+  /** Documented plan, truncated (~120 chars). */
+  intent: string;
+  /** ISO timestamp. */
+  expiresAtUtc: string;
+  rearmDepth: number;
+  status: string;
 }
 
 /** One per-pair Hold cooldown entry surfaced to the cockpit. */
@@ -188,4 +232,11 @@ export const DEFAULT_SWEEP_CONFIG: SpotSweepConfig = {
   blackoutStart: '22:00',
   blackoutEnd: '00:00',
   blackoutTimezone: 'Africa/Lagos',
+  // Patient hunter ships off; enabling is the master switch + per-pair opt-in.
+  hunterEnabled: false,
+  hunterMaxActiveMonitors: 20,
+  hunterMaxActiveMonitorsPerSymbol: 2,
+  hunterMaxRearmDepth: 1,
+  hunterSkipWhileArmed: true,
+  hunterMaxExpiryHours: 72,
 };

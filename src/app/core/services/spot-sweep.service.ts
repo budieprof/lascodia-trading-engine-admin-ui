@@ -150,6 +150,7 @@ export class SpotSweepService {
         excludedCount: 0,
         holdCooldowns: [],
         excludedPairs: [],
+        hunterMonitors: [],
       };
     }
 
@@ -191,6 +192,9 @@ export class SpotSweepService {
         manualPending: autoApproved ? 1 : 3 + (tick % 4),
         gateRejected: tick % 3,
         costUsd: +(0.012 * (6 + (tick % 12))).toFixed(3),
+        monitorsArmed: cfg.hunterEnabled ? 1 + (tick % 3) : 0,
+        monitorsFired: cfg.hunterEnabled ? tick % 2 : 0,
+        monitorsInvalidated: cfg.hunterEnabled ? tick % 2 : 0,
       },
       killSwitchActive: false,
       eligibleCount: pairs.length,
@@ -230,6 +234,22 @@ export class SpotSweepService {
               },
             ]
           : [],
+      // Synthesize an armed hunter watch so the "Armed watches" panel renders
+      // in mock mode when the mode is on.
+      hunterMonitors: cfg.hunterEnabled
+        ? [
+            {
+              monitorId: 9100 + (tick % 5),
+              symbol: current.symbol,
+              timeframe: current.timeframe,
+              direction: tick % 2 === 0 ? 'Buy' : 'Sell',
+              intent: 'Wait for a retest of the broken H1 range high with rejection wicks',
+              expiresAtUtc: new Date(tick * 6000 + 14_400_000).toISOString(),
+              rearmDepth: tick % 2,
+              status: 'Active',
+            },
+          ]
+        : [],
     };
   }
 
@@ -271,6 +291,9 @@ export class SpotSweepService {
       manualPending: 0,
       gateRejected: 0,
       costUsd: 0,
+      monitorsArmed: 0,
+      monitorsFired: 0,
+      monitorsInvalidated: 0,
     };
   }
 }
