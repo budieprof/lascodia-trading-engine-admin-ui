@@ -7,6 +7,7 @@ import {
   signal,
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
@@ -14,10 +15,12 @@ import { AnalysisChatComponent } from '@shared/components/analysis-chat/analysis
 import {
   SpotRecChartComponent,
   type SpotRecChartRec,
+  type SpotRecChartMarker,
 } from '@shared/components/spot-rec-chart/spot-rec-chart.component';
 import { MarketDataService } from '@core/services/market-data.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
+import { RealtimeService } from '@core/realtime/realtime.service';
 import type {
   AnalysisConversationSummaryDto,
   AnalysisConversationDetailDto,
@@ -110,7 +113,8 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell' |
 
           <input
             class="conv-search"
-            placeholder="Search symbol…"
+            placeholder="Search symbol, #id, or signal:id…"
+            title="Symbol (EURUSD) · a number or #id matches both a conversation id and a signal id (labelled) · force one with signal:8566 or conv:19120"
             [value]="search()"
             (input)="onSearch($event)"
           />
@@ -129,6 +133,9 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell' |
                 <span class="conv-sym">{{ c.symbol }} {{ c.timeframe }}</span>
                 <span class="conv-time">{{ c.lastActivityAtUtc | relativeTime }}</span>
               </div>
+              @if (c.matchReason) {
+                <div class="conv-match">{{ c.matchReason }}</div>
+              }
               <div class="conv-preview">{{ c.preview }}</div>
               @if (c.followUpCount > 0 || c.activeMonitorCount > 0) {
                 <div class="conv-badges">
@@ -163,6 +170,14 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell' |
               <span class="conv-kind" [attr.data-kind]="d.kind">{{ d.kind }}</span>
               <strong>{{ d.symbol }} {{ d.timeframe }}</strong>
               <span class="muted">{{ d.model }} · {{ d.invokedAt | date: 'MMM d, HH:mm' }}</span>
+              <button
+                type="button"
+                class="conv-id"
+                (click)="copyId(id)"
+                [title]="copiedId() === id ? 'Copied' : 'Copy conversation ID'"
+              >
+                #{{ id }} <span class="conv-id-copy">{{ copiedId() === id ? '✓' : '⧉' }}</span>
+              </button>
             </header>
           } @else if (detailLoading()) {
             <header class="conv-header"><span class="spinner"></span> Loading…</header>
@@ -199,11 +214,14 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell' |
                 <app-spot-rec-chart
                   [symbol]="d.symbol"
                   [timeframe]="chartTf()"
-                  [asOfUtc]="d.invokedAt"
+                  [asOfUtc]="d.chartAsOfUtc ?? d.invokedAt"
                   [recommendations]="chartRecs()"
                   [historyBars]="chartBars()"
                   [fullWidthLevels]="true"
                   [collapsible]="true"
+                  [live]="!d.chartAsOfUtc"
+                  [fillMarker]="chartFillMarker()"
+                  [exitMarker]="chartExitMarker()"
                 >
                   <div legendActions class="rec-signals">
                     @for (item of actionableRecs(); track item.index) {
@@ -396,6 +414,17 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell' |
         background: rgba(234, 88, 12, 0.15);
         color: #ea580c;
       }
+      .conv-match {
+        display: inline-block;
+        margin: 2px 0 3px;
+        padding: 1px 7px;
+        border-radius: var(--radius-full);
+        background: color-mix(in srgb, var(--accent) 14%, transparent);
+        color: var(--accent);
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+      }
       .conv-preview {
         font-size: var(--text-xs);
         color: var(--text-secondary);
@@ -448,6 +477,28 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell' |
         color: var(--text-tertiary);
         font-size: var(--text-xs);
         font-weight: var(--font-normal);
+      }
+      .conv-id {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 2px 9px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
+        background: var(--bg-secondary);
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        font-family: var(--font-mono, monospace);
+        font-variant-numeric: tabular-nums;
+        cursor: pointer;
+      }
+      .conv-id:hover {
+        border-color: var(--accent);
+        color: var(--text-primary);
+      }
+      .conv-id-copy {
+        color: var(--text-tertiary);
       }
       .conv-recs {
         flex: none;
@@ -570,6 +621,7 @@ export class ConversationsPageComponent {
   private readonly marketData = inject(MarketDataService);
   private readonly notify = inject(NotificationService);
   private readonly pairsService = inject(CurrencyPairsService);
+  private readonly realtime = inject(RealtimeService);
 
   protected readonly timeframes = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
 
@@ -587,6 +639,8 @@ export class ConversationsPageComponent {
   protected readonly selectedId = signal<number | null>(null);
   protected readonly detail = signal<AnalysisConversationDetailDto | null>(null);
   protected readonly detailLoading = signal(false);
+  /** Conversation id most recently copied to the clipboard (for the ✓ tick). */
+  protected readonly copiedId = signal<number | null>(null);
 
   protected readonly newOpen = signal(false);
   protected newSymbol = '';
@@ -630,6 +684,23 @@ export class ConversationsPageComponent {
         takeProfit: r.takeProfit,
       }));
   });
+
+  /** Where the journal's signal filled (blue triangle) — null for a normal analysis. */
+  protected readonly chartFillMarker = computed<SpotRecChartMarker | null>(() =>
+    this.toChartMarker(this.detail()?.fillMarker),
+  );
+  /** Where the journal's signal exited — TP star / SL x — null for a normal analysis. */
+  protected readonly chartExitMarker = computed<SpotRecChartMarker | null>(() =>
+    this.toChartMarker(this.detail()?.exitMarker),
+  );
+
+  private toChartMarker(
+    m: { timeUtc: string; price: number; label: string; kind: string } | null | undefined,
+  ): SpotRecChartMarker | null {
+    if (!m) return null;
+    const kind = m.kind === 'tp' ? 'tp' : m.kind === 'sl' ? 'sl' : 'fill';
+    return { time: m.timeUtc, price: m.price, label: m.label, kind };
+  }
 
   /** Actionable recommendations paired with their ORIGINAL index in the full
    *  recommendation list — the index the persist-signal endpoint expects. */
@@ -697,9 +768,108 @@ export class ConversationsPageComponent {
 
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /** Coalesces a burst of realtime tickles (an ask loop persists several turns
+   *  in quick succession) into one refresh pass. */
+  private liveTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly pendingChangedIds = new Set<number>();
+
   constructor() {
     this.load(true);
     this.loadSymbols();
+
+    // Live conversation list: the engine tickles `analysisConversationChanged`
+    // with an anchor id whenever a conversation is created or its thread changes
+    // (a turn added by any operator/tab, a monitor firing, a new analysis run
+    // elsewhere). Coalesce and refresh so the rail stays current hands-free.
+    this.realtime.connect();
+    this.realtime
+      .on<{ llmInvocationId: number }>('analysisConversationChanged')
+      .pipe(takeUntilDestroyed())
+      .subscribe((p) => {
+        if (!p?.llmInvocationId) return;
+        this.pendingChangedIds.add(p.llmInvocationId);
+        this.scheduleLiveRefresh();
+      });
+  }
+
+  private scheduleLiveRefresh(): void {
+    if (this.liveTimer) clearTimeout(this.liveTimer);
+    this.liveTimer = setTimeout(() => this.applyLiveRefresh(), 500);
+  }
+
+  /**
+   * Apply a coalesced batch of conversation-changed tickles to the rail.
+   *  - Unfiltered first page (the common case): reload page 1 so brand-new
+   *    conversations appear at the top and bumps/counts are canonical.
+   *  - Searching or paginated: update only the already-visible rows in place
+   *    (preserving the search's match labels + pagination), so a badge/bump
+   *    still lands without yanking the view.
+   * Always refresh the open conversation's detail so the main-pane chart's
+   * filed-signal badges stay live.
+   */
+  private applyLiveRefresh(): void {
+    const ids = [...this.pendingChangedIds];
+    this.pendingChangedIds.clear();
+    if (ids.length === 0) return;
+
+    const selected = this.selectedId();
+    if (selected != null && ids.includes(selected)) this.refreshDetail(selected);
+
+    if (!this.search().trim() && this.page === 1) {
+      this.load(true);
+      return;
+    }
+
+    const visible = new Set(this.conversations().map((c) => c.llmInvocationId));
+    ids.filter((id) => visible.has(id)).forEach((id) => this.refreshRow(id));
+  }
+
+  /** Refetch one conversation's live-changing fields (counts, last activity,
+   *  preview) by id and merge them in place, then re-sort newest-first. Keeps the
+   *  row's existing kind/symbol/match label from the current search. */
+  private refreshRow(id: number): void {
+    this.marketData.listAnalysisConversations({ conversationId: id }, 1, 1).subscribe({
+      next: (res) => {
+        const updated = res?.data?.items?.[0];
+        if (!updated) return;
+        this.conversations.update((list) =>
+          list
+            .map((c) =>
+              c.llmInvocationId === id
+                ? {
+                    ...c,
+                    followUpCount: updated.followUpCount,
+                    activeMonitorCount: updated.activeMonitorCount,
+                    lastActivityAtUtc: updated.lastActivityAtUtc,
+                    preview: updated.preview,
+                  }
+                : c,
+            )
+            .slice()
+            .sort(
+              (a, b) =>
+                new Date(b.lastActivityAtUtc).getTime() - new Date(a.lastActivityAtUtc).getTime(),
+            ),
+        );
+      },
+      error: () => {
+        /* transient — the next tickle refreshes */
+      },
+    });
+  }
+
+  /** Silently refetch the open conversation's detail (recommendations, filed
+   *  signals) so main-pane badges reflect a chat-filed signal without a reselect. */
+  private refreshDetail(id: number): void {
+    this.marketData.getAnalysisConversation(id).subscribe({
+      next: (res) => {
+        if (this.selectedId() !== id) return;
+        if (res?.status && res.data) this.detail.set(res.data);
+      },
+      error: () => {
+        /* non-fatal */
+      },
+    });
   }
 
   /** Load active currency-pair symbols for the New-analysis dropdown. */
@@ -723,11 +893,38 @@ export class ConversationsPageComponent {
     });
   }
 
+  /**
+   * Parse the single search box into a typed filter. Signal-id and
+   * conversation-id spaces OVERLAP (the same number can be both), so a bare or
+   * "#"-prefixed number searches BOTH and the results are labelled (matchReason).
+   * Explicit prefixes force one interpretation:
+   *  - "signal:8565" / "sig 8565"   → signal id only (the conversation that produced it)
+   *  - "conv:8565" / "c:8565"       → conversation id only (the "#N" chip)
+   *  - "#8565" / "8565"             → ambiguous → match both, labelled
+   *  - "eurusd" / "gbp"             → symbol substring (default)
+   */
+  private parseSearch(raw: string): {
+    symbol?: string;
+    conversationId?: number;
+    signalId?: number;
+    anyId?: number;
+  } {
+    const s = raw.trim();
+    if (!s) return {};
+    const sig = s.match(/^(?:signal|sig)\s*[:#]?\s*(\d+)$/i);
+    if (sig) return { signalId: Number(sig[1]) };
+    const conv = s.match(/^(?:conv(?:ersation)?|c)\s*[:#]?\s*(\d+)$/i);
+    if (conv) return { conversationId: Number(conv[1]) };
+    const num = s.match(/^#?\s*(\d+)$/);
+    if (num) return { anyId: Number(num[1]) };
+    return { symbol: s };
+  }
+
   private load(reset: boolean): void {
     if (reset) this.page = 1;
     this.loading.set(true);
     this.marketData
-      .listAnalysisConversations(this.search().trim() || null, this.page, this.pageSize)
+      .listAnalysisConversations(this.parseSearch(this.search()), this.page, this.pageSize)
       .subscribe({
         next: (res) => {
           this.loading.set(false);
@@ -744,6 +941,19 @@ export class ConversationsPageComponent {
   protected loadMore(): void {
     this.page += 1;
     this.load(false);
+  }
+
+  /** Copy the conversation id to the clipboard so it can be quoted in a review. */
+  protected copyId(id: number): void {
+    navigator.clipboard
+      ?.writeText(String(id))
+      .then(() => {
+        this.copiedId.set(id);
+        setTimeout(() => this.copiedId.set(null), 1500);
+      })
+      .catch(() => {
+        /* clipboard blocked — the id stays visible in the header */
+      });
   }
 
   protected onSearch(ev: Event): void {

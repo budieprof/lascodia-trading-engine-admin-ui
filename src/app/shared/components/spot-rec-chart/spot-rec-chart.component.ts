@@ -2,17 +2,20 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  DestroyRef,
   effect,
   inject,
   input,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import type { EChartsOption } from 'echarts';
 import { catchError, of } from 'rxjs';
 
 import { MarketDataService } from '@core/services/market-data.service';
+import { RealtimeService } from '@core/realtime/realtime.service';
 import { ThemeService } from '@core/theme/theme.service';
 import { CandleDto, Timeframe } from '@core/api/api.types';
 
@@ -298,6 +301,7 @@ export interface SpotRecChartMarker {
 })
 export class SpotRecChartComponent {
   private readonly marketData = inject(MarketDataService);
+  private readonly realtime = inject(RealtimeService);
   private readonly theme = inject(ThemeService);
 
   /** Instrument symbol — e.g. "EURUSD". */
@@ -328,10 +332,21 @@ export class SpotRecChartComponent {
    *  operator can hide the ~440px chart pane to free up space. Off by default;
    *  the legend (spec + projected actions) stays visible when collapsed. */
   readonly collapsible = input<boolean>(false);
+  /** Opt in to a LIVE price stream: the chart joins the symbol's price room over
+   *  the realtime hub and overlays a dashed "LIVE" line that updates ~1 Hz, so the
+   *  operator can watch price approach the Entry / SL / TP levels. Off by default —
+   *  historical/snapshot charts (e.g. the per-rec cards in chat) stay static. */
+  readonly live = input<boolean>(false);
 
   /** Whether the chart pane is currently collapsed (only meaningful when
    *  `collapsible` is true). */
   protected readonly collapsed = signal(false);
+
+  /** Latest streamed mid price for the current symbol (null until the first
+   *  tick / when `live` is off). Rendered as the dashed LIVE mark-line. */
+  readonly livePrice = signal<number | null>(null);
+  /** Symbol currently joined to a price room, so we can leave it on switch. */
+  private subscribedSymbol: string | null = null;
 
   readonly candles = signal<CandleDto[]>([]);
   readonly loading = signal(false);
@@ -374,6 +389,44 @@ export class SpotRecChartComponent {
       if (this.lastFetchedKey === key) return;
       this.lastFetchedKey = key;
       this.fetchCandles(sym, tf, at, ttl, hb);
+    });
+
+    // ── Live price subscription lifecycle ──────────────────────────────────
+    // Join the symbol's price room once the shared hub connection is up; leave +
+    // rejoin on symbol switch; force a rejoin after a reconnect (server-side group
+    // membership is lost on a dropped connection). Re-runs whenever `live`, the
+    // symbol, or the connection state changes (all read as signals).
+    effect(() => {
+      if (!this.live()) return;
+      const sym = this.symbol()?.toUpperCase();
+      if (!this.realtime.isConnected()) {
+        // Not connected yet — kick the (idempotent) connect and clear the marker
+        // so a reconnect re-subscribes rather than assuming we're still joined.
+        this.subscribedSymbol = null;
+        this.realtime.connect();
+        return;
+      }
+      if (!sym || this.subscribedSymbol === sym) return;
+      if (this.subscribedSymbol) this.realtime.invoke('UnsubscribePrice', this.subscribedSymbol);
+      this.livePrice.set(null);
+      this.realtime.invoke('SubscribePrice', sym);
+      this.subscribedSymbol = sym;
+    });
+
+    // Tick stream — keep only ticks for the symbol we're showing.
+    this.realtime
+      .on<{ symbol: string; mid: number; bid: number; ask: number }>('priceUpdated')
+      .pipe(takeUntilDestroyed())
+      .subscribe((p) => {
+        if (!this.live() || !p) return;
+        if ((p.symbol ?? '').toUpperCase() !== this.symbol()?.toUpperCase()) return;
+        const mid = p.mid ?? (p.bid + p.ask) / 2;
+        if (typeof mid === 'number' && isFinite(mid)) this.livePrice.set(mid);
+      });
+
+    // Leave the price room on teardown so we don't leak group membership.
+    inject(DestroyRef).onDestroy(() => {
+      if (this.subscribedSymbol) this.realtime.invoke('UnsubscribePrice', this.subscribedSymbol);
     });
   }
 
@@ -475,6 +528,11 @@ export class SpotRecChartComponent {
       if (rec.stopLoss != null) allYs.push(rec.stopLoss);
       if (rec.takeProfit != null) allYs.push(rec.takeProfit);
     });
+    // Live price (opt-in) participates in the y-bounds so the LIVE marker never
+    // clips off the top/bottom when price runs past every rec level.
+    const livePx = this.livePrice();
+    const showLive = this.live() && livePx != null && isFinite(livePx);
+    if (showLive) allYs.push(livePx!);
     const yMin = Math.min(...allYs);
     const yMax = Math.max(...allYs);
     const yPad = (yMax - yMin) * 0.15;
@@ -699,6 +757,27 @@ export class SpotRecChartComponent {
                   fontSize: 11,
                 },
               },
+              // Live-price line (opt-in) — dashed horizontal marker refreshed ~1 Hz
+              // by the priceUpdated stream so price is watchable against the levels.
+              ...(showLive
+                ? [
+                    {
+                      yAxis: livePx!,
+                      lineStyle: { color: '#0071e3', type: 'dashed', width: 1.5, opacity: 0.95 },
+                      label: {
+                        show: true,
+                        formatter: `LIVE ${fmt(livePx!)}`,
+                        position: 'insideEndTop',
+                        color: '#ffffff',
+                        backgroundColor: '#0071e3',
+                        padding: [2, 6],
+                        borderRadius: 3,
+                        fontWeight: 'bold',
+                        fontSize: 10,
+                      },
+                    },
+                  ]
+                : []),
             ],
           },
         },

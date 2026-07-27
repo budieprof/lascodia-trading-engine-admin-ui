@@ -273,12 +273,22 @@ export class MarketDataService {
    * the chat page's sidebar.
    */
   listAnalysisConversations(
-    symbol: string | null,
+    filter: {
+      symbol?: string | null;
+      conversationId?: number | null;
+      signalId?: number | null;
+      anyId?: number | null;
+    } | null,
     page = 1,
     pageSize = 30,
   ): Observable<ResponseData<AnalysisConversationsPageDto>> {
     const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-    if (symbol) params.set('symbol', this.formatSymbol(symbol));
+    // Direct-id filters take precedence server-side; a symbol is a substring match.
+    // anyId = an ambiguous number that matches a conversation id OR a signal id.
+    if (filter?.conversationId != null) params.set('conversationId', String(filter.conversationId));
+    else if (filter?.signalId != null) params.set('signalId', String(filter.signalId));
+    else if (filter?.anyId != null) params.set('anyId', String(filter.anyId));
+    else if (filter?.symbol) params.set('symbol', this.formatSymbol(filter.symbol));
     return this.api.get(`/market-data/analysis-conversations?${params.toString()}`);
   }
 

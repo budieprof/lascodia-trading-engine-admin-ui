@@ -45,6 +45,15 @@ export const REALTIME_EVENTS = [
   // ── Notification bell (NotificationDispatcherWorker tickles every client
   //    when the unified feed's source-table max-timestamp advances) ──
   'notificationsChanged',
+  // ── Conversations chat page (analysis command handlers + follow-up turn
+  //    writers + AnalysisMonitorWorker push a { llmInvocationId } tickle when a
+  //    conversation is created or its thread changes — see
+  //    AnalysisChatRealtimeBroadcaster). Drives live left-rail + chat thread. ──
+  'analysisConversationChanged',
+  // ── Live price stream, room-scoped to `price:{SYMBOL}` (PriceUpdatedRealtimeRelay,
+  //    throttled ~1 Hz). Only reaches clients that called SubscribePrice — used by
+  //    the spot-rec chart's live-price marker. ──
+  'priceUpdated',
 ] as const;
 export type RealtimeEventName = (typeof REALTIME_EVENTS)[number];
 
