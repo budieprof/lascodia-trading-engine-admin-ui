@@ -2269,11 +2269,14 @@ export class SignalSensitivityPageComponent implements OnInit {
 
   // Timeframe the operator picks from the chart toolbar. Default M5 because
   // the walker pins TP/SL touches to the smallest available timeframe bar,
-  // so M5 candles render the exact bar the verdict was registered on. H1
-  // and above hide intra-hour movement behind wider bars and make the exit
-  // dot look misaligned vs visible price action. M15/H1/H4/D1 stay one
-  // click away for macro context on long-horizon signals.
-  readonly chartTimeframes: Timeframe[] = ['M5', 'M15', 'H1', 'H4', 'D1'];
+  // so M5 candles render close to the exact bar the verdict was registered
+  // on. M1 is included as the FINEST option: the walk itself runs on the
+  // smallest timeframe present for the symbol (M1 when it exists), so when a
+  // HITSL/HITTP verdict looks wrong against the M5 render, M1 shows the exact
+  // wick the walker actually resolved on — the definitive check. H1 and above
+  // hide intra-bar movement and make the exit dot look misaligned vs visible
+  // price action; they stay one click away for macro context.
+  readonly chartTimeframes: Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
   readonly selectedTimeframe = signal<Timeframe>('M5');
 
   readonly windowDays = signal<number>(30);
@@ -3216,10 +3219,20 @@ export class SignalSensitivityPageComponent implements OnInit {
     const from = new Date(generatedMs - preMin * 60_000);
     const to = new Date(Math.min(endMs + postMin * 60_000, nowMs));
 
+    // Size the page to the full computed window (+ headroom), capped at 2000.
+    // The candle endpoint has no server-side page-size clamp and orders
+    // newest-first, so a fixed 500 would silently drop the OLDEST bars —
+    // fine for coarse TFs, but on M1/M5 a multi-hour signal easily exceeds
+    // 500 bars and would truncate the fill/exit region the operator is here
+    // to inspect. Requesting the whole span keeps the verdict bar in view.
+    const spanMin = (to.getTime() - from.getTime()) / 60_000;
+    const expectedBars = Math.ceil(spanMin / tfMin);
+    const pageSize = Math.min(Math.max(expectedBars + 50, 200), 2000);
+
     this.marketDataSvc
       .listCandles({
         currentPage: 1,
-        itemCountPerPage: 500,
+        itemCountPerPage: pageSize,
         sortBy: 'timestamp',
         sortDirection: 'asc',
         filter: {
