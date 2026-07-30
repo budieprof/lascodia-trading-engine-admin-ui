@@ -16,6 +16,9 @@ import {
   AnalysisMonitorDto,
   AnalysisConversationsPageDto,
   AnalysisConversationDetailDto,
+  LiveExposureDto,
+  SignalExposureConfigDto,
+  UpdateSignalExposureConfigRequest,
 } from '@core/api/api.types';
 
 @Injectable({ providedIn: 'root' })
@@ -297,6 +300,27 @@ export class MarketDataService {
     llmInvocationId: number,
   ): Observable<ResponseData<AnalysisConversationDetailDto>> {
     return this.api.get(`/market-data/analysis-conversations/${llmInvocationId}`);
+  }
+
+  /**
+   * GET /market-data/signal-exposure — the live signal book: net cross-currency
+   * exposure across all not-yet-resolved signals (walk-derived, position-independent),
+   * plus the open/pending signals behind it. `refresh` re-walks before reading.
+   */
+  getSignalExposure(refresh = false): Observable<ResponseData<LiveExposureDto>> {
+    return this.api.get(`/market-data/signal-exposure?refresh=${refresh}`);
+  }
+
+  /** GET /market-data/signal-exposure/config — portfolio-awareness knobs. */
+  getSignalExposureConfig(): Observable<ResponseData<SignalExposureConfigDto>> {
+    return this.api.get(`/market-data/signal-exposure/config`);
+  }
+
+  /** PUT /market-data/signal-exposure/config — partial update of the knobs. */
+  updateSignalExposureConfig(
+    body: UpdateSignalExposureConfigRequest,
+  ): Observable<ResponseData<number>> {
+    return this.api.put(`/market-data/signal-exposure/config`, body);
   }
 
   /**

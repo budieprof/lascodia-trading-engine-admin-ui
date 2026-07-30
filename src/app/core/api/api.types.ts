@@ -3428,6 +3428,67 @@ export interface AnalysisConversationsPageDto {
   totalItems: number;
 }
 
+/** Net signed exposure to one currency across the live signal book. */
+export interface CurrencyExposureDto {
+  currency: string;
+  net: number;
+  longCount: number;
+  shortCount: number;
+}
+
+/** One in-play signal in the live book. */
+export interface ExposureSignalDto {
+  signalId: number;
+  symbol: string;
+  direction: string;
+  baseCurrency: string;
+  quoteCurrency: string;
+  status: string; // Open | Pending
+  confidence: number;
+  walkPipPnL: number;
+  generatedAt: string;
+}
+
+/** The live signal book — net cross-currency exposure derived solely from signal
+ *  walk status (position-independent), plus the signals behind it. */
+export interface LiveExposureDto {
+  asOfUtc: string;
+  openCount: number;
+  pendingCount: number;
+  crowdedThreshold: number;
+  currencies: CurrencyExposureDto[];
+  signals: ExposureSignalDto[];
+}
+
+/** Portfolio-exposure ("signal book") config knobs for the sweep cockpit. */
+export interface SignalExposureConfigDto {
+  enabled: boolean;
+  includePending: boolean;
+  inPlayWindowHours: number;
+  intervalSeconds: number;
+  crowdedThreshold: number;
+  maxOpenSignalsPerSymbol: number;
+  symbolCapIncludesPending: boolean;
+  enabledDefault: boolean;
+  includePendingDefault: boolean;
+  inPlayWindowHoursDefault: number;
+  intervalSecondsDefault: number;
+  crowdedThresholdDefault: number;
+  maxOpenSignalsPerSymbolDefault: number;
+  symbolCapIncludesPendingDefault: boolean;
+}
+
+/** Partial update — only supplied fields are written. */
+export interface UpdateSignalExposureConfigRequest {
+  enabled?: boolean;
+  includePending?: boolean;
+  inPlayWindowHours?: number;
+  intervalSeconds?: number;
+  crowdedThreshold?: number;
+  maxOpenSignalsPerSymbol?: number;
+  symbolCapIncludesPending?: boolean;
+}
+
 /** The opening brief of a conversation — analysis prose (blocks stripped) +
  *  metadata + parsed recommendations (for the entry/SL/TP chart). */
 export interface AnalysisConversationDetailDto {

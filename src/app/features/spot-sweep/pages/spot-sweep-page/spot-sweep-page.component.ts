@@ -17,6 +17,8 @@ import {
   SweepLastResult,
   SweepSession,
 } from '@features/spot-sweep/spot-sweep.types';
+import { SignalExposureControlsComponent } from '@features/spot-sweep/components/signal-exposure-controls/signal-exposure-controls.component';
+import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symbol-cap-controls/symbol-cap-controls.component';
 
 /**
  * Spot Sweep cockpit — configure + monitor the autonomous spot-analysis loop.
@@ -26,7 +28,7 @@ import {
 @Component({
   selector: 'app-spot-sweep-page',
   standalone: true,
-  imports: [DatePipe, DecimalPipe],
+  imports: [DatePipe, DecimalPipe, SignalExposureControlsComponent, SymbolCapControlsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -166,522 +168,538 @@ import {
       }
 
       @if (config(); as cfg) {
-        <div class="grid">
-          <!-- ───────── Config ───────── -->
-          <section class="card">
-            <header class="card-head">
-              <h2>Configuration</h2>
-              @if (dirty()) {
-                <span class="muted small">unsaved changes</span>
-              }
-            </header>
+        <div class="cols">
+          <!-- Left column — the configuration form (tall) -->
+          <div class="col">
+            <!-- ───────── Config ───────── -->
+            <section class="card">
+              <header class="card-head">
+                <h2>Configuration</h2>
+                @if (dirty()) {
+                  <span class="muted small">unsaved changes</span>
+                }
+              </header>
 
-            <!-- Pairs -->
-            <div class="field">
-              <label>Pairs ({{ cfg.pairs.length }} selected)</label>
-              <div class="tf-row">
-                <span class="muted small">Timeframe</span>
-                <select
-                  [value]="sweepTimeframe()"
-                  (change)="setSweepTimeframe($any($event.target).value)"
-                >
-                  @for (tf of timeframes; track tf) {
-                    <option [value]="tf" [selected]="tf === sweepTimeframe()">{{ tf }}</option>
+              <!-- Pairs -->
+              <div class="field">
+                <label>Pairs ({{ cfg.pairs.length }} selected)</label>
+                <div class="tf-row">
+                  <span class="muted small">Timeframe</span>
+                  <select
+                    [value]="sweepTimeframe()"
+                    (change)="setSweepTimeframe($any($event.target).value)"
+                  >
+                    @for (tf of timeframes; track tf) {
+                      <option [value]="tf" [selected]="tf === sweepTimeframe()">{{ tf }}</option>
+                    }
+                  </select>
+                  <span class="spacer"></span>
+                  @if (availableSymbols().length > 0) {
+                    <button type="button" class="linkish" (click)="toggleAllPairs()">
+                      {{ allPairsSelected() ? 'Clear all' : 'Select all' }}
+                    </button>
                   }
-                </select>
-                <span class="spacer"></span>
+                </div>
                 @if (availableSymbols().length > 0) {
-                  <button type="button" class="linkish" (click)="toggleAllPairs()">
-                    {{ allPairsSelected() ? 'Clear all' : 'Select all' }}
-                  </button>
+                  <ul class="pair-check-list">
+                    @for (sym of availableSymbols(); track sym) {
+                      <li class="pair-row">
+                        <label class="inline-check">
+                          <input
+                            type="checkbox"
+                            [checked]="isPairSelected(sym)"
+                            (change)="togglePair(sym)"
+                          />
+                          <span class="mono">{{ sym }}</span>
+                        </label>
+                        @if (isPairSelected(sym)) {
+                          <button
+                            type="button"
+                            class="hunter-toggle"
+                            [class.on]="isPairHunter(sym)"
+                            (click)="togglePairHunter(sym)"
+                            title="Patient-hunter mode: only A-grade setups trade immediately; forming setups arm a documented watch"
+                          >
+                            H
+                          </button>
+                        }
+                      </li>
+                    }
+                  </ul>
+                } @else if (pairsLoading()) {
+                  <p class="muted small">Loading currency pairs…</p>
+                } @else {
+                  <p class="muted small">No active currency pairs found in the catalogue.</p>
                 }
               </div>
-              @if (availableSymbols().length > 0) {
-                <ul class="pair-check-list">
-                  @for (sym of availableSymbols(); track sym) {
-                    <li class="pair-row">
-                      <label class="inline-check">
-                        <input
-                          type="checkbox"
-                          [checked]="isPairSelected(sym)"
-                          (change)="togglePair(sym)"
-                        />
-                        <span class="mono">{{ sym }}</span>
-                      </label>
-                      @if (isPairSelected(sym)) {
-                        <button
-                          type="button"
-                          class="hunter-toggle"
-                          [class.on]="isPairHunter(sym)"
-                          (click)="togglePairHunter(sym)"
-                          title="Patient-hunter mode: only A-grade setups trade immediately; forming setups arm a documented watch"
-                        >
-                          H
-                        </button>
-                      }
-                    </li>
-                  }
-                </ul>
-              } @else if (pairsLoading()) {
-                <p class="muted small">Loading currency pairs…</p>
-              } @else {
-                <p class="muted small">No active currency pairs found in the catalogue.</p>
-              }
-            </div>
 
-            <!-- Pacing + framing -->
-            <div class="row-2">
-              <div class="field">
-                <label>Bar position</label>
-                <select
-                  [value]="cfg.barPosition"
-                  (change)="patch({ barPosition: $any($event.target).value })"
-                >
-                  @for (bp of barPositions; track bp) {
-                    <option [value]="bp" [selected]="bp === cfg.barPosition">{{ bp }}</option>
-                  }
-                </select>
+              <!-- Pacing + framing -->
+              <div class="row-2">
+                <div class="field">
+                  <label>Bar position</label>
+                  <select
+                    [value]="cfg.barPosition"
+                    (change)="patch({ barPosition: $any($event.target).value })"
+                  >
+                    @for (bp of barPositions; track bp) {
+                      <option [value]="bp" [selected]="bp === cfg.barPosition">{{ bp }}</option>
+                    }
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Interval (seconds between sweep ticks)</label>
+                  <input
+                    type="number"
+                    min="5"
+                    [value]="cfg.intervalSeconds"
+                    (input)="
+                      patch({ intervalSeconds: clampInt($any($event.target).value, 5, 3600) })
+                    "
+                  />
+                  <p class="muted small">
+                    Each tick now analyses every eligible pair in parallel; this is the cooldown
+                    between sweeps of the full list.
+                  </p>
+                </div>
+                <div class="field">
+                  <label>Max parallel analyses</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="16"
+                    [value]="cfg.maxParallelAnalyses"
+                    (input)="
+                      patch({ maxParallelAnalyses: clampInt($any($event.target).value, 1, 16) })
+                    "
+                  />
+                  <p class="muted small">
+                    Caps concurrent LLM calls per tick. 1 = legacy one-pair-per-tick; 6 is a good
+                    default; > 10 will usually hit provider rate limits.
+                  </p>
+                </div>
               </div>
-              <div class="field">
-                <label>Interval (seconds between sweep ticks)</label>
-                <input
-                  type="number"
-                  min="5"
-                  [value]="cfg.intervalSeconds"
-                  (input)="patch({ intervalSeconds: clampInt($any($event.target).value, 5, 3600) })"
-                />
-                <p class="muted small">
-                  Each tick now analyses every eligible pair in parallel; this is the cooldown
-                  between sweeps of the full list.
-                </p>
-              </div>
-              <div class="field">
-                <label>Max parallel analyses</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="16"
-                  [value]="cfg.maxParallelAnalyses"
-                  (input)="
-                    patch({ maxParallelAnalyses: clampInt($any($event.target).value, 1, 16) })
-                  "
-                />
-                <p class="muted small">
-                  Caps concurrent LLM calls per tick. 1 = legacy one-pair-per-tick; 6 is a good
-                  default; > 10 will usually hit provider rate limits.
-                </p>
-              </div>
-            </div>
 
-            <!-- Active trading sessions — when none selected, sweep is
+              <!-- Active trading sessions — when none selected, sweep is
                  always-on (legacy). When one or more are selected, the
                  worker parks ticks whose UTC hour falls outside every
                  selected window. Windows match the chart UI's session bar:
                  Sydney 22-07 UTC, Tokyo 00-09, London 08-17, NewYork 13-22.
                  The labels under each box show the UTC window so the
                  operator doesn't have to remember them. -->
-            <div class="field">
-              <label>Active trading sessions</label>
-              <ul class="session-check-list">
-                @for (s of allSessions; track s.name) {
-                  <li>
-                    <label class="inline-check">
-                      <input
-                        type="checkbox"
-                        [checked]="isSessionSelected(s.name)"
-                        (change)="toggleSession(s.name)"
-                      />
-                      <span>
-                        <strong>{{ s.label }}</strong>
-                        <span class="muted small mono"> · {{ s.window }} UTC</span>
-                      </span>
-                    </label>
-                  </li>
-                }
-              </ul>
-              <p class="muted small">
-                @if (cfg.activeSessions.length === 0) {
-                  Always on — sweep runs 24/5 regardless of session.
-                } @else {
-                  Sweep parks outside the selected window(s).
-                }
-              </p>
-            </div>
+              <div class="field">
+                <label>Active trading sessions</label>
+                <ul class="session-check-list">
+                  @for (s of allSessions; track s.name) {
+                    <li>
+                      <label class="inline-check">
+                        <input
+                          type="checkbox"
+                          [checked]="isSessionSelected(s.name)"
+                          (change)="toggleSession(s.name)"
+                        />
+                        <span>
+                          <strong>{{ s.label }}</strong>
+                          <span class="muted small mono"> · {{ s.window }} UTC</span>
+                        </span>
+                      </label>
+                    </li>
+                  }
+                </ul>
+                <p class="muted small">
+                  @if (cfg.activeSessions.length === 0) {
+                    Always on — sweep runs 24/5 regardless of session.
+                  } @else {
+                    Sweep parks outside the selected window(s).
+                  }
+                </p>
+              </div>
 
-            <!-- Daily signal blackout — an operator-defined quiet window
+              <!-- Daily signal blackout — an operator-defined quiet window
                  (local time in the chosen timezone, wraps midnight) during
                  which the sweep parks entirely: no LLM analyses, no signal
                  generation. Overrides the session windows above. -->
-            <div class="field">
-              <label class="inline-check">
-                <input
-                  type="checkbox"
-                  [checked]="cfg.blackoutEnabled"
-                  (change)="patch({ blackoutEnabled: $any($event.target).checked })"
-                />
-                <span><strong>Daily signal blackout</strong></span>
-              </label>
-              @if (cfg.blackoutEnabled) {
-                <div class="blackout-row">
-                  <span class="muted small">from</span>
+              <div class="field">
+                <label class="inline-check">
                   <input
-                    type="time"
-                    [value]="cfg.blackoutStart"
-                    (change)="setBlackoutStart($any($event.target).value)"
+                    type="checkbox"
+                    [checked]="cfg.blackoutEnabled"
+                    (change)="patch({ blackoutEnabled: $any($event.target).checked })"
                   />
-                  <span class="muted small">for</span>
-                  <input
-                    type="number"
-                    class="dur-input"
-                    min="0"
-                    max="23"
-                    [value]="blackoutDurationHours()"
-                    (change)="setBlackoutDuration($any($event.target).value, null)"
-                  />
-                  <span class="muted small">h</span>
-                  <input
-                    type="number"
-                    class="dur-input"
-                    min="0"
-                    max="59"
-                    step="5"
-                    [value]="blackoutDurationMinutesPart()"
-                    (change)="setBlackoutDuration(null, $any($event.target).value)"
-                  />
-                  <span class="muted small">m</span>
-                  <select
-                    [value]="cfg.blackoutTimezone"
-                    (change)="patch({ blackoutTimezone: $any($event.target).value })"
-                  >
-                    @for (tz of blackoutTimezones; track tz.id) {
-                      <option [value]="tz.id" [selected]="cfg.blackoutTimezone === tz.id">
-                        {{ tz.label }}
-                      </option>
-                    }
-                  </select>
-                  <span class="muted small mono">ends {{ cfg.blackoutEnd }}</span>
-                </div>
-              }
-              <span class="muted small">
-                During this window each day the sweep parks entirely — no LLM analyses, no signal
-                generation. Overrides the session windows and wraps past midnight when needed (22:00
-                for 2h = 10 PM to midnight). Manual Spot Analysis is unaffected.
-              </span>
-            </div>
+                  <span><strong>Daily signal blackout</strong></span>
+                </label>
+                @if (cfg.blackoutEnabled) {
+                  <div class="blackout-row">
+                    <span class="muted small">from</span>
+                    <input
+                      type="time"
+                      [value]="cfg.blackoutStart"
+                      (change)="setBlackoutStart($any($event.target).value)"
+                    />
+                    <span class="muted small">for</span>
+                    <input
+                      type="number"
+                      class="dur-input"
+                      min="0"
+                      max="23"
+                      [value]="blackoutDurationHours()"
+                      (change)="setBlackoutDuration($any($event.target).value, null)"
+                    />
+                    <span class="muted small">h</span>
+                    <input
+                      type="number"
+                      class="dur-input"
+                      min="0"
+                      max="59"
+                      step="5"
+                      [value]="blackoutDurationMinutesPart()"
+                      (change)="setBlackoutDuration(null, $any($event.target).value)"
+                    />
+                    <span class="muted small">m</span>
+                    <select
+                      [value]="cfg.blackoutTimezone"
+                      (change)="patch({ blackoutTimezone: $any($event.target).value })"
+                    >
+                      @for (tz of blackoutTimezones; track tz.id) {
+                        <option [value]="tz.id" [selected]="cfg.blackoutTimezone === tz.id">
+                          {{ tz.label }}
+                        </option>
+                      }
+                    </select>
+                    <span class="muted small mono">ends {{ cfg.blackoutEnd }}</span>
+                  </div>
+                }
+                <span class="muted small">
+                  During this window each day the sweep parks entirely — no LLM analyses, no signal
+                  generation. Overrides the session windows and wraps past midnight when needed
+                  (22:00 for 2h = 10 PM to midnight). Manual Spot Analysis is unaffected.
+                </span>
+              </div>
 
-            <!-- Patient hunter — quality-over-quantity mode for opted-in
+              <!-- Patient hunter — quality-over-quantity mode for opted-in
                  pairs (the "H" toggle in the pair list). The sweep LLM only
                  recommends A-grade setups immediately; forming-but-incomplete
                  setups instead arm a documented watch (intent + trigger +
                  invalidation + expiry) that re-runs the analysis when the
                  market gets there. -->
-            <div class="field">
-              <label class="inline-check">
-                <input
-                  type="checkbox"
-                  [checked]="cfg.hunterEnabled"
-                  (change)="patch({ hunterEnabled: $any($event.target).checked })"
-                />
-                <span><strong>Patient hunter</strong></span>
-              </label>
-              @if (cfg.hunterEnabled) {
-                <div class="hunter-box">
-                  <div class="row-2">
-                    <div class="field">
-                      <label>Max active watches (fleet)</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="100"
-                        [value]="cfg.hunterMaxActiveMonitors"
-                        (change)="
-                          patch({
-                            hunterMaxActiveMonitors: clampInt($any($event.target).value, 1, 100),
-                          })
-                        "
-                      />
+              <div class="field">
+                <label class="inline-check">
+                  <input
+                    type="checkbox"
+                    [checked]="cfg.hunterEnabled"
+                    (change)="patch({ hunterEnabled: $any($event.target).checked })"
+                  />
+                  <span><strong>Patient hunter</strong></span>
+                </label>
+                @if (cfg.hunterEnabled) {
+                  <div class="hunter-box">
+                    <div class="row-2">
+                      <div class="field">
+                        <label>Max active watches (fleet)</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="100"
+                          [value]="cfg.hunterMaxActiveMonitors"
+                          (change)="
+                            patch({
+                              hunterMaxActiveMonitors: clampInt($any($event.target).value, 1, 100),
+                            })
+                          "
+                        />
+                      </div>
+                      <div class="field">
+                        <label>Max active watches per symbol</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="10"
+                          [value]="cfg.hunterMaxActiveMonitorsPerSymbol"
+                          (change)="
+                            patch({
+                              hunterMaxActiveMonitorsPerSymbol: clampInt(
+                                $any($event.target).value,
+                                1,
+                                10
+                              ),
+                            })
+                          "
+                        />
+                      </div>
+                      <div class="field">
+                        <label>Max re-arm depth</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="5"
+                          [value]="cfg.hunterMaxRearmDepth"
+                          (change)="
+                            patch({
+                              hunterMaxRearmDepth: clampInt($any($event.target).value, 0, 5),
+                            })
+                          "
+                        />
+                        <p class="muted small">
+                          How many times a fired watch's re-analysis may arm a successor ("keep
+                          waiting"). 0 = never re-arm.
+                        </p>
+                      </div>
+                      <div class="field">
+                        <label>Max watch expiry (hours)</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="168"
+                          [value]="cfg.hunterMaxExpiryHours"
+                          (change)="
+                            patch({
+                              hunterMaxExpiryHours: clampInt($any($event.target).value, 1, 168),
+                            })
+                          "
+                        />
+                        <p class="muted small">
+                          Ceiling on the expiry the LLM may request for a watch.
+                        </p>
+                      </div>
                     </div>
-                    <div class="field">
-                      <label>Max active watches per symbol</label>
+                    <label class="inline-check">
                       <input
-                        type="number"
-                        min="1"
-                        max="10"
-                        [value]="cfg.hunterMaxActiveMonitorsPerSymbol"
-                        (change)="
-                          patch({
-                            hunterMaxActiveMonitorsPerSymbol: clampInt(
-                              $any($event.target).value,
-                              1,
-                              10
-                            ),
-                          })
-                        "
+                        type="checkbox"
+                        [checked]="cfg.hunterSkipWhileArmed"
+                        (change)="patch({ hunterSkipWhileArmed: $any($event.target).checked })"
                       />
-                    </div>
-                    <div class="field">
-                      <label>Max re-arm depth</label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="5"
-                        [value]="cfg.hunterMaxRearmDepth"
-                        (change)="
-                          patch({
-                            hunterMaxRearmDepth: clampInt($any($event.target).value, 0, 5),
-                          })
-                        "
-                      />
-                      <p class="muted small">
-                        How many times a fired watch's re-analysis may arm a successor ("keep
-                        waiting"). 0 = never re-arm.
-                      </p>
-                    </div>
-                    <div class="field">
-                      <label>Max watch expiry (hours)</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="168"
-                        [value]="cfg.hunterMaxExpiryHours"
-                        (change)="
-                          patch({
-                            hunterMaxExpiryHours: clampInt($any($event.target).value, 1, 168),
-                          })
-                        "
-                      />
-                      <p class="muted small">
-                        Ceiling on the expiry the LLM may request for a watch.
-                      </p>
-                    </div>
+                      <span>Skip scheduled sweeps while a watch is armed for the pair</span>
+                    </label>
                   </div>
-                  <label class="inline-check">
-                    <input
-                      type="checkbox"
-                      [checked]="cfg.hunterSkipWhileArmed"
-                      (change)="patch({ hunterSkipWhileArmed: $any($event.target).checked })"
-                    />
-                    <span>Skip scheduled sweeps while a watch is armed for the pair</span>
-                  </label>
-                </div>
-              }
-              <span class="muted small">
-                For pairs flagged <strong>H</strong> in the list above, only A-grade setups trade
-                immediately — forming setups arm a documented watch that re-analyses the pair when
-                the market reaches its trigger (or drops it on invalidation / expiry).
-              </span>
-            </div>
+                }
+                <span class="muted small">
+                  For pairs flagged <strong>H</strong> in the list above, only A-grade setups trade
+                  immediately — forming setups arm a documented watch that re-analyses the pair when
+                  the market reaches its trigger (or drops it on invalidation / expiry).
+                </span>
+              </div>
 
-            <!-- Signal expiration — how long a sweep-created signal lives
+              <!-- Signal expiration — how long a sweep-created signal lives
                  before the engine auto-cancels it. Stored in seconds to
                  match the rest of this config; the helper line below
                  surfaces the human-readable equivalent so the operator
                  doesn't have to do the arithmetic in their head. -->
-            <div class="field">
-              <label>Signal expiration (seconds)</label>
-              <input
-                type="number"
-                min="60"
-                max="86400"
-                step="60"
-                [value]="cfg.signalExpirationSeconds"
-                (input)="
-                  patch({
-                    signalExpirationSeconds: parseRawInt($any($event.target).value),
-                  })
-                "
-                (change)="
-                  patch({
-                    signalExpirationSeconds: clampInt($any($event.target).value, 60, 86400),
-                  })
-                "
-              />
-              <span class="muted small">
-                {{ formatDuration(cfg.signalExpirationSeconds) }} · pending sweep signals expire
-                after this; cancels any unfilled order and closes the position at market.
-              </span>
-            </div>
-
-            <!-- Entry-style bias -->
-            <div class="field">
-              <label>Entry bias</label>
-              <select
-                [value]="cfg.entryPreference"
-                (change)="patch({ entryPreference: $any($event.target).value })"
-              >
-                <option value="Any" [selected]="cfg.entryPreference === 'Any'">
-                  No preference
-                </option>
-                <option value="Stop" [selected]="cfg.entryPreference === 'Stop'">
-                  Prefer breakout (stop orders)
-                </option>
-                <option value="Limit" [selected]="cfg.entryPreference === 'Limit'">
-                  Prefer pullback (limit orders)
-                </option>
-              </select>
-              <span class="muted small">
-                Biases the LLM to rank stop-side (breakout) or limit-side (pullback) entries first.
-              </span>
-            </div>
-
-            <button
-              type="button"
-              class="save-btn"
-              [disabled]="!dirty() || saving()"
-              (click)="save()"
-            >
-              {{ saving() ? 'Saving…' : 'Save configuration' }}
-            </button>
-          </section>
-
-          <!-- ───────── Guardrails + activity ───────── -->
-          <section class="card">
-            <header class="card-head"><h2>Guardrails</h2></header>
-
-            <div class="field check">
-              <label>
+              <div class="field">
+                <label>Signal expiration (seconds)</label>
                 <input
-                  type="checkbox"
-                  [checked]="cfg.respectKillSwitch"
-                  (change)="patch({ respectKillSwitch: $any($event.target).checked })"
+                  type="number"
+                  min="60"
+                  max="86400"
+                  step="60"
+                  [value]="cfg.signalExpirationSeconds"
+                  (input)="
+                    patch({
+                      signalExpirationSeconds: parseRawInt($any($event.target).value),
+                    })
+                  "
+                  (change)="
+                    patch({
+                      signalExpirationSeconds: clampInt($any($event.target).value, 60, 86400),
+                    })
+                  "
                 />
-                Halt on kill switch
-              </label>
-            </div>
-
-            <header class="card-head">
-              <h2>Excluded</h2>
-              <span class="muted small">
-                {{ excludedPairs().length }} pair{{ excludedPairs().length === 1 ? '' : 's' }}
-              </span>
-            </header>
-            @if (excludedPairs().length > 0) {
-              <ul class="excluded-list">
-                @for (e of excludedPairs(); track e.symbol + ':' + e.timeframe) {
-                  <li class="excluded-row">
-                    <span class="cool-symbol mono">
-                      {{ e.symbol }}
-                      <span class="cool-tf">· {{ e.timeframe }}</span>
-                    </span>
-                    <span
-                      class="excluded-reason"
-                      [class.no-coverage]="e.reason === 'No EA coverage'"
-                      [class.open-position]="e.reason === 'Open position'"
-                      [class.pending]="
-                        e.reason === 'Pending order' || e.reason === 'Pending signal'
-                      "
-                    >
-                      {{ e.reason }}
-                    </span>
-                  </li>
-                }
-              </ul>
-            } @else {
-              <p class="muted small">All configured pairs are eligible.</p>
-            }
-
-            <header class="card-head">
-              <h2>On cooldown</h2>
-              <span class="muted small">
-                {{ holdCooldowns().length }} pair{{ holdCooldowns().length === 1 ? '' : 's' }}
-              </span>
-            </header>
-            @if (holdCooldowns().length > 0) {
-              <ul class="cooldown-list">
-                @for (c of holdCooldowns(); track c.symbol + ':' + c.timeframe) {
-                  <li class="cooldown-row">
-                    <span class="cool-symbol mono">
-                      {{ c.symbol }}
-                      <span class="cool-tf">· {{ c.timeframe }}</span>
-                    </span>
-                    <span class="cool-placed muted small">
-                      placed
-                      <span class="mono">{{ c.placedAtUtc | date: 'HH:mm:ss' }}</span>
-                    </span>
-                    <span
-                      class="cool-countdown mono"
-                      [class.imminent]="cooldownExpirySec(c)! <= 30"
-                    >
-                      {{ formatCountdown(cooldownExpirySec(c)!) }}
-                    </span>
-                  </li>
-                }
-              </ul>
-            } @else {
-              <p class="muted small">No pairs currently on cooldown.</p>
-            }
-
-            @if (cfg.hunterEnabled || armedMonitors().length > 0) {
-              <header class="card-head">
-                <h2>Armed watches</h2>
                 <span class="muted small">
-                  {{ armedMonitors().length }} watch{{ armedMonitors().length === 1 ? '' : 'es' }}
+                  {{ formatDuration(cfg.signalExpirationSeconds) }} · pending sweep signals expire
+                  after this; cancels any unfilled order and closes the position at market.
+                </span>
+              </div>
+
+              <!-- Entry-style bias -->
+              <div class="field">
+                <label>Entry bias</label>
+                <select
+                  [value]="cfg.entryPreference"
+                  (change)="patch({ entryPreference: $any($event.target).value })"
+                >
+                  <option value="Any" [selected]="cfg.entryPreference === 'Any'">
+                    No preference
+                  </option>
+                  <option value="Stop" [selected]="cfg.entryPreference === 'Stop'">
+                    Prefer breakout (stop orders)
+                  </option>
+                  <option value="Limit" [selected]="cfg.entryPreference === 'Limit'">
+                    Prefer pullback (limit orders)
+                  </option>
+                </select>
+                <span class="muted small">
+                  Biases the LLM to rank stop-side (breakout) or limit-side (pullback) entries
+                  first.
+                </span>
+              </div>
+
+              <button
+                type="button"
+                class="save-btn"
+                [disabled]="!dirty() || saving()"
+                (click)="save()"
+              >
+                {{ saving() ? 'Saving…' : 'Save configuration' }}
+              </button>
+            </section>
+          </div>
+
+          <!-- Right column — exposure governance + guardrails/activity,
+               stacked so no card is stranded beside a much taller neighbour. -->
+          <div class="col">
+            <!-- ───────── Portfolio awareness (signal-book concentration) ───────── -->
+            <app-signal-exposure-controls />
+
+            <!-- ───────── Per-symbol open-signal generation cap ───────── -->
+            <app-symbol-cap-controls />
+
+            <!-- ───────── Guardrails + activity ───────── -->
+            <section class="card">
+              <header class="card-head"><h2>Guardrails</h2></header>
+
+              <div class="field check">
+                <label>
+                  <input
+                    type="checkbox"
+                    [checked]="cfg.respectKillSwitch"
+                    (change)="patch({ respectKillSwitch: $any($event.target).checked })"
+                  />
+                  Halt on kill switch
+                </label>
+              </div>
+
+              <header class="card-head">
+                <h2>Excluded</h2>
+                <span class="muted small">
+                  {{ excludedPairs().length }} pair{{ excludedPairs().length === 1 ? '' : 's' }}
                 </span>
               </header>
-              @if (armedMonitors().length > 0) {
-                <ul class="watch-list">
-                  @for (m of armedMonitors(); track m.monitorId) {
-                    <li class="watch-row">
+              @if (excludedPairs().length > 0) {
+                <ul class="excluded-list">
+                  @for (e of excludedPairs(); track e.symbol + ':' + e.timeframe) {
+                    <li class="excluded-row">
                       <span class="cool-symbol mono">
-                        {{ m.symbol }}
-                        <span class="cool-tf">· {{ m.timeframe }}</span>
+                        {{ e.symbol }}
+                        <span class="cool-tf">· {{ e.timeframe }}</span>
                       </span>
-                      @if (m.direction) {
-                        <span
-                          class="dir-chip"
-                          [class.buy]="m.direction === 'Buy'"
-                          [class.sell]="m.direction === 'Sell'"
-                        >
-                          {{ m.direction }}
-                        </span>
-                      }
-                      <span class="watch-intent" [title]="m.intent">{{ m.intent }}</span>
-                      @if (m.rearmDepth > 0) {
-                        <span
-                          class="depth-badge"
-                          title="Re-armed after a previous watch fired; 0 = original watch"
-                        >
-                          depth {{ m.rearmDepth }}
-                        </span>
-                      }
                       <span
-                        class="cool-countdown mono"
-                        [class.imminent]="cooldownExpirySec(m)! <= 300"
-                        [title]="
-                          'Expires ' + (m.expiresAtUtc | date: 'MMM d HH:mm' : 'UTC') + ' UTC'
+                        class="excluded-reason"
+                        [class.no-coverage]="e.reason === 'No EA coverage'"
+                        [class.open-position]="e.reason === 'Open position'"
+                        [class.pending]="
+                          e.reason === 'Pending order' || e.reason === 'Pending signal'
                         "
                       >
-                        {{ formatLongCountdown(cooldownExpirySec(m)!) }}
+                        {{ e.reason }}
                       </span>
                     </li>
                   }
                 </ul>
               } @else {
-                <p class="muted small">No hunter watches armed.</p>
+                <p class="muted small">All configured pairs are eligible.</p>
               }
-            }
 
-            <header class="card-head"><h2>Recent activity</h2></header>
-            @if (feed().length > 0) {
-              <ul class="feed">
-                @for (r of feed(); track r.signalId) {
-                  <li>
-                    <span class="feed-time mono">{{ r.at | date: 'HH:mm:ss' }}</span>
-                    <span class="mono">{{ r.symbol }}</span>
-                    <span class="feed-outcome">{{ r.outcome }}</span>
-                    @if (r.orderId) {
-                      <span class="chip ok">order #{{ r.orderId }}</span>
-                    } @else if (r.signalId) {
-                      <span class="chip">signal #{{ r.signalId }}</span>
+              <header class="card-head">
+                <h2>On cooldown</h2>
+                <span class="muted small">
+                  {{ holdCooldowns().length }} pair{{ holdCooldowns().length === 1 ? '' : 's' }}
+                </span>
+              </header>
+              @if (holdCooldowns().length > 0) {
+                <ul class="cooldown-list">
+                  @for (c of holdCooldowns(); track c.symbol + ':' + c.timeframe) {
+                    <li class="cooldown-row">
+                      <span class="cool-symbol mono">
+                        {{ c.symbol }}
+                        <span class="cool-tf">· {{ c.timeframe }}</span>
+                      </span>
+                      <span class="cool-placed muted small">
+                        placed
+                        <span class="mono">{{ c.placedAtUtc | date: 'HH:mm:ss' }}</span>
+                      </span>
+                      <span
+                        class="cool-countdown mono"
+                        [class.imminent]="cooldownExpirySec(c)! <= 30"
+                      >
+                        {{ formatCountdown(cooldownExpirySec(c)!) }}
+                      </span>
+                    </li>
+                  }
+                </ul>
+              } @else {
+                <p class="muted small">No pairs currently on cooldown.</p>
+              }
+
+              @if (cfg.hunterEnabled || armedMonitors().length > 0) {
+                <header class="card-head">
+                  <h2>Armed watches</h2>
+                  <span class="muted small">
+                    {{ armedMonitors().length }} watch{{ armedMonitors().length === 1 ? '' : 'es' }}
+                  </span>
+                </header>
+                @if (armedMonitors().length > 0) {
+                  <ul class="watch-list">
+                    @for (m of armedMonitors(); track m.monitorId) {
+                      <li class="watch-row">
+                        <span class="cool-symbol mono">
+                          {{ m.symbol }}
+                          <span class="cool-tf">· {{ m.timeframe }}</span>
+                        </span>
+                        @if (m.direction) {
+                          <span
+                            class="dir-chip"
+                            [class.buy]="m.direction === 'Buy'"
+                            [class.sell]="m.direction === 'Sell'"
+                          >
+                            {{ m.direction }}
+                          </span>
+                        }
+                        <span class="watch-intent" [title]="m.intent">{{ m.intent }}</span>
+                        @if (m.rearmDepth > 0) {
+                          <span
+                            class="depth-badge"
+                            title="Re-armed after a previous watch fired; 0 = original watch"
+                          >
+                            depth {{ m.rearmDepth }}
+                          </span>
+                        }
+                        <span
+                          class="cool-countdown mono"
+                          [class.imminent]="cooldownExpirySec(m)! <= 300"
+                          [title]="
+                            'Expires ' + (m.expiresAtUtc | date: 'MMM d HH:mm' : 'UTC') + ' UTC'
+                          "
+                        >
+                          {{ formatLongCountdown(cooldownExpirySec(m)!) }}
+                        </span>
+                      </li>
                     }
-                    <span class="muted small">{{ r.costUsd | number: '1.3-3' }} $</span>
-                  </li>
+                  </ul>
+                } @else {
+                  <p class="muted small">No hunter watches armed.</p>
                 }
-              </ul>
-            } @else {
-              <p class="muted small">No sweep activity yet.</p>
-            }
-          </section>
+              }
+
+              <header class="card-head"><h2>Recent activity</h2></header>
+              @if (feed().length > 0) {
+                <ul class="feed">
+                  @for (r of feed(); track r.signalId) {
+                    <li>
+                      <span class="feed-time mono">{{ r.at | date: 'HH:mm:ss' }}</span>
+                      <span class="mono">{{ r.symbol }}</span>
+                      <span class="feed-outcome">{{ r.outcome }}</span>
+                      @if (r.orderId) {
+                        <span class="chip ok">order #{{ r.orderId }}</span>
+                      } @else if (r.signalId) {
+                        <span class="chip">signal #{{ r.signalId }}</span>
+                      }
+                      <span class="muted small">{{ r.costUsd | number: '1.3-3' }} $</span>
+                    </li>
+                  }
+                </ul>
+              } @else {
+                <p class="muted small">No sweep activity yet.</p>
+              }
+            </section>
+          </div>
         </div>
       } @else if (loading()) {
         <div class="card muted">Loading configuration…</div>
@@ -942,16 +960,20 @@ import {
           opacity: 1;
         }
       }
+      /* Auto-fill so every counter cell is the same width and each row fills
+         edge-to-edge — no ragged half-empty row when the hunter counters push
+         the total to 10. On a wide status card all fit in a single row. */
       .counters {
         display: grid;
-        grid-template-columns: repeat(7, 1fr);
-        gap: var(--space-3);
+        grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+        gap: var(--space-4) var(--space-3);
         margin: 0;
       }
       .counters div {
         display: flex;
         flex-direction: column;
         gap: 2px;
+        min-width: 0;
       }
       .counters dt {
         font-size: 10.5px;
@@ -964,18 +986,25 @@ import {
         font-size: var(--text-lg);
         font-weight: var(--font-semibold);
       }
-      @media (max-width: 1100px) {
-        .counters {
-          grid-template-columns: repeat(4, 1fr);
-        }
-      }
-      .grid {
+      /* Two independent column stacks rather than a single auto-placed grid:
+         the tall Configuration form lives alone on the left while the shorter
+         governance + guardrail cards stack on the right, so no card is left
+         stranded beside a much taller neighbour (the old empty-void problem).
+         align-items:start keeps each column its natural height. */
+      .cols {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: var(--space-4);
+        align-items: start;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+        min-width: 0;
       }
       @media (max-width: 1000px) {
-        .grid {
+        .cols {
           grid-template-columns: 1fr;
         }
       }

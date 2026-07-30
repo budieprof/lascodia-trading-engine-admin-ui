@@ -40,6 +40,7 @@ import {
 import { ParkedRecsCockpitComponent } from '@features/pending-signal-recs/components/parked-recs-cockpit/parked-recs-cockpit.component';
 import { EARejectionsPanelComponent } from '@features/ea-instances/components/ea-rejections-panel/ea-rejections-panel.component';
 import { SignalPickupsPanelComponent } from '../../components/signal-pickups-panel/signal-pickups-panel.component';
+import { SignalExposurePanelComponent } from '../../components/signal-exposure-panel/signal-exposure-panel.component';
 
 type StatusChip = 'all' | TradeSignalStatus;
 type DirectionChip = 'all' | TradeDirection;
@@ -62,6 +63,7 @@ type DirectionChip = 'all' | TradeDirection;
     ParkedRecsCockpitComponent,
     EARejectionsPanelComponent,
     SignalPickupsPanelComponent,
+    SignalExposurePanelComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -81,6 +83,10 @@ type DirectionChip = 'all' | TradeDirection;
           (created)="onSignalCreated()"
         />
       }
+
+      <!-- Live signal book — net cross-currency exposure across not-yet-resolved
+           signals, so concentration (correlated same-direction bets) is visible. -->
+      <app-signal-exposure-panel />
 
       <!-- View tabs — main signals queue vs. parked LLM recs awaiting touch -->
       <nav class="view-tabs" role="tablist" aria-label="Signals view">
