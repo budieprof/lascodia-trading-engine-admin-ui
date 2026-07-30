@@ -520,6 +520,17 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
                           >
                             {{ s.status }}
                           </span>
+                          @if (s.guardVerdict) {
+                            <span
+                              class="guard-chip"
+                              [class.align]="s.guardVerdict === 'Align'"
+                              [class.caution]="s.guardVerdict === 'Caution'"
+                              [class.violate]="s.guardVerdict === 'Violate'"
+                              [title]="s.guardRationale || 'Memory guard verdict'"
+                            >
+                              Guard: {{ s.guardVerdict }}
+                            </span>
+                          }
                         </td>
                         <td class="num mono">{{ s.entryPrice }}</td>
                         <td class="num mono">{{ s.confidence * 100 | number: '1.0-0' }}%</td>
@@ -542,6 +553,20 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
                           <td colspan="7" class="muted reason-cell">
                             <span class="reason-prefix">Rejection:</span>
                             {{ s.rejectionReason }}
+                          </td>
+                        </tr>
+                      }
+                      @if (s.guardVerdict && s.guardVerdict !== 'Align' && s.guardRationale) {
+                        <tr class="reason-row">
+                          <td colspan="7" class="muted reason-cell">
+                            <span class="reason-prefix">Memory guard ({{ s.guardVerdict }}):</span>
+                            {{ s.guardRationale }}
+                            @if (s.guardConversationId) {
+                              <span class="guard-conv-hint"
+                                >— search #{{ s.guardConversationId }} on Conversations for the full
+                                verdict</span
+                              >
+                            }
                           </td>
                         </tr>
                       }
@@ -1115,6 +1140,31 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
       .status-chip.bad {
         background: rgba(255, 59, 48, 0.14);
         color: #dc2626;
+      }
+      .guard-chip {
+        margin-left: 4px;
+        font-size: 10px;
+        padding: 1px 5px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+      }
+      .guard-chip.align {
+        background: rgba(52, 199, 89, 0.12);
+        color: #16a34a;
+      }
+      .guard-chip.caution {
+        background: rgba(234, 179, 8, 0.16);
+        color: #b45309;
+      }
+      .guard-chip.violate {
+        background: rgba(255, 59, 48, 0.14);
+        color: #dc2626;
+      }
+      .guard-conv-hint {
+        margin-left: 6px;
+        font-size: 10px;
+        opacity: 0.7;
       }
       .exit-card {
         margin-top: var(--space-2);

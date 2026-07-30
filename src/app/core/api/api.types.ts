@@ -3286,6 +3286,10 @@ export interface SpotAnalysisDetailSignalDto {
   generatedAt: string;
   expiresAt: string;
   rejectionReason: string | null;
+  // Second-level memory-guard verdict for this signal (null until the guard ran).
+  guardVerdict: 'Align' | 'Caution' | 'Violate' | null;
+  guardRationale: string | null;
+  guardConversationId: number | null;
 }
 
 export interface SpotAnalysisDetailPositionDto {

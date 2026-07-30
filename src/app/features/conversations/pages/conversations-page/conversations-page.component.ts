@@ -414,6 +414,10 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell' |
         background: rgba(234, 88, 12, 0.15);
         color: #ea580c;
       }
+      .conv-kind[data-kind='Guard'] {
+        background: rgba(13, 148, 136, 0.15);
+        color: #0d9488;
+      }
       .conv-match {
         display: inline-block;
         margin: 2px 0 3px;
