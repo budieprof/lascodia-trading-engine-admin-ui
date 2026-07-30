@@ -390,11 +390,14 @@ export class SpotRecChartComponent {
       const at = this.asOfUtc();
       const ttl = this.ttlBars();
       const hb = this.historyBars();
+      // Resolved-signal exit instant (if any) — extends the forward window so
+      // the candles run all the way to the TP/SL touch, like the sensitivity chart.
+      const exitAt = this.exitMarker()?.time ?? null;
       if (!sym || tf == null || !at) return;
-      const key = `${sym}|${tf}|${at}|${ttl ?? '?'}|${hb}`;
+      const key = `${sym}|${tf}|${at}|${ttl ?? '?'}|${hb}|${exitAt ?? '-'}`;
       if (this.lastFetchedKey === key) return;
       this.lastFetchedKey = key;
-      this.fetchCandles(sym, tf, at, ttl, hb);
+      this.fetchCandles(sym, tf, at, ttl, hb, exitAt);
     });
 
     // ── Live price subscription lifecycle ──────────────────────────────────
@@ -449,11 +452,29 @@ export class SpotRecChartComponent {
     asOfUtc: string,
     ttlBars: number | null,
     historyBars: number,
+    exitAt: string | null,
   ): void {
     this.loading.set(true);
     const HISTORY_BARS = Math.max(20, historyBars);
-    const forward = Math.min(40, Math.max(8, ttlBars ?? this.defaultForwardBars(tf)));
-    const itemCount = HISTORY_BARS + forward;
+    const tfMs = this.timeframeMinutes(tf) * 60_000;
+    const asOfMs = new Date(asOfUtc).getTime();
+
+    // Forward window: the live / unresolved default (a few hours), but once the
+    // signal has RESOLVED, extend it so the candles run all the way to the
+    // TP/SL touch — the sensitivity chart always keeps the resolving bar in
+    // view. A small buffer past the exit stops the verdict bar sitting flush
+    // against the right edge.
+    let forward = Math.min(40, Math.max(8, ttlBars ?? this.defaultForwardBars(tf)));
+    if (exitAt) {
+      const exitMs = new Date(exitAt).getTime();
+      if (Number.isFinite(exitMs) && exitMs > asOfMs && tfMs > 0) {
+        forward = Math.max(forward, Math.ceil((exitMs - asOfMs) / tfMs) + 12);
+      }
+    }
+    // Guard the request size — a stale/far-out exit can't blow past the
+    // endpoint's useful span (history + forward capped at 2000 bars).
+    forward = Math.min(forward, 1900);
+    const itemCount = Math.min(HISTORY_BARS + forward, 2000);
     this.marketData
       .listCandles({
         currentPage: 1,
