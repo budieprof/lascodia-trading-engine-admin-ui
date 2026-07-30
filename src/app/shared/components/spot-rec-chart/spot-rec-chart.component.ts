@@ -167,8 +167,8 @@ export interface SpotRecChartMarker {
          dominates the panel but matches operator expectations. */
       .chart-instance {
         width: 100%;
-        height: 440px;
-        min-height: 440px;
+        height: 470px;
+        min-height: 470px;
       }
       /* Legend as a header above the chart, separated by a hairline; a single
          horizontal row (asOfUtc + each rec's full spec) that wraps only when
@@ -337,6 +337,12 @@ export class SpotRecChartComponent {
    *  operator can watch price approach the Entry / SL / TP levels. Off by default —
    *  historical/snapshot charts (e.g. the per-rec cards in chat) stay static. */
   readonly live = input<boolean>(false);
+  /** Pan/zoom affordances matching the Signal Sensitivity chart: an inside
+   *  (wheel + drag) zoom plus a bottom overview slider, and a rich OHLC
+   *  crosshair tooltip. On by default so every host reads and behaves like the
+   *  sensitivity page; set false for compact/embedded uses that want a static
+   *  frame. */
+  readonly zoomable = input<boolean>(true);
 
   /** Whether the chart pane is currently collapsed (only meaningful when
    *  `collapsible` is true). */
@@ -555,7 +561,7 @@ export class SpotRecChartComponent {
       const offset: [number, number] = [0, isPrimary ? 0 : 20 * i];
       const labelPad: [number, number] = isPrimary ? [3, 7] : [2, 6];
       const labelFs = isPrimary ? 11 : 10;
-      const lineW = isPrimary ? 2 : 1.5;
+      const lineW = isPrimary ? 2.5 : 1.5;
       const prefix = recs.length > 1 ? `${rec.label} ` : '';
 
       if (rec.entryPrice != null) {
@@ -697,11 +703,45 @@ export class SpotRecChartComponent {
       }
     }
 
+    // Pan/zoom + overview slider, mirroring the Signal Sensitivity chart. The
+    // slider needs vertical room below the x-axis, so the grid drops
+    // containLabel and reserves an explicit bottom band when zoomable.
+    const zoom = this.zoomable();
+
     return <EChartsOption>{
       animation: false,
       // Right margin = 110px so the colour-coded endLabel pills have room.
-      grid: { left: 60, right: 110, top: 20, bottom: 40, containLabel: true },
-      tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+      grid: zoom
+        ? { left: 70, right: 110, top: 20, bottom: 64 }
+        : { left: 60, right: 110, top: 20, bottom: 40, containLabel: true },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'cross' },
+        // Clean OHLC read on the hovered bar (matches the sensitivity chart)
+        // rather than dumping every overlay series' raw value.
+        formatter: (params: any) => {
+          const arr = Array.isArray(params) ? params : [params];
+          const candle = arr.find((p: any) => p.seriesType === 'candlestick');
+          const c = candle ? rows[candle.dataIndex] : undefined;
+          if (!c) return '';
+          const d = new Date(c.timestamp);
+          const label = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          return `<b>${label}</b><br/>O ${fmt(c.open)}<br/>H ${fmt(c.high)}<br/>L ${fmt(c.low)}<br/>C ${fmt(c.close)}`;
+        },
+      },
+      dataZoom: zoom
+        ? [
+            { type: 'inside', xAxisIndex: 0, startValue: 0, endValue: lastIdx },
+            {
+              type: 'slider',
+              xAxisIndex: 0,
+              height: 24,
+              bottom: 8,
+              startValue: 0,
+              endValue: lastIdx,
+            },
+          ]
+        : undefined,
       xAxis: {
         type: 'category',
         data: categories,
