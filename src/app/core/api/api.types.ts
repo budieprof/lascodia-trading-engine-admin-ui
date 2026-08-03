@@ -692,6 +692,23 @@ export interface CandleDto {
   isClosed: boolean;
 }
 
+/** A change's end-to-end outcome scorecard row (algo-engineer agent, ADR-0020). */
+export interface AlgoEngineerScorecardRowDto {
+  changeSetId: number;
+  sha: string;
+  summary: string;
+  changeSetStatus: string;
+  metric: string;
+  predictedDelta: number;
+  realizedDelta: number | null;
+  counterfactualDelta: number | null;
+  forecastError: number | null;
+  realizedSampleAccrued: number;
+  outcomeStatus: string;
+  horizonExpiresAtUtc: string;
+  verdictAtUtc: string | null;
+}
+
 export interface MLModelOverfitFlagDto {
   mlModelId: number;
   symbol: string;

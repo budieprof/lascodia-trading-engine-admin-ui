@@ -121,6 +121,14 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'algo-engineer/scorecard',
+        data: { breadcrumb: 'Change Scorecard' },
+        loadChildren: () =>
+          import('@features/algo-engineer/algo-engineer.routes').then(
+            (m) => m.ALGO_ENGINEER_ROUTES,
+          ),
+      },
+      {
         path: 'spot-sweep',
         data: { breadcrumb: 'Spot Sweep' },
         loadChildren: () =>

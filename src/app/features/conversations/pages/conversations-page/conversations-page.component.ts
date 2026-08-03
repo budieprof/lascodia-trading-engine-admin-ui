@@ -118,6 +118,25 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell' |
             [value]="search()"
             (input)="onSearch($event)"
           />
+
+          <div class="conv-kinds" role="group" aria-label="Filter by conversation type">
+            @for (k of kindFilters; track k.value) {
+              <button
+                type="button"
+                class="kind-chip"
+                [class.active]="kindFilter() === k.value"
+                [attr.data-kind]="k.value || null"
+                [title]="
+                  k.value
+                    ? 'Show only ' + k.label + ' conversations'
+                    : 'Show all conversation types'
+                "
+                (click)="setKind(k.value)"
+              >
+                {{ k.label }}
+              </button>
+            }
+          </div>
         </div>
 
         <div class="conv-items">
@@ -324,6 +343,32 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell' |
         background: var(--bg-primary);
         color: var(--text-primary);
       }
+      .conv-kinds {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 6px;
+      }
+      .kind-chip {
+        font: inherit;
+        font-size: var(--text-xs);
+        line-height: 1;
+        padding: 4px 8px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        cursor: pointer;
+      }
+      .kind-chip:hover {
+        border-color: var(--accent);
+        color: var(--text-primary);
+      }
+      .kind-chip.active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
       .new-actions {
         display: flex;
         gap: 6px;
@@ -417,6 +462,10 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell' |
       .conv-kind[data-kind='Guard'] {
         background: rgba(13, 148, 136, 0.15);
         color: #0d9488;
+      }
+      .conv-kind[data-kind='Engineer'] {
+        background: rgba(217, 70, 239, 0.15);
+        color: #c026d3;
       }
       .conv-match {
         display: inline-block;
@@ -639,6 +688,20 @@ export class ConversationsPageComponent {
   protected readonly search = signal('');
   private page = 1;
   private readonly pageSize = 30;
+
+  /** Conversation-type filter. '' = all. Values are the server Kind labels (see KindLabel). */
+  protected readonly kindFilter = signal<string>('');
+  protected readonly kindFilters: ReadonlyArray<{ value: string; label: string }> = [
+    { value: '', label: 'All' },
+    { value: 'Spot', label: 'Spot' },
+    { value: 'Macro', label: 'Macro' },
+    { value: 'Guard', label: 'Guard' },
+    { value: 'Journal', label: 'Journal' },
+    { value: 'Memory', label: 'Memory' },
+    { value: 'Stop', label: 'Stop' },
+    { value: 'Limit', label: 'Limit' },
+    { value: 'Engineer', label: 'Engineer' },
+  ];
 
   protected readonly selectedId = signal<number | null>(null);
   protected readonly detail = signal<AnalysisConversationDetailDto | null>(null);
@@ -924,22 +987,28 @@ export class ConversationsPageComponent {
     return { symbol: s };
   }
 
+  /** Select a conversation-type filter chip and reload from page 1. Re-clicking is a no-op. */
+  protected setKind(value: string): void {
+    if (this.kindFilter() === value) return;
+    this.kindFilter.set(value);
+    this.load(true);
+  }
+
   private load(reset: boolean): void {
     if (reset) this.page = 1;
     this.loading.set(true);
-    this.marketData
-      .listAnalysisConversations(this.parseSearch(this.search()), this.page, this.pageSize)
-      .subscribe({
-        next: (res) => {
-          this.loading.set(false);
-          if (!res?.status || !res.data) return;
-          this.totalItems.set(res.data.totalItems);
-          this.conversations.update((list) =>
-            reset ? res.data!.items : [...list, ...res.data!.items],
-          );
-        },
-        error: () => this.loading.set(false),
-      });
+    const filter = { ...this.parseSearch(this.search()), kind: this.kindFilter() || null };
+    this.marketData.listAnalysisConversations(filter, this.page, this.pageSize).subscribe({
+      next: (res) => {
+        this.loading.set(false);
+        if (!res?.status || !res.data) return;
+        this.totalItems.set(res.data.totalItems);
+        this.conversations.update((list) =>
+          reset ? res.data!.items : [...list, ...res.data!.items],
+        );
+      },
+      error: () => this.loading.set(false),
+    });
   }
 
   protected loadMore(): void {
