@@ -88,3 +88,28 @@ export interface RunCmeOrderflowExperimentRequest {
   toUtc: string;
   oosFolds: number;
 }
+
+/**
+ * Synthetic-data regimes. `NoEdge` is the null control — the experiment must find nothing;
+ * `DeltaLeadsPrice` plants a lead-lag it must detect. Synthetic data validates the PIPELINE and the
+ * HARNESS; it can never prove a real edge exists.
+ */
+export type SyntheticFlowRegime = 'NoEdge' | 'DeltaLeadsPrice';
+
+export interface GenerateSyntheticCmeRequest {
+  contract: string;
+  rootSymbol: string;
+  minutes: number;
+  regime: SyntheticFlowRegime;
+  seed: number;
+  purgeExistingSynthetic: boolean;
+}
+
+export interface SyntheticCmeGenerationResultDto {
+  tradesWritten: number;
+  booksWritten: number;
+  barsBuilt: number;
+  purgedTrades: number;
+  purgedBooks: number;
+  regime: string;
+}

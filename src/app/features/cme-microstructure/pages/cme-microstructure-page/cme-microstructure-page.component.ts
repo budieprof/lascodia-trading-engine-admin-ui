@@ -8,6 +8,7 @@ import { NotificationService } from '@core/notifications/notification.service';
 import type {
   CmeOrderflowExperimentResultDto,
   CmeStatusDto,
+  SyntheticFlowRegime,
 } from '@features/cme-microstructure/cme-microstructure.types';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -272,6 +273,44 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           }
         </section>
 
+        <!-- ── Simulator (pre-purchase pipeline validation) ──────────── -->
+        <section class="card">
+          <header class="card-head">
+            <h3>Simulator — synthetic tape &amp; depth</h3>
+            <span class="muted small">
+              Exercises the pipeline before a real slice exists. <strong>NoEdge</strong> is the null
+              control (the experiment must find nothing); <strong>DeltaLeadsPrice</strong> plants a
+              lead-lag it must detect. Synthetic data validates the pipeline and the harness — it
+              can never prove a real edge. Rows are stamped <code>Source=Synthetic</code>; real data
+              is never touched.
+            </span>
+          </header>
+
+          <div class="toolbar">
+            <select class="input sm" [(ngModel)]="synthRegime">
+              <option value="NoEdge">NoEdge (null control)</option>
+              <option value="DeltaLeadsPrice">DeltaLeadsPrice (planted edge)</option>
+            </select>
+            <input
+              class="input xs"
+              type="number"
+              min="1"
+              [(ngModel)]="synthMinutes"
+              title="Minutes"
+            />
+            <input class="input xs" type="number" [(ngModel)]="synthSeed" title="Seed" />
+            <button
+              type="button"
+              class="btn btn-secondary"
+              [disabled]="busy() || !expContract"
+              (click)="generateSynthetic()"
+            >
+              Generate synthetic data
+            </button>
+            <span class="muted small">into {{ expContract || 'set a contract above' }}</span>
+          </div>
+        </section>
+
         <!-- ── Shadow monitor ────────────────────────────────────────── -->
         <section class="card">
           <header class="card-head">
@@ -498,6 +537,11 @@ export class CmeMicrostructurePageComponent {
   protected expTo = isoDate(0);
   protected expFolds = 5;
 
+  // Simulator form
+  protected synthRegime: SyntheticFlowRegime = 'NoEdge';
+  protected synthMinutes = 600;
+  protected synthSeed = 20260808;
+
   protected readonly hasData = computed(() => (this.status()?.tradeCount ?? 0) > 0);
 
   constructor() {
@@ -543,6 +587,39 @@ export class CmeMicrostructurePageComponent {
 
   protected backAdjust(): void {
     this.run(this.cme.backAdjust(this.seedRoot), (n) => `Back-adjusted ${n} contract(s).`);
+  }
+
+  /** Populate the CME tables with synthetic tape/depth so the rest of this page can be exercised. */
+  protected generateSynthetic(): void {
+    this.busy.set(true);
+    this.cme
+      .generateSynthetic({
+        contract: this.expContract,
+        rootSymbol: this.seedRoot,
+        minutes: this.synthMinutes,
+        regime: this.synthRegime,
+        seed: this.synthSeed,
+        purgeExistingSynthetic: true,
+      })
+      .pipe(
+        finalize(() => this.busy.set(false)),
+        catchError((err) => {
+          this.notify.error(err?.error?.message ?? 'Synthetic generation failed.');
+          return of(null);
+        }),
+      )
+      .subscribe((res) => {
+        if (res === null) return;
+        if (res.status && res.data) {
+          const d = res.data;
+          this.notify.success(
+            `Generated ${d.tradesWritten} trades / ${d.booksWritten} books → ${d.barsBuilt} bars (${d.regime}).`,
+          );
+          this.load();
+        } else {
+          this.notify.error(res.message ?? 'Synthetic generation failed.');
+        }
+      });
   }
 
   protected runExperiment(): void {

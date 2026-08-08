@@ -6,8 +6,10 @@ import type { ResponseData } from '@core/api/api.types';
 import type {
   CmeStatusDto,
   CmeOrderflowExperimentResultDto,
+  GenerateSyntheticCmeRequest,
   RunCmeOrderflowExperimentRequest,
   SeedCmeContractsRequest,
+  SyntheticCmeGenerationResultDto,
 } from '@features/cme-microstructure/cme-microstructure.types';
 
 /**
@@ -38,6 +40,20 @@ export class CmeMicrostructureService {
     return this.api.post<ResponseData<number>>(`${this.base}/cme-contracts/back-adjust`, {
       rootSymbol,
     });
+  }
+
+  /**
+   * Generate SYNTHETIC tape + depth to exercise the pipeline before a real slice exists. Rows are
+   * stamped Source="Synthetic" and prior synthetic rows are purged; real data is never touched.
+   * Proves the pipeline and the harness — never proves an edge.
+   */
+  generateSynthetic(
+    body: GenerateSyntheticCmeRequest,
+  ): Observable<ResponseData<SyntheticCmeGenerationResultDto>> {
+    return this.api.post<ResponseData<SyntheticCmeGenerationResultDto>>(
+      `${this.base}/cme-synthetic`,
+      body,
+    );
   }
 
   /** THE decisive experiment: real aggressor delta vs the tick-rule proxy, out-of-sample. */
