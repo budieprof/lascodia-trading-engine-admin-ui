@@ -251,6 +251,16 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'cme-microstructure',
+        // Every /experiment/cme-* endpoint is Operator-gated engine-side.
+        canActivate: [requireRoles('Operator', 'Admin')],
+        data: { breadcrumb: 'CME Microstructure' },
+        loadChildren: () =>
+          import('@features/cme-microstructure/cme-microstructure.routes').then(
+            (m) => m.CME_MICROSTRUCTURE_ROUTES,
+          ),
+      },
+      {
         path: 'fleet-health',
         // Phase-16: read-only observability dashboard.
         canActivate: [requireRoles('Operator', 'Admin')],

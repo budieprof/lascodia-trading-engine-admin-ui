@@ -518,6 +518,12 @@ export class SidebarComponent {
         { label: 'Audit Trail', route: '/audit-trail', icon: '📜' },
         { label: 'Drawdown', route: '/drawdown-recovery', icon: '📉' },
         { label: 'Paper Trading', route: '/paper-trading', icon: '🧪', policy: 'Operator' },
+        {
+          label: 'CME Microstructure',
+          route: '/cme-microstructure',
+          icon: '📶',
+          policy: 'Operator',
+        },
         { label: 'Economic Events', route: '/economic-events', icon: '📅' },
       ],
     },
