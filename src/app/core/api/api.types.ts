@@ -709,6 +709,13 @@ export interface AlgoEngineerScorecardRowDto {
   verdictAtUtc: string | null;
 }
 
+/** The launched algo-engineer work order — its anchor "Engineer" conversation id (ADR-0020). The agent
+ *  keeps running on the host; the conversation streams in live via SignalR. */
+export interface AlgoEngineerWorkOrderResultDto {
+  sessionLlmInvocationId: number;
+  status: string;
+}
+
 export interface MLModelOverfitFlagDto {
   mlModelId: number;
   symbol: string;

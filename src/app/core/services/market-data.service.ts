@@ -281,6 +281,8 @@ export class MarketDataService {
       conversationId?: number | null;
       signalId?: number | null;
       anyId?: number | null;
+      /** Conversation-type filter — a Kind label (Spot/Macro/Journal/Memory/Guard/Stop/Limit). */
+      kind?: string | null;
     } | null,
     page = 1,
     pageSize = 30,
@@ -292,6 +294,8 @@ export class MarketDataService {
     else if (filter?.signalId != null) params.set('signalId', String(filter.signalId));
     else if (filter?.anyId != null) params.set('anyId', String(filter.anyId));
     else if (filter?.symbol) params.set('symbol', this.formatSymbol(filter.symbol));
+    // Kind stacks with a symbol browse (server ignores it on an id search).
+    if (filter?.kind) params.set('kind', filter.kind);
     return this.api.get(`/market-data/analysis-conversations?${params.toString()}`);
   }
 

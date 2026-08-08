@@ -18,6 +18,7 @@ import {
   type SpotRecChartMarker,
 } from '@shared/components/spot-rec-chart/spot-rec-chart.component';
 import { MarketDataService } from '@core/services/market-data.service';
+import { AlgoEngineerService } from '@core/services/algo-engineer.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
@@ -31,8 +32,15 @@ import type {
 import type { Observable } from 'rxjs';
 
 /** Analysis types the New-analysis launcher supports (spot + directed
- *  limit/stop proposals + the longer-horizon macro brief). */
-type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell' | 'macro';
+ *  limit/stop proposals + the longer-horizon macro brief + an algo-engineer work order). */
+type AnalysisMode =
+  | 'spot'
+  | 'limitBuy'
+  | 'limitSell'
+  | 'stopBuy'
+  | 'stopSell'
+  | 'macro'
+  | 'engineer';
 
 /**
  * ChatGPT-style full-page conversation view. Every LLM analysis is a resumable
@@ -64,40 +72,62 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell' |
             </button>
           } @else {
             <form class="new-form" (submit)="runNew($event)">
-              <select
-                class="new-symbol"
-                [(ngModel)]="newSymbol"
-                name="sym"
-                [disabled]="running() || symbols().length === 0"
-              >
-                @if (symbols().length === 0) {
-                  <option value="" disabled>Loading symbols…</option>
-                } @else {
-                  <option value="" disabled>Symbol…</option>
-                  @for (s of symbols(); track s) {
-                    <option [value]="s">{{ s }}</option>
-                  }
-                }
-              </select>
               <select class="new-mode" [(ngModel)]="newMode" name="mode" [disabled]="running()">
                 @for (m of analysisModes; track m.value) {
                   <option [value]="m.value">{{ m.label }}</option>
                 }
               </select>
-              <select
-                class="new-tf"
-                [(ngModel)]="newTimeframe"
-                name="tf"
-                [disabled]="running() || newMode === 'macro'"
-                [title]="newMode === 'macro' ? 'Macro analysis always anchors on D1' : ''"
-              >
-                @for (tf of timeframes; track tf) {
-                  <option [value]="tf">{{ tf }}</option>
-                }
-              </select>
+              @if (newMode === 'engineer') {
+                <textarea
+                  class="new-instruction"
+                  [(ngModel)]="newInstruction"
+                  name="instr"
+                  rows="3"
+                  [disabled]="running()"
+                  placeholder="Work order for the algo-engineer — e.g. 'EURUSD Buy in London is bleeding; investigate the stop geometry and propose a fix.'"
+                ></textarea>
+              } @else {
+                <select
+                  class="new-symbol"
+                  [(ngModel)]="newSymbol"
+                  name="sym"
+                  [disabled]="running() || symbols().length === 0"
+                >
+                  @if (symbols().length === 0) {
+                    <option value="" disabled>Loading symbols…</option>
+                  } @else {
+                    <option value="" disabled>Symbol…</option>
+                    @for (s of symbols(); track s) {
+                      <option [value]="s">{{ s }}</option>
+                    }
+                  }
+                </select>
+                <select
+                  class="new-tf"
+                  [(ngModel)]="newTimeframe"
+                  name="tf"
+                  [disabled]="running() || newMode === 'macro'"
+                  [title]="newMode === 'macro' ? 'Macro analysis always anchors on D1' : ''"
+                >
+                  @for (tf of timeframes; track tf) {
+                    <option [value]="tf">{{ tf }}</option>
+                  }
+                </select>
+              }
               <div class="new-actions">
-                <button type="submit" class="new-run" [disabled]="running() || !newSymbol.trim()">
-                  {{ running() ? 'Running…' : 'Run' }}
+                <button
+                  type="submit"
+                  class="new-run"
+                  [disabled]="
+                    running() ||
+                    (newMode === 'engineer' ? !newInstruction.trim() : !newSymbol.trim())
+                  "
+                >
+                  @if (newMode === 'engineer') {
+                    {{ running() ? 'Launching…' : 'Launch' }}
+                  } @else {
+                    {{ running() ? 'Running…' : 'Run' }}
+                  }
                 </button>
                 <button
                   type="button"
@@ -334,6 +364,7 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell' |
       .new-symbol,
       .new-tf,
       .new-mode,
+      .new-instruction,
       .conv-search {
         font: inherit;
         font-size: var(--text-sm);
@@ -342,6 +373,11 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell' |
         border-radius: var(--radius-sm);
         background: var(--bg-primary);
         color: var(--text-primary);
+      }
+      .new-instruction {
+        resize: vertical;
+        min-height: 60px;
+        line-height: 1.4;
       }
       .conv-kinds {
         display: flex;
@@ -675,6 +711,7 @@ export class ConversationsPageComponent {
   private readonly notify = inject(NotificationService);
   private readonly pairsService = inject(CurrencyPairsService);
   private readonly realtime = inject(RealtimeService);
+  private readonly algoEngineer = inject(AlgoEngineerService);
 
   protected readonly timeframes = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
 
@@ -713,6 +750,8 @@ export class ConversationsPageComponent {
   protected newSymbol = '';
   protected newTimeframe = 'H1';
   protected newMode: AnalysisMode = 'spot';
+  /** Work-order instruction for the 'engineer' mode (ignored by the analysis modes). */
+  protected newInstruction = '';
   protected readonly running = signal(false);
 
   /** Analysis types the "New analysis" launcher supports — mirrors the
@@ -725,6 +764,7 @@ export class ConversationsPageComponent {
     { value: 'stopBuy', label: 'Stop Buy' },
     { value: 'stopSell', label: 'Stop Sell' },
     { value: 'macro', label: 'Macro' },
+    { value: 'engineer', label: 'Engineer' },
   ];
 
   protected readonly hasMore = computed(() => this.conversations().length < this.totalItems());
@@ -1058,8 +1098,17 @@ export class ConversationsPageComponent {
 
   protected runNew(ev: Event): void {
     ev.preventDefault();
+    if (this.running()) return;
+
+    // Engineer mode is a different beast: it launches a background algo-engineer work order (no
+    // symbol/timeframe) and returns the anchor "Engineer" conversation to open.
+    if (this.newMode === 'engineer') {
+      this.launchWorkOrder();
+      return;
+    }
+
     const sym = this.newSymbol.trim().toUpperCase();
-    if (!sym || this.running()) return;
+    if (!sym) return;
     const tf = this.newTimeframe;
     const mode = this.newMode;
     this.running.set(true);
@@ -1097,6 +1146,37 @@ export class ConversationsPageComponent {
       error: (err) => {
         this.running.set(false);
         this.notify.error(err?.message ?? 'Analysis failed. Is the engine reachable?');
+      },
+    });
+  }
+
+  /** Launch an algo-engineer work order (Engineer mode). Fire-and-forget on the host: the endpoint
+   *  returns as soon as the Engineer conversation exists; the agent's reasoning then streams onto it
+   *  live via SignalR. */
+  private launchWorkOrder(): void {
+    const instruction = this.newInstruction.trim();
+    if (!instruction) return;
+    this.running.set(true);
+    this.algoEngineer.startWorkOrder(instruction).subscribe({
+      next: (res) => {
+        this.running.set(false);
+        if (res?.status && res.data) {
+          this.notify.success('Algo-engineer work order launched.');
+          this.newInstruction = '';
+          this.closeNew();
+          this.load(true); // prepend the new Engineer conversation to the list
+          this.openConversation(res.data.sessionLlmInvocationId);
+        } else {
+          this.notify.error(res?.message || 'Could not launch the work order.');
+        }
+      },
+      error: (err) => {
+        this.running.set(false);
+        this.notify.error(
+          err?.error?.message ??
+            err?.message ??
+            'Work order failed. Is the algo-engineer service running?',
+        );
       },
     });
   }
