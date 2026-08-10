@@ -63,6 +63,17 @@ describe('CmeMicrostructurePageComponent', () => {
         shadowSignalCount: 0,
         contracts: [],
         recentShadowSignals: [],
+        feedHealth: {
+          status: 'NoData',
+          latestBarAgeSeconds: null,
+          maxFlowStalenessSeconds: 120,
+          tradesLast24h: 0,
+          booksLast24h: 0,
+          barsLast24h: 0,
+          ingestEnabled: true,
+          shadowMonitorEnabled: true,
+        },
+        v11Models: [],
       });
       expect(cmp['hasData']()).toBe(true);
     });

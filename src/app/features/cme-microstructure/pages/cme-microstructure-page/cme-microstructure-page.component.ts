@@ -6,6 +6,7 @@ import { catchError, finalize, of } from 'rxjs';
 import { CmeMicrostructureService } from '@core/services/cme-microstructure.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type {
+  CmeFeedHealthDto,
   CmeOrderflowExperimentResultDto,
   CmeStatusDto,
   SyntheticFlowRegime,
@@ -93,6 +94,98 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             format="number"
             dotColor="#FF9500"
           />
+        </section>
+
+        <!-- ── Feed health ───────────────────────────────────────────── -->
+        <section class="card">
+          <header class="card-head">
+            <h3>Feed health</h3>
+            <span class="feed-pill" [attr.data-status]="s.feedHealth.status">
+              {{ feedStatusLabel(s.feedHealth.status) }}
+            </span>
+          </header>
+
+          <p class="muted small">{{ feedStatusExplanation(s.feedHealth) }}</p>
+
+          <div class="health-grid">
+            <div class="health-cell">
+              <span class="hc-label">Newest bar age</span>
+              <span class="hc-value">{{ formatAge(s.feedHealth.latestBarAgeSeconds) }}</span>
+              <span class="hc-sub">gate {{ s.feedHealth.maxFlowStalenessSeconds }}s</span>
+            </div>
+            <div class="health-cell">
+              <span class="hc-label">Trades / 24h</span>
+              <span class="hc-value">{{ s.feedHealth.tradesLast24h | number }}</span>
+            </div>
+            <div class="health-cell">
+              <span class="hc-label">Books / 24h</span>
+              <span class="hc-value">{{ s.feedHealth.booksLast24h | number }}</span>
+            </div>
+            <div class="health-cell">
+              <span class="hc-label">Bars / 24h</span>
+              <span class="hc-value">{{ s.feedHealth.barsLast24h | number }}</span>
+            </div>
+            <div class="health-cell">
+              <span class="hc-label">Ingest worker</span>
+              <span class="hc-value">{{ s.feedHealth.ingestEnabled ? 'On' : 'Off' }}</span>
+            </div>
+            <div class="health-cell">
+              <span class="hc-label">Shadow monitor</span>
+              <span class="hc-value">{{ s.feedHealth.shadowMonitorEnabled ? 'On' : 'Off' }}</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- ── V11 model status ──────────────────────────────────────── -->
+        <section class="card">
+          <header class="card-head">
+            <h3>V11 CME-flow models</h3>
+            <span class="muted small">Active models carrying the real-flow feature block</span>
+          </header>
+
+          @if (s.v11Models.length === 0) {
+            <p class="muted small">
+              No active model uses the V11 CME feature block yet. This is the expected state until a
+              training run completes with <code>MLTraining:UseV11CmeFlow</code> on — it is not a
+              fault, and models on earlier schemas keep serving normally.
+            </p>
+          } @else {
+            <p class="muted small">
+              <strong>Requires real flow</strong> means the model was trained against observed CME
+              flow, so serving it without flow is a source mismatch and the scorer suppresses it. A
+              V11 model trained with no flow coverage reads “no” and scores normally.
+            </p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th>Symbol</th>
+                    <th>TF</th>
+                    <th>Version</th>
+                    <th>Requires real flow</th>
+                    <th>Trained</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (m of s.v11Models; track m.modelId) {
+                    <tr>
+                      <td class="mono">#{{ m.modelId }}</td>
+                      <td>{{ m.symbol }}</td>
+                      <td>{{ m.timeframe }}</td>
+                      <td class="mono">{{ m.modelVersion }}</td>
+                      <td>
+                        <span class="flow-pill" [attr.data-on]="m.requiresRealFlow">
+                          {{ m.requiresRealFlow ? 'Yes' : 'No' }}
+                        </span>
+                      </td>
+                      <td>{{ m.trainedAt ? (m.trainedAt | date: 'short') : '—' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
         </section>
 
         @if (!hasData()) {
@@ -367,6 +460,71 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
   `,
   styles: [
     `
+      .feed-pill {
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        border: 1px solid transparent;
+      }
+      .feed-pill[data-status='Live'] {
+        background: rgba(52, 199, 89, 0.14);
+        color: #34c759;
+        border-color: rgba(52, 199, 89, 0.35);
+      }
+      .feed-pill[data-status='Stale'] {
+        background: rgba(255, 149, 0, 0.14);
+        color: #ff9500;
+        border-color: rgba(255, 149, 0, 0.35);
+      }
+      .feed-pill[data-status='NoData'] {
+        background: rgba(142, 142, 147, 0.14);
+        color: #8e8e93;
+        border-color: rgba(142, 142, 147, 0.3);
+      }
+      .health-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .health-cell {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 10px 12px;
+        border: 1px solid var(--border, rgba(120, 120, 128, 0.24));
+        border-radius: 10px;
+      }
+      .hc-label {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        opacity: 0.65;
+      }
+      .hc-value {
+        font-size: 18px;
+        font-weight: 600;
+      }
+      .hc-sub {
+        font-size: 11px;
+        opacity: 0.55;
+      }
+      .flow-pill {
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .flow-pill[data-on='true'] {
+        background: rgba(255, 149, 0, 0.14);
+        color: #ff9500;
+      }
+      .flow-pill[data-on='false'] {
+        background: rgba(142, 142, 147, 0.14);
+        color: #8e8e93;
+      }
+
       .kpis {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -543,6 +701,41 @@ export class CmeMicrostructurePageComponent {
   protected synthSeed = 20260808;
 
   protected readonly hasData = computed(() => (this.status()?.tradeCount ?? 0) > 0);
+
+  protected feedStatusLabel(status: CmeFeedHealthDto['status']): string {
+    switch (status) {
+      case 'Live':
+        return 'Live';
+      case 'Stale':
+        return 'Stale';
+      default:
+        return 'No data';
+    }
+  }
+
+  /**
+   * Says what the status *means for trading*, not just what it is. "Stale" on its own reads like a
+   * fault; it is actually the freshness gate doing its job, and the operator needs to know the
+   * strategy path is refusing the flow rather than silently trading on an old book.
+   */
+  protected feedStatusExplanation(health: CmeFeedHealthDto): string {
+    switch (health.status) {
+      case 'Live':
+        return `Newest bar is inside the ${health.maxFlowStalenessSeconds}s freshness gate, so the strategy path will accept this flow.`;
+      case 'Stale':
+        return `Newest bar is older than the ${health.maxFlowStalenessSeconds}s freshness gate, so the strategy path is refusing this flow. Data exists — it is just too old to trade on.`;
+      default:
+        return 'Nothing ingested yet. Expected until a Databento slice is loaded or a sidecar starts streaming — not a fault.';
+    }
+  }
+
+  protected formatAge(seconds: number | null): string {
+    if (seconds === null) return '—';
+    if (seconds < 90) return `${Math.round(seconds)}s`;
+    if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
+    if (seconds < 172800) return `${Math.round(seconds / 3600)}h`;
+    return `${Math.round(seconds / 86400)}d`;
+  }
 
   constructor() {
     this.load();

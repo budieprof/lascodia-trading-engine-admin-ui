@@ -43,6 +43,43 @@ export interface CmeStatusDto {
   shadowSignalCount: number;
   contracts: CmeContractDto[];
   recentShadowSignals: CmeShadowSignalDto[];
+  feedHealth: CmeFeedHealthDto;
+  v11Models: CmeV11ModelDto[];
+}
+
+/**
+ * Whether the CME feed is usable right now, as opposed to merely configured.
+ *
+ * `NoData` is the expected state before the historical slice is purchased — it is not an error.
+ * `Stale` means data exists but the newest bar is past the staleness gate, so the strategy path
+ * refuses it. Only `Live` is tradeable.
+ */
+export interface CmeFeedHealthDto {
+  status: 'NoData' | 'Stale' | 'Live';
+  latestBarAgeSeconds: number | null;
+  /** The gate the age is judged against, so the operator can see WHY something reads stale. */
+  maxFlowStalenessSeconds: number;
+  tradesLast24h: number;
+  booksLast24h: number;
+  barsLast24h: number;
+  ingestEnabled: boolean;
+  shadowMonitorEnabled: boolean;
+}
+
+/** An active ML model carrying the V11 CME real-flow feature block. */
+export interface CmeV11ModelDto {
+  modelId: number;
+  symbol: string;
+  timeframe: string;
+  modelVersion: string;
+  isActive: boolean;
+  /**
+   * True when the model was TRAINED against observed CME flow, so serving it without flow is a
+   * source mismatch and the scorer suppresses it. A V11 model trained with no flow coverage reads
+   * false and scores normally — the distinction the parity gate turns on.
+   */
+  requiresRealFlow: boolean;
+  trainedAt: string | null;
 }
 
 /** Aggregated out-of-sample performance of one delta source across the experiment's folds. */
