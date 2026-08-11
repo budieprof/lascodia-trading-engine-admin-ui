@@ -45,6 +45,20 @@ export interface CmeStatusDto {
   recentShadowSignals: CmeShadowSignalDto[];
   feedHealth: CmeFeedHealthDto;
   v11Models: CmeV11ModelDto[];
+  warmTier: CmeWarmTierStatusDto;
+}
+
+/**
+ * What the Parquet warm tier holds. Bulk-imported slices land there rather than in the hot tables,
+ * so a zero trade/book count above is expected after an import and does NOT mean the data is
+ * missing — the experiment reads both tiers.
+ */
+export interface CmeWarmTierStatusDto {
+  configured: boolean;
+  contracts: string[];
+  sessionCount: number;
+  earliestSession: string | null;
+  latestSession: string | null;
 }
 
 /**
@@ -109,6 +123,45 @@ export interface CmeOrderflowExperimentResultDto {
   oosNetPnlDelta: number;
   oosProfitFactorDelta: number;
   fractionFoldsRealBeatsProxy: number;
+}
+
+/**
+ * One recorded verdict from the run history (`GET /experiment/cme-orderflow/runs`).
+ *
+ * Both the aggregate AND the per-trade comparison are carried, because they can disagree: when the
+ * underlying strategy is unprofitable, the arm that trades less loses less in total while losing
+ * MORE on every trade. `aggregateAndPerTradeDisagree` is computed engine-side precisely so this
+ * surface cannot forget to show it.
+ */
+export interface CmeExperimentRunDto {
+  id: number;
+  contract: string;
+  fromUtc: string;
+  toUtc: string;
+  ran: boolean;
+  reason: string;
+  eventsLoaded: number;
+  foldsScored: number;
+  realNetPnl: number;
+  realProfitFactor: number;
+  realTradeCount: number;
+  realPnlPerTrade: number;
+  proxyNetPnl: number;
+  proxyProfitFactor: number;
+  proxyTradeCount: number;
+  proxyPnlPerTrade: number;
+  oosNetPnlDelta: number;
+  oosProfitFactorDelta: number;
+  /** Real minus proxy PnL per trade — the trade-count-neutral comparison. */
+  oosPnlPerTradeDelta: number;
+  fractionFoldsRealBeatsProxy: number;
+  /** True when the aggregate and per-trade comparisons point at different arms. */
+  aggregateAndPerTradeDisagree: boolean;
+  /** Entries rested on the touch rather than crossing — a different COST model, so runs with
+   *  different values here are not directly comparable. */
+  passiveEntry: boolean;
+  createdAtUtc: string;
+  notes: string | null;
 }
 
 /** Request bodies (engine binds camelCase → PascalCase). */

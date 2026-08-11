@@ -73,6 +73,13 @@ describe('CmeMicrostructurePageComponent', () => {
           ingestEnabled: true,
           shadowMonitorEnabled: true,
         },
+        warmTier: {
+          configured: false,
+          contracts: [],
+          sessionCount: 0,
+          earliestSession: null,
+          latestSession: null,
+        },
         v11Models: [],
       });
       expect(cmp['hasData']()).toBe(true);

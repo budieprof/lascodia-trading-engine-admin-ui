@@ -6,11 +6,34 @@ import { catchError, finalize, of } from 'rxjs';
 import { CmeMicrostructureService } from '@core/services/cme-microstructure.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type {
+  CmeExperimentRunDto,
   CmeFeedHealthDto,
   CmeOrderflowExperimentResultDto,
   CmeStatusDto,
+  ExperimentArmDto,
   SyntheticFlowRegime,
 } from '@features/cme-microstructure/cme-microstructure.types';
+
+/** One bar in a history panel. Geometry is precomputed so the template stays declarative. */
+interface ChartBar {
+  key: string;
+  series: 'real' | 'proxy';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  tooltip: string;
+}
+
+/** One chart panel — a single measure on its own axis. */
+interface ChartPanel {
+  key: string;
+  title: string;
+  caption: string;
+  zeroY: number;
+  bars: ChartBar[];
+  xLabels: { key: string; text: string }[];
+}
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
@@ -188,7 +211,23 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           }
         </section>
 
-        @if (!hasData()) {
+        <!--
+          The hot tables are only a recent window; bulk-imported research slices live in the Parquet
+          warm tier. Reporting "no data" off the hot counts alone told an operator the purchase had
+          failed while 31M records sat on disk and the experiment was running against them.
+        -->
+        @if (status()?.warmTier?.sessionCount) {
+          <section class="banner" data-tone="info">
+            <strong
+              >Warm tier holds {{ status()!.warmTier.sessionCount }} imported session(s).</strong
+            >
+            {{ status()!.warmTier.contracts.join(', ') }} ·
+            {{ status()!.warmTier.earliestSession }} → {{ status()!.warmTier.latestSession }}. Raw
+            tape and book live in Parquet (the system of record); the hot tables above hold only the
+            recent window the retention worker keeps, so a zero there is expected after a bulk
+            import — the experiment reads both tiers.
+          </section>
+        } @else if (!hasData()) {
           <section class="banner">
             <strong>No CME data ingested yet.</strong>
             The subsystem ships disabled and inert: it needs a Databento slice plus
@@ -314,20 +353,48 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 }
               </p>
             } @else {
-              <div class="verdict" [attr.data-good]="x.oosNetPnlDelta > 0">
-                <div class="verdict-headline">
-                  {{
-                    x.oosNetPnlDelta > 0
-                      ? 'Real flow beat the proxy'
-                      : 'Real flow did NOT beat the proxy'
-                  }}
-                </div>
+              <div class="verdict" [attr.data-good]="verdictIsClean(x)">
+                <div class="verdict-headline">{{ verdictHeadline(x) }}</div>
                 <div class="verdict-sub muted small">
                   OOS net-PnL delta {{ x.oosNetPnlDelta | number: '1.2-2' }} · PF delta
                   {{ x.oosProfitFactorDelta | number: '1.2-2' }} ·
                   {{ x.fractionFoldsRealBeatsProxy * 100 | number: '1.0-0' }}% of
-                  {{ x.foldsScored }} folds · {{ x.eventsLoaded | number }} events
+                  {{ x.foldsScored }} sessions · {{ x.eventsLoaded | number }} events
                 </div>
+
+                @if (perTradeDisagrees(x)) {
+                  <!--
+                    The selectivity trap. Total PnL is trade-count sensitive: when the underlying
+                    strategy loses money, whichever arm trades LESS loses less overall while losing
+                    MORE on each trade. Reporting the headline delta alone calls that "real flow
+                    beat the proxy" — the first real 6E run did exactly this.
+                  -->
+                  <p class="verdict-caveat">
+                    <span aria-hidden="true">⚠</span>
+                    <span>
+                      <strong>Aggregate and per-trade disagree.</strong> Real took
+                      {{ x.real.tradeCount | number }} trades vs the proxy's
+                      {{ x.proxy.tradeCount | number }}, so the headline delta reflects selectivity
+                      rather than signal quality. Per trade real is
+                      {{ perTrade(x.real) | number: '1.2-2' }} against the proxy's
+                      {{ perTrade(x.proxy) | number: '1.2-2' }}. This run does
+                      <strong>not</strong> show real flow carrying edge.
+                    </span>
+                  </p>
+                }
+
+                @if (bothArmsLose(x)) {
+                  <p class="verdict-caveat">
+                    <span aria-hidden="true">⚠</span>
+                    <span>
+                      Both arms lose money (profit factor
+                      {{ x.real.profitFactor | number: '1.2-2' }} and
+                      {{ x.proxy.profitFactor | number: '1.2-2' }}). This compares two losing
+                      configurations — it measures which way a losing system fails, not whether real
+                      flow carries edge.
+                    </span>
+                  </p>
+                }
               </div>
 
               <div class="table-wrap">
@@ -363,6 +430,146 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             <p class="muted small">
               Run the experiment for an ingested contract/window to get a verdict.
             </p>
+          }
+        </section>
+
+        <!-- ── Verdict history ───────────────────────────────────────── -->
+        <section class="card">
+          <header class="card-head">
+            <h3>Verdict history</h3>
+            <span class="muted small">
+              Every recorded run, newest first. A verdict that exists only in one HTTP response
+              can't be revisited or compared — and a decision that gates real money should be
+              auditable long after the run.
+            </span>
+          </header>
+
+          @if (runs().length === 0) {
+            <p class="muted small">No runs recorded yet.</p>
+          } @else {
+            <!--
+              TWO charts, never one with two y-scales. Total PnL is in dollars and per-trade PnL is
+              dollars-per-trade — plotting them on a shared axis would make their relative sizes
+              meaningless. Separate panels keep each honest, and put the two comparisons side by
+              side where a disagreement between them is visible at a glance.
+            -->
+            <div class="chart-grid">
+              @for (panel of chartPanels(); track panel.key) {
+                <figure class="chart">
+                  <figcaption>
+                    <span class="chart-title">{{ panel.title }}</span>
+                    <span class="muted small">{{ panel.caption }}</span>
+                  </figcaption>
+
+                  <svg
+                    class="chart-svg"
+                    [attr.viewBox]="'0 0 ' + chartWidth + ' ' + chartHeight"
+                    role="img"
+                    [attr.aria-label]="panel.title + ' — real aggressor versus tick-rule proxy'"
+                    preserveAspectRatio="xMidYMid meet"
+                  >
+                    <!-- zero line: the reference that makes a loss legible as a loss -->
+                    <line
+                      class="axis-zero"
+                      [attr.x1]="0"
+                      [attr.x2]="chartWidth"
+                      [attr.y1]="panel.zeroY"
+                      [attr.y2]="panel.zeroY"
+                    />
+
+                    @for (bar of panel.bars; track bar.key) {
+                      <rect
+                        [attr.x]="bar.x"
+                        [attr.y]="bar.y"
+                        [attr.width]="bar.width"
+                        [attr.height]="bar.height"
+                        [attr.rx]="3"
+                        [attr.fill]="
+                          bar.series === 'real' ? 'var(--series-real)' : 'var(--series-proxy)'
+                        "
+                      >
+                        <title>{{ bar.tooltip }}</title>
+                      </rect>
+                    }
+                  </svg>
+
+                  <div class="chart-xaxis">
+                    @for (label of panel.xLabels; track label.key) {
+                      <span class="muted small">{{ label.text }}</span>
+                    }
+                  </div>
+                </figure>
+              }
+            </div>
+
+            <div class="legend">
+              <span class="legend-item">
+                <span class="swatch" style="background: var(--series-real)"></span>Real aggressor
+              </span>
+              <span class="legend-item">
+                <span class="swatch" style="background: var(--series-proxy)"></span>Tick-rule proxy
+              </span>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Run</th>
+                    <th>Window</th>
+                    <th class="num">Sessions</th>
+                    <th class="num">Real PF</th>
+                    <th class="num">Proxy PF</th>
+                    <th class="num">Net Δ</th>
+                    <th class="num">Per-trade Δ</th>
+                    <th>Entry</th>
+                    <th>Verdict</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (r of runs(); track r.id) {
+                    <tr>
+                      <td>
+                        {{ r.createdAtUtc | date: 'MMM d, HH:mm' }}
+                        <span class="muted small">· {{ r.contract }}</span>
+                      </td>
+                      <td class="muted small">
+                        {{ r.fromUtc | date: 'MMM d' }} – {{ r.toUtc | date: 'MMM d' }}
+                      </td>
+                      <td class="num">{{ r.foldsScored }}</td>
+                      <td class="num">{{ r.realProfitFactor | number: '1.2-2' }}</td>
+                      <td class="num">{{ r.proxyProfitFactor | number: '1.2-2' }}</td>
+                      <td class="num">{{ r.oosNetPnlDelta | number: '1.2-2' }}</td>
+                      <td class="num">{{ r.oosPnlPerTradeDelta | number: '1.2-2' }}</td>
+                      <!-- Cost model, not signal. A crossing run and a passive run are different
+                           experiments: on 6EM6 the round-trip spread was ~$12.50 against a ~$20-25
+                           average trade, so execution dominated the result. -->
+                      <td class="muted small">{{ r.passiveEntry ? 'Passive' : 'Crossing' }}</td>
+                      <td>
+                        <!-- Icon + label, never colour alone. -->
+                        @if (!r.ran) {
+                          <span class="tag" data-state="skipped">
+                            <span aria-hidden="true">○</span> {{ r.reason }}
+                          </span>
+                        } @else if (r.aggregateAndPerTradeDisagree) {
+                          <span class="tag" data-state="ambiguous">
+                            <span aria-hidden="true">⚠</span> Inconclusive
+                          </span>
+                        } @else if (r.oosNetPnlDelta > 0 && r.oosPnlPerTradeDelta > 0) {
+                          <span class="tag" data-state="real">
+                            <span aria-hidden="true">▲</span> Real ahead
+                          </span>
+                        } @else {
+                          <span class="tag" data-state="proxy">
+                            <span aria-hidden="true">▼</span> Proxy ahead
+                          </span>
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
           }
         </section>
 
@@ -670,6 +877,133 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         opacity: 0.55;
         cursor: not-allowed;
       }
+
+      /* ── Verdict caveats ──────────────────────────────────────────────
+         The delta alone is the most misleading number on this page, so the
+         qualifier is styled to be read, not skimmed past. */
+      .verdict-caveat {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+        margin: 10px 0 0;
+        padding: 8px 10px;
+        border-radius: 6px;
+        font-size: 12.5px;
+        line-height: 1.45;
+        background: rgba(250, 178, 25, 0.12);
+        border: 1px solid rgba(250, 178, 25, 0.4);
+        color: var(--text-primary);
+      }
+
+      /* ── Charts ───────────────────────────────────────────────────────
+         Series hues are the validated categorical slots 1 and 2 (blue,
+         orange): adjacent CVD ΔE 24.7 light / 26.8 dark, normal-vision
+         33.6 / 31.8, both clear of the floors and ≥3:1 on their surface.
+         Dark steps are re-stepped for the dark surface, not a flip. */
+      .chart-grid {
+        --series-real: #2a78d6;
+        --series-proxy: #eb6834;
+        --chart-axis: rgba(0, 0, 0, 0.22);
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 18px;
+        margin-bottom: 4px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme='light']) .chart-grid {
+          --series-real: #3987e5;
+          --series-proxy: #d95926;
+          --chart-axis: rgba(255, 255, 255, 0.26);
+        }
+      }
+      :root[data-theme='dark'] .chart-grid {
+        --series-real: #3987e5;
+        --series-proxy: #d95926;
+        --chart-axis: rgba(255, 255, 255, 0.26);
+      }
+
+      .chart {
+        margin: 0;
+        min-width: 0;
+      }
+      .chart figcaption {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin-bottom: 6px;
+      }
+      .chart-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+      .chart-svg {
+        width: 100%;
+        height: auto;
+        display: block;
+        overflow: visible;
+      }
+      /* Recessive: the zero reference should orient, not compete with the data. */
+      .axis-zero {
+        stroke: var(--chart-axis);
+        stroke-width: 1;
+      }
+      .chart-xaxis {
+        display: flex;
+        justify-content: space-around;
+        margin-top: 2px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .legend {
+        display: flex;
+        gap: 16px;
+        margin: 4px 0 14px;
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+      .legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        display: inline-block;
+      }
+
+      /* Verdict tags: icon + label, so state never rests on colour alone. */
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11.5px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .tag[data-state='real'] {
+        background: rgba(12, 163, 12, 0.14);
+        color: #0ca30c;
+      }
+      .tag[data-state='proxy'] {
+        background: rgba(208, 59, 59, 0.14);
+        color: #d03b3b;
+      }
+      .tag[data-state='ambiguous'] {
+        background: rgba(250, 178, 25, 0.16);
+        color: #b07c00;
+      }
+      .tag[data-state='skipped'] {
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+      }
+      :root[data-theme='dark'] .tag[data-state='ambiguous'] {
+        color: #fab219;
+      }
     `,
   ],
 })
@@ -679,9 +1013,14 @@ export class CmeMicrostructurePageComponent {
 
   protected readonly status = signal<CmeStatusDto | null>(null);
   protected readonly experiment = signal<CmeOrderflowExperimentResultDto | null>(null);
+  protected readonly runs = signal<readonly CmeExperimentRunDto[]>([]);
   protected readonly loading = signal(false);
   protected readonly busy = signal(false);
   protected readonly loadError = signal<string | null>(null);
+
+  /** Chart geometry. Fixed viewBox; the SVG scales to its container. */
+  protected readonly chartWidth = 320;
+  protected readonly chartHeight = 120;
 
   // Seed form
   protected seedRoot = '6E';
@@ -701,6 +1040,133 @@ export class CmeMicrostructurePageComponent {
   protected synthSeed = 20260808;
 
   protected readonly hasData = computed(() => (this.status()?.tradeCount ?? 0) > 0);
+
+  // ── Verdict interpretation ───────────────────────────────────────────────
+  // These guard the single most misleading reading of this experiment: that a positive headline
+  // delta means real flow carries edge. It can equally mean the real arm simply traded less.
+
+  protected perTrade(arm: ExperimentArmDto): number {
+    return arm.tradeCount > 0 ? arm.netPnl / arm.tradeCount : 0;
+  }
+
+  /** True when total-PnL and per-trade PnL favour DIFFERENT arms. */
+  protected perTradeDisagrees(x: CmeOrderflowExperimentResultDto): boolean {
+    const perTradeDelta = this.perTrade(x.real) - this.perTrade(x.proxy);
+    return (
+      x.oosNetPnlDelta !== 0 &&
+      perTradeDelta !== 0 &&
+      Math.sign(x.oosNetPnlDelta) !== Math.sign(perTradeDelta)
+    );
+  }
+
+  protected bothArmsLose(x: CmeOrderflowExperimentResultDto): boolean {
+    return x.real.netPnl < 0 && x.proxy.netPnl < 0;
+  }
+
+  /** Only a run whose two comparisons agree, on a profitable arm, reads as a clean win. */
+  protected verdictIsClean(x: CmeOrderflowExperimentResultDto): boolean {
+    return x.oosNetPnlDelta > 0 && !this.perTradeDisagrees(x) && !this.bothArmsLose(x);
+  }
+
+  protected verdictHeadline(x: CmeOrderflowExperimentResultDto): string {
+    if (this.perTradeDisagrees(x)) return 'Inconclusive — the two comparisons disagree';
+    if (x.oosNetPnlDelta > 0) {
+      return this.bothArmsLose(x) ? 'Real lost less than the proxy' : 'Real flow beat the proxy';
+    }
+    return 'Real flow did NOT beat the proxy';
+  }
+
+  // ── History charts ───────────────────────────────────────────────────────
+
+  /**
+   * Two separate panels — total PnL and per-trade PnL — each on its OWN axis.
+   *
+   * Never one chart with two y-scales: the measures are dollars and dollars-per-trade, so a shared
+   * axis makes their relative heights arbitrary. Side by side, the panels answer the question that
+   * matters: do the aggregate and per-trade views point the same way?
+   */
+  protected readonly chartPanels = computed<ChartPanel[]>(() => {
+    const scored = this.runs()
+      .filter((r) => r.ran)
+      .slice(0, 8)
+      .reverse();
+    if (scored.length === 0) return [];
+
+    return [
+      this.buildPanel(
+        'net',
+        'Net PnL by run',
+        'Total across all scored sessions.',
+        scored,
+        (r) => r.realNetPnl,
+        (r) => r.proxyNetPnl,
+      ),
+      this.buildPanel(
+        'perTrade',
+        'PnL per trade by run',
+        'Trade-count neutral — the comparison selectivity cannot flatter.',
+        scored,
+        (r) => r.realPnlPerTrade,
+        (r) => r.proxyPnlPerTrade,
+      ),
+    ];
+  });
+
+  private buildPanel(
+    key: string,
+    title: string,
+    caption: string,
+    runs: readonly CmeExperimentRunDto[],
+    real: (r: CmeExperimentRunDto) => number,
+    proxy: (r: CmeExperimentRunDto) => number,
+  ): ChartPanel {
+    const values = runs.flatMap((r) => [real(r), proxy(r)]);
+
+    // The domain always includes zero: these are signed PnL values, and a bar chart whose baseline
+    // floats makes a loss look like a small gain.
+    const max = Math.max(0, ...values);
+    const min = Math.min(0, ...values);
+    const span = max - min || 1;
+
+    const pad = 6;
+    const plotHeight = this.chartHeight - pad * 2;
+    const yOf = (v: number) => pad + ((max - v) / span) * plotHeight;
+    const zeroY = yOf(0);
+
+    // Two bars per run, with a 2px surface gap between the pair and a wider gap between groups.
+    const groupWidth = this.chartWidth / runs.length;
+    const barWidth = Math.max(3, Math.min(14, groupWidth / 2 - 4));
+
+    const bars: ChartBar[] = [];
+    runs.forEach((r, i) => {
+      const centre = groupWidth * i + groupWidth / 2;
+      [
+        { series: 'real' as const, value: real(r), offset: -barWidth - 1 },
+        { series: 'proxy' as const, value: proxy(r), offset: 1 },
+      ].forEach(({ series, value, offset }) => {
+        const y = yOf(value);
+        bars.push({
+          key: `${key}-${r.id}-${series}`,
+          series,
+          x: centre + offset,
+          width: barWidth,
+          y: Math.min(y, zeroY),
+          // Always at least 1px so a near-zero value is visibly present rather than absent.
+          height: Math.max(1, Math.abs(zeroY - y)),
+          tooltip: `${series === 'real' ? 'Real' : 'Proxy'} · ${title}: ${value.toFixed(2)} (${r.contract}, ${runs.length > 1 ? new Date(r.createdAtUtc).toLocaleDateString() : ''})`,
+        });
+      });
+    });
+
+    return {
+      key,
+      title,
+      caption,
+      zeroY,
+      bars,
+      xLabels: runs.map((r) => ({ key: `${key}-x-${r.id}`, text: `#${r.id}` })),
+    };
+  }
 
   protected feedStatusLabel(status: CmeFeedHealthDto['status']): string {
     switch (status) {
@@ -763,6 +1229,21 @@ export class CmeMicrostructurePageComponent {
             this.expContract = res.data.frontMonthContract;
           }
         }
+      });
+
+    this.loadRuns();
+  }
+
+  /**
+   * Verdict history. Failures degrade to an empty list rather than an error banner — the history is
+   * context for the panel, and losing it should not make the page look broken.
+   */
+  protected loadRuns(): void {
+    this.cme
+      .getExperimentRuns(undefined, 50)
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        if (res?.status && res.data) this.runs.set(res.data);
       });
   }
 
@@ -835,6 +1316,8 @@ export class CmeMicrostructurePageComponent {
         if (res === null) return;
         if (res.status && res.data) {
           this.experiment.set(res.data);
+          // The run was recorded engine-side; refresh so it appears in the history immediately.
+          this.loadRuns();
           this.notify.success(
             res.data.ran ? 'Experiment complete.' : `Not scored: ${res.data.reason}`,
           );

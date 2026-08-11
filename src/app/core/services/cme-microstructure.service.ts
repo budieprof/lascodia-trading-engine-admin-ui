@@ -5,6 +5,7 @@ import { ApiService } from '@core/api/api.service';
 import type { ResponseData } from '@core/api/api.types';
 import type {
   CmeStatusDto,
+  CmeExperimentRunDto,
   CmeOrderflowExperimentResultDto,
   GenerateSyntheticCmeRequest,
   RunCmeOrderflowExperimentRequest,
@@ -63,6 +64,21 @@ export class CmeMicrostructureService {
     return this.api.post<ResponseData<CmeOrderflowExperimentResultDto>>(
       `${this.base}/cme-orderflow`,
       body,
+    );
+  }
+
+  /**
+   * Recorded verdict history, newest first. Includes SKIPPED runs — a `no_data` outcome says the
+   * window an operator believed was ingested isn't there, which is itself worth seeing.
+   */
+  getExperimentRuns(
+    contract?: string,
+    limit = 50,
+  ): Observable<ResponseData<CmeExperimentRunDto[]>> {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (contract) query.set('contract', contract);
+    return this.api.get<ResponseData<CmeExperimentRunDto[]>>(
+      `${this.base}/cme-orderflow/runs?${query.toString()}`,
     );
   }
 }
