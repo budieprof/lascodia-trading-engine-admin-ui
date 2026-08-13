@@ -352,7 +352,7 @@ interface AnalyticsPanel {
         margin-top: 1.25rem;
       }
       @media (prefers-color-scheme: dark) {
-        :root:not([data-theme='light']) .hist {
+        :host-context(:not([data-theme='light'])) .hist {
           --c-a: #3987e5;
           --c-b: #d95926;
           --c-neutral: #9a9aa0;
@@ -361,7 +361,7 @@ interface AnalyticsPanel {
           --surface: #1a1a19;
         }
       }
-      :root[data-theme='dark'] .hist {
+      :host-context([data-theme='dark']) .hist {
         --c-a: #3987e5;
         --c-b: #d95926;
         --c-neutral: #9a9aa0;

@@ -6,6 +6,7 @@ import type { ResponseData } from '@core/api/api.types';
 import type {
   CmeStatusDto,
   CmeExperimentRunDto,
+  CmeExperimentTradesDto,
   CmeHistoricAnalyticsDto,
   CmeOrderflowExperimentResultDto,
   GenerateSyntheticCmeRequest,
@@ -55,6 +56,20 @@ export class CmeMicrostructureService {
     return this.api.post<ResponseData<SyntheticCmeGenerationResultDto>>(
       `${this.base}/cme-synthetic`,
       body,
+    );
+  }
+
+  /**
+   * Per-trade detail for one run, plus the derived series a trade view needs (equity curve per arm,
+   * shared-bin PnL distribution, per-session breakdown). Derived server-side so "cumulative PnL at
+   * trade N" has one definition and the payload stays proportional to what is drawn.
+   */
+  getExperimentTrades(
+    runId: number,
+    maxRowsPerArm = 1000,
+  ): Observable<ResponseData<CmeExperimentTradesDto>> {
+    return this.api.get<ResponseData<CmeExperimentTradesDto>>(
+      `${this.base}/cme-orderflow/runs/${runId}/trades?maxRowsPerArm=${maxRowsPerArm}`,
     );
   }
 

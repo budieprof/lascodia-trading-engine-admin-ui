@@ -42,6 +42,7 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { CmeHistoricAnalyticsComponent } from '@features/cme-microstructure/components/cme-historic-analytics.component';
+import { CmeExperimentTradesComponent } from '@features/cme-microstructure/components/cme-experiment-trades.component';
 
 /**
  * CME Microstructure operator panel (engine ADR-0021 / ADR-0022).
@@ -67,6 +68,7 @@ import { CmeHistoricAnalyticsComponent } from '@features/cme-microstructure/comp
     EmptyStateComponent,
     RelativeTimePipe,
     CmeHistoricAnalyticsComponent,
+    CmeExperimentTradesComponent,
   ],
   template: `
     <div class="page">
@@ -582,6 +584,28 @@ import { CmeHistoricAnalyticsComponent } from '@features/cme-microstructure/comp
           }
         </section>
 
+        <!-- ── Trades behind the verdict ─────────────────────────────── -->
+        @if (runs().length > 0) {
+          <section class="card">
+            <div class="toolbar">
+              <label class="muted small" for="trade-run">Inspect run</label>
+              <select
+                id="trade-run"
+                class="input sm"
+                [ngModel]="tradeRunId()"
+                (ngModelChange)="tradeRunId.set(+$event)"
+              >
+                @for (r of runs(); track r.id) {
+                  <option [value]="r.id">
+                    #{{ r.id }} · {{ r.contract }} · {{ r.createdAtUtc | date: 'dd MMM HH:mm' }}
+                  </option>
+                }
+              </select>
+            </div>
+            <app-cme-experiment-trades [runId]="tradeRunId()" />
+          </section>
+        }
+
         <!-- ── Simulator (pre-purchase pipeline validation) ──────────── -->
         <section class="card">
           <header class="card-head">
@@ -1023,6 +1047,12 @@ export class CmeMicrostructurePageComponent {
   protected readonly status = signal<CmeStatusDto | null>(null);
   protected readonly experiment = signal<CmeOrderflowExperimentResultDto | null>(null);
   protected readonly runs = signal<readonly CmeExperimentRunDto[]>([]);
+
+  /**
+   * Run whose trades are being inspected. Set when the run list loads (newest first, so it defaults
+   * to the most recent verdict) and thereafter driven by the operator's selection.
+   */
+  protected readonly tradeRunId = signal<number | null>(null);
   protected readonly loading = signal(false);
   protected readonly busy = signal(false);
   protected readonly loadError = signal<string | null>(null);
@@ -1252,7 +1282,14 @@ export class CmeMicrostructurePageComponent {
       .getExperimentRuns(undefined, 50)
       .pipe(catchError(() => of(null)))
       .subscribe((res) => {
-        if (res?.status && res.data) this.runs.set(res.data);
+        if (res?.status && res.data) {
+          this.runs.set(res.data);
+          // Default to the newest run, but never override a selection the operator has already
+          // made — a background refresh must not yank them to a different run mid-read.
+          if (this.tradeRunId() === null && res.data.length > 0) {
+            this.tradeRunId.set(res.data[0].id);
+          }
+        }
       });
   }
 

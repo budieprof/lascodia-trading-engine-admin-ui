@@ -275,3 +275,83 @@ export interface CmeHistoricAnalyticsDto {
   contracts: CmeContractAnalyticsDto[];
   totals: CmeSliceTotalsDto;
 }
+
+// ── Per-trade detail for one experiment run ───────────────────────────────────
+//
+// The aggregates say WHICH arm won; these say HOW. Whether an edge is broad or a few outliers,
+// whether the path to a net result was survivable, and which sessions drove the gap — none of
+// which six summary numbers per arm can answer.
+
+export interface CmeExperimentTradeDto {
+  arm: string;
+  sessionDate: string;
+  sequence: number;
+  entryTimeUtc: string;
+  exitTimeUtc: string;
+  direction: 'Long' | 'Short';
+  size: number;
+  entryPrice: number;
+  exitPrice: number;
+  netPnl: number;
+  holdSeconds: number;
+}
+
+export interface CmeArmTradeSeriesDto {
+  arm: string;
+  tradeCount: number;
+  netPnl: number;
+  avgPnl: number;
+  medianPnl: number;
+  bestTrade: number;
+  worstTrade: number;
+  /** Strictly positive PnL. */
+  winCount: number;
+  /**
+   * Closed at exactly zero after costs. Split out because the engine's own Wins counter treats
+   * these as wins — without the split, this view and the verdict card report different win rates
+   * for the same run and neither can be reconciled against the other.
+   */
+  scratchCount: number;
+  lossCount: number;
+  /** Wins / all trades. */
+  winRatePct: number;
+  /** (Wins + scratches) / all trades — the engine's definition, for reconciliation. */
+  nonLosingRatePct: number;
+  avgHoldSeconds: number;
+  longCount: number;
+  shortCount: number;
+  /** Largest peak-to-trough fall in the equity curve — the path, not just the destination. */
+  maxDrawdown: number;
+  /** Cumulative net PnL after each trade, in sequence. */
+  equity: number[];
+}
+
+/** Shared bins across both arms, so the two distributions are actually comparable. */
+export interface CmePnlHistogramBinDto {
+  binLowerPnl: number;
+  binUpperPnl: number;
+  realCount: number;
+  proxyCount: number;
+}
+
+export interface CmeSessionPnlDto {
+  sessionDate: string;
+  realNetPnl: number;
+  proxyNetPnl: number;
+  realTrades: number;
+  proxyTrades: number;
+}
+
+export interface CmeExperimentTradesDto {
+  runId: number;
+  contract: string;
+  /** False for runs recorded before per-trade capture existed — not an error. */
+  hasTrades: boolean;
+  totalTrades: number;
+  rowsTruncated: boolean;
+  real: CmeArmTradeSeriesDto | null;
+  proxy: CmeArmTradeSeriesDto | null;
+  histogram: CmePnlHistogramBinDto[];
+  sessions: CmeSessionPnlDto[];
+  trades: CmeExperimentTradeDto[];
+}
