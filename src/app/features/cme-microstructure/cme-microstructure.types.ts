@@ -203,3 +203,75 @@ export interface SyntheticCmeGenerationResultDto {
   purgedBooks: number;
   regime: string;
 }
+
+// ── Historic-slice analytics (GET /experiment/cme-historic-analytics) ─────────
+//
+// What the purchased Databento slice actually contains, per session. Row counts alone cannot
+// answer "is this data usable?" — a session can hold a million book records and still be worthless
+// if its tape lost the aggressor tags, and a half-finished import looks fully ingested until a
+// book-aware backtest silently produces no fills on it.
+
+export interface CmeSessionAnalyticsDto {
+  contract: string;
+  sessionDate: string;
+  tradeCount: number;
+  volume: number;
+  buyVolume: number;
+  sellVolume: number;
+  untaggedVolume: number;
+  /** Share of trades carrying a Buy/Sell tag. THE quality metric — it is why CME data was bought. */
+  aggressorCoveragePct: number;
+  /** Buy-aggressor share of directional volume, 0-1. 0.5 = balanced. */
+  buyVolumeShare: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  rangeTicks: number;
+  firstEventUtc: string | null;
+  lastEventUtc: string | null;
+  spanHours: number;
+  hasTrades: boolean;
+  hasBook: boolean;
+  /** Tape present, book missing — an interrupted import. */
+  isTradesOnly: boolean;
+  tradeBytes: number;
+  bookBytes: number;
+}
+
+export interface CmeContractAnalyticsDto {
+  contract: string;
+  sessions: number;
+  sessionsWithBook: number;
+  sessionsTradesOnly: number;
+  tradeCount: number;
+  volume: number;
+  aggressorCoveragePct: number;
+  firstSession: string | null;
+  lastSession: string | null;
+}
+
+export interface CmeSliceTotalsDto {
+  contracts: number;
+  sessions: number;
+  sessionsWithBook: number;
+  sessionsTradesOnly: number;
+  tradeCount: number;
+  volume: number;
+  aggressorCoveragePct: number;
+  buyVolumeShare: number;
+  tradeBytes: number;
+  bookBytes: number;
+  firstSession: string | null;
+  lastSession: string | null;
+  /** Weekdays inside the span with no session at all — holes, as distinct from the span ending. */
+  calendarGapDays: number;
+}
+
+export interface CmeHistoricAnalyticsDto {
+  configured: boolean;
+  rootSymbol: string;
+  sessions: CmeSessionAnalyticsDto[];
+  contracts: CmeContractAnalyticsDto[];
+  totals: CmeSliceTotalsDto;
+}

@@ -41,6 +41,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { CmeHistoricAnalyticsComponent } from '@features/cme-microstructure/components/cme-historic-analytics.component';
 
 /**
  * CME Microstructure operator panel (engine ADR-0021 / ADR-0022).
@@ -65,6 +66,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     ErrorStateComponent,
     EmptyStateComponent,
     RelativeTimePipe,
+    CmeHistoricAnalyticsComponent,
   ],
   template: `
     <div class="page">
@@ -431,6 +433,13 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
               Run the experiment for an ingested contract/window to get a verdict.
             </p>
           }
+        </section>
+
+        <!-- ── Downloaded historic slice ─────────────────────────────── -->
+        <!-- Placed before the verdict history deliberately: a verdict is only worth reading once
+             you know what data produced it, and this is where the tape-only sessions show up. -->
+        <section class="card">
+          <app-cme-historic-analytics />
         </section>
 
         <!-- ── Verdict history ───────────────────────────────────────── -->

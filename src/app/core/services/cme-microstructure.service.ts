@@ -6,6 +6,7 @@ import type { ResponseData } from '@core/api/api.types';
 import type {
   CmeStatusDto,
   CmeExperimentRunDto,
+  CmeHistoricAnalyticsDto,
   CmeOrderflowExperimentResultDto,
   GenerateSyntheticCmeRequest,
   RunCmeOrderflowExperimentRequest,
@@ -54,6 +55,25 @@ export class CmeMicrostructureService {
     return this.api.post<ResponseData<SyntheticCmeGenerationResultDto>>(
       `${this.base}/cme-synthetic`,
       body,
+    );
+  }
+
+  /**
+   * Per-session analytics over the imported historic slice — tape volume, aggressor balance and
+   * coverage, session range, and which sessions are missing their book.
+   *
+   * Server-side this reads the trade tape only and characterises the book from its on-disk
+   * footprint, so a 79-session sweep stays inside a request; results are memoised per session
+   * because imported history is immutable. The FIRST call on a cold cache can take ~20s.
+   */
+  getHistoricAnalytics(
+    rootSymbol = '6E',
+    contract?: string,
+  ): Observable<ResponseData<CmeHistoricAnalyticsDto>> {
+    const query = new URLSearchParams({ rootSymbol });
+    if (contract) query.set('contract', contract);
+    return this.api.get<ResponseData<CmeHistoricAnalyticsDto>>(
+      `${this.base}/cme-historic-analytics?${query.toString()}`,
     );
   }
 
