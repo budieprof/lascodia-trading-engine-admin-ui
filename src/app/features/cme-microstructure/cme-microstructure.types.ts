@@ -355,3 +355,41 @@ export interface CmeExperimentTradesDto {
   sessions: CmeSessionPnlDto[];
   trades: CmeExperimentTradeDto[];
 }
+
+// ── Price + flow context for one trade (chart modal) ──────────────────────────
+
+export interface CmeTradeContextBarDto {
+  timestampUtc: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  buyVolume: number;
+  sellVolume: number;
+  /** Buy − sell volume: the signed flow the strategy trades on. */
+  delta: number;
+  cumulativeDelta: number;
+  tradeCount: number;
+}
+
+export interface CmeTradeContextDto {
+  runId: number;
+  contract: string;
+  arm: string;
+  sequence: number;
+  sessionDate: string;
+  entryTimeUtc: string;
+  exitTimeUtc: string;
+  direction: 'Long' | 'Short';
+  size: number;
+  entryPrice: number;
+  exitPrice: number;
+  netPnl: number;
+  holdSeconds: number;
+  /** Bar interval chosen server-side to suit the trade's own length. */
+  barSeconds: number;
+  windowStartUtc: string;
+  windowEndUtc: string;
+  bars: CmeTradeContextBarDto[];
+}

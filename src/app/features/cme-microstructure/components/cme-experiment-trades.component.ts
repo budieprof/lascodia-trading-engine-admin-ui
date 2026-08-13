@@ -5,7 +5,11 @@ import type { EChartsOption } from 'echarts';
 
 import { ThemeService } from '@core/theme/theme.service';
 import { CmeMicrostructureService } from '@core/services/cme-microstructure.service';
-import type { CmeExperimentTradesDto } from '@features/cme-microstructure/cme-microstructure.types';
+import type {
+  CmeExperimentTradeDto,
+  CmeExperimentTradesDto,
+  CmeTradeContextDto,
+} from '@features/cme-microstructure/cme-microstructure.types';
 
 /**
  * Trade-level view of one real-vs-proxy experiment run.
@@ -209,7 +213,17 @@ import type { CmeExperimentTradesDto } from '@features/cme-microstructure/cme-mi
                 </thead>
                 <tbody>
                   @for (t of visibleTrades(); track t.arm + '-' + t.sequence) {
-                    <tr>
+                    <tr
+                      class="row-clickable"
+                      tabindex="0"
+                      role="button"
+                      [attr.aria-label]="
+                        'Chart trade ' + t.sequence + ' on ' + t.sessionDate + ', ' + t.arm + ' arm'
+                      "
+                      (click)="openTrade(t)"
+                      (keydown.enter)="openTrade(t)"
+                      (keydown.space)="$event.preventDefault(); openTrade(t)"
+                    >
                       <td>
                         <span class="swatch sm" [style.background]="armColour(t.arm)"></span>
                         {{ t.arm }}
@@ -239,6 +253,60 @@ import type { CmeExperimentTradesDto } from '@features/cme-microstructure/cme-mi
           </details>
         }
       }
+
+      <!-- ── Single-trade chart modal ──────────────────────────────────────── -->
+      @if (selected(); as sel) {
+        <div class="modal-scrim" role="dialog" aria-modal="true" (click)="closeTrade()">
+          <div class="modal-card" (click)="$event.stopPropagation()">
+            <header class="modal-head">
+              <div>
+                <h4>
+                  <span class="swatch" [style.background]="armColour(sel.arm)"></span>
+                  {{ sel.arm }} · trade #{{ sel.sequence }} · {{ sel.direction }}
+                  <span class="chip" [class.chip--loss]="sel.netPnl < 0">
+                    {{ sel.netPnl | number: '1.2-2' }}
+                  </span>
+                </h4>
+                <p class="muted small">
+                  {{ sel.sessionDate }} · {{ sel.entryTimeUtc | date: 'HH:mm:ss' : 'UTC' }} →
+                  {{ sel.exitTimeUtc | date: 'HH:mm:ss' : 'UTC' }} UTC · held
+                  {{ holdLabel(sel.holdSeconds) }} · size {{ sel.size }} ·
+                  {{ sel.entryPrice | number: '1.5-5' }} → {{ sel.exitPrice | number: '1.5-5' }}
+                </p>
+              </div>
+              <button type="button" class="modal-close" (click)="closeTrade()" aria-label="Close">
+                ×
+              </button>
+            </header>
+
+            <div class="modal-body">
+              @if (contextLoading()) {
+                <p class="muted small">Rebuilding bars from the tape…</p>
+              } @else if (contextError(); as ce) {
+                <p class="err small" role="alert">{{ ce }}</p>
+              } @else if (context(); as ctx) {
+                @if (ctx.bars.length === 0) {
+                  <p class="muted small">{{ contextNote() }}</p>
+                } @else {
+                  <div
+                    echarts
+                    [options]="tradeChartOptions()"
+                    [theme]="echartsTheme()"
+                    [autoResize]="true"
+                    class="modal-chart"
+                  ></div>
+                  <p class="muted small">
+                    {{ ctx.bars.length }} bars at {{ ctx.barSeconds }}s, rebuilt from the raw tape.
+                    Middle panel is per-bar aggressor delta (buy − sell volume), lower panel its
+                    running total — each on its own axis, since their ranges differ by an order of
+                    magnitude.
+                  </p>
+                }
+              }
+            </div>
+          </div>
+        </div>
+      }
     </section>
   `,
   styles: [
@@ -248,6 +316,7 @@ import type { CmeExperimentTradesDto } from '@features/cme-microstructure/cme-mi
         --c-proxy: #eb6834;
         --axis: rgba(0, 0, 0, 0.22);
         --head-bg: #fcfcfb;
+        --row-hover: rgba(42, 120, 214, 0.09);
         display: grid;
         gap: 1rem;
       }
@@ -257,6 +326,7 @@ import type { CmeExperimentTradesDto } from '@features/cme-microstructure/cme-mi
           --c-proxy: #d95926;
           --axis: rgba(255, 255, 255, 0.26);
           --head-bg: #1a1a19;
+          --row-hover: rgba(57, 135, 229, 0.16);
         }
       }
       :host-context([data-theme='dark']) .trades {
@@ -264,6 +334,7 @@ import type { CmeExperimentTradesDto } from '@features/cme-microstructure/cme-mi
         --c-proxy: #d95926;
         --axis: rgba(255, 255, 255, 0.26);
         --head-bg: #1a1a19;
+        --row-hover: rgba(57, 135, 229, 0.16);
       }
 
       .trades-head {
@@ -411,6 +482,80 @@ import type { CmeExperimentTradesDto } from '@features/cme-microstructure/cme-mi
       .btn[disabled] {
         opacity: 0.55;
         cursor: default;
+      }
+
+      .row-clickable {
+        cursor: pointer;
+      }
+      .row-clickable:hover,
+      .row-clickable:focus-visible {
+        background: var(--row-hover);
+        outline: none;
+      }
+      .row-clickable:focus-visible {
+        /* Keyboard users need the target visible, not merely reachable. */
+        box-shadow: inset 0 0 0 2px var(--c-real);
+      }
+
+      .modal-scrim {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        display: grid;
+        place-items: center;
+        padding: 1.5rem;
+        z-index: 1000;
+      }
+      .modal-card {
+        background: var(--head-bg);
+        border: 1px solid var(--axis);
+        border-radius: 12px;
+        width: min(1100px, 100%);
+        max-height: 90vh;
+        overflow: auto;
+        padding: 1rem 1.15rem 1.15rem;
+        display: grid;
+        gap: 0.75rem;
+      }
+      .modal-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+      }
+      .modal-head h4 {
+        margin: 0 0 0.2rem;
+        font-size: 0.95rem;
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        flex-wrap: wrap;
+      }
+      .chip {
+        padding: 0.05rem 0.4rem;
+        border-radius: 999px;
+        background: rgba(52, 199, 89, 0.16);
+        font-variant-numeric: tabular-nums;
+      }
+      .chip--loss {
+        background: rgba(215, 38, 61, 0.16);
+      }
+      .modal-close {
+        border: none;
+        background: transparent;
+        color: inherit;
+        font-size: 1.4rem;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0 0.25rem;
+      }
+      .modal-body {
+        display: grid;
+        gap: 0.5rem;
+      }
+      .modal-chart {
+        width: 100%;
+        height: 460px;
       }
     `,
   ],
@@ -611,6 +756,227 @@ export class CmeExperimentTradesComponent {
         },
       ],
     };
+  });
+
+  // ── Single-trade chart modal ────────────────────────────────────────────────
+
+  protected readonly selected = signal<CmeExperimentTradeDto | null>(null);
+  protected readonly context = signal<CmeTradeContextDto | null>(null);
+  protected readonly contextLoading = signal(false);
+  protected readonly contextError = signal<string | null>(null);
+  protected readonly contextNote = signal('');
+
+  openTrade(t: CmeExperimentTradeDto): void {
+    this.selected.set(t);
+    this.context.set(null);
+    this.contextError.set(null);
+    this.contextLoading.set(true);
+
+    const id = this.runId();
+    if (!id) return;
+
+    this.service.getTradeContext(id, t.arm, t.sequence).subscribe({
+      next: (res) => {
+        if (res.status && res.data) {
+          this.context.set(res.data);
+          // Carries the "tape no longer readable" explanation on an otherwise-successful envelope,
+          // which is the difference between an empty chart and an understood one.
+          this.contextNote.set(res.message ?? '');
+        } else {
+          this.contextError.set(res.message || 'Could not rebuild context for this trade.');
+        }
+        this.contextLoading.set(false);
+      },
+      error: (err: unknown) => {
+        this.contextError.set(
+          err instanceof Error ? err.message : 'Could not rebuild context for this trade.',
+        );
+        this.contextLoading.set(false);
+      },
+    });
+  }
+
+  closeTrade(): void {
+    this.selected.set(null);
+    this.context.set(null);
+    this.contextError.set(null);
+  }
+
+  /**
+   * Price candles with the trade marked, and aggressor delta on a SEPARATE grid below.
+   *
+   * <p>The delta panel is a small multiple sharing the x-axis, not a second y-axis on the price
+   * plot. Price and signed volume have no common scale, and overlaying them would manufacture
+   * apparent agreement between the two at whatever ratio the axes happened to land on.</p>
+   */
+  protected readonly tradeChartOptions = computed<EChartsOption>(() => {
+    const ctx = this.context();
+    const sel = this.selected();
+    const p = this.palette();
+    const bars = ctx?.bars ?? [];
+
+    const times = bars.map((b) => b.timestampUtc);
+    const candles = bars.map((b) => [b.open, b.close, b.low, b.high]);
+    const armColour = sel?.arm === 'real' ? p.real : p.proxy;
+
+    const label = (iso: string) => iso.slice(11, 19);
+    const nearest = (iso: string) => {
+      // Snap to the bar containing the event: category axes only accept a category that exists, and
+      // an entry timestamp mid-bar has no category of its own.
+      const t = Date.parse(iso);
+      let best = 0;
+      let bestDiff = Number.POSITIVE_INFINITY;
+      times.forEach((s, i) => {
+        const diff = Math.abs(Date.parse(s) - t);
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          best = i;
+        }
+      });
+      return best;
+    };
+
+    const entryIdx = sel ? nearest(sel.entryTimeUtc) : 0;
+    const exitIdx = sel ? nearest(sel.exitTimeUtc) : 0;
+
+    return {
+      animation: false,
+      // Two grids, one shared category axis. axisPointer links them so a hover reads price and
+      // flow at the SAME instant — the comparison the whole experiment is about.
+      axisPointer: { link: [{ xAxisIndex: 'all' }] },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+      legend: { data: ['Price', 'Aggressor delta', 'Cumulative delta'], top: 0 },
+      // THREE grids, not two. Per-bar delta and cumulative delta are different measures with
+      // different ranges (here roughly -200..+100 against 0..800); sharing one axis flattens the
+      // bars into a line at zero and hides the per-bar texture entirely. Same reason price gets its
+      // own grid — this is small multiples, not a stacked axis.
+      grid: [
+        { left: 64, right: 58, top: 30, height: '44%' },
+        { left: 64, right: 58, top: '61%', height: '15%' },
+        { left: 64, right: 58, top: '81%', height: '13%' },
+      ],
+      xAxis: [
+        {
+          type: 'category',
+          data: times,
+          gridIndex: 0,
+          axisLabel: { formatter: label, fontSize: 10 },
+          axisLine: { lineStyle: { color: p.axis } },
+        },
+        {
+          type: 'category',
+          data: times,
+          gridIndex: 1,
+          axisLabel: { show: false },
+          axisLine: { lineStyle: { color: p.axis } },
+        },
+        {
+          type: 'category',
+          data: times,
+          gridIndex: 2,
+          axisLabel: { formatter: label, fontSize: 10 },
+          axisLine: { lineStyle: { color: p.axis } },
+        },
+      ],
+      yAxis: [
+        {
+          type: 'value',
+          scale: true,
+          name: 'price',
+          gridIndex: 0,
+          axisLine: { lineStyle: { color: p.axis } },
+          splitLine: { lineStyle: { color: p.axis, opacity: 0.35 } },
+        },
+        {
+          type: 'value',
+          gridIndex: 1,
+          axisLine: { lineStyle: { color: p.axis } },
+          splitLine: { show: false },
+        },
+        {
+          type: 'value',
+          gridIndex: 2,
+          axisLine: { lineStyle: { color: p.axis } },
+          splitLine: { show: false },
+        },
+      ],
+      dataZoom: [
+        { type: 'inside', xAxisIndex: [0, 1, 2] },
+        { type: 'slider', xAxisIndex: [0, 1, 2], bottom: 2, height: 14 },
+      ],
+      series: [
+        {
+          name: 'Price',
+          type: 'candlestick',
+          data: candles,
+          xAxisIndex: 0,
+          yAxisIndex: 0,
+          itemStyle: {
+            color: 'transparent',
+            color0: p.axis,
+            borderColor: p.real,
+            borderColor0: p.proxy,
+          },
+          markPoint: {
+            symbolSize: 44,
+            data: sel
+              ? [
+                  {
+                    name: 'Entry',
+                    coord: [entryIdx, sel.entryPrice],
+                    value: 'IN',
+                    itemStyle: { color: armColour },
+                  },
+                  {
+                    name: 'Exit',
+                    coord: [exitIdx, sel.exitPrice],
+                    value: 'OUT',
+                    itemStyle: { color: sel.netPnl >= 0 ? '#34c759' : '#d7263d' },
+                  },
+                ]
+              : [],
+          },
+          markLine: {
+            symbol: 'none',
+            data: sel
+              ? [
+                  // The held window shaded by its own boundaries, so "when was I in the market"
+                  // is answerable at a glance rather than by reading timestamps off the axis.
+                  [
+                    { name: 'held', coord: [entryIdx, sel.entryPrice] },
+                    { coord: [exitIdx, sel.exitPrice] },
+                  ],
+                ]
+              : [],
+            lineStyle: { color: armColour, width: 2, type: 'dashed' },
+            label: { show: false },
+          },
+        },
+        {
+          name: 'Aggressor delta',
+          type: 'bar',
+          data: bars.map((b) => b.delta),
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          // Diverging by sign: buy-dominant bars take the real-arm hue, sell-dominant the proxy's,
+          // which keeps the page's two hues doing one job each rather than inventing a third.
+          itemStyle: {
+            color: (params: { data: number }) => (params.data >= 0 ? p.real : p.proxy),
+          },
+        },
+        {
+          name: 'Cumulative delta',
+          type: 'line',
+          data: bars.map((b) => b.cumulativeDelta),
+          xAxisIndex: 2,
+          yAxisIndex: 2,
+          showSymbol: false,
+          areaStyle: { opacity: 0.12 },
+          lineStyle: { width: 1.5, color: p.real },
+          itemStyle: { color: p.real },
+        },
+      ],
+    } as EChartsOption;
   });
 
   load(): void {

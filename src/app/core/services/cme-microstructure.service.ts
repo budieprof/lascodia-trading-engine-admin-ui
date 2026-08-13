@@ -7,6 +7,7 @@ import type {
   CmeStatusDto,
   CmeExperimentRunDto,
   CmeExperimentTradesDto,
+  CmeTradeContextDto,
   CmeHistoricAnalyticsDto,
   CmeOrderflowExperimentResultDto,
   GenerateSyntheticCmeRequest,
@@ -70,6 +71,20 @@ export class CmeMicrostructureService {
   ): Observable<ResponseData<CmeExperimentTradesDto>> {
     return this.api.get<ResponseData<CmeExperimentTradesDto>>(
       `${this.base}/cme-orderflow/runs/${runId}/trades?maxRowsPerArm=${maxRowsPerArm}`,
+    );
+  }
+
+  /**
+   * Price + order-flow context around ONE trade, for the chart modal. Bars are rebuilt from the raw
+   * tape per request and their interval adapts to the trade's length.
+   */
+  getTradeContext(
+    runId: number,
+    arm: string,
+    sequence: number,
+  ): Observable<ResponseData<CmeTradeContextDto>> {
+    return this.api.get<ResponseData<CmeTradeContextDto>>(
+      `${this.base}/cme-orderflow/runs/${runId}/trades/${arm}/${sequence}/context`,
     );
   }
 
