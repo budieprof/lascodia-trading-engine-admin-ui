@@ -301,6 +301,19 @@ import type {
                     running total — each on its own axis, since their ranges differ by an order of
                     magnitude.
                   </p>
+                  <p class="muted small note-why">
+                    <strong>Why IN/OUT rarely sit exactly on a candle.</strong> The strategy decides
+                    once per minute and the trade is stamped with that minute's START, though the
+                    decision is taken at its END. Fills also come from the <em>order book</em> — a
+                    buy lifts the ask, a sell hits the bid — while these candles are the
+                    <em>trade tape</em>, so an entry usually prints a tick above the last trade and
+                    an exit a tick below. Win or loss is decided by direction, not by where the
+                    markers sit: this <strong>{{ sel.direction }}</strong> went
+                    {{ sel.entryPrice | number: '1.5-5' }} → {{ sel.exitPrice | number: '1.5-5' }},
+                    which moved
+                    <strong>{{ favourLabel(sel) }}</strong>
+                    the position.
+                  </p>
                 }
               }
             </div>
@@ -557,6 +570,10 @@ import type {
         width: 100%;
         height: 460px;
       }
+      .note-why {
+        border-left: 2px solid var(--axis);
+        padding-left: 0.6rem;
+      }
     `,
   ],
 })
@@ -601,6 +618,16 @@ export class CmeExperimentTradesComponent {
       colour: string;
     } & NonNullable<CmeExperimentTradesDto['real']>)[];
   });
+
+  /**
+   * Whether price moved for or against the position — the thing that actually decides win/loss,
+   * stated in words so it does not have to be inferred from two prices and a direction.
+   */
+  protected favourLabel(t: CmeExperimentTradeDto): string {
+    const favourable =
+      t.direction === 'Long' ? t.exitPrice >= t.entryPrice : t.exitPrice <= t.entryPrice;
+    return favourable ? 'in favour of' : 'against';
+  }
 
   protected holdLabel(seconds: number): string {
     if (!seconds || seconds < 0) return '—';
