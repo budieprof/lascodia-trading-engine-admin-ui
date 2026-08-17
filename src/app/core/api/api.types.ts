@@ -1673,6 +1673,23 @@ export interface EAStatePayload {
   latencyP50Ms?: number;
   latencyP95Ms?: number;
   latencyP99Ms?: number;
+  /**
+   * OnTimer cycle latency in milliseconds (EA v8.47.222+).
+   *
+   * The EA's headline health metric: OnTimer is the only HTTP path and runs a
+   * 9-phase 1s cycle, so a rising p95 means phases are being shed. Absent on
+   * older EA builds — treat undefined as "not reported", not as zero.
+   */
+  onTimerP50Ms?: number;
+  onTimerP95Ms?: number;
+  onTimerP99Ms?: number;
+  onTimerMaxMs?: number;
+  /** Alarm SLA for onTimerP95Ms. Shipped by the EA so the UI cannot drift from it. */
+  onTimerP95TargetMs?: number;
+  /** Hard per-cycle budget above which the EA sheds LOW/NORMAL phases. */
+  onTimerBudgetMs?: number;
+  /** True when the EA's own breach gauge is asserting. */
+  onTimerP95Breach?: boolean;
   /** First owned symbol — the "primary" used for spread / tick display. */
   primarySymbol?: string;
   /** Bid-ask spread in points on the primary symbol. */

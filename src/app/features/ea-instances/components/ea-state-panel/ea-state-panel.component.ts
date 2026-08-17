@@ -451,6 +451,33 @@ export class EAStatePanelComponent {
       }
     }
 
+    // OnTimer cycle health — the EA's headline SLA metric.
+    //
+    // It carries a codified target and a Prometheus breach gauge, but until
+    // v8.47.222 it was not in the heartbeat payload at all: reading it meant
+    // opening slo_summary.json on the MT5 host by hand. A live 3.3x breach
+    // (p95 1665 ms against a 500 ms target) consequently ran unnoticed until a
+    // baseline refresh surfaced it by accident on 2026-08-17.
+    //
+    // Thresholds come from the EA (onTimerP95TargetMs = the alarm SLA,
+    // onTimerBudgetMs = the hard per-cycle shed budget) rather than being
+    // hardcoded here, so this cell can never disagree with the gauge the EA
+    // actually enforces.
+    if (s.onTimerP95Ms != null) {
+      const target = s.onTimerP95TargetMs ?? 500;
+      const budget = s.onTimerBudgetMs ?? 900;
+      const p50 = s.onTimerP50Ms ?? 0;
+      const p99 = s.onTimerP99Ms ?? 0;
+      cells.push({
+        key: 'onTimerPct',
+        label: 'OnTimer p50/p95/p99',
+        value: `${p50} / ${s.onTimerP95Ms} / ${p99} ms`,
+        // Past the hard budget the EA is actively shedding phases, so that is
+        // 'bad'; between target and budget it is degraded but still complete.
+        tone: s.onTimerP95Ms > budget ? 'bad' : s.onTimerP95Ms > target ? 'warn' : 'ok',
+      });
+    }
+
     // Market microstructure
     if (s.marketState) {
       cells.push({
