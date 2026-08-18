@@ -16,9 +16,11 @@ type LadderMode = 'recovery' | 'fixed';
 /** What happens when the ladder hits its depth cap without recovering. */
 type CapPolicy = 'abandon' | 'continue';
 
-/** One simulated trade in sequence. */
-interface SimTrade {
+/** One simulated trade in sequence. Exported so the page's per-signal table can render it. */
+export interface SimTrade {
   index: number;
+  signalId: number;
+  at: string;
   symbol: string;
   r: number;
   laddered: boolean;
@@ -441,8 +443,22 @@ export class MartingaleSimulatorComponent {
   /** The sensitivity result to replay. Null until the operator runs an analysis. */
   readonly result = input<AnalyzeSignalSensitivityResultDto | null>(null);
 
-  protected readonly enabled = signal(false);
+  /** Public: the page's per-signal table shows ladder columns only while this is on. */
+  readonly enabled = signal(false);
   protected enabledModel = false;
+
+  /**
+   * Public per-signal lookup for the page's outcomes table. Null when off or before a result —
+   * the table hides its ladder columns entirely then, rather than rendering a wall of dashes.
+   */
+  readonly tradeBySignalId = computed<Map<number, SimTrade> | null>(() => {
+    if (!this.enabled()) return null;
+    const s = this.sim();
+    if (!s) return null;
+    const m = new Map<number, SimTrade>();
+    for (const t of s.trades) m.set(t.signalId, t);
+    return m;
+  });
 
   protected readonly symbolScope = signal<string>('__all__');
   protected readonly mode = signal<LadderMode>('recovery');
@@ -603,6 +619,8 @@ export class MartingaleSimulatorComponent {
 
       trades.push({
         index: trades.length,
+        signalId: sig.signalId,
+        at: sig.fillAt ?? sig.triggeredAt ?? sig.generatedAt,
         symbol: sig.symbol,
         r,
         laddered: inLadder,
@@ -686,6 +704,12 @@ export class MartingaleSimulatorComponent {
     const axis = dark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.18)';
     const led = s?.trades.map((t) => Math.round(t.equity)) ?? [];
     const bl = s?.baselineEquity.map((v) => Math.round(v)) ?? [];
+    // Date labels, not trade numbers: the page's own equity curve above speaks in dates, and the
+    // operator's first move is to compare the two. Same sequence semantics, comparable axis.
+    const labels = (s?.trades ?? []).map((t) => {
+      const d = new Date(t.at);
+      return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    });
 
     return {
       grid: { left: 68, right: 16, top: 30, bottom: 34 },
@@ -693,15 +717,16 @@ export class MartingaleSimulatorComponent {
       legend: { data: ['Ladder', 'Flat sizing'], top: 0 },
       xAxis: {
         type: 'category',
-        name: 'trade #',
-        nameLocation: 'middle',
-        nameGap: 22,
-        data: bl.map((_, i) => i + 1),
+        data: labels,
+        axisLabel: { hideOverlap: true, fontSize: 10 },
         axisLine: { lineStyle: { color: axis } },
       },
       yAxis: {
         type: 'value',
         name: 'equity',
+        // Scale to the data. Anchored at zero, a 10,264-vs-9,971 comparison renders as two flat
+        // lines squashed into the top of the plot — unreadable, which defeats the chart.
+        scale: true,
         axisLine: { lineStyle: { color: axis } },
         splitLine: { lineStyle: { color: axis, opacity: 0.4 } },
       },

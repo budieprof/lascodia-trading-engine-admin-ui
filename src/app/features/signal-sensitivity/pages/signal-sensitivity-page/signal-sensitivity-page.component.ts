@@ -7,6 +7,7 @@ import {
   effect,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import { CurrencyPipe, DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -1042,6 +1043,23 @@ const WINDOW_OPTIONS = [
                     Resolve&nbsp;(h)
                   </th>
                   <th class="num">P&amp;L</th>
+                  @if (mgTradeMap()) {
+                    <th
+                      class="num"
+                      title="Stake the ladder placed on this trade, % of equity at the time"
+                    >
+                      MG&nbsp;stake
+                    </th>
+                    <th
+                      class="num"
+                      title="Ladder depth when this trade was placed (0 = base stake)"
+                    >
+                      MG&nbsp;depth
+                    </th>
+                    <th class="num" title="Simulated P&L of this trade under the ladder's sizing">
+                      MG&nbsp;P&amp;L
+                    </th>
+                  }
                 </tr>
               </thead>
               <tbody>
@@ -1086,6 +1104,23 @@ const WINDOW_OPTIONS = [
                     >
                       {{ s.scenarioPnL | currency: 'USD' }}
                     </td>
+                    @if (mgTradeMap(); as mg) {
+                      @if (mg.get(s.signalId); as t) {
+                        <td class="num">{{ t.stakePct | number: '1.2-2' }}%</td>
+                        <td class="num" [class.loss]="t.depth > 0">{{ t.depth }}</td>
+                        <td class="num" [class.profit]="t.pnl > 0" [class.loss]="t.pnl < 0">
+                          {{ t.pnl | currency: 'USD' }}
+                        </td>
+                      } @else {
+                        <td
+                          class="num"
+                          colspan="3"
+                          title="Not simulated: the signal never filled (no risk taken), or it falls after the point where the ladder broke — the simulation stops there."
+                        >
+                          — not simulated —
+                        </td>
+                      }
+                    }
                   </tr>
                 }
               </tbody>
@@ -2363,6 +2398,14 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly loading = signal(false);
   readonly errorMessage = signal<string | null>(null);
   readonly result = signal<AnalyzeSignalSensitivityResultDto | null>(null);
+
+  /**
+   * Handle on the martingale simulator so the per-signal table can show each trade's ladder
+   * columns (stake, depth, simulated P&L). Reads the component's own computed state rather than
+   * duplicating the simulation — one model, two views of it.
+   */
+  private readonly mgSim = viewChild(MartingaleSimulatorComponent);
+  protected readonly mgTradeMap = computed(() => this.mgSim()?.tradeBySignalId() ?? null);
   readonly riskProfiles = signal<RiskProfileDto[]>([]);
 
   /**
