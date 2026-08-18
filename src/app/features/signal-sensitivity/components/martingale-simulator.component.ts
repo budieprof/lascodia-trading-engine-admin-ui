@@ -48,6 +48,14 @@ interface SimResult {
   peakStakePct: number;
   usableTrades: number;
   skippedNoR: number;
+  /**
+   * Flat sizing over EVERY filled trade — no serialisation, no ladder. The population the page's
+   * own equity curve walks, and the control that separates what the one-position rule did from
+   * what the ladder did.
+   */
+  baselineAllFilledFinal: number;
+  /** How many filled trades that population contains. */
+  allFilledCount: number;
   /** Signals skipped because they filled while the symbol's simulated position was still open. */
   skippedOverlap: number;
   /** Why each unsimulated signal was skipped. Post-break signals are simply absent. */
@@ -225,6 +233,18 @@ export interface SkipInfo {
                 {{ s.baselineFinal | number: '1.0-0' }} flat-sized — but read max drawdown and peak
                 stake before treating that as an edge.
               </p>
+              @if (s.baselineAllFilledFinal < s.baselineFinal) {
+                <p class="verdict verdict--warn">
+                  <strong>Most of that came from SELECTION, not sizing.</strong> Flat sizing over
+                  all {{ s.allFilledCount }} filled trades ends at
+                  {{ s.baselineAllFilledFinal | number: '1.0-0' }}; flat sizing over just the
+                  {{ s.usableTrades }} the one-position rule admits ends at
+                  {{ s.baselineFinal | number: '1.0-0' }} — before any stake is resized. On this
+                  symbol the losses cluster in overlapping entries, so simply refusing to stack
+                  positions does most of the work. The ladder's own contribution is the gap from
+                  {{ s.baselineFinal | number: '1.0-0' }} to {{ s.finalEquity | number: '1.0-0' }}.
+                </p>
+              }
             } @else {
               <p class="verdict">
                 Survived, and finished BEHIND flat sizing:
@@ -259,6 +279,19 @@ export interface SkipInfo {
                 <span class="k">Ladders</span>
                 <span class="v">{{ s.laddersRecovered }}/{{ s.laddersStarted }}</span>
                 <span class="s">paid in full · {{ s.laddersAbandoned }} abandoned</span>
+              </div>
+              <div
+                class="tile"
+                [attr.data-state]="s.baselineAllFilledFinal < s.baselineFinal ? 'warn' : 'ok'"
+              >
+                <span class="k">Selection effect</span>
+                <span class="v">
+                  {{ s.baselineAllFilledFinal | number: '1.0-0' }}
+                </span>
+                <span class="s">
+                  flat over ALL {{ s.allFilledCount }} filled · vs
+                  {{ s.baselineFinal | number: '1.0-0' }} over the {{ s.usableTrades }} serialised
+                </span>
               </div>
               <div class="tile">
                 <span class="k">Trades simulated</span>
@@ -421,6 +454,10 @@ export interface SkipInfo {
       .verdict--ok {
         border-left-color: #34c759;
         background: rgba(52, 199, 89, 0.1);
+      }
+      .verdict--warn {
+        border-left-color: #ff9500;
+        background: rgba(255, 149, 0, 0.1);
       }
 
       .tiles {
@@ -786,6 +823,19 @@ export class MartingaleSimulatorComponent {
       }
     }
 
+    // Flat sizing over every filled trade, ignoring serialisation. Without this the panel credits
+    // the ladder for gains the one-position rule produced by SELECTION: on a symbol whose losses
+    // cluster in stacked entries, dropping the overlaps can turn a losing population into a
+    // winning subset before a single stake is resized.
+    let allFilledEquity = this.startBalance();
+    let allFilledCount = 0;
+    for (const sig of ordered) {
+      const r = this.rMultiple(sig, slMult, tpMult);
+      if (r === null) continue;
+      allFilledCount++;
+      allFilledEquity += r * (allFilledEquity * base);
+    }
+
     return {
       trades,
       baselineEquity,
@@ -802,6 +852,8 @@ export class MartingaleSimulatorComponent {
       skippedNoR: skipped,
       skippedOverlap,
       skipReasons,
+      baselineAllFilledFinal: allFilledEquity,
+      allFilledCount,
     };
   });
 
