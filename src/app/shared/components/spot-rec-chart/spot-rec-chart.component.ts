@@ -573,6 +573,48 @@ export class SpotRecChartComponent {
       [lastIdx, y],
     ];
 
+    // ── Live price ────────────────────────────────────────────────────────
+    // Rendered as a two-point LINE SERIES, deliberately NOT as a markLine.
+    //
+    // As a markLine this drew in the wrong place: the dashed line sat ~19 pips
+    // above where its own label said it was (label LIVE 1.15817 against a line
+    // rendered at ~1.16000 on the same frame). Line and label come from the same
+    // `livePx`, so they can only disagree if the RENDERED option is stale
+    // relative to the label — echarts merging a markLine update mid-frame while
+    // the price ticks ~1 Hz. The sibling trading-chart component hit the same
+    // thing and works around it by pushing markLine updates imperatively.
+    //
+    // Entry / TP / SL on this chart never had the problem, and they are plain
+    // line series with explicit [x, y] data. Using that proven path for the live
+    // line removes the failure mode instead of compensating for it: the y value
+    // is now part of the series data itself, so a stale frame cannot separate
+    // the line from its label.
+    const liveSeries: any[] = [];
+    if (showLive) {
+      liveSeries.push({
+        name: 'LIVE',
+        type: 'line',
+        data: [
+          [0, livePx!],
+          [lastIdx, livePx!],
+        ],
+        symbol: 'none',
+        lineStyle: { color: '#0071e3', width: 1.5, type: 'dashed', opacity: 0.95 },
+        tooltip: { show: false },
+        z: 11,
+        endLabel: {
+          show: true,
+          formatter: `LIVE ${fmt(livePx!)}`,
+          backgroundColor: '#0071e3',
+          color: '#ffffff',
+          padding: [2, 6],
+          borderRadius: 3,
+          fontWeight: 'bold',
+          fontSize: 10,
+        },
+      });
+    }
+
     // Per-rec endLabel offset — when there are multiple recs we stagger
     // labels vertically by 18px so they don't stack on top of each other.
     const lineSeries: any[] = [];
@@ -818,31 +860,12 @@ export class SpotRecChartComponent {
                   fontSize: 11,
                 },
               },
-              // Live-price line (opt-in) — dashed horizontal marker refreshed ~1 Hz
-              // by the priceUpdated stream so price is watchable against the levels.
-              ...(showLive
-                ? [
-                    {
-                      yAxis: livePx!,
-                      lineStyle: { color: '#0071e3', type: 'dashed', width: 1.5, opacity: 0.95 },
-                      label: {
-                        show: true,
-                        formatter: `LIVE ${fmt(livePx!)}`,
-                        position: 'insideEndTop',
-                        color: '#ffffff',
-                        backgroundColor: '#0071e3',
-                        padding: [2, 6],
-                        borderRadius: 3,
-                        fontWeight: 'bold',
-                        fontSize: 10,
-                      },
-                    },
-                  ]
-                : []),
+              // The live-price line is NOT a markLine — see the liveSeries note below.
             ],
           },
         },
         ...lineSeries,
+        ...liveSeries,
       ],
     };
   });
