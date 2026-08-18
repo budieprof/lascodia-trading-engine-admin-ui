@@ -1059,6 +1059,20 @@ const WINDOW_OPTIONS = [
                     <th class="num" title="Simulated P&L of this trade under the ladder's sizing">
                       MTG&nbsp;P&amp;L
                     </th>
+                    @if (mgCumulative()) {
+                      <th
+                        class="num"
+                        title="Running P&L since the start of the run, in fill order — the ladder's cumulative result at this point"
+                      >
+                        MTG&nbsp;cum&nbsp;P&amp;L
+                      </th>
+                      <th
+                        class="num"
+                        title="Account balance after this trade under the ladder. The bracketed figure is what flat sizing had at the same point."
+                      >
+                        MTG&nbsp;equity
+                      </th>
+                    }
                   }
                 </tr>
               </thead>
@@ -1113,12 +1127,25 @@ const WINDOW_OPTIONS = [
                         <td class="num" [class.profit]="t.pnl > 0" [class.loss]="t.pnl < 0">
                           {{ t.pnl | currency: 'USD' }}
                         </td>
+                        @if (mgCumulative()) {
+                          <td class="num" [class.profit]="t.cumPnl > 0" [class.loss]="t.cumPnl < 0">
+                            {{ t.cumPnl | currency: 'USD' }}
+                          </td>
+                          <td class="num">
+                            {{ t.equity | currency: 'USD' : 'symbol' : '1.0-0' }}
+                            <small class="mtg-flat"
+                              >({{
+                                t.baselineEquity | currency: 'USD' : 'symbol' : '1.0-0'
+                              }})</small
+                            >
+                          </td>
+                        }
                       } @else {
                         @if (mgSkipReasons()?.get(s.signalId); as skip) {
                           @if (skip.reason === 'overlap') {
                             <td
                               class="num"
-                              colspan="3"
+                              [attr.colspan]="mgCumulative() ? 5 : 3"
                               [title]="
                                 'Filled while signal #' +
                                 skip.blockedBySignalId +
@@ -1138,14 +1165,18 @@ const WINDOW_OPTIONS = [
                               </button>
                             </td>
                           } @else {
-                            <td class="num" colspan="3" title="Never filled — no risk was taken.">
+                            <td
+                              class="num"
+                              [attr.colspan]="mgCumulative() ? 5 : 3"
+                              title="Never filled — no risk was taken."
+                            >
                               — unfilled —
                             </td>
                           }
                         } @else {
                           <td
                             class="num"
-                            colspan="3"
+                            [attr.colspan]="mgCumulative() ? 5 : 3"
                             title="Falls after the point where the ladder broke — the simulation stops there."
                           >
                             — after break —
@@ -2099,6 +2130,10 @@ const WINDOW_OPTIONS = [
       }
       /* Blocker-jump affordances: the reference in the MTG column is a real link, and the target
          row flashes so the eye lands on it after the smooth scroll. */
+      .mtg-flat {
+        opacity: 0.6;
+        margin-left: 0.25rem;
+      }
       .blocker-link {
         background: none;
         border: none;
@@ -2463,6 +2498,10 @@ export class SignalSensitivityPageComponent implements OnInit {
   private readonly mgSim = viewChild(MartingaleSimulatorComponent);
   protected readonly mgTradeMap = computed(() => this.mgSim()?.tradeBySignalId() ?? null);
   protected readonly mgSkipReasons = computed(() => this.mgSim()?.skipReasonBySignalId() ?? null);
+  /** Running-ledger columns are opt-in — the table is already wide. */
+  protected readonly mgCumulative = computed(
+    () => !!this.mgTradeMap() && !!this.mgSim()?.showCumulative(),
+  );
   readonly riskProfiles = signal<RiskProfileDto[]>([]);
 
   /**

@@ -28,6 +28,10 @@ export interface SimTrade {
   stakePct: number;
   pnl: number;
   equity: number;
+  /** Running P&L since the start of the run — equity minus the opening balance. */
+  cumPnl: number;
+  /** What flat sizing had made by this same point, so the two ledgers compare row by row. */
+  baselineEquity: number;
 }
 
 interface SimResult {
@@ -176,6 +180,17 @@ export interface SkipInfo {
               <option value="abandon">Abandon — take the loss, reset</option>
               <option value="continue">Continue — keep laddering</option>
             </select>
+          </label>
+          <label class="chk">
+            <span>Running ledger</span>
+            <span class="chk-row">
+              <input
+                type="checkbox"
+                [(ngModel)]="showCumulativeModel"
+                (ngModelChange)="showCumulative.set($event)"
+              />
+              <span class="chk-lbl">Cumulative columns in the table</span>
+            </span>
           </label>
           <label>
             <span>Start balance</span>
@@ -368,6 +383,18 @@ export interface SkipInfo {
         text-transform: uppercase;
         letter-spacing: 0.03em;
       }
+      .chk-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding-top: 0.25rem;
+      }
+      .chk-lbl {
+        text-transform: none;
+        letter-spacing: 0;
+        opacity: 0.9;
+        font-size: 0.78rem;
+      }
       .controls input,
       .controls select {
         font: inherit;
@@ -478,6 +505,10 @@ export class MartingaleSimulatorComponent {
     if (!this.enabled()) return null;
     return this.sim()?.skipReasons ?? null;
   });
+
+  /** Public: adds running-ledger columns (cum P&L, equity) to the page's per-signal table. */
+  readonly showCumulative = signal(true);
+  protected showCumulativeModel = true;
 
   protected readonly symbolScope = signal<string>('__all__');
   protected readonly mode = signal<LadderMode>('recovery');
@@ -695,6 +726,8 @@ export class MartingaleSimulatorComponent {
         stakePct: stakePct * 100,
         pnl,
         equity,
+        cumPnl: equity - this.startBalance(),
+        baselineEquity: baseline,
       });
 
       if (equity <= 0) {
