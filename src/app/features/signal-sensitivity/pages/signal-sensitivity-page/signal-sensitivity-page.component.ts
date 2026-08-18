@@ -32,6 +32,7 @@ import {
   Timeframe,
 } from '@core/api/api.types';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { MartingaleSimulatorComponent } from '@features/signal-sensitivity/components/martingale-simulator.component';
 
 const SOURCES = ['SpotAnalysis', 'Strategy', 'Manual', 'SyntheticAnalyser'] as const;
 
@@ -70,6 +71,7 @@ const WINDOW_OPTIONS = [
     FormsModule,
     NgxEchartsDirective,
     PageHeaderComponent,
+    MartingaleSimulatorComponent,
   ],
   template: `
     <div class="page">
@@ -855,6 +857,12 @@ const WINDOW_OPTIONS = [
           </section>
         </div>
         <!-- /.sweep-and-daily-grid -->
+
+        <!-- ── Martingale simulation ──────────────────────────────────────
+             Sits directly after the equity view because it is a SIZING overlay
+             on the same replayed signals: it consumes the result above and
+             re-simulates whenever the TP/SL multipliers change. -->
+        <app-martingale-simulator [result]="result()" />
 
         <!-- ── Distributions + streaks + risk metrics ─────────────────────── -->
         <section class="analytics-grid">
