@@ -47,7 +47,14 @@ interface SimResult {
   /** Signals skipped because they filled while the symbol's simulated position was still open. */
   skippedOverlap: number;
   /** Why each unsimulated signal was skipped. Post-break signals are simply absent. */
-  skipReasons: Map<number, 'unfilled' | 'overlap'>;
+  skipReasons: Map<number, SkipInfo>;
+}
+
+/** Why a signal was not simulated; for overlaps, which executed trade held the position. */
+export interface SkipInfo {
+  reason: 'unfilled' | 'overlap';
+  blockedBySignalId?: number;
+  blockedUntil?: string;
 }
 
 /**
@@ -467,7 +474,7 @@ export class MartingaleSimulatorComponent {
    * filled while the symbol's simulated position was still open, so under the one-position rule
    * it would never have been placed. Absent = after the ladder broke (simulation stopped).
    */
-  readonly skipReasonBySignalId = computed<Map<number, 'unfilled' | 'overlap'> | null>(() => {
+  readonly skipReasonBySignalId = computed<Map<number, SkipInfo> | null>(() => {
     if (!this.enabled()) return null;
     return this.sim()?.skipReasons ?? null;
   });
@@ -570,14 +577,14 @@ export class MartingaleSimulatorComponent {
     let abandoned = 0;
     let skipped = 0;
     let skippedOverlap = 0;
-    const skipReasons = new Map<number, 'unfilled' | 'overlap'>();
+    const skipReasons = new Map<number, SkipInfo>();
 
     // One position per symbol, enforced. The intended live rule is that a laddered symbol cannot
     // open a new position until the previous one has closed — so the simulation must not let
     // overlapping historical signals all "execute" and advance the chain with outcomes that did
     // not exist yet at the next fill. A signal that fills while the symbol's simulated position
     // is still open is skipped: under the rule it would never have been placed.
-    const busyUntil = new Map<string, number>();
+    const busyUntil = new Map<string, { until: number; bySignalId: number }>();
 
     // Ladder state is PER SYMBOL: a symbol running a ladder is serialised, and other symbols
     // continue on flat sizing untouched. That is the rule being modelled, not a simplification.
@@ -596,7 +603,7 @@ export class MartingaleSimulatorComponent {
       const r = this.rMultiple(sig, slMult, tpMult);
       if (r === null) {
         skipped++;
-        skipReasons.set(sig.signalId, 'unfilled');
+        skipReasons.set(sig.signalId, { reason: 'unfilled' });
         continue;
       }
 
@@ -606,10 +613,17 @@ export class MartingaleSimulatorComponent {
       // they are flat-sized context, not the scheme under test.
       const fillMs = Date.parse(sig.fillAt ?? sig.triggeredAt ?? sig.generatedAt);
       if (inScope) {
-        const busy = busyUntil.get(sig.symbol) ?? 0;
-        if (fillMs < busy) {
+        const busy = busyUntil.get(sig.symbol);
+        if (busy && fillMs < busy.until) {
           skippedOverlap++;
-          skipReasons.set(sig.signalId, 'overlap');
+          // Name the blocker: "skipped: overlap" is only auditable if the row can say WHICH
+          // executed trade held the position and until when. Generation order and fill order
+          // disagree on limit entries, so this is routinely non-obvious from the table.
+          skipReasons.set(sig.signalId, {
+            reason: 'overlap',
+            blockedBySignalId: busy.bySignalId,
+            blockedUntil: new Date(busy.until).toISOString(),
+          });
           continue;
         }
       }
@@ -654,7 +668,10 @@ export class MartingaleSimulatorComponent {
       if (inScope) {
         // Busy until the position closes. exitAt is always stamped by the walk; guard against a
         // malformed row by never letting the busy window end before the fill itself.
-        busyUntil.set(sig.symbol, Math.max(fillMs, Date.parse(sig.exitAt) || fillMs));
+        busyUntil.set(sig.symbol, {
+          until: Math.max(fillMs, Date.parse(sig.exitAt) || fillMs),
+          bySignalId: sig.signalId,
+        });
       }
 
       trades.push({
@@ -744,8 +761,10 @@ export class MartingaleSimulatorComponent {
     const ok = dark ? '#3987e5' : '#2a78d6';
     const flat = dark ? '#d95926' : '#eb6834';
     const axis = dark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.18)';
-    const led = s?.trades.map((t) => Math.round(t.equity)) ?? [];
-    const bl = s?.baselineEquity.map((v) => Math.round(v)) ?? [];
+    // Full precision: at a small balance / base risk, per-trade moves are cents, and rounding to
+    // whole currency collapses the entire series into a step function that reads as a broken chart.
+    const led = s?.trades.map((t) => +t.equity.toFixed(2)) ?? [];
+    const bl = s?.baselineEquity.map((v) => +v.toFixed(2)) ?? [];
     // Date labels, not trade numbers: the page's own equity curve above speaks in dates, and the
     // operator's first move is to compare the two. Same sequence semantics, comparable axis.
     const labels = (s?.trades ?? []).map((t) => {

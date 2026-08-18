@@ -1112,30 +1112,34 @@ const WINDOW_OPTIONS = [
                           {{ t.pnl | currency: 'USD' }}
                         </td>
                       } @else {
-                        @switch (mgSkipReasons()?.get(s.signalId)) {
-                          @case ('overlap') {
+                        @if (mgSkipReasons()?.get(s.signalId); as skip) {
+                          @if (skip.reason === 'overlap') {
                             <td
                               class="num"
                               colspan="3"
-                              title="Filled while the symbol's simulated position was still open. Under the one-position-per-symbol rule this trade would never have been placed."
+                              [title]="
+                                'Filled while signal #' +
+                                skip.blockedBySignalId +
+                                ' still held the position (until ' +
+                                (skip.blockedUntil | date: 'MMM d, HH:mm' : 'UTC') +
+                                ' UTC). Under the one-position-per-symbol rule this trade would never have been placed.'
+                              "
                             >
-                              — skipped: overlap —
+                              — overlap: blocked by #{{ skip.blockedBySignalId }} —
                             </td>
-                          }
-                          @case ('unfilled') {
+                          } @else {
                             <td class="num" colspan="3" title="Never filled — no risk was taken.">
                               — unfilled —
                             </td>
                           }
-                          @default {
-                            <td
-                              class="num"
-                              colspan="3"
-                              title="Falls after the point where the ladder broke — the simulation stops there."
-                            >
-                              — after break —
-                            </td>
-                          }
+                        } @else {
+                          <td
+                            class="num"
+                            colspan="3"
+                            title="Falls after the point where the ladder broke — the simulation stops there."
+                          >
+                            — after break —
+                          </td>
                         }
                       }
                     }
