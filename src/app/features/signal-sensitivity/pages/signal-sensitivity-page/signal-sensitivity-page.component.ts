@@ -1109,6 +1109,12 @@ const WINDOW_OPTIONS = [
           Pick filters + multipliers, then press <b>Analyse</b>. The query replays each matching
           signal against actual candles between its <code>GeneratedAt</code> and
           <code>ExpiresAt</code>, applying your TP/SL multipliers to compute the outcome.
+          <br />
+          <!-- The simulator consumes the result, so it cannot exist before one does — say so
+               here, where an operator looking for its Enable toggle will actually be reading. -->
+          The <b>Martingale simulation</b> panel (with its Enable toggle) appears below the results
+          after you run an analysis — it replays those same signals as a per-symbol recovery ladder,
+          so it needs a result to exist first.
         </div>
       }
 
