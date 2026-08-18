@@ -544,6 +544,16 @@ export class MartingaleSimulatorComponent {
     return rewardDist / riskDist;
   }
 
+  /**
+   * Absolute slack for the paid-in-full comparison, scaled to the amount being compared so it
+   * stays meaningful whether the ladder deals in cents or millions. Large enough to absorb
+   * double-rounding on a multiply-then-divide round trip, far too small to forgive a genuinely
+   * unpaid deficit.
+   */
+  private clearTolerance(targetMoney: number): number {
+    return 1e-9 * Math.max(1, Math.abs(targetMoney));
+  }
+
   protected readonly sim = computed<SimResult | null>(() => {
     const res = this.result();
     if (!res) return null;
@@ -713,8 +723,15 @@ export class MartingaleSimulatorComponent {
               targetMoney: target * stakeMoney,
             });
           }
-        } else if (newDeficit <= -st.targetMoney) {
+        } else if (newDeficit <= -st.targetMoney + this.clearTolerance(st.targetMoney)) {
           // Deficit fully paid AND the target banked — the chain is genuinely recovered.
+          //
+          // Compared with a relative tolerance, not exactly. A HitTP realises exactly the entry
+          // geometry the stake was sized from, so it repays deficit + target to the cent — and in
+          // floating point that lands a hair ABOVE the threshold, failing an exact <= and running
+          // the chain one rung further than it earned. Observed live on GBPUSD #8956: it paid
+          // 16,190.26 against a 16,190.26 requirement and still did not reset, which pushed #9020
+          // to depth 2 when its chain was already square.
           recovered++;
           ladder.delete(sig.symbol);
         } else {
