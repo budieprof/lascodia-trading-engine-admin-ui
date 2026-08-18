@@ -44,6 +44,10 @@ interface SimResult {
   peakStakePct: number;
   usableTrades: number;
   skippedNoR: number;
+  /** Signals skipped because they filled while the symbol's simulated position was still open. */
+  skippedOverlap: number;
+  /** Why each unsimulated signal was skipped. Post-break signals are simply absent. */
+  skipReasons: Map<number, 'unfilled' | 'overlap'>;
 }
 
 /**
@@ -77,10 +81,12 @@ interface SimResult {
         <div>
           <h2 id="mg-h">Martingale simulation</h2>
           <p class="sub">
-            Replays the signals above as a per-symbol recovery ladder. The deficit is tracked in
-            money and a ladder only resets once losses plus the target are actually PAID — a trade
-            that merely closes positive shrinks the deficit and the chain continues. Stakes size by
-            each trade's entry-known TP/SL geometry, so this tracks the multipliers above.
+            Replays the signals above as a per-symbol recovery ladder under the one-position rule: a
+            signal that fills while the symbol's previous position is still open is skipped, as it
+            could never have been placed live. The deficit is tracked in money and a chain only
+            resets once losses plus the target are actually PAID — a trade that merely closes
+            positive shrinks the deficit and the chain continues. Stakes size by each trade's
+            entry-known TP/SL geometry.
           </p>
         </div>
         <label class="toggle">
@@ -236,11 +242,7 @@ interface SimResult {
                 <span class="k">Trades simulated</span>
                 <span class="v">{{ s.usableTrades | number }}</span>
                 <span class="s">
-                  @if (s.skippedNoR > 0) {
-                    {{ s.skippedNoR }} skipped (no risk distance)
-                  } @else {
-                    all usable
-                  }
+                  {{ s.skippedNoR }} unfilled · {{ s.skippedOverlap }} overlap-skipped
                 </span>
               </div>
             </div>
@@ -460,6 +462,16 @@ export class MartingaleSimulatorComponent {
     return m;
   });
 
+  /**
+   * Why a signal was NOT simulated, keyed by id. 'unfilled' = never took risk; 'overlap' = it
+   * filled while the symbol's simulated position was still open, so under the one-position rule
+   * it would never have been placed. Absent = after the ladder broke (simulation stopped).
+   */
+  readonly skipReasonBySignalId = computed<Map<number, 'unfilled' | 'overlap'> | null>(() => {
+    if (!this.enabled()) return null;
+    return this.sim()?.skipReasons ?? null;
+  });
+
   protected readonly symbolScope = signal<string>('__all__');
   protected readonly mode = signal<LadderMode>('recovery');
   protected readonly fixedMult = signal(2);
@@ -557,6 +569,15 @@ export class MartingaleSimulatorComponent {
     let recovered = 0;
     let abandoned = 0;
     let skipped = 0;
+    let skippedOverlap = 0;
+    const skipReasons = new Map<number, 'unfilled' | 'overlap'>();
+
+    // One position per symbol, enforced. The intended live rule is that a laddered symbol cannot
+    // open a new position until the previous one has closed — so the simulation must not let
+    // overlapping historical signals all "execute" and advance the chain with outcomes that did
+    // not exist yet at the next fill. A signal that fills while the symbol's simulated position
+    // is still open is skipped: under the rule it would never have been placed.
+    const busyUntil = new Map<string, number>();
 
     // Ladder state is PER SYMBOL: a symbol running a ladder is serialised, and other symbols
     // continue on flat sizing untouched. That is the rule being modelled, not a simplification.
@@ -575,10 +596,23 @@ export class MartingaleSimulatorComponent {
       const r = this.rMultiple(sig, slMult, tpMult);
       if (r === null) {
         skipped++;
+        skipReasons.set(sig.signalId, 'unfilled');
         continue;
       }
 
       const inScope = scope === '__all__' || sig.symbol === scope;
+
+      // Serialise in-scope symbols. Out-of-scope symbols keep their historical concurrency —
+      // they are flat-sized context, not the scheme under test.
+      const fillMs = Date.parse(sig.fillAt ?? sig.triggeredAt ?? sig.generatedAt);
+      if (inScope) {
+        const busy = busyUntil.get(sig.symbol) ?? 0;
+        if (fillMs < busy) {
+          skippedOverlap++;
+          skipReasons.set(sig.signalId, 'overlap');
+          continue;
+        }
+      }
       const st = ladder.get(sig.symbol) ?? { depth: 0, deficit: 0, targetMoney: 0 };
       const inLadder = inScope && st.depth > 0;
 
@@ -616,6 +650,12 @@ export class MartingaleSimulatorComponent {
 
       peakEquity = Math.max(peakEquity, equity);
       maxDd = Math.max(maxDd, peakEquity > 0 ? ((peakEquity - equity) / peakEquity) * 100 : 0);
+
+      if (inScope) {
+        // Busy until the position closes. exitAt is always stamped by the walk; guard against a
+        // malformed row by never letting the busy window end before the fill itself.
+        busyUntil.set(sig.symbol, Math.max(fillMs, Date.parse(sig.exitAt) || fillMs));
+      }
 
       trades.push({
         index: trades.length,
@@ -693,6 +733,8 @@ export class MartingaleSimulatorComponent {
       peakStakePct,
       usableTrades: trades.length,
       skippedNoR: skipped,
+      skippedOverlap,
+      skipReasons,
     };
   });
 

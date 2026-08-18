@@ -1048,16 +1048,16 @@ const WINDOW_OPTIONS = [
                       class="num"
                       title="Stake the ladder placed on this trade, % of equity at the time"
                     >
-                      MG&nbsp;stake
+                      MTG&nbsp;stake
                     </th>
                     <th
                       class="num"
                       title="Ladder depth when this trade was placed (0 = base stake)"
                     >
-                      MG&nbsp;depth
+                      MTG&nbsp;depth
                     </th>
                     <th class="num" title="Simulated P&L of this trade under the ladder's sizing">
-                      MG&nbsp;P&amp;L
+                      MTG&nbsp;P&amp;L
                     </th>
                   }
                 </tr>
@@ -1112,13 +1112,31 @@ const WINDOW_OPTIONS = [
                           {{ t.pnl | currency: 'USD' }}
                         </td>
                       } @else {
-                        <td
-                          class="num"
-                          colspan="3"
-                          title="Not simulated: the signal never filled (no risk taken), or it falls after the point where the ladder broke — the simulation stops there."
-                        >
-                          — not simulated —
-                        </td>
+                        @switch (mgSkipReasons()?.get(s.signalId)) {
+                          @case ('overlap') {
+                            <td
+                              class="num"
+                              colspan="3"
+                              title="Filled while the symbol's simulated position was still open. Under the one-position-per-symbol rule this trade would never have been placed."
+                            >
+                              — skipped: overlap —
+                            </td>
+                          }
+                          @case ('unfilled') {
+                            <td class="num" colspan="3" title="Never filled — no risk was taken.">
+                              — unfilled —
+                            </td>
+                          }
+                          @default {
+                            <td
+                              class="num"
+                              colspan="3"
+                              title="Falls after the point where the ladder broke — the simulation stops there."
+                            >
+                              — after break —
+                            </td>
+                          }
+                        }
                       }
                     }
                   </tr>
@@ -2406,6 +2424,7 @@ export class SignalSensitivityPageComponent implements OnInit {
    */
   private readonly mgSim = viewChild(MartingaleSimulatorComponent);
   protected readonly mgTradeMap = computed(() => this.mgSim()?.tradeBySignalId() ?? null);
+  protected readonly mgSkipReasons = computed(() => this.mgSim()?.skipReasonBySignalId() ?? null);
   readonly riskProfiles = signal<RiskProfileDto[]>([]);
 
   /**
