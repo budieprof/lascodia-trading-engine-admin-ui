@@ -1066,8 +1066,10 @@ const WINDOW_OPTIONS = [
                 @for (s of visibleSignals(); track s.signalId) {
                   <tr
                     class="signal-row"
+                    [attr.id]="'sig-row-' + s.signalId"
                     [class.row--win]="s.outcome === 'HitTP'"
                     [class.row--loss]="s.outcome === 'HitSL'"
+                    [class.row--flash]="flashSignalId() === s.signalId"
                     (click)="openSignalChart(s)"
                     [attr.title]="'Click to view chart'"
                   >
@@ -1125,7 +1127,15 @@ const WINDOW_OPTIONS = [
                                 ' UTC). Under the one-position-per-symbol rule this trade would never have been placed.'
                               "
                             >
-                              — overlap: blocked by #{{ skip.blockedBySignalId }} —
+                              <button
+                                type="button"
+                                class="blocker-link"
+                                (click)="
+                                  $event.stopPropagation(); revealSignal(skip.blockedBySignalId!)
+                                "
+                              >
+                                — overlap: blocked by #{{ skip.blockedBySignalId }} —
+                              </button>
                             </td>
                           } @else {
                             <td class="num" colspan="3" title="Never filled — no risk was taken.">
@@ -2087,6 +2097,30 @@ const WINDOW_OPTIONS = [
         cursor: pointer;
         transition: background 0.1s ease;
       }
+      /* Blocker-jump affordances: the reference in the MTG column is a real link, and the target
+         row flashes so the eye lands on it after the smooth scroll. */
+      .blocker-link {
+        background: none;
+        border: none;
+        padding: 0;
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+        text-decoration: underline dotted;
+      }
+      .signal-row.row--flash {
+        animation: sigFlash 2.4s ease-out;
+      }
+      @keyframes sigFlash {
+        0%,
+        60% {
+          outline: 2px solid #0071e3;
+          outline-offset: -2px;
+        }
+        100% {
+          outline: 2px solid transparent;
+        }
+      }
       .signal-table tr.signal-row:hover td {
         background: var(--bg-tertiary);
       }
@@ -2440,6 +2474,30 @@ export class SignalSensitivityPageComponent implements OnInit {
    */
   private static readonly PerSignalChunkSize = 100;
   readonly visibleSignalCount = signal<number>(SignalSensitivityPageComponent.PerSignalChunkSize);
+  /** Row briefly highlighted after a blocker-link jump. */
+  readonly flashSignalId = signal<number | null>(null);
+
+  /**
+   * Stream the table far enough to include the given signal, scroll to it and flash it. Exists
+   * because the martingale panel can name a blocker that sits beyond the lazily-rendered chunk —
+   * a reference the operator cannot follow is worse than none.
+   */
+  revealSignal(signalId: number): void {
+    const r = this.result();
+    if (!r?.signals?.length) return;
+    const idx = r.signals.findIndex((x) => x.signalId === signalId);
+    if (idx < 0) return;
+    if (idx >= this.visibleSignalCount()) this.visibleSignalCount.set(idx + 10);
+    // Let the new rows render before scrolling to one of them.
+    setTimeout(() => {
+      document
+        .getElementById('sig-row-' + signalId)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      this.flashSignalId.set(signalId);
+      setTimeout(() => this.flashSignalId.set(null), 2400);
+    }, 60);
+  }
+
   readonly visibleSignals = computed(() => {
     const r = this.result();
     if (!r?.signals?.length) return [];
