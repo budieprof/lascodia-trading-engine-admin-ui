@@ -53,9 +53,12 @@ interface SimResult {
  * ladder re-simulates instantly as the operator drags depth / base risk, instead of a round-trip per
  * knob, and it stays automatically consistent with whatever TP/SL multipliers are active above.</p>
  *
- * <p><b>Sizing is in R, not money.</b> Each trade's outcome is normalised to a multiple of the risk
- * it took, so restaking is a clean multiplication. Raw P&L cannot be restaked — doubling the lot on
- * a trade does not double a P&L figure that already has a lot size baked into it.</p>
+ * <p><b>Outcomes are normalised to R; the ladder ledger is MONEY.</b> Each trade's outcome is a
+ * multiple of the risk it took (raw P&L has lot size baked in and cannot be restaked), but the
+ * deficit a ladder must repay is tracked in currency: percent losses and percent gains are not
+ * symmetric, so an R-unit ledger recovered against post-loss equity systematically under-recovers,
+ * compounding with depth. A chain resets only when deficit + target is actually paid — a trade that
+ * merely closes positive shrinks the deficit and the chain continues.</p>
  *
  * <p><b>The ladder is per-symbol and strictly sequential</b>, matching the intended rule: a symbol
  * running a ladder holds at most one position at a time, so its trades form one ordered chain and
@@ -72,9 +75,10 @@ interface SimResult {
         <div>
           <h2 id="mg-h">Martingale simulation</h2>
           <p class="sub">
-            Replays the signals above as a per-symbol recovery ladder. Sizing is expressed in R
-            (multiples of the risk each trade took), so it tracks whatever TP/SL multipliers are
-            active — change them above and this re-simulates.
+            Replays the signals above as a per-symbol recovery ladder. The deficit is tracked in
+            money and a ladder only resets once losses plus the target are actually PAID — a trade
+            that merely closes positive shrinks the deficit and the chain continues. Stakes size by
+            each trade's entry-known TP/SL geometry, so this tracks the multipliers above.
           </p>
         </div>
         <label class="toggle">
@@ -179,11 +183,10 @@ interface SimResult {
             <!-- ── Verdict ───────────────────────────────────────────────── -->
             @if (s.ruinedAtIndex !== null) {
               <p class="verdict verdict--ruin" role="alert">
-                <strong
-                  >Account wiped at trade #{{ s.ruinedAtIndex + 1 }} of {{ s.usableTrades }}</strong
-                >
-                — the ladder reached a stake the balance could not cover. Everything below is the
-                run up to that point; the curve stops there because there is nothing left to trade.
+                <strong>Ladder broke after {{ s.ruinedAtIndex }} trades</strong> — the next stake
+                the recovery rule demanded exceeded the remaining balance, so the scheme is
+                unexecutable from that point and the simulation stops there. Everything below is the
+                run up to the break.
               </p>
             } @else if (s.finalEquity > s.baselineFinal) {
               <p class="verdict verdict--ok">
@@ -225,7 +228,7 @@ interface SimResult {
               <div class="tile">
                 <span class="k">Ladders</span>
                 <span class="v">{{ s.laddersRecovered }}/{{ s.laddersStarted }}</span>
-                <span class="s">recovered · {{ s.laddersAbandoned }} abandoned</span>
+                <span class="s">paid in full · {{ s.laddersAbandoned }} abandoned</span>
               </div>
               <div class="tile">
                 <span class="k">Trades simulated</span>
@@ -489,6 +492,23 @@ export class MartingaleSimulatorComponent {
     return signed / riskDist;
   }
 
+  /**
+   * The trade's reward:risk as knowable AT ENTRY — TP distance over SL distance under the active
+   * multipliers. Recovery stakes divide by this, never by the realised outcome: the realised R
+   * does not exist when the stake is placed, and sizing by it is lookahead a live implementation
+   * cannot reproduce.
+   */
+  private geometryR(
+    sig: AnalyzeSignalSensitivitySignalDto,
+    slMult: number,
+    tpMult: number,
+  ): number {
+    const riskDist = Math.abs(sig.entryPrice - sig.originalSL) * (slMult || 1);
+    const rewardDist = Math.abs(sig.originalTP - sig.entryPrice) * (tpMult || 1);
+    if (!isFinite(riskDist) || riskDist <= 0 || !isFinite(rewardDist)) return 1;
+    return rewardDist / riskDist;
+  }
+
   protected readonly sim = computed<SimResult | null>(() => {
     const res = this.result();
     if (!res) return null;
@@ -524,40 +544,53 @@ export class MartingaleSimulatorComponent {
 
     // Ladder state is PER SYMBOL: a symbol running a ladder is serialised, and other symbols
     // continue on flat sizing untouched. That is the rule being modelled, not a simplification.
-    const ladder = new Map<string, { depth: number; cumLossR: number }>();
+    //
+    // The DEFICIT is tracked in MONEY, not in percent-of-equity R units. Percent losses and
+    // percent gains are not symmetric: losses booked as fractions of a larger equity and then
+    // "recovered" as the same fraction of the post-loss equity systematically under-recover, and
+    // the gap compounds with ladder depth. Money in, money out — the rule is "cover what was
+    // actually lost", so the ledger must be in the unit the loss happened in.
+    const ladder = new Map<string, { depth: number; deficit: number; targetMoney: number }>();
 
     const trades: SimTrade[] = [];
     const baselineEquity: number[] = [];
 
-    ordered.forEach((sig) => {
+    for (const sig of ordered) {
       const r = this.rMultiple(sig, slMult, tpMult);
       if (r === null) {
         skipped++;
-        return;
+        continue;
       }
 
       const inScope = scope === '__all__' || sig.symbol === scope;
-      const st = ladder.get(sig.symbol) ?? { depth: 0, cumLossR: 0 };
+      const st = ladder.get(sig.symbol) ?? { depth: 0, deficit: 0, targetMoney: 0 };
+      const inLadder = inScope && st.depth > 0;
 
-      // Stake in fraction-of-equity terms. Depth 0 is always the base stake.
-      let stakePct = base;
-      if (inScope && st.depth > 0) {
-        stakePct = useRecovery
-          ? // Recover accumulated losses plus a target, at this trade's own reward ratio. With
-            // r < 1 the reward leg is smaller than the risk leg, which is exactly why this grows
-            // faster than doubling.
-            (base * (st.cumLossR + target)) / Math.max(0.05, r > 0 ? r : 1)
-          : base * Math.pow(mult, st.depth);
+      // Stake sizing. Recovery mode sizes by the trade's ENTRY-KNOWN geometry (TP distance over
+      // SL distance under the active multipliers) — what a live implementation would have to use,
+      // since the realised outcome does not exist yet. Sizing by realised R would be lookahead.
+      let stakeMoney = equity * base;
+      if (inLadder) {
+        if (useRecovery) {
+          const geomR = this.geometryR(sig, slMult, tpMult);
+          // A micro-TP trade cannot be asked to recover a large deficit — the stake explodes.
+          // Floor the divisor at 0.1R and let the ruin check catch what still cannot fit,
+          // loudly, rather than silently skipping the trade.
+          stakeMoney = (st.deficit + st.targetMoney) / Math.max(0.1, geomR);
+        } else {
+          stakeMoney = equity * base * Math.pow(mult, st.depth);
+        }
       }
 
-      const stakeMoney = equity * stakePct;
+      const stakePct = equity > 0 ? stakeMoney / equity : 1;
       peakStakePct = Math.max(peakStakePct, stakePct * 100);
 
-      // Ruin: the stake the ladder demands exceeds what is left. Recording the index rather than
-      // clamping keeps the failure visible instead of quietly capping it into survival.
+      // Ruin: the stake the ladder demands exceeds what is left. This ENDS the simulation — the
+      // scheme as specified is unexecutable from here, and quietly skipping the unaffordable trade
+      // while others continue would let post-ruin trading launder the verdict.
       if (stakeMoney > equity || equity <= 0) {
         ruinedAt = trades.length;
-        return;
+        break;
       }
 
       const pnl = r * stakeMoney;
@@ -572,7 +605,7 @@ export class MartingaleSimulatorComponent {
         index: trades.length,
         symbol: sig.symbol,
         r,
-        laddered: inScope && st.depth > 0,
+        laddered: inLadder,
         depth: inScope ? st.depth : 0,
         stakePct: stakePct * 100,
         pnl,
@@ -581,30 +614,52 @@ export class MartingaleSimulatorComponent {
 
       if (equity <= 0) {
         ruinedAt = trades.length - 1;
-        return;
+        break;
       }
 
-      // Advance ladder state.
+      // Advance ladder state — on the MONEY ledger.
+      //
+      // The ladder only resets when the deficit plus target has actually been PAID. A trade that
+      // merely closes positive does not recover a ladder: an Expired exit at +0.05R used to reset
+      // the whole chain while covering almost none of it, which is exactly the "winnings are not
+      // covering the losses" behaviour this replaces. Partial wins now shrink the deficit and the
+      // chain continues.
       if (inScope) {
-        if (r > 0) {
-          if (st.depth > 0) recovered++;
-          ladder.set(sig.symbol, { depth: 0, cumLossR: 0 });
+        const newDeficit = st.deficit - pnl;
+        if (st.depth === 0) {
+          if (pnl < 0) {
+            started++;
+            maxDepthSeen = Math.max(maxDepthSeen, 1);
+            ladder.set(sig.symbol, {
+              depth: 1,
+              deficit: -pnl,
+              // The profit target is fixed in money at LADDER START (target R × the base stake
+              // that opened the chain), so later stakes cannot inflate what "recovered" means.
+              targetMoney: target * stakeMoney,
+            });
+          }
+        } else if (newDeficit <= -st.targetMoney) {
+          // Deficit fully paid AND the target banked — the chain is genuinely recovered.
+          recovered++;
+          ladder.delete(sig.symbol);
         } else {
-          if (st.depth === 0) started++;
-          maxDepthSeen = Math.max(maxDepthSeen, st.depth + 1);
           const nextDepth = st.depth + 1;
+          maxDepthSeen = Math.max(maxDepthSeen, nextDepth);
           if (nextDepth >= cap && this.capPolicy() === 'abandon') {
+            // Take the remaining deficit as a realised loss and reset. This is the survivable
+            // variant: bounded worst case, at the price of sometimes eating the loss.
             abandoned++;
-            ladder.set(sig.symbol, { depth: 0, cumLossR: 0 });
+            ladder.delete(sig.symbol);
           } else {
             ladder.set(sig.symbol, {
               depth: nextDepth,
-              cumLossR: st.cumLossR + stakePct / base,
+              deficit: Math.max(0, newDeficit),
+              targetMoney: st.targetMoney,
             });
           }
         }
       }
-    });
+    }
 
     return {
       trades,
