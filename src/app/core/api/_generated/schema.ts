@@ -18922,11 +18922,9 @@ export interface components {
       maxSymbolExposurePct?: number;
       isDefault?: boolean;
       /** Format: double */
-      drawdownRecoveryThresholdPct?: number;
       /** Format: double */
       recoveryLotSizeMultiplier?: number;
       /** Format: double */
-      recoveryExitThresholdPct?: number;
       requireStopLoss?: boolean;
       requireTakeProfit?: boolean;
       /** Format: double */
@@ -18986,11 +18984,9 @@ export interface components {
       maxSymbolExposurePct?: number;
       isDefault?: boolean;
       /** Format: double */
-      drawdownRecoveryThresholdPct?: number;
       /** Format: double */
       recoveryLotSizeMultiplier?: number;
       /** Format: double */
-      recoveryExitThresholdPct?: number;
       requireStopLoss?: boolean;
       requireTakeProfit?: boolean;
       /** Format: double */
@@ -19052,11 +19048,9 @@ export interface components {
       maxSymbolExposurePct?: number;
       isDefault?: boolean;
       /** Format: double */
-      drawdownRecoveryThresholdPct?: number;
       /** Format: double */
       recoveryLotSizeMultiplier?: number;
       /** Format: double */
-      recoveryExitThresholdPct?: number;
       requireStopLoss?: boolean;
       requireTakeProfit?: boolean;
       /** Format: double */

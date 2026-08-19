@@ -594,9 +594,7 @@ export interface RiskProfileDto {
   maxRiskPerTradePct: number;
   maxSymbolExposurePct: number;
   isDefault: boolean;
-  drawdownRecoveryThresholdPct: number;
   recoveryLotSizeMultiplier: number;
-  recoveryExitThresholdPct: number;
   requireStopLoss: boolean;
   requireTakeProfit: boolean;
   minStopLossDistancePips: number;
@@ -4226,9 +4224,7 @@ export interface CreateRiskProfileRequest {
   maxRiskPerTradePct: number;
   maxSymbolExposurePct: number;
   isDefault?: boolean;
-  drawdownRecoveryThresholdPct: number;
   recoveryLotSizeMultiplier: number;
-  recoveryExitThresholdPct: number;
   requireStopLoss?: boolean;
   requireTakeProfit?: boolean;
   minStopLossDistancePips?: number;
@@ -4262,9 +4258,7 @@ export interface UpdateRiskProfileRequest {
   maxRiskPerTradePct: number;
   maxSymbolExposurePct: number;
   isDefault?: boolean;
-  drawdownRecoveryThresholdPct: number;
   recoveryLotSizeMultiplier: number;
-  recoveryExitThresholdPct: number;
   requireStopLoss: boolean;
   requireTakeProfit: boolean;
   minStopLossDistancePips: number;

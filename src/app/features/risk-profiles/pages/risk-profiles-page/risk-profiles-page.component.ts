@@ -174,19 +174,14 @@ import {
                     min="0"
                   />
                 </app-form-field>
-                <app-form-field
-                  label="Recovery Threshold %"
-                  [required]="true"
-                  [control]="form.controls.drawdownRecoveryThresholdPct"
-                >
-                  <input
-                    appFormFieldControl
-                    formControlName="drawdownRecoveryThresholdPct"
-                    type="number"
-                    step="0.1"
-                    min="0"
-                  />
-                </app-form-field>
+                <!--
+                  Recovery ENTRY/EXIT thresholds are deliberately absent. They are not a
+                  per-profile concern: recovery mode is computed fleet-wide from
+                  RiskCheckerOptions.ReducedDrawdownPct (10%) / HaltedDrawdownPct (20%),
+                  and the same predicate governs exit, so no separate exit threshold
+                  exists. The per-profile columns that used to render here were read by
+                  no decision path — editing them changed nothing.
+                -->
                 <app-form-field
                   label="Recovery Lot Multiplier"
                   [required]="true"
@@ -197,19 +192,6 @@ import {
                     formControlName="recoveryLotSizeMultiplier"
                     type="number"
                     step="0.05"
-                    min="0"
-                  />
-                </app-form-field>
-                <app-form-field
-                  label="Recovery Exit Threshold %"
-                  [required]="true"
-                  [control]="form.controls.recoveryExitThresholdPct"
-                >
-                  <input
-                    appFormFieldControl
-                    formControlName="recoveryExitThresholdPct"
-                    type="number"
-                    step="0.1"
                     min="0"
                   />
                 </app-form-field>
@@ -612,7 +594,6 @@ import {
                     <th class="num">Min SL pips</th>
                     <th class="num">Min TP pips</th>
                     <th class="num">Min RR</th>
-                    <th class="num">Recovery thr.</th>
                     <th class="num">Recov. mult.</th>
                     <th>Default</th>
                   </tr>
@@ -642,7 +623,6 @@ import {
                       <td class="num mono">
                         {{ p.minRiskRewardRatio > 0 ? p.minRiskRewardRatio.toFixed(2) : '—' }}
                       </td>
-                      <td class="num mono">{{ p.drawdownRecoveryThresholdPct.toFixed(1) }}%</td>
                       <td class="num mono">{{ p.recoveryLotSizeMultiplier.toFixed(2) }}×</td>
                       <td>
                         @if (p.isDefault) {
@@ -2039,9 +2019,7 @@ export class RiskProfilesPageComponent implements OnInit {
     maxTotalDrawdownPct: [10.0, [Validators.required, Validators.min(0)]],
     maxRiskPerTradePct: [1.0, [Validators.required, Validators.min(0)]],
     maxSymbolExposurePct: [25.0, [Validators.required, Validators.min(0)]],
-    drawdownRecoveryThresholdPct: [5.0, [Validators.required, Validators.min(0)]],
     recoveryLotSizeMultiplier: [0.5, [Validators.required, Validators.min(0)]],
-    recoveryExitThresholdPct: [2.0, [Validators.required, Validators.min(0)]],
     isDefault: [false],
     requireStopLoss: [true],
     requireTakeProfit: [true],
@@ -2103,22 +2081,10 @@ export class RiskProfilesPageComponent implements OnInit {
       valueFormatter: (p) => (p.value != null ? `${(p.value as number).toFixed(1)}%` : '-'),
     },
     {
-      headerName: 'Recov. thr.',
-      field: 'drawdownRecoveryThresholdPct',
-      width: 110,
-      valueFormatter: (p) => (p.value != null ? `${(p.value as number).toFixed(1)}%` : '-'),
-    },
-    {
       headerName: 'Recov. mult.',
       field: 'recoveryLotSizeMultiplier',
       width: 110,
       valueFormatter: (p) => (p.value != null ? `${(p.value as number).toFixed(2)}×` : '-'),
-    },
-    {
-      headerName: 'Recov. exit',
-      field: 'recoveryExitThresholdPct',
-      width: 110,
-      valueFormatter: (p) => (p.value != null ? `${(p.value as number).toFixed(1)}%` : '-'),
     },
     {
       headerName: 'SL',
@@ -2169,9 +2135,7 @@ export class RiskProfilesPageComponent implements OnInit {
       maxTotalDrawdownPct: 10.0,
       maxRiskPerTradePct: 1.0,
       maxSymbolExposurePct: 25.0,
-      drawdownRecoveryThresholdPct: 5.0,
       recoveryLotSizeMultiplier: 0.5,
-      recoveryExitThresholdPct: 2.0,
       isDefault: false,
       requireStopLoss: true,
       requireTakeProfit: true,
@@ -2209,9 +2173,7 @@ export class RiskProfilesPageComponent implements OnInit {
       maxTotalDrawdownPct: row.maxTotalDrawdownPct,
       maxRiskPerTradePct: row.maxRiskPerTradePct,
       maxSymbolExposurePct: row.maxSymbolExposurePct,
-      drawdownRecoveryThresholdPct: row.drawdownRecoveryThresholdPct,
       recoveryLotSizeMultiplier: row.recoveryLotSizeMultiplier,
-      recoveryExitThresholdPct: row.recoveryExitThresholdPct,
       isDefault: row.isDefault,
       requireStopLoss: row.requireStopLoss,
       requireTakeProfit: row.requireTakeProfit,
@@ -2256,9 +2218,7 @@ export class RiskProfilesPageComponent implements OnInit {
       maxDailyTrades: v.maxDailyTrades,
       maxRiskPerTradePct: v.maxRiskPerTradePct,
       maxSymbolExposurePct: v.maxSymbolExposurePct,
-      drawdownRecoveryThresholdPct: v.drawdownRecoveryThresholdPct,
       recoveryLotSizeMultiplier: v.recoveryLotSizeMultiplier,
-      recoveryExitThresholdPct: v.recoveryExitThresholdPct,
       isDefault: v.isDefault,
       requireStopLoss: v.requireStopLoss,
       requireTakeProfit: v.requireTakeProfit,
