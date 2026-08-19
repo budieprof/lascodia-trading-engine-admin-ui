@@ -1876,8 +1876,19 @@ export class RiskProfilesPageComponent implements OnInit {
     this.loadGlobalOptions(true);
   }
 
-  onGlobalEdit(row: GlobalOptionRow, value: string): void {
-    row.editValue = value;
+  /**
+   * Coerces to a string before storing. The bound control is `<input type="number">`, and Angular's
+   * number-input valueAccessor emits a NUMBER at runtime regardless of this parameter's declared
+   * type — TypeScript cannot police what a template binding actually passes.
+   *
+   * Two things broke as a result. The server's UpsertEngineConfigCommand.Value is a string, so
+   * System.Text.Json rejected the payload outright with
+   * `The JSON value could not be converted to System.String` and the request 400'd before any
+   * validation ran. And the dirty check `editValue !== value` compared a number against a string,
+   * so a row stayed marked dirty even after being reset.
+   */
+  onGlobalEdit(row: GlobalOptionRow, value: string | number | null | undefined): void {
+    row.editValue = value === null || value === undefined ? '' : String(value);
     this.globalRows.set([...this.globalRows()]);
   }
 
@@ -1948,7 +1959,7 @@ export class RiskProfilesPageComponent implements OnInit {
         next: (res) => {
           row.saving = false;
           if (res.status) {
-            row.value = res.data?.value ?? row.editValue;
+            row.value = String(res.data?.value ?? row.editValue);
             row.editValue = row.value;
             row.exists = true;
           } else {
