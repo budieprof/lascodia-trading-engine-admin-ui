@@ -55,7 +55,31 @@ export interface MartingaleAccountSymbolsDto {
   reducedDrawdownPct: number;
   haltedDrawdownPct: number;
 
+  /**
+   * FLEET-WIDE execution mode — not per-account, not per-profile. Dominates both opt-ins:
+   * a symbol shown as enabled while this is 'Shadow' computes rungs and applies none.
+   */
+  mode: MartingaleMode;
+
   symbols: MartingaleSymbolDto[];
+}
+
+export type MartingaleMode = 'Off' | 'Shadow' | 'Live';
+
+export interface SetMartingaleModeRequest {
+  mode: MartingaleMode;
+  /** Required when going Live. */
+  reason?: string | null;
+  /** Required when going Live; recorded in the audit trail. */
+  acknowledgeLiveTrading?: boolean;
+}
+
+export interface SetMartingaleModeResult {
+  previousMode: string;
+  newMode: string;
+  /** (account, symbol) ladders the change immediately affects. */
+  activeLadderCount: number;
+  activeLadders: string[];
 }
 
 export interface SetMartingaleProfileRequest {
@@ -114,5 +138,13 @@ export class MartingaleService {
    */
   setProfile(riskProfileId: number, body: SetMartingaleProfileRequest): Observable<boolean> {
     return this.api.putEnvelope<boolean>(`/martingale/profiles/${riskProfileId}`, body);
+  }
+
+  /**
+   * Sets the fleet-wide execution mode. Affects every account at once — the response reports how
+   * many (account, symbol) ladders the change actually touches.
+   */
+  setMode(body: SetMartingaleModeRequest): Observable<SetMartingaleModeResult> {
+    return this.api.putEnvelope<SetMartingaleModeResult>(`/martingale/mode`, body);
   }
 }

@@ -6,6 +6,7 @@ import {
   MartingaleService,
   type MartingaleAccountSymbolsDto,
   type MartingaleSymbolDto,
+  type MartingaleMode,
 } from '@core/services/martingale.service';
 import { TradingAccountsService } from '@core/services/trading-accounts.service';
 import type { TradingAccountDto } from '@core/api/api.types';
@@ -37,6 +38,53 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       title="Martingale Ladders"
       subtitle="Per-symbol recovery ladders, opted in one account and one symbol at a time."
     />
+
+    <!--
+      The mode banner sits ABOVE the account picker on purpose: it is fleet-wide, so putting it
+      inside the per-account section would imply a scope it does not have. It is also the first
+      thing that determines whether anything below it does something — a symbol shown as enabled
+      under Shadow is computing rungs and applying none.
+    -->
+    @if (view(); as v) {
+      <section class="mode" [attr.data-mode]="v.mode">
+        <div class="mode-row">
+          <span class="mode-badge">{{ v.mode }}</span>
+          <span class="mode-copy">
+            @switch (v.mode) {
+              @case ('Live') {
+                <b>Ladders are placing real orders.</b> A losing trade on an enabled symbol
+                escalates the next position's size.
+              }
+              @case ('Shadow') {
+                Rungs are computed and logged but <b>never applied</b> — chains still open, advance
+                and recover against real fills, so the ladder can be judged before it is trusted.
+              }
+              @case ('Off') {
+                Ladders compute nothing. Chain state and sizing are both untouched.
+              }
+            }
+          </span>
+          <span class="mode-scope">fleet-wide · every account</span>
+        </div>
+
+        <div class="mode-actions">
+          @for (m of modes; track m) {
+            <button
+              type="button"
+              class="mode-btn"
+              [class.sel]="m === v.mode"
+              [disabled]="savingMode() || m === v.mode"
+              (click)="changeMode(m)"
+            >
+              {{ m }}
+            </button>
+          }
+          @if (savingMode()) {
+            <span class="saving">Saving…</span>
+          }
+        </div>
+      </section>
+    }
 
     <div class="acct-bar">
       <label for="acct">Account</label>
@@ -346,6 +394,89 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         display: block;
       }
 
+      /*
+       * Mode banner. Colour-coded by consequence rather than by state: Live is the only one that
+       * moves money, so it is the only one that reads as an alarm.
+       */
+      .mode {
+        border: 1px solid var(--border-default);
+        border-left-width: 4px;
+        border-radius: 12px;
+        padding: var(--space-3) var(--space-4);
+        margin-bottom: var(--space-4);
+        background: var(--surface-raised);
+      }
+      .mode[data-mode='Live'] {
+        border-left-color: #ff3b30;
+        background: color-mix(in srgb, #ff3b30 7%, var(--surface-raised));
+      }
+      .mode[data-mode='Shadow'] {
+        border-left-color: #0a84ff;
+      }
+      .mode[data-mode='Off'] {
+        border-left-color: #8e8e93;
+      }
+      .mode-row {
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: var(--space-2) var(--space-3);
+      }
+      .mode-badge {
+        font-weight: 700;
+        font-size: 12px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        padding: 3px 10px;
+        border-radius: 999px;
+        background: color-mix(in srgb, currentColor 14%, transparent);
+      }
+      .mode[data-mode='Live'] .mode-badge {
+        color: #ff3b30;
+      }
+      .mode[data-mode='Shadow'] .mode-badge {
+        color: #0a84ff;
+      }
+      .mode[data-mode='Off'] .mode-badge {
+        color: #8e8e93;
+      }
+      .mode-copy {
+        font-size: 13px;
+        color: var(--text-secondary);
+        flex: 1 1 320px;
+      }
+      .mode-scope {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-tertiary);
+      }
+      .mode-actions {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        margin-top: var(--space-3);
+      }
+      .mode-btn {
+        padding: 5px 14px;
+        border-radius: 8px;
+        border: 1px solid var(--border-default);
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .mode-btn.sel {
+        background: var(--surface-base);
+        color: var(--text-primary);
+        font-weight: 600;
+        cursor: default;
+      }
+      .mode-btn:disabled:not(.sel) {
+        opacity: 0.5;
+        cursor: default;
+      }
+
       .acct-bar {
         display: flex;
         align-items: center;
@@ -607,7 +738,10 @@ export class MartingalePageComponent {
   readonly openChains = computed(() => (this.view()?.symbols ?? []).filter((s) => s.hasOpenChain));
 
   readonly savingProfile = signal(false);
+  readonly savingMode = signal(false);
   readonly editing = signal<string | null>(null);
+
+  readonly modes: MartingaleMode[] = ['Off', 'Shadow', 'Live'];
 
   /**
    * Draft profile settings. A plain mutable object rather than a signal because ngModel two-way
@@ -684,6 +818,51 @@ export class MartingalePageComponent {
       error: (e: { message?: string }) => {
         this.error.set(e?.message ?? 'Could not load martingale settings.');
         this.loading.set(false);
+      },
+    });
+  }
+
+  // ── Fleet-wide mode ───────────────────────────────────────────────────────
+
+  changeMode(mode: MartingaleMode): void {
+    // Going Live is the moment a size-escalating scheme starts placing real orders, across every
+    // account at once. The server demands a reason and an explicit acknowledgement; both are
+    // collected here rather than sent as placeholders.
+    let reason: string | null = null;
+    let ack = false;
+
+    if (mode === 'Live') {
+      ack = window.confirm(
+        'Put martingale ladders LIVE?\n\n' +
+          'Every enabled (account, symbol) pair will start sizing recovery rungs with real ' +
+          'orders — a loss escalates the next position instead of being logged.\n\n' +
+          'This is fleet-wide and takes effect within a minute. Continue?',
+      );
+      if (!ack) return;
+
+      reason = window.prompt('Reason for going Live (required):');
+      if (!reason || !reason.trim()) return;
+    }
+
+    this.savingMode.set(true);
+    this.error.set(null);
+    this.martingale.setMode({ mode, reason, acknowledgeLiveTrading: ack }).subscribe({
+      next: (r) => {
+        this.savingMode.set(false);
+        // Report the blast radius the server measured, rather than leaving the operator to guess
+        // how many ladders a fleet-wide switch just touched.
+        if (r.activeLadderCount > 0) {
+          window.alert(
+            `Mode ${r.previousMode} → ${r.newMode}.\n\n` +
+              `${r.activeLadderCount} active ladder(s) affected:\n${r.activeLadders.join('\n')}`,
+          );
+        }
+        this.load();
+      },
+      error: (e: { message?: string }) => {
+        this.error.set(e?.message ?? 'Could not change the martingale mode.');
+        this.savingMode.set(false);
+        this.load();
       },
     });
   }
