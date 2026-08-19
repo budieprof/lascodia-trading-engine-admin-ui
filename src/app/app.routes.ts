@@ -302,6 +302,12 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'martingale',
+        data: { breadcrumb: 'Martingale Ladders' },
+        loadChildren: () =>
+          import('@features/martingale/martingale.routes').then((m) => m.MARTINGALE_ROUTES),
+      },
+      {
         path: 'drift-report',
         data: { breadcrumb: 'Drift Report' },
         loadChildren: () =>

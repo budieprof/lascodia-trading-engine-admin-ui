@@ -517,6 +517,7 @@ export class SidebarComponent {
         { label: 'Config', route: '/engine-config', icon: '⚙', policy: 'Operator' },
         { label: 'Audit Trail', route: '/audit-trail', icon: '📜' },
         { label: 'Drawdown', route: '/drawdown-recovery', icon: '📉' },
+        { label: 'Martingale', route: '/martingale', icon: '🪜', policy: 'Operator' },
         { label: 'Paper Trading', route: '/paper-trading', icon: '🧪', policy: 'Operator' },
         {
           label: 'CME Microstructure',
