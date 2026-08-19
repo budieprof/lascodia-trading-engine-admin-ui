@@ -1896,7 +1896,12 @@ export class RiskProfilesPageComponent implements OnInit {
       value: row.editValue,
       dataType: row.dataType,
       reason: reason || null,
-      immediate: true,
+      // Break-glass is OPT-IN, keyed on the operator actually supplying a reason. Hardcoding
+      // immediate:true made every save fail with "Reason is required when Immediate=true" the
+      // moment the reason box was empty — including for tightening changes that never needed
+      // break-glass at all. With it off, the server applies non-risk-sensitive changes directly
+      // and still governs the ones that matter.
+      immediate: reason.length > 0,
     };
     this.configService.upsert(request).subscribe({
       next: (res) => {
@@ -1928,6 +1933,7 @@ export class RiskProfilesPageComponent implements OnInit {
     const reason = this.globalReason().trim();
     let remaining = dirty.length;
     let failures = 0;
+    let firstError: string | null = null;
     for (const row of dirty) {
       row.saving = true;
       const request: UpsertConfigRequest = {
@@ -1935,7 +1941,8 @@ export class RiskProfilesPageComponent implements OnInit {
         value: row.editValue,
         dataType: row.dataType,
         reason: reason || null,
-        immediate: true,
+        // Opt-in break-glass — see the note on the single-row save.
+        immediate: reason.length > 0,
       };
       this.configService.upsert(request).subscribe({
         next: (res) => {
@@ -1946,28 +1953,33 @@ export class RiskProfilesPageComponent implements OnInit {
             row.exists = true;
           } else {
             failures++;
+            // Keep the server's explanation. A bare "1 failed" gives the operator nothing to act
+            // on — the reason a governed config write is refused IS the useful part.
+            firstError ??= res.message ?? null;
           }
           remaining--;
           this.globalRows.set([...this.globalRows()]);
-          if (remaining === 0) this.finishGlobalBulk(dirty.length, failures);
+          if (remaining === 0) this.finishGlobalBulk(dirty.length, failures, firstError);
         },
-        error: () => {
+        error: (e: { message?: string }) => {
           row.saving = false;
           failures++;
+          firstError ??= e?.message ?? null;
           remaining--;
           this.globalRows.set([...this.globalRows()]);
-          if (remaining === 0) this.finishGlobalBulk(dirty.length, failures);
+          if (remaining === 0) this.finishGlobalBulk(dirty.length, failures, firstError);
         },
       });
     }
   }
 
-  private finishGlobalBulk(total: number, failures: number): void {
+  private finishGlobalBulk(total: number, failures: number, firstError?: string | null): void {
     this.globalBulkSaving.set(false);
     if (failures === 0) {
       this.notifications.success(`Saved ${total} option${total === 1 ? '' : 's'}`);
     } else {
-      this.notifications.error(`Saved ${total - failures} of ${total} · ${failures} failed`);
+      const why = firstError ? ` — ${firstError}` : '';
+      this.notifications.error(`Saved ${total - failures} of ${total} · ${failures} failed${why}`);
     }
   }
 
