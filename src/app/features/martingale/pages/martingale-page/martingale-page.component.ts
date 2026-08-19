@@ -92,19 +92,89 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
           </p>
         }
 
-        <div class="defaults">
-          <span
-            >depth <b>{{ v.defaultMaxDepth }}</b></span
-          >
-          <span
-            >target <b>{{ v.defaultTargetProfitR }}R</b></span
-          >
-          <span
-            >max stake <b>{{ v.defaultMaxStakePctEquity }}%</b></span
-          >
-          <span
-            >age cap <b>{{ v.defaultMaxChainAgeHours }}h</b></span
-          >
+        <!--
+          Profile defaults are editable here rather than only on the Risk Profiles page: they were
+          previously reachable only by direct database update, which is the invisible-config trap
+          this codebase has already been bitten by twice.
+        -->
+        <div class="pform">
+          <label class="fld master">
+            <input type="checkbox" [(ngModel)]="pf.enabled" [disabled]="savingProfile()" />
+            <span>Allow martingale on this profile</span>
+          </label>
+
+          <label class="fld">
+            <span>Depth cap</span>
+            <input
+              type="number"
+              min="1"
+              max="20"
+              step="1"
+              [(ngModel)]="pf.maxDepth"
+              (ngModelChange)="onDepthChange($event)"
+            />
+          </label>
+
+          <label class="fld">
+            <span>Target profit (R)</span>
+            <input type="number" min="0" max="10" step="0.1" [(ngModel)]="pf.targetProfitR" />
+          </label>
+
+          <label class="fld">
+            <span>Max stake (% equity)</span>
+            <input
+              type="number"
+              min="0.01"
+              max="100"
+              step="0.5"
+              [(ngModel)]="pf.maxStakePctEquity"
+            />
+          </label>
+
+          <label class="fld">
+            <span>Chain age cap (h)</span>
+            <input type="number" min="1" max="8760" step="1" [(ngModel)]="pf.maxChainAgeHours" />
+          </label>
+
+          <label class="fld master">
+            <input type="checkbox" [(ngModel)]="pf.abandonAtCap" [disabled]="savingProfile()" />
+            <span>Abandon at depth cap</span>
+          </label>
+        </div>
+
+        <!--
+          The projected worst case is computed client-side from the DRAFT depth, so it moves as the
+          operator types. Showing it only after saving would mean the number that decides whether a
+          cap is safe arrives after the decision.
+        -->
+        <p
+          class="proj"
+          [class.danger]="projectedWorstCase() >= v.haltedDrawdownPct"
+          [class.warn]="
+            projectedWorstCase() >= v.reducedDrawdownPct &&
+            projectedWorstCase() < v.haltedDrawdownPct
+          "
+        >
+          Worst case at depth {{ pf.maxDepth }} on {{ v.baseRiskPerTradePct }}% base risk:
+          <b>{{ projectedWorstCase() | number: '1.0-1' }}%</b> of equity
+          @if (!pf.abandonAtCap) {
+            <b> — unbounded, the depth cap is disabled</b>
+          } @else if (projectedWorstCase() >= v.haltedDrawdownPct) {
+            — past the {{ v.haltedDrawdownPct }}% Halted threshold. A chain this deep halts the
+            account before it can finish recovering.
+          } @else if (projectedWorstCase() >= v.reducedDrawdownPct) {
+            — past the {{ v.reducedDrawdownPct }}% Reduced threshold, but inside the
+            {{ v.haltedDrawdownPct }}% halt boundary.
+          } @else {
+            — inside both drawdown thresholds.
+          }
+        </p>
+
+        <div class="pactions">
+          <button type="button" (click)="saveProfile()" [disabled]="savingProfile()">
+            {{ savingProfile() ? 'Saving…' : 'Save profile defaults' }}
+          </button>
+          <button type="button" class="ghost" (click)="resetProfileForm()">Reset</button>
         </div>
       </section>
 
@@ -140,6 +210,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                 <th class="n">Target</th>
                 <th class="n">Max stake</th>
                 <th>Chain</th>
+                <th class="c">Tune</th>
               </tr>
             </thead>
             <tbody>
@@ -180,7 +251,86 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                       <span class="muted">—</span>
                     }
                   </td>
+                  <td class="c">
+                    <button type="button" class="link" (click)="startEdit(s)">
+                      {{ hasOverrides(s) ? 'Overrides ✎' : 'Override' }}
+                    </button>
+                  </td>
                 </tr>
+
+                @if (editing() === s.symbol) {
+                  <tr class="editrow">
+                    <td colspan="8">
+                      <!--
+                        An empty field means INHERIT, not zero. Stated explicitly because a blank
+                        numeric input reading as 0 is exactly how a stake ceiling of 0 would get
+                        set — which abandons every chain on its first rung.
+                      -->
+                      <div class="edit">
+                        <span class="edit-title">{{ s.symbol }} overrides</span>
+                        <span class="edit-hint">blank = inherit the profile default</span>
+
+                        <label class="fld">
+                          <span>Depth cap</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="20"
+                            [(ngModel)]="ef.maxDepthOverride"
+                            [placeholder]="v.defaultMaxDepth"
+                          />
+                        </label>
+
+                        <label class="fld">
+                          <span>Target (R)</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max="10"
+                            step="0.1"
+                            [(ngModel)]="ef.targetProfitROverride"
+                            [placeholder]="v.defaultTargetProfitR"
+                          />
+                        </label>
+
+                        <label class="fld">
+                          <span>Max stake (%)</span>
+                          <input
+                            type="number"
+                            min="0.01"
+                            max="100"
+                            step="0.5"
+                            [(ngModel)]="ef.maxStakePctEquityOverride"
+                            [placeholder]="v.defaultMaxStakePctEquity"
+                          />
+                        </label>
+
+                        <label class="fld">
+                          <span>Age cap (h)</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="8760"
+                            [(ngModel)]="ef.maxChainAgeHoursOverride"
+                            [placeholder]="v.defaultMaxChainAgeHours"
+                          />
+                        </label>
+
+                        <div class="edit-actions">
+                          <button type="button" (click)="saveOverrides(s)" [disabled]="saving()">
+                            Save
+                          </button>
+                          <button type="button" class="ghost" (click)="cancelEdit()">Cancel</button>
+                          @if (hasOverrides(s)) {
+                            <button type="button" class="ghost" (click)="clearOverrides(s)">
+                              Clear all
+                            </button>
+                          }
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                }
               }
             </tbody>
           </table>
@@ -270,12 +420,103 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       .gate-note.warn {
         color: #b25000;
       }
-      .defaults {
+      /* Profile default editor */
+      .pform {
         display: flex;
-        gap: var(--space-4);
+        flex-wrap: wrap;
+        gap: var(--space-3) var(--space-4);
         margin-top: var(--space-3);
+        align-items: flex-end;
+      }
+      .fld {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
         font-size: 12px;
         color: var(--text-secondary);
+      }
+      .fld.master {
+        flex-direction: row;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        color: var(--text-primary);
+      }
+      .fld input[type='number'] {
+        width: 120px;
+        padding: 6px 8px;
+        border-radius: 8px;
+        border: 1px solid var(--border-default);
+        background: var(--surface-base);
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+      }
+      .proj {
+        margin: var(--space-3) 0 0;
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+      .proj.warn {
+        color: #b25000;
+      }
+      .proj.danger {
+        color: #ff3b30;
+      }
+      .pactions {
+        display: flex;
+        gap: var(--space-2);
+        margin-top: var(--space-3);
+      }
+      .pactions button,
+      .edit-actions button {
+        padding: 6px 14px;
+        border-radius: 8px;
+        border: 1px solid var(--border-default);
+        background: var(--accent, #0a84ff);
+        color: #fff;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .pactions button.ghost,
+      .edit-actions button.ghost {
+        background: transparent;
+        color: var(--text-secondary);
+      }
+      .pactions button:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+
+      /* Per-symbol override editor */
+      button.link {
+        background: none;
+        border: none;
+        color: var(--accent, #0a84ff);
+        font-size: 12px;
+        cursor: pointer;
+        padding: 0;
+      }
+      tr.editrow > td {
+        background: var(--surface-raised);
+      }
+      .edit {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        gap: var(--space-3) var(--space-4);
+        padding: var(--space-2) 0;
+      }
+      .edit-title {
+        font-weight: 600;
+        font-size: 13px;
+      }
+      .edit-hint {
+        font-size: 11px;
+        color: var(--text-tertiary);
+      }
+      .edit-actions {
+        display: flex;
+        gap: var(--space-2);
       }
 
       .chains {
@@ -365,6 +606,52 @@ export class MartingalePageComponent {
 
   readonly openChains = computed(() => (this.view()?.symbols ?? []).filter((s) => s.hasOpenChain));
 
+  readonly savingProfile = signal(false);
+  readonly editing = signal<string | null>(null);
+
+  /**
+   * Draft profile settings. A plain mutable object rather than a signal because ngModel two-way
+   * binding writes into it directly; `projectedDepth` is the signal that drives recomputation.
+   */
+  pf = {
+    enabled: false,
+    maxDepth: 3,
+    targetProfitR: 0.5,
+    maxStakePctEquity: 10,
+    maxChainAgeHours: 72,
+    abandonAtCap: true,
+  };
+
+  /** Draft per-symbol overrides. Empty string means inherit, NOT zero. */
+  ef: {
+    maxDepthOverride: number | string | null;
+    targetProfitROverride: number | string | null;
+    maxStakePctEquityOverride: number | string | null;
+    maxChainAgeHoursOverride: number | string | null;
+  } = {
+    maxDepthOverride: '',
+    targetProfitROverride: '',
+    maxStakePctEquityOverride: '',
+    maxChainAgeHoursOverride: '',
+  };
+
+  /** Mirrors pf.maxDepth so the projection recomputes as the operator types. */
+  private readonly draftDepth = signal(3);
+
+  /**
+   * Worst-case cumulative loss if every rung to the depth cap loses.
+   *
+   * A rung sized to recover the accumulated deficit plus a target grows roughly 3x per step at
+   * this book's geometry, so k losing rungs cost basePct * (3^k - 1)/2. Mirrors the server's
+   * calculation deliberately: the operator needs it while typing, not after saving.
+   */
+  readonly projectedWorstCase = computed(() => {
+    const base = this.view()?.baseRiskPerTradePct ?? 0;
+    const depth = Math.min(Math.max(this.draftDepth(), 0), 20);
+    if (base <= 0 || depth <= 0) return 0;
+    return (base * (Math.pow(3, depth) - 1)) / 2;
+  });
+
   constructor() {
     this.accountsApi.list({ currentPage: 1, itemCountPerPage: 100 }).subscribe({
       next: (res) => {
@@ -391,6 +678,7 @@ export class MartingalePageComponent {
     this.martingale.getSymbols(id).subscribe({
       next: (v) => {
         this.view.set(v);
+        this.resetProfileForm();
         this.loading.set(false);
       },
       error: (e: { message?: string }) => {
@@ -398,6 +686,174 @@ export class MartingalePageComponent {
         this.loading.set(false);
       },
     });
+  }
+
+  // ── Profile defaults ──────────────────────────────────────────────────────
+
+  /** Keeps the live worst-case projection in step with the depth field as it is typed. */
+  onDepthChange(value: number | string): void {
+    this.draftDepth.set(Number(value) || 0);
+  }
+
+  resetProfileForm(): void {
+    const v = this.view();
+    if (!v) return;
+    this.pf = {
+      enabled: v.profileMartingaleEnabled,
+      maxDepth: v.defaultMaxDepth,
+      targetProfitR: v.defaultTargetProfitR,
+      maxStakePctEquity: v.defaultMaxStakePctEquity,
+      maxChainAgeHours: v.defaultMaxChainAgeHours,
+      abandonAtCap: v.defaultAbandonAtCap,
+    };
+    this.draftDepth.set(v.defaultMaxDepth);
+  }
+
+  saveProfile(): void {
+    const v = this.view();
+    if (!v?.riskProfileId) {
+      this.error.set('This account has no risk profile, so there is nothing to configure.');
+      return;
+    }
+
+    // Keep the projection honest if the operator typed without blurring.
+    this.draftDepth.set(Number(this.pf.maxDepth) || 0);
+
+    let reason: string | null = null;
+    if (this.pf.enabled) {
+      const shared = v.accountsSharingProfile.length;
+      reason = window.prompt(
+        `Allow martingale on "${v.riskProfileName}"?\n\n` +
+          (shared > 0
+            ? `This profile is shared with ${shared} other account(s): #${v.accountsSharingProfile.join(', #')}. ` +
+              `Ladders become reachable for all of them (each still needs its own per-symbol opt-in).\n\n`
+            : '') +
+          `Worst case at depth ${this.pf.maxDepth}: ${this.projectedWorstCase().toFixed(1)}% of equity.\n\n` +
+          `Reason (required):`,
+      );
+      if (!reason || !reason.trim()) return;
+    }
+
+    // AbandonAtCap = false removes the only bound on a chain's loss. The server demands an
+    // explicit acknowledgement rather than trusting a dialog, so the intent lands in the audit
+    // trail instead of only in the browser that clicked OK.
+    let ack = false;
+    if (!this.pf.abandonAtCap) {
+      ack = window.confirm(
+        'Disabling "Abandon at depth cap" makes the worst-case loss UNBOUNDED — a chain will keep ' +
+          'escalating past the depth cap until the equity floor or a halt stops it.\n\n' +
+          'This is recorded in the audit trail. Continue?',
+      );
+      if (!ack) return;
+    }
+
+    this.savingProfile.set(true);
+    this.error.set(null);
+    this.martingale
+      .setProfile(v.riskProfileId, {
+        enabled: this.pf.enabled,
+        targetProfitR: Number(this.pf.targetProfitR),
+        maxDepth: Number(this.pf.maxDepth),
+        maxStakePctEquity: Number(this.pf.maxStakePctEquity),
+        maxChainAgeHours: Number(this.pf.maxChainAgeHours),
+        abandonAtCap: this.pf.abandonAtCap,
+        acknowledgeUnboundedRisk: ack,
+        reason,
+      })
+      .subscribe({
+        next: () => {
+          this.savingProfile.set(false);
+          this.load();
+        },
+        error: (e: { message?: string }) => {
+          this.error.set(e?.message ?? 'Could not save the profile defaults.');
+          this.savingProfile.set(false);
+          this.load();
+        },
+      });
+  }
+
+  // ── Per-symbol overrides ──────────────────────────────────────────────────
+
+  hasOverrides(s: MartingaleSymbolDto): boolean {
+    return (
+      s.maxDepthOverride != null ||
+      s.targetProfitROverride != null ||
+      s.maxStakePctEquityOverride != null ||
+      s.maxChainAgeHoursOverride != null
+    );
+  }
+
+  startEdit(s: MartingaleSymbolDto): void {
+    this.editing.set(s.symbol);
+    // null becomes '' rather than 0 — an empty field means inherit, and a 0 stake ceiling would
+    // abandon every chain on its first rung.
+    this.ef = {
+      maxDepthOverride: s.maxDepthOverride ?? '',
+      targetProfitROverride: s.targetProfitROverride ?? '',
+      maxStakePctEquityOverride: s.maxStakePctEquityOverride ?? '',
+      maxChainAgeHoursOverride: s.maxChainAgeHoursOverride ?? '',
+    };
+  }
+
+  cancelEdit(): void {
+    this.editing.set(null);
+  }
+
+  saveOverrides(s: MartingaleSymbolDto): void {
+    this.writeSymbol(s, {
+      maxDepthOverride: toNullableNumber(this.ef.maxDepthOverride),
+      targetProfitROverride: toNullableNumber(this.ef.targetProfitROverride),
+      maxStakePctEquityOverride: toNullableNumber(this.ef.maxStakePctEquityOverride),
+      maxChainAgeHoursOverride: toNullableNumber(this.ef.maxChainAgeHoursOverride),
+    });
+  }
+
+  clearOverrides(s: MartingaleSymbolDto): void {
+    this.writeSymbol(s, {
+      maxDepthOverride: null,
+      targetProfitROverride: null,
+      maxStakePctEquityOverride: null,
+      maxChainAgeHoursOverride: null,
+    });
+  }
+
+  /**
+   * Overrides are written with the symbol's CURRENT enabled state, never a fresh decision — a
+   * tuning edit must not silently switch a ladder on or off.
+   */
+  private writeSymbol(
+    s: MartingaleSymbolDto,
+    overrides: {
+      maxDepthOverride: number | null;
+      targetProfitROverride: number | null;
+      maxStakePctEquityOverride: number | null;
+      maxChainAgeHoursOverride: number | null;
+    },
+  ): void {
+    const id = this.accountId();
+    if (id == null) return;
+
+    this.saving.set(true);
+    this.error.set(null);
+    this.martingale
+      .setSymbol(id, s.symbol, {
+        enabled: s.enabled,
+        ...overrides,
+        reason: s.enabled ? `Tuning overrides for ${s.symbol}` : null,
+      })
+      .subscribe({
+        next: () => {
+          this.saving.set(false);
+          this.editing.set(null);
+          this.load();
+        },
+        error: (e: { message?: string }) => {
+          this.error.set(e?.message ?? 'Could not save the overrides.');
+          this.saving.set(false);
+          this.load();
+        },
+      });
   }
 
   toggle(symbol: MartingaleSymbolDto, enabled: boolean): void {
@@ -432,4 +888,15 @@ export class MartingalePageComponent {
       },
     });
   }
+}
+
+/**
+ * Blank / empty means INHERIT the profile default, so it maps to null rather than 0. Getting this
+ * backwards would write a stake ceiling of 0, which abandons every chain on its first rung.
+ */
+function toNullableNumber(v: number | string | null | undefined): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'string' && v.trim() === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }

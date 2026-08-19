@@ -47,7 +47,28 @@ export interface MartingaleAccountSymbolsDto {
   defaultMaxChainAgeHours: number;
   defaultAbandonAtCap: boolean;
 
+  /** Per-trade risk — the base stake every worst-case figure compounds from. */
+  baseRiskPerTradePct: number;
+  /** Worst case at the profile default depth, as a % of equity. */
+  defaultWorstCaseDrawdownPct: number;
+  /** Fleet-wide drawdown thresholds a ladder must stay inside. */
+  reducedDrawdownPct: number;
+  haltedDrawdownPct: number;
+
   symbols: MartingaleSymbolDto[];
+}
+
+export interface SetMartingaleProfileRequest {
+  enabled: boolean;
+  targetProfitR: number;
+  maxDepth: number;
+  maxStakePctEquity: number;
+  maxChainAgeHours: number;
+  abandonAtCap: boolean;
+  /** Required to set abandonAtCap = false; recorded in the audit trail. */
+  acknowledgeUnboundedRisk?: boolean;
+  /** Required when enabling. */
+  reason?: string | null;
 }
 
 export interface SetMartingaleSymbolRequest {
@@ -85,5 +106,13 @@ export class MartingaleService {
       `/martingale/accounts/${accountId}/symbols/${encodeURIComponent(symbol)}`,
       body,
     );
+  }
+
+  /**
+   * Updates the martingale defaults on a risk profile. Scoped to the martingale fields alone —
+   * it never round-trips the profile's other risk limits, which this screen does not show.
+   */
+  setProfile(riskProfileId: number, body: SetMartingaleProfileRequest): Observable<boolean> {
+    return this.api.putEnvelope<boolean>(`/martingale/profiles/${riskProfileId}`, body);
   }
 }
