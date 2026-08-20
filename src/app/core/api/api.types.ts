@@ -1792,6 +1792,68 @@ export interface EAConfigInputs {
   [key: string]: unknown;
 }
 
+/**
+ * A saved EA config profile (GET /admin/ea/profiles).
+ *
+ * Profiles exist because instance configuration previously lived ONLY as
+ * runtime state inside a live EA: the "reference" config could be reproduced
+ * only by reading one instance's heartbeat and hand-writing the same JSON
+ * everywhere else. That made drift invisible — on 2026-08-20 three accounts
+ * were found running with spread and consecutive-loss guards effectively
+ * disabled because an older per-instance override had been keyed to instance
+ * ids that no longer existed after their terminals were re-attached.
+ *
+ * `configJson` deliberately EXCLUDES identity/connectivity fields
+ * (instanceId, symbols) — a profile is applied to many instances, and symbol
+ * ownership is exclusive per account.
+ */
+export interface EaConfigProfile {
+  id: number;
+  name: string;
+  description?: string | null;
+  /** JSON object: knob name -> value. Absent knobs are left untouched on apply. */
+  configJson: string;
+  fieldCount: number;
+  capturedFromInstanceId?: string | null;
+  createdAt: string;
+  createdBy?: string | null;
+  lastAppliedAt?: string | null;
+  appliedCount: number;
+}
+
+/** Body for POST /admin/ea/profiles (create when `id` omitted, else update). */
+export interface SaveEaConfigProfileRequest {
+  id?: number;
+  name: string;
+  description?: string | null;
+  configJson: string;
+}
+
+/** Body for POST /admin/ea/{instanceId}/capture-profile. */
+export interface CaptureEaConfigProfileRequest {
+  instanceId: string;
+  name: string;
+  description?: string | null;
+}
+
+/** Body for POST /admin/ea/profiles/{id}/apply. */
+export interface ApplyEaConfigProfileRequest {
+  profileId?: number;
+  instanceIds: string[];
+}
+
+/**
+ * Result of applying a profile. Partial success is expected and normal: each
+ * target is independent, so one disconnected EA must not prevent the rest
+ * being configured. `failures` carries per-target detail.
+ */
+export interface ApplyProfileResult {
+  profileName: string;
+  fieldsApplied: number;
+  targets: string[];
+  failures: string[];
+}
+
 /** Returned by GET /admin/ea — one row per registered EA instance. */
 export interface EAFleetItem {
   instanceId: string;

@@ -2,6 +2,10 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from '@core/api/api.service';
 import type {
+  EaConfigProfile,
+  SaveEaConfigProfileRequest,
+  CaptureEaConfigProfileRequest,
+  ApplyProfileResult,
   AdminCommandQueueResult,
   AdminFleetCommandResult,
   CandleStreamSource,
@@ -236,6 +240,42 @@ export class EAAdminService {
     return this.api.post<ResponseData<AdminCommandQueueResult>>(
       `${this.base}/${encodeURIComponent(instanceId)}/retry-queue/purge`,
       this.withInstanceId(instanceId, body),
+    );
+  }
+
+  // ── Config profiles ──────────────────────────────────────────────────────
+
+  listConfigProfiles(): Observable<ResponseData<EaConfigProfile[]>> {
+    return this.api.get<ResponseData<EaConfigProfile[]>>(`${this.base}/profiles`);
+  }
+
+  saveConfigProfile(body: SaveEaConfigProfileRequest): Observable<ResponseData<EaConfigProfile>> {
+    return this.api.post<ResponseData<EaConfigProfile>>(`${this.base}/profiles`, body);
+  }
+
+  deleteConfigProfile(profileId: number): Observable<ResponseData<string>> {
+    return this.api.delete<ResponseData<string>>(`${this.base}/profiles/${profileId}`);
+  }
+
+  /** Snapshot an instance's EFFECTIVE config (post config_override replay) into a profile. */
+  captureConfigProfile(
+    instanceId: string,
+    body: Omit<CaptureEaConfigProfileRequest, 'instanceId'>,
+  ): Observable<ResponseData<EaConfigProfile>> {
+    return this.api.post<ResponseData<EaConfigProfile>>(
+      `${this.base}/${encodeURIComponent(instanceId)}/capture-profile`,
+      { ...body, instanceId },
+    );
+  }
+
+  /** Apply a profile to one or more instances. Partial success is reported per-target. */
+  applyConfigProfile(
+    profileId: number,
+    instanceIds: string[],
+  ): Observable<ResponseData<ApplyProfileResult>> {
+    return this.api.post<ResponseData<ApplyProfileResult>>(
+      `${this.base}/profiles/${profileId}/apply`,
+      { profileId, instanceIds },
     );
   }
 

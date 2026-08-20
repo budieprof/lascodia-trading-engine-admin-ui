@@ -36,6 +36,7 @@ import { EAStatePanelComponent } from '../../components/ea-state-panel/ea-state-
 import { EAAuditTimelineComponent } from '../../components/ea-audit-timeline/ea-audit-timeline.component';
 import { EAControlPanelComponent } from '../../components/ea-control-panel/ea-control-panel.component';
 import { EAConfigPanelComponent } from '../../components/ea-config-panel/ea-config-panel.component';
+import { EaConfigProfilePanelComponent } from '../../components/ea-config-profile-panel/ea-config-profile-panel.component';
 import { EAPositionsPanelComponent } from '../../components/ea-positions-panel/ea-positions-panel.component';
 import { EAPendingOrdersPanelComponent } from '../../components/ea-pending-orders-panel/ea-pending-orders-panel.component';
 import { EALogsPanelComponent } from '../../components/ea-logs-panel/ea-logs-panel.component';
@@ -74,6 +75,7 @@ interface ConfigForm {
     EAAuditTimelineComponent,
     EAControlPanelComponent,
     EAConfigPanelComponent,
+    EaConfigProfilePanelComponent,
     EAPositionsPanelComponent,
     EAPendingOrdersPanelComponent,
     EALogsPanelComponent,
@@ -926,6 +928,14 @@ interface ConfigForm {
           [inputs]="adminInputs()"
           [loading]="detailLoading()"
           (configPushed)="onCommandQueued('configPush')"
+        />
+
+        <!-- Named config profiles: capture this instance's effective config,
+             or apply a saved one. Exists because instance config previously
+             lived only as EA runtime state, which made fleet drift invisible. -->
+        <app-ea-config-profile-panel
+          [instanceId]="ea()!.instanceId"
+          (profileApplied)="onCommandQueued('configPush')"
         />
 
         <!-- Logs (Phase-9) + Audit timeline (Phase-2A) side-by-side on
