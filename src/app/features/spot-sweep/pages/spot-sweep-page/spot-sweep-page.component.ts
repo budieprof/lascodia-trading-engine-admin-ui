@@ -67,6 +67,31 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
           Kill switch is active — the sweep is halted regardless of its enabled state.
         </div>
       }
+      <!--
+        The worker runs on the llm role while this API is served by money-path, so the panel below
+        is a PUBLISHED snapshot rather than live in-process state. If nothing has published, the
+        numbers are meaningless and must not be shown as fact — an unreported panel and a genuinely
+        idle sweep look identical otherwise.
+      -->
+      @if (status(); as st) {
+        @if (st.statusStale) {
+          <div class="banner warn">
+            Sweep status is stale — no fresh report from the worker
+            @if (st.statusAgeSeconds !== null && st.statusAgeSeconds !== undefined) {
+              (last seen {{ st.statusAgeSeconds | number: '1.0-0' }}s ago)
+            }
+            . The counters below may not reflect what the worker is doing. The sweep worker runs on
+            the <code>llm</code> role; check that container is up and on the current build.
+          </div>
+        } @else if (st.reportedByRole) {
+          <div class="banner info subtle">
+            Status reported by the <code>{{ st.reportedByRole }}</code> process
+            @if (st.statusAgeSeconds !== null && st.statusAgeSeconds !== undefined) {
+              · {{ st.statusAgeSeconds | number: '1.0-0' }}s ago
+            }
+          </div>
+        }
+      }
 
       <!-- ───────── Live status ───────── -->
       @if (status(); as st) {

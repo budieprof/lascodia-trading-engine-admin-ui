@@ -149,6 +149,22 @@ export interface SpotSweepStatus {
   killSwitchActive: boolean;
   eligibleCount: number;
   excludedCount: number;
+
+  /**
+   * Which role-scoped process produced this snapshot (e.g. 'llm'). The sweep worker and the API
+   * are NOT in the same process, so the panel has to say where its numbers came from.
+   */
+  reportedByRole?: string | null;
+  /** ISO timestamp of the last publish. */
+  reportedAtUtc?: string | null;
+  /** Age of the snapshot in seconds. */
+  statusAgeSeconds?: number | null;
+  /**
+   * True when nothing fresh has reported. Without this, a panel that never received an update
+   * looks identical to a genuinely idle sweep — which is how a running worker read as "Idle,
+   * 0 eligible" indefinitely.
+   */
+  statusStale?: boolean;
   /** Pairs currently in the Hold cooldown — analysed recently, returned no signal. */
   holdCooldowns: SweepHoldCooldown[];
   /**
