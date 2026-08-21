@@ -158,6 +158,10 @@ export interface MartingaleChainViewDto {
   isStale: boolean;
   realisedPnl: number;
   ledger: MartingaleChainLedgerEntryDto[];
+  /** Depth implied by the ledger: the open, plus one per subsequent loss. */
+  ledgerDerivedDepth: number | null;
+  /** Stored depth disagrees with the trade history — an inflated depth writes a chain off early. */
+  depthDivergesFromLedger: boolean;
   nextRung: MartingaleNextRungDto | null;
 }
 

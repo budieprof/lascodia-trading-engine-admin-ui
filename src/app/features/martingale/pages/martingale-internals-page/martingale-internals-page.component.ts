@@ -277,6 +277,9 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                   {{ c.realisedPnl | number: '1.2-2' }} net
                 </span>
 
+                @if (c.depthDivergesFromLedger) {
+                  <span class="pill pill-bad">depth mismatch</span>
+                }
                 @if (c.isStale) {
                   <span class="pill pill-warn">stale</span>
                 }
@@ -314,6 +317,28 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                       </div>
                     }
                   </dl>
+
+                  @if (c.depthDivergesFromLedger) {
+                    <!--
+                      Not cosmetic: depth decides how close a chain is to its cap, and a chain at
+                      its cap is abandoned rather than staked. An inflated depth writes off a chain
+                      that still had headroom — possibly one that is winning.
+                    -->
+                    <div class="divergence">
+                      <h3>Stored depth disagrees with the ledger</h3>
+                      <p>
+                        This chain records <b>depth {{ c.depth }}</b
+                        >, but its trades show <b>depth {{ c.ledgerDerivedDepth }}</b> — one for the
+                        opening loss plus one per subsequent loss.
+                      </p>
+                      <p>
+                        Depth decides how close the chain is to its cap, and a chain at its cap is
+                        <b>abandoned rather than staked</b>. An inflated count writes off a chain
+                        that still had room to recover. The usual cause is rungs burned by closes
+                        that did not lose, before that was corrected.
+                      </p>
+                    </div>
+                  }
 
                   @if (c.nextRung; as r) {
                     <div
@@ -685,6 +710,26 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       }
       .pill-warn {
         border-color: var(--color-warning, #d69e2e);
+      }
+      .pill-bad {
+        border-color: var(--color-danger, #d64545);
+        color: var(--color-danger, #d64545);
+        font-weight: 600;
+      }
+
+      .divergence {
+        border: 1px solid var(--color-danger, #d64545);
+        border-left-width: 3px;
+        border-radius: 6px;
+        padding: 0.6rem 0.8rem;
+        margin-top: 0.9rem;
+      }
+      .divergence h3 {
+        margin-top: 0;
+        color: var(--color-danger, #d64545);
+      }
+      .divergence p {
+        margin: 0.25rem 0;
       }
 
       .pos {
