@@ -456,6 +456,7 @@ export class CommandPaletteComponent implements OnInit {
     { group: 'System', label: 'Audit Trail', route: '/audit-trail' },
     { group: 'System', label: 'Drawdown Recovery', route: '/drawdown-recovery' },
     { group: 'System', label: 'Martingale Ladders', route: '/martingale' },
+    { group: 'System', label: 'Martingale Internals', route: '/martingale/internals' },
     { group: 'System', label: 'Paper Trading', route: '/paper-trading' },
     { group: 'System', label: 'Economic Events', route: '/economic-events' },
 

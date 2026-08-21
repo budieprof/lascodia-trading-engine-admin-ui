@@ -7,5 +7,9 @@ export const MARTINGALE_ROUTES: Routes = [
   // Configuration and observation are separate jobs: the root page changes what the ladder WILL
   // do, this one explains what it HAS done. Keeping them apart stops a read-only investigation
   // from sharing a screen with switches that move money.
-  { path: 'internals', component: MartingaleInternalsPageComponent },
+  {
+    path: 'internals',
+    component: MartingaleInternalsPageComponent,
+    data: { breadcrumb: 'Internals' },
+  },
 ];

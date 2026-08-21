@@ -518,6 +518,16 @@ export class SidebarComponent {
         { label: 'Audit Trail', route: '/audit-trail', icon: '📜' },
         { label: 'Drawdown', route: '/drawdown-recovery', icon: '📉' },
         { label: 'Martingale', route: '/martingale', icon: '🪜', policy: 'Operator' },
+        // Separate entry rather than a sub-item: configuring the ladder and investigating
+        // what it did are different jobs, and the investigation is the one an operator
+        // reaches for under time pressure. Burying it one click inside the config screen
+        // made it findable only by someone who already knew it existed.
+        {
+          label: 'Martingale Internals',
+          route: '/martingale/internals',
+          icon: '🔬',
+          policy: 'Operator',
+        },
         { label: 'Paper Trading', route: '/paper-trading', icon: '🧪', policy: 'Operator' },
         {
           label: 'CME Microstructure',
