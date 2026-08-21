@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 
 import {
   MartingaleService,
@@ -28,6 +29,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     FormsModule,
+    RouterLink,
     DecimalPipe,
     PageHeaderComponent,
     CardSkeletonComponent,
@@ -38,6 +40,17 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       title="Martingale Ladders"
       subtitle="Per-symbol recovery ladders, opted in one account and one symbol at a time."
     />
+
+    <!--
+      This page configures what the ladder WILL do; the internals page explains what it HAS done.
+      The link sits at the top because "why is this chain at depth 3?" is usually the question
+      that brought an operator here in the first place.
+    -->
+    <p class="internals-link">
+      <a routerLink="/martingale/internals">
+        Open ladder internals → chains, ledgers and next-rung previews
+      </a>
+    </p>
 
     <!--
       The mode banner sits ABOVE the account picker on purpose: it is fleet-wide, so putting it
@@ -392,6 +405,11 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
     `
       :host {
         display: block;
+      }
+
+      .internals-link {
+        margin: 0 0 1rem;
+        font-size: 0.875rem;
       }
 
       /*

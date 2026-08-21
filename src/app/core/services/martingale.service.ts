@@ -105,6 +105,111 @@ export interface SetMartingaleSymbolRequest {
   reason?: string | null;
 }
 
+// ── Fleet-wide internals ─────────────────────────────────────────────────────
+
+/** One close that moved a chain, replayed from position history. */
+export interface MartingaleChainLedgerEntryDto {
+  positionId: number;
+  direction: string;
+  lots: number;
+  realisedPnl: number;
+  closedAtUtc: string | null;
+  closePrice: number | null;
+  /** Deficit after this close, replayed from the chain's opening balance. */
+  runningDeficit: number;
+  /** Loss | Win | Scratch. */
+  outcome: string;
+  /** Only losses cost a rung — depth counts attempts that lost. */
+  burnedARung: boolean;
+  openedTheChain: boolean;
+}
+
+/** The rung a chain would stake next, and the first thing that would stop it. */
+export interface MartingaleNextRungDto {
+  depth: number;
+  amountToRecover: number;
+  stakeMultiple: number;
+  stakePctEquity: number;
+  bindingConstraint: string | null;
+  wouldAbandon: boolean;
+  /** Serialisation: something is already live on the symbol. */
+  blockedBy: string | null;
+}
+
+export interface MartingaleChainViewDto {
+  id: number;
+  tradingAccountId: number;
+  accountName: string;
+  symbol: string;
+  status: string;
+  depth: number;
+  maxDepth: number;
+  /** Positive is owed; NEGATIVE is surplus banked toward the target. */
+  deficitAmount: number;
+  targetAmount: number;
+  baseStakeAmount: number;
+  openedAtUtc: string;
+  lastAdvancedAtUtc: string;
+  closedAtUtc: string | null;
+  closureReason: string | null;
+  lastPositionId: number | null;
+  ageHours: number;
+  maxChainAgeHours: number;
+  isStale: boolean;
+  realisedPnl: number;
+  ledger: MartingaleChainLedgerEntryDto[];
+  nextRung: MartingaleNextRungDto | null;
+}
+
+export interface MartingaleSweeperStateDto {
+  enabled: boolean;
+  intervalSeconds: number;
+  staleAfterMinutes: number;
+  openLookbackMinutes: number;
+  openSettleSeconds: number;
+  maxChainsPerCycle: number;
+  chainsCurrentlyStale: number;
+}
+
+export interface MartingaleTotalsDto {
+  openChains: number;
+  recoveredChains: number;
+  abandonedChains: number;
+  outstandingDeficit: number;
+  bankedSurplus: number;
+  abandonedDeficit: number;
+  lifetimeRealisedPnl: number;
+}
+
+export interface MartingaleLadderedSymbolDto {
+  tradingAccountId: number;
+  accountName: string;
+  symbol: string;
+  enabled: boolean;
+  profileEnabled: boolean;
+  effectivelyActive: boolean;
+  effectiveMaxDepth: number;
+  effectiveTargetProfitR: number;
+  effectiveMaxStakePctEquity: number;
+  effectiveMaxChainAgeHours: number;
+  abandonAtCap: boolean;
+  accountEquity: number;
+  worstCaseDrawdownPct: number;
+  openChainId: number | null;
+  openPositions: number;
+  ordersInFlight: number;
+}
+
+export interface MartingaleOverviewDto {
+  mode: MartingaleMode;
+  modeExplicitlySet: boolean;
+  generatedAtUtc: string;
+  sweeper: MartingaleSweeperStateDto;
+  totals: MartingaleTotalsDto;
+  chains: MartingaleChainViewDto[];
+  ladderedSymbols: MartingaleLadderedSymbolDto[];
+}
+
 /**
  * Per-symbol recovery ladder controls.
  *
@@ -114,6 +219,23 @@ export interface SetMartingaleSymbolRequest {
 @Injectable({ providedIn: 'root' })
 export class MartingaleService {
   private readonly api = inject(ApiService);
+
+  /**
+   * Everything the ladder module is doing, fleet-wide. Read-only and derived — the chain ledgers
+   * are replayed from position history because a chain row keeps only running totals.
+   */
+  getOverview(opts?: {
+    maxChains?: number;
+    status?: string;
+    accountId?: number;
+  }): Observable<MartingaleOverviewDto> {
+    const params = new URLSearchParams();
+    if (opts?.maxChains != null) params.set('maxChains', String(opts.maxChains));
+    if (opts?.status) params.set('status', opts.status);
+    if (opts?.accountId != null) params.set('accountId', String(opts.accountId));
+    const qs = params.toString();
+    return this.api.getEnvelope<MartingaleOverviewDto>(`/martingale/overview${qs ? `?${qs}` : ''}`);
+  }
 
   getSymbols(accountId: number): Observable<MartingaleAccountSymbolsDto> {
     return this.api.getEnvelope<MartingaleAccountSymbolsDto>(
