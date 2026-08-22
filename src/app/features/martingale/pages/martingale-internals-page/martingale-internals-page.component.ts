@@ -420,11 +420,16 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                                 @if (e.openedTheChain) {
                                   <span class="pill">opened the chain</span>
                                 } @else if (e.burnedARung) {
-                                  <span class="pill pill-warn">burned a rung</span>
+                                  <span class="pill pill-warn">lost — burned a rung</span>
                                 } @else if (e.outcome === 'Win') {
-                                  <span class="pill pill-on">paid down, depth held</span>
+                                  <!--
+                                    A win that did not fully recover the chain still escalates:
+                                    only a full recovery ends a ladder, so a partial win is a
+                                    failed attempt that happened to close green.
+                                  -->
+                                  <span class="pill pill-warn">paid down — burned a rung</span>
                                 } @else {
-                                  <span class="pill">scratch, depth held</span>
+                                  <span class="pill">scratch — depth held</span>
                                 }
                               </td>
                             </tr>
@@ -433,10 +438,12 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                       </table>
                     </div>
                     <p class="foot">
-                      Depth is the escalation budget and counts attempts that <b>lost</b> — wins and
-                      scratches hold it. The running balance is replayed from the chain's opening
-                      loss; if its last row disagrees with the header, the stored total and the
-                      position history have diverged.
+                      Depth is the escalation budget. Only a <b>full recovery</b> ends a ladder, so
+                      every close that falls short escalates it — a win that merely paid some of the
+                      debt burns a rung just as a loss does. Only an exact break-even holds. The
+                      running balance is replayed from the chain's opening loss; if its last row
+                      disagrees with the header, the stored total and the position history have
+                      diverged.
                     </p>
                   }
                 </div>
