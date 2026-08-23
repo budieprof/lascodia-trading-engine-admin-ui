@@ -135,6 +135,12 @@ export const routes: Routes = [
           import('@features/spot-sweep/spot-sweep.routes').then((m) => m.SPOT_SWEEP_ROUTES),
       },
       {
+        path: 'news-intel',
+        data: { breadcrumb: 'News Intelligence' },
+        loadChildren: () =>
+          import('@features/news-intel/news-intel.routes').then((m) => m.NEWS_INTEL_ROUTES),
+      },
+      {
         path: 'spread-reactive',
         data: { breadcrumb: 'Spread-Reactive' },
         loadChildren: () =>
