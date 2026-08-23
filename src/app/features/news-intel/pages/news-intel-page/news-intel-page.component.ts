@@ -257,16 +257,25 @@ import {
             @if (f.quoteCurrency) {
               <div class="bias">
                 <span class="bias-label">Pair bias</span>
-                <span
-                  class="bias-value mono"
-                  [class.pos]="ctx.pairBias > 0.02"
-                  [class.neg]="ctx.pairBias < -0.02"
-                >
-                  {{ ctx.pairBias > 0 ? '+' : '' }}{{ ctx.pairBias | number: '1.3-3' }}
-                </span>
-                <span class="muted small">
-                  base − quote; positive favours a long {{ focusSymbol() }}. Context, not a signal.
-                </span>
+                @if (ctx.pairBias !== null) {
+                  <span
+                    class="bias-value mono"
+                    [class.pos]="ctx.pairBias > 0.02"
+                    [class.neg]="ctx.pairBias < -0.02"
+                  >
+                    {{ ctx.pairBias > 0 ? '+' : '' }}{{ ctx.pairBias | number: '1.3-3' }}
+                  </span>
+                  <span class="muted small">
+                    base − quote; positive favours a long {{ focusSymbol() }}. Context, not a
+                    signal.
+                  </span>
+                } @else {
+                  <span class="bias-value mono muted">n/a</span>
+                  <span class="muted small">
+                    one leg is not a tracked currency, so there is no second score to subtract —
+                    read the legs individually.
+                  </span>
+                }
               </div>
             }
 

@@ -45,8 +45,14 @@ export interface NewsPressureLeg {
 export interface NewsPressureContext {
   baseLeg: NewsPressureLeg | null;
   quoteLeg: NewsPressureLeg | null;
-  /** base − quote, squashed. Positive favours a long. */
-  pairBias: number;
+  /**
+   * base − quote, squashed. Positive favours a long.
+   *
+   * Null when the difference cannot be meant: a single-currency request, or a leg whose code
+   * the module does not track (the base of "XAUUSD"). A tracked leg that is merely quiet
+   * counts as zero and keeps this non-null.
+   */
+  pairBias: number | null;
   asOfNote: string;
   /** Scores computed under different fingerprints are not comparable. */
   paramsFingerprint: string;
