@@ -12,10 +12,12 @@ import { SpotSweepService } from '@core/services/spot-sweep.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 import {
+  ALL_WEEK_DAYS,
   SpotSweepConfig,
   SweepBarPosition,
   SweepLastResult,
   SweepSession,
+  WeekDay,
 } from '@features/spot-sweep/spot-sweep.types';
 import { SignalExposureControlsComponent } from '@features/spot-sweep/components/signal-exposure-controls/signal-exposure-controls.component';
 import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symbol-cap-controls/symbol-cap-controls.component';
@@ -397,6 +399,84 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
                   During this window each day the sweep parks entirely — no LLM analyses, no signal
                   generation. Overrides the session windows and wraps past midnight when needed
                   (22:00 for 2h = 10 PM to midnight). Manual Spot Analysis is unaffected.
+                </span>
+              </div>
+
+              <!-- Weekly signal blackout — the once-a-week multi-day quiet
+                 window, primarily the FX weekend close. Evaluated on a
+                 minute-of-week line in the chosen timezone, so a window whose
+                 end lands before its start simply wraps the week boundary
+                 (Fri 22:00 → Sun 22:00). Overrides both the session windows
+                 and the daily blackout. -->
+              <div class="field">
+                <label class="inline-check">
+                  <input
+                    type="checkbox"
+                    [checked]="cfg.weeklyBlackoutEnabled"
+                    (change)="patch({ weeklyBlackoutEnabled: $any($event.target).checked })"
+                  />
+                  <span><strong>Weekly signal blackout</strong></span>
+                </label>
+                @if (cfg.weeklyBlackoutEnabled) {
+                  <div class="blackout-row">
+                    <span class="muted small">from</span>
+                    <select
+                      [value]="cfg.weeklyBlackoutStartDay"
+                      (change)="setWeeklyDay('start', $any($event.target).value)"
+                    >
+                      @for (d of allWeekDays; track d) {
+                        <option [value]="d" [selected]="cfg.weeklyBlackoutStartDay === d">
+                          {{ d }}
+                        </option>
+                      }
+                    </select>
+                    <input
+                      type="time"
+                      [value]="cfg.weeklyBlackoutStartTime"
+                      (change)="setWeeklyTime('start', $any($event.target).value)"
+                    />
+                    <span class="muted small">to</span>
+                    <select
+                      [value]="cfg.weeklyBlackoutEndDay"
+                      (change)="setWeeklyDay('end', $any($event.target).value)"
+                    >
+                      @for (d of allWeekDays; track d) {
+                        <option [value]="d" [selected]="cfg.weeklyBlackoutEndDay === d">
+                          {{ d }}
+                        </option>
+                      }
+                    </select>
+                    <input
+                      type="time"
+                      [value]="cfg.weeklyBlackoutEndTime"
+                      (change)="setWeeklyTime('end', $any($event.target).value)"
+                    />
+                    <select
+                      [value]="cfg.weeklyBlackoutTimezone"
+                      (change)="patch({ weeklyBlackoutTimezone: $any($event.target).value })"
+                    >
+                      @for (tz of blackoutTimezones; track tz.id) {
+                        <option [value]="tz.id" [selected]="cfg.weeklyBlackoutTimezone === tz.id">
+                          {{ tz.label }}
+                        </option>
+                      }
+                    </select>
+                  </div>
+                  <p class="muted small">
+                    @if (weeklyBlackoutInvalid()) {
+                      <span class="warn-text"
+                        >Start and end are the same instant — that would halt the sweep all week, so
+                        the engine ignores the window. Pick a different end.</span
+                      >
+                    } @else {
+                      Sweep halts for {{ weeklyBlackoutDurationLabel() }} each week.
+                    }
+                  </p>
+                }
+                <span class="muted small">
+                  A once-a-week halt for the market close — default Friday 22:00 → Sunday 22:00 WAT
+                  covers the FX weekend. Wraps the week boundary, overrides the session windows and
+                  the daily blackout. Manual Spot Analysis is unaffected.
                 </span>
               </div>
 
@@ -1230,7 +1310,10 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
       }
       .blackout-row select {
         width: auto;
-        min-width: 180px;
+        min-width: 120px;
+      }
+      .warn-text {
+        color: var(--warning, #b45309);
       }
       .inline-check {
         display: flex;
@@ -1747,6 +1830,13 @@ export class SpotSweepPageComponent implements OnDestroy {
           blackoutStart: cfg.blackoutStart || '22:00',
           blackoutEnd: cfg.blackoutEnd || '00:00',
           blackoutTimezone: cfg.blackoutTimezone || 'Africa/Lagos',
+          // Weekly blackout fields for configs saved before the feature existed.
+          weeklyBlackoutEnabled: cfg.weeklyBlackoutEnabled ?? false,
+          weeklyBlackoutStartDay: cfg.weeklyBlackoutStartDay || 'Friday',
+          weeklyBlackoutStartTime: cfg.weeklyBlackoutStartTime || '22:00',
+          weeklyBlackoutEndDay: cfg.weeklyBlackoutEndDay || 'Sunday',
+          weeklyBlackoutEndTime: cfg.weeklyBlackoutEndTime || '22:00',
+          weeklyBlackoutTimezone: cfg.weeklyBlackoutTimezone || 'Africa/Lagos',
           // Patient-hunter fields for configs saved before the feature existed.
           hunterEnabled: cfg.hunterEnabled ?? false,
           hunterMaxActiveMonitors: cfg.hunterMaxActiveMonitors ?? 20,
@@ -1883,6 +1973,63 @@ export class SpotSweepPageComponent implements OnDestroy {
         SpotSweepPageComponent.hhmmToMinutes(c.blackoutStart) + total,
       ),
     });
+  }
+
+  // ── Weekly blackout: (day, time) → (day, time) in the chosen timezone,
+  // evaluated server-side on a minute-of-week line. The UI keeps all four
+  // fields free-form — a window whose end precedes its start simply wraps the
+  // week — and only flags the one degenerate case the engine fails open on
+  // (start == end, which would read as a permanent 7-day halt).
+  readonly allWeekDays: WeekDay[] = ALL_WEEK_DAYS;
+
+  private static minuteOfWeek(day: WeekDay | undefined, hhmm: string | undefined): number {
+    const dayIdx = Math.max(0, ALL_WEEK_DAYS.indexOf((day ?? 'Sunday') as WeekDay));
+    return dayIdx * 1440 + SpotSweepPageComponent.hhmmToMinutes(hhmm);
+  }
+
+  setWeeklyDay(edge: 'start' | 'end', raw: string): void {
+    const day = (ALL_WEEK_DAYS as string[]).includes(raw) ? (raw as WeekDay) : 'Friday';
+    this.patch(edge === 'start' ? { weeklyBlackoutStartDay: day } : { weeklyBlackoutEndDay: day });
+  }
+
+  setWeeklyTime(edge: 'start' | 'end', raw: string): void {
+    const t = /^(\d{1,2}):(\d{2})$/.test(raw)
+      ? SpotSweepPageComponent.minutesToHHmm(SpotSweepPageComponent.hhmmToMinutes(raw))
+      : '22:00';
+    this.patch(edge === 'start' ? { weeklyBlackoutStartTime: t } : { weeklyBlackoutEndTime: t });
+  }
+
+  /** True for the degenerate zero-span window the engine refuses to apply. */
+  weeklyBlackoutInvalid(): boolean {
+    const c = this.config();
+    if (!c) return false;
+    return (
+      SpotSweepPageComponent.minuteOfWeek(c.weeklyBlackoutStartDay, c.weeklyBlackoutStartTime) ===
+      SpotSweepPageComponent.minuteOfWeek(c.weeklyBlackoutEndDay, c.weeklyBlackoutEndTime)
+    );
+  }
+
+  /** "2d 0h" — the halt length, wrapping the week boundary the way the engine does. */
+  weeklyBlackoutDurationLabel(): string {
+    const c = this.config();
+    if (!c) return '';
+    const start = SpotSweepPageComponent.minuteOfWeek(
+      c.weeklyBlackoutStartDay,
+      c.weeklyBlackoutStartTime,
+    );
+    const end = SpotSweepPageComponent.minuteOfWeek(
+      c.weeklyBlackoutEndDay,
+      c.weeklyBlackoutEndTime,
+    );
+    const total = (end - start + 10080) % 10080 || 10080;
+    const d = Math.floor(total / 1440);
+    const h = Math.floor((total % 1440) / 60);
+    const m = total % 60;
+    const parts: string[] = [];
+    if (d) parts.push(`${d}d`);
+    if (h) parts.push(`${h}h`);
+    if (m || parts.length === 0) parts.push(`${m}m`);
+    return parts.join(' ');
   }
 
   isSessionSelected(name: SweepSession): boolean {

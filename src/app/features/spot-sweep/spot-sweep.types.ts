@@ -81,6 +81,26 @@ export interface SpotSweepConfig {
   /** IANA timezone id, e.g. "Africa/Lagos" (WAT) or "UTC". */
   blackoutTimezone: string;
 
+  /**
+   * Weekly signal blackout: a once-a-week multi-day window — primarily the
+   * FX weekend close (Friday evening → Sunday evening). While the local time
+   * (in weeklyBlackoutTimezone) is inside it the sweep parks entirely,
+   * overriding both the session windows and the daily blackout. An (end day,
+   * end time) at or before the start wraps past the week boundary.
+   * Operator-initiated Spot Analysis is unaffected.
+   */
+  weeklyBlackoutEnabled: boolean;
+  /** Day the window opens, e.g. "Friday". */
+  weeklyBlackoutStartDay: WeekDay;
+  /** "HH:mm" local time in weeklyBlackoutTimezone. */
+  weeklyBlackoutStartTime: string;
+  /** Day the window closes, e.g. "Sunday". */
+  weeklyBlackoutEndDay: WeekDay;
+  /** "HH:mm" local time; (day, time) <= start wraps past the week boundary. */
+  weeklyBlackoutEndTime: string;
+  /** IANA timezone id, e.g. "Africa/Lagos" (WAT) or "UTC". */
+  weeklyBlackoutTimezone: string;
+
   // ── Patient-hunter mode ────────────────────────────────────────────────
   /** Master switch; per-pair opt-in via {@link SweepPair.hunter}. */
   hunterEnabled: boolean;
@@ -95,6 +115,25 @@ export interface SpotSweepConfig {
   /** Ceiling (hours) on monitor expiry the LLM may request; clamped to [1, this]. */
   hunterMaxExpiryHours: number;
 }
+
+/** Day-of-week names the engine parses (invariant English DayOfWeek names). */
+export type WeekDay =
+  | 'Sunday'
+  | 'Monday'
+  | 'Tuesday'
+  | 'Wednesday'
+  | 'Thursday'
+  | 'Friday'
+  | 'Saturday';
+export const ALL_WEEK_DAYS: WeekDay[] = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
 
 export type SweepSession = 'Sydney' | 'Tokyo' | 'London' | 'NewYork';
 export const ALL_SWEEP_SESSIONS: SweepSession[] = ['Sydney', 'Tokyo', 'London', 'NewYork'];
@@ -248,6 +287,15 @@ export const DEFAULT_SWEEP_CONFIG: SpotSweepConfig = {
   blackoutStart: '22:00',
   blackoutEnd: '00:00',
   blackoutTimezone: 'Africa/Lagos',
+  // Weekly blackout ships disabled; the defaults describe the FX weekend
+  // close in WAT (Fri 22:00 → Sun 22:00 local = 21:00 UTC either side), so
+  // enabling the weekend halt is a single checkbox.
+  weeklyBlackoutEnabled: false,
+  weeklyBlackoutStartDay: 'Friday',
+  weeklyBlackoutStartTime: '22:00',
+  weeklyBlackoutEndDay: 'Sunday',
+  weeklyBlackoutEndTime: '22:00',
+  weeklyBlackoutTimezone: 'Africa/Lagos',
   // Patient hunter ships off; enabling is the master switch + per-pair opt-in.
   hunterEnabled: false,
   hunterMaxActiveMonitors: 20,
