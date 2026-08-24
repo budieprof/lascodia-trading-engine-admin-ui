@@ -351,10 +351,12 @@ interface ConfigForm {
           </section>
 
           <!-- ── Spread pad toggle ────────────────────────────────────────
-             Per-account opt-out for SpreadPadder. AND-ed under the hood
-             with the engine-wide SpreadReactive:Pad:Enabled master — either
-             off skips the pad for this account. Defaults on. Hot-reloads
-             via EngineConfigCache on the next pad evaluation. -->
+             Per-account opt-out for SpreadPadder (bid-anchored exit sync:
+             entry never moves; shorts SL/TP + floor, pending longs TP −
+             floor). AND-ed under the hood with the engine-wide
+             SpreadReactive:Pad:Enabled master — either off skips the pad
+             for this account. Hot-reloads via EngineConfigCache on the
+             next pad evaluation. -->
           <section
             class="fill-mode-panel"
             [attr.data-mode]="
@@ -378,12 +380,13 @@ interface ConfigForm {
               </div>
               <span class="fm-desc muted small">
                 @if ((spreadPadDraft() ?? spreadPadServer()) === true) {
-                  SpreadPadder shifts entry/SL/TP by the per-(account, symbol) floor before
-                  placement (long pads entry+SL down, short pads entry+TP up). Engine-wide master
-                  must also be on for the pad to fire.
+                  Sync pad: exits are shifted by the per-(account, symbol) floor so they trigger
+                  when the CHART (bid) touches the analyser's levels — shorts get SL &amp; TP lifted
+                  (no more spread-spike stop-outs), pending longs get TP lowered. Entry is never
+                  moved. Engine-wide master must also be on for the pad to fire.
                 } @else if ((spreadPadDraft() ?? spreadPadServer()) === false) {
-                  Padding disabled for this account — signals reach the broker at the analyser's
-                  original levels regardless of the engine-wide master.
+                  Padding disabled for this account — exits reach the broker at the analyser's
+                  original levels, so short SL/TP will trigger a full spread early (ask-triggered).
                 } @else {
                   Loading…
                 }
@@ -447,7 +450,8 @@ interface ConfigForm {
                       per-account override.
                     }
                     Floor captures the calm spread (≈p50); spikes hit 2-3× on real brokers, so raise
-                    to 2.5-3.5 on live broker accounts to absorb upper-tail spread.
+                    to 2.5-3.5 on live broker accounts so short stops stay clear of upper-tail
+                    spread.
                   </span>
                 </div>
               }

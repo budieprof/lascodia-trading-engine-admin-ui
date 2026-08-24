@@ -71,9 +71,10 @@ import type { SpreadReactiveConfig } from '@features/spread-reactive/spread-reac
               <span class="spm-section-name">Enable spread padding (engine-wide)</span>
             </label>
             <p class="spm-desc muted small">
-              When on, the engine pads signal entry/SL/TP by the per-(account, symbol)
-              <code>SpreadBaselineFloor</code> before placement (longs pad entry+SL down; shorts pad
-              entry+TP up). Off skips the pad regardless of any per-EA opt-in.
+              When on, the engine shifts signal EXITS by the per-(account, symbol)
+              <code>SpreadBaselineFloor</code> before placement so they trigger when the chart (bid)
+              touches the analyser's levels (shorts: SL &amp; TP lifted; pending longs: TP lowered;
+              entry never moves). Off skips the pad regardless of any per-EA opt-in.
             </p>
           </div>
 

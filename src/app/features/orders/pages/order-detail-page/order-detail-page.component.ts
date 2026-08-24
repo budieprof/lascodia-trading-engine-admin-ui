@@ -297,7 +297,9 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
               </div>
 
               <!-- Spread pad card — only visible when the SpreadPadder
-                   shifted this order's entry/SL/TP at placement time. -->
+                   shifted this order's levels at placement time.  Current
+                   (sync) pad shifts EXITS only; legacy harvest-pad orders
+                   carry originalSignalEntry and keep the entry comparison. -->
               @if (order()!.spreadPadFloorUsed !== null) {
                 <div class="detail-card pad-card">
                   <div class="card-header">
@@ -305,23 +307,32 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                     <span class="pad-pill">Floor padded</span>
                   </div>
                   <p class="pad-blurb">
-                    The signal-entry pad shifted this order toward the SL by the persistent
-                    spread-baseline floor for {{ order()!.symbol }}/{{ order()!.tradingAccountId }}.
-                    Compare the analyser's original entry against the broker-placed price below.
+                    @if (order()!.originalSignalEntry !== null) {
+                      Legacy harvest pad: the entry was shifted toward the SL by the persistent
+                      spread-baseline floor for
+                      {{ order()!.symbol }}/{{ order()!.tradingAccountId }}. Compare the analyser's
+                      original entry against the broker-placed price below.
+                    } @else {
+                      Sync pad: the exits were shifted by the persistent spread-baseline floor for
+                      {{ order()!.symbol }}/{{ order()!.tradingAccountId }} so they trigger when the
+                      chart (bid) touches the analyser's levels. The entry was not moved.
+                    }
                   </p>
                   <div class="detail-grid-3">
-                    <div class="detail-item">
-                      <span class="detail-label">Original signal entry</span>
-                      <span class="detail-value mono">{{
-                        order()!.originalSignalEntry !== null
-                          ? (order()!.originalSignalEntry! | number: '1.5-5')
-                          : '-'
-                      }}</span>
-                    </div>
-                    <div class="detail-item">
-                      <span class="detail-label">Padded entry (placed)</span>
-                      <span class="detail-value mono">{{ order()!.price | number: '1.5-5' }}</span>
-                    </div>
+                    @if (order()!.originalSignalEntry !== null) {
+                      <div class="detail-item">
+                        <span class="detail-label">Original signal entry</span>
+                        <span class="detail-value mono">{{
+                          order()!.originalSignalEntry! | number: '1.5-5'
+                        }}</span>
+                      </div>
+                      <div class="detail-item">
+                        <span class="detail-label">Padded entry (placed)</span>
+                        <span class="detail-value mono">{{
+                          order()!.price | number: '1.5-5'
+                        }}</span>
+                      </div>
+                    }
                     <div class="detail-item">
                       <span class="detail-label">Floor used</span>
                       <span class="detail-value mono">{{
@@ -329,20 +340,20 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                       }}</span>
                     </div>
                     <div class="detail-item">
-                      <span class="detail-label">Pad direction</span>
+                      <span class="detail-label">Pad shape</span>
                       <span class="detail-value">
-                        @if (
-                          order()!.originalSignalEntry !== null &&
-                          order()!.price > order()!.originalSignalEntry!
-                        ) {
-                          Entry &amp; TP shifted up (Short)
-                        } @else if (
-                          order()!.originalSignalEntry !== null &&
-                          order()!.price < order()!.originalSignalEntry!
-                        ) {
-                          Entry &amp; SL shifted down (Long)
+                        @if (order()!.originalSignalEntry !== null) {
+                          {{
+                            isBuy()
+                              ? 'Entry & SL shifted down (Long)'
+                              : 'Entry & TP shifted up (Short)'
+                          }}
                         } @else {
-                          -
+                          {{
+                            isBuy()
+                              ? 'TP lowered by floor (entry/SL par)'
+                              : 'SL & TP lifted by floor (entry par)'
+                          }}
                         }
                       </span>
                     </div>
