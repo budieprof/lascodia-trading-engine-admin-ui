@@ -25,6 +25,16 @@ export interface NewsPressureItem {
   ageMinutes: number;
   /** Final decayed weight, 0–1. */
   weight: number;
+  /**
+   * What the tape did in the hour after publication: `NotMeasured` (window still open, or no
+   * strength history covers it), `Muted`, `Confirmed`, `Contradicted`. Only `Muted` and
+   * `Contradicted` reduce the weight — confirmation is reported but never amplifies, because
+   * a move in the labelled direction cannot distinguish a repricing that is starting from one
+   * that is ending.
+   */
+  marketResponse: string;
+  /** The realised currency-strength move behind that verdict, or null when unmeasured. */
+  marketResponsePct: number | null;
 }
 
 /** One currency leg's pressure. */
@@ -39,6 +49,14 @@ export interface NewsPressureLeg {
   storyCount: number;
   dominantCategory: string | null;
   topItems: NewsPressureItem[];
+  /** Directional contributors whose post-publication window had closed. */
+  responseMeasured: number;
+  /** …of those, how many the market did not move on. A high share means the score rests on news already discounted. */
+  responseMuted: number;
+  /** …how many the currency moved WITH. */
+  responseConfirmed: number;
+  /** …how many the currency moved AGAINST. */
+  responseContradicted: number;
 }
 
 /** The block exactly as the analysis prompt would carry it. */
@@ -229,10 +247,16 @@ export const NEWS_CONFIG_SECTIONS: { match: string; title: string; blurb: string
     blurb: 'Whether and how the block reaches the spot-analysis prompt.',
   },
   {
+    match: 'Weight:Response',
+    title: 'Market response',
+    blurb:
+      'What the tape did in the hour after a story, folded in as damping ONLY. A story the market ignored counts for less; one it moved against counts for less still; one it moved with is reported but never amplified — confirmation cannot tell a repricing that is starting from one that is ending. Set the muted factor to 1.0 to switch the damping off while still reporting the verdict.',
+  },
+  {
     match: 'Weight:',
     title: 'Weight formula',
     blurb:
-      'Every term of the score. weight = severity × source reliability × certainty × novelty × relevance × confidence × decay × corroboration. Changing any of these re-scores everything on the next roll-up.',
+      'Every term of the score. weight = severity × source reliability × certainty × novelty × relevance × confidence × decay × corroboration × market response. Changing any of these re-scores everything on the next roll-up.',
   },
   {
     match: 'Retention:',

@@ -10,6 +10,7 @@ import {
   NewsConfigEntry,
   NewsFocusResult,
   NewsPressureLeg,
+  NewsPressureItem,
 } from '@features/news-intel/news-intel.types';
 
 /**
@@ -193,7 +194,28 @@ import {
                       <dt>Dominant</dt>
                       <dd>{{ leg.dominantCategory || '—' }}</dd>
                     </div>
+                    <div>
+                      <dt>Tape</dt>
+                      <dd
+                        class="mono"
+                        title="Of the directional stories whose post-publication hour has closed: how many the market moved on, and how many it ignored"
+                      >
+                        @if (leg.responseMeasured) {
+                          {{ leg.responseConfirmed }}✓ / {{ leg.responseContradicted }}✗ /
+                          {{ leg.responseMuted }}—
+                        } @else {
+                          not yet measurable
+                        }
+                      </dd>
+                    </div>
                   </dl>
+
+                  @if (isMostlyDiscounted(leg)) {
+                    <p class="conflict small">
+                      Most of this score rests on stories the market did not move on — already
+                      priced, or ignored. Read the number quietly.
+                    </p>
+                  }
 
                   @if (isConflicted(leg)) {
                     <p class="conflict small">
@@ -233,6 +255,15 @@ import {
                                 [title]="certaintyHint(item.certainty)"
                                 >{{ item.certainty }}</span
                               >
+                              @if (item.marketResponse !== 'NotMeasured') {
+                                <span
+                                  class="tag subtle"
+                                  [class.echo]="item.marketResponse === 'Muted'"
+                                  [class.rumor]="item.marketResponse === 'Contradicted'"
+                                  [title]="responseHint(item)"
+                                  >{{ item.marketResponse }}</span
+                                >
+                              }
                               @if (item.novelty !== 'New') {
                                 <span
                                   class="tag subtle echo"
@@ -384,9 +415,7 @@ import {
                   </div>
                   <span class="muted xsmall">{{ ch.publishers }} publisher(s)</span>
                   <span class="muted xsmall">
-                    newest {{ ch.newest | date: 'MMM d HH:mm' }} ({{
-                      formatAge(ch.staleMinutes)
-                    }}
+                    newest {{ ch.newest | date: 'MMM d HH:mm' }} ({{ formatAge(ch.staleMinutes) }}
                     ago)
                     @if (ch.stale) {
                       — stale
@@ -1364,6 +1393,35 @@ export class NewsIntelPageComponent {
    */
   isConflicted(leg: NewsPressureLeg): boolean {
     return Math.abs(leg.score) < 0.05 && leg.absolutePressure > 0.25;
+  }
+
+  /**
+   * True when most of this leg's MEASURED stories drew no market response.
+   *
+   * <para>Scored over the measured subset, not every contributor: a leg whose stories are all
+   * too fresh to have a verdict is not "discounted", it is unknown, and warning about it would
+   * teach the operator to ignore the warning.</para>
+   */
+  isMostlyDiscounted(leg: NewsPressureLeg): boolean {
+    return leg.responseMeasured >= 3 && leg.responseMuted / leg.responseMeasured > 0.6;
+  }
+
+  responseHint(item: NewsPressureItem): string {
+    const move =
+      item.marketResponsePct === null
+        ? ''
+        : ` Realised move ${item.marketResponsePct > 0 ? '+' : ''}${item.marketResponsePct}.`;
+
+    switch (item.marketResponse) {
+      case 'Muted':
+        return `The market did not move in the hour after this published — priced in, or nobody cared. Weight reduced.${move}`;
+      case 'Contradicted':
+        return `Price moved AGAINST this reading. Either the label is wrong or the market disagrees; both are reasons to trust it less. Weight reduced.${move}`;
+      case 'Confirmed':
+        return `Price moved as labelled. Consistent, but NOT extra evidence — it cannot tell a repricing that is starting from one that is ending, so the weight is unchanged.${move}`;
+      default:
+        return 'The hour after publication has not closed yet, or no strength history covers it. Not a quiet tape — simply unknown.';
+    }
   }
 
   /** Half-width bar: score is already bounded to [−1, 1], so 50% is full deflection. */
