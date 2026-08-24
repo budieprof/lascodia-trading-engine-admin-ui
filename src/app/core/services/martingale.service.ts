@@ -134,6 +134,22 @@ export interface MartingaleNextRungDto {
   wouldAbandon: boolean;
   /** Serialisation: something is already live on the symbol. */
   blockedBy: string | null;
+
+  /**
+   * Approximate rung size in lots, from the last close's size and entry geometry. The money caps
+   * are exact, but the broker's lot ceiling only exists in lot space — which needs a signal that
+   * does not exist yet, hence an estimate. Null when the chain has no usable close.
+   */
+  estimatedRungLots: number | null;
+  /** This account's broker lot ceiling for the symbol. Null when unreported. */
+  brokerMaxLotSize: number | null;
+  /** What the estimate was derived from — position id, lots, geometry. */
+  estimateBasis: string | null;
+  /**
+   * The estimated rung exceeds the broker ceiling: sizing will SKIP the rung and trade base
+   * size. The chain stays open without escalating — distinct from wouldAbandon, which ends it.
+   */
+  rungWillBeSkipped: boolean;
 }
 
 export interface MartingaleChainViewDto {
@@ -163,6 +179,13 @@ export interface MartingaleChainViewDto {
   /** Stored depth disagrees with the trade history — an inflated depth writes a chain off early. */
   depthDivergesFromLedger: boolean;
   nextRung: MartingaleNextRungDto | null;
+
+  /** When sizing last computed a LIVE rung and refused to place it (UTC). Null when never. */
+  lastRungSkippedAtUtc: string | null;
+  /** Why — the computed lots and the ceiling that bound. */
+  lastRungSkipReason: string | null;
+  /** Skip episodes recorded (debounced — roughly one per minute a signal stays refused). */
+  rungSkipCount: number;
 }
 
 export interface MartingaleSweeperStateDto {
@@ -202,6 +225,16 @@ export interface MartingaleLadderedSymbolDto {
   openChainId: number | null;
   openPositions: number;
   ordersInFlight: number;
+}
+
+/** What a manual chain reset did. */
+export interface ResetMartingaleChainResult {
+  chainId: number;
+  /** 'Abandoned' when the chain was reset; 'None' when there was nothing to reset. */
+  outcome: string;
+  depthAtReset: number;
+  writtenOffDeficit: number;
+  explanation: string;
 }
 
 export interface MartingaleOverviewDto {
@@ -272,5 +305,18 @@ export class MartingaleService {
    */
   setMode(body: SetMartingaleModeRequest): Observable<SetMartingaleModeResult> {
     return this.api.putEnvelope<SetMartingaleModeResult>(`/martingale/mode`, body);
+  }
+
+  /**
+   * Manually resets an OPEN chain: writes off the outstanding deficit, closes the chain as
+   * Abandoned with the reason, and reverts the (account, symbol) to base sizing — depth zero.
+   * The next losing close opens a fresh chain at depth 1. The reason is required; it lands
+   * verbatim in the chain's closure record.
+   */
+  resetChain(chainId: number, reason: string): Observable<ResetMartingaleChainResult> {
+    return this.api.postEnvelope<ResetMartingaleChainResult>(
+      `/martingale/chains/${chainId}/reset`,
+      { reason },
+    );
   }
 }

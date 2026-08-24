@@ -283,6 +283,9 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                 @if (c.isStale) {
                   <span class="pill pill-warn">stale</span>
                 }
+                @if (c.status === 'Open' && c.rungSkipCount > 0) {
+                  <span class="pill pill-bad">rung skipped ×{{ c.rungSkipCount }}</span>
+                }
 
                 <span class="chain-toggle">{{ expanded().has(c.id) ? '−' : '+' }}</span>
               </header>
@@ -340,17 +343,51 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                     </div>
                   }
 
+                  @if (c.lastRungSkippedAtUtc) {
+                    <!--
+                      The poll path computed a LIVE rung and refused to place it — broker lot
+                      ceiling, or an unfundable stake nothing abandons. Without this trace the
+                      chain looks identical to one that is laddering, while it actually keeps
+                      advancing on base-sized trades and the deficit compounds.
+                    -->
+                    <div class="skiptrace">
+                      <h3>
+                        Rung skipped at sizing time
+                        <span class="dim"
+                          >— last {{ c.lastRungSkippedAtUtc | date: 'short' : 'UTC' }} UTC,
+                          {{ c.rungSkipCount }} episode{{ c.rungSkipCount === 1 ? '' : 's' }}</span
+                        >
+                      </h3>
+                      <p>{{ c.lastRungSkipReason }}</p>
+                      <p class="foot">
+                        The chain stays open without escalating, so every later rung is even more
+                        likely to hit the same ceiling. If it cannot recover at base size, reset it
+                        below to write the deficit off and return to normal sizing.
+                      </p>
+                    </div>
+                  }
+
                   @if (c.nextRung; as r) {
                     <div
                       class="rung"
                       [class.rung-blocked]="!!r.blockedBy"
                       [class.rung-abandon]="r.wouldAbandon"
+                      [class.rung-skip]="r.rungWillBeSkipped"
                     >
                       <h3>Next rung — depth {{ r.depth }}</h3>
                       <p>
                         Must make <b>{{ r.amountToRecover | number: '1.2-2' }}</b> ({{
                           r.stakeMultiple | number: '1.1-2'
                         }}× the base stake, {{ r.stakePctEquity | number: '1.1-2' }}% of equity).
+                        @if (r.estimatedRungLots !== null) {
+                          Roughly <b>{{ r.estimatedRungLots | number: '1.0-2' }} lots</b>
+                          @if (r.brokerMaxLotSize !== null) {
+                            against a broker ceiling of
+                            {{ r.brokerMaxLotSize | number: '1.0-0' }} lots
+                          }
+                          .
+                          <span class="dim">{{ r.estimateBasis }}</span>
+                        }
                       </p>
                       @if (r.wouldAbandon) {
                         <p class="warn">
@@ -362,6 +399,12 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                           <b>Blocked:</b> {{ r.blockedBy }} on this symbol. Serialisation holds a
                           laddered symbol to one live thing at a time — a second would give the
                           chain two deficits it cannot tell apart.
+                        </p>
+                      } @else if (r.rungWillBeSkipped) {
+                        <p class="warn">
+                          <b>Will not fit.</b> {{ r.bindingConstraint }} Unlike a cap breach this
+                          does NOT abandon the chain — it quietly under-ladders instead, which is
+                          why it is surfaced here.
                         </p>
                       } @else {
                         <p class="ok">Clear to stake on the next signal for this symbol.</p>
@@ -445,6 +488,61 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                       disagrees with the header, the stored total and the position history have
                       diverged.
                     </p>
+                  }
+
+                  @if (c.status === 'Open') {
+                    <!--
+                      The escape hatch for a stuck chain. A terminal close, not an in-place zeroing:
+                      the deficit is written off and stays inspectable on the Abandoned row, sizing
+                      reverts to base immediately, and the next loss opens a fresh chain at depth 1.
+                    -->
+                    <div class="reset">
+                      @if (resettingId() === c.id) {
+                        <input
+                          type="text"
+                          class="reset-reason"
+                          placeholder="Why? Required — recorded verbatim on the chain."
+                          [ngModel]="resetReason()"
+                          (ngModelChange)="resetReason.set($event)"
+                          [disabled]="resetBusy()"
+                        />
+                        <button
+                          type="button"
+                          class="btn-danger"
+                          [disabled]="resetBusy() || !resetReason().trim()"
+                          (click)="confirmReset(c.id)"
+                        >
+                          {{
+                            resetBusy()
+                              ? 'Resetting…'
+                              : 'Write off ' +
+                                (c.deficitAmount > 0
+                                  ? (c.deficitAmount | number: '1.2-2')
+                                  : 'chain') +
+                                ' & reset'
+                          }}
+                        </button>
+                        <button
+                          type="button"
+                          class="btn-plain"
+                          [disabled]="resetBusy()"
+                          (click)="cancelReset()"
+                        >
+                          Cancel
+                        </button>
+                        @if (resetError(); as re) {
+                          <span class="warn">{{ re }}</span>
+                        }
+                      } @else {
+                        <button type="button" class="btn-danger-outline" (click)="openReset(c.id)">
+                          Reset chain…
+                        </button>
+                        <span class="dim">
+                          Writes off the deficit, closes the chain as Abandoned, and reverts the
+                          symbol to base sizing (depth zero).
+                        </span>
+                      }
+                    </div>
                   }
                 </div>
               }
@@ -762,6 +860,73 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         font-size: 0.8rem;
         color: var(--text-muted);
       }
+
+      /* Rung-skip trace: same visual weight as the depth-divergence callout — both mean the
+         module's paper state and its money state disagree. */
+      .skiptrace {
+        border: 1px solid var(--color-danger, #d64545);
+        border-left-width: 4px;
+        border-radius: 6px;
+        padding: 0.6rem 0.8rem;
+        margin: 0.75rem 0;
+      }
+      .skiptrace h3 {
+        margin: 0 0 0.3rem;
+      }
+      .skiptrace p {
+        margin: 0 0 0.3rem;
+      }
+      .rung-skip {
+        border-left: 4px solid var(--color-warning, #d69e2e);
+      }
+
+      .reset {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-top: 0.9rem;
+        padding-top: 0.75rem;
+        border-top: 1px dashed var(--border-default);
+        font-size: 0.85rem;
+      }
+      .reset-reason {
+        flex: 1 1 18rem;
+        padding: 0.35rem 0.5rem;
+        border: 1px solid var(--border-default);
+        border-radius: 6px;
+        background: var(--surface-base, transparent);
+        color: inherit;
+        font: inherit;
+      }
+      .btn-danger,
+      .btn-danger-outline,
+      .btn-plain {
+        border-radius: 6px;
+        padding: 0.35rem 0.7rem;
+        font: inherit;
+        font-size: 0.85rem;
+        cursor: pointer;
+      }
+      .btn-danger {
+        border: 1px solid var(--color-danger, #d64545);
+        background: var(--color-danger, #d64545);
+        color: #fff;
+      }
+      .btn-danger:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .btn-danger-outline {
+        border: 1px solid var(--color-danger, #d64545);
+        background: none;
+        color: var(--color-danger, #d64545);
+      }
+      .btn-plain {
+        border: 1px solid var(--border-default);
+        background: none;
+        color: inherit;
+      }
       .generated {
         font-size: 0.8rem;
         color: var(--text-muted);
@@ -793,6 +958,46 @@ export class MartingaleInternalsPageComponent {
 
   constructor() {
     this.reload();
+  }
+
+  // ── Manual reset ──────────────────────────────────────────────────────────
+  // Inline reason-and-confirm rather than a browser prompt: the reason is required (it becomes
+  // the chain's closure record) and the destructive button must show what is being written off.
+  readonly resettingId = signal<number | null>(null);
+  readonly resetReason = signal('');
+  readonly resetBusy = signal(false);
+  readonly resetError = signal<string | null>(null);
+
+  openReset(chainId: number): void {
+    this.resettingId.set(chainId);
+    this.resetReason.set('');
+    this.resetError.set(null);
+  }
+
+  cancelReset(): void {
+    this.resettingId.set(null);
+    this.resetReason.set('');
+    this.resetError.set(null);
+  }
+
+  confirmReset(chainId: number): void {
+    const reason = this.resetReason().trim();
+    if (!reason || this.resetBusy()) return;
+
+    this.resetError.set(null);
+    this.resetBusy.set(true);
+
+    this.service.resetChain(chainId, reason).subscribe({
+      next: () => {
+        this.resetBusy.set(false);
+        this.cancelReset();
+        this.reload();
+      },
+      error: (err: unknown) => {
+        this.resetBusy.set(false);
+        this.resetError.set(err instanceof Error ? err.message : 'Reset failed.');
+      },
+    });
   }
 
   reload(): void {
