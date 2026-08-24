@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { DatePipe, DecimalPipe } from '@angular/common';
+import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { NewsIntelService } from '@core/services/news-intel.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { createPolledResource } from '@core/polling/polled-resource';
@@ -24,7 +24,7 @@ import {
 @Component({
   selector: 'app-news-intel-page',
   standalone: true,
-  imports: [DatePipe, DecimalPipe],
+  imports: [DatePipe, DecimalPipe, PercentPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -377,15 +377,18 @@ import {
           @if (st.channelBreakdown.length) {
             <div class="channels">
               @for (ch of st.channelBreakdown; track ch.kind) {
-                <div class="channel-card" [class.stale]="isChannelStale(ch)">
+                <div class="channel-card" [class.stale]="ch.stale">
                   <div class="channel-head">
                     <span class="channel-name">{{ ch.kind }}</span>
                     <span class="mono channel-count">{{ ch.count }}</span>
                   </div>
                   <span class="muted xsmall">{{ ch.publishers }} publisher(s)</span>
                   <span class="muted xsmall">
-                    newest {{ ch.newest | date: 'MMM d HH:mm' }}
-                    @if (isChannelStale(ch)) {
+                    newest {{ ch.newest | date: 'MMM d HH:mm' }} ({{
+                      formatAge(ch.staleMinutes)
+                    }}
+                    ago)
+                    @if (ch.stale) {
                       — stale
                     }
                   </span>
@@ -401,6 +404,8 @@ import {
                   <th>Publisher</th>
                   <th>Channel</th>
                   <th class="num">Articles</th>
+                  <th class="num">Labelled</th>
+                  <th class="num">Skip rate</th>
                   <th class="num">Newest</th>
                 </tr>
               </thead>
@@ -412,6 +417,10 @@ import {
                       <span class="tag subtle">{{ src.kind }}</span>
                     </td>
                     <td class="num mono">{{ src.count }}</td>
+                    <td class="num mono">{{ src.labelled }}</td>
+                    <td class="num mono" [class.neg]="src.skipRate >= 0.8">
+                      {{ src.skipRate | percent: '1.0-0' }}
+                    </td>
                     <td class="num muted small">{{ src.newest | date: 'MMM d HH:mm' }}</td>
                   </tr>
                 }
@@ -1372,12 +1381,6 @@ export class NewsIntelPageComponent {
    * because the sweep only runs hourly and central banks publish on their own schedule —
    * flagging those two as often as the fast feeds would train the operator to ignore it.
    */
-  isChannelStale(ch: { kind: string; newest: string }): boolean {
-    const ageHours = (Date.now() - new Date(ch.newest).getTime()) / 3_600_000;
-    const budget = ch.kind === 'CentralBank' ? 72 : ch.kind === 'LlmSweep' ? 4 : 2;
-    return ageHours > budget;
-  }
-
   formatAge(minutes: number): string {
     if (minutes < 60) return `${minutes}m`;
     if (minutes < 60 * 24) return `${Math.round(minutes / 60)}h`;

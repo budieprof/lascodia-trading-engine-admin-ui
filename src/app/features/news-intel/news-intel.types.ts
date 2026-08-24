@@ -109,6 +109,16 @@ export interface NewsSourceStatView {
   source: string;
   count: number;
   newest: string;
+  /** Articles this publisher produced that were labelled for at least one tracked currency. */
+  labelled: number;
+  /** Articles classified and found to bear on no tracked currency. */
+  skipped: number;
+  /**
+   * skipped / count, 0–1. The evidence for `NewsIntel:Ingest:BlockedPublishers`: a publisher
+   * near 1.0 is spending model batches — shared with money-path spot analysis — to produce
+   * nothing.
+   */
+  skipRate: number;
 }
 
 /** Latest roll-up for one currency. */
@@ -132,6 +142,15 @@ export interface NewsChannelStatView {
   count: number;
   publishers: number;
   newest: string;
+  /** Age of the newest article on this channel, in minutes. */
+  staleMinutes: number;
+  /**
+   * Server verdict, against a threshold matched to THIS channel's cadence. Do not re-derive it
+   * client-side: a central-bank wire quiet for two days is normal and an RSS backbone quiet for
+   * two hours is dead, and a cockpit that guesses differently from the engine is worse than one
+   * that says nothing.
+   */
+  stale: boolean;
 }
 
 /** Module health snapshot. */
