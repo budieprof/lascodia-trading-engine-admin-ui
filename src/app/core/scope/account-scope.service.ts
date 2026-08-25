@@ -89,9 +89,56 @@ export class AccountScopeService {
     return live.filter((a) => !a.isPaper).map((a) => a.id);
   });
 
+  /**
+   * The scope the console is ACTUALLY operating under, normalised to a
+   * string so a `<select>` / `[selected]` binding can compare against it
+   * directly.  This is deliberately NOT the same as `selected()`:
+   * `accountIds()` silently falls back to the real-aggregate when the
+   * persisted selection names an account that is no longer live, and any
+   * chrome that renders `selected()` verbatim would then advertise a
+   * scope the data isn't actually using.  Every consumer that *displays*
+   * the scope must read this; only `select()` writes `selected`.
+   */
+  readonly effectiveSelected = computed<string>(() => {
+    const sel = this.selected();
+    if (sel === AccountScopeService.SCOPE_AGGREGATE_REAL)
+      return AccountScopeService.SCOPE_AGGREGATE_REAL;
+    if (sel === AccountScopeService.SCOPE_AGGREGATE_ALL)
+      return AccountScopeService.SCOPE_AGGREGATE_ALL;
+    const id = typeof sel === 'string' ? Number(sel) : sel;
+    if (Number.isFinite(id) && this.liveAccounts().some((a) => a.id === id)) return String(id);
+    return AccountScopeService.SCOPE_AGGREGATE_REAL;
+  });
+
+  /**
+   * The single account the scope resolves to, or null under either
+   * aggregate.  Chrome that highlights a per-account chip should compare
+   * against this rather than the raw `selected()`.
+   */
+  readonly effectiveSelectedId = computed<number | null>(() => {
+    const sel = this.effectiveSelected();
+    if (sel === AccountScopeService.SCOPE_AGGREGATE_REAL) return null;
+    if (sel === AccountScopeService.SCOPE_AGGREGATE_ALL) return null;
+    return Number(sel);
+  });
+
   /** True when the current scope is the operator-friendly "all real" default. */
   readonly isAggregateReal = computed(
-    () => this.selected() === AccountScopeService.SCOPE_AGGREGATE_REAL,
+    () => this.effectiveSelected() === AccountScopeService.SCOPE_AGGREGATE_REAL,
+  );
+
+  /**
+   * Order-insensitive fingerprint of `accountIds()`.  Signal equality on
+   * the id array is reference-based, so an effect that depends on it
+   * re-fires on every 30 s refresh even when the set is unchanged — which
+   * turns a "refetch when the scope changes" effect into a request loop.
+   * Depend on this string instead: it only changes when the set does.
+   */
+  readonly accountIdsKey = computed<string>(() =>
+    this.accountIds()
+      .slice()
+      .sort((a, b) => a - b)
+      .join(','),
   );
 
   /** Convenience: the single resolved account (or null when aggregate). */

@@ -325,7 +325,12 @@ type DirectionChip = 'all' | TradeDirection;
         </div>
 
         <!-- Comprehensive table -->
-        <app-data-table [columnDefs]="columns" [fetchData]="fetchData" [selectable]="true">
+        <app-data-table
+          [columnDefs]="columns"
+          [fetchData]="fetchData"
+          [selectable]="true"
+          (rowClick)="selectedDetail.set($event)"
+        >
           <ng-template #bulkActions let-rows>
             <button class="btn btn-success" (click)="bulkApprove(rows)" [disabled]="processing()">
               Approve {{ pendingInSelection(rows) }} pending
@@ -1025,6 +1030,11 @@ type DirectionChip = 'all' | TradeDirection;
         height: 40px;
         font-weight: 600;
       }
+
+      /* The whole row opens the signal detail (chart) modal — advertise it. */
+      :host ::ng-deep .ag-theme-alpine .ag-center-cols-container .ag-row {
+        cursor: pointer;
+      }
     `,
   ],
 })
@@ -1502,31 +1512,11 @@ export class SignalsPageComponent {
       width: 120,
       valueFormatter: (p) => this.relativeTimePipe.transform(p.value),
     },
-    {
-      headerName: 'Actions',
-      colId: 'actions',
-      width: 150,
-      sortable: false,
-      cellRenderer: (p: { data: TradeSignalDto }) => {
-        if (p.data?.status !== 'Pending') {
-          return `<button data-action="details" style="height:24px;padding:0 10px;border:none;border-radius:999px;font-size:11px;font-weight:600;cursor:pointer;background:rgba(0,113,227,0.12);color:#0071E3">Details</button>`;
-        }
-        return `<div style="display:flex;gap:4px;align-items:center;height:100%">
-          <button data-action="approve" style="height:24px;padding:0 10px;border:none;border-radius:999px;font-size:11px;font-weight:600;cursor:pointer;background:rgba(52,199,89,0.15);color:#248A3D">✓</button>
-          <button data-action="reject" style="height:24px;padding:0 10px;border:none;border-radius:999px;font-size:11px;font-weight:600;cursor:pointer;background:rgba(255,59,48,0.15);color:#D70015">✗</button>
-          <button data-action="details" style="height:24px;padding:0 8px;border:none;border-radius:999px;font-size:11px;font-weight:600;cursor:pointer;background:rgba(0,113,227,0.12);color:#0071E3">⋯</button>
-        </div>`;
-      },
-      onCellClicked: (p) => {
-        const target = p.event?.target as HTMLElement | undefined;
-        const action = target?.getAttribute('data-action');
-        if (!action || !p.data) return;
-        if (action === 'approve') this.approveSignal(p.data);
-        if (action === 'reject') this.rejectSignal(p.data);
-        if (action === 'details') this.selectedDetail.set(p.data);
-      },
-    },
   ];
+
+  // No per-row Actions column: a row click opens the detail modal, which
+  // carries Approve / Reject for Pending signals, and the selection
+  // checkbox + bulk bar covers approving or rejecting several at once.
 
   // Server-side filter shape (passed to fetchData). The chip filters drive
   // engine queries via TradeSignalQueryFilter — see CreateAlertCommand for

@@ -20,17 +20,33 @@ import { AccountScopeService } from './account-scope.service';
         title="Scope every list and metric in the admin console to a specific trading account or aggregate across the operator's live accounts."
       >
         <span class="scope-label">Account:</span>
-        <select
-          class="scope-select"
-          [value]="String(scope.selected())"
-          (change)="onChange($any($event.target).value)"
-        >
-          <option [value]="AGG_REAL">All real ({{ realCount() }} · aggregated)</option>
+        <!--
+          Selection is expressed per-option via [selected], NOT via a
+          [value] binding on the <select>.  A [value] binding executes at
+          the select's own node position — i.e. BEFORE the @for below has
+          materialised the per-account <option>s — so assigning a concrete
+          account id lands on a select that has no matching option yet.
+          The browser drops it (selectedIndex = -1), then "asks for a
+          reset" once the options arrive and settles on the first one.
+          Angular never re-runs the binding because the bound value never
+          changed, so the pill permanently ADVERTISED "All real
+          (N · aggregated)" while every metric on the page was scoped to a
+          single account — and re-picking that same option fired no
+          (change) event, which made the dropdown look dead.  Per-option
+          [selected] is evaluated inside each option's own view, after
+          that option exists.
+        -->
+        <select class="scope-select" (change)="onChange($any($event.target).value)">
+          <option [value]="AGG_REAL" [selected]="selected() === AGG_REAL">
+            All real ({{ realCount() }} · aggregated)
+          </option>
           @if (paperCount() > 0) {
-            <option [value]="AGG_ALL">All live ({{ live().length }} · incl. paper)</option>
+            <option [value]="AGG_ALL" [selected]="selected() === AGG_ALL">
+              All live ({{ live().length }} · incl. paper)
+            </option>
           }
           @for (acc of live(); track acc.id) {
-            <option [value]="acc.id">
+            <option [value]="acc.id" [selected]="selected() === String(acc.id)">
               {{ acc.accountName ?? acc.accountId }}{{ acc.isPaper ? ' · paper' : '' }} ·
               {{ acc.currency }}
             </option>
@@ -112,6 +128,14 @@ export class AccountScopePillComponent {
   protected readonly String = String;
 
   protected readonly live = this.scope.liveAccounts;
+  /**
+   * What the console is ACTUALLY scoped to, as a string.  Reads
+   * `effectiveSelected` rather than the raw `selected` so a persisted id
+   * that no longer resolves to a live account shows the real-aggregate
+   * fallback the data is already using, instead of leaving the select
+   * with nothing selected.
+   */
+  protected readonly selected = this.scope.effectiveSelected;
   protected readonly realCount = computed(() => this.scope.liveRealAccounts().length);
   protected readonly paperCount = computed(
     () => this.scope.liveAccounts().length - this.scope.liveRealAccounts().length,

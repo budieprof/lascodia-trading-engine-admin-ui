@@ -77,7 +77,7 @@ import {
             <button
               type="button"
               class="acct-pill"
-              [class.active]="accountScope.selected() === a.id"
+              [class.active]="accountScope.effectiveSelectedId() === a.id"
               (click)="selectAccountScope(a.id)"
               [title]="a.brokerName ? a.brokerName + ' · ' + a.accountId : ''"
             >

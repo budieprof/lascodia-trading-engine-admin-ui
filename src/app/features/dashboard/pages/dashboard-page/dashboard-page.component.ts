@@ -7,6 +7,7 @@ import {
   effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { DatePipe, DecimalPipe } from '@angular/common';
@@ -44,6 +45,7 @@ import type {
   MLModelDto,
   MLModelOverfitFlagDto,
   OrderDto,
+  PagerRequest,
   PositionDto,
   StrategyAllocationDto,
   StrategyDto,
@@ -135,8 +137,14 @@ interface ActivityEntry {
             format="currency"
             [colorByValue]="true"
           />
+          <!--
+            Reads the fetched closed-position window (most recent 1000 in
+            scope, closedAt desc), not all history — calling it "Lifetime"
+            overstated it on any account with more closed trades than the
+            page holds.
+          -->
           <app-metric-card
-            label="Lifetime P&L"
+            label="Realized P&L"
             [value]="lifetimePnl()"
             format="currency"
             [colorByValue]="true"
@@ -1217,16 +1225,27 @@ export class DashboardPageComponent implements OnInit {
       .pipe(throttleTime(3_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
       .subscribe(() => this.refresh());
 
-    // Re-fetch the Drawdown tile any time the scoped account set
-    // changes — selecting a different account in the header dropdown
-    // re-issues /drawdown-recovery/latest?accountIds=… so the tile
-    // shows that account's per-account snapshot instead of the
-    // fleet-wide aggregate.  Effect runs in injection context so
+    // Re-fetch everything account-scoped any time the scoped account set
+    // changes — selecting a different account (or the aggregate) in the
+    // header dropdown re-issues /drawdown-recovery/latest?accountIds=…
+    // AND re-runs the position/order queries, which are now narrowed
+    // server-side and would otherwise keep serving the previous scope's
+    // page until the 15 s poll came round.
+    //
+    // The dependency is `accountIdsKey()`, NOT `accountIds()` /
+    // `scopedAccountIds()`: those recompute to a fresh array (or Set) on
+    // every 30 s account refresh, so an effect reading them would re-fire
+    // — and re-fetch — even when the selection never moved. The key only
+    // changes when the id set genuinely does.
+    //
+    // refresh() is untracked because it writes back into the very signals
+    // the key derives from (accounts / eaInstances); tracking its reads
+    // would close the loop.  Effect runs in injection context so
     // takeUntilDestroyed is handled automatically.
     effect(() => {
-      const scope = this.scopedAccountIds();
-      if (scope.size === 0) return;
-      const ids = Array.from(scope);
+      const key = this.accountScope.accountIdsKey();
+      if (key.length === 0) return;
+      const ids = key.split(',').map(Number);
       this.drawdownService
         .getLatest(ids)
         .pipe(takeUntilDestroyed(this.destroyRef))
@@ -1236,6 +1255,7 @@ export class DashboardPageComponent implements OnInit {
           // better than flashing the tile blank.
           error: () => {},
         });
+      untracked(() => this.refresh());
     });
   }
 
@@ -1273,22 +1293,23 @@ export class DashboardPageComponent implements OnInit {
   protected readonly accountScope = inject(AccountScopeService);
   readonly accounts = this.accountScope.accounts;
   readonly liveAccounts = this.accountScope.liveAccounts;
-  readonly selectedAccountId = this.accountScope.selected;
 
+  // Resolve through the scope service's `effectiveSelected` rather than
+  // the raw `selected` signal, so the account this tile-set aggregates
+  // over is *by construction* the same one the header pill displays and
+  // the same one `accountIds()` filters by.  Re-deriving the sentinel /
+  // stale-id fallback locally is what let the two drift apart.
   readonly account = computed<TradingAccountDto | null>(() => {
     const live = this.liveAccounts();
     if (live.length === 0) return null;
-    const sel = this.selectedAccountId();
+    const sel = this.accountScope.effectiveSelected();
     if (sel === AccountScopeService.SCOPE_AGGREGATE_REAL) {
       return DashboardPageComponent.aggregateReal(live.filter((a) => !a.isPaper));
     }
     if (sel === AccountScopeService.SCOPE_AGGREGATE_ALL) {
       return DashboardPageComponent.aggregateReal(live);
     }
-    const id = typeof sel === 'string' ? Number(sel) : sel;
-    const match = live.find((a) => a.id === id);
-    if (match) return match;
-    return DashboardPageComponent.aggregateReal(live.filter((a) => !a.isPaper));
+    return live.find((a) => a.id === Number(sel)) ?? null;
   });
 
   // Account Equity tile — derived from the scoped account() so it re-computes
@@ -1307,14 +1328,17 @@ export class DashboardPageComponent implements OnInit {
 
   /** Synthesize an aggregated DTO across the supplied accounts.  Sums balance/
    *  equity/margin; pairs the resulting equity-weighted marginLevel.
-   *  Returns the only real account when there's just one, or a null-
-   *  placeholder when zero real accounts (operator running paper-
-   *  only).  Caller is expected to pass already-live accounts (those
-   *  with an actually-running EAInstance) — we only filter `isPaper`
-   *  here, not `isActive` (which is sticky and includes detached
-   *  accounts). */
-  private static aggregateReal(liveAccounts: TradingAccountDto[]): TradingAccountDto | null {
-    const real = liveAccounts.filter((a) => !a.isPaper);
+   *  Returns the only account when there's just one, or null when the set
+   *  is empty.
+   *
+   *  The caller decides membership and passes exactly the accounts to roll
+   *  up — this used to re-apply its own `!isPaper` filter, which silently
+   *  dropped every paper account back out of the "All live (incl. paper)"
+   *  scope, so that option aggregated the same set as "All real".  Callers
+   *  pass already-live accounts (those with an actually-running
+   *  EAInstance); `isActive` is sticky and would readmit detached ones. */
+  private static aggregateReal(scopedAccounts: TradingAccountDto[]): TradingAccountDto | null {
+    const real = scopedAccounts;
     if (real.length === 0) return null;
     if (real.length === 1) return real[0];
     const sum = (k: keyof TradingAccountDto) =>
@@ -1332,7 +1356,7 @@ export class DashboardPageComponent implements OnInit {
     return {
       id: -1,
       accountId: null,
-      accountName: `Aggregate · ${real.length} real accounts`,
+      accountName: `Aggregate · ${real.length} accounts`,
       brokerServer: null,
       brokerName: null,
       accountType: real[0].accountType,
@@ -1351,7 +1375,7 @@ export class DashboardPageComponent implements OnInit {
       marginSoStopOut: real[0].marginSoStopOut,
       maxAbsoluteDailyLoss: sum('maxAbsoluteDailyLoss'),
       isActive: true,
-      isPaper: false,
+      isPaper: real.every((a) => a.isPaper),
       lastSyncedAt:
         real
           .map((a) => a.lastSyncedAt)
@@ -1380,7 +1404,11 @@ export class DashboardPageComponent implements OnInit {
   });
   readonly allocations = signal<StrategyAllocationDto[]>([]);
   readonly alerts = signal<AlertDto[]>([]);
-  readonly eaInstances = signal<EAInstanceDto[]>([]);
+  // Owned by AccountScopeService — refresh() writes the fetched list
+  // there, not into a page-local copy.  This used to be a separate
+  // `signal([])` that nothing ever set, which pinned the EA Connections
+  // tile at 0 no matter how many EAs were attached.
+  readonly eaInstances = this.accountScope.eaInstances;
   readonly workers = signal<WorkerHealthDto[]>([]);
   readonly mlModels = signal<MLModelDto[]>([]);
   // Models flagged because in-sample CV Sharpe is materially higher than rolling
@@ -1439,9 +1467,14 @@ export class DashboardPageComponent implements OnInit {
     return ((a.marginUsed ?? 0) / a.equity) * 100;
   });
 
-  readonly activeEaCount = computed(
-    () => this.eaInstances().filter((e) => e.status === 'Active').length,
-  );
+  // Scoped like every other account-tagged tile: under an aggregate scope
+  // this is the EA count across all selected accounts, under a singleton
+  // scope it's just that account's EAs.
+  readonly activeEaCount = computed(() => {
+    const scope = this.scopedAccountIds();
+    return this.eaInstances().filter((e) => e.status === 'Active' && scope.has(e.tradingAccountId))
+      .length;
+  });
 
   readonly totalWorkerCount = computed(() => this.workers().length);
   readonly healthyWorkerCount = computed(
@@ -1747,14 +1780,75 @@ export class DashboardPageComponent implements OnInit {
     { intervalMs: 15_000, runImmediately: false },
   );
 
+  /**
+   * Narrow a paged request to the accounts currently in scope so the
+   * engine filters before paging.  Left undecorated when the scope is
+   * empty (accounts not loaded yet) — the client-side `scopedAccountIds`
+   * filter on the derived signals still holds the line, so a first paint
+   * that races the account fetch shows nothing rather than everything.
+   */
+  private scopedRequest(params: PagerRequest): PagerRequest {
+    const ids = this.accountScope.accountIds();
+    if (ids.length === 0) return params;
+    return {
+      ...params,
+      filter: {
+        ...((params.filter as object | null) ?? {}),
+        tradingAccountIds: Array.from(ids),
+      },
+    };
+  }
+
   // Single-shot refresh — tolerant: every leaf catchError returns an empty
   // shape so a flaky ML endpoint doesn't blank the rest of the dashboard.
   private refresh(): void {
     forkJoin({
-      positions: this.positionsService.list({ currentPage: 1, itemCountPerPage: 500 }).pipe(
-        map((r) => r.data?.data ?? []),
-        catchError(() => of([] as PositionDto[])),
-      ),
+      // Open and closed are fetched as SEPARATE status-scoped queries, the
+      // same way the Positions page loads its KPI window, and for the same
+      // reason: one mixed page is an arbitrary truncation. It used to be a
+      // single unscoped 500-row pull filtered down in the browser, which
+      // failed twice over —
+      //   1. the page budget was spent FLEET-wide, so under an aggregate
+      //      scope across six accounts the tiles saw whatever slice each
+      //      account happened to get, and under a single-account scope
+      //      most of the 500 rows were discarded on arrival;
+      //   2. the server's default sort is by OPEN date, so a trade opened
+      //      long ago and closed yesterday fell outside the window and
+      //      went missing from the 30-day equity curve and daily P&L.
+      // Closed is now sorted by closedAt desc so the window really is the
+      // most recently closed trades, and open positions get their own
+      // budget instead of competing with thousands of closed rows.
+      openPositions: this.positionsService
+        .list(
+          this.scopedRequest({
+            currentPage: 1,
+            itemCountPerPage: 500,
+            filter: { status: 'Open' },
+          }),
+        )
+        .pipe(
+          map((r) => r.data?.data ?? []),
+          catchError(() => of([] as PositionDto[])),
+        ),
+      // 1000 covers the 30-day window the charts draw with room to spare at
+      // current fleet volume (~870 closed trades / 30 days across six live
+      // accounts). The headline P&L / win-rate / profit-factor tiles read
+      // this same window — they are "recent", not all-time, and the labels
+      // say so.
+      closedPositions: this.positionsService
+        .list(
+          this.scopedRequest({
+            currentPage: 1,
+            itemCountPerPage: 1000,
+            filter: { status: 'Closed' },
+            sortBy: 'closedAt',
+            sortDirection: 'desc',
+          }),
+        )
+        .pipe(
+          map((r) => r.data?.data ?? []),
+          catchError(() => of([] as PositionDto[])),
+        ),
       strategies: this.strategiesService.list({ currentPage: 1, itemCountPerPage: 200 }).pipe(
         map((r) => r.data?.data ?? []),
         catchError(() => of([] as StrategyDto[])),
@@ -1763,10 +1857,12 @@ export class DashboardPageComponent implements OnInit {
         map((r) => r.data?.data ?? []),
         catchError(() => of([] as TradeSignalDto[])),
       ),
-      orders: this.ordersService.list({ currentPage: 1, itemCountPerPage: 50 }).pipe(
-        map((r) => r.data?.data ?? []),
-        catchError(() => of([] as OrderDto[])),
-      ),
+      orders: this.ordersService
+        .list(this.scopedRequest({ currentPage: 1, itemCountPerPage: 50 }))
+        .pipe(
+          map((r) => r.data?.data ?? []),
+          catchError(() => of([] as OrderDto[])),
+        ),
       status: this.healthService.getStatus().pipe(
         map((r) => r.data ?? null),
         catchError(() => of(null as EngineStatusDto | null)),
@@ -1802,7 +1898,8 @@ export class DashboardPageComponent implements OnInit {
       ),
     }).subscribe(
       ({
-        positions,
+        openPositions,
+        closedPositions,
         strategies,
         signals,
         orders,
@@ -1820,10 +1917,15 @@ export class DashboardPageComponent implements OnInit {
         // openPositionCount/topOpenPositions/recentActivity/equityCurve/
         // dailyPnL/winRate/profitFactor/etc.) re-compute reactively when
         // the account scope changes.
+        // Defensive status re-partition — the server-side status filter is
+        // a no-op on older engine builds. Closing rows are admitted here
+        // because they are still live broker exposure; the engine's
+        // Status='Open' filter is an exact enum match and won't return
+        // them, which matches how the Positions page loads its own window.
         this.rawOpenPositions.set(
-          positions.filter((p) => p.status === 'Open' || p.status === 'Closing'),
+          openPositions.filter((p) => p.status === 'Open' || p.status === 'Closing'),
         );
-        this.rawClosedPositions.set(positions.filter((p) => p.status === 'Closed'));
+        this.rawClosedPositions.set(closedPositions.filter((p) => p.status === 'Closed'));
         this.rawRecentOrders.set(orders);
 
         this.activeStrategyCount.set(strategies.filter((s) => s.status === 'Active').length);

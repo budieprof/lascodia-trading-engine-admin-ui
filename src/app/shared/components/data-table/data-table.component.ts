@@ -20,6 +20,7 @@ import type {
   GridApi,
   GridReadyEvent,
   IRowNode,
+  RowClickedEvent,
   RowSelectedEvent,
   SelectionChangedEvent,
   SortChangedEvent,
@@ -102,7 +103,7 @@ type SortDir = 'asc' | 'desc';
           [rowSelection]="rowSelectionOptions()"
           (gridReady)="onGridReady($event)"
           (sortChanged)="onSortChanged($event)"
-          (rowClicked)="rowClick.emit($event.data)"
+          (rowClicked)="onRowClicked($event)"
           (rowSelected)="onRowSelected($event)"
           (selectionChanged)="onSelectionChanged($event)"
           style="width: 100%; height: 100%;"
@@ -410,6 +411,26 @@ export class DataTableComponent<T> implements OnInit, OnDestroy {
 
   rowClick = output<T>();
   selectionChange = output<T[]>();
+
+  /**
+   * Row clicks are the table's primary "open this" gesture, but a click that
+   * landed on an interactive control inside the row (an action button in a
+   * cell renderer, the selection checkbox, a link) already has its own
+   * meaning — firing `rowClick` on top of it would run two actions from one
+   * click. Cell renderers can opt an element out explicitly with
+   * `data-no-row-click`.
+   */
+  protected onRowClicked(event: RowClickedEvent<T>): void {
+    const target = event.event?.target as HTMLElement | null;
+    if (
+      target?.closest(
+        'button, input, select, textarea, a[href], .ag-selection-checkbox, [data-no-row-click]',
+      )
+    ) {
+      return;
+    }
+    if (event.data) this.rowClick.emit(event.data);
+  }
 
   /** Template projected via `<ng-template #bulkActions let-rows let-clear="clear">…</ng-template>`. */
   bulkActionsTpl = contentChild<TemplateRef<{ $implicit: T[]; clear: () => void }>>('bulkActions');
