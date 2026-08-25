@@ -37,7 +37,11 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
                 // Refresh failed too — the token is genuinely beyond saving
                 // (jti revoked, past grace window, account deactivated).
                 // This is the only path that drops the session.
-                authService.logout();
+                //
+                // expired:true so the route the user was on is captured as a
+                // returnUrl and login puts them back there rather than on the
+                // dashboard.
+                authService.logout({ expired: true });
                 notificationService.error('Session expired. Please log in again.');
                 return throwError(() => error);
               }
@@ -57,7 +61,7 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
 
         // Refresh-exempt path (login/refresh/logout itself) hit a 401 — fall
         // through to the legacy "session expired" toast + logout flow.
-        authService.logout();
+        authService.logout({ expired: true });
         notificationService.error('Session expired. Please log in again.');
         return throwError(() => error);
       }

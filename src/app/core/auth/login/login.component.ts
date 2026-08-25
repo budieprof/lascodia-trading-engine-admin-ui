@@ -1,7 +1,8 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../auth.service';
+import { DEFAULT_POST_LOGIN_ROUTE, RETURN_URL_PARAM, sanitizeReturnUrl } from '../return-url';
 
 @Component({
   selector: 'app-login',
@@ -397,6 +398,21 @@ import { AuthService } from '../auth.service';
 export class LoginComponent {
   private auth = inject(AuthService);
   private router = inject(Router);
+  private route = inject(ActivatedRoute);
+
+  /**
+   * Where to land after a successful login.
+   *
+   * When the session expired under the user, authGuard / errorInterceptor
+   * stashed the route they were on as a `returnUrl` param — send them back
+   * there so re-authenticating is a blip rather than a loss of place.
+   * Falls back to the dashboard when there is no param, or when the param
+   * fails sanitisation (it is attacker-controllable — see return-url.ts).
+   */
+  private postLoginTarget(): string {
+    const raw = this.route.snapshot.queryParamMap.get(RETURN_URL_PARAM);
+    return sanitizeReturnUrl(raw) ?? DEFAULT_POST_LOGIN_ROUTE;
+  }
 
   readonly mode = signal<'admin' | 'operator' | 'dev'>('admin');
 
@@ -428,9 +444,9 @@ export class LoginComponent {
     this.auth.loginAdmin(this.username, this.adminPassword).subscribe({
       next: (res) => {
         if (res?.status && res.data?.token) {
-          this.router.navigate([
-            res.data.mustChangePassword ? '/account/change-password' : '/dashboard',
-          ]);
+          this.router.navigateByUrl(
+            res.data.mustChangePassword ? '/account/change-password' : this.postLoginTarget(),
+          );
         } else {
           this.error.set(res?.message || 'Invalid username or password.');
           this.loading.set(false);
@@ -459,7 +475,7 @@ export class LoginComponent {
       .subscribe({
         next: (res) => {
           if (res?.status) {
-            this.router.navigate(['/dashboard']);
+            this.router.navigateByUrl(this.postLoginTarget());
           } else {
             this.error.set(res?.message || 'Login failed.');
             this.loading.set(false);
@@ -484,7 +500,7 @@ export class LoginComponent {
       })
       .subscribe({
         next: () => {
-          this.router.navigate(['/dashboard']);
+          this.router.navigateByUrl(this.postLoginTarget());
         },
         error: (err) => {
           this.error.set(err?.message || 'Login failed. Is the backend running?');

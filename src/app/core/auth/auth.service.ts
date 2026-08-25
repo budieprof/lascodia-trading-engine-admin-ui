@@ -4,6 +4,7 @@ import { Observable, catchError, defer, map, of, shareReplay, tap } from 'rxjs';
 import { ApiService } from '../api/api.service';
 import { TokenResponseDto } from '../api/api.types';
 import { decodeJwt, rolesFromPayload } from './jwt';
+import { returnUrlQueryParams } from './return-url';
 
 export interface AuthUser {
   passportId: string;
@@ -447,8 +448,12 @@ export class AuthService {
    * JWT — tells the engine to revoke the token's `jti` so the same string can't
    * be replayed. The API call is best-effort; a failure still clears the
    * local session and routes to /login (never hold a user hostage to the server).
+   *
+   * @param options.expired  Set when the session was taken from the user
+   *   (refresh exhausted, jti revoked, idle timeout) rather than surrendered
+   *   deliberately. Only then is the current route captured as a returnUrl.
    */
-  logout(): void {
+  logout(options?: { expired?: boolean }): void {
     const hadToken = !!this._token();
     if (hadToken) {
       // Fire-and-forget — don't block the UX on the network. errors are
@@ -460,8 +465,18 @@ export class AuthService {
         .pipe(catchError(() => of(null)))
         .subscribe();
     }
+
+    // Capture the current route BEFORE clearing the session so login can put
+    // the user back where they were standing when it died.
+    //
+    // Deliberately opt-in. A sign-out from the header means "I am done here";
+    // returning that user to the page they just left on their next login would
+    // be wrong, and on a shared machine it also hands the next operator the
+    // previous one's context.
+    const returnParams = options?.expired ? returnUrlQueryParams(this.router.url) : {};
+
     this.clearSession();
-    this.router.navigate(['/login']);
+    this.router.navigate(['/login'], { queryParams: returnParams });
   }
 
   getToken(): string | null {
@@ -618,7 +633,8 @@ export class AuthService {
     if (this.idleIntervalId === null) {
       this.idleIntervalId = setInterval(() => {
         if (this.isAuthenticated() && this.isIdleExpired()) {
-          this.logout();
+          // Idle timeout is an expiry, not a deliberate sign-out.
+          this.logout({ expired: true });
         }
       }, IDLE_CHECK_INTERVAL_MS);
     }
