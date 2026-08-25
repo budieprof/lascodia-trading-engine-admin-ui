@@ -5,7 +5,10 @@ import { catchError, map, of, switchMap } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 import type { ColDef } from 'ag-grid-community';
 
-import { DrawdownRecoveryService } from '@core/services/drawdown-recovery.service';
+import {
+  DrawdownRecoveryService,
+  type AccountRecoveryStateDto,
+} from '@core/services/drawdown-recovery.service';
 import type { DrawdownSnapshotDto, RecoveryMode } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 import {
@@ -60,6 +63,134 @@ const MODE_COLOR: Record<RecoveryMode, string> = {
       />
 
       <ui-tabs [tabs]="tabs" [(activeTab)]="activeTab" />
+
+      <!--
+        A restricted account is invisible on the Live tab — that view aggregates,
+        so one halted account among six reads as a fleet in "Reduced". Surface it
+        on every tab, with the route to act on it.
+      -->
+      @if (restrictedAccounts().length > 0 && activeTab() !== 'accounts') {
+        <button class="restricted-banner" (click)="activeTab.set('accounts')">
+          <span class="rb-count">{{ restrictedAccounts().length }}</span>
+          account(s) not trading normally:
+          @for (a of restrictedAccounts(); track a.tradingAccountId) {
+            <span class="rb-acct">
+              {{ a.accountName }}
+              <span class="mode-badge" [attr.data-mode]="a.recoveryMode">{{ a.recoveryMode }}</span>
+            </span>
+          }
+          <span class="rb-go">Review →</span>
+        </button>
+      }
+
+      @if (activeTab() === 'accounts') {
+        @if (accountsLoading()) {
+          <app-card-skeleton [lines]="6" />
+        } @else {
+          @if (releaseNote(); as note) {
+            <p class="release-note">{{ note }}</p>
+          }
+          @if (releaseError(); as err) {
+            <p class="release-error">{{ err }}</p>
+          }
+
+          <div class="card accounts-card">
+            <h3>Recovery mode by account</h3>
+            <p class="card-note">
+              Mode is read from the <code>DrawdownRecovery:ActiveMode</code> rows the risk checker
+              enforces — not inferred — so what is shown here is what the engine applies. Releasing
+              rebases the anchor to current equity; the all-time high-water mark is kept, so
+              historical drawdown stays reportable.
+            </p>
+
+            <table class="trans-table accounts-table">
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th>Mode</th>
+                  <th class="num">Drawdown</th>
+                  <th class="num">Equity</th>
+                  <th class="num">Anchor peak</th>
+                  <th>Last recorded</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (a of accounts(); track a.tradingAccountId) {
+                  <tr [class.row-restricted]="a.isRestricted">
+                    <td>
+                      <span class="acct-name">{{ a.accountName }}</span>
+                      <span class="mono muted">
+                        #{{ a.tradingAccountId }} · {{ a.accountNumber }}</span
+                      >
+                      @if (!a.isActive) {
+                        <span class="chip-inactive">inactive</span>
+                      }
+                    </td>
+                    <td>
+                      <span class="mode-badge" [attr.data-mode]="a.recoveryMode">
+                        {{ a.recoveryMode }}
+                      </span>
+                      <!--
+                        Published mode vs last-evaluated mode. They normally agree; a
+                        divergence means the row the engine enforces is stale, which is
+                        worth seeing rather than quietly preferring one of them.
+                      -->
+                      @if (a.snapshotMode && a.snapshotMode !== a.recoveryMode) {
+                        <span
+                          class="mode-stale"
+                          [title]="'Newest snapshot recorded ' + a.snapshotMode"
+                        >
+                          snapshot: {{ a.snapshotMode }}
+                        </span>
+                      }
+                    </td>
+                    <td class="num" [class.bad]="a.isRestricted">
+                      {{ a.drawdownPct !== null ? (a.drawdownPct | number: '1.2-2') + '%' : '—' }}
+                    </td>
+                    <td class="num">
+                      {{ a.currentEquity !== null ? (a.currentEquity | number: '1.2-2') : '—' }}
+                    </td>
+                    <td class="num">
+                      {{ a.peakEquity !== null ? (a.peakEquity | number: '1.2-2') : '—' }}
+                    </td>
+                    <td class="muted">
+                      {{ a.recordedAtUtc ? (a.recordedAtUtc | date: 'MMM d HH:mm') : 'never' }}
+                      @if (a.peakRebasedAtUtc) {
+                        <span
+                          class="rebased"
+                          [title]="a.peakRebaseReason ?? 'Anchor previously rebased'"
+                        >
+                          · rebased {{ a.peakRebasedAtUtc | date: 'MMM d' }}
+                        </span>
+                      }
+                    </td>
+                    <td class="num">
+                      @if (a.isRestricted) {
+                        <button
+                          class="release-btn"
+                          (click)="releaseToNormal(a)"
+                          [disabled]="releasing() === a.tradingAccountId"
+                        >
+                          {{
+                            releasing() === a.tradingAccountId ? 'Releasing…' : 'Release to Normal'
+                          }}
+                        </button>
+                      } @else {
+                        <span class="muted">—</span>
+                      }
+                    </td>
+                  </tr>
+                } @empty {
+                  <tr>
+                    <td colspan="7" class="muted">No trading accounts.</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      }
 
       @if (activeTab() === 'live') {
         @if (loading()) {
@@ -261,7 +392,14 @@ const MODE_COLOR: Record<RecoveryMode, string> = {
             description="The engine has not yet recorded a drawdown snapshot."
           />
         }
-      } @else {
+        <!--
+          Named explicitly rather than "@else". With only Live and History, "not
+          live" meant history and read fine; adding a third tab silently made
+          Accounts render the entire history section underneath itself — charts,
+          KPIs and a 1.2M-row grid. Guards on a tab set of three or more have to
+          name their tab.
+        -->
+      } @else if (activeTab() === 'history') {
         <div class="history-toolbar">
           <h3 class="muted small">Drawdown history with operator notes</h3>
           @if (annotationsEnabled()) {
@@ -659,6 +797,145 @@ const MODE_COLOR: Record<RecoveryMode, string> = {
         color: var(--text-tertiary);
       }
 
+      /* ── Per-account recovery ─────────────────────────────────────────── */
+
+      .restricted-banner {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        width: 100%;
+        margin: 0.75rem 0 0;
+        padding: 0.6rem 0.9rem;
+        border: 1px solid #ff9500;
+        border-radius: 8px;
+        background: rgba(255, 149, 0, 0.08);
+        color: inherit;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+      .restricted-banner:hover {
+        background: rgba(255, 149, 0, 0.14);
+      }
+      .rb-count {
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .rb-acct {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        font-size: 0.85rem;
+      }
+      .rb-go {
+        margin-left: auto;
+        font-size: 0.82rem;
+        opacity: 0.8;
+        white-space: nowrap;
+      }
+
+      .accounts-card {
+        margin-top: 1rem;
+      }
+      .card-note {
+        margin: 0 0 0.9rem;
+        font-size: 0.82rem;
+        opacity: 0.75;
+        max-width: 78ch;
+      }
+      .accounts-table td {
+        vertical-align: top;
+      }
+      .acct-name {
+        font-weight: 600;
+      }
+      .row-restricted {
+        background: rgba(255, 59, 48, 0.05);
+      }
+      .chip-inactive {
+        margin-left: 0.4rem;
+        border: 1px solid rgba(128, 128, 128, 0.4);
+        border-radius: 999px;
+        padding: 0 0.4rem;
+        font-size: 0.7rem;
+        opacity: 0.75;
+      }
+
+      /* One badge shape for every mode; colour carries the severity. */
+      .mode-badge {
+        display: inline-block;
+        border-radius: 4px;
+        padding: 0.1rem 0.45rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        background: rgba(128, 128, 128, 0.18);
+      }
+      .mode-badge[data-mode='Normal'] {
+        background: rgba(52, 199, 89, 0.18);
+        color: #248a3d;
+      }
+      .mode-badge[data-mode='Reduced'] {
+        background: rgba(255, 149, 0, 0.2);
+        color: #a86400;
+      }
+      .mode-badge[data-mode='Halted'] {
+        background: #ff3b30;
+        color: #fff;
+      }
+      /* Never evaluated — an absence of information, not a restriction. */
+      .mode-badge[data-mode='Unknown'] {
+        background: transparent;
+        border: 1px dashed rgba(128, 128, 128, 0.5);
+        opacity: 0.7;
+        font-weight: 500;
+      }
+      .mode-stale {
+        display: block;
+        margin-top: 0.2rem;
+        font-size: 0.7rem;
+        opacity: 0.7;
+      }
+      .rebased {
+        opacity: 0.8;
+      }
+
+      .release-btn {
+        border: 1px solid #ff3b30;
+        background: transparent;
+        color: #ff3b30;
+        border-radius: 6px;
+        padding: 0.25rem 0.6rem;
+        font-size: 0.78rem;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .release-btn:hover:not(:disabled) {
+        background: #ff3b30;
+        color: #fff;
+      }
+      .release-btn:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+
+      .release-note,
+      .release-error {
+        margin: 0.75rem 0 0;
+        padding: 0.55rem 0.8rem;
+        border-radius: 6px;
+        font-size: 0.85rem;
+      }
+      .release-note {
+        border: 1px solid #34c759;
+        background: rgba(52, 199, 89, 0.1);
+      }
+      .release-error {
+        border: 1px solid #ff3b30;
+        background: rgba(255, 59, 48, 0.1);
+      }
+
       /* Transitions table */
       .trans-scroll {
         max-height: 320px;
@@ -843,9 +1120,90 @@ export class DrawdownPageComponent {
 
   readonly tabs: TabItem[] = [
     { label: 'Live', value: 'live' },
+    { label: 'Accounts', value: 'accounts' },
     { label: 'History', value: 'history' },
   ];
   readonly activeTab = signal('live');
+
+  // ── Per-account recovery ─────────────────────────────────────────────────
+  // The Live tab is a fleet AGGREGATE: it sums equity and shows the worst mode in
+  // the set. That cannot answer "which account is halted", so an account can sit
+  // Halted for days behind a gauge reading "Reduced" — which is how account 24
+  // went unnoticed. This is the per-account view, and the only place a halt can
+  // be released.
+  private readonly accountsResource = createPolledResource(
+    () =>
+      this.service.listByAccount(true).pipe(
+        map((r) => r.data ?? []),
+        catchError(() => of([] as AccountRecoveryStateDto[])),
+      ),
+    { intervalMs: 15_000 },
+  );
+
+  readonly accounts = computed(() => this.accountsResource.value() ?? []);
+  readonly accountsLoading = computed(
+    () => this.accountsResource.loading() && this.accountsResource.value() === null,
+  );
+
+  /** Accounts whose sizing is restricted or whose trading is stopped. */
+  readonly restrictedAccounts = computed(() => this.accounts().filter((a) => a.isRestricted));
+
+  /** Id currently being released, so only that row shows a pending state. */
+  readonly releasing = signal<number | null>(null);
+  readonly releaseError = signal<string | null>(null);
+  readonly releaseNote = signal<string | null>(null);
+
+  /**
+   * Release an account back to Normal by rebasing its drawdown anchor to current
+   * equity.
+   *
+   * The reason is prompted for rather than defaulted because the engine persists it
+   * on the rebase snapshot — this discards a protective state, and months later an
+   * unexplained rebase is indistinguishable from a bug. A cancelled or blank prompt
+   * aborts rather than sending a placeholder.
+   */
+  releaseToNormal(account: AccountRecoveryStateDto): void {
+    const reason = window.prompt(
+      `Release ${account.accountName} (#${account.tradingAccountId}) from ${account.recoveryMode} back to Normal?\n\n` +
+        `This rebases the drawdown anchor to current equity. The all-time high-water mark is kept, ` +
+        `so historical drawdown stays reportable.\n\nReason (required, stored on the audit snapshot):`,
+      '',
+    );
+    if (reason === null) return;
+    if (reason.trim().length === 0) {
+      this.releaseError.set('A reason is required — nothing was changed.');
+      return;
+    }
+
+    this.releaseError.set(null);
+    this.releaseNote.set(null);
+    this.releasing.set(account.tradingAccountId);
+
+    this.service.rebaseAnchor(account.tradingAccountId, reason.trim(), 0).subscribe({
+      next: (res) => {
+        this.releasing.set(null);
+        const result = res.data;
+        if (!res.status || !result?.rebased) {
+          // The engine refuses some rebases deliberately; surface its reason verbatim
+          // rather than a generic failure, because the reason is the actionable part.
+          this.releaseError.set(
+            result?.refusedReason ?? res.message ?? 'The engine refused the release.',
+          );
+          return;
+        }
+        this.releaseNote.set(
+          `${account.accountName} released from ${result.previousMode} ` +
+            `(was ${result.previousDrawdownPct.toFixed(2)}% drawdown). ` +
+            `Anchor ${result.previousAnchor.toFixed(2)} → ${result.newAnchor.toFixed(2)}.`,
+        );
+        this.accountsResource.refresh();
+      },
+      error: (e) => {
+        this.releasing.set(null);
+        this.releaseError.set(e?.error?.message ?? e?.message ?? 'Release failed.');
+      },
+    });
+  }
 
   readonly thresholds = [
     { value: 5, color: '#34C759' },

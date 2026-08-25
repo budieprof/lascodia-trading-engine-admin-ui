@@ -35,4 +35,71 @@ export class DrawdownRecoveryService {
   ): Observable<ResponseData<PagedData<DrawdownSnapshotDto>>> {
     return this.api.post(`/drawdown-recovery/history`, query);
   }
+
+  /**
+   * Per-account recovery standing.
+   *
+   * `getLatest` aggregates — it sums equity and reports the worst mode in the set —
+   * so it can show the fleet as "Reduced" while one account has been Halted for
+   * days. This returns each account separately, with the mode read from the
+   * EngineConfig rows RiskChecker actually enforces.
+   */
+  listByAccount(includeInactive = false): Observable<ResponseData<AccountRecoveryStateDto[]>> {
+    return this.api.get(`/drawdown-recovery/by-account?includeInactive=${includeInactive}`);
+  }
+
+  /**
+   * BREAK-GLASS: rebase an account's drawdown anchor to its current equity.
+   *
+   * Mode is derived from drawdown against a monotonic peak, and Halted blocks new
+   * orders — so a halted account with no open positions has static equity and can
+   * never trade its way back under the threshold. This is the release valve.
+   *
+   * `reason` is mandatory and is persisted on the rebase snapshot: an unexplained
+   * rebase is indistinguishable later from a bug. `targetDrawdownPct` 0 releases to
+   * Normal; a value inside the Reduced band resumes at reduced size instead.
+   */
+  rebaseAnchor(
+    accountId: number,
+    reason: string,
+    targetDrawdownPct = 0,
+  ): Observable<ResponseData<RebaseDrawdownAnchorResult>> {
+    return this.api.post(`/drawdown-recovery/${accountId}/rebase-anchor`, {
+      reason,
+      targetDrawdownPct,
+    });
+  }
+}
+
+/** One account's recovery standing — mirrors AccountRecoveryStateDto on the engine. */
+export interface AccountRecoveryStateDto {
+  tradingAccountId: number;
+  accountName: string;
+  accountNumber: string;
+  isActive: boolean;
+  /** Mode RiskChecker enforces, from DrawdownRecovery:ActiveMode:{id}. */
+  recoveryMode: string;
+  /** Mode on the newest snapshot; a divergence means the published row is stale. */
+  snapshotMode: string | null;
+  drawdownPct: number | null;
+  peakEquity: number | null;
+  currentEquity: number | null;
+  highWaterMark: number | null;
+  recordedAtUtc: string | null;
+  peakRebasedAtUtc: string | null;
+  peakRebaseReason: string | null;
+  isRestricted: boolean;
+  /** No ActiveMode row — never evaluated, not a halt. */
+  isUnknown: boolean;
+}
+
+/** Outcome of a rebase attempt. */
+export interface RebaseDrawdownAnchorResult {
+  rebased: boolean;
+  refusedReason: string | null;
+  previousAnchor: number;
+  newAnchor: number;
+  highWaterMark: number;
+  previousDrawdownPct: number;
+  previousMode: string;
 }

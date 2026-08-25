@@ -23,6 +23,8 @@ export class GaugeComponent {
   max = input(100);
   label = input('');
   size = input('160px');
+  /** Max decimals in the dial label. Trailing zeros are dropped. */
+  precision = input(2);
   thresholds = input<{ value: number; color: string }[]>([
     { value: 33, color: '#34C759' },
     { value: 66, color: '#FF9500' },
@@ -60,7 +62,13 @@ export class GaugeComponent {
           fontSize: 20,
           fontWeight: 600,
           offsetCenter: [0, '0%'],
-          formatter: `{value}%`,
+          // ECharts prints the raw bound number, so an unrounded float renders in
+          // full and overflows the dial — the drawdown gauge read
+          // "3.18947458410723%" straight across its own arc. Round to at most
+          // `precision` decimals and drop trailing zeros, so 45 stays "45%" while
+          // 3.18947… becomes "3.19%". Capped here rather than at each call site
+          // because no caller wants 14 significant figures inside a circle.
+          formatter: (v: number) => `${Number(v.toFixed(this.precision()))}%`,
           color: '#1D1D1F',
         },
         data: [{ value: this.value(), name: this.label() }],
