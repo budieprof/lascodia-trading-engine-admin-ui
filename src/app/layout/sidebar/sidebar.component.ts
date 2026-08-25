@@ -426,6 +426,11 @@ export class SidebarComponent {
         { label: 'Positions', route: '/positions', icon: '📊' },
         { label: 'Position Deltas', route: '/positions/deltas', icon: '🔄' },
         { label: 'Trade Signals', route: '/trade-signals', icon: '⚡' },
+        // Sibling entry, not a sub-item: 'what signals exist' and 'why did nothing
+        // happen' are different jobs, and the second is the one reached for under
+        // time pressure. It is also the only screen that shows generation-stage
+        // rejections, which never reach the signals list at all.
+        { label: 'Signal Internals', route: '/trade-signals/internals', icon: '🔬' },
         { label: 'Signal Sensitivity', route: '/signal-sensitivity', icon: '🎛' },
         { label: 'Signal Exits', route: '/trade-signals/feedback', icon: '📨' },
         { label: 'Signal Rejections', route: '/rejections', icon: '🚫' },
