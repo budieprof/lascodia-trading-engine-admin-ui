@@ -6,9 +6,19 @@ import { RouterLink } from '@angular/router';
 import {
   SignalInternalsService,
   type SignalAccountReadinessDto,
+  type SignalEaInstanceDto,
   type SignalPipelineOverviewDto,
   type SignalPipelineSignalDto,
 } from '@core/services/signal-internals.service';
+
+/** Blocked accounts collapsed by the cause they share. */
+interface BlockedGroup {
+  key: string;
+  condition: string;
+  detail: string;
+  remedy: string;
+  accounts: SignalAccountReadinessDto[];
+}
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
@@ -84,32 +94,55 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       @if (blockedAccounts().length > 0) {
         <section class="blockers">
           <h2>{{ blockedAccounts().length }} account(s) cannot act on ANY signal</h2>
-          @for (a of blockedAccounts(); track a.tradingAccountId) {
+          <!--
+            Grouped by CAUSE, not listed per account. Every account sharing a
+            cause also shares its detail and remedy verbatim, so the per-account
+            layout printed the same two sentences once per account — 7 accounts
+            filled the viewport with 14 lines of identical prose and pushed the
+            signals (the subject of this page) entirely below the fold.
+            One block per cause, accounts as chips, and the reader can see both
+            the problem and the page.
+          -->
+          @for (g of blockedGroups(); track g.key) {
             <article class="blocker">
               <header>
-                <span class="acct">{{ a.accountName }}</span>
-                <span class="acct-num">#{{ a.tradingAccountId }} · {{ a.accountNumber }}</span>
-                <span class="blocker-badge">{{ a.blockingCondition }}</span>
+                <span class="blocker-badge">{{ g.condition }}</span>
+                <span class="acct-num">{{ g.accounts.length }} account(s)</span>
               </header>
-              <p class="detail">{{ a.blockingDetail }}</p>
-              @if (a.blockingRemedy) {
-                <p class="remedy"><b>How to clear it:</b> {{ a.blockingRemedy }}</p>
+              <p class="detail">{{ g.detail }}</p>
+              @if (g.remedy) {
+                <p class="remedy"><b>How to clear it:</b> {{ g.remedy }}</p>
               }
-              @if (a.recoveryMode === 'Halted') {
-                <dl class="dd">
-                  <div>
-                    <dt>Equity</dt>
-                    <dd>{{ a.equity | number: '1.2-2' }}</dd>
-                  </div>
-                  <div>
-                    <dt>Anchor peak</dt>
-                    <dd>{{ a.peakEquity | number: '1.2-2' }}</dd>
-                  </div>
-                  <div>
-                    <dt>Drawdown</dt>
-                    <dd class="neg">{{ a.drawdownPct | number: '1.2-2' }}%</dd>
-                  </div>
-                </dl>
+              <div class="chips">
+                @for (a of g.accounts; track a.tradingAccountId) {
+                  <span class="chip" [title]="'#' + a.tradingAccountId + ' · ' + a.accountNumber">
+                    {{ a.accountName }}
+                    <span class="muted">#{{ a.tradingAccountId }}</span>
+                  </span>
+                }
+              </div>
+              <!-- Per-account figures only where they carry information. -->
+              @for (a of g.accounts; track a.tradingAccountId) {
+                @if (a.recoveryMode === 'Halted') {
+                  <dl class="dd">
+                    <div>
+                      <dt>Account</dt>
+                      <dd>{{ a.accountName }}</dd>
+                    </div>
+                    <div>
+                      <dt>Equity</dt>
+                      <dd>{{ a.equity | number: '1.2-2' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Anchor peak</dt>
+                      <dd>{{ a.peakEquity | number: '1.2-2' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Drawdown</dt>
+                      <dd class="neg">{{ a.drawdownPct | number: '1.2-2' }}%</dd>
+                    </div>
+                  </dl>
+                }
               }
             </article>
           }
@@ -220,16 +253,43 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                 <td class="mono">
                   {{ a.polledSymbols.length ? a.polledSymbols.join(', ') : '—' }}
                 </td>
+                <!--
+                  Live instances in full; dead ones folded away.
+
+                  An EA re-derives its instanceId at OnInit from its owned-symbol
+                  set, so every restart leaves the previous registration behind as
+                  a Disconnected row — they accumulate forever. Account #5 has 34,
+                  and rendering each with its notPollingReason produced 68 lines of
+                  identical text in ONE table cell, about 1,900px tall. The reason
+                  is the same sentence for all of them, so it is stated once on the
+                  summary; the roster stays reachable behind a disclosure for
+                  anyone who needs the versions or ids.
+                -->
                 <td>
-                  @for (i of a.instances; track i.instanceId) {
-                    <div class="ea" [class.ea-down]="!i.isPolling" [title]="i.instanceId">
-                      {{ i.isPolling ? '● polling' : '○ ' + i.status }}
+                  @for (i of pollingInstances(a); track i.instanceId) {
+                    <div class="ea" [title]="i.instanceId">
+                      ● polling
                       <span class="muted">v{{ i.eaVersion }}</span>
-                      @if (i.notPollingReason) {
-                        <span class="ea-why">{{ i.notPollingReason }}</span>
-                      }
                     </div>
-                  } @empty {
+                  }
+                  @if (downInstances(a).length > 0) {
+                    <details class="ea-dead">
+                      <summary class="ea-down">
+                        {{ downInstances(a).length }} disconnected
+                        <span class="muted">· newest v{{ newestDownVersion(a) }}</span>
+                      </summary>
+                      @for (why of distinctDownReasons(a); track why) {
+                        <span class="ea-why">{{ why }}</span>
+                      }
+                      @for (i of downInstances(a); track i.instanceId) {
+                        <div class="ea ea-down" [title]="i.instanceId">
+                          ○ {{ i.status }}
+                          <span class="muted">v{{ i.eaVersion }}</span>
+                        </div>
+                      }
+                    </details>
+                  }
+                  @if (a.instances.length === 0) {
                     <span class="muted">no instance</span>
                   }
                 </td>
@@ -527,6 +587,31 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         opacity: 0.75;
         font-size: 0.72rem;
       }
+      .ea-dead > summary {
+        cursor: pointer;
+        font-size: 0.78rem;
+        list-style-position: outside;
+      }
+      /* Keep the expanded roster from re-inflating the row height. */
+      .ea-dead[open] {
+        max-height: 12rem;
+        overflow-y: auto;
+      }
+
+      /* Affected accounts read as a compact set, not as repeated paragraphs. */
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        margin-top: 0.5rem;
+      }
+      .chip {
+        border: 1px solid rgba(128, 128, 128, 0.35);
+        border-radius: 999px;
+        padding: 0.1rem 0.55rem;
+        font-size: 0.78rem;
+        white-space: nowrap;
+      }
 
       .signal {
         border: 1px solid rgba(128, 128, 128, 0.3);
@@ -648,6 +733,89 @@ export class SignalInternalsPageComponent {
   readonly blockedAccounts = computed<SignalAccountReadinessDto[]>(
     () => this.view()?.accounts.filter((a) => a.blockingCondition) ?? [],
   );
+
+  /**
+   * Blocked accounts collapsed by cause.
+   *
+   * The detail and remedy are properties of the CONDITION, not of the account,
+   * so a per-account list repeats them verbatim once per account. Grouping keeps
+   * every fact on screen while spending one block per distinct cause.
+   */
+  readonly blockedGroups = computed<BlockedGroup[]>(() => {
+    const groups = new Map<string, BlockedGroup>();
+    for (const a of this.blockedAccounts()) {
+      const condition = a.blockingCondition ?? '';
+      const detail = a.blockingDetail ?? '';
+      const remedy = a.blockingRemedy ?? '';
+      const key = `${condition} ${detail} ${remedy}`;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.accounts.push(a);
+      } else {
+        groups.set(key, { key, condition, detail, remedy, accounts: [a] });
+      }
+    }
+    // Biggest group first — the widest-reaching cause is the one to fix first.
+    return [...groups.values()].sort((x, y) => y.accounts.length - x.accounts.length);
+  });
+
+  /** Instances actively polling for signals. */
+  pollingInstances(a: SignalAccountReadinessDto): SignalEaInstanceDto[] {
+    return a.instances.filter((i) => i.isPolling);
+  }
+
+  /** Registrations left behind by restarts — superseded, never cleaned up. */
+  downInstances(a: SignalAccountReadinessDto): SignalEaInstanceDto[] {
+    return a.instances.filter((i) => !i.isPolling);
+  }
+
+  /**
+   * Newest EA version among the dead registrations, for the summary line.
+   *
+   * Not every eaVersion is a version. Harness builds register as `vsmoke`, and
+   * a segment-wise numeric compare turns that into NaN — every comparison
+   * returns 0, the sort leaves it wherever it started, and the summary reported
+   * "newest vsmoke" for an account whose real newest build was 8.47.216.
+   * Rank the parseable ones and only fall back to a raw label when there is
+   * nothing numeric to report.
+   */
+  newestDownVersion(a: SignalAccountReadinessDto): string {
+    const versions = this.downInstances(a)
+      .map((i) => i.eaVersion)
+      .filter((v): v is string => !!v);
+    if (versions.length === 0) return '—';
+
+    const numeric = versions.filter((v) => /^\d+(\.\d+)*$/.test(v));
+    if (numeric.length === 0) return versions[0];
+
+    return numeric.sort((x, y) => {
+      const xs = x.split('.').map(Number);
+      const ys = y.split('.').map(Number);
+      for (let i = 0; i < Math.max(xs.length, ys.length); i++) {
+        const d = (ys[i] ?? 0) - (xs[i] ?? 0);
+        if (d !== 0) return d;
+      }
+      return 0;
+    })[0];
+  }
+
+  /**
+   * The DISTINCT reasons across dead registrations, stated once each.
+   *
+   * An earlier version only deduplicated when all rows agreed exactly, which
+   * failed the moment one registration among 34 differed — the other 33
+   * identical sentences printed anyway. Reasons are a small closed set, so
+   * listing the distinct ones is always shorter than one per row and never
+   * loses information.
+   */
+  distinctDownReasons(a: SignalAccountReadinessDto): string[] {
+    const reasons = new Set(
+      this.downInstances(a)
+        .map((i) => i.notPollingReason)
+        .filter((r): r is string => !!r),
+    );
+    return [...reasons];
+  }
 
   constructor() {
     this.reload();
