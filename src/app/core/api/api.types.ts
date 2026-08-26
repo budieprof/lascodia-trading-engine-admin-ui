@@ -1769,6 +1769,7 @@ export interface EAConfigInputs {
   specRefreshHour?: number;
   tickBufferMax?: number;
   telemetryEndpoint?: string;
+  engineBaseUrl?: string;
   telemetryPushSec?: number;
   enableNewsBlackout?: boolean;
   newsBlackoutFilePath?: string;
@@ -1779,7 +1780,8 @@ export interface EAConfigInputs {
   enableChartMarkers?: boolean;
 
   // ── Read-only (truly load-bearing — restart required) ──
-  engineBaseUrl?: string;
+  // NOTE: engineBaseUrl moved into the hot-reloadable block above in
+  // v8.47.234 — it is now a probe-gated live override, not restart-only.
   symbols?: string;
   symbolMapping?: string;
   timeframes?: string;
@@ -2473,6 +2475,7 @@ export interface UpdateInstanceConfigRequest {
   specRefreshHour?: number | null;
   tickBufferMax?: number | null;
   telemetryEndpoint?: string | null;
+  engineBaseUrl?: string | null;
   telemetryPushSec?: number | null;
   enableNewsBlackout?: boolean | null;
   newsBlackoutFilePath?: string | null;

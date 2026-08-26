@@ -1052,6 +1052,28 @@ export class EAConfigPanelComponent {
       ],
     },
     {
+      title: 'Connection',
+      fields: [
+        {
+          key: 'engineBaseUrl',
+          label: 'Engine API base URL',
+          kind: 'string',
+          badge: 'live',
+          takesEffect:
+            'Probe-gated. The EA GETs /health/live at the candidate host before ' +
+            'switching; if that probe fails the change is REJECTED, the current URL ' +
+            'is kept, and nothing is persisted. Plain http:// is accepted only for ' +
+            'localhost or a private-LAN (RFC1918) address — anything public must be ' +
+            'https://. The URL must also be in that MT5 terminal WebRequest allowlist ' +
+            '(Tools -> Options -> Expert Advisors), or the probe fails with error 4060. ' +
+            'Host-specific, so it is excluded from config profiles: a bulk apply cannot ' +
+            'repoint the whole fleet at one host. If a saved override later stops ' +
+            'resolving, the EA falls back to its compiled-in input URL on restart ' +
+            'rather than stranding itself.',
+        },
+      ],
+    },
+    {
       title: 'Timing',
       fields: [
         {
@@ -1814,6 +1836,7 @@ type HotReloadKey =
   | 'specRefreshHour'
   | 'tickBufferMax'
   | 'telemetryEndpoint'
+  | 'engineBaseUrl'
   | 'telemetryPushSec'
   | 'enableNewsBlackout'
   | 'newsBlackoutFilePath'
