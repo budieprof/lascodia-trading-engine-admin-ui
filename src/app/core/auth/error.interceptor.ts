@@ -12,6 +12,18 @@ import { ResponseData } from '../api/api.types';
  */
 const REFRESH_EXEMPT = ['/auth/login', '/auth/refresh', '/auth/logout', '/auth/token'];
 
+/**
+ * Of the refresh-exempt paths, only a failed *refresh* means the session is
+ * genuinely beyond saving. A 401 from a login endpoint means the credentials
+ * were wrong — the login form reports that itself — and from logout it means
+ * the server has already dropped the session. Tearing down on those was
+ * actively harmful: it re-navigated to /login, which discarded the returnUrl
+ * the user was carrying, and toasted "Session expired" over a plain typo.
+ *
+ * Substring-matched, so `/admin/auth/refresh` is covered by the same entry.
+ */
+const SESSION_ENDING_PATHS = ['/auth/refresh'];
+
 function shouldAttemptRefresh(req: HttpRequest<unknown>): boolean {
   // Marker header set by the retried request — never refresh more than once
   // per original call to avoid recursive loops on a genuinely-bad token.
@@ -59,10 +71,12 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
           );
         }
 
-        // Refresh-exempt path (login/refresh/logout itself) hit a 401 — fall
-        // through to the legacy "session expired" toast + logout flow.
-        authService.logout({ expired: true });
-        notificationService.error('Session expired. Please log in again.');
+        // Refresh-exempt path hit a 401. Only refresh failing here is a dead
+        // session; login/logout 401s are handled by their own callers.
+        if (SESSION_ENDING_PATHS.some((p) => req.url.includes(p))) {
+          authService.logout({ expired: true });
+          notificationService.error('Session expired. Please log in again.');
+        }
         return throwError(() => error);
       }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  captureReturnUrl,
   DEFAULT_POST_LOGIN_ROUTE,
   RETURN_URL_PARAM,
   returnUrlQueryParams,
@@ -74,6 +75,75 @@ describe('sanitizeReturnUrl', () => {
     it.each([null, undefined])('rejects %s', (value) => {
       expect(sanitizeReturnUrl(value)).toBeNull();
     });
+  });
+});
+
+describe('captureReturnUrl', () => {
+  it('captures the route the user was standing on', () => {
+    expect(captureReturnUrl('/ea-instances/49')).toBe('/ea-instances/49');
+  });
+
+  describe('survives a repeated teardown', () => {
+    // A dead session takes down every request in flight, not just one, so
+    // logout() runs several times. The later runs see /login as the current
+    // URL; if they resolved to "no target" the redirect would replace the
+    // query string and wipe the target captured by the first run.
+    it('recovers a target already stashed on /login', () => {
+      expect(captureReturnUrl('/login?returnUrl=%2Fea-instances%2F49')).toBe('/ea-instances/49');
+    });
+
+    it('is idempotent — re-capturing yields the same target', () => {
+      const first = captureReturnUrl('/signals?status=pending');
+      const second = captureReturnUrl(`/login?${RETURN_URL_PARAM}=${encodeURIComponent(first!)}`);
+      expect(second).toBe(first);
+    });
+
+    it('keeps the returnUrl param across repeated redirects', () => {
+      const first = returnUrlQueryParams('/conversations/19140');
+      const second = returnUrlQueryParams(
+        `/login?returnUrl=${encodeURIComponent('/conversations/19140')}`,
+      );
+      expect(second).toEqual(first);
+    });
+
+    it('preserves a target carrying its own query string', () => {
+      const target = '/signals?status=pending&symbol=EURUSD';
+      expect(captureReturnUrl(`/login?returnUrl=${encodeURIComponent(target)}`)).toBe(target);
+    });
+
+    it('ignores a fragment on the login URL itself', () => {
+      expect(captureReturnUrl('/login?returnUrl=%2Fdashboard#top')).toBe('/dashboard');
+    });
+  });
+
+  describe('does not trust the recovered value', () => {
+    // The stash is readable and writable by anyone who can hand the user a
+    // link, so recovery re-runs the same sanitisation as first capture.
+    it.each([
+      ['absolute url', '/login?returnUrl=https%3A%2F%2Fevil.example'],
+      ['protocol-relative', '/login?returnUrl=%2F%2Fevil.example'],
+      ['nested login', '/login?returnUrl=%2Flogin'],
+      ['empty param', '/login?returnUrl='],
+    ])('rejects %s', (_label, url) => {
+      expect(captureReturnUrl(url)).toBeNull();
+    });
+
+    it('only reads the stash from the login route', () => {
+      // Another page may legitimately use a `returnUrl` param of its own; it
+      // is not ours to promote into a post-login destination. The page URL
+      // itself is the capture, and it is returnable on its own merits.
+      expect(captureReturnUrl('/wizard?returnUrl=%2Fdashboard')).toBe(
+        '/wizard?returnUrl=%2Fdashboard',
+      );
+    });
+  });
+
+  it('has nothing to recover from a bare /login', () => {
+    expect(captureReturnUrl('/login')).toBeNull();
+  });
+
+  it.each([null, undefined])('rejects %s', (value) => {
+    expect(captureReturnUrl(value)).toBeNull();
   });
 });
 

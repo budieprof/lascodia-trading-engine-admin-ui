@@ -23,6 +23,9 @@ export const DEFAULT_POST_LOGIN_ROUTE = '/dashboard';
 /** Query-param name carried on /login. */
 export const RETURN_URL_PARAM = 'returnUrl';
 
+/** The login route itself — the one page that stashes a return target. */
+const LOGIN_ROUTE = '/login';
+
 /**
  * Routes that must never be captured as a return target.
  *
@@ -31,7 +34,7 @@ export const RETURN_URL_PARAM = 'returnUrl';
  *   mustChangePasswordGuard; returning to it would strand a user who has
  *   already satisfied it.
  */
-const NON_RETURNABLE = ['/login', '/account/change-password'];
+const NON_RETURNABLE = [LOGIN_ROUTE, '/account/change-password'];
 
 /**
  * Reduce an untrusted candidate to a safe in-app path, or null.
@@ -68,11 +71,56 @@ export function sanitizeReturnUrl(candidate: string | null | undefined): string 
 }
 
 /**
+ * Choose the return target to stash on /login for a session that just died.
+ *
+ * Normally that is simply the route the user was standing on. The wrinkle is
+ * that a teardown is not one event. A page under a dead session usually has
+ * several requests in flight — pollers, dashboard widgets, realtime top-ups —
+ * and each one that fails its refresh calls logout() again. By the second call
+ * the app is already sitting on `/login?returnUrl=/ea-instances/49`, which
+ * {@link sanitizeReturnUrl} rightly refuses as a return target, and a redirect
+ * built from that empty result REPLACES the query string. The URL captured a
+ * moment earlier is gone, the user logs in, and lands on the dashboard — the
+ * exact failure this module exists to prevent, reintroduced by its own retry.
+ *
+ * So when the current URL is our own login route, recover the target already
+ * captured there and carry it forward, which makes repeat teardowns idempotent
+ * (the redirect URL stops changing, so Angular ignores the re-navigation and
+ * the login form the user is typing into survives too).
+ *
+ * The recovered value is re-sanitised rather than trusted: a hand-crafted
+ * `/login?returnUrl=https://evil.example` gains nothing by passing through here.
+ */
+export function captureReturnUrl(currentUrl: string | null | undefined): string | null {
+  const direct = sanitizeReturnUrl(currentUrl);
+  if (direct) return direct;
+  return sanitizeReturnUrl(readStashedReturnUrl(currentUrl));
+}
+
+/**
+ * Read the `returnUrl` param back out of a URL string, but only when that URL
+ * is the login route — we recover what WE stashed, not a same-named param
+ * belonging to some other page.
+ */
+function readStashedReturnUrl(currentUrl: string | null | undefined): string | null {
+  if (typeof currentUrl !== 'string') return null;
+
+  const queryStart = currentUrl.indexOf('?');
+  if (queryStart === -1) return null;
+  if (currentUrl.slice(0, queryStart) !== LOGIN_ROUTE) return null;
+
+  // Drop any fragment before parsing — `?a=1#frag` would otherwise fold the
+  // fragment into the last param's value.
+  const query = currentUrl.slice(queryStart + 1).split('#')[0];
+  return new URLSearchParams(query).get(RETURN_URL_PARAM);
+}
+
+/**
  * Build the query-param bag for a /login redirect. Returns an empty object
- * when the candidate is unusable, so the caller can spread it unconditionally
+ * when there is no usable target, so the caller can spread it unconditionally
  * and simply not add the param.
  */
 export function returnUrlQueryParams(candidate: string | null | undefined): Record<string, string> {
-  const safe = sanitizeReturnUrl(candidate);
+  const safe = captureReturnUrl(candidate);
   return safe ? { [RETURN_URL_PARAM]: safe } : {};
 }

@@ -520,12 +520,21 @@ export class AuthService {
     // refresh endpoint will read the lascodia-auth cookie via `withCredentials`.
     const body = current && current !== COOKIE_SESSION_SENTINEL ? { token: current } : {};
 
+    // Renew against the endpoint that matches the token type, exactly as
+    // logout() does. This is load-bearing: `/auth/refresh` is the TRADING
+    // ACCOUNT path, and its handler hard-fails any token without a
+    // `tradingAccountId` claim ("Token has no tradingAccountId claim").
+    // Admin-user tokens never carry that claim, so sending them there made
+    // every admin refresh fail — the proactive timer renewed nothing and the
+    // first 401 after expiry tore the session down instead of recovering it.
+    const refreshPath = this.isAdminToken() ? '/admin/auth/refresh' : '/auth/refresh';
+
     this.refreshInFlight$ = defer(() =>
       this.api.post<{
         data: { token: string; expiresAt: string; tokenType: string } | null;
         status: boolean;
         message: string | null;
-      }>('/auth/refresh', body),
+      }>(refreshPath, body),
     ).pipe(
       map((res) => {
         if (!res?.status || !res.data?.token) return null;
