@@ -19,6 +19,7 @@ import {
 } from '@shared/components/spot-rec-chart/spot-rec-chart.component';
 import { MarketDataService } from '@core/services/market-data.service';
 import { AlgoEngineerService } from '@core/services/algo-engineer.service';
+import { WireService } from '@core/services/wire.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
@@ -32,7 +33,8 @@ import type {
 import type { Observable } from 'rxjs';
 
 /** Analysis types the New-analysis launcher supports (spot + directed
- *  limit/stop proposals + the longer-horizon macro brief + an algo-engineer work order). */
+ *  limit/stop proposals + the longer-horizon macro brief + the two agents: an algo-engineer
+ *  work order and a Wire market-intelligence briefing). */
 type AnalysisMode =
   | 'spot'
   | 'limitBuy'
@@ -40,7 +42,12 @@ type AnalysisMode =
   | 'stopBuy'
   | 'stopSell'
   | 'macro'
-  | 'engineer';
+  | 'engineer'
+  | 'wire';
+
+/** The agent modes — they take a free-text instruction instead of a symbol/timeframe, and launch a
+ *  background run on a host service rather than returning an analysis inline. */
+const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer', 'wire']);
 
 /**
  * ChatGPT-style full-page conversation view. Every LLM analysis is a resumable
@@ -77,14 +84,14 @@ type AnalysisMode =
                   <option [value]="m.value">{{ m.label }}</option>
                 }
               </select>
-              @if (newMode === 'engineer') {
+              @if (isAgentMode) {
                 <textarea
                   class="new-instruction"
                   [(ngModel)]="newInstruction"
                   name="instr"
                   rows="3"
                   [disabled]="running()"
-                  placeholder="Work order for the algo-engineer — e.g. 'EURUSD Buy in London is bleeding; investigate the stop geometry and propose a fix.'"
+                  [placeholder]="instructionPlaceholder"
                 ></textarea>
               } @else {
                 <select
@@ -503,6 +510,10 @@ type AnalysisMode =
         background: rgba(217, 70, 239, 0.15);
         color: #c026d3;
       }
+      .conv-kind[data-kind='Wire'] {
+        background: rgba(202, 138, 4, 0.15);
+        color: #ca8a04;
+      }
       .conv-match {
         display: inline-block;
         margin: 2px 0 3px;
@@ -712,6 +723,7 @@ export class ConversationsPageComponent {
   private readonly pairsService = inject(CurrencyPairsService);
   private readonly realtime = inject(RealtimeService);
   private readonly algoEngineer = inject(AlgoEngineerService);
+  private readonly wire = inject(WireService);
 
   protected readonly timeframes = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
 
@@ -738,6 +750,7 @@ export class ConversationsPageComponent {
     { value: 'Stop', label: 'Stop' },
     { value: 'Limit', label: 'Limit' },
     { value: 'Engineer', label: 'Engineer' },
+    { value: 'Wire', label: 'Wire' },
   ];
 
   protected readonly selectedId = signal<number | null>(null);
@@ -750,8 +763,20 @@ export class ConversationsPageComponent {
   protected newSymbol = '';
   protected newTimeframe = 'H1';
   protected newMode: AnalysisMode = 'spot';
-  /** Work-order instruction for the 'engineer' mode (ignored by the analysis modes). */
+  /** Free-text instruction for the agent modes (ignored by the analysis modes). */
   protected newInstruction = '';
+
+  /** True for the agent modes, which take an instruction rather than a symbol + timeframe. */
+  protected get isAgentMode(): boolean {
+    return AGENT_MODES.has(this.newMode);
+  }
+
+  /** Prompt text for the instruction box — each agent gets an example in its own idiom. */
+  protected get instructionPlaceholder(): string {
+    return this.newMode === 'wire'
+      ? "Ask Wire — e.g. 'USD pressure is \u22120.44 today. Decompose it, and tell me whether it is already priced.'"
+      : "Work order for the algo-engineer \u2014 e.g. 'EURUSD Buy in London is bleeding; investigate the stop geometry and propose a fix.'";
+  }
   protected readonly running = signal(false);
 
   /** Analysis types the "New analysis" launcher supports — mirrors the
@@ -765,6 +790,7 @@ export class ConversationsPageComponent {
     { value: 'stopSell', label: 'Stop Sell' },
     { value: 'macro', label: 'Macro' },
     { value: 'engineer', label: 'Engineer' },
+    { value: 'wire', label: 'Wire' },
   ];
 
   protected readonly hasMore = computed(() => this.conversations().length < this.totalItems());
@@ -1100,10 +1126,14 @@ export class ConversationsPageComponent {
     ev.preventDefault();
     if (this.running()) return;
 
-    // Engineer mode is a different beast: it launches a background algo-engineer work order (no
-    // symbol/timeframe) and returns the anchor "Engineer" conversation to open.
+    // The agent modes are a different beast: they launch a background run on a host service (no
+    // symbol/timeframe) and return the anchor conversation to open.
     if (this.newMode === 'engineer') {
       this.launchWorkOrder();
+      return;
+    }
+    if (this.newMode === 'wire') {
+      this.launchBriefing();
       return;
     }
 
@@ -1176,6 +1206,35 @@ export class ConversationsPageComponent {
           err?.error?.message ??
             err?.message ??
             'Work order failed. Is the algo-engineer service running?',
+        );
+      },
+    });
+  }
+
+  /** Ask Wire (Wire mode). Fire-and-forget on the host, same shape as a work order: the endpoint
+   *  returns as soon as the Wire conversation exists; Wire's reasoning then streams onto it live
+   *  via SignalR. */
+  private launchBriefing(): void {
+    const instruction = this.newInstruction.trim();
+    if (!instruction) return;
+    this.running.set(true);
+    this.wire.askWire(instruction).subscribe({
+      next: (res) => {
+        this.running.set(false);
+        if (res?.status && res.data) {
+          this.notify.success('Wire briefing launched.');
+          this.newInstruction = '';
+          this.closeNew();
+          this.load(true); // prepend the new Wire conversation to the list
+          this.openConversation(res.data.sessionLlmInvocationId);
+        } else {
+          this.notify.error(res?.message || 'Could not launch the briefing.');
+        }
+      },
+      error: (err) => {
+        this.running.set(false);
+        this.notify.error(
+          err?.error?.message ?? err?.message ?? 'Briefing failed. Is the Wire service running?',
         );
       },
     });

@@ -714,6 +714,13 @@ export interface AlgoEngineerWorkOrderResultDto {
   status: string;
 }
 
+/** The launched Wire briefing — its anchor "Wire" conversation id. Wire keeps working on the host;
+ *  the conversation streams in live via SignalR, exactly like an algo-engineer work order. */
+export interface WireBriefingResultDto {
+  sessionLlmInvocationId: number;
+  status: string;
+}
+
 export interface MLModelOverfitFlagDto {
   mlModelId: number;
   symbol: string;
