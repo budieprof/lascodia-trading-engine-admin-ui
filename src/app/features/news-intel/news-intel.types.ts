@@ -57,6 +57,26 @@ export interface NewsPressureLeg {
   responseConfirmed: number;
   /** …how many the currency moved AGAINST. */
   responseContradicted: number;
+
+  // ── Liveness ──
+  // The score says which way the evidence points; these say how much of it is still tradeable.
+  // A trade-war cluster holds a currency deeply negative for days after the market has finished
+  // repricing it — true, and no longer an opportunity.
+
+  /** The recency window liveness was computed over, in minutes. */
+  freshWindowMinutes: number;
+  /** Contributors inside that window, whatever the tape did. */
+  freshCount: number;
+  /** …of those, how many the market has not already absorbed (Muted) or contradicted. */
+  liveCount: number;
+  /**
+   * Share of the leg's weight that is still live, 0..1 — the number that falls to zero as a
+   * story ages out. Null when there is no weight to divide: "nothing to measure" and "measured,
+   * and none of it is live" are different claims.
+   */
+  liveShare: number | null;
+  /** Signed sum over the live contributors — which way the still-tradeable part points. */
+  liveSignedWeight: number;
 }
 
 /** The block exactly as the analysis prompt would carry it. */

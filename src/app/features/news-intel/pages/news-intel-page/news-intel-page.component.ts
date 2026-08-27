@@ -208,7 +208,37 @@ import {
                         }
                       </dd>
                     </div>
+                    <div>
+                      <dt>Live edge</dt>
+                      <dd
+                        class="mono"
+                        [class.stale]="isFullyPriced(leg)"
+                        [title]="liveEdgeHint(leg)"
+                      >
+                        @if (leg.liveShare === null) {
+                          —
+                        } @else {
+                          {{ leg.liveShare * 100 | number: '1.0-0' }}%
+                          <span class="sub">({{ leg.liveCount }}/{{ leg.freshCount }})</span>
+                        }
+                      </dd>
+                    </div>
                   </dl>
+
+                  @if (isFullyPriced(leg)) {
+                    <p class="conflict small">
+                      <strong>Fully priced.</strong> None of this score comes from news the market
+                      has not already answered. The direction is real; the opportunity is behind us.
+                      Initiating here is betting on a move that already happened.
+                    </p>
+                  } @else if (isThinEdge(leg)) {
+                    <p class="conflict small">
+                      Thin live edge — {{ (leg.liveShare ?? 0) * 100 | number: '1.0-0' }}% of this
+                      score rests on news still open, pointing
+                      {{ leg.liveSignedWeight >= 0 ? 'bullish' : 'bearish' }} at
+                      {{ leg.liveSignedWeight | number: '1.3-3' }}. Most of the move is behind us.
+                    </p>
+                  }
 
                   @if (isMostlyDiscounted(leg)) {
                     <p class="conflict small">
@@ -957,6 +987,18 @@ import {
         margin: 0;
         font-size: var(--text-xs);
       }
+      /* A zero live share is the one reading here an operator must not skim past. */
+      .leg-meta dd.stale {
+        color: #b25e00;
+        font-weight: 600;
+      }
+      .leg-meta dd .sub {
+        color: var(--text-secondary);
+        font-weight: 400;
+      }
+      .leg-meta {
+        flex-wrap: wrap;
+      }
       .conflict {
         color: #b25e00;
         margin: 0;
@@ -1404,6 +1446,39 @@ export class NewsIntelPageComponent {
    */
   isMostlyDiscounted(leg: NewsPressureLeg): boolean {
     return leg.responseMeasured >= 3 && leg.responseMuted / leg.responseMeasured > 0.6;
+  }
+
+  /**
+   * True when nothing behind this score is still open.
+   *
+   * Distinct from {@link isMostlyDiscounted}, which infers "priced" from the muted SHARE. This is
+   * the direct measurement: zero weight inside the freshness window that the tape has not already
+   * answered. A leg can be mostly-discounted and still hold a live tail; this says there is none.
+   *
+   * Guards on liveShare === 0 rather than falsy, because null means "no weight to divide" — an
+   * absence of measurement, not a confident zero.
+   */
+  isFullyPriced(leg: NewsPressureLeg): boolean {
+    return leg.liveShare === 0;
+  }
+
+  /** Some edge left, but little. Suppressed when fully priced, which has its own louder callout. */
+  isThinEdge(leg: NewsPressureLeg): boolean {
+    return leg.liveShare !== null && leg.liveShare > 0 && leg.liveShare < 0.15;
+  }
+
+  liveEdgeHint(leg: NewsPressureLeg): string {
+    const hours = Math.round(leg.freshWindowMinutes / 60);
+    if (leg.liveShare === null) {
+      return 'No weight behind this leg to divide — nothing to measure, which is not the same as nothing live.';
+    }
+    return (
+      `Share of this leg's weight from news inside the last ${hours}h that the market has NOT already ` +
+      `absorbed or contradicted. ${leg.liveCount} of ${leg.freshCount} recent contributors are still ` +
+      `open, summing to ${leg.liveSignedWeight.toFixed(3)} signed. Stories with no verdict yet count ` +
+      'as live on purpose: for genuinely fresh news the response window has not closed, and requiring ' +
+      'a confirmed move would exclude exactly the items with the most edge left.'
+    );
   }
 
   responseHint(item: NewsPressureItem): string {
