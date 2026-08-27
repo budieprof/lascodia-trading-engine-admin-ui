@@ -247,6 +247,12 @@ export const NEWS_CONFIG_SECTIONS: { match: string; title: string; blurb: string
     blurb: 'Whether and how the block reaches the spot-analysis prompt.',
   },
   {
+    match: 'FreshEdge:',
+    title: 'Fresh edge',
+    blurb:
+      'How much of a reading is still LIVE, as opposed to merely true. The score says which way the evidence points; it does not say whether anything is left to trade, and the two come apart routinely — a trade-war cluster held CAD at −0.99 for days after the market had finished repricing it. Live = inside this window AND not already Muted or Contradicted by the tape. Stories with no measured response yet count as live on purpose: for genuinely fresh news the response window has not closed, and requiring a confirmed response selects almost nothing, because confirmation only accrues with age.',
+  },
+  {
     match: 'Weight:Response',
     title: 'Market response',
     blurb:
