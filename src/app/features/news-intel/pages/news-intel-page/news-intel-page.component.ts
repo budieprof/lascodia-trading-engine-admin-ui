@@ -430,6 +430,98 @@ import {
           }
         </section>
 
+        <!-- ───────── Pressure history ───────── -->
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>Pressure history</h2>
+              <p class="muted small">
+                Score over time, with the share still live beneath it. The pair matters more than
+                either line: a score holding flat while the bars drain is a move that has finished
+                without the evidence changing.
+              </p>
+            </div>
+            <div class="hist-controls">
+              <select
+                class="hist-select"
+                [value]="historyCurrency()"
+                (change)="onHistoryCurrency($event)"
+                aria-label="Currency"
+              >
+                @for (c of historyCurrencies(); track c) {
+                  <option [value]="c" [selected]="c === historyCurrency()">{{ c }}</option>
+                }
+              </select>
+              @for (h of [24, 48, 168]; track h) {
+                <button
+                  type="button"
+                  class="chip"
+                  [class.active]="historyHours() === h"
+                  (click)="setHistoryHours(h)"
+                >
+                  {{ h }}h
+                </button>
+              }
+            </div>
+          </div>
+
+          @if (history.value(); as pts) {
+            @if (pts.length > 1) {
+              <svg
+                class="hist"
+                [attr.viewBox]="'0 0 ' + plot.w + ' ' + plotHeight"
+                preserveAspectRatio="none"
+                role="img"
+                aria-label="News pressure score and live share over time"
+              >
+                <line
+                  class="axis"
+                  x1="0"
+                  [attr.y1]="plot.scoreH / 2"
+                  [attr.x2]="plot.w"
+                  [attr.y2]="plot.scoreH / 2"
+                />
+                <path class="score-line" [attr.d]="scorePath()" />
+
+                <line
+                  class="axis faint"
+                  x1="0"
+                  [attr.y1]="plotHeight"
+                  [attr.x2]="plot.w"
+                  [attr.y2]="plotHeight"
+                />
+                @for (b of liveBars(); track b.x) {
+                  <rect
+                    class="live-bar"
+                    [class.zero]="b.zero"
+                    [attr.x]="b.x"
+                    [attr.y]="b.y"
+                    [attr.width]="b.w"
+                    [attr.height]="b.h"
+                  >
+                    <title>{{ b.title }}</title>
+                  </rect>
+                }
+              </svg>
+
+              <div class="hist-legend small muted">
+                <span><i class="key score"></i> score (−1 … +1, midline is zero)</span>
+                <span><i class="key live"></i> live share (0 … 100%)</span>
+                @if (liveUnknownCount() > 0) {
+                  <span class="unknown">
+                    {{ liveUnknownCount() }} of {{ pts.length }} points predate liveness tracking —
+                    drawn as gaps, because unknown is not zero.
+                  </span>
+                }
+              </div>
+            } @else {
+              <p class="muted small">Not enough roll-ups yet to plot a history.</p>
+            }
+          } @else {
+            <p class="muted small">Loading…</p>
+          }
+        </section>
+
         <!-- ───────── Ingestion health ───────── -->
         <section class="card">
           <div class="card-head">
@@ -1004,6 +1096,76 @@ import {
         font-size: var(--text-xs);
       }
       /* A zero live share is the one reading here an operator must not skim past. */
+      /* ── Pressure history ── */
+      .hist-controls {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .hist-select {
+        padding: 4px 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        color: var(--text-primary);
+        font-size: var(--text-xs);
+      }
+      .hist {
+        display: block;
+        width: 100%;
+        height: 200px;
+        margin-top: var(--space-3);
+        overflow: visible;
+      }
+      /* Strokes must not scale with preserveAspectRatio="none", or the line thins as the card widens. */
+      .hist .score-line {
+        fill: none;
+        stroke: #2563eb;
+        stroke-width: 2;
+        vector-effect: non-scaling-stroke;
+        stroke-linejoin: round;
+      }
+      .hist .axis {
+        stroke: var(--border);
+        stroke-width: 1;
+        vector-effect: non-scaling-stroke;
+      }
+      .hist .axis.faint {
+        opacity: 0.6;
+      }
+      .hist .live-bar {
+        fill: #0d9488;
+        opacity: 0.75;
+      }
+      /* A measured zero is a real reading, not a missing one — keep it visible as a floor tick. */
+      .hist .live-bar.zero {
+        fill: #b25e00;
+        opacity: 0.5;
+      }
+      .hist-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-3);
+        margin-top: var(--space-2);
+        align-items: center;
+      }
+      .hist-legend .key {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        margin-right: 4px;
+        vertical-align: middle;
+      }
+      .hist-legend .key.score {
+        background: #2563eb;
+      }
+      .hist-legend .key.live {
+        background: #0d9488;
+      }
+      .hist-legend .unknown {
+        color: #b25e00;
+      }
       .board td.stale {
         color: #b25e00;
         font-weight: 600;
@@ -1337,6 +1499,102 @@ export class NewsIntelPageComponent {
   readonly focus = createPolledResource(() => this.svc.getFocus(this.focusSymbol()), {
     intervalMs: 30_000,
   });
+
+  // ── Pressure history ────────────────────────────────────────────────
+  readonly historyCurrency = signal('USD');
+  readonly historyHours = signal(48);
+  readonly history = createPolledResource(
+    () => this.svc.getTimeseries(this.historyCurrency(), this.historyHours()),
+    { intervalMs: 60_000 },
+  );
+
+  /** Plot geometry. Two stacked panels on one x axis: score above, liveness below. */
+  private static readonly PLOT = {
+    w: 1000,
+    scoreH: 140,
+    gap: 14,
+    liveH: 46,
+  };
+
+  readonly plot = NewsIntelPageComponent.PLOT;
+  readonly plotHeight =
+    NewsIntelPageComponent.PLOT.scoreH +
+    NewsIntelPageComponent.PLOT.gap +
+    NewsIntelPageComponent.PLOT.liveH;
+
+  /** x for point i. Index-spaced, not time-spaced — roll-up cadence is uniform, and index
+   *  spacing keeps a gap in the series visible rather than silently interpolated across. */
+  private plotX(i: number, n: number): number {
+    return n <= 1 ? 0 : (i / (n - 1)) * NewsIntelPageComponent.PLOT.w;
+  }
+
+  /** Score path over a symmetric ±1 axis; 0 sits on the midline. */
+  readonly scorePath = computed(() => {
+    const pts = this.history.value() ?? [];
+    const { scoreH } = NewsIntelPageComponent.PLOT;
+    return pts
+      .map((p, i) => {
+        const y = ((1 - Math.max(-1, Math.min(1, p.weightedScore))) / 2) * scoreH;
+        return `${i === 0 ? 'M' : 'L'}${this.plotX(i, pts.length).toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(' ');
+  });
+
+  /**
+   * Liveness as filled bars rather than a line, because the series is legitimately gappy.
+   *
+   * A null liveShare is a row recorded before liveness was tracked — unknown, not zero. Drawing
+   * a line across it would interpolate a value nobody measured, and the flat segment would read
+   * as "steadily priced" precisely where we know least. Bars simply do not appear.
+   */
+  readonly liveBars = computed(() => {
+    const pts = this.history.value() ?? [];
+    const { w, scoreH, gap, liveH } = NewsIntelPageComponent.PLOT;
+    const top = scoreH + gap;
+    const barW = pts.length > 1 ? Math.max(1, (w / pts.length) * 0.7) : 6;
+    return pts
+      .map((p, i) => ({ p, i }))
+      .filter(({ p }) => p.liveShare !== null && p.liveShare !== undefined)
+      .map(({ p, i }) => {
+        const share = Math.max(0, Math.min(1, p.liveShare as number));
+        const h = Math.max(share > 0 ? 1 : 0, share * liveH);
+        return {
+          x: this.plotX(i, pts.length) - barW / 2,
+          y: top + (liveH - h),
+          w: barW,
+          h,
+          zero: share === 0,
+          title: `${new Date(p.asOfUtc).toISOString().slice(11, 16)}Z — score ${p.weightedScore.toFixed(3)}, live ${(share * 100).toFixed(0)}%`,
+        };
+      });
+  });
+
+  /** How much of the window predates liveness tracking — stated rather than left to be inferred. */
+  readonly liveUnknownCount = computed(
+    () =>
+      (this.history.value() ?? []).filter((p) => p.liveShare === null || p.liveShare === undefined)
+        .length,
+  );
+
+  readonly historyCurrencies = computed(() =>
+    (this.status.value()?.latestPressure ?? []).map((r) => r.currency),
+  );
+
+  onHistoryCurrency(ev: Event): void {
+    this.selectHistory((ev.target as HTMLSelectElement).value);
+  }
+
+  selectHistory(currency: string): void {
+    if (this.historyCurrency() === currency) return;
+    this.historyCurrency.set(currency);
+    this.history.refresh();
+  }
+
+  setHistoryHours(hours: number): void {
+    if (this.historyHours() === hours) return;
+    this.historyHours.set(hours);
+    this.history.refresh();
+  }
 
   // ── Status + articles ───────────────────────────────────────────────
   readonly status = createPolledResource(() => this.svc.getStatus(24), { intervalMs: 30_000 });
