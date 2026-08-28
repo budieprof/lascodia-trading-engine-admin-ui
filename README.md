@@ -26,6 +26,7 @@ The dev server proxies to the API at `http://localhost:5081` by default (see [pu
 | `npm run e2e:install`   | Download Playwright browsers (one-time)                         |
 | `npm run e2e`           | Playwright smoke tests (starts a dev server if none is running) |
 | `npm run e2e:ui`        | Playwright interactive runner                                   |
+| `npm run icons`         | Regenerate the favicon + PWA icons (see Brand assets)           |
 
 ## Runtime configuration
 
@@ -119,6 +120,21 @@ The Storybook config in [.storybook/](.storybook/) uses the Angular builder (`@s
 - **`ApiService.getEnvelope` / `postEnvelope` / `putEnvelope` / `deleteEnvelope`** — unwrap `ResponseData<T>` or throw `ApiError`.
 - **Feedback components** — [offline-banner](src/app/shared/components/feedback/offline-banner.component.ts), [paper-mode-banner](src/app/shared/components/feedback/paper-mode-banner.component.ts), [kill-switch-banner](src/app/shared/components/feedback/kill-switch-banner.component.ts), [rate-limit-strip](src/app/shared/components/feedback/rate-limit-strip.component.ts), [empty-state](src/app/shared/components/feedback/empty-state.component.ts), [error-state](src/app/shared/components/feedback/error-state.component.ts), [table-skeleton](src/app/shared/components/feedback/table-skeleton.component.ts), [card-skeleton](src/app/shared/components/feedback/card-skeleton.component.ts).
 - **Command palette** — [command-palette.component.ts](src/app/shared/components/command-palette/command-palette.component.ts). Global ⌘K / Ctrl+K, fuzzy filter across every route.
+
+## Brand assets
+
+The mark is a pair of chart axes forming an "L" with two candlesticks rising inside it — the monogram and the instrument in one figure — on a rounded blue plate matching the `--accent` ramp.
+
+**The mark is sized for 16px, not for 512.** A favicon spends most of its life in a browser tab, and a drawing that looks balanced on the 512 grid arrives there as a smudge — an axis of 36 units is 1.1 device pixels at tab size, which anti-aliasing dissolves into grey. So the geometry is fitted to the pixel budget: at 16px one device pixel is 32 grid units, and every edge lands on a multiple of 32, giving a 2px axis, 3px candle bodies and 1px wicks that stay crisp instead of straddling pixel boundaries. Two candles rather than three for the same reason — three bodies plus their wicks put more edges into a ~12px box than there are pixels to draw them — and the axis is full-opacity white, since a tinted axis is the first thing to disappear.
+
+When you change the geometry, check it by rasterising at a true 16px and magnifying, never by eyeballing the 512 artwork. `MASKABLE_INSET` is asserted against Android's safe-zone radius at generation time, so widening the mark fails the build rather than shipping a clipped adaptive icon.
+
+The geometry lives in exactly two places, and they must be changed together:
+
+- [scripts/generate-icons.mjs](scripts/generate-icons.mjs) — source of truth for every shipped raster. `npm run icons` rewrites `public/favicon.svg`, `favicon.ico` (16/32/48), `apple-touch-icon.png`, `icon-192.png`, `icon-512.png`, `icon-maskable-512.png` and `logo-mark.svg`. It rasterises through the Playwright Chromium already vendored for e2e, so there is no extra toolchain.
+- [logo.component.ts](src/app/shared/components/logo/logo.component.ts) — `<app-logo [size]="32" />`, the in-app mark used by the sidebar header and the login card. Inlined rather than fetched: both render above the fold.
+
+Two cuts exist because the platforms differ. The rounded plate is used wherever we control the shape (favicon, in-app, PWA `any`); a full-bleed square with the glyph pulled into the 86% safe zone is used for `apple-touch-icon` and the `maskable` PWA icon, since iOS and Android apply their own mask and would otherwise round an already-rounded corner.
 
 ## Engine prerequisites
 

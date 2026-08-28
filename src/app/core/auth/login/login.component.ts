@@ -3,16 +3,17 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../auth.service';
 import { DEFAULT_POST_LOGIN_ROUTE, RETURN_URL_PARAM, sanitizeReturnUrl } from '../return-url';
+import { LogoComponent } from '@shared/components/logo/logo.component';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, LogoComponent],
   template: `
     <div class="login-page">
       <div class="login-card">
         <div class="login-header">
-          <div class="logo">L</div>
+          <app-logo [size]="60" />
           <h1>Lascodia Trading Engine</h1>
           <p>Admin Console</p>
         </div>
@@ -236,18 +237,10 @@ import { DEFAULT_POST_LOGIN_ROUTE, RETURN_URL_PARAM, sanitizeReturnUrl } from '.
         margin-bottom: var(--space-8);
       }
 
-      .logo {
-        width: 56px;
-        height: 56px;
-        background: var(--accent);
-        color: white;
-        border-radius: var(--radius-md);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 24px;
-        font-weight: 700;
+      app-logo {
         margin: 0 auto var(--space-4);
+        /* Lift the mark off the card the way an app icon sits on a shelf. */
+        filter: drop-shadow(0 6px 16px rgba(0, 87, 216, 0.28));
       }
 
       .login-header h1 {

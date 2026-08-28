@@ -4,6 +4,7 @@ import { ThemeService } from '@core/theme/theme.service';
 import { AuthService, type Role } from '@core/auth/auth.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { HoverPreloadingStrategy } from '@core/routing/hover-preloading.strategy';
+import { LogoComponent } from '@shared/components/logo/logo.component';
 
 interface NavItem {
   label: string;
@@ -32,11 +33,11 @@ interface NavGroup {
 @Component({
   selector: 'app-sidebar',
   standalone: true,
-  imports: [RouterLink, RouterLinkActive],
+  imports: [RouterLink, RouterLinkActive, LogoComponent],
   template: `
     <aside class="sidebar" [class.collapsed]="collapsed()" aria-label="Primary navigation">
       <div class="sidebar-header">
-        <div class="logo" aria-hidden="true">L</div>
+        <app-logo [size]="32" [label]="collapsed() ? 'Lascodia' : ''" />
         @if (!collapsed()) {
           <span class="logo-text">Lascodia</span>
         }
@@ -198,18 +199,8 @@ interface NavGroup {
         min-height: 64px;
       }
 
-      .logo {
-        width: 32px;
-        height: 32px;
-        min-width: 32px;
-        background: var(--accent);
-        color: white;
-        border-radius: var(--radius-sm);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 16px;
-        font-weight: 700;
+      app-logo {
+        flex: none;
       }
 
       .logo-text {
