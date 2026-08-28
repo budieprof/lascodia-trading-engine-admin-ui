@@ -53,8 +53,15 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
                 // expired:true so the route the user was on is captured as a
                 // returnUrl and login puts them back there rather than on the
                 // dashboard.
-                authService.logout({ expired: true });
-                notificationService.error('Session expired. Please log in again.');
+                //
+                // Guarded on actually HAVING a session: on a cold boot the
+                // first probe 401s, the refresh has nothing to renew, and a
+                // visitor who never logged in would be told their session
+                // expired over an empty state.
+                if (authService.isAuthenticated()) {
+                  authService.logout({ expired: true });
+                  notificationService.error('Session expired. Please log in again.');
+                }
                 return throwError(() => error);
               }
               // Re-issue the original request with the fresh bearer attached
@@ -73,7 +80,10 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
 
         // Refresh-exempt path hit a 401. Only refresh failing here is a dead
         // session; login/logout 401s are handled by their own callers.
-        if (SESSION_ENDING_PATHS.some((p) => req.url.includes(p))) {
+        if (
+          SESSION_ENDING_PATHS.some((p) => req.url.includes(p)) &&
+          authService.isAuthenticated()
+        ) {
           authService.logout({ expired: true });
           notificationService.error('Session expired. Please log in again.');
         }
