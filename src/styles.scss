@@ -327,4 +327,34 @@ html[data-view-transition='slide-left']::view-transition-new(root) {
     padding: 1px 4px;
     border-radius: 3px;
   }
+
+  // GFM tables. The wrapper scrolls a wide table inside its own container so a
+  // many-column table never forces the chat bubble (or the page) to scroll
+  // sideways.
+  .md-table-wrap {
+    margin: 0 0 0.85em;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  table {
+    border-collapse: collapse;
+    font-size: var(--text-sm, 13px);
+    line-height: 1.45;
+  }
+  th,
+  td {
+    border: 1px solid var(--border);
+    padding: 5px 9px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-weight: var(--font-semibold, 600);
+    white-space: nowrap;
+  }
+  tbody tr:nth-child(even) td {
+    background: var(--bg-secondary);
+  }
 }
