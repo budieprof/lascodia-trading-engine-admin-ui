@@ -11,6 +11,7 @@ import {
   NewsFocusResult,
   NewsPressureLeg,
   NewsPressureItem,
+  NewsPressureSummaryView,
 } from '@features/news-intel/news-intel.types';
 
 /**
@@ -356,7 +357,11 @@ import {
           <div class="card-head">
             <div>
               <h2>Pressure board</h2>
-              <p class="muted small">Latest roll-up per tracked currency.</p>
+              <p class="muted small">
+                Latest roll-up per tracked currency. <strong>Live</strong> is the share of each
+                score still coming from news the market has not already answered — a strong score at
+                0% is real, and already behind us.
+              </p>
             </div>
           </div>
 
@@ -368,6 +373,7 @@ import {
                   <th class="num">Score</th>
                   <th>Direction</th>
                   <th class="num">In play</th>
+                  <th class="num">Live</th>
                   <th class="num">Stories</th>
                   <th>Dominant</th>
                   <th class="num">As of</th>
@@ -398,7 +404,17 @@ import {
                         ></div>
                       </div>
                     </td>
-                    <td class="num mono">{{ row.absolutePressure | number: '1.3-3' }}</td>
+                    <td
+                      class="num mono"
+                      [class.stale]="row.liveShare === 0"
+                      [title]="boardLiveHint(row)"
+                    >
+                      @if (row.liveShare === null) {
+                        <span class="muted">—</span>
+                      } @else {
+                        {{ row.liveShare * 100 | number: '1.0-0' }}%
+                      }
+                    </td>
                     <td class="num mono">{{ row.storyCount }} / {{ row.articleCount }}</td>
                     <td>{{ row.dominantCategory || '—' }}</td>
                     <td class="num muted small">{{ row.asOfUtc | date: 'HH:mm' }}</td>
@@ -988,6 +1004,10 @@ import {
         font-size: var(--text-xs);
       }
       /* A zero live share is the one reading here an operator must not skim past. */
+      .board td.stale {
+        color: #b25e00;
+        font-weight: 600;
+      }
       .leg-meta dd.stale {
         color: #b25e00;
         font-weight: 600;
@@ -1478,6 +1498,20 @@ export class NewsIntelPageComponent {
       `open, summing to ${leg.liveSignedWeight.toFixed(3)} signed. Stories with no verdict yet count ` +
       'as live on purpose: for genuinely fresh news the response window has not closed, and requiring ' +
       'a confirmed move would exclude exactly the items with the most edge left.'
+    );
+  }
+
+  /** Board tooltip. Null liveness is pre-liveness history, not a zero — say so rather than imply a reading. */
+  boardLiveHint(row: NewsPressureSummaryView): string {
+    if (row.liveShare === null) {
+      return 'Recorded before liveness was tracked — unknown, not zero.';
+    }
+    const hours = Math.round((row.freshWindowMinutes ?? 0) / 60);
+    return (
+      `${row.liveCount ?? 0} of ${row.freshCount ?? 0} contributors inside the last ${hours}h are ` +
+      `still open (not muted or contradicted by the tape), summing to ` +
+      `${(row.liveSignedWeight ?? 0).toFixed(3)} signed. 0% means the direction is real but the ` +
+      'move is behind us.'
     );
   }
 

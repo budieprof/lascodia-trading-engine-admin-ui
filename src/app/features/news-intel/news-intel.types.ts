@@ -169,6 +169,16 @@ export interface NewsPressureSummaryView {
   storyCount: number;
   dominantCategory: string | null;
   paramsFingerprint: string | null;
+
+  // ── Liveness, as recorded at asOfUtc ──
+  // NULL on rows written before liveness shipped. Render that as unknown, never as zero:
+  // zero is the claim "fully priced", and nobody measured that for historical rows.
+  freshWindowMinutes: number | null;
+  freshCount: number | null;
+  liveCount: number | null;
+  /** Share of this row's weight still live, 0..1. */
+  liveShare: number | null;
+  liveSignedWeight: number | null;
 }
 
 /**
@@ -208,6 +218,8 @@ export interface NewsPressurePoint {
   absolutePressure: number;
   articleCount: number;
   paramsFingerprint: string | null;
+  /** Share still live at this point — plot beside the score to see edge drain while it holds. */
+  liveShare: number | null;
 }
 
 /** One editable knob, with the description that explains what it does. */
