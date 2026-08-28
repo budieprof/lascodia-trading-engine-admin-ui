@@ -222,6 +222,34 @@ export interface NewsPressurePoint {
   liveShare: number | null;
 }
 
+/** One currency's pressure series — a leg of the divergence chart. */
+export interface NewsCurrencySeries {
+  currency: string;
+  points: NewsPressurePoint[];
+}
+
+/**
+ * Articles first seen in one hour, split by channel.
+ *
+ * Counts rather than rates: a rate normalises away exactly the thing worth seeing, which is a
+ * channel's band going flat while the others carry on.
+ */
+export interface NewsIngestBucket {
+  hourUtc: string;
+  total: number;
+  byChannel: Record<string, number>;
+}
+
+/** What one liveness-backfill pass did. Repeat while `remainingRows` is non-zero. */
+export interface NewsLivenessBackfillResult {
+  instantsProcessed: number;
+  rowsFilled: number;
+  rowsWithoutReading: number;
+  remainingRows: number;
+  oldestRemainingUtc: string | null;
+  dryRun: boolean;
+}
+
 /** One editable knob, with the description that explains what it does. */
 export interface NewsConfigEntry {
   key: string;

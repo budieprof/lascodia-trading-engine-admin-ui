@@ -12,6 +12,8 @@ import {
   NewsPressureLeg,
   NewsPressureItem,
   NewsPressureSummaryView,
+  NewsCurrencySeries,
+  NewsIngestBucket,
 } from '@features/news-intel/news-intel.types';
 
 /**
@@ -462,6 +464,17 @@ import {
                   {{ h }}h
                 </button>
               }
+              @if (liveUnknownCount() > 0) {
+                <button
+                  type="button"
+                  class="chip"
+                  [disabled]="backfilling()"
+                  (click)="runBackfill()"
+                  title="Recompute liveness for older rows at their OWN timestamp — point-in-time honest, never using knowledge from after the fact."
+                >
+                  {{ backfilling() ? 'Backfilling…' : 'Backfill liveness' }}
+                </button>
+              }
             </div>
           </div>
 
@@ -507,6 +520,9 @@ import {
               <div class="hist-legend small muted">
                 <span><i class="key score"></i> score (−1 … +1, midline is zero)</span>
                 <span><i class="key live"></i> live share (0 … 100%)</span>
+                @if (backfillNote(); as note) {
+                  <span class="unknown">{{ note }}</span>
+                }
                 @if (liveUnknownCount() > 0) {
                   <span class="unknown">
                     {{ liveUnknownCount() }} of {{ pts.length }} points predate liveness tracking —
@@ -519,6 +535,120 @@ import {
             }
           } @else {
             <p class="muted small">Loading…</p>
+          }
+        </section>
+
+        <!-- ───────── Divergence ───────── -->
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>Divergence</h2>
+              <p class="muted small">
+                Every tracked currency on one ±1 axis, read from the same rows. A pair trade lives
+                in the GAP between two legs, not in either score alone. Click a code to mute it.
+              </p>
+            </div>
+          </div>
+
+          @if (divergenceLines(); as lines) {
+            @if (lines.length) {
+              <svg
+                class="hist"
+                [attr.viewBox]="'0 0 ' + plot.w + ' ' + plot.scoreH"
+                preserveAspectRatio="none"
+                role="img"
+                aria-label="All currency news pressure scores over time"
+              >
+                <line
+                  class="axis"
+                  x1="0"
+                  [attr.y1]="plot.scoreH / 2"
+                  [attr.x2]="plot.w"
+                  [attr.y2]="plot.scoreH / 2"
+                />
+                @for (l of lines; track l.currency) {
+                  <path
+                    class="score-line"
+                    [class.muted-line]="l.dim"
+                    [attr.d]="l.d"
+                    [attr.stroke]="l.color"
+                  />
+                }
+              </svg>
+
+              <div class="hist-legend small">
+                @for (l of lines; track l.currency) {
+                  <button
+                    type="button"
+                    class="ccy-key"
+                    [class.off]="l.dim"
+                    (click)="toggleCurrency(l.currency)"
+                  >
+                    <i class="key" [style.background]="l.color"></i>
+                    {{ l.currency }}
+                    <span class="mono"
+                      >{{ l.last > 0 ? '+' : '' }}{{ l.last | number: '1.2-2' }}</span
+                    >
+                  </button>
+                }
+              </div>
+            } @else {
+              <p class="muted small">No roll-up history in this window yet.</p>
+            }
+          }
+        </section>
+
+        <!-- ───────── Ingestion volume ───────── -->
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>Ingestion volume</h2>
+              <p class="muted small">
+                Articles first seen per hour, stacked by channel. This is where a silently dead feed
+                shows up — one band goes flat while the others carry on. In the pressure score alone
+                that is indistinguishable from a quiet news day.
+              </p>
+            </div>
+          </div>
+
+          @if (ingestBars(); as bars) {
+            @if (bars.length) {
+              <svg
+                class="hist ingest"
+                [attr.viewBox]="'0 0 ' + plot.w + ' ' + ingestH"
+                preserveAspectRatio="none"
+                role="img"
+                aria-label="Articles ingested per hour by channel"
+              >
+                <line
+                  class="axis faint"
+                  x1="0"
+                  [attr.y1]="ingestH"
+                  [attr.x2]="plot.w"
+                  [attr.y2]="ingestH"
+                />
+                @for (b of bars; track b.key) {
+                  <rect
+                    [attr.x]="b.x"
+                    [attr.y]="b.y"
+                    [attr.width]="b.w"
+                    [attr.height]="b.h"
+                    [attr.fill]="b.color"
+                  >
+                    <title>{{ b.title }}</title>
+                  </rect>
+                }
+              </svg>
+
+              <div class="hist-legend small muted">
+                @for (ch of ingestChannels(); track ch; let i = $index) {
+                  <span><i class="key" [style.background]="paletteAt(i)"></i> {{ ch }}</span>
+                }
+                <span>peak {{ ingestPeak() }}/h</span>
+              </div>
+            } @else {
+              <p class="muted small">No articles ingested in this window.</p>
+            }
           }
         </section>
 
@@ -1163,6 +1293,27 @@ import {
       .hist-legend .key.live {
         background: #0d9488;
       }
+      .hist .score-line.muted-line {
+        opacity: 0.12;
+      }
+      .ccy-key {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
+        background: var(--surface);
+        color: var(--text-primary);
+        font-size: var(--text-xs);
+        cursor: pointer;
+      }
+      .ccy-key.off {
+        opacity: 0.4;
+      }
+      .hist.ingest {
+        height: 130px;
+      }
       .hist-legend .unknown {
         color: #b25e00;
       }
@@ -1516,6 +1667,10 @@ export class NewsIntelPageComponent {
     liveH: 46,
   };
 
+  /** Height of the ingestion panel's own viewBox. */
+  private static readonly INGEST_H = 120;
+  readonly ingestH = NewsIntelPageComponent.INGEST_H;
+
   readonly plot = NewsIntelPageComponent.PLOT;
   readonly plotHeight =
     NewsIntelPageComponent.PLOT.scoreH +
@@ -1594,6 +1749,158 @@ export class NewsIntelPageComponent {
     if (this.historyHours() === hours) return;
     this.historyHours.set(hours);
     this.history.refresh();
+    this.allSeries.refresh();
+    this.ingestHistory.refresh();
+  }
+
+  // ── Divergence: every currency on one axis ──────────────────────────
+  readonly allSeries = createPolledResource(
+    () => this.svc.getAllTimeseries(this.historyHours(), 300),
+    { intervalMs: 60_000 },
+  );
+
+  private static readonly PALETTE = [
+    '#2563eb',
+    '#dc2626',
+    '#0d9488',
+    '#7c3aed',
+    '#ea580c',
+    '#0891b2',
+    '#65a30d',
+    '#c026d3',
+    '#b45309',
+  ];
+
+  /** One path per currency over a shared ±1 axis, so legs are directly comparable. */
+  readonly divergenceLines = computed(() => {
+    const series = this.allSeries.value() ?? [];
+    const { w, scoreH } = NewsIntelPageComponent.PLOT;
+    return series.map((s: NewsCurrencySeries, idx: number) => {
+      const pts = s.points;
+      const d = pts
+        .map((p, i) => {
+          const x = pts.length <= 1 ? 0 : (i / (pts.length - 1)) * w;
+          const y = ((1 - Math.max(-1, Math.min(1, p.weightedScore))) / 2) * scoreH;
+          return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+        })
+        .join(' ');
+      const last = pts.length ? pts[pts.length - 1].weightedScore : 0;
+      return {
+        currency: s.currency,
+        d,
+        color: NewsIntelPageComponent.PALETTE[idx % NewsIntelPageComponent.PALETTE.length],
+        last,
+        dim: this.dimmed().has(s.currency),
+      };
+    });
+  });
+
+  /** Currencies the operator has clicked off. Nine overlaid lines is a hairball; this is the comb. */
+  readonly dimmed = signal<ReadonlySet<string>>(new Set<string>());
+
+  paletteAt(i: number): string {
+    return NewsIntelPageComponent.PALETTE[i % NewsIntelPageComponent.PALETTE.length];
+  }
+
+  toggleCurrency(currency: string): void {
+    const next = new Set(this.dimmed());
+    if (!next.delete(currency)) next.add(currency);
+    this.dimmed.set(next);
+  }
+
+  // ── Ingestion volume: where a dead feed becomes visible ─────────────
+  readonly ingestHistory = createPolledResource(
+    () => this.svc.getIngestHistory(this.historyHours()),
+    { intervalMs: 60_000 },
+  );
+
+  readonly ingestChannels = computed(() => {
+    const buckets = this.ingestHistory.value() ?? [];
+    const names = new Set<string>();
+    for (const b of buckets) for (const k of Object.keys(b.byChannel)) names.add(k);
+    return [...names].sort();
+  });
+
+  /**
+   * Stacked hourly bars per channel.
+   *
+   * Stacked rather than grouped because the question is "did THIS channel stop", and a channel
+   * keeps its own band position across the whole chart when stacked — a gap in one band is
+   * obvious, where grouped bars just look sparser.
+   */
+  readonly ingestBars = computed(() => {
+    const buckets = this.ingestHistory.value() ?? [];
+    const channels = this.ingestChannels();
+    const { w } = NewsIntelPageComponent.PLOT;
+    const h = NewsIntelPageComponent.INGEST_H;
+    if (!buckets.length) return [];
+    const peak = Math.max(1, ...buckets.map((b) => b.total));
+    const barW = Math.max(1, (w / buckets.length) * 0.8);
+
+    return buckets.flatMap((b: NewsIngestBucket, i: number) => {
+      const x = (i / Math.max(1, buckets.length - 1)) * (w - barW);
+      let acc = 0;
+      return channels
+        .map((ch, ci) => {
+          const n = b.byChannel[ch] ?? 0;
+          if (n === 0) return null;
+          const segH = (n / peak) * h;
+          const y = h - acc - segH;
+          acc += segH;
+          return {
+            key: `${b.hourUtc}-${ch}`,
+            x,
+            y,
+            w: barW,
+            h: segH,
+            color: NewsIntelPageComponent.PALETTE[ci % NewsIntelPageComponent.PALETTE.length],
+            title: `${b.hourUtc.slice(11, 16)}Z — ${ch}: ${n} (hour total ${b.total})`,
+          };
+        })
+        .filter((v): v is NonNullable<typeof v> => v !== null);
+    });
+  });
+
+  readonly ingestPeak = computed(() =>
+    Math.max(0, ...(this.ingestHistory.value() ?? []).map((b) => b.total)),
+  );
+
+  // ── Backfill ────────────────────────────────────────────────────────
+  readonly backfilling = signal(false);
+  readonly backfillNote = signal<string | null>(null);
+
+  /** Runs passes until the queue drains, so the operator clicks once rather than N times. */
+  runBackfill(): void {
+    if (this.backfilling()) return;
+    this.backfilling.set(true);
+    this.backfillNote.set('Recomputing liveness at each row&apos;s own timestamp…');
+
+    const pass = (filledSoFar: number): void => {
+      this.svc.backfillLiveness(150, false).subscribe({
+        next: (r) => {
+          const filled = filledSoFar + r.rowsFilled;
+          if (r.remainingRows > 0 && r.rowsFilled + r.rowsWithoutReading > 0) {
+            this.backfillNote.set(`Filled ${filled}… ${r.remainingRows} rows remaining.`);
+            pass(filled);
+            return;
+          }
+          this.backfilling.set(false);
+          this.backfillNote.set(
+            `Done — ${filled} rows filled` +
+              (r.remainingRows > 0
+                ? `, ${r.remainingRows} left with no reading at their instant.`
+                : '.'),
+          );
+          this.history.refresh();
+          this.allSeries.refresh();
+        },
+        error: (e) => {
+          this.backfilling.set(false);
+          this.backfillNote.set(e?.error?.message ?? e?.message ?? 'Backfill failed.');
+        },
+      });
+    };
+    pass(0);
   }
 
   // ── Status + articles ───────────────────────────────────────────────

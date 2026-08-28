@@ -13,6 +13,9 @@ import {
   NewsFocusResult,
   NewsIntelStatusView,
   NewsPressurePoint,
+  NewsCurrencySeries,
+  NewsIngestBucket,
+  NewsLivenessBackfillResult,
   NewsPressureSummaryView,
 } from '@features/news-intel/news-intel.types';
 
@@ -80,6 +83,28 @@ export class NewsIntelService {
     return this.api.getEnvelope<NewsPressurePoint[]>(
       `/news-intel/timeseries?currency=${encodeURIComponent(currency)}&hours=${hours}`,
     );
+  }
+
+  /** Every tracked currency's series in ONE call — the divergence chart must read all legs from
+   *  the same rows, or "USD up while CAD collapses" is a fact about request timing. */
+  getAllTimeseries(hours = 48, maxPointsPerCurrency = 400): Observable<NewsCurrencySeries[]> {
+    return this.api.getEnvelope<NewsCurrencySeries[]>(
+      `/news-intel/timeseries-all?hours=${hours}&maxPointsPerCurrency=${maxPointsPerCurrency}`,
+    );
+  }
+
+  /** Articles first seen per hour by channel — the visual form of a silently dead feed. */
+  getIngestHistory(hours = 48): Observable<NewsIngestBucket[]> {
+    return this.api.getEnvelope<NewsIngestBucket[]>(`/news-intel/ingest-history?hours=${hours}`);
+  }
+
+  /** Recompute liveness for roll-up rows written before it was tracked. Bounded; call until
+   *  `remainingRows` is zero. */
+  backfillLiveness(maxInstants = 100, dryRun = false): Observable<NewsLivenessBackfillResult> {
+    return this.api.postEnvelope<NewsLivenessBackfillResult>('/news-intel/backfill-liveness', {
+      maxInstants,
+      dryRun,
+    });
   }
 
   /** Every `NewsIntel:` knob with its current value and description. */
