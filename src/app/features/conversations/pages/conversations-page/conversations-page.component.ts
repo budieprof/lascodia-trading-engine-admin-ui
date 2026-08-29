@@ -302,7 +302,12 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
             }
           }
           <div class="conv-chat">
-            <app-analysis-chat [llmInvocationId]="id" [opener]="openerText()" [fillHeight]="true" />
+            <app-analysis-chat
+              [llmInvocationId]="id"
+              [opener]="openerText()"
+              [openerAt]="detail()?.invokedAt ?? null"
+              [fillHeight]="true"
+            />
           </div>
         } @else {
           <div class="conv-placeholder">

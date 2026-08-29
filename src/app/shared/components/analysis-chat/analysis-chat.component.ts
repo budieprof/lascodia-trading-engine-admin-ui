@@ -9,6 +9,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DatePipe } from '@angular/common';
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import { MarkdownCopyDirective } from '@shared/directives/markdown-copy.directive';
 import { MarketDataService } from '@core/services/market-data.service';
@@ -18,6 +19,25 @@ import {
   SpotRecChartComponent,
   type SpotRecChartRec,
 } from '@shared/components/spot-rec-chart/spot-rec-chart.component';
+
+/**
+ * Whether a turn opens a new calendar day and so needs a date divider above it.
+ *
+ * Exported separately from the component so the boundary rule can be tested directly,
+ * without a TestBed. The comparison is in the VIEWER's timezone, matching what DatePipe
+ * renders beside each turn: comparing the UTC dates instead would draw the divider in the
+ * wrong place for anyone whose local midnight is not UTC midnight — which is everyone here,
+ * the engine stores UTC and the operator reads BST.
+ */
+export function startsNewLocalDay(
+  currentIso: string | null | undefined,
+  previousIso: string | null | undefined,
+): boolean {
+  if (!currentIso) return false;
+  // The first turn always carries the date: the reader has no earlier row to infer it from.
+  if (!previousIso) return true;
+  return new Date(currentIso).toDateString() !== new Date(previousIso).toDateString();
+}
 
 /** A chat-generated recommendation parsed from a "recommend" tool turn. */
 interface ParsedChatRec {
@@ -53,7 +73,7 @@ interface ParsedChatRec {
   selector: 'app-analysis-chat',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MarkdownPipe, SpotRecChartComponent, MarkdownCopyDirective],
+  imports: [MarkdownPipe, SpotRecChartComponent, MarkdownCopyDirective, DatePipe],
   template: `
     <section
       class="chat"
@@ -136,21 +156,48 @@ interface ParsedChatRec {
         }
 
         @if (opener(); as op) {
+          @if (openerAt(); as at) {
+            <div class="day-sep">
+              <span>{{ at | date: 'EEE d MMM y' }}</span>
+            </div>
+          }
           <div class="msg">
             <div class="bubble md opener" [innerHTML]="op | markdown"></div>
+            @if (openerAt(); as at) {
+              <time class="msg-time" [attr.datetime]="at" [title]="at | date: 'full'">{{
+                at | date: timeFormat
+              }}</time>
+            }
           </div>
         }
 
-        @for (m of messages(); track m.id) {
+        @for (m of messages(); track m.id; let i = $index) {
+          @if (startsNewDay(i)) {
+            <div class="day-sep">
+              <span>{{ m.createdAtUtc | date: 'EEE d MMM y' }}</span>
+            </div>
+          }
           @switch (m.role) {
             @case ('Assistant') {
               <div class="msg">
                 <div class="bubble md" [innerHTML]="m.content | markdown"></div>
+                <time
+                  class="msg-time"
+                  [attr.datetime]="m.createdAtUtc"
+                  [title]="m.createdAtUtc | date: 'full'"
+                  >{{ m.createdAtUtc | date: timeFormat }}</time
+                >
               </div>
             }
             @case ('User') {
               <div class="msg user">
                 <div class="bubble">{{ m.content }}</div>
+                <time
+                  class="msg-time"
+                  [attr.datetime]="m.createdAtUtc"
+                  [title]="m.createdAtUtc | date: 'full'"
+                  >{{ m.createdAtUtc | date: timeFormat }}</time
+                >
               </div>
             }
             @case ('Tool') {
@@ -203,6 +250,12 @@ interface ParsedChatRec {
                       </div>
                     }
                   </div>
+                  <time
+                    class="msg-time"
+                    [attr.datetime]="m.createdAtUtc"
+                    [title]="m.createdAtUtc | date: 'full'"
+                    >{{ m.createdAtUtc | date: timeFormat }}</time
+                  >
                 </div>
               } @else {
                 <div class="msg">
@@ -217,6 +270,12 @@ interface ParsedChatRec {
                       <pre class="tool-pre">{{ m.toolResultJson }}</pre>
                     </div>
                   </details>
+                  <time
+                    class="msg-time"
+                    [attr.datetime]="m.createdAtUtc"
+                    [title]="m.createdAtUtc | date: 'full'"
+                    >{{ m.createdAtUtc | date: timeFormat }}</time
+                  >
                 </div>
               }
             }
@@ -274,6 +333,12 @@ interface ParsedChatRec {
                     </details>
                   }
                 </div>
+                <time
+                  class="msg-time"
+                  [attr.datetime]="m.createdAtUtc"
+                  [title]="m.createdAtUtc | date: 'full'"
+                  >{{ m.createdAtUtc | date: timeFormat }}</time
+                >
               </div>
             }
           }
@@ -511,9 +576,41 @@ interface ParsedChatRec {
       .msg {
         display: flex;
         justify-content: flex-start;
+        /* Bottom-aligned so the timestamp sits on the bubble's last line, not floating
+           beside a tall block of markdown. */
+        align-items: flex-end;
+        gap: 6px;
       }
       .msg.user {
         justify-content: flex-end;
+      }
+      /* Timestamps read outward from the bubble: after it for the agent, before it for the
+         operator, so the column of times never cuts through the middle of the thread. */
+      .msg-time {
+        flex: none;
+        font-size: var(--text-xs, 11px);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-tertiary, var(--text-secondary));
+        opacity: 0.75;
+        padding-bottom: 2px;
+        white-space: nowrap;
+      }
+      .msg.user .msg-time {
+        order: -1;
+      }
+      .day-sep {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 6px 0 2px;
+        color: var(--text-secondary);
+        font-size: var(--text-xs, 11px);
+      }
+      .day-sep::before,
+      .day-sep::after {
+        content: '';
+        flex: 1;
+        border-top: 1px solid var(--border);
       }
       .bubble {
         max-width: 85%;
@@ -818,6 +915,10 @@ export class AnalysisChatComponent {
    *  scroll as one thread. */
   readonly opener = input<string | null>(null);
 
+  /** When the opener was produced (the analysis's `invokedAt`), so the anchor turn carries a
+   *  timestamp like every other turn. Optional: callers that pass no opener have none. */
+  readonly openerAt = input<string | null>(null);
+
   /** When true the chat fills its container height (full-page use) instead of
    *  the default capped log height (embedded-in-modal use). */
   readonly fillHeight = input<boolean>(false);
@@ -837,6 +938,28 @@ export class AnalysisChatComponent {
   protected readonly filingId = signal<number | null>(null);
   /** Brief "copied" confirmation after the operator copies the conversation id. */
   protected readonly copied = signal(false);
+
+  /**
+   * Turn timestamps show SECONDS, not just hours and minutes. An agent run posts several
+   * turns inside one minute — conversation 24272 has four between 05:56:25 and 05:56:44 —
+   * so `HH:mm` would stamp them all identically and tell the reader nothing about order or
+   * pace. The engine sends UTC with a `Z`, and DatePipe renders in the viewer's timezone;
+   * the `title` carries the full date for anyone reconciling against an engine log.
+   */
+  protected readonly timeFormat = 'HH:mm:ss';
+
+  /**
+   * True when this turn is the first of a calendar day, so the thread gets a date divider.
+   * Work-order conversations are long-lived — 24272 was resumed hours later — and without
+   * this a reply from a different day is indistinguishable from the one above it.
+   */
+  protected startsNewDay(index: number): boolean {
+    const turns = this.messages();
+    // The opener is the turn before the first reply. Comparing against it stops the thread
+    // drawing the date twice — once over the brief, once over the answer below it.
+    const previous = index === 0 ? this.openerAt() : turns[index - 1]?.createdAtUtc;
+    return startsNewLocalDay(turns[index]?.createdAtUtc, previous);
+  }
 
   /** Memoised parsed recommendations, keyed by turn id + payload so the chart's
    *  inputs stay reference-stable across change detection (a fresh array every
