@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
+import { MarkdownCopyDirective } from '@shared/directives/markdown-copy.directive';
 import { MarketDataService } from '@core/services/market-data.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import type { SpotAnalysisFollowUpTurnDto, AnalysisMonitorDto } from '@core/api/api.types';
@@ -52,9 +53,14 @@ interface ParsedChatRec {
   selector: 'app-analysis-chat',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MarkdownPipe, SpotRecChartComponent],
+  imports: [MarkdownPipe, SpotRecChartComponent, MarkdownCopyDirective],
   template: `
-    <section class="chat" [class.fill]="fillHeight()" aria-label="Analysis follow-up chat">
+    <section
+      class="chat"
+      appMarkdownCopy
+      [class.fill]="fillHeight()"
+      aria-label="Analysis follow-up chat"
+    >
       @if (llmInvocationId()) {
         <div class="chat-idbar">
           <span class="idbar-label">Conversation ID</span>
@@ -179,7 +185,7 @@ interface ParsedChatRec {
                       [fullWidthLevels]="true"
                     />
                     @if (rec.rationale) {
-                      <p class="rec-rationale">{{ rec.rationale }}</p>
+                      <div class="rec-rationale md" [innerHTML]="rec.rationale | markdown"></div>
                     }
                     @if (rec.filedSignalId !== null) {
                       <div class="rec-filed">✓ Filed as signal #{{ rec.filedSignalId }}</div>
@@ -224,9 +230,18 @@ interface ParsedChatRec {
                     <span class="action-badge">⚡ Proposed action</span>
                     <span class="action-status">{{ m.actionStatus }}</span>
                   </div>
+                  <!--
+                    The proposal's own prose. The http_action producer puts everything in
+                    toolArgsJson and leaves this empty, but the algo-engineer posts a written
+                    proposal as the turn CONTENT — which used to render as nothing at all: a
+                    badge, a status, and 1,168 silently discarded characters.
+                  -->
+                  @if (m.content) {
+                    <div class="action-body md" [innerHTML]="m.content | markdown"></div>
+                  }
                   @if (parseAction(m); as pa) {
                     @if (pa.summary) {
-                      <p class="action-summary">{{ pa.summary }}</p>
+                      <div class="action-summary md" [innerHTML]="pa.summary | markdown"></div>
                     }
                     <code class="action-call">{{ pa.method }} {{ pa.path }}</code>
                     @if (pa.body) {
