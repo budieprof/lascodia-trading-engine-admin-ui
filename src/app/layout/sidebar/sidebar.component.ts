@@ -416,6 +416,9 @@ export class SidebarComponent {
         { label: 'Orders', route: '/orders', icon: '📋' },
         { label: 'Positions', route: '/positions', icon: '📊' },
         { label: 'Position Deltas', route: '/positions/deltas', icon: '🔄' },
+        // Directly under Positions: it answers a question about the open book that the
+        // positions list cannot, because nothing there knows the economic calendar.
+        { label: 'Event Exposure', route: '/positions/event-exposure', icon: '📅' },
         { label: 'Trade Signals', route: '/trade-signals', icon: '⚡' },
         // Sibling entry, not a sub-item: 'what signals exist' and 'why did nothing
         // happen' are different jobs, and the second is the one reached for under

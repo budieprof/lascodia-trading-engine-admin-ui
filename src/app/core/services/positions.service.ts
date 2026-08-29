@@ -22,12 +22,78 @@ export interface PositionTimingDto {
   openedAt: string | null;
 }
 
+/** One open position sitting across an upcoming release. */
+export interface ExposedPositionDto {
+  positionId: number;
+  symbol: string;
+  direction: string;
+  lots: number;
+  unrealizedPnL: number;
+  openedAtUtc: string;
+  ageMinutes: number;
+  tradingAccountId: number;
+  /** False when the position carries no stop — the case worth looking at first. */
+  hasStopLoss: boolean;
+  stopLoss: number | null;
+  takeProfit: number | null;
+}
+
+/** An upcoming release and the open exposure sitting across it. */
+export interface ExposedEventDto {
+  eventId: number;
+  title: string;
+  currency: string;
+  impact: string;
+  scheduledAtUtc: string;
+  minutesUntil: number;
+  forecast: string | null;
+  previous: string | null;
+  /** False when no consensus is published — the release cannot be read in surprise terms at all. */
+  hasConsensus: boolean;
+  positionCount: number;
+  totalLots: number;
+  totalUnrealizedPnL: number;
+  unprotectedPositionCount: number;
+  positions: ExposedPositionDto[];
+}
+
+/** Event-exposure snapshot across the open book, from `GET /position/event-exposure`. */
+export interface EventExposureDto {
+  generatedAtUtc: string;
+  lookaheadHours: number;
+  openPositionCount: number;
+  /** Distinct positions exposed to at least one release; a position may appear under several. */
+  exposedPositionCount: number;
+  exposedLots: number;
+  exposedUnrealizedPnL: number;
+  events: ExposedEventDto[];
+  /** What the measurement does and does not establish. Render it with the numbers. */
+  basis: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class PositionsService {
   private readonly api = inject(ApiService);
 
   getById(id: number): Observable<ResponseData<PositionDto>> {
     return this.api.get(`/position/${id}`);
+  }
+
+  /**
+   * Open positions about to straddle a high-impact economic release, grouped by event.
+   *
+   * Reporting only. The engine returns a `basis` string describing exactly what the
+   * measurement does and does not establish; render it alongside the numbers rather
+   * than presenting the exposure as a call to close.
+   */
+  getEventExposure(
+    lookaheadHours = 24,
+    includeMediumImpact = false,
+  ): Observable<ResponseData<EventExposureDto>> {
+    return this.api.get(
+      `/position/event-exposure?lookaheadHours=${lookaheadHours}` +
+        `&includeMediumImpact=${includeMediumImpact}`,
+    );
   }
 
   /**

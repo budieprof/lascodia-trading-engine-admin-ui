@@ -12,5 +12,14 @@ export const POSITIONS_ROUTES: Routes = [
         (m) => m.PositionDeltasPageComponent,
       ),
   },
+  {
+    path: 'event-exposure',
+    data: { breadcrumb: 'Event Exposure' },
+    loadComponent: () =>
+      import('./pages/event-exposure-page/event-exposure-page.component').then(
+        (m) => m.EventExposurePageComponent,
+      ),
+  },
+  // Must stay last: ':id' would otherwise swallow every sibling path above it.
   { path: ':id', component: PositionDetailPageComponent, data: { breadcrumb: 'Detail' } },
 ];
