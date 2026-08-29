@@ -328,6 +328,122 @@ html[data-view-transition='slide-left']::view-transition-new(root) {
     border-radius: 3px;
   }
 
+  // Fenced code blocks. `pre` scrolls on its own so a wide ASCII flow diagram never
+  // forces the bubble (or the page) sideways — same containment rule as .md-table-wrap.
+  // white-space: pre is what preserves the diagram's alignment; the nested code resets
+  // the inline-code chrome above, which would otherwise draw a pill per block.
+  pre.md-code {
+    margin: 0 0 0.85em;
+    padding: 8px 10px;
+    // Both axes: a long dump scrolls inside the block rather than turning the whole
+    // transcript into a scroll bar.
+    overflow: auto;
+    max-width: 100%;
+    max-height: 26em;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+    line-height: 1.4;
+  }
+  pre.md-code > code {
+    display: block;
+    background: none;
+    padding: 0;
+    border-radius: 0;
+    white-space: pre;
+    font-size: var(--text-xs, 12px);
+    color: var(--text-primary);
+  }
+
+  hr {
+    margin: 1em 0;
+    border: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  // The copy button floats over the block's top-right and only materialises on hover, so it
+  // never sits between the reader and the code.
+  .md-code-wrap {
+    position: relative;
+    margin: 0 0 0.85em;
+
+    pre.md-code {
+      margin: 0;
+    }
+    .md-copy {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      opacity: 0;
+      transition: opacity 0.12s ease-in-out;
+      padding: 2px 8px;
+      font-size: var(--text-xs, 12px);
+      color: var(--text-secondary);
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm, 4px);
+      cursor: pointer;
+    }
+    // Keyboard users get it on focus; it is never hover-only.
+    &:hover .md-copy,
+    .md-copy:focus-visible {
+      opacity: 1;
+    }
+    .md-copy:hover {
+      color: var(--text-primary);
+    }
+  }
+
+  a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    // A long unbroken URL must not widen the bubble.
+    overflow-wrap: anywhere;
+  }
+
+  del {
+    opacity: 0.7;
+  }
+
+  img.md-img {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--radius-sm, 4px);
+  }
+
+  blockquote {
+    margin: 0 0 0.85em;
+    padding: 0.1em 0 0.1em 0.9em;
+    border-left: 3px solid var(--border);
+    color: var(--text-secondary);
+  }
+
+  // Task items lose the bullet: the checkbox is the marker.
+  li.md-task {
+    list-style: none;
+    margin-left: -1.15em;
+
+    input[type='checkbox'] {
+      margin-right: 0.45em;
+      vertical-align: middle;
+    }
+  }
+
+  .md-fnref {
+    font-size: 0.75em;
+    a {
+      text-decoration: none;
+    }
+  }
+  .md-fn-rule {
+    margin-top: 1.4em;
+  }
+  .md-footnotes {
+    font-size: var(--text-xs, 12px);
+    color: var(--text-secondary);
+  }
+
   // GFM tables. The wrapper scrolls a wide table inside its own container so a
   // many-column table never forces the chat bubble (or the page) to scroll
   // sideways.

@@ -12,6 +12,7 @@ import type { EChartsOption } from 'echarts';
 import { buildRecPreviewChartOption } from '@shared/components/analysis-recommendations/rec-preview-chart';
 import { catchError, of } from 'rxjs';
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
+import { MarkdownCopyDirective } from '@shared/directives/markdown-copy.directive';
 import { AnalysisChatComponent } from '@shared/components/analysis-chat/analysis-chat.component';
 import { MarketDataService } from '@core/services/market-data.service';
 import { NotificationService } from '@core/notifications/notification.service';
@@ -34,7 +35,7 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
   selector: 'app-spot-analysis-modal',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgxEchartsDirective, MarkdownPipe, AnalysisChatComponent],
+  imports: [NgxEchartsDirective, MarkdownPipe, AnalysisChatComponent, MarkdownCopyDirective],
   template: `
     <div class="backdrop" (click)="closed.emit()">
       <div class="modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true">
@@ -247,7 +248,7 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
             @if (r.analysis) {
               <details class="analysis" open>
                 <summary>Full analysis</summary>
-                <div class="md" [innerHTML]="r.analysis | markdown"></div>
+                <div class="md" appMarkdownCopy [innerHTML]="r.analysis | markdown"></div>
               </details>
             }
 

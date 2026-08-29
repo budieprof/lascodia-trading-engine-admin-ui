@@ -18,6 +18,7 @@ import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
+import { MarkdownCopyDirective } from '@shared/directives/markdown-copy.directive';
 import { AnalysisChatComponent } from '@shared/components/analysis-chat/analysis-chat.component';
 import type { EChartsOption } from 'echarts';
 import { Subject, timer, switchMap, takeUntil, catchError, of } from 'rxjs';
@@ -314,6 +315,7 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
     RouterLink,
     MarkdownPipe,
     AnalysisChatComponent,
+    MarkdownCopyDirective,
   ],
   template: `
     <div class="trading-chart">
@@ -1013,7 +1015,11 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
                 </ul>
               </section>
             }
-            <div class="analysis-body md" [innerHTML]="ar.analysis | markdown"></div>
+            <div
+              class="analysis-body md"
+              appMarkdownCopy
+              [innerHTML]="ar.analysis | markdown"
+            ></div>
 
             <section class="analysis-followup">
               <h4 class="analysis-followup-title">Follow-up chat</h4>
@@ -1109,7 +1115,11 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
                 </p>
               </section>
             }
-            <div class="analysis-body md" [innerHTML]="mr.analysis | markdown"></div>
+            <div
+              class="analysis-body md"
+              appMarkdownCopy
+              [innerHTML]="mr.analysis | markdown"
+            ></div>
           } @else if (macroAnalysisError(); as merr) {
             <header class="analysis-head">
               <h3 id="macro-analysis-title">Macro analysis failed</h3>
