@@ -121,6 +121,14 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'analysis-monitors',
+        data: { breadcrumb: 'Analysis Monitors' },
+        loadChildren: () =>
+          import('@features/analysis-monitors/analysis-monitors.routes').then(
+            (m) => m.ANALYSIS_MONITORS_ROUTES,
+          ),
+      },
+      {
         path: 'algo-engineer/scorecard',
         data: { breadcrumb: 'Change Scorecard' },
         loadChildren: () =>
