@@ -432,172 +432,213 @@ import {
           }
         </section>
 
-        <!-- ───────── Pressure history ───────── -->
-        <section class="card">
-          <div class="card-head">
-            <div>
-              <h2>Pressure history</h2>
-              <p class="muted small">
-                Score over time, with the share still live beneath it. The pair matters more than
-                either line: a score holding flat while the bars drain is a move that has finished
-                without the evidence changing.
-              </p>
-            </div>
-            <div class="hist-controls">
-              <select
-                class="hist-select"
-                [value]="historyCurrency()"
-                (change)="onHistoryCurrency($event)"
-                aria-label="Currency"
-              >
-                @for (c of historyCurrencies(); track c) {
-                  <option [value]="c" [selected]="c === historyCurrency()">{{ c }}</option>
-                }
-              </select>
-              @for (h of [24, 48, 168]; track h) {
-                <button
-                  type="button"
-                  class="chip"
-                  [class.active]="historyHours() === h"
-                  (click)="setHistoryHours(h)"
-                >
-                  {{ h }}h
-                </button>
-              }
-              @if (liveUnknownCount() > 0) {
-                <button
-                  type="button"
-                  class="chip"
-                  [disabled]="backfilling()"
-                  (click)="runBackfill()"
-                  title="Recompute liveness for older rows at their OWN timestamp — point-in-time honest, never using knowledge from after the fact."
-                >
-                  {{ backfilling() ? 'Backfilling…' : 'Backfill liveness' }}
-                </button>
-              }
-            </div>
-          </div>
-
-          @if (history.value(); as pts) {
-            @if (pts.length > 1) {
-              <svg
-                class="hist"
-                [attr.viewBox]="'0 0 ' + plot.w + ' ' + plotHeight"
-                preserveAspectRatio="none"
-                role="img"
-                aria-label="News pressure score and live share over time"
-              >
-                <line
-                  class="axis"
-                  x1="0"
-                  [attr.y1]="plot.scoreH / 2"
-                  [attr.x2]="plot.w"
-                  [attr.y2]="plot.scoreH / 2"
-                />
-                <path class="score-line" [attr.d]="scorePath()" />
-
-                <line
-                  class="axis faint"
-                  x1="0"
-                  [attr.y1]="plotHeight"
-                  [attr.x2]="plot.w"
-                  [attr.y2]="plotHeight"
-                />
-                @for (b of liveBars(); track b.x) {
-                  <rect
-                    class="live-bar"
-                    [class.zero]="b.zero"
-                    [attr.x]="b.x"
-                    [attr.y]="b.y"
-                    [attr.width]="b.w"
-                    [attr.height]="b.h"
-                  >
-                    <title>{{ b.title }}</title>
-                  </rect>
-                }
-              </svg>
-
-              <div class="hist-legend small muted">
-                <span><i class="key score"></i> score (−1 … +1, midline is zero)</span>
-                <span><i class="key live"></i> live share (0 … 100%)</span>
-                @if (backfillNote(); as note) {
-                  <span class="unknown">{{ note }}</span>
-                }
-                @if (liveUnknownCount() > 0) {
-                  <span class="unknown">
-                    {{ liveUnknownCount() }} of {{ pts.length }} points predate liveness tracking —
-                    drawn as gaps, because unknown is not zero.
-                  </span>
-                }
+        <!-- ───────── Pressure history + Divergence, side by side ───────── -->
+        <div class="chart-row">
+          <section class="card">
+            <div class="card-head">
+              <div>
+                <h2>Pressure history</h2>
+                <p class="muted small">
+                  Score over time, with the share still live beneath it. The pair matters more than
+                  either line: a score holding flat while the bars drain is a move that has finished
+                  without the evidence changing.
+                </p>
               </div>
-            } @else {
-              <p class="muted small">Not enough roll-ups yet to plot a history.</p>
-            }
-          } @else {
-            <p class="muted small">Loading…</p>
-          }
-        </section>
-
-        <!-- ───────── Divergence ───────── -->
-        <section class="card">
-          <div class="card-head">
-            <div>
-              <h2>Divergence</h2>
-              <p class="muted small">
-                Every tracked currency on one ±1 axis, read from the same rows. A pair trade lives
-                in the GAP between two legs, not in either score alone. Click a code to mute it.
-              </p>
-            </div>
-          </div>
-
-          @if (divergenceLines(); as lines) {
-            @if (lines.length) {
-              <svg
-                class="hist"
-                [attr.viewBox]="'0 0 ' + plot.w + ' ' + plot.scoreH"
-                preserveAspectRatio="none"
-                role="img"
-                aria-label="All currency news pressure scores over time"
-              >
-                <line
-                  class="axis"
-                  x1="0"
-                  [attr.y1]="plot.scoreH / 2"
-                  [attr.x2]="plot.w"
-                  [attr.y2]="plot.scoreH / 2"
-                />
-                @for (l of lines; track l.currency) {
-                  <path
-                    class="score-line"
-                    [class.muted-line]="l.dim"
-                    [attr.d]="l.d"
-                    [attr.stroke]="l.color"
-                  />
-                }
-              </svg>
-
-              <div class="hist-legend small">
-                @for (l of lines; track l.currency) {
+              <div class="hist-controls">
+                <select
+                  class="hist-select"
+                  [value]="historyCurrency()"
+                  (change)="onHistoryCurrency($event)"
+                  aria-label="Currency"
+                >
+                  @for (c of historyCurrencies(); track c) {
+                    <option [value]="c" [selected]="c === historyCurrency()">{{ c }}</option>
+                  }
+                </select>
+                @for (h of [24, 48, 168]; track h) {
                   <button
                     type="button"
-                    class="ccy-key"
-                    [class.off]="l.dim"
-                    (click)="toggleCurrency(l.currency)"
+                    class="chip"
+                    [class.active]="historyHours() === h"
+                    (click)="setHistoryHours(h)"
                   >
-                    <i class="key" [style.background]="l.color"></i>
-                    {{ l.currency }}
-                    <span class="mono"
-                      >{{ l.last > 0 ? '+' : '' }}{{ l.last | number: '1.2-2' }}</span
-                    >
+                    {{ h }}h
+                  </button>
+                }
+                @if (liveUnknownCount() > 0) {
+                  <button
+                    type="button"
+                    class="chip"
+                    [disabled]="backfilling()"
+                    (click)="runBackfill()"
+                    title="Recompute liveness for older rows at their OWN timestamp — point-in-time honest, never using knowledge from after the fact."
+                  >
+                    {{ backfilling() ? 'Backfilling…' : 'Backfill liveness' }}
                   </button>
                 }
               </div>
-            } @else {
-              <p class="muted small">No roll-up history in this window yet.</p>
-            }
-          }
-        </section>
+            </div>
 
+            @if (history.value(); as pts) {
+              @if (pts.length > 1) {
+                <!-- Axis labels live in HTML, not in the SVG: the plot uses
+                     preserveAspectRatio="none" to fill the card, which would stretch any <text>
+                     inside it horizontally as the column resizes. -->
+                <div class="chart">
+                  <div class="y-axis dual" aria-hidden="true">
+                    <div class="ticks">
+                      <span>+1</span>
+                      <span>0</span>
+                      <span>−1</span>
+                    </div>
+                    <span class="panel-tag">live</span>
+                  </div>
+                  <svg
+                    class="hist"
+                    [attr.viewBox]="'0 0 ' + plot.w + ' ' + plotHeight"
+                    preserveAspectRatio="none"
+                    role="img"
+                    aria-label="News pressure score and live share over time"
+                  >
+                    @for (g of scoreGridlines; track g) {
+                      <line class="grid" x1="0" [attr.y1]="g" [attr.x2]="plot.w" [attr.y2]="g" />
+                    }
+                    <line
+                      class="axis"
+                      x1="0"
+                      [attr.y1]="plot.scoreH / 2"
+                      [attr.x2]="plot.w"
+                      [attr.y2]="plot.scoreH / 2"
+                    />
+                    <path class="score-line single" [attr.d]="scorePath()" />
+
+                    <line
+                      class="axis faint"
+                      x1="0"
+                      [attr.y1]="plotHeight"
+                      [attr.x2]="plot.w"
+                      [attr.y2]="plotHeight"
+                    />
+                    @for (b of liveBars(); track b.x) {
+                      <rect
+                        class="live-bar"
+                        [class.zero]="b.zero"
+                        [attr.x]="b.x"
+                        [attr.y]="b.y"
+                        [attr.width]="b.w"
+                        [attr.height]="b.h"
+                      >
+                        <title>{{ b.title }}</title>
+                      </rect>
+                    }
+                  </svg>
+                </div>
+                <div class="x-axis small muted">
+                  <span>−{{ historyHours() }}h</span>
+                  <span>now</span>
+                </div>
+
+                <div class="hist-legend small muted">
+                  <span><i class="key score"></i> score (−1 … +1, midline is zero)</span>
+                  <span><i class="key live"></i> live share (0 … 100%)</span>
+                  @if (backfillNote(); as note) {
+                    <span class="unknown">{{ note }}</span>
+                  }
+                  @if (liveUnknownCount() > 0) {
+                    <span class="unknown">
+                      {{ liveUnknownCount() }} of {{ pts.length }} points predate liveness tracking
+                      — drawn as gaps, because unknown is not zero.
+                    </span>
+                  }
+                </div>
+              } @else {
+                <p class="muted small">Not enough roll-ups yet to plot a history.</p>
+              }
+            } @else {
+              <p class="muted small">Loading…</p>
+            }
+          </section>
+
+          <section class="card">
+            <div class="card-head">
+              <div>
+                <h2>Divergence</h2>
+                <p class="muted small">
+                  Every tracked currency on one ±1 axis, read from the same rows. A pair trade lives
+                  in the GAP between two legs, not in either score alone. Click a code to mute it.
+                </p>
+              </div>
+            </div>
+
+            @if (divergenceLines(); as lines) {
+              @if (lines.length) {
+                <div class="chart">
+                  <div class="y-axis" aria-hidden="true">
+                    <span>+1</span>
+                    <span>0</span>
+                    <span>−1</span>
+                  </div>
+                  <svg
+                    class="hist"
+                    [attr.viewBox]="'0 0 ' + plot.w + ' ' + plot.scoreH"
+                    preserveAspectRatio="none"
+                    role="img"
+                    aria-label="All currency news pressure scores over time"
+                  >
+                    @for (g of scoreGridlines; track g) {
+                      <line class="grid" x1="0" [attr.y1]="g" [attr.x2]="plot.w" [attr.y2]="g" />
+                    }
+                    <line
+                      class="axis"
+                      x1="0"
+                      [attr.y1]="plot.scoreH / 2"
+                      [attr.x2]="plot.w"
+                      [attr.y2]="plot.scoreH / 2"
+                    />
+                    @for (l of lines; track l.currency) {
+                      <!-- style, not attr: a CSS rule beats a presentation attribute, so the
+                           shared .score-line colour used to repaint every leg the same blue. -->
+                      <path
+                        class="score-line"
+                        [class.muted-line]="l.dim"
+                        [attr.d]="l.d"
+                        [style.stroke]="l.color"
+                      >
+                        <title>
+                          {{ l.currency }} — latest {{ l.last > 0 ? '+' : ''
+                          }}{{ l.last | number: '1.2-2' }}
+                        </title>
+                      </path>
+                    }
+                  </svg>
+                </div>
+                <div class="x-axis small muted">
+                  <span>−{{ historyHours() }}h</span>
+                  <span>now</span>
+                </div>
+
+                <div class="hist-legend small">
+                  @for (l of lines; track l.currency) {
+                    <button
+                      type="button"
+                      class="ccy-key"
+                      [class.off]="l.dim"
+                      (click)="toggleCurrency(l.currency)"
+                    >
+                      <i class="key" [style.background]="l.color"></i>
+                      {{ l.currency }}
+                      <span class="mono"
+                        >{{ l.last > 0 ? '+' : '' }}{{ l.last | number: '1.2-2' }}</span
+                      >
+                    </button>
+                  }
+                </div>
+              } @else {
+                <p class="muted small">No roll-up history in this window yet.</p>
+              }
+            }
+          </section>
+        </div>
         <!-- ───────── Ingestion volume ───────── -->
         <section class="card">
           <div class="card-head">
@@ -1240,20 +1281,89 @@ import {
         color: var(--text-primary);
         font-size: var(--text-xs);
       }
+      /* The two history charts share one row and stack again before either gets too narrow
+         to read. minmax(min(100%, 440px), 1fr) rather than a bare 1fr so a wide SVG can never
+         force its column past its share and shove the neighbour out of the row. */
+      .chart-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
+        gap: var(--space-4);
+        /* Deliberately NOT align-items: start. The two cards carry different amounts of chrome
+           — a second panel on one, a nine-key legend on the other — and letting them finish at
+           different heights is what made the row look unfinished. */
+      }
+      .chart-row > .card {
+        min-width: 0;
+      }
+
+      /* Label gutter + plot. This is why the scale can be labelled at all: the plot uses
+         preserveAspectRatio="none" to fill its column, which would stretch any <text> inside
+         the viewBox horizontally as the column resizes. HTML labels beside it do not distort. */
+      .chart {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: var(--space-2);
+        margin-top: var(--space-3);
+      }
+      .y-axis {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+      }
+      /* The pressure plot stacks a second panel (live share, on its own 0..100% scale) under
+         the score panel. Left alone the ±1 labels would space themselves across BOTH, putting
+         "−1" against the liveness bars — a scale label pointing at the wrong axis. The rows are
+         scoreH : (gap + liveH) from PLOT, so the ticks track the panel they belong to and the
+         lower panel gets named rather than left as an unexplained strip. */
+      .y-axis.dual {
+        display: grid;
+        grid-template-rows: 140fr 60fr;
+      }
+      .y-axis.dual .ticks {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .y-axis.dual .panel-tag {
+        align-self: end;
+      }
+      .x-axis {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 2px;
+      }
       .hist {
         display: block;
         width: 100%;
         height: 200px;
-        margin-top: var(--space-3);
         overflow: visible;
       }
-      /* Strokes must not scale with preserveAspectRatio="none", or the line thins as the card widens. */
+      /* Recessive by design: the grid orients the eye, it must never compete with the data. */
+      .hist .grid {
+        stroke: var(--border);
+        stroke-width: 1;
+        opacity: 0.45;
+        stroke-dasharray: 2 4;
+        vector-effect: non-scaling-stroke;
+      }
+      /* Geometry ONLY. The colour is deliberately absent: this class is shared with the
+         divergence chart where every leg carries its own hue, and a CSS rule beats a
+         presentation attribute — which is exactly why all nine legs rendered the same blue.
+         Strokes stay non-scaling or the line thins as the card widens. */
       .hist .score-line {
         fill: none;
-        stroke: #2563eb;
         stroke-width: 2;
         vector-effect: non-scaling-stroke;
         stroke-linejoin: round;
+        stroke-linecap: round;
+      }
+      /* The single-series pressure chart has no legend hue to inherit, so it names its own. */
+      .hist .score-line.single {
+        stroke: #2563eb;
       }
       .hist .axis {
         stroke: var(--border);
@@ -1759,6 +1869,10 @@ export class NewsIntelPageComponent {
     { intervalMs: 60_000 },
   );
 
+  /**
+   * Fixed hue order — assigned to a currency once (see currencyColor) and never cycled by
+   * position. A hue has to mean the same leg on every render.
+   */
   private static readonly PALETTE = [
     '#2563eb',
     '#dc2626',
@@ -1771,11 +1885,46 @@ export class NewsIntelPageComponent {
     '#b45309',
   ];
 
+  /**
+   * Colour belongs to the ENTITY, not to its row number. The API returns currencies in whatever
+   * order it likes, so indexing the palette by position meant one currency dropping out of the
+   * response shifted the hue of every currency after it: the legend would still agree with the
+   * chart, but not with the chart the operator read a minute earlier.
+   *
+   * Codes are pinned in palette order; anything unlisted falls back to a stable hash, so a newly
+   * tracked currency still gets a consistent colour rather than a moving one.
+   */
+  private static readonly CURRENCY_HUE: ReadonlyMap<string, string> = new Map([
+    ['USD', '#2563eb'],
+    ['JPY', '#dc2626'],
+    ['XAU', '#0d9488'],
+    ['CAD', '#7c3aed'],
+    ['CHF', '#ea580c'],
+    ['EUR', '#0891b2'],
+    ['GBP', '#65a30d'],
+    ['AUD', '#c026d3'],
+    ['NZD', '#b45309'],
+  ]);
+
+  private static currencyColor(code: string): string {
+    const pinned = NewsIntelPageComponent.CURRENCY_HUE.get(code);
+    if (pinned) return pinned;
+    let hash = 0;
+    for (let i = 0; i < code.length; i++) hash = (hash * 31 + code.charCodeAt(i)) >>> 0;
+    return NewsIntelPageComponent.PALETTE[hash % NewsIntelPageComponent.PALETTE.length];
+  }
+
+  /** Gridlines at +0.5 / −0.5 on the ±1 axis; zero keeps its own darker axis line. */
+  readonly scoreGridlines = [
+    NewsIntelPageComponent.PLOT.scoreH * 0.25,
+    NewsIntelPageComponent.PLOT.scoreH * 0.75,
+  ];
+
   /** One path per currency over a shared ±1 axis, so legs are directly comparable. */
   readonly divergenceLines = computed(() => {
     const series = this.allSeries.value() ?? [];
     const { w, scoreH } = NewsIntelPageComponent.PLOT;
-    return series.map((s: NewsCurrencySeries, idx: number) => {
+    return series.map((s: NewsCurrencySeries) => {
       const pts = s.points;
       const d = pts
         .map((p, i) => {
@@ -1788,7 +1937,7 @@ export class NewsIntelPageComponent {
       return {
         currency: s.currency,
         d,
-        color: NewsIntelPageComponent.PALETTE[idx % NewsIntelPageComponent.PALETTE.length],
+        color: NewsIntelPageComponent.currencyColor(s.currency),
         last,
         dim: this.dimmed().has(s.currency),
       };
@@ -1798,8 +1947,14 @@ export class NewsIntelPageComponent {
   /** Currencies the operator has clicked off. Nine overlaid lines is a hairball; this is the comb. */
   readonly dimmed = signal<ReadonlySet<string>>(new Set<string>());
 
+  /** Legacy positional accessor kept for callers that genuinely have only an index. */
   paletteAt(i: number): string {
     return NewsIntelPageComponent.PALETTE[i % NewsIntelPageComponent.PALETTE.length];
+  }
+
+  /** Prefer this: a currency's hue must not depend on where it landed in the response. */
+  colorFor(currency: string): string {
+    return NewsIntelPageComponent.currencyColor(currency);
   }
 
   toggleCurrency(currency: string): void {
