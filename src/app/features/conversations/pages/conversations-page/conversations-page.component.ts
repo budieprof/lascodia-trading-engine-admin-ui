@@ -28,6 +28,7 @@ import type {
   AnalysisConversationSummaryDto,
   AnalysisConversationDetailDto,
   AnalysisFiledSignalDto,
+  AnalysisParkedRecDto,
   MarketAnalysisRecommendationDto,
   ResponseData,
 } from '@core/api/api.types';
@@ -282,10 +283,26 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
                 >
                   <div legendActions class="rec-signals">
                     @for (item of actionableRecs(); track item.index) {
+                      <span class="rs-conf" [title]="'Model confidence for this recommendation'"
+                        >{{ item.r.action }} · conf
+                        {{ confPct(item.r) === null ? '—' : confPct(item.r) + '%' }}</span
+                      >
                       @if (filedFor(item.r); as f) {
                         <span class="rs-filed" [attr.data-status]="f.status.toLowerCase()"
                           >✓ Signal #{{ f.signalId }} · {{ f.status }}</span
                         >
+                      } @else if (parkedFor(item.r); as p) {
+                        <span class="rs-parked" [attr.data-state]="p.state.toLowerCase()"
+                          >📥 Parked #{{ p.pendingRecId }} · {{ p.state }}
+                          @if (p.terminalReason) {
+                            · {{ p.terminalReason }}
+                          } @else {
+                            · until {{ p.parkExpiresAt | date: 'HH:mm' }}
+                          }
+                          @if (p.resultingTradeSignalId) {
+                            · → Signal #{{ p.resultingTradeSignalId }}
+                          }
+                        </span>
                       } @else {
                         <button
                           type="button"
@@ -612,6 +629,28 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
         border-bottom: 1px solid var(--border);
         background: var(--bg-secondary);
       }
+      .rs-conf {
+        font-size: var(--text-xs, 11px);
+        color: var(--text-secondary);
+        padding: 2px 6px;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+      }
+      /* Parked reads as pending, not as success or failure — it is neither yet. */
+      .rs-parked {
+        font-size: var(--text-xs, 11px);
+        padding: 2px 6px;
+        border-radius: 3px;
+        border: 1px solid var(--border);
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+      .rs-parked[data-state='rejected'],
+      .rs-parked[data-state='expired'] {
+        opacity: 0.7;
+        text-decoration: line-through;
+      }
+
       .rec-controls {
         display: flex;
         align-items: center;
@@ -868,6 +907,30 @@ export class ConversationsPageComponent {
         (f) => f.direction === rec.action && Math.abs(f.entryPrice - rec.entryPrice!) <= tol,
       ) ?? null
     );
+  }
+
+  /** The parked pending-rec for a recommendation, or null.
+   *
+   *  A rec whose entry sits too far from live price is PARKED as a PendingSignalRec with
+   *  a TTL rather than filed. Without this the parked case fell through to the "Create
+   *  signal" button — the conversation showed no sign the analysis had already acted on
+   *  it. Live 2026-09-01 #25682: a USDJPY Buy parked six pips below mid and later died on
+   *  re-validation, with nothing on screen ever saying so. */
+  protected parkedFor(rec: MarketAnalysisRecommendationDto): AnalysisParkedRecDto | null {
+    const parked = this.detail()?.parkedRecommendations;
+    if (!parked?.length || rec.entryPrice == null) return null;
+    const tol = Math.abs(rec.entryPrice) * 1e-5 + 1e-9;
+    return (
+      parked.find(
+        (p) => p.direction === rec.action && Math.abs(p.entryPrice - rec.entryPrice!) <= tol,
+      ) ?? null
+    );
+  }
+
+  /** Confidence as a whole percent, or null when the rec carried none — rendered "—"
+   *  rather than a fabricated 0%. */
+  protected confPct(rec: MarketAnalysisRecommendationDto): number | null {
+    return typeof rec.confidence === 'number' ? Math.round(rec.confidence * 100) : null;
   }
 
   /** File one analysis recommendation as a live signal through the risk gates,

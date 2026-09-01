@@ -3604,6 +3604,21 @@ export interface UpdateSignalExposureConfigRequest {
   symbolCapIncludesPending?: boolean;
 }
 
+/** A recommendation parked as a PendingSignalRec instead of being filed. */
+export interface AnalysisParkedRecDto {
+  pendingRecId: number;
+  direction: string;
+  entryPrice: number;
+  confidence: number;
+  /** Parked | Triggered | Expired | Rejected. */
+  state: string;
+  parkExpiresAt: string;
+  /** Why it ended, when it did (e.g. InvalidOnReval). Null while still parked. */
+  terminalReason?: string | null;
+  /** Set once a park re-validated into a real signal. */
+  resultingTradeSignalId?: number | null;
+}
+
 /** The opening brief of a conversation — analysis prose (blocks stripped) +
  *  metadata + parsed recommendations (for the entry/SL/TP chart). */
 export interface AnalysisConversationDetailDto {
@@ -3620,6 +3635,11 @@ export interface AnalysisConversationDetailDto {
   recommendations: MarketAnalysisRecommendationDto[];
   /** Signals already filed from this analysis (matched to a rec by direction + entry). */
   filedSignals?: AnalysisFiledSignalDto[];
+  /** Recommendations PARKED rather than filed — entry too far from live price, so they
+   *  wait as a PendingSignalRec with a TTL and only become signals if they re-validate.
+   *  Previously invisible: absent from filedSignals AND from the rejected set, so the
+   *  conversation showed a recommendation with no indication of its fate. */
+  parkedRecommendations?: AnalysisParkedRecDto[];
   /** Chart window anchor. Null for a normal analysis (chart centres on invokedAt). For a
    *  signal-review journal, the SIGNAL's generation time — the chart straddles when the
    *  signal fired, not when the post-mortem was written. */

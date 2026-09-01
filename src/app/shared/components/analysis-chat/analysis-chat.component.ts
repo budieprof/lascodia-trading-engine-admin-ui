@@ -48,7 +48,7 @@ interface ParsedChatRec {
   entryPrice: number;
   stopLoss: number;
   takeProfit: number;
-  confidencePct: number;
+  confidencePct: number | null;
   riskRewardRatio: number | null;
   rationale: string;
   filedSignalId: number | null;
@@ -212,7 +212,7 @@ interface ParsedChatRec {
                         >📌 {{ rec.action }} {{ rec.symbol }} · {{ rec.timeframe }}</span
                       >
                       <span class="rec-conf"
-                        >conf {{ rec.confidencePct }}%
+                        >conf {{ rec.confidencePct === null ? '—' : rec.confidencePct + '%' }}
                         @if (rec.riskRewardRatio !== null) {
                           · R:R {{ rec.riskRewardRatio }}
                         }
@@ -1218,7 +1218,10 @@ export class AnalysisChatComponent {
           entryPrice: r.entryPrice,
           stopLoss: r.stopLoss,
           takeProfit: r.takeProfit,
-          confidencePct: Math.round((r.confidence ?? 0) * 100),
+          // `?? 0` printed "conf 0%" for a rec that simply carried no confidence —
+          // a fabricated value indistinguishable from a genuine zero. Null means unknown
+          // and renders as "conf —".
+          confidencePct: typeof r.confidence === 'number' ? Math.round(r.confidence * 100) : null,
           riskRewardRatio: r.riskRewardRatio ?? null,
           rationale: r.rationale || '',
           filedSignalId: r.filedSignalId ?? null,
