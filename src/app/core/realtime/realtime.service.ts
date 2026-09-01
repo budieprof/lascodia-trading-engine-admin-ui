@@ -50,6 +50,14 @@ export const REALTIME_EVENTS = [
   //    conversation is created or its thread changes — see
   //    AnalysisChatRealtimeBroadcaster). Drives live left-rail + chat thread. ──
   'analysisConversationChanged',
+  // ── Analysis-monitor lifecycle (AnalysisMonitorWorker). `Fired` carries the
+  //    verdict + any generated signal ids and is what the chat strip renders as a
+  //    turn; `Changed` is the broader tickle covering EVERY transition — expiry,
+  //    invalidation, error escalation, forced fire — which previously happened
+  //    with no outward sign at all. Drives the /analysis-monitors cockpit. ──
+  'analysisMonitorFired',
+  'analysisMonitorInvalidated',
+  'analysisMonitorChanged',
   // ── Live price stream, room-scoped to `price:{SYMBOL}` (PriceUpdatedRealtimeRelay,
   //    throttled ~1 Hz). Only reaches clients that called SubscribePrice — used by
   //    the spot-rec chart's live-price marker. ──

@@ -3661,7 +3661,7 @@ export interface AnalysisMonitorDto {
   evaluationMode: string;
   triggerSpecJson: string;
   actionSpecJson: string;
-  /** 'Active' | 'Triggered' | 'Cancelled' | 'Expired' | 'Error'. */
+  /** 'Active' | 'Paused' | 'Triggered' | 'Cancelled' | 'Expired' | 'Invalidated' | 'Error'. */
   status: string;
   recurring: boolean;
   triggerCount: number;
@@ -3687,6 +3687,32 @@ export interface AnalysisMonitorDto {
   parentMonitorId?: number | null;
   /** How many re-arms deep this watch is (0 = original). */
   rearmDepth?: number;
+
+  /** Operator identity captured at creation. */
+  createdBy?: string | null;
+  /** Throttle floor for LlmAssisted evaluation (bounds auto-LLM spend). */
+  minEvalIntervalSeconds?: number;
+  /** Last mid price the worker saw for this symbol. */
+  lastObservedPrice?: number | null;
+  /** When the operator paused this watch (null unless status is 'Paused'). */
+  pausedAtUtc?: string | null;
+  /** Consecutive failed evaluations; escalates to status 'Error' past tolerance. */
+  consecutiveEvalErrors?: number;
+
+  // ── Server-computed, so every surface agrees on the same instant ──
+  /** Seconds until expiry; negative once past it. */
+  secondsToExpiry?: number;
+  /** Seconds since the worker last evaluated this monitor. A large value on an
+   *  Active monitor means the worker is not running. */
+  secondsSinceLastCheck?: number | null;
+  /** Earliest instant this monitor could next fire, given its cooldown. */
+  cooldownUntilUtc?: string | null;
+  /** True when the monitor is in a state the worker will evaluate. */
+  isLive?: boolean;
+  /** History rows recorded for this monitor. */
+  eventCount?: number;
+  /** Trade signals filed by this monitor's fires. */
+  filedSignalCount?: number;
 }
 
 /** Structured multi-week → multi-month posture parsed from the macro

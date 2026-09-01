@@ -9,6 +9,7 @@ import {
 import { DatePipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { AnalysisChatComponent } from '@shared/components/analysis-chat/analysis-chat.component';
@@ -727,6 +728,7 @@ export class ConversationsPageComponent {
   private readonly notify = inject(NotificationService);
   private readonly pairsService = inject(CurrencyPairsService);
   private readonly realtime = inject(RealtimeService);
+  private readonly route = inject(ActivatedRoute);
   private readonly algoEngineer = inject(AlgoEngineerService);
   private readonly wire = inject(WireService);
 
@@ -914,6 +916,14 @@ export class ConversationsPageComponent {
   constructor() {
     this.load(true);
     this.loadSymbols();
+
+    // Deep link: /conversations?conversation=19120 opens that thread directly.
+    // Selection is otherwise an internal signal with no route representation, so
+    // nothing outside this page could link to a specific conversation — which
+    // made "open the thread that created this monitor" impossible from the
+    // monitors cockpit and the notification bell.
+    const deepLinkId = Number(this.route.snapshot.queryParamMap.get('conversation'));
+    if (Number.isFinite(deepLinkId) && deepLinkId > 0) this.openConversation(deepLinkId);
 
     // Live conversation list: the engine tickles `analysisConversationChanged`
     // with an anchor id whenever a conversation is created or its thread changes

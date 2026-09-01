@@ -410,6 +410,12 @@ export class CommandPaletteComponent implements OnInit {
     { group: 'Analysis', label: 'Sentiment', route: '/sentiment', keywords: 'regime cot' },
     {
       group: 'Analysis',
+      label: 'Analysis Monitors',
+      route: '/analysis-monitors',
+      keywords: 'watch monitor alert armed hunter fired trigger',
+    },
+    {
+      group: 'Analysis',
       label: 'Strategy Ensemble',
       route: '/strategy-ensemble',
       keywords: 'allocation rebalance',
