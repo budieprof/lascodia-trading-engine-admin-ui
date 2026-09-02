@@ -1231,7 +1231,10 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       valueFormatter: (p: any) => (p.value != null ? Number(p.value).toFixed(5) : '—'),
     },
     {
-      field: 'openLots',
+      // CLOSED rows must show what TRADED, not what is still open. A full close
+      // decrements openLots to zero on the engine's virtual SL/TP path, so this
+      // column read 0.00 for those rows while EA-closed rows kept their size.
+      field: 'tradedLots',
       headerName: 'Lots',
       width: 70,
       cellClass: 'mono',
@@ -1242,6 +1245,12 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       headerName: 'Realized',
       width: 110,
       cellRenderer: (params: any) => {
+        // A position the engine could not reconcile carries realizedPnL = 0 meaning UNKNOWN,
+        // not break-even. Rendering it as "+0.00" turned real wins into "Flat" rows — position
+        // 6231 showed +0.00 next to a +0.73R price move. Say unknown instead.
+        if ((params.data as PositionDto)?.pnlUnreconciledAt) {
+          return `<span style="color:#FF9500;font-weight:600;font-family:'SF Mono',monospace;font-size:12px" title="Realised P&L could not be recovered from broker deal history — value unknown, not zero">n/a</span>`;
+        }
         if (params.value == null) return '-';
         const color = params.value >= 0 ? '#34C759' : '#FF3B30';
         const sign = params.value >= 0 ? '+' : '';
@@ -2554,6 +2563,8 @@ function closedSortAccessor(colId: string): ((p: PositionDto) => number | string
       return (p) => p.currentPrice ?? 0;
     case 'openLots':
       return (p) => p.openLots;
+    case 'tradedLots':
+      return (p) => p.tradedLots ?? p.openLots;
     case 'rMultipleClosed':
       return (p) => rMultipleClosed(p) ?? 0;
     case 'hold':

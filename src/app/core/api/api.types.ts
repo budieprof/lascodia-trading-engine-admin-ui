@@ -413,7 +413,15 @@ export interface PositionDto {
   tradingAccountId: number;
   symbol: string | null;
   direction: PositionDirection;
+  /** Lots CURRENTLY open. Reads 0 on most closed rows — use `tradedLots` there. */
   openLots: number;
+  /** The size that actually traded, sourced from the opening order. Populated by
+   *  the engine because a full close decrements `openLots` to zero on the virtual
+   *  SL/TP path, so closed rows would otherwise show 0.00 lots. */
+  tradedLots: number | null;
+  /** Set when the engine gave up recovering realised P&L from broker deal history:
+   *  `realizedPnL === 0` means UNKNOWN here, not break-even. Never render as 0.00. */
+  pnlUnreconciledAt: string | null;
   averageEntryPrice: number;
   currentPrice: number | null;
   unrealizedPnL: number;
