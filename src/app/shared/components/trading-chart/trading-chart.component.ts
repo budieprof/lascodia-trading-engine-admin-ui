@@ -35,6 +35,7 @@ import {
   MarketMacroAnalysisResultDto,
   PositionDto,
 } from '@core/api/api.types';
+import { applyTickToCandles } from '@shared/utils/live-candle';
 
 // ── Candle countdown helpers ─────────────────────────────────────────────
 // Timeframes align to the UTC grid (M1 → top of each minute, H1 → top of
@@ -3954,6 +3955,11 @@ export class TradingChartComponent implements OnInit, OnDestroy {
         }
 
         this.candles.set(data);
+        // The server sends closed bars only, so this refresh just dropped the
+        // forming bar. Rebuild it from the last known tick rather than leaving
+        // a gap until the next live-price poll.
+        const bid = this.livePrice()?.bid;
+        if (bid) this.patchLastCandleWithTick(bid);
         this.loading.set(false);
         this.buildChartMerge();
       });
@@ -4020,28 +4026,26 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Update the rightmost candle's high/low/close to reflect a live tick.
-   * Doesn't try to roll into a new bar on its own — the periodic
-   * `loadCandles()` re-fetch in `startLivePricePolling` is what brings the
-   * fresh server-side bar in. Until that happens, the current bar simply
-   * keeps growing, which matches what an operator expects to see between
-   * candle closes.
+   * Fold a live tick into the series — extending the bar currently forming, or
+   * opening one when the clock has moved into a new bucket.
+   *
+   * <p>This used to paint every tick onto <c>candles[length - 1]</c>, assuming
+   * the rightmost bar was in progress. It never is: the engine stores CLOSED
+   * bars only, so the newest row the API returns is the last COMPLETED bar —
+   * leaving the chart one bar behind with the live price rewriting a finished
+   * candle. See <c>shared/utils/live-candle.ts</c> for the bucket logic and its
+   * tests.</p>
    */
   private patchLastCandleWithTick(tickPrice: number): void {
-    if (!Number.isFinite(tickPrice) || tickPrice <= 0) return;
-    const data = this.candles();
-    if (data.length === 0) return;
-    const last = data[data.length - 1];
-    // Skip if the tick is identical to the existing close — no visual
-    // change and no need to re-emit candlesChange to subscribers.
-    if (last.close === tickPrice && last.high >= tickPrice && last.low <= tickPrice) return;
-    const updated: CandleDto = {
-      ...last,
-      close: tickPrice,
-      high: Math.max(last.high, tickPrice),
-      low: Math.min(last.low, tickPrice),
-    };
-    this.candles.set([...data.slice(0, -1), updated]);
+    const next = applyTickToCandles(
+      this.candles(),
+      this.selectedTimeframe(),
+      tickPrice,
+      Date.now(),
+    );
+    // Same reference = nothing changed; skip the write so we don't re-emit
+    // candlesChange to subscribers for a byte-identical series.
+    if (next !== this.candles()) this.candles.set(next);
   }
 
   private buildChartMerge() {
