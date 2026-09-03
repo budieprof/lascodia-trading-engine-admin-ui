@@ -19,7 +19,7 @@ import { animate, AnimationTriggerMetadata, style, transition, trigger } from '@
 
 import { MarketDataService } from '@core/services/market-data.service';
 import type { CandleDto, LivePriceDto, PositionDto, OrderDto } from '@core/api/api.types';
-import { applyTickToCandles } from '@shared/utils/live-candle';
+import { applyTickToCandles, preserveFormingBar } from '@shared/utils/live-candle';
 
 /**
  * One symbol tile on the watchlist grid. Self-contained: owns its own
@@ -627,10 +627,12 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
           // Engine returns newest-first — ECharts wants oldest-first on
           // the time axis. Reverse once here so the rest of the
           // component can think left-to-right = past-to-future.
-          this.candles.set([...data].reverse());
-          // The server sends closed bars only, so this refresh just dropped
-          // the forming bar. Rebuild it from the last known tick instead of
-          // leaving a gap until the next 5s price poll.
+          // The server sends closed bars only, so this refresh would drop the
+          // forming bar. Carry it over — rebuilding it from one tick would
+          // reset its open/high/low and flatten it every cycle.
+          this.candles.set(
+            preserveFormingBar([...data].reverse(), this.candles(), this.timeframe(), Date.now()),
+          );
           const bid = this.livePrice()?.bid;
           if (bid) this.patchLastCandleWithTick(bid);
         }

@@ -21,6 +21,17 @@ import type { CandleDto } from '@core/api/api.types';
  * built when history and ticks arrive on separate channels.</p>
  */
 
+/**
+ * Id stamped on a client-composed bar. Negative so it can never collide with a
+ * persisted row, and checkable by anything that must not treat it as real data.
+ */
+export const FORMING_BAR_ID = -1;
+
+/** True when this candle is the client-composed in-progress bar. */
+export function isFormingBar(candle: CandleDto | undefined): boolean {
+  return !!candle && candle.id === FORMING_BAR_ID && !candle.isClosed;
+}
+
 /** Bucket width in milliseconds for the intraday timeframes. */
 const MINUTE_MS = 60_000;
 const INTRADAY_MINUTES: Record<string, number> = {
@@ -103,13 +114,21 @@ export function applyTickToCandles(
   // A NEW bucket has begun: the rightmost bar is closed history. Open a forming
   // bar rather than mutating a finished candle — this is the actual bug fix.
   if (bucket > lastMs) {
+    // Open at the previous bar's CLOSE, not at the tick.
+    //
+    // Opening at the tick made the bar render as a zero-height doji — a bare
+    // horizontal line — because open/high/low/close were all the same number
+    // until price happened to move. A real bar opens where the last one closed,
+    // so it has visible body from its first instant and the series stays
+    // visually continuous across the boundary.
+    const open = last.close;
     const forming: CandleDto = {
-      id: -1, // synthetic: never persisted, and negative so it cannot collide
+      id: FORMING_BAR_ID,
       symbol: last.symbol,
       timeframe: last.timeframe,
-      open: tickPrice,
-      high: tickPrice,
-      low: tickPrice,
+      open,
+      high: Math.max(open, tickPrice),
+      low: Math.min(open, tickPrice),
       close: tickPrice,
       volume: 0,
       timestamp: new Date(bucket).toISOString(),
@@ -122,6 +141,47 @@ export function applyTickToCandles(
   // the path taken on every tick after the first within a bucket, and the only
   // path taken at all when the server has begun serving open bars.
   return patchLast(series, last, tickPrice);
+}
+
+/**
+ * Carries the in-progress bar across a server refresh.
+ *
+ * <p>The candle endpoint returns closed bars only, so every periodic re-fetch
+ * wipes the forming bar. Rebuilding it from the next single tick is not enough:
+ * that resets open/high/low to one price, so the bar collapses back to a flat
+ * line every refresh cycle and never accumulates its true range — which is what
+ * made the "current active bar" look broken even after it started appearing.</p>
+ *
+ * <p>Real server data always wins. If the refresh has brought in the bar for
+ * this bucket (i.e. it closed, or the engine began serving open bars), the
+ * synthetic one is dropped rather than shadowing it.</p>
+ *
+ * @param server Freshly-fetched series, oldest-first.
+ * @param previous The series being replaced, which may end in a forming bar.
+ */
+export function preserveFormingBar(
+  server: CandleDto[],
+  previous: readonly CandleDto[],
+  timeframe: string | null | undefined,
+  nowMs: number,
+): CandleDto[] {
+  if (server.length === 0 || previous.length === 0) return server;
+
+  const forming = previous[previous.length - 1];
+  if (!isFormingBar(forming)) return server;
+
+  const bucket = bucketStartMs(timeframe, nowMs);
+  if (bucket === null) return server;
+
+  // The forming bar belongs to a bucket that has since elapsed — let it go; the
+  // server's real bar for it is either present now or will be next refresh.
+  if (Date.parse(forming.timestamp) !== bucket) return server;
+
+  // Server already covers this bucket: prefer its data over our approximation.
+  const serverLastMs = Date.parse(server[server.length - 1].timestamp);
+  if (Number.isFinite(serverLastMs) && serverLastMs >= bucket) return server;
+
+  return [...server, forming];
 }
 
 function patchLast(series: CandleDto[], last: CandleDto, tickPrice: number): CandleDto[] {
