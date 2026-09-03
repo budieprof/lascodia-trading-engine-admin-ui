@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { CandleDto } from '@core/api/api.types';
-import { applyTickToCandles, bucketStartMs } from './live-candle';
+import { applyTickToCandles, bucketStartMs, preserveFormingBar } from './live-candle';
 
 function candle(timestamp: string, o: number, h: number, l: number, c: number): CandleDto {
   return {
@@ -62,9 +62,28 @@ describe('applyTickToCandles', () => {
     const forming = out[1];
     expect(forming.timestamp).toBe('2026-09-03T08:55:00.000Z');
     expect(forming.isClosed).toBe(false);
-    expect([forming.open, forming.high, forming.low, forming.close]).toEqual([
-      1.1615, 1.1615, 1.1615, 1.1615,
-    ]);
+    // Opens at the previous bar's CLOSE, not at the tick — otherwise
+    // open=high=low=close and the bar renders as a zero-height line.
+    expect(forming.open).toBe(1.16111);
+    expect(forming.close).toBe(1.1615);
+    expect(forming.high).toBe(1.1615);
+    expect(forming.low).toBe(1.16111);
+  });
+
+  it('gives the forming bar visible body from its very first tick', () => {
+    const series = [candle('2026-09-03T08:54:00Z', 1.161, 1.1612, 1.1609, 1.16111)];
+    const out = applyTickToCandles(series, 'M1', 1.1615, ms('2026-09-03T08:55:41Z'));
+    const forming = out[1];
+    expect(forming.high).toBeGreaterThan(forming.low);
+  });
+
+  it('opens downward correctly when the first tick is below the prior close', () => {
+    const series = [candle('2026-09-03T08:54:00Z', 1.161, 1.1612, 1.1609, 1.16111)];
+    const forming = applyTickToCandles(series, 'M1', 1.1605, ms('2026-09-03T08:55:41Z'))[1];
+    expect(forming.open).toBe(1.16111);
+    expect(forming.high).toBe(1.16111);
+    expect(forming.low).toBe(1.1605);
+    expect(forming.close).toBe(1.1605);
   });
 
   it('extends the forming bar on subsequent ticks in the same bucket', () => {
@@ -75,7 +94,9 @@ describe('applyTickToCandles', () => {
 
     expect(afterDown).toHaveLength(2);
     const forming = afterDown[1];
-    expect(forming.open).toBe(1.1615); // open is pinned to the bucket's first tick
+    // Open stays pinned to the prior bar's close for the whole bucket; only
+    // high/low/close move as ticks arrive.
+    expect(forming.open).toBe(1.16111);
     expect(forming.high).toBe(1.162);
     expect(forming.low).toBe(1.1608);
     expect(forming.close).toBe(1.1608);
@@ -89,7 +110,10 @@ describe('applyTickToCandles', () => {
     expect(series).toHaveLength(3);
     expect(series[1].timestamp).toBe('2026-09-03T08:55:00.000Z');
     expect(series[2].timestamp).toBe('2026-09-03T08:56:00.000Z');
-    expect(series[2].open).toBe(1.1618);
+    // Each new bar opens where the previous one closed, so the series stays
+    // visually continuous across the boundary rather than gapping to the tick.
+    expect(series[2].open).toBe(series[1].close);
+    expect(series[2].close).toBe(1.1618);
   });
 
   it('patches in place when the server already serves an open bar', () => {
@@ -113,6 +137,49 @@ describe('applyTickToCandles', () => {
     const out = applyTickToCandles(series, 'W1', 1.162, ms('2026-09-03T08:55:41Z'));
     expect(out).toHaveLength(1);
     expect(out[0].close).toBe(1.162);
+  });
+
+  it('keeps its accumulated range across a server refresh', () => {
+    // The regression that made the active bar look broken: each refresh returns
+    // closed bars only, and rebuilding the forming bar from one tick reset its
+    // range, flattening it every cycle.
+    const closed = candle('2026-09-03T08:54:00Z', 1.161, 1.1612, 1.1609, 1.16111);
+    let series = applyTickToCandles([closed], 'M1', 1.1615, ms('2026-09-03T08:55:05Z'));
+    series = applyTickToCandles(series, 'M1', 1.1622, ms('2026-09-03T08:55:20Z')); // high
+    series = applyTickToCandles(series, 'M1', 1.1603, ms('2026-09-03T08:55:35Z')); // low
+
+    const refreshed = preserveFormingBar([closed], series, 'M1', ms('2026-09-03T08:55:40Z'));
+
+    expect(refreshed).toHaveLength(2);
+    expect(refreshed[1].high).toBe(1.1622);
+    expect(refreshed[1].low).toBe(1.1603);
+  });
+
+  it('drops the forming bar once the server serves that bucket for real', () => {
+    const closed = candle('2026-09-03T08:54:00Z', 1.161, 1.1612, 1.1609, 1.16111);
+    const withForming = applyTickToCandles([closed], 'M1', 1.1615, ms('2026-09-03T08:55:05Z'));
+    // The 08:55 bar has now closed and arrived from the server.
+    const server = [closed, candle('2026-09-03T08:55:00Z', 1.16111, 1.1625, 1.1601, 1.1618)];
+
+    const out = preserveFormingBar(server, withForming, 'M1', ms('2026-09-03T08:55:50Z'));
+
+    expect(out).toHaveLength(2);
+    expect(out[1].isClosed).toBe(true); // real data wins over the approximation
+    expect(out[1].high).toBe(1.1625);
+  });
+
+  it('drops a forming bar whose bucket has elapsed', () => {
+    const closed = candle('2026-09-03T08:54:00Z', 1.161, 1.1612, 1.1609, 1.16111);
+    const withForming = applyTickToCandles([closed], 'M1', 1.1615, ms('2026-09-03T08:55:05Z'));
+    // Clock has moved to 08:57 — the stale 08:55 synthetic must not linger.
+    const out = preserveFormingBar([closed], withForming, 'M1', ms('2026-09-03T08:57:10Z'));
+    expect(out).toHaveLength(1);
+  });
+
+  it('leaves a server refresh untouched when there was no forming bar', () => {
+    const server = [candle('2026-09-03T08:54:00Z', 1.161, 1.1612, 1.1609, 1.16111)];
+    expect(preserveFormingBar(server, [], 'M1', ms('2026-09-03T08:55:05Z'))).toBe(server);
+    expect(preserveFormingBar(server, server, 'M1', ms('2026-09-03T08:55:05Z'))).toBe(server);
   });
 
   it('ignores junk ticks and empty history', () => {

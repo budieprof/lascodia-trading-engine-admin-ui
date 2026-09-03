@@ -35,7 +35,7 @@ import {
   MarketMacroAnalysisResultDto,
   PositionDto,
 } from '@core/api/api.types';
-import { applyTickToCandles } from '@shared/utils/live-candle';
+import { applyTickToCandles, preserveFormingBar } from '@shared/utils/live-candle';
 
 // ── Candle countdown helpers ─────────────────────────────────────────────
 // Timeframes align to the UTC grid (M1 → top of each minute, H1 → top of
@@ -3954,10 +3954,12 @@ export class TradingChartComponent implements OnInit, OnDestroy {
           data = data.filter((c) => !this.isForexWeekendClosed(new Date(c.timestamp)));
         }
 
-        this.candles.set(data);
-        // The server sends closed bars only, so this refresh just dropped the
-        // forming bar. Rebuild it from the last known tick rather than leaving
-        // a gap until the next live-price poll.
+        // The server sends closed bars only, so this refresh would drop the
+        // forming bar. Carry it over — rebuilding it from one tick would reset
+        // its open/high/low and flatten it every cycle.
+        this.candles.set(
+          preserveFormingBar(data, this.candles(), this.selectedTimeframe(), Date.now()),
+        );
         const bid = this.livePrice()?.bid;
         if (bid) this.patchLastCandleWithTick(bid);
         this.loading.set(false);
