@@ -19,6 +19,7 @@ import { animate, AnimationTriggerMetadata, style, transition, trigger } from '@
 
 import { MarketDataService } from '@core/services/market-data.service';
 import type { CandleDto, LivePriceDto, PositionDto, OrderDto } from '@core/api/api.types';
+import { applyTickToCandles } from '@shared/utils/live-candle';
 
 /**
  * One symbol tile on the watchlist grid. Self-contained: owns its own
@@ -586,33 +587,21 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Update the rightmost candle's high/low/close to reflect a live tick.
-   * Mirrors the main trading chart's helper of the same name — direct
-   * mutation of `candles()` instead of a separate "liveCandles" computed
-   * keeps the chart options graph simple AND lets ECharts diff the
-   * series cheaply: only the last data point changes, the rest stay
-   * identical.
+   * Fold a live tick into the series — extending the bar currently forming, or
+   * opening one when the clock has moved into a new bucket.
    *
-   * Doesn't try to roll into a new bar on its own — the periodic
-   * `fetchCandles` re-fetch above brings fresh server-side bars in.
-   * Until then, the current bar simply keeps growing, which matches
-   * what an operator expects to see between candle closes.
+   * <p>This used to paint every tick onto <c>candles[length - 1]</c> on the
+   * assumption that the rightmost bar was in progress. It never is: the engine
+   * stores CLOSED bars only, so the newest row the API returns is the last
+   * COMPLETED bar. The chart therefore sat one bar behind, with the live price
+   * rewriting a finished candle's close/high/low. See
+   * <c>shared/utils/live-candle.ts</c> for the bucket logic and its tests.</p>
    */
   private patchLastCandleWithTick(tickPrice: number): void {
-    if (!Number.isFinite(tickPrice) || tickPrice <= 0) return;
-    const data = this.candles();
-    if (data.length === 0) return;
-    const last = data[data.length - 1];
-    // Skip when the tick is already covered by the existing OHLC range
-    // — no visual change, no allocation of a new array.
-    if (last.close === tickPrice && last.high >= tickPrice && last.low <= tickPrice) return;
-    const updated: CandleDto = {
-      ...last,
-      close: tickPrice,
-      high: Math.max(last.high, tickPrice),
-      low: Math.min(last.low, tickPrice),
-    };
-    this.candles.set([...data.slice(0, -1), updated]);
+    const next = applyTickToCandles(this.candles(), this.timeframe(), tickPrice, Date.now());
+    // Same reference = nothing changed; skip the signal write so ECharts
+    // doesn't re-diff a series that is byte-identical.
+    if (next !== this.candles()) this.candles.set(next);
   }
 
   ngOnDestroy(): void {
@@ -639,6 +628,11 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
           // the time axis. Reverse once here so the rest of the
           // component can think left-to-right = past-to-future.
           this.candles.set([...data].reverse());
+          // The server sends closed bars only, so this refresh just dropped
+          // the forming bar. Rebuild it from the last known tick instead of
+          // leaving a gap until the next 5s price poll.
+          const bid = this.livePrice()?.bid;
+          if (bid) this.patchLastCandleWithTick(bid);
         }
       });
   }
