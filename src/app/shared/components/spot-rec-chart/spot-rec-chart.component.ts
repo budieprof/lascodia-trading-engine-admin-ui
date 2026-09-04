@@ -20,6 +20,13 @@ import { ThemeService } from '@core/theme/theme.service';
 import { CandleDto, Timeframe } from '@core/api/api.types';
 
 /**
+ * Hard ceiling on candles requested for one chart. The window is anchored on
+ * asOfUtc and grown FORWARD to reach the present, so on a fast timeframe an old
+ * conversation can ask for more bars than are worth fetching or drawing.
+ */
+const MAX_WINDOW_BARS = 2000;
+
+/**
  * One actionable recommendation to overlay on the chart. Entry/SL/TP are
  * rendered as horizontal mark-lines on the y-axis, coloured by the rec's
  * action. Hold recs (entryPrice == null) are dropped silently — the chart
@@ -51,10 +58,18 @@ export interface SpotRecChartMarker {
 
 /**
  * Reusable candle-with-overlay chart for live spot-analysis + trade-signal
- * surfaces. Fetches a candle window straddling `asOfUtc` (HISTORY_BARS
- * leading bars + forward bars from `ttlBars` or a per-timeframe default)
- * and overlays each recommendation's Entry/SL/TP as horizontal mark-lines
- * plus optional fill/exit mark-points.
+ * surfaces. Fetches a candle window straddling `asOfUtc` — HISTORY_BARS leading
+ * bars, then forward bars running through to the PRESENT (or to the resolved
+ * exit, whichever is further) — and overlays each recommendation's Entry/SL/TP
+ * as horizontal mark-lines plus optional fill/exit mark-points.
+ *
+ * The forward side used to be capped at 40 bars, which on M1 is forty minutes:
+ * reopening a conversation from earlier in the day drew a chart that stopped
+ * just after the signal, so what price did NEXT — the reason for reopening it —
+ * was missing. The window is anchored on `asOfUtc` and grown forward, so the
+ * signal marker never slides off the left edge; if the span exceeds
+ * MAX_WINDOW_BARS the chart says it is truncated rather than quietly ending
+ * early, which would read as "nothing happened since".
  *
  * Distinct from `LlmInvocationModalComponent`'s embedded chart in that
  * this one accepts an ARRAY of recommendations and renders all of them at
@@ -90,6 +105,14 @@ export interface SpotRecChartMarker {
         <span class="legend-item legend-item--asof">
           <span class="dot dot--asof"></span> asOfUtc bar
         </span>
+        @if (windowTruncated()) {
+          <span
+            class="legend-item legend-item--truncated"
+            title="This conversation is far enough in the past that showing every bar up to now would exceed the fetch limit. Switch to a higher timeframe to see the full span."
+          >
+            ⚠ window truncated — not shown to now
+          </span>
+        }
         @for (r of overlayRecs(); track r.label) {
           <span class="legend-item">
             <span class="legend-row">
@@ -231,6 +254,11 @@ export interface SpotRecChartMarker {
         margin-bottom: 0;
         padding-bottom: 0;
       }
+      .legend-item--truncated {
+        color: var(--warning, #b45309);
+        font-weight: 600;
+        cursor: help;
+      }
       .legend-item--asof {
         margin-right: 0.4rem;
       }
@@ -355,6 +383,14 @@ export class SpotRecChartComponent {
   private subscribedSymbol: string | null = null;
 
   readonly candles = signal<CandleDto[]>([]);
+
+  /**
+   * True when the span from asOfUtc to now exceeded MAX_WINDOW_BARS, so the
+   * chart stops short of the present. Surfaced in the legend — a chart that
+   * silently ends early reads as 'nothing happened since', which is exactly the
+   * wrong conclusion.
+   */
+  readonly windowTruncated = signal(false);
   readonly loading = signal(false);
 
   /** ECharts theme — flips with the global dark/light toggle. */
@@ -459,22 +495,38 @@ export class SpotRecChartComponent {
     const tfMs = this.timeframeMinutes(tf) * 60_000;
     const asOfMs = new Date(asOfUtc).getTime();
 
-    // Forward window: the live / unresolved default (a few hours), but once the
-    // signal has RESOLVED, extend it so the candles run all the way to the
-    // TP/SL touch — the sensitivity chart always keeps the resolving bar in
-    // view. A small buffer past the exit stops the verdict bar sitting flush
-    // against the right edge.
+    // Forward window: run the candles from the signal all the way to NOW.
+    //
+    // This used to be hard-capped at 40 bars, which on M1 is forty MINUTES. An
+    // analysis a few hours old therefore drew a chart that stopped shortly after
+    // the signal and never reached the present, so the operator could not see
+    // what price actually did afterwards — the whole point of reopening an old
+    // conversation. The cap only lifted for a RESOLVED signal (extended to the
+    // TP/SL touch), which left rejected and still-open signals truncated.
     let forward = Math.min(40, Math.max(8, ttlBars ?? this.defaultForwardBars(tf)));
+
+    const nowMs = Date.now();
+    if (tfMs > 0 && nowMs > asOfMs) {
+      // +2 bars so the newest candle isn't flush against the right edge.
+      forward = Math.max(forward, Math.ceil((nowMs - asOfMs) / tfMs) + 2);
+    }
+
     if (exitAt) {
       const exitMs = new Date(exitAt).getTime();
       if (Number.isFinite(exitMs) && exitMs > asOfMs && tfMs > 0) {
         forward = Math.max(forward, Math.ceil((exitMs - asOfMs) / tfMs) + 12);
       }
     }
-    // Guard the request size — a stale/far-out exit can't blow past the
-    // endpoint's useful span (history + forward capped at 2000 bars).
-    forward = Math.min(forward, 1900);
-    const itemCount = Math.min(HISTORY_BARS + forward, 2000);
+
+    // Guard the request size. The window stays ANCHORED on asOfUtc rather than
+    // sliding to the newest bars — losing the signal marker off the left edge
+    // would be a worse chart than one that stops short of now. When the span is
+    // too wide to fit (an old conversation on a fast timeframe: three days of M1
+    // is 4,320 bars), say so rather than silently drawing a partial window.
+    const maxForward = MAX_WINDOW_BARS - HISTORY_BARS;
+    this.windowTruncated.set(forward > maxForward);
+    forward = Math.min(forward, maxForward);
+    const itemCount = Math.min(HISTORY_BARS + forward, MAX_WINDOW_BARS);
     this.marketData
       .listCandles({
         currentPage: 1,
