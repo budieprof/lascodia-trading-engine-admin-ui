@@ -530,7 +530,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                                       <span class="pill">opened the chain — depth 0</span>
                                     } @else if (e.burnedARung && e.outcome === 'Loss') {
                                       <span class="pill pill-warn">lost — burned a rung</span>
-                                    } @else if (e.burnedARung) {
+                                    } @else if (e.burnedARung || e.outcome === 'Win') {
                                       <!--
                                         A win that did not fully recover the chain still escalates:
                                         only a full recovery ends a ladder, so a partial win is a
