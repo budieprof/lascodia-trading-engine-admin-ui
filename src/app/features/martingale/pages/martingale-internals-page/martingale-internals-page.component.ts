@@ -134,10 +134,16 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
             opened a chain, and waits <b>{{ v.sweeper.openSettleSeconds }}s</b> for the broker's
             realised P&amp;L to settle before opening from one.
           </p>
-          @if (v.sweeper.chainsCurrentlyStale > 0) {
+          @if (v.sweeper.chainsStaleIdle > 0) {
             <p class="warn">
-              {{ v.sweeper.chainsCurrentlyStale }} chain(s) currently stale — in the sweeper's
-              queue. A count that never drains means the repair path itself is stuck.
+              {{ v.sweeper.chainsStaleIdle }} chain(s) stale with nothing live on the symbol — in
+              the sweeper's queue. A count that never drains means the repair path itself is stuck.
+            </p>
+          } @else if (v.sweeper.chainsWaitingOnOpenPosition > 0) {
+            <p class="ok">
+              No chain needs repair. {{ v.sweeper.chainsWaitingOnOpenPosition }} chain(s) show as
+              stale only because their rung is still open at the broker — they are waiting on that
+              position, not on the sweeper.
             </p>
           } @else {
             <p class="ok">No stale chains. Nothing waiting on repair.</p>
@@ -280,8 +286,20 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                 @if (c.depthDivergesFromLedger) {
                   <span class="pill pill-bad">depth mismatch</span>
                 }
-                @if (c.isStale) {
-                  <span class="pill pill-warn">stale</span>
+                @if (c.isStale && c.waitingOnOpenPosition) {
+                  <span
+                    class="pill"
+                    title="Its rung is still open at the broker; the chain advances when it closes."
+                  >
+                    waiting on open position
+                  </span>
+                } @else if (c.isStale) {
+                  <span
+                    class="pill pill-warn"
+                    title="No advance inside the sweeper's stale window and nothing live on the symbol."
+                  >
+                    stale
+                  </span>
                 }
                 @if (c.status === 'Open' && c.rungSkipCount > 0) {
                   <span class="pill pill-bad">rung skipped ×{{ c.rungSkipCount }}</span>
@@ -378,7 +396,13 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                       <p>
                         Must make <b>{{ r.amountToRecover | number: '1.2-2' }}</b> ({{
                           r.stakeMultiple | number: '1.1-2'
-                        }}× the base stake, {{ r.stakePctEquity | number: '1.1-2' }}% of equity).
+                        }}× the base stake), which means risking
+                        <b>{{ r.riskRequired | number: '1.2-2' }}</b>
+                        @if (r.geometryR !== null) {
+                          at {{ r.geometryR | number: '1.2-2' }}R
+                        }
+                        — <b>{{ r.stakePctEquity | number: '1.1-2' }}% of equity</b>, the figure the
+                        stake ceiling is tested against.
                         @if (r.estimatedRungLots !== null) {
                           Roughly <b>{{ r.estimatedRungLots | number: '1.0-2' }} lots</b>
                           @if (r.brokerMaxLotSize !== null) {
@@ -412,11 +436,21 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                     </div>
                   }
 
-                  <h3>Ledger</h3>
+                  <h3>
+                    Ledger
+                    @if (c.ledgerSource === 'replay') {
+                      <span
+                        class="pill pill-warn"
+                        title="This chain predates the advance ledger, so its closes are reconstructed from position history by account, symbol and time window. That attributes by coincidence and can include a neighbouring chain's close or miss one whose timestamp was revised."
+                      >
+                        reconstructed from position history
+                      </span>
+                    }
+                  </h3>
                   @if (c.ledger.length === 0) {
                     <p class="dim">
-                      No closes attributed. A chain opened by the sweeper from a close outside the
-                      replay window will show empty here.
+                      No closes recorded. A chain opened before the advance ledger existed, from a
+                      close outside the replay window, will show empty here.
                     </p>
                   } @else {
                     <div class="table-scroll">
@@ -429,6 +463,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                             <th class="num">Lots</th>
                             <th class="num">P&amp;L</th>
                             <th class="num">Running balance</th>
+                            <th class="num">Depth</th>
                             <th>Effect</th>
                           </tr>
                         </thead>
@@ -459,20 +494,53 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                                   level
                                 }
                               </td>
-                              <td>
-                                @if (e.openedTheChain) {
-                                  <span class="pill">opened the chain</span>
-                                } @else if (e.burnedARung) {
-                                  <span class="pill pill-warn">lost — burned a rung</span>
-                                } @else if (e.outcome === 'Win') {
-                                  <!--
-                                    A win that did not fully recover the chain still escalates:
-                                    only a full recovery ends a ladder, so a partial win is a
-                                    failed attempt that happened to close green.
-                                  -->
-                                  <span class="pill pill-warn">paid down — burned a rung</span>
+                              <td class="num mono">
+                                @if (e.depthBefore !== null && e.depthBefore !== e.depthAfter) {
+                                  {{ e.depthBefore }} → {{ e.depthAfter }}
                                 } @else {
-                                  <span class="pill">scratch — depth held</span>
+                                  {{ e.depthAfter }}
+                                }
+                              </td>
+                              <td>
+                                @switch (e.advanceOutcome) {
+                                  @case ('Opened') {
+                                    <span class="pill">opened the chain — depth 0</span>
+                                  }
+                                  @case ('Recovered') {
+                                    <span class="pill pill-on">recovered — chain closed</span>
+                                  }
+                                  @case ('Abandoned') {
+                                    <span class="pill pill-bad"
+                                      >abandoned — deficit written off</span
+                                    >
+                                  }
+                                  @case ('Scratch') {
+                                    <span class="pill">scratch — depth held</span>
+                                  }
+                                  @case ('Unfunded') {
+                                    <span
+                                      class="pill pill-warn"
+                                      title="Traded at base size while a rung was staked — the money counts, the depth does not."
+                                    >
+                                      unfunded — depth held
+                                    </span>
+                                  }
+                                  @default {
+                                    @if (e.openedTheChain) {
+                                      <span class="pill">opened the chain — depth 0</span>
+                                    } @else if (e.burnedARung && e.outcome === 'Loss') {
+                                      <span class="pill pill-warn">lost — burned a rung</span>
+                                    } @else if (e.burnedARung) {
+                                      <!--
+                                        A win that did not fully recover the chain still escalates:
+                                        only a full recovery ends a ladder, so a partial win is a
+                                        failed attempt that happened to close green.
+                                      -->
+                                      <span class="pill pill-warn">paid down — burned a rung</span>
+                                    } @else {
+                                      <span class="pill">depth held</span>
+                                    }
+                                  }
                                 }
                               </td>
                             </tr>
@@ -481,12 +549,20 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                       </table>
                     </div>
                     <p class="foot">
-                      Depth is the escalation budget. Only a <b>full recovery</b> ends a ladder, so
-                      every close that falls short escalates it — a win that merely paid some of the
-                      debt burns a rung just as a loss does. Only an exact break-even holds. The
-                      running balance is replayed from the chain's opening loss; if its last row
-                      disagrees with the header, the stored total and the position history have
-                      diverged.
+                      Depth is the escalation budget: the opening loss is depth 0 and each recovery
+                      rung that fails to clear the debt raises it by one. Only a
+                      <b>full recovery</b>
+                      of the deficit ends a ladder, so a win that merely paid some of it down burns
+                      a rung just as a loss does; a break-even or an unfunded close holds.
+                      @if (c.ledgerSource === 'advances') {
+                        Every row is what the service actually applied, with the figure it applied —
+                        if the last running balance disagrees with the header, the row and the chain
+                        have genuinely diverged.
+                      } @else {
+                        The running balance is replayed from the chain's opening loss; if its last
+                        row disagrees with the header, the reconstruction has attributed the wrong
+                        closes.
+                      }
                     </p>
                   }
 
@@ -494,7 +570,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                     <!--
                       The escape hatch for a stuck chain. A terminal close, not an in-place zeroing:
                       the deficit is written off and stays inspectable on the Abandoned row, sizing
-                      reverts to base immediately, and the next loss opens a fresh chain at depth 1.
+                      reverts to base immediately, and the next loss opens a fresh chain at depth 0.
                     -->
                     <div class="reset">
                       @if (resettingId() === c.id) {
@@ -539,7 +615,8 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                         </button>
                         <span class="dim">
                           Writes off the deficit, closes the chain as Abandoned, and reverts the
-                          symbol to base sizing (depth zero).
+                          symbol to base sizing with no chain. The next loss opens a fresh chain at
+                          depth 0.
                         </span>
                       }
                     </div>

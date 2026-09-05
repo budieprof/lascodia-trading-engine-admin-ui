@@ -107,28 +107,47 @@ export interface SetMartingaleSymbolRequest {
 
 // ── Fleet-wide internals ─────────────────────────────────────────────────────
 
-/** One close that moved a chain, replayed from position history. */
+/**
+ * One close that moved a chain. From the service's own advance ledger where the chain has one
+ * (`ledgerSource === 'advances'`), otherwise replayed from position history.
+ */
 export interface MartingaleChainLedgerEntryDto {
   positionId: number;
   direction: string;
   lots: number;
+  /** Net realised P&L the chain applied. */
   realisedPnl: number;
   closedAtUtc: string | null;
   closePrice: number | null;
-  /** Deficit after this close, replayed from the chain's opening balance. */
+  /** Deficit before this close. Null on a replayed ledger. */
+  deficitBefore: number | null;
+  /** Deficit after this close. Negative is surplus banked. */
   runningDeficit: number;
-  /** Loss | Win | Scratch. */
+  /** Loss | Win | Scratch — the sign of the close. */
   outcome: string;
-  /** Only losses cost a rung — depth counts attempts that lost. */
+  /** Opened | Advanced | Recovered | Abandoned | Scratch | Unfunded. Null on a replayed ledger. */
+  advanceOutcome: string | null;
+  /** This close raised the depth — a recovery attempt was spent. */
   burnedARung: boolean;
   openedTheChain: boolean;
+  /** Depth before this close. Null on a replayed ledger. */
+  depthBefore: number | null;
+  /** Depth after this close. The opening loss is depth 0. */
+  depthAfter: number;
+  appliedAtUtc: string | null;
 }
 
 /** The rung a chain would stake next, and the first thing that would stop it. */
 export interface MartingaleNextRungDto {
   depth: number;
+  /** Money the rung must make: deficit + target. */
   amountToRecover: number;
+  /** Money the rung must RISK to make it: (deficit + target) / geometry — the service's cap test. */
+  riskRequired: number;
+  /** Entry geometry the estimate used. Null when no usable close. */
+  geometryR: number | null;
   stakeMultiple: number;
+  /** riskRequired as % of equity. */
   stakePctEquity: number;
   bindingConstraint: string | null;
   wouldAbandon: boolean;
@@ -172,7 +191,11 @@ export interface MartingaleChainViewDto {
   ageHours: number;
   maxChainAgeHours: number;
   isStale: boolean;
+  /** A position is still live on the symbol — a stale chain in this state is waiting, not stuck. */
+  waitingOnOpenPosition: boolean;
   realisedPnl: number;
+  /** 'advances' (the service's audit rows) or 'replay' (reconstructed; can be wrong). */
+  ledgerSource: 'advances' | 'replay';
   ledger: MartingaleChainLedgerEntryDto[];
   /** Depth implied by the ledger: the open, plus one per subsequent loss. */
   ledgerDerivedDepth: number | null;
@@ -196,6 +219,10 @@ export interface MartingaleSweeperStateDto {
   openSettleSeconds: number;
   maxChainsPerCycle: number;
   chainsCurrentlyStale: number;
+  /** Stale chains whose rung is still open — waiting on the broker, not on the sweeper. */
+  chainsWaitingOnOpenPosition: number;
+  /** Stale chains with nothing live — the count that should drain. */
+  chainsStaleIdle: number;
 }
 
 export interface MartingaleTotalsDto {
