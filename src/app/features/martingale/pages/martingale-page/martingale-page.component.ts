@@ -164,8 +164,11 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
             <span>Allow martingale on this profile</span>
           </label>
 
-          <label class="fld">
-            <span>Depth cap</span>
+          <label
+            class="fld"
+            title="Recovery rungs allowed after the opening loss. The opening loss is depth 0 and does not count, so a cap of 2 permits two recovery trades and a fully-lost chain has lost three times."
+          >
+            <span>Depth cap (recovery rungs)</span>
             <input
               type="number"
               min="1"
@@ -216,7 +219,8 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
             projectedWorstCase() < v.haltedDrawdownPct
           "
         >
-          Worst case at depth {{ pf.maxDepth }} on {{ v.baseRiskPerTradePct }}% base risk:
+          Worst case at {{ pf.maxDepth }} recovery rung{{ pf.maxDepth === 1 ? '' : 's' }} (the
+          opening loss plus every rung losing) on {{ v.baseRiskPerTradePct }}% base risk:
           <b>{{ projectedWorstCase() | number: '1.0-1' }}%</b> of equity
           @if (!pf.abandonAtCap) {
             <b> — unbounded, the depth cap is disabled</b>
@@ -767,7 +771,7 @@ export class MartingalePageComponent {
    */
   pf = {
     enabled: false,
-    maxDepth: 3,
+    maxDepth: 2,
     targetProfitR: 0.5,
     maxStakePctEquity: 10,
     maxChainAgeHours: 72,
@@ -788,20 +792,21 @@ export class MartingalePageComponent {
   };
 
   /** Mirrors pf.maxDepth so the projection recomputes as the operator types. */
-  private readonly draftDepth = signal(3);
+  private readonly draftDepth = signal(2);
 
   /**
-   * Worst-case cumulative loss if every rung to the depth cap loses.
+   * Worst-case cumulative loss if the opening trade and every rung to the depth cap all lose.
    *
    * A rung sized to recover the accumulated deficit plus a target grows roughly 3x per step at
-   * this book's geometry, so k losing rungs cost basePct * (3^k - 1)/2. Mirrors the server's
+   * this book's geometry, so k consecutive losses cost basePct * (3^k - 1)/2. The depth cap counts
+   * RECOVERY rungs — the opening loss is depth 0 — so k = maxDepth + 1. Mirrors the server's
    * calculation deliberately: the operator needs it while typing, not after saving.
    */
   readonly projectedWorstCase = computed(() => {
     const base = this.view()?.baseRiskPerTradePct ?? 0;
     const depth = Math.min(Math.max(this.draftDepth(), 0), 20);
     if (base <= 0 || depth <= 0) return 0;
-    return (base * (Math.pow(3, depth) - 1)) / 2;
+    return (base * (Math.pow(3, depth + 1) - 1)) / 2;
   });
 
   constructor() {

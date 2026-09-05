@@ -171,8 +171,10 @@ export interface SkipInfo {
               (ngModelChange)="baseRiskPct.set(+$event)"
             />
           </label>
-          <label>
-            <span>Max depth</span>
+          <label
+            title="Recovery rungs allowed after the opening loss (depth 0). Matches the engine's MaxDepth: a cap of N permits N recovery trades."
+          >
+            <span>Max depth (recovery rungs)</span>
             <input
               type="number"
               min="1"
@@ -807,7 +809,12 @@ export class MartingaleSimulatorComponent {
         } else {
           const nextDepth = st.depth + 1;
           maxDepthSeen = Math.max(maxDepthSeen, nextDepth);
-          if (nextDepth >= cap && this.capPolicy() === 'abandon') {
+          // Internal `depth` counts losses so far (the base loss makes it 1), so the trade taken
+          // at depth d is recovery rung d. The cap counts RECOVERY RUNGS, matching the engine's
+          // MaxDepth since 2026-09-05 (base loss = depth 0 there): rung N is permitted when
+          // N <= cap, so the chain abandons only when the NEXT rung would be cap + 1. This was
+          // `>=`, which stopped one rung short of the cap — the same off-by-one the engine had.
+          if (nextDepth > cap && this.capPolicy() === 'abandon') {
             // Take the remaining deficit as a realised loss and reset. This is the survivable
             // variant: bounded worst case, at the price of sometimes eating the loss.
             abandoned++;
