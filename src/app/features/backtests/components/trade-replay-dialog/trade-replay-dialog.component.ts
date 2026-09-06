@@ -83,9 +83,13 @@ const TIMEFRAME_MINUTES: Record<string, number> = {
                 </span>
                 <span class="muted">{{ t.LotSize }} lots</span>
                 <span class="muted">·</span>
+                <!-- Year and UTC are both load-bearing: a run spanning
+                     2023-2026 has several "Sep 3"s, and the chart axis is
+                     UTC, so a local-time header disagreed with it by an
+                     hour. -->
                 <span class="muted"
-                  >{{ t.EntryTime | date: 'MMM d, HH:mm' }} →
-                  {{ t.ExitTime | date: 'MMM d, HH:mm' }}</span
+                  >{{ t.EntryTime | date: 'MMM d, yyyy HH:mm' : 'UTC' }} →
+                  {{ t.ExitTime | date: 'MMM d, yyyy HH:mm' : 'UTC' }} UTC</span
                 >
                 <span class="muted">·</span>
                 <span class="muted">{{ durationLabel() }}</span>
@@ -141,6 +145,9 @@ const TIMEFRAME_MINUTES: Record<string, number> = {
               backtest time, but those candles aren't in the live candle store.
             </div>
           } @else {
+            @if (coverageNote(); as note) {
+              <p class="coverage-note" role="status">{{ note }}</p>
+            }
             <div class="chart-wrap">
               <div
                 echarts
@@ -157,8 +164,7 @@ const TIMEFRAME_MINUTES: Record<string, number> = {
   styles: [
     `
       .dialog {
-        max-width: 1100px;
-        width: calc(100vw - var(--space-6));
+        width: min(1100px, calc(100vw - var(--space-6)));
         max-height: calc(100vh - var(--space-6));
         padding: 0;
         border: 1px solid var(--border);
@@ -166,6 +172,15 @@ const TIMEFRAME_MINUTES: Record<string, number> = {
         background: var(--bg-secondary);
         color: var(--text-primary);
         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+      }
+      /* Centring is not automatic here — the dialog rendered hard against
+         the viewport's top-left corner. Declare the placement explicitly,
+         the way the spread-reactive floor-override dialog does, instead of
+         relying on the user-agent's "margin: auto". */
+      dialog.dialog:modal {
+        position: fixed;
+        inset: 0;
+        margin: auto;
       }
       .dialog::backdrop {
         background: rgba(0, 0, 0, 0.4);
@@ -288,6 +303,18 @@ const TIMEFRAME_MINUTES: Record<string, number> = {
       }
       .chart {
         height: 500px;
+      }
+      /* Amber, not red: incomplete history is a fact about the candle store,
+         not a failure of this trade or of the page. */
+      .coverage-note {
+        margin: 0;
+        padding: var(--space-2) var(--space-3);
+        font-size: var(--text-xs);
+        line-height: 1.5;
+        color: var(--text-secondary);
+        background: rgba(255, 149, 0, 0.08);
+        border-left: 3px solid var(--warning, #ff9500);
+        border-radius: var(--radius-sm);
       }
       .chart-placeholder {
         height: 320px;
@@ -425,6 +452,43 @@ export class TradeReplayDialogComponent {
     return `${(hours / 24).toFixed(1)}d`;
   });
 
+  /**
+   * Says so when the candle store does not actually span the trade.
+   *
+   * The backtester ran on the data the engine held at the time; the live
+   * candle store is a different, shorter history. AUDUSD H4 begins on
+   * 2024-09-06 20:00, so backtest 480's trade #4 (entered 2024-09-03) has
+   * no bar of its own to sit on and the chart is showing the aftermath.
+   * Null when every bar of the trade window is present.
+   */
+  readonly coverageNote = computed<string | null>(() => {
+    const t = this.trade();
+    const c = this.candles();
+    if (!t || c.length === 0) return null;
+    const first = Date.parse(c[0].timestamp);
+    const last = Date.parse(c[c.length - 1].timestamp);
+    const entry = Date.parse(t.EntryTime);
+    const exit = Date.parse(t.ExitTime);
+    if (![first, last, entry, exit].every(Number.isFinite)) return null;
+
+    const barMs = (TIMEFRAME_MINUTES[this.timeframe()] ?? 60) * 60_000;
+    const utc = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ');
+
+    if (first > exit + barMs) {
+      return `The candle store for ${this.symbol()} ${this.timeframe()} starts at ${utc(first)} UTC — after this trade closed. Every bar below is the aftermath, so no entry or exit marker is drawn. The price levels are still the trade's own.`;
+    }
+    if (last < entry - barMs) {
+      return `The candle store for ${this.symbol()} ${this.timeframe()} ends at ${utc(last)} UTC — before this trade opened. Every bar below precedes it, so no entry or exit marker is drawn.`;
+    }
+    if (first > entry + barMs) {
+      return `Candles before ${utc(first)} UTC are missing, so the run-up to the entry is not shown.`;
+    }
+    if (last < exit - barMs) {
+      return `Candles after ${utc(last)} UTC are missing, so the exit is not shown.`;
+    }
+    return null;
+  });
+
   readonly riskReward = computed(() => {
     const t = this.trade();
     if (!t || t.StopLoss == null || t.TakeProfit == null) return null;
@@ -459,25 +523,58 @@ export class TradeReplayDialogComponent {
     const ohlc = c.map((x) => [x.open, x.close, x.low, x.high]);
     const isLong = t.Direction === 0;
 
-    // Find nearest candle for entry / exit so the markPoints sit on category ticks.
-    const entryIdx = nearestIdx(dates, t.EntryTime);
-    const exitIdx = nearestIdx(dates, t.ExitTime);
+    // Find nearest candle for entry / exit so the markPoints sit on category
+    // ticks — but only when a bar genuinely lands on that time. One bar of
+    // tolerance covers the usual off-by-one between a fill timestamp and the
+    // bar that contains it, and nothing further.
+    const barMs = (TIMEFRAME_MINUTES[this.timeframe()] ?? 60) * 60_000;
+    const entryIdx = nearestIdx(dates, t.EntryTime, barMs);
+    const exitIdx = nearestIdx(dates, t.ExitTime, barMs);
 
     const precision = pricePrecision(this.symbol());
-    const fmt = (v: number) => v.toFixed(precision);
+    // Same rounding as the KPI strip's `number` pipe. `toFixed` rounds the
+    // binary double and printed the entry above as 0.65353 while the KPI two
+    // inches higher said 0.65354 for the identical value (0.653535).
+    const priceFormat = new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: precision,
+      maximumFractionDigits: precision,
+      useGrouping: false,
+    });
+    const fmt = (v: number) => priceFormat.format(v);
 
     const entryColor = isLong ? '#0071E3' : '#FF6B35';
     const exitColor = t.PnL >= 0 ? '#34C759' : '#FF3B30';
 
-    const markLineData: any[] = [
+    // Price levels are drawn as EXPLICIT two-point pairs spanning the plot.
+    //
+    // A list of single `{ yAxis }` objects is the obvious spelling, and it is
+    // what this used to do — but ECharts consumed them two at a time as the
+    // start and end of ONE line: the entry and stop-loss collapsed onto a
+    // single rule at the stop's height, wearing both labels side by side,
+    // while the entry marker sat correctly 80px higher. A pair per level
+    // cannot be re-paired, so each level gets its own horizontal rule.
+    //
+    // Labels sit on the far side of each level from the entry, so a stop or
+    // target close to the entry price separates instead of overprinting.
+    const lastIdx = dates.length - 1;
+    const awayFromEntry = (value: number) =>
+      value < t.EntryPrice ? 'insideEndBottom' : 'insideEndTop';
+    const level = (
+      value: number,
+      colour: string,
+      text: string,
+      dashed: boolean,
+      position: string,
+    ) => [
       {
-        yAxis: t.EntryPrice,
-        lineStyle: { color: entryColor, type: 'solid', width: 1.4 },
+        coord: [0, value],
+        lineStyle: { color: colour, type: dashed ? 'dashed' : 'solid', width: dashed ? 1 : 1.4 },
         label: {
           show: true,
-          position: 'insideStartTop',
-          formatter: `ENTRY ${fmt(t.EntryPrice)}`,
-          backgroundColor: entryColor,
+          position,
+          distance: 4,
+          formatter: text,
+          backgroundColor: colour,
           color: '#fff',
           padding: [2, 6],
           borderRadius: 3,
@@ -485,40 +582,27 @@ export class TradeReplayDialogComponent {
           fontWeight: 600,
         },
       },
+      { coord: [lastIdx, value] },
+    ];
+
+    const markLineData: any[] = [
+      level(t.EntryPrice, entryColor, `ENTRY ${fmt(t.EntryPrice)}`, false, 'insideEndTop'),
     ];
     if (t.StopLoss != null && Number.isFinite(t.StopLoss)) {
-      markLineData.push({
-        yAxis: t.StopLoss,
-        lineStyle: { color: '#FF3B30', type: 'dashed', width: 1 },
-        label: {
-          show: true,
-          position: 'insideStartTop',
-          formatter: `SL ${fmt(t.StopLoss)}`,
-          backgroundColor: '#FF3B30',
-          color: '#fff',
-          padding: [2, 6],
-          borderRadius: 3,
-          fontSize: 10,
-          fontWeight: 600,
-        },
-      });
+      markLineData.push(
+        level(t.StopLoss, '#FF3B30', `SL ${fmt(t.StopLoss)}`, true, awayFromEntry(t.StopLoss)),
+      );
     }
     if (t.TakeProfit != null && Number.isFinite(t.TakeProfit)) {
-      markLineData.push({
-        yAxis: t.TakeProfit,
-        lineStyle: { color: '#34C759', type: 'dashed', width: 1 },
-        label: {
-          show: true,
-          position: 'insideStartTop',
-          formatter: `TP ${fmt(t.TakeProfit)}`,
-          backgroundColor: '#34C759',
-          color: '#fff',
-          padding: [2, 6],
-          borderRadius: 3,
-          fontSize: 10,
-          fontWeight: 600,
-        },
-      });
+      markLineData.push(
+        level(
+          t.TakeProfit,
+          '#34C759',
+          `TP ${fmt(t.TakeProfit)}`,
+          true,
+          awayFromEntry(t.TakeProfit),
+        ),
+      );
     }
 
     const markPointData: any[] = [];
@@ -690,7 +774,18 @@ export class TradeReplayDialogComponent {
   }
 }
 
-function nearestIdx(dates: string[], target: string): number {
+/**
+ * Index of the bar closest to `target`, or -1 when the closest one is still
+ * further away than `toleranceMs`.
+ *
+ * The tolerance is the whole point. Without it the entry marker was pinned
+ * to whatever bar happened to be nearest, however distant: backtest 480's
+ * trade #4 entered on 2024-09-03 04:00, the candle store for AUDUSD H4
+ * starts on 2024-09-06 20:00, and the "Sell" pin was drawn on that first
+ * bar — three and a half days after the fact, on price action the trade
+ * never saw. A marker that cannot be placed truthfully is not placed.
+ */
+function nearestIdx(dates: string[], target: string, toleranceMs: number): number {
   const t = Date.parse(target);
   if (!Number.isFinite(t)) return -1;
   let best = -1;
@@ -704,7 +799,7 @@ function nearestIdx(dates: string[], target: string): number {
       best = i;
     }
   }
-  return best;
+  return bestDelta <= toleranceMs ? best : -1;
 }
 
 function pricePrecision(symbol: string): number {
