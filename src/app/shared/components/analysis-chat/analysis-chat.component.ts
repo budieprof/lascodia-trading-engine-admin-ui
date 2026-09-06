@@ -81,7 +81,7 @@ interface ParsedChatRec {
       [class.fill]="fillHeight()"
       aria-label="Analysis follow-up chat"
     >
-      @if (llmInvocationId()) {
+      @if (llmInvocationId() && showIdBar()) {
         <div class="chat-idbar">
           <span class="idbar-label">Conversation ID</span>
           <button
@@ -355,10 +355,7 @@ interface ParsedChatRec {
         }
 
         @if (!loading() && messages().length === 0 && !sending() && !error() && !opener()) {
-          <div class="chat-empty">
-            Ask a follow-up about this analysis — e.g. “Why refuse the sell-stop?” or “What would
-            flip you to a long?”
-          </div>
+          <div class="chat-empty">{{ emptyHint() }}</div>
         }
       </div>
 
@@ -367,7 +364,7 @@ interface ParsedChatRec {
           rows="2"
           [value]="question()"
           [disabled]="sending()"
-          placeholder="Ask a follow-up question…"
+          [placeholder]="placeholder()"
           (input)="question.set($any($event.target).value)"
           (keydown)="onKeydown($event)"
           aria-label="Follow-up question"
@@ -935,6 +932,17 @@ export class AnalysisChatComponent {
    * it opts out rather than firing a request that can only ever return an empty list.
    */
   readonly showMonitors = input<boolean>(true);
+
+  /** Empty-thread hint. The default speaks to a spot analysis; other hosts pass their own. */
+  readonly emptyHint = input<string>(
+    'Ask a follow-up about this analysis — e.g. “Why refuse the sell-stop?” or “What would flip you to a long?”',
+  );
+
+  /** Composer placeholder. */
+  readonly placeholder = input<string>('Ask a follow-up question…');
+
+  /** The "Conversation ID · copy" strip. Hosts with their own header suppress it. */
+  readonly showIdBar = input<boolean>(true);
 
   protected readonly messages = signal<SpotAnalysisFollowUpTurnDto[]>([]);
   protected readonly question = signal('');

@@ -125,9 +125,13 @@ import { WallModeService } from '@core/wall-mode/wall-mode.service';
               </div>
             } @else if (dock.conversationId(); as id) {
               <app-analysis-chat
+                class="dock-chat"
                 [llmInvocationId]="id"
                 [fillHeight]="true"
                 [showMonitors]="false"
+                [showIdBar]="false"
+                [placeholder]="'Ask about this page, or anything in the console…'"
+                [emptyHint]="emptyHint()"
                 [contextProvider]="contextProvider"
               />
             }
@@ -265,6 +269,14 @@ import { WallModeService } from '@core/wall-mode/wall-mode.service';
         flex-direction: column;
         overflow: hidden;
       }
+      /* The chat is the drawer's content — it must take the remaining height, not sit
+         at the top with the composer stranded above empty space. */
+      .dock-chat {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
       .dock-state {
         padding: var(--space-5);
         color: var(--text-secondary);
@@ -312,6 +324,14 @@ export class AssistantDockComponent {
   /** Short label for the page the assistant can currently see. */
   protected readonly contextLabel = computed(() => this.pageLabel());
   private readonly pageLabel = signal<string | null>(null);
+
+  /** Empty-thread hint, naming the page so the offer is concrete. */
+  protected readonly emptyHint = computed(() => {
+    const label = this.pageLabel();
+    return label
+      ? `Ask about ${label}, or anything else in the console — positions, signals, strategies, the EA fleet. I can read live data, and I will ask before changing anything.`
+      : 'Ask about this page, or anything else in the console. I can read live data, and I will ask before changing anything.';
+  });
 
   /** Passed to the chat; called at send time so it reads the page as it is then. */
   protected readonly contextProvider = (): unknown | null => {
