@@ -169,7 +169,7 @@ type RolesState = { id: number; username: string; selected: Set<number> };
                       }
                     </td>
                     <td>{{ u.displayName }}</td>
-                    <td class="muted">{{ u.email }}</td>
+                    <td class="email">{{ u.email }}</td>
                     <td>
                       @for (role of u.roles; track role.id) {
                         <span class="chip">{{ role.name }}</span>
@@ -229,25 +229,38 @@ type RolesState = { id: number; username: string; selected: Set<number> };
         <div class="panel" (click)="$event.stopPropagation()">
           <header class="panel-head">
             <h3>Edit profile</h3>
-            <button type="button" class="link-btn" (click)="editState.set(null)">Close</button>
+            <button
+              type="button"
+              class="close-btn"
+              aria-label="Close"
+              title="Close"
+              (click)="editState.set(null)"
+            >
+              ×
+            </button>
           </header>
-          <form class="panel-body" (ngSubmit)="saveEdit()">
-            <label class="field">
-              <span class="label">Email</span>
-              <input class="input" type="email" [(ngModel)]="ed.email" name="editEmail" required />
-            </label>
-            <label class="field">
-              <span class="label">Display name</span>
-              <input class="input" [(ngModel)]="ed.displayName" name="editDisplayName" required />
-            </label>
-            <div class="panel-actions">
-              <button type="button" class="btn btn-ghost" (click)="editState.set(null)">
-                Cancel
-              </button>
+          <form class="panel-form" (ngSubmit)="saveEdit()">
+            <div class="panel-body">
+              <label class="field">
+                <span class="label">Email</span>
+                <input
+                  class="input"
+                  type="email"
+                  [(ngModel)]="ed.email"
+                  name="editEmail"
+                  required
+                />
+              </label>
+              <label class="field">
+                <span class="label">Display name</span>
+                <input class="input" [(ngModel)]="ed.displayName" name="editDisplayName" required />
+              </label>
+            </div>
+            <footer class="panel-actions">
               <button type="submit" class="btn btn-primary" [disabled]="busyId() === ed.id">
                 Save
               </button>
-            </div>
+            </footer>
           </form>
         </div>
       </div>
@@ -259,7 +272,15 @@ type RolesState = { id: number; username: string; selected: Set<number> };
         <div class="panel" (click)="$event.stopPropagation()">
           <header class="panel-head">
             <h3>Manage roles · &#64;{{ rs.username }}</h3>
-            <button type="button" class="link-btn" (click)="rolesState.set(null)">Close</button>
+            <button
+              type="button"
+              class="close-btn"
+              aria-label="Close"
+              title="Close"
+              (click)="rolesState.set(null)"
+            >
+              ×
+            </button>
           </header>
           <div class="panel-body">
             <div class="role-checks col">
@@ -277,20 +298,17 @@ type RolesState = { id: number; username: string; selected: Set<number> };
                 </label>
               }
             </div>
-            <div class="panel-actions">
-              <button type="button" class="btn btn-ghost" (click)="rolesState.set(null)">
-                Cancel
-              </button>
-              <button
-                type="button"
-                class="btn btn-primary"
-                [disabled]="busyId() === rs.id"
-                (click)="saveRoles()"
-              >
-                Save roles
-              </button>
-            </div>
           </div>
+          <footer class="panel-actions">
+            <button
+              type="button"
+              class="btn btn-primary"
+              [disabled]="busyId() === rs.id"
+              (click)="saveRoles()"
+            >
+              Save roles
+            </button>
+          </footer>
         </div>
       </div>
     }
@@ -539,6 +557,11 @@ type RolesState = { id: number; username: string; selected: Set<number> };
         top: 0;
         z-index: 1;
       }
+      /* Email was painted text-tertiary (#636366 on the dark row) — a real
+         identifier column, not decoration, so it gets body contrast. */
+      .data-table td.email {
+        color: var(--text-secondary);
+      }
       .data-table .actions {
         text-align: right;
         white-space: nowrap;
@@ -583,37 +606,82 @@ type RolesState = { id: number; username: string; selected: Set<number> };
         z-index: 100;
         padding: var(--space-4);
       }
+      /* Dialog shell: header and footer stay put, only the body scrolls, and
+         the whole thing is capped at 90vh like every other dialog in the app.
+         The old panel scrolled as one block, so the actions could scroll out
+         of view, and it carried both a "Close" link and a "Cancel" button —
+         the × in the header is the single dismiss control now. */
       .panel {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         width: 100%;
         max-width: 480px;
-        max-height: 80vh;
-        overflow-y: auto;
+        max-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .panel-form {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        flex: 1;
       }
       .panel-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
+        gap: var(--space-3);
         padding: var(--space-3) var(--space-4);
         border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
       }
       .panel-head h3 {
         margin: 0;
         font-size: var(--text-sm);
         font-weight: var(--font-semibold);
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .close-btn {
+        flex-shrink: 0;
+        width: 28px;
+        height: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        border-radius: var(--radius-full);
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: 20px;
+        line-height: 1;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .close-btn:hover {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
       }
       .panel-body {
         display: flex;
         flex-direction: column;
         gap: var(--space-3);
         padding: var(--space-4);
+        overflow-y: auto;
+        min-height: 0;
+        flex: 1;
       }
       .panel-actions {
         display: flex;
         justify-content: flex-end;
         gap: var(--space-2);
+        padding: var(--space-3) var(--space-4);
+        border-top: 1px solid var(--border);
+        flex-shrink: 0;
       }
     `,
   ],

@@ -24,6 +24,7 @@ import {
 } from '@core/services/prompt-template.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 
 /** Direction-of-good helper rows for the headline-metrics delta table. */
 type DirectionGood = 'up' | 'down';
@@ -45,7 +46,15 @@ interface DeltaRow {
   selector: 'app-llm-backtest-compare-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CurrencyPipe, DatePipe, DecimalPipe, PercentPipe, RouterLink, PageHeaderComponent],
+  imports: [
+    CurrencyPipe,
+    DatePipe,
+    DecimalPipe,
+    PercentPipe,
+    RouterLink,
+    PageHeaderComponent,
+    EmptyStateComponent,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -57,6 +66,18 @@ interface DeltaRow {
 
       @if (loading()) {
         <section class="card empty">Loading comparison…</section>
+      } @else if (missingSelection()) {
+        <!-- Reached without ?left=&right= (typed URL, stale bookmark). This
+             is a navigation state, not a fault — say what to do, not which
+             query parameters are missing. -->
+        <section class="card">
+          <app-empty-state
+            title="Pick two runs to compare"
+            description="Select exactly two runs on the LLM Backtest list and press “Compare these 2”. The baseline goes on the left, the candidate on the right."
+            actionLabel="Go to backtest runs"
+            (actionClick)="goToList()"
+          />
+        </section>
       } @else if (errorMessage(); as msg) {
         <section class="card empty error">{{ msg }}</section>
       } @else if (result(); as r) {
@@ -90,9 +111,11 @@ interface DeltaRow {
               <dt>Cache hit</dt>
               <dd>{{ r.left.cacheHitRatio | percent: '1.0-1' }}</dd>
               <dt>Started</dt>
-              <dd>{{ r.left.startedAt ? (r.left.startedAt | date: 'short') : '—' }}</dd>
+              <dd>{{ r.left.startedAt ? (r.left.startedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}</dd>
               <dt>Completed</dt>
-              <dd>{{ r.left.completedAt ? (r.left.completedAt | date: 'short') : '—' }}</dd>
+              <dd>
+                {{ r.left.completedAt ? (r.left.completedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}
+              </dd>
             </dl>
           </div>
 
@@ -124,9 +147,13 @@ interface DeltaRow {
               <dt>Cache hit</dt>
               <dd>{{ r.right.cacheHitRatio | percent: '1.0-1' }}</dd>
               <dt>Started</dt>
-              <dd>{{ r.right.startedAt ? (r.right.startedAt | date: 'short') : '—' }}</dd>
+              <dd>
+                {{ r.right.startedAt ? (r.right.startedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}
+              </dd>
               <dt>Completed</dt>
-              <dd>{{ r.right.completedAt ? (r.right.completedAt | date: 'short') : '—' }}</dd>
+              <dd>
+                {{ r.right.completedAt ? (r.right.completedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}
+              </dd>
             </dl>
           </div>
         </section>
@@ -590,6 +617,12 @@ export class LlmBacktestComparePageComponent implements OnInit {
   readonly loading = signal(false);
   readonly errorMessage = signal<string | null>(null);
   readonly result = signal<CompareLlmBacktestRunsResult | null>(null);
+  /** No usable `?left=&right=` pair — render the pick-two-runs guidance instead of an error. */
+  readonly missingSelection = signal(false);
+
+  goToList(): void {
+    this.router.navigate(['/llm-backtest']);
+  }
 
   /**
    * P4.3 — Candidate prompt template lookup. Populated after the comparison
@@ -608,11 +641,13 @@ export class LlmBacktestComparePageComponent implements OnInit {
     const left = Number(params.get('left'));
     const right = Number(params.get('right'));
     if (!Number.isFinite(left) || left <= 0 || !Number.isFinite(right) || right <= 0) {
-      this.errorMessage.set('Missing or invalid ?left=…&right=… query parameters.');
+      this.missingSelection.set(true);
       return;
     }
     if (left === right) {
-      this.errorMessage.set('Left and right run IDs must differ.');
+      this.errorMessage.set(
+        `Run #${left} was selected on both sides — pick two different runs to compare.`,
+      );
       return;
     }
     this.loading.set(true);

@@ -1,7 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
 import { catchError, finalize, map, of } from 'rxjs';
 
 import { CompositeMLService } from '@core/services/composite-ml.service';
@@ -14,6 +13,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 
 @Component({
   selector: 'app-trainer-skill-page',
@@ -23,8 +23,8 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     DatePipe,
     DecimalPipe,
     FormsModule,
-    RouterLink,
     PageHeaderComponent,
+    CompositeMlNavComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
@@ -35,18 +35,12 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       <app-page-header
         title="CompositeML — Trainer Skill"
         subtitle="Per-(trainer, partition tier) skill estimates driving promotion suppression"
-      >
-        <a routerLink="/composite-ml/layer-skill" class="btn btn-secondary">← Layer Skill</a>
-        <a routerLink="/composite-ml" class="btn btn-secondary">Active Policies</a>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
-      </app-page-header>
+      />
+      <app-composite-ml-nav
+        [showRefresh]="true"
+        [refreshing]="resource.loading()"
+        (refresh)="resource.refresh()"
+      />
 
       @if (loading()) {
         <app-card-skeleton [lines]="8" />

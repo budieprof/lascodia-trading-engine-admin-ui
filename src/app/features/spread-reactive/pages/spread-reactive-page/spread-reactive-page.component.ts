@@ -50,6 +50,12 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
         subtitle="Opt-in SL widening on broker spread spikes — protects open positions during NY close, news, and weekend gaps.  Per-account baselines so Exness Raw vs Standard vs other brokers don't share one wrong number."
       >
         @if (config(); as cfg) {
+          <!-- State badge + action button are separate: the badge says what
+               the subsystem IS, the button says what clicking DOES. The old
+               green-outlined "■ Disable" read as "enabled and healthy". -->
+          <span class="state-badge" [class.on]="cfg.enabled">
+            {{ cfg.enabled ? 'Enabled' : 'Disabled' }}
+          </span>
           <button
             type="button"
             class="power-btn"
@@ -112,6 +118,19 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
         >
           SL Audit
         </button>
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          [class.active]="activeTab() === 'settings'"
+          [attr.aria-selected]="activeTab() === 'settings'"
+          (click)="selectTab('settings')"
+        >
+          Settings
+          @if (dirty()) {
+            <span class="tab-badge dirty">unsaved</span>
+          }
+        </button>
       </nav>
 
       <!-- ───────── Live state ───────── -->
@@ -120,15 +139,14 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
           <div class="status-head">
             <h2>Live state</h2>
             <span class="status-meta">
-              <span class="muted small"
-                >{{ stateRows().length }} pair{{
-                  stateRows().length === 1 ? '' : 's'
-                }}
-                observed</span
-              >
-              @if (elevatedCount() > 0) {
-                <span class="condition-pill elevated">{{ elevatedCount() }} elevated</span>
-              }
+              <input
+                type="search"
+                class="state-filter"
+                placeholder="Filter symbol / account"
+                [value]="stateFilter()"
+                (input)="onStateFilter($any($event.target).value)"
+                aria-label="Filter live state rows"
+              />
               <button
                 type="button"
                 class="btn ghost"
@@ -139,6 +157,31 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
               </button>
             </span>
           </div>
+          <!-- Summary strip: "162 pairs observed" over a wall of grey WARMING
+               pills looked healthy; this says how many pairs actually have a
+               baseline and how many are still warming / elevated. -->
+          @if (stateRows().length > 0) {
+            <div class="state-summary" role="status">
+              <span class="summary-item" [class.warn]="stateSummary().withBaseline === 0"
+                >{{ stateSummary().withBaseline }} of {{ stateRows().length }} pairs have a
+                baseline</span
+              >
+              <span class="summary-item">
+                <span class="condition-pill normal">{{ stateSummary().normal }}</span> normal
+              </span>
+              <span class="summary-item">
+                <span class="condition-pill warming">{{ stateSummary().warming }}</span> warming
+              </span>
+              <span class="summary-item">
+                <span class="condition-pill elevated">{{ stateSummary().elevated }}</span> elevated
+              </span>
+              @if (stateSummary().noSample > 0) {
+                <span class="summary-item muted small">
+                  {{ stateSummary().noSample }} with no sample yet
+                </span>
+              }
+            </div>
+          }
           <!-- Table headers always visible — the empty-state hint sits
              inside a colspan'd row so the operator never sees the
              section's structure collapse on a freshly-restarted engine
@@ -167,8 +210,14 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
                       typically populates within 30 s of engine start.
                     </td>
                   </tr>
+                } @else if (pagedStateRows().length === 0) {
+                  <tr class="empty-row">
+                    <td colspan="10" class="muted small empty-cell">
+                      No pair matches “{{ stateFilter() }}”.
+                    </td>
+                  </tr>
                 } @else {
-                  @for (r of stateRows(); track r.tradingAccountId + ':' + r.symbol) {
+                  @for (r of pagedStateRows(); track r.tradingAccountId + ':' + r.symbol) {
                     <tr [class.row-elevated]="r.condition === 'Elevated'">
                       <td class="mono small">{{ r.tradingAccountId }}</td>
                       <td class="mono">{{ r.symbol }}</td>
@@ -205,7 +254,7 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
                       <td class="num mono">{{ r.sampleCount }}</td>
                       <td class="num mono">{{ r.consecutiveCalmSamples }}</td>
                       <td class="mono small" [class.muted]="staleRow(r)">
-                        {{ sampleAge(r.lastSampleAt) }}
+                        {{ sampleAge(r) }}
                       </td>
                     </tr>
                   }
@@ -213,6 +262,30 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
               </tbody>
             </table>
           </div>
+          @if (statePageCount() > 1) {
+            <div class="pager">
+              <button
+                type="button"
+                class="btn ghost"
+                [disabled]="statePage() <= 1"
+                (click)="statePage.set(statePage() - 1)"
+              >
+                ‹ Prev
+              </button>
+              <span class="muted small">
+                Page {{ statePage() }} of {{ statePageCount() }} ·
+                {{ filteredStateRows().length }} pairs
+              </span>
+              <button
+                type="button"
+                class="btn ghost"
+                [disabled]="statePage() >= statePageCount()"
+                (click)="statePage.set(statePage() + 1)"
+              >
+                Next ›
+              </button>
+            </div>
+          }
         </section>
       }
 
@@ -233,7 +306,10 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
         </section>
       }
 
-      @if (config(); as cfg) {
+      <!-- ───────── Settings ─────────
+           Its own tab: the full form used to repeat under every
+           monitoring tab, pushing Save/Reset to y≈7,600 on Live state. -->
+      @if (activeTab() === 'settings' && config(); as cfg) {
         <!-- Configuration: 2x2 auto-fit grid so the 4 small panels
              share horizontal space on wide screens, stacking only
              below the per-cell minimum width.  Mirrors the EA detail
@@ -570,15 +646,12 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
           </section>
         </div>
 
-        <div class="actions-row">
-          <button
-            type="button"
-            class="btn primary"
-            [disabled]="saving() || !dirty()"
-            (click)="save()"
-          >
-            {{ saving() ? 'Saving…' : 'Save' }}
-          </button>
+        <!-- Sticky footer: Save/Reset stay in view while the operator scrolls
+             the four settings panels. -->
+        <div class="actions-row" [class.dirty]="dirty()">
+          <span class="muted small">
+            {{ dirty() ? 'Unsaved changes' : 'All settings saved' }}
+          </span>
           <button
             type="button"
             class="btn ghost"
@@ -587,8 +660,16 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
           >
             Reset
           </button>
+          <button
+            type="button"
+            class="btn primary"
+            [disabled]="saving() || !dirty()"
+            (click)="save()"
+          >
+            {{ saving() ? 'Saving…' : 'Save' }}
+          </button>
         </div>
-      } @else if (loading()) {
+      } @else if (activeTab() === 'settings' && loading()) {
         <div class="muted">Loading…</div>
       }
     </div>
@@ -617,18 +698,41 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
       .small {
         font-size: 0.85em;
       }
+      .state-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 10px;
+        border-radius: var(--radius-full, 999px);
+        font-size: var(--text-xs, 12px);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        margin-right: 8px;
+      }
+      .state-badge.on {
+        background: color-mix(in srgb, var(--profit) 18%, transparent);
+        color: var(--profit);
+      }
+      /* Enable = primary action; Disable = destructive outline. */
       .power-btn {
         padding: 8px 14px;
         border-radius: 6px;
-        border: 1px solid var(--border, #ccc);
-        background: var(--surface, var(--bg-primary, #fff));
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: #fff;
         cursor: pointer;
         font-weight: 600;
       }
       .power-btn.on {
-        background: var(--success-bg, #e7f5ec);
-        border-color: var(--success, #2c8a3f);
-        color: var(--success, #2c8a3f);
+        background: transparent;
+        border-color: var(--loss);
+        color: var(--loss);
+      }
+      .power-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
       }
       .card {
         background: var(--bg-secondary, var(--card-bg, #fff));
@@ -666,21 +770,42 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
         font-weight: 600;
         font-size: 0.9em;
       }
-      .field input {
+      /* Dark inputs on the app surface tokens — var(--input-bg, #fff) fell
+         through to white with pale values, unreadable on the dark theme. */
+      .field input,
+      .field select {
         padding: 6px 8px;
         border-radius: 4px;
-        border: 1px solid var(--border, #ccc);
-        background: var(--input-bg, #fff);
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font: inherit;
       }
       .actions-row {
+        position: sticky;
+        bottom: 0;
+        z-index: 2;
         display: flex;
+        align-items: center;
+        justify-content: flex-end;
         gap: 10px;
+        padding: 10px 14px;
+        margin: 0 calc(-1 * var(--space-4, 16px)) calc(-1 * var(--space-4, 16px));
+        background: var(--bg-secondary);
+        border-top: 1px solid var(--border);
+      }
+      .actions-row.dirty {
+        border-top-color: var(--warning);
+      }
+      .actions-row .muted {
+        margin-right: auto;
       }
       .btn {
         padding: 8px 14px;
         border-radius: 6px;
-        border: 1px solid var(--border, #ccc);
-        background: var(--surface, #fff);
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-primary);
         cursor: pointer;
       }
       .btn.primary {
@@ -718,6 +843,48 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
         align-items: center;
         gap: 10px;
       }
+      .state-filter {
+        padding: 6px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font: inherit;
+        font-size: var(--text-sm, 13px);
+        min-width: 200px;
+      }
+      .state-summary {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 14px;
+        margin-top: 10px;
+        padding: 8px 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-tertiary);
+        font-size: var(--text-sm, 13px);
+      }
+      .summary-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .summary-item.warn {
+        color: var(--warning);
+        font-weight: 600;
+      }
+      .pager {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        margin-top: 10px;
+      }
+      .tab-badge.dirty {
+        background: color-mix(in srgb, var(--warning) 22%, transparent);
+        color: var(--warning);
+      }
       .condition-pill {
         padding: 2px 8px;
         border-radius: 8px;
@@ -753,6 +920,7 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
         padding: 6px 10px;
         text-align: left;
         border-bottom: 1px solid var(--border, #eee);
+        white-space: nowrap;
       }
       .state-table th {
         font-size: 12px;
@@ -883,6 +1051,49 @@ export class SpreadReactivePageComponent {
     () => this.stateRows().filter((r) => r.condition === 'Elevated').length,
   );
 
+  /** Counts for the summary strip above the table. */
+  protected readonly stateSummary = computed(() => {
+    const rows = this.stateRows();
+    return {
+      withBaseline: rows.filter((r) => r.floorBaseline != null && r.floorBaseline > 0).length,
+      normal: rows.filter((r) => r.condition === 'Normal').length,
+      warming: rows.filter((r) => r.condition === 'Warming').length,
+      elevated: rows.filter((r) => r.condition === 'Elevated').length,
+      noSample: rows.filter((r) => !this.hasSample(r)).length,
+    };
+  });
+
+  // 162 (account, symbol) rows in one table pushed everything below it off
+  // screen; filter + 50-row pages keep the section scannable.
+  private static readonly STATE_PAGE_SIZE = 50;
+  protected readonly stateFilter = signal('');
+  protected readonly statePage = signal(1);
+  protected readonly filteredStateRows = computed(() => {
+    const q = this.stateFilter().trim().toUpperCase();
+    if (!q) return this.stateRows();
+    return this.stateRows().filter(
+      (r) => r.symbol.toUpperCase().includes(q) || String(r.tradingAccountId).includes(q),
+    );
+  });
+  protected readonly statePageCount = computed(() =>
+    Math.max(
+      1,
+      Math.ceil(this.filteredStateRows().length / SpreadReactivePageComponent.STATE_PAGE_SIZE),
+    ),
+  );
+  protected readonly pagedStateRows = computed(() => {
+    const page = Math.min(this.statePage(), this.statePageCount());
+    const start = (page - 1) * SpreadReactivePageComponent.STATE_PAGE_SIZE;
+    return this.filteredStateRows().slice(
+      start,
+      start + SpreadReactivePageComponent.STATE_PAGE_SIZE,
+    );
+  });
+  protected onStateFilter(value: string): void {
+    this.stateFilter.set(value);
+    this.statePage.set(1);
+  }
+
   /**
    * Which of the two monitoring tabs (Live state / SL Audit) is visible.
    * Defaults to 'state' on first load; auto-flips to 'audit' when a
@@ -891,7 +1102,7 @@ export class SpreadReactivePageComponent {
    * `?positionId=N` link expect to see the audit pre-filtered to that
    * position without having to click the tab.
    */
-  protected readonly activeTab = signal<'state' | 'floors' | 'audit'>('state');
+  protected readonly activeTab = signal<'state' | 'floors' | 'audit' | 'settings'>('state');
 
   private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
@@ -919,7 +1130,7 @@ export class SpreadReactivePageComponent {
     });
   }
 
-  protected selectTab(tab: 'state' | 'floors' | 'audit'): void {
+  protected selectTab(tab: 'state' | 'floors' | 'audit' | 'settings'): void {
     this.activeTab.set(tab);
   }
 
@@ -1026,25 +1237,41 @@ export class SpreadReactivePageComponent {
   }
 
   /**
-   * Rendered "last sample" age — "Xs" up to 60s, "Xm Ys" beyond.  Used
-   * to flag stale rows where bumps will freeze in place (the engine
-   * applies the TelemetryFreshnessSeconds gate at decision time).
+   * A pair the worker has registered but never sampled carries
+   * `lastSampleAt` = DateTime.MinValue / epoch zero and sampleCount 0.
+   * Rendering that as a relative age produced "1065404125m 18s ago".
    */
-  protected sampleAge(iso: string): string {
-    const t = new Date(iso).getTime();
-    if (!Number.isFinite(t)) return '—';
+  protected hasSample(r: SpreadStateEntry): boolean {
+    if (!r.lastSampleAt || (r.sampleCount ?? 0) === 0) return false;
+    const t = new Date(r.lastSampleAt).getTime();
+    return Number.isFinite(t) && t > Date.UTC(2000, 0, 1);
+  }
+
+  /**
+   * Rendered "last sample" age — "Xs" up to 60s, "Xm Ys" up to an hour,
+   * then "Xh Ym"; "no sample yet" for never-sampled pairs.  Used to flag
+   * stale rows where bumps will freeze in place (the engine applies the
+   * TelemetryFreshnessSeconds gate at decision time).
+   */
+  protected sampleAge(r: SpreadStateEntry): string {
+    if (!this.hasSample(r)) return 'no sample yet';
+    const t = new Date(r.lastSampleAt).getTime();
     const diffSec = Math.max(0, Math.floor((Date.now() - t) / 1000));
     if (diffSec < 60) return `${diffSec}s ago`;
     const m = Math.floor(diffSec / 60);
-    const s = diffSec % 60;
-    return s === 0 ? `${m}m ago` : `${m}m ${s}s ago`;
+    if (m < 60) {
+      const s = diffSec % 60;
+      return s === 0 ? `${m}m ago` : `${m}m ${s}s ago`;
+    }
+    const h = Math.floor(m / 60);
+    if (h < 48) return `${h}h ${m % 60}m ago`;
+    return `${Math.floor(h / 24)}d ago`;
   }
 
   /** Heuristic stale-row tag — last sample older than 2× the default freshness budget. */
   protected staleRow(r: SpreadStateEntry): boolean {
-    const t = new Date(r.lastSampleAt).getTime();
-    if (!Number.isFinite(t)) return true;
-    return Date.now() - t > 120 * 1_000;
+    if (!this.hasSample(r)) return true;
+    return Date.now() - new Date(r.lastSampleAt).getTime() > 120 * 1_000;
   }
 
   private toMessage(e: unknown): string {

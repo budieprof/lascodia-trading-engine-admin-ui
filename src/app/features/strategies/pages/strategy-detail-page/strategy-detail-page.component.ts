@@ -43,6 +43,7 @@ import { GaugeComponent } from '@shared/components/gauge/gauge.component';
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
 import { EnumLabelPipe } from '@shared/pipes/enum-label.pipe';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { StatusPillCellComponent } from '@shared/components/data-table/cell-renderers/status-pill-cell.component';
 
 import { StrategyFormComponent } from '../../components/strategy-form/strategy-form.component';
 import { PromotionReadinessCardComponent } from '../../components/promotion-readiness-card/promotion-readiness-card.component';
@@ -78,11 +79,22 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
   template: `
     <div class="page">
       @if (strategy()) {
-        <app-page-header
-          [title]="strategy()!.name ?? ''"
-          [subtitle]="(strategy()!.symbol ?? '') + ' - ' + (strategy()!.description ?? '')"
-        >
-          <app-presence-badge [routeKey]="'strategy:' + strategyId" />
+        <app-page-header [title]="strategy()!.name ?? ''" [subtitle]="headerSubtitle()">
+          <span slot="title-after" class="head-chips">
+            <app-status-badge [status]="strategy()!.status" type="strategy" />
+            <app-presence-badge [routeKey]="'strategy:' + strategyId" />
+          </span>
+          @if (strategy()!.status === 'Paused' || strategy()!.status === 'Stopped') {
+            <button class="btn btn-success" (click)="onActivate()" [disabled]="actionLoading()">
+              Activate
+            </button>
+          }
+          @if (strategy()!.status === 'Active') {
+            <button class="btn btn-warning" (click)="onPause()" [disabled]="actionLoading()">
+              Pause
+            </button>
+          }
+          <button class="btn btn-secondary" (click)="showEditForm.set(true)">Edit</button>
           <button class="btn btn-secondary" (click)="openAnalytics()">Open analytics →</button>
           <button
             type="button"
@@ -92,7 +104,14 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
           >
             Why no signals?
           </button>
-          <button class="btn btn-ghost" (click)="goBack()">Back</button>
+          <button
+            class="btn btn-secondary btn-danger-text"
+            (click)="showDeleteConfirm.set(true)"
+            title="Delete this strategy"
+          >
+            Delete
+          </button>
+          <button class="btn btn-ghost" (click)="goBack()">← Back</button>
         </app-page-header>
 
         <!--
@@ -227,7 +246,7 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
                     </div>
                     <div class="detail-item">
                       <span class="detail-label">Type</span>
-                      <span class="detail-value">{{ strategy()!.strategyType | enumLabel }}</span>
+                      <span class="detail-value">{{ typeLabel(strategy()!.strategyType) }}</span>
                     </div>
                     <div class="detail-item">
                       <span class="detail-label">Status</span>
@@ -254,8 +273,33 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
 
                 @if (strategy()!.parametersJson) {
                   <div class="detail-card">
-                    <h3 class="card-title">Parameters</h3>
-                    <pre class="code-block">{{ formatJson(strategy()!.parametersJson!) }}</pre>
+                    <h3 class="card-title">
+                      Parameters
+                      <span class="muted small">
+                        {{ parameterEntries().length }} set
+                        @if (nullParameterCount() > 0) {
+                          · {{ nullParameterCount() }} unset hidden
+                        }
+                      </span>
+                    </h3>
+                    @if (parameterEntries().length > 0) {
+                      <dl class="param-grid">
+                        @for (kv of parameterEntries(); track kv.key) {
+                          <div class="param-item">
+                            <dt [title]="kv.key">{{ kv.key }}</dt>
+                            <dd class="mono" [title]="kv.value">{{ kv.value }}</dd>
+                          </div>
+                        }
+                      </dl>
+                    } @else {
+                      <p class="muted">
+                        Every parameter is unset — the strategy runs on code defaults.
+                      </p>
+                    }
+                    <details class="json-fold">
+                      <summary>View raw JSON</summary>
+                      <pre class="code-block">{{ formatJson(strategy()!.parametersJson!) }}</pre>
+                    </details>
                   </div>
                 } @else {
                   <div class="detail-card">
@@ -334,27 +378,6 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
                     <p class="muted">No orders placed yet.</p>
                   }
                 </div>
-              </div>
-
-              <div class="action-bar">
-                @if (strategy()!.status === 'Paused' || strategy()!.status === 'Stopped') {
-                  <button
-                    class="btn btn-success"
-                    (click)="onActivate()"
-                    [disabled]="actionLoading()"
-                  >
-                    Activate
-                  </button>
-                }
-                @if (strategy()!.status === 'Active') {
-                  <button class="btn btn-warning" (click)="onPause()" [disabled]="actionLoading()">
-                    Pause
-                  </button>
-                }
-                <button class="btn btn-outline" (click)="showEditForm.set(true)">Edit</button>
-                <button class="btn btn-destructive" (click)="showDeleteConfirm.set(true)">
-                  Delete
-                </button>
               </div>
             </div>
           }
@@ -668,6 +691,68 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
         opacity: 0.9;
       }
 
+      .btn-secondary {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+      }
+      .btn-danger-text {
+        color: var(--loss);
+      }
+      .head-chips {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .card-title .muted {
+        margin-left: var(--space-2);
+        font-weight: var(--font-regular);
+      }
+      .param-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: var(--space-3) var(--space-4);
+        margin: 0;
+      }
+      .param-item {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      .param-item dt {
+        font-size: 11px;
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .param-item dd {
+        margin: 0;
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .json-fold {
+        margin-top: var(--space-4);
+      }
+      .json-fold summary {
+        cursor: pointer;
+        font-size: var(--text-xs);
+        color: var(--accent);
+      }
+      .json-fold .code-block {
+        margin-top: var(--space-2);
+        max-height: 420px;
+        overflow: auto;
+      }
       .btn-outline {
         background: transparent;
         color: var(--text-primary);
@@ -1480,7 +1565,13 @@ export class StrategyDetailPageComponent implements OnInit {
       width: 120,
       valueFormatter: (p: any) => (p.value ? new Date(p.value).toLocaleDateString() : '—'),
     },
-    { field: 'status', headerName: 'Status', width: 110 },
+    {
+      field: 'status',
+      headerName: 'Status',
+      width: 120,
+      cellRenderer: StatusPillCellComponent,
+      cellRendererParams: { label: 'Backtest status' },
+    },
     {
       field: 'totalTrades',
       headerName: 'Trades',
@@ -1515,13 +1606,14 @@ export class StrategyDetailPageComponent implements OnInit {
       field: 'totalReturn',
       headerName: 'Return',
       width: 100,
-      valueFormatter: (p: any) => (p.value != null ? `${(p.value * 100).toFixed(2)}%` : '—'),
+      // BacktestEngine stores TotalReturn already in percent (0.1089 = 0.1089%);
+      // multiplying by 100 again printed 10.89% for a $10.89 gain on $10,000.
+      valueFormatter: (p: any) => (p.value != null ? `${Number(p.value).toFixed(2)}%` : '—'),
     },
     {
       field: 'startedAt',
       headerName: 'Started',
-      flex: 1,
-      minWidth: 130,
+      width: 120,
       valueFormatter: (p: any) => this.relativeTime.transform(p.value),
     },
   ];
@@ -1549,7 +1641,13 @@ export class StrategyDetailPageComponent implements OnInit {
     },
     { field: 'inSampleDays', headerName: 'IS days', width: 90 },
     { field: 'outOfSampleDays', headerName: 'OOS days', width: 100 },
-    { field: 'status', headerName: 'Status', width: 110 },
+    {
+      field: 'status',
+      headerName: 'Status',
+      width: 120,
+      cellRenderer: StatusPillCellComponent,
+      cellRendererParams: { label: 'Walk-forward status' },
+    },
     {
       field: 'averageOutOfSampleScore',
       headerName: 'Avg OOS',
@@ -1559,7 +1657,8 @@ export class StrategyDetailPageComponent implements OnInit {
     {
       field: 'scoreConsistency',
       headerName: 'Consistency',
-      width: 120,
+      width: 130,
+      minWidth: 130,
       valueFormatter: (p: any) => (p.value != null ? p.value.toFixed(3) : '—'),
     },
     {
@@ -1666,6 +1765,59 @@ export class StrategyDetailPageComponent implements OnInit {
       return json;
     }
   }
+
+  /** Header sub-line: symbol · timeframe · description, skipping whatever is blank. */
+  readonly headerSubtitle = computed(() => {
+    const s = this.strategy();
+    if (!s) return '';
+    return [
+      s.symbol,
+      s.timeframe ? this.enumLabel.transform(s.timeframe, 'timeframe') : null,
+      s.description,
+    ]
+      .filter((v): v is string => !!v && v.trim().length > 0)
+      .join(' · ');
+  });
+
+  /** Enum label with the acronym cases the generic pipe title-cases wrongly. */
+  typeLabel(type: string | null | undefined): string {
+    if (!type) return '—';
+    if (type === 'LlmProposal') return 'LLM Proposal';
+    return this.enumLabel.transform(type);
+  }
+
+  /**
+   * Set (non-null) parameters as key/value pairs. The raw JSON for a
+   * generated strategy carries ~60 keys of which most are null — rendering
+   * it verbatim made the card ~2,800px tall and pushed everything below it.
+   */
+  readonly parameterEntries = computed<{ key: string; value: string }[]>(() => {
+    const parsed = this.parsedParameters();
+    if (!parsed) return [];
+    return Object.entries(parsed)
+      .filter(([, v]) => v !== null && v !== undefined && v !== '')
+      .map(([key, v]) => ({
+        key,
+        value: typeof v === 'object' ? JSON.stringify(v) : String(v),
+      }));
+  });
+
+  readonly nullParameterCount = computed(() => {
+    const parsed = this.parsedParameters();
+    if (!parsed) return 0;
+    return Object.values(parsed).filter((v) => v === null || v === undefined || v === '').length;
+  });
+
+  private readonly parsedParameters = computed<Record<string, unknown> | null>(() => {
+    const json = this.strategy()?.parametersJson;
+    if (!json) return null;
+    try {
+      const parsed = JSON.parse(json);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  });
 
   onActivate(): void {
     this.actionLoading.set(true);

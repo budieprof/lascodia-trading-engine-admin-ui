@@ -101,8 +101,12 @@ interface PriceEntry extends LivePriceDto {
           <div class="stale-feed-banner" role="status" aria-live="polite">
             <span class="stale-feed-icon" aria-hidden="true">⚠</span>
             <span class="stale-feed-text">
-              Feed stale — last live tick {{ feedAgeSec() }}s ago. Showing candle-fallback prices;
-              spread KPIs reflect last-known live values.
+              Feed stale — last live tick {{ formatAge(feedAgeSec()) }} ago
+              @if (lastLiveTickLabel(); as t) {
+                ({{ t }} UTC)
+              }
+              . Showing candle-fallback prices; spread KPIs reflect last-known live values. Depth of
+              book and candle panels are fed separately and may be fresher.
             </span>
           </div>
         }
@@ -114,22 +118,29 @@ interface PriceEntry extends LivePriceDto {
               <span class="muted">Trading sessions</span>
               <span class="session-time mono">{{ utcClockLabel() }} UTC</span>
             </div>
+            <!-- One lane per session. The four windows overlap (Sydney/Tokyo
+                 00–07, London/New York 13–17), so on a single track the bars
+                 stacked and their labels overprinted ("Sydneyyo"). Labels sit
+                 in a fixed gutter and never on a bar. -->
             <div class="sessions-track">
-              @for (s of sessionTrack(); track $index) {
-                <div
-                  class="session-bar"
-                  [class.active]="s.active"
-                  [style.left.%]="s.startPct"
-                  [style.width.%]="s.widthPct"
-                  [attr.data-session]="s.label"
-                  [title]="s.label + ' · ' + s.range"
-                >
-                  @if (s.showLabel) {
-                    <span>{{ s.label }}</span>
-                  }
+              @for (lane of sessionLanes(); track lane.label) {
+                <div class="session-lane" [class.active]="lane.active">
+                  <span class="lane-label">{{ lane.label }}</span>
+                  <div class="lane-track">
+                    @for (seg of lane.segments; track $index) {
+                      <div
+                        class="session-bar"
+                        [class.active]="lane.active"
+                        [style.left.%]="seg.startPct"
+                        [style.width.%]="seg.widthPct"
+                        [attr.data-session]="lane.label"
+                        [title]="lane.label + ' · ' + lane.range"
+                      ></div>
+                    }
+                    <div class="now-marker" [style.left.%]="nowMarkerPct()"></div>
+                  </div>
                 </div>
               }
-              <div class="now-marker" [style.left.%]="nowMarkerPct()"></div>
             </div>
             <div class="sessions-active">
               @for (s of activeSessions(); track s) {
@@ -172,12 +183,23 @@ interface PriceEntry extends LivePriceDto {
               format="number"
               [dotColor]="upPairsCount() >= downPairsCount() ? '#34C759' : '#FF3B30'"
             />
-            <app-metric-card
-              label="Feed age (s)"
-              [value]="feedAgeSec()"
-              format="number"
-              [dotColor]="feedAgeSec() !== null && feedAgeSec()! > 60 ? '#FF3B30' : '#34C759'"
-            />
+            <!-- Local tile: the shared card only takes a number, and
+                 "93,551" seconds is unreadable — this renders "1d 2h". -->
+            <div class="kpi-tile">
+              <div class="kpi-tile-head">
+                <span
+                  class="dot"
+                  [style.background]="
+                    feedAgeSec() !== null && feedAgeSec()! > 60 ? '#FF3B30' : '#34C759'
+                  "
+                ></span>
+                <span class="kpi-tile-label">Feed age</span>
+              </div>
+              <div class="kpi-tile-value">{{ formatAge(feedAgeSec()) }}</div>
+              @if (lastLiveTickLabel(); as t) {
+                <div class="kpi-tile-sub">last tick {{ t }} UTC</div>
+              }
+            </div>
           </div>
         </div>
 
@@ -712,7 +734,7 @@ interface PriceEntry extends LivePriceDto {
                 @if (card.live) {
                   <span
                     class="watch-change"
-                    [class.up]="card.live.change >= 0"
+                    [class.up]="card.live.change > 0"
                     [class.down]="card.live.change < 0"
                   >
                     {{ card.live.change >= 0 ? '+' : '' }}{{ card.live.changePct.toFixed(2) }}%
@@ -743,10 +765,10 @@ interface PriceEntry extends LivePriceDto {
                   }
                 </span>
                 <span class="watch-spark">
-                  @if (card.live && card.live.sparkData.length > 1) {
+                  @if (card.live && sparkHasMovement(card.live.sparkData)) {
                     <app-sparkline
                       [data]="card.live.sparkData"
-                      [color]="card.live.change >= 0 ? '#34C759' : '#FF3B30'"
+                      [color]="sparkColor(card.live.change)"
                       width="100%"
                       height="22px"
                     />
@@ -789,7 +811,15 @@ interface PriceEntry extends LivePriceDto {
                         {{ p.changePct >= 0 ? '+' : '' }}{{ p.changePct.toFixed(2) }}%
                       </td>
                       <td class="num mono">
-                        {{ formatPrice(p.low24h, p.symbol) }}–{{ formatPrice(p.high24h, p.symbol) }}
+                        <!-- A candle-fallback row carries one close for both
+                             ends of its "range"; that is not a range. -->
+                        @if (!p.fromCandle && p.high24h > p.low24h) {
+                          {{ formatPrice(p.low24h, p.symbol) }}–{{
+                            formatPrice(p.high24h, p.symbol)
+                          }}
+                        } @else {
+                          <span class="muted">—</span>
+                        }
                       </td>
                       <td class="num mono" [class.loss]="p.spread > 3">
                         @if (!p.fromCandle) {
@@ -804,8 +834,13 @@ interface PriceEntry extends LivePriceDto {
               </table>
             } @else {
               <div class="empty-state">
-                <span class="muted">Waiting for live price feed…</span>
-                <span class="empty-hint">Movers populate once the EA pushes a tick.</span>
+                @if (livePrices().length === 0) {
+                  <span class="muted">Waiting for live price feed…</span>
+                  <span class="empty-hint">Movers populate once the EA pushes a tick.</span>
+                } @else {
+                  <span class="muted">No pair has moved this session.</span>
+                  <span class="empty-hint">Every watched pair is flat since the first poll.</span>
+                }
               </div>
             }
           </section>
@@ -880,8 +915,12 @@ interface PriceEntry extends LivePriceDto {
                         <span class="muted">—</span>
                       }
                     </td>
+                    <!-- Ask / high / low are dashes on a candle-fallback row:
+                         the fallback copies one close into all of them, so
+                         "bid = ask, high = low" was the fallback, not the
+                         market. -->
                     <td class="num mono">
-                      @if (row.live) {
+                      @if (row.live && !row.live.fromCandle) {
                         {{ formatPrice(row.live.ask, row.symbol) }}
                       } @else {
                         <span class="muted">—</span>
@@ -895,14 +934,14 @@ interface PriceEntry extends LivePriceDto {
                       }
                     </td>
                     <td class="num mono">
-                      @if (row.live) {
+                      @if (row.live && !row.live.fromCandle) {
                         {{ formatPrice(row.live.high24h, row.symbol) }}
                       } @else {
                         <span class="muted">—</span>
                       }
                     </td>
                     <td class="num mono">
-                      @if (row.live) {
+                      @if (row.live && !row.live.fromCandle) {
                         {{ formatPrice(row.live.low24h, row.symbol) }}
                       } @else {
                         <span class="muted">—</span>
@@ -927,10 +966,10 @@ interface PriceEntry extends LivePriceDto {
                       }
                     </td>
                     <td>
-                      @if (row.spark.length > 1) {
+                      @if (sparkHasMovement(row.spark)) {
                         <app-sparkline
                           [data]="row.spark"
-                          [color]="row.live && row.live.changePct >= 0 ? '#34C759' : '#FF3B30'"
+                          [color]="sparkColor(row.live?.changePct ?? 0)"
                           width="120px"
                           height="20px"
                         />
@@ -1112,18 +1151,42 @@ interface PriceEntry extends LivePriceDto {
           <!-- Spread comparison + volatility — same row as the insight panels.
                Reuse computeds defined for the analytics tab; when there's no
                data they short-circuit to {} which renders an empty card. -->
-          <app-chart-card
-            title="Spread comparison"
-            [subtitle]="spreadChartCaption()"
-            [options]="spreadChartOptions()"
-            height="240px"
-          />
-          <app-chart-card
-            title="Volatility (last 100 ticks)"
-            subtitle="Average tick-to-tick move in basis points"
-            [options]="volatilityOptions()"
-            height="240px"
-          />
+          @if (hasSeries(spreadChartOptions())) {
+            <app-chart-card
+              title="Spread comparison"
+              [subtitle]="spreadChartCaption()"
+              [options]="spreadChartOptions()"
+              height="240px"
+            />
+          } @else {
+            <article class="chart-empty-card">
+              <h3 class="chart-title">Spread comparison</h3>
+              <p class="chart-subtitle">{{ spreadChartCaption() }}</p>
+              <div class="chart-empty-body" [style.height.px]="240">
+                <span class="muted">No live spreads yet.</span>
+                <span class="empty-hint"
+                  >Every row is on candle fallback — spreads need a tick.</span
+                >
+              </div>
+            </article>
+          }
+          @if (hasSeries(volatilityOptions())) {
+            <app-chart-card
+              title="Volatility (last 100 ticks)"
+              subtitle="Average tick-to-tick move in basis points"
+              [options]="volatilityOptions()"
+              height="240px"
+            />
+          } @else {
+            <article class="chart-empty-card">
+              <h3 class="chart-title">Volatility (last 100 ticks)</h3>
+              <p class="chart-subtitle">Average tick-to-tick move in basis points</p>
+              <div class="chart-empty-body" [style.height.px]="240">
+                <span class="muted">No measurable movement yet.</span>
+                <span class="empty-hint">Needs ≥10 ticks per symbol with a non-zero range.</span>
+              </div>
+            </article>
+          }
         </div>
       }
 
@@ -1196,18 +1259,18 @@ interface PriceEntry extends LivePriceDto {
                   <span class="symbol-name">{{ price.symbol }}</span>
                   <span
                     class="symbol-change"
-                    [class.up]="price.change >= 0"
+                    [class.up]="price.change > 0"
                     [class.down]="price.change < 0"
                   >
                     {{ price.change >= 0 ? '+' : '' }}{{ price.changePct.toFixed(2) }}%
                   </span>
                 </div>
+                <!-- Spread only when it is a real one; the card's source pill
+                     in the footer is the single "candle" marker. -->
                 @if (!price.fromCandle) {
                   <span class="spread-badge" [class.wide]="price.spread > 3">
                     {{ price.spread.toFixed(1) }} sp
                   </span>
-                } @else {
-                  <span class="spread-badge candle">candle</span>
                 }
               </div>
 
@@ -1251,15 +1314,17 @@ interface PriceEntry extends LivePriceDto {
               </div>
 
               <div class="price-sparkline">
-                @if (price.sparkData.length > 1) {
+                @if (sparkHasMovement(price.sparkData)) {
                   <app-sparkline
                     [data]="price.sparkData"
-                    [color]="price.change >= 0 ? '#34C759' : '#FF3B30'"
+                    [color]="sparkColor(price.change)"
                     width="100%"
                     height="36px"
                   />
                 } @else {
-                  <div class="sparkline-empty">collecting ticks…</div>
+                  <div class="sparkline-empty">
+                    {{ price.sparkData.length > 1 ? 'no movement yet' : 'collecting ticks…' }}
+                  </div>
                 }
               </div>
 
@@ -1276,15 +1341,9 @@ interface PriceEntry extends LivePriceDto {
           }
         </div>
 
-        <!-- Currency strength + Spread board (compact table) -->
-        <div class="strength-row">
-          <app-chart-card
-            title="Currency strength"
-            subtitle="Aggregate Δ% across each currency's pairs (positive = base appreciating)"
-            [options]="currencyStrengthOptions()"
-            height="280px"
-          />
-
+        <!-- Spread board — full width. A 23-row table beside a 280px chart
+             left the chart floating above 1,400px of empty column. -->
+        <div class="board-row">
           <section class="spread-board">
             <header class="board-head">
               <h3>Spread board</h3>
@@ -1329,14 +1388,47 @@ interface PriceEntry extends LivePriceDto {
           </section>
         </div>
 
-        <!-- Spread comparison chart + Activity feed (live tick log). -->
-        <div class="charts-row two-col">
-          <app-chart-card
-            title="Spread comparison"
-            [subtitle]="spreadChartCaption()"
-            [options]="spreadChartOptions()"
-            height="280px"
-          />
+        <!-- Currency strength + Spread comparison + Activity feed on one row.
+             Currency strength lives only on this tab now — it was duplicated
+             on Price Analytics with the same (often all-zero) data. -->
+        <div class="charts-row three-col">
+          @if (!currencyStrengthAllFlat()) {
+            <app-chart-card
+              title="Currency strength"
+              subtitle="Aggregate Δ% across each currency's pairs (positive = base appreciating)"
+              [options]="currencyStrengthOptions()"
+              height="280px"
+            />
+          } @else {
+            <article class="chart-empty-card">
+              <h3 class="chart-title">Currency strength</h3>
+              <p class="chart-subtitle">Aggregate Δ% across each currency's pairs</p>
+              <div class="chart-empty-body" [style.height.px]="280">
+                <span class="muted">All currencies flat.</span>
+                <span class="empty-hint">No watched pair has moved since the first poll.</span>
+              </div>
+            </article>
+          }
+
+          @if (hasSeries(spreadChartOptions())) {
+            <app-chart-card
+              title="Spread comparison"
+              [subtitle]="spreadChartCaption()"
+              [options]="spreadChartOptions()"
+              height="280px"
+            />
+          } @else {
+            <article class="chart-empty-card">
+              <h3 class="chart-title">Spread comparison</h3>
+              <p class="chart-subtitle">{{ spreadChartCaption() }}</p>
+              <div class="chart-empty-body" [style.height.px]="280">
+                <span class="muted">No live spreads yet.</span>
+                <span class="empty-hint"
+                  >Every row is on candle fallback — spreads need a tick.</span
+                >
+              </div>
+            </article>
+          }
 
           <section class="activity-feed">
             <header class="board-head">
@@ -1427,63 +1519,147 @@ interface PriceEntry extends LivePriceDto {
           />
         </div>
 
+        <!-- Every chart on this tab short-circuits to {} until its series has
+             real movement; a bare titled 320px box read as a broken chart, so
+             each one carries a one-line empty state that says what it needs. -->
         <div class="charts-grid">
-          <app-chart-card
-            title="Price Movement"
-            subtitle="Bid prices over time (last 100 ticks)"
-            [options]="priceHistoryOptions()"
-            height="320px"
-          />
-          <app-chart-card
-            title="Spread History"
-            subtitle="Spread over time per pair (live-only)"
-            [options]="spreadHistoryOptions()"
-            height="320px"
-          />
+          @if (hasSeries(priceHistoryOptions())) {
+            <app-chart-card
+              title="Price Movement"
+              subtitle="% change from first observed bid, per pair (last 100 ticks)"
+              [options]="priceHistoryOptions()"
+              height="320px"
+            />
+          } @else {
+            <article class="chart-empty-card">
+              <h3 class="chart-title">Price Movement</h3>
+              <p class="chart-subtitle">% change from first observed bid, per pair</p>
+              <div class="chart-empty-body" [style.height.px]="320">
+                <span class="muted">No pair has moved yet.</span>
+                <span class="empty-hint"
+                  >Lines appear once a symbol has ≥10 ticks with a range.</span
+                >
+              </div>
+            </article>
+          }
+          @if (hasSeries(spreadHistoryOptions())) {
+            <app-chart-card
+              title="Spread History"
+              subtitle="Spread over time per pair (live-only)"
+              [options]="spreadHistoryOptions()"
+              height="320px"
+            />
+          } @else {
+            <article class="chart-empty-card">
+              <h3 class="chart-title">Spread History</h3>
+              <p class="chart-subtitle">Spread over time per pair (live-only)</p>
+              <div class="chart-empty-body" [style.height.px]="320">
+                <span class="muted">No live spread samples yet.</span>
+                <span class="empty-hint"
+                  >Candle-fallback rows carry no spread; needs live ticks.</span
+                >
+              </div>
+            </article>
+          }
         </div>
         <div class="charts-grid">
-          <app-chart-card
-            title="Volatility Gauge"
-            subtitle="Tick-to-tick volatility (basis points)"
-            [options]="volatilityOptions()"
-            height="280px"
-          />
-          <app-chart-card
-            title="Correlation Matrix"
-            subtitle="Pearson r across rolling priceHistory windows · live data"
-            [options]="correlationOptions()"
-            height="280px"
-          />
+          @if (hasSeries(volatilityOptions())) {
+            <app-chart-card
+              title="Volatility Gauge"
+              subtitle="Tick-to-tick volatility (basis points)"
+              [options]="volatilityOptions()"
+              height="280px"
+            />
+          } @else {
+            <article class="chart-empty-card">
+              <h3 class="chart-title">Volatility Gauge</h3>
+              <p class="chart-subtitle">Tick-to-tick volatility (basis points)</p>
+              <div class="chart-empty-body" [style.height.px]="280">
+                <span class="muted">No measurable movement yet.</span>
+                <span class="empty-hint">Needs ≥10 ticks per symbol with a non-zero range.</span>
+              </div>
+            </article>
+          }
+          @if (hasCorrelationData()) {
+            <app-chart-card
+              title="Correlation Matrix"
+              subtitle="Pearson r across rolling priceHistory windows · live data"
+              [options]="correlationOptions()"
+              height="280px"
+            />
+          } @else {
+            <article class="chart-empty-card">
+              <h3 class="chart-title">Correlation Matrix</h3>
+              <p class="chart-subtitle">Pearson r across rolling priceHistory windows</p>
+              <div class="chart-empty-body" [style.height.px]="280">
+                <span class="muted">Not enough movement to correlate.</span>
+                <span class="empty-hint"
+                  >r is undefined at zero variance; needs ≥10 shared moving ticks.</span
+                >
+              </div>
+            </article>
+          }
+        </div>
+        <div class="charts-grid one">
+          @if (spreadHeatmapOptions(); as heatmap) {
+            <app-chart-card
+              title="Bid-Ask Spread Heatmap"
+              [subtitle]="spreadHeatmapCaption()"
+              [options]="heatmap"
+              height="280px"
+            />
+          } @else {
+            <article class="chart-empty-card">
+              <h3 class="chart-title">Bid-Ask Spread Heatmap</h3>
+              <p class="chart-subtitle">{{ spreadHeatmapCaption() }}</p>
+              <div class="chart-empty-body" [style.height.px]="200">
+                <span class="muted">No live spread samples yet this session.</span>
+                <span class="empty-hint">Fills in as ticks arrive, one cell per UTC hour.</span>
+              </div>
+            </article>
+          }
         </div>
         <div class="charts-grid">
-          <app-chart-card
-            title="Bid-Ask Spread Heatmap"
-            subtitle="Average spread by hour of day · sample data"
-            [options]="spreadHeatmapOptions"
-            height="280px"
-          />
-          <app-chart-card
-            title="Price Distribution"
-            subtitle="Bid price distribution (last 100 ticks)"
-            [options]="priceDistOptions()"
-            height="280px"
-          />
-        </div>
-
-        <!-- Range vs Volatility scatter — out-of-shape pair detector. -->
-        <div class="charts-grid">
-          <app-chart-card
-            title="Range vs Volatility"
-            subtitle="One dot per symbol · color = today's direction"
-            [options]="rangeVsVolatilityOptions()"
-            height="320px"
-          />
-          <app-chart-card
-            title="Currency Strength"
-            subtitle="Aggregate Δ% across each currency's pairs"
-            [options]="currencyStrengthOptions()"
-            height="320px"
-          />
+          @if (hasSeries(priceDistOptions())) {
+            <app-chart-card
+              title="Price Distribution"
+              [subtitle]="
+                'Bid price distribution (last 100 ticks)' +
+                (priceDistSymbol() ? ' · ' + priceDistSymbol() : '')
+              "
+              [options]="priceDistOptions()"
+              height="280px"
+            />
+          } @else {
+            <article class="chart-empty-card">
+              <h3 class="chart-title">Price Distribution</h3>
+              <p class="chart-subtitle">Bid price distribution (last 100 ticks)</p>
+              <div class="chart-empty-body" [style.height.px]="280">
+                <span class="muted">No pair has moved yet.</span>
+                <span class="empty-hint"
+                  >A flat series is a single bar — shown once a range exists.</span
+                >
+              </div>
+            </article>
+          }
+          <!-- Range vs Volatility scatter — out-of-shape pair detector. -->
+          @if (hasSeries(rangeVsVolatilityOptions())) {
+            <app-chart-card
+              title="Range vs Volatility"
+              subtitle="One dot per symbol · color = today's direction"
+              [options]="rangeVsVolatilityOptions()"
+              height="280px"
+            />
+          } @else {
+            <article class="chart-empty-card">
+              <h3 class="chart-title">Range vs Volatility</h3>
+              <p class="chart-subtitle">One dot per symbol · color = today's direction</p>
+              <div class="chart-empty-body" [style.height.px]="280">
+                <span class="muted">No symbol has a defined range yet.</span>
+                <span class="empty-hint">Dots appear once a pair has moved.</span>
+              </div>
+            </article>
+          }
         </div>
 
         <!-- Per-symbol statistics table — comprehensive end-of-tab summary. -->
@@ -1514,15 +1690,19 @@ interface PriceEntry extends LivePriceDto {
                 <tr>
                   <td class="mono">{{ s.symbol }}</td>
                   <td class="num mono">{{ s.points }}</td>
-                  <td class="num mono">{{ formatPrice(s.current, s.symbol) }}</td>
-                  <td class="num mono">{{ formatPrice(s.mean, s.symbol) }}</td>
-                  <td class="num mono">{{ s.stdDev.toFixed(6) }}</td>
-                  <td class="num mono">{{ formatPrice(s.min, s.symbol) }}</td>
-                  <td class="num mono">{{ formatPrice(s.max, s.symbol) }}</td>
-                  <td class="num mono">{{ s.rangePips.toFixed(1) }}</td>
-                  <td class="num mono">{{ s.volatility.toFixed(2) }}</td>
-                  <td class="num mono" [class.profit]="s.zScore > 1" [class.loss]="s.zScore < -1">
-                    {{ s.zScore.toFixed(2) }}
+                  <td class="num mono">{{ formatPriceOrDash(s.current, s.symbol) }}</td>
+                  <td class="num mono">{{ formatPriceOrDash(s.mean, s.symbol) }}</td>
+                  <td class="num mono">{{ fixedOrDash(s.stdDev, 6) }}</td>
+                  <td class="num mono">{{ formatPriceOrDash(s.min, s.symbol) }}</td>
+                  <td class="num mono">{{ formatPriceOrDash(s.max, s.symbol) }}</td>
+                  <td class="num mono">{{ fixedOrDash(s.rangePips, 1) }}</td>
+                  <td class="num mono">{{ fixedOrDash(s.volatility, 2) }}</td>
+                  <td
+                    class="num mono"
+                    [class.profit]="s.zScore !== null && s.zScore > 1"
+                    [class.loss]="s.zScore !== null && s.zScore < -1"
+                  >
+                    {{ fixedOrDash(s.zScore, 2) }}
                   </td>
                   <td
                     class="num mono"
@@ -1726,12 +1906,8 @@ interface PriceEntry extends LivePriceDto {
                   <tr>
                     <td class="mono">{{ c.symbol }}</td>
                     <td class="mono">{{ c.timeframe }}</td>
-                    <td class="num mono">
-                      {{ c.open.toFixed((c.symbol ?? '').includes('JPY') ? 3 : 5) }}
-                    </td>
-                    <td class="num mono">
-                      {{ c.close.toFixed((c.symbol ?? '').includes('JPY') ? 3 : 5) }}
-                    </td>
+                    <td class="num mono">{{ formatPrice(c.open, c.symbol) }}</td>
+                    <td class="num mono">{{ formatPrice(c.close, c.symbol) }}</td>
                     <td
                       class="num mono"
                       [class.profit]="c.deltaPips > 0"
@@ -1746,7 +1922,7 @@ interface PriceEntry extends LivePriceDto {
                     >
                       {{ c.bodyPct >= 0 ? '+' : '' }}{{ c.bodyPct.toFixed(2) }}%
                     </td>
-                    <td class="mono">{{ c.timestamp | date: 'dd/MM HH:mm' }}</td>
+                    <td class="mono">{{ formatUtcMinute(c.timestamp) }}</td>
                   </tr>
                 }
               </tbody>
@@ -1755,10 +1931,40 @@ interface PriceEntry extends LivePriceDto {
         </div>
 
         <!-- Existing paged candle data-table — full historical browser. -->
+        <!-- Generated bars used to fill this table silently whenever the
+             endpoint came back empty — random prices with hour-spaced stamps
+             read as real history. They are opt-in now and labelled. -->
+        @if (showSampleCandles()) {
+          <div class="sample-banner warn" role="status">
+            <span>
+              <b>Sample data.</b> These bars are randomly generated for layout checks — not market
+              history. Prices, times and volumes are invented.
+            </span>
+            <button type="button" class="link-btn" (click)="toggleSampleCandles()">
+              Back to engine data
+            </button>
+          </div>
+        } @else if (candleSourceEmpty()) {
+          <div class="sample-banner" role="status">
+            <span>
+              The engine returned no candles for this query (<code>/market-data/candle/list</code>).
+              Check the EA candle backfill or widen the filter.
+            </span>
+            <button type="button" class="link-btn" (click)="toggleSampleCandles()">
+              Show sample data
+            </button>
+          </div>
+        }
         <section class="data-table-card">
           <header class="board-head">
             <h3>All candles</h3>
-            <span class="muted">Browse the complete OHLCV history</span>
+            <span class="muted">
+              {{
+                showSampleCandles()
+                  ? 'Sample data — not market history'
+                  : 'Browse the complete OHLCV history'
+              }}
+            </span>
           </header>
           <app-data-table [columnDefs]="candleColumns" [fetchData]="fetchCandles" />
         </section>
@@ -2466,7 +2672,9 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
       xAxis: {
         type: 'category',
         data: xLabels,
-        axisLabel: { fontSize: 9, color: '#888', interval: Math.ceil(xLabels.length / 6) },
+        // Let ECharts thin the HH:mm:ss labels to what fits; a fixed interval
+        // computed for six labels overprinted them in a 260px card.
+        axisLabel: { fontSize: 9, color: '#888', hideOverlap: true },
         splitArea: { show: false },
       },
       yAxis: {
@@ -2558,6 +2766,19 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   // chart when the live tick feed has gone stale (EA stopped pushing) — gives
   // operators "best-known-truth" instead of a row of `-`.
   private lastLiveSpread: Record<string, number> = {};
+
+  // Per-symbol, per-UTC-hour running mean of the live spread, accumulated
+  // from real ticks this session. Replaces the Math.random() "sample data"
+  // heatmap that used to sit on the analytics tab as if it were live.
+  private hourlySpread: Record<string, { sum: number; count: number }[]> = {};
+  private readonly hourlySpreadRev = signal(0);
+
+  // The candle endpoint can return nothing (fresh DB, filter mismatch). A
+  // locally generated sample used to fill the table silently — random
+  // prices with hour-spaced timestamps presented as market history. It is
+  // now opt-in and prominently labelled when shown.
+  readonly showSampleCandles = signal(false);
+  readonly candleSourceEmpty = signal(false);
 
   // Watched-pair catalogue is driven by the CurrencyPair API — fetched once
   // at OnInit and used as the source-of-truth for every spread / strength /
@@ -2743,10 +2964,11 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   activityFeed = computed(() => this.activityBuffer().slice(0, 12));
 
   rangeInPips(p: PriceEntry): number {
-    const isJPY = (p.symbol ?? '').includes('JPY');
-    const pipFactor = isJPY ? 100 : 10000;
-    return (p.high24h - p.low24h) * pipFactor;
+    return (p.high24h - p.low24h) * this.pipFactorFor(p.symbol);
   }
+
+  /** Every currency bucket at exactly zero — the chart would be eight grey stubs. */
+  currencyStrengthAllFlat = computed(() => this.currencyStrength().every((d) => d.strength === 0));
 
   // ── Candle History tab — analytics over a 200-candle sample ────────
   // Lazy-loaded the first time the user opens this tab (or when invalidated
@@ -2845,10 +3067,16 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     });
     return {
       grid: { top: 10, right: 20, bottom: 30, left: 40 },
+      tooltip: {
+        trigger: 'axis',
+        formatter: (p: any) => `${p[0].name} pips<br/>${p[0].value} candles`,
+      },
       xAxis: {
         type: 'category',
-        data: counts.map((_, i) => `${(i * width).toFixed(0)}+`),
-        axisLabel: { fontSize: 9, color: '#6E6E73', rotate: 30 },
+        // Bin ranges ("0–5"), not "0+" — the rotated "+" glyph read as an
+        // asterisk at 9px and the labels overprinted each other.
+        data: counts.map((_, i) => `${(i * width).toFixed(0)}–${((i + 1) * width).toFixed(0)}`),
+        axisLabel: { fontSize: 9, color: '#6E6E73', hideOverlap: true },
         axisTick: { show: false },
       },
       yAxis: {
@@ -2878,10 +3106,15 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     const entries = Object.entries(map).sort((a, b) => b[1] - a[1]);
     if (entries.length === 0) return {};
     return {
-      grid: { top: 10, right: 30, bottom: 30, left: 80 },
+      grid: { top: 10, right: 56, bottom: 30, left: 80 },
       xAxis: {
         type: 'value',
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        axisLabel: {
+          fontSize: 10,
+          color: '#6E6E73',
+          hideOverlap: true,
+          formatter: (v: number) => this.formatVolume(v),
+        },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
       yAxis: {
@@ -3013,14 +3246,18 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
       .subscribe((res: any) => {
         const data: CandleDto[] = res?.data?.data ?? [];
         if (data.length > 0) {
+          this.candleSourceEmpty.set(false);
           this.candleAnalyticsSample.set(data);
         } else {
-          // Backend returned nothing (or 4xx) — populate with the same
-          // generator the data table uses so the analytics tab still has
-          // something to render in dev.
+          // Nothing (or 4xx) from /market-data/candle/list. Only the explicit
+          // sample toggle substitutes generated bars — and then the tab
+          // carries a "sample data" banner so nobody reads them as history.
+          this.candleSourceEmpty.set(true);
           this.candleAnalyticsSample.set(
-            this.generateSampleCandles({ currentPage: 1, itemCountPerPage: 200, filter: null })
-              .data,
+            this.showSampleCandles()
+              ? this.generateSampleCandles({ currentPage: 1, itemCountPerPage: 200, filter: null })
+                  .data
+              : [],
           );
         }
       });
@@ -3089,7 +3326,9 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   // ribbon — operators want to spot symbols breaking out without scanning
   // every card.
   topMovers = computed(() => {
-    return [...this.livePrices()]
+    // Only pairs that have moved: six rows of "+0.00%" is not a movers table.
+    return this.livePrices()
+      .filter((p) => p.changePct !== 0)
       .sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct))
       .slice(0, 6);
   });
@@ -3134,8 +3373,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
       const hist = this.priceHistory[apiSym] ?? [];
       const sparkHist = this.sparkSeries[apiSym] ?? hist;
       const liveEntry = live.find((p) => p.symbol === sym) ?? null;
-      const isJPY = sym.includes('JPY');
-      const pipFactor = isJPY ? 100 : 10000;
+      const pipFactor = this.pipFactorFor(sym);
       const rangePips =
         hist.length > 1 ? +((Math.max(...hist) - Math.min(...hist)) * pipFactor).toFixed(1) : null;
       return {
@@ -3230,6 +3468,30 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     return segments;
   });
 
+  /** Session segments grouped per session, one lane each (see the template note). */
+  sessionLanes = computed(() => {
+    const lanes = new Map<
+      string,
+      {
+        label: string;
+        active: boolean;
+        range: string;
+        segments: { startPct: number; widthPct: number }[];
+      }
+    >();
+    for (const s of this.sessionTrack()) {
+      const lane = lanes.get(s.label) ?? {
+        label: s.label,
+        active: s.active,
+        range: s.range,
+        segments: [],
+      };
+      lane.segments.push({ startPct: s.startPct, widthPct: s.widthPct });
+      lanes.set(s.label, lane);
+    }
+    return [...lanes.values()];
+  });
+
   activeSessions = computed(() => {
     // De-duplicate so a wrapping session that surfaced as two segments only
     // shows up once in the active-pill row.
@@ -3244,6 +3506,10 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     return out;
   });
 
+  // Prices take the row's own symbol precision (JPY 3dp, majors 5dp) and the
+  // timestamp uses the same yyyy-MM-dd HH:mm formatter as the rest of the
+  // tab — the previous toLocaleString() printed "9/4/2026, 10:49:13 PM" next
+  // to a "02/09 21:49" table above it.
   candleColumns: ColDef[] = [
     { field: 'symbol', headerName: 'Symbol', width: 110 },
     { field: 'timeframe', headerName: 'TF', width: 80 },
@@ -3251,44 +3517,86 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
       field: 'open',
       headerName: 'Open',
       width: 120,
-      valueFormatter: (p: any) => p.value?.toFixed(5),
+      cellClass: 'ag-right-aligned-cell',
+      valueFormatter: (p: any) =>
+        p.value == null ? '—' : this.formatPrice(p.value, p.data?.symbol ?? null),
     },
     {
       field: 'high',
       headerName: 'High',
       width: 120,
-      valueFormatter: (p: any) => p.value?.toFixed(5),
+      cellClass: 'ag-right-aligned-cell',
+      valueFormatter: (p: any) =>
+        p.value == null ? '—' : this.formatPrice(p.value, p.data?.symbol ?? null),
     },
     {
       field: 'low',
       headerName: 'Low',
       width: 120,
-      valueFormatter: (p: any) => p.value?.toFixed(5),
+      cellClass: 'ag-right-aligned-cell',
+      valueFormatter: (p: any) =>
+        p.value == null ? '—' : this.formatPrice(p.value, p.data?.symbol ?? null),
     },
     {
       field: 'close',
       headerName: 'Close',
       width: 120,
-      valueFormatter: (p: any) => p.value?.toFixed(5),
+      cellClass: 'ag-right-aligned-cell',
+      valueFormatter: (p: any) =>
+        p.value == null ? '—' : this.formatPrice(p.value, p.data?.symbol ?? null),
     },
-    { field: 'volume', headerName: 'Volume', width: 100 },
+    {
+      field: 'volume',
+      headerName: 'Volume',
+      width: 110,
+      cellClass: 'ag-right-aligned-cell',
+      valueFormatter: (p: any) => (p.value == null ? '—' : this.formatVolume(p.value)),
+    },
     {
       field: 'timestamp',
-      headerName: 'Time',
+      headerName: 'Time (UTC)',
       flex: 1,
-      valueFormatter: (p: any) => (p.value ? new Date(p.value).toLocaleString() : '-'),
+      valueFormatter: (p: any) => this.formatUtcMinute(p.value),
     },
   ];
 
+  /** yyyy-MM-dd HH:mm in UTC — the one timestamp format on the candle tab. */
+  formatUtcMinute(iso: string | null | undefined): string {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '—';
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    return (
+      `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
+      `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
+    );
+  }
+
+  /**
+   * Minimum shared samples before a correlation / z-score is quoted. With a
+   * handful of near-identical polls the Pearson denominator is a rounding
+   * residue and every cell reads ±1.00 — the matrix of "perfect" correlations
+   * the analytics tab used to show above a table of 0.000000 std-devs.
+   */
+  private static readonly MIN_STAT_POINTS = 10;
+
+  /** Series whose std-dev is under a tenth of a pip has not moved; treat as flat. */
+  private hasMovement(hist: number[], symbol: string | null): boolean {
+    if (hist.length < MarketDataPageComponent.MIN_STAT_POINTS) return false;
+    const mean = hist.reduce((a, b) => a + b, 0) / hist.length;
+    const variance = hist.reduce((a, b) => a + (b - mean) ** 2, 0) / hist.length;
+    return Math.sqrt(variance) * this.pipFactorFor(symbol) >= 0.1;
+  }
+
   // Pearson correlation across the rolling priceHistory windows for every
-  // pair of watched symbols. Returns the 8×8 matrix; cells without enough
-  // data (< 5 shared points) read 0 so the heatmap renders cleanly during a
-  // cold start. The matrix is later consumed by the chart and the KPI strip.
-  private corrMatrix = computed<number[][]>(() => {
+  // pair of watched symbols. Cells without enough data or without movement
+  // are null (rendered blank) rather than 0 or a spurious ±1. The matrix is
+  // consumed by the chart and the KPI strip.
+  private corrMatrix = computed<(number | null)[][]>(() => {
     this.livePrices(); // re-run on each poll
     const apiSyms = this.watchedSymbols();
     const n = apiSyms.length;
-    const matrix: number[][] = [];
+    const matrix: (number | null)[][] = [];
     for (let i = 0; i < n; i++) {
       matrix[i] = [];
       for (let j = 0; j < n; j++) {
@@ -3299,12 +3607,16 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
         const a = this.priceHistory[apiSyms[i]] ?? [];
         const b = this.priceHistory[apiSyms[j]] ?? [];
         const len = Math.min(a.length, b.length);
-        if (len < 5) {
-          matrix[i][j] = 0;
+        if (len < MarketDataPageComponent.MIN_STAT_POINTS) {
+          matrix[i][j] = null;
           continue;
         }
         const aSlice = a.slice(-len);
         const bSlice = b.slice(-len);
+        if (!this.hasMovement(aSlice, apiSyms[i]) || !this.hasMovement(bSlice, apiSyms[j])) {
+          matrix[i][j] = null;
+          continue;
+        }
         const meanA = aSlice.reduce((x, y) => x + y, 0) / len;
         const meanB = bSlice.reduce((x, y) => x + y, 0) / len;
         let num = 0;
@@ -3318,11 +3630,16 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
           denB += db * db;
         }
         const den = Math.sqrt(denA * denB);
-        matrix[i][j] = den === 0 ? 0 : +(num / den).toFixed(3);
+        matrix[i][j] = den === 0 ? null : +(num / den).toFixed(3);
       }
     }
     return matrix;
   });
+
+  /** True once at least one off-diagonal correlation is defined. */
+  hasCorrelationData = computed(() =>
+    this.corrMatrix().some((row, i) => row.some((v, j) => i !== j && v !== null)),
+  );
 
   correlationOptions = computed<EChartsOption>(() => {
     const matrix = this.corrMatrix();
@@ -3330,19 +3647,23 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     const data: [number, number, number][] = [];
     for (let i = 0; i < symbols.length; i++) {
       for (let j = 0; j < symbols.length; j++) {
-        data.push([j, i, matrix[i]?.[j] ?? 0]);
+        const v = matrix[i]?.[j];
+        if (v !== null && v !== undefined) data.push([j, i, v]);
       }
     }
+    // Cell labels only fit up to ~8×8; beyond that they overprint each other
+    // and the colour plus tooltip carry the value.
+    const dense = symbols.length > 8;
     return {
       tooltip: {
         formatter: (p: any) =>
           `${symbols[p.value[1]]} ↔ ${symbols[p.value[0]]}<br/>r = ${p.value[2].toFixed(2)}`,
       },
-      grid: { top: 30, right: 20, bottom: 40, left: 80 },
+      grid: { top: 10, right: 20, bottom: 70, left: 80 },
       xAxis: {
         type: 'category',
         data: symbols,
-        axisLabel: { fontSize: 9.5, color: '#6E6E73', rotate: 30 },
+        axisLabel: { fontSize: 9.5, color: '#6E6E73', rotate: 40, hideOverlap: true },
       },
       yAxis: {
         type: 'category',
@@ -3366,8 +3687,12 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
         {
           type: 'heatmap',
           data,
-          label: { show: true, fontSize: 9, formatter: (p: any) => p.value[2].toFixed(2) },
-          itemStyle: { borderColor: '#fff', borderWidth: 2, borderRadius: 3 },
+          label: {
+            show: !dense,
+            fontSize: 9,
+            formatter: (p: any) => p.value[2].toFixed(2),
+          },
+          itemStyle: { borderWidth: dense ? 1 : 2, borderRadius: dense ? 1 : 3 },
         },
       ],
     };
@@ -3376,30 +3701,40 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   // Per-symbol price-history statistics: mean, std-dev, range in pips,
   // tick-to-tick volatility, current Z-score. Drives the analytics-tab
   // stats table and a few of the KPI tiles.
+  /**
+   * Per-symbol rolling statistics. Every derived figure is null until the
+   * series has enough points AND real movement — a two-point history with a
+   * 1e-7 std-dev used to print "0.000000" beside a z-score of ±1.00, which is
+   * arithmetic, not information. The table renders null as "—" and the KPI
+   * tiles skip it, so the two agree.
+   */
   perSymbolStats = computed(() => {
     this.livePrices(); // re-run on each poll
     return this.displaySymbols().map((sym, i) => {
       const apiSym = this.watchedSymbols()[i];
       const hist = this.priceHistory[apiSym] ?? [];
       const live = this.livePrices().find((p) => p.symbol === sym);
-      const isJPY = sym.includes('JPY');
-      const pipFactor = isJPY ? 100 : 10000;
+      const pipFactor = this.pipFactorFor(sym);
+      const current = live?.bid ?? (hist.length > 0 ? hist[hist.length - 1] : null);
+      const base = {
+        symbol: sym,
+        points: hist.length,
+        current,
+        changePct: live?.changePct ?? 0,
+        direction: live?.direction ?? 'none',
+        fromCandle: live?.fromCandle ?? false,
+      };
 
-      if (hist.length < 2) {
+      if (!this.hasMovement(hist, sym)) {
         return {
-          symbol: sym,
-          points: hist.length,
-          mean: 0,
-          stdDev: 0,
-          min: 0,
-          max: 0,
-          rangePips: 0,
-          volatility: 0,
-          current: live?.bid ?? 0,
-          zScore: 0,
-          changePct: live?.changePct ?? 0,
-          direction: live?.direction ?? 'none',
-          fromCandle: live?.fromCandle ?? false,
+          ...base,
+          mean: null as number | null,
+          stdDev: null as number | null,
+          min: null as number | null,
+          max: null as number | null,
+          rangePips: null as number | null,
+          volatility: null as number | null,
+          zScore: null as number | null,
         };
       }
 
@@ -3412,25 +3747,9 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
 
       const returns = hist.slice(1).map((v, j) => Math.abs((v - hist[j]) / hist[j]) * 10000);
       const volatility = returns.reduce((a, b) => a + b, 0) / returns.length;
+      const zScore = current !== null && stdDev > 0 ? (current - mean) / stdDev : null;
 
-      const current = live?.bid ?? hist[hist.length - 1];
-      const zScore = stdDev > 0 ? (current - mean) / stdDev : 0;
-
-      return {
-        symbol: sym,
-        points: hist.length,
-        mean,
-        stdDev,
-        min,
-        max,
-        rangePips,
-        volatility,
-        current,
-        zScore,
-        changePct: live?.changePct ?? 0,
-        direction: live?.direction ?? 'none',
-        fromCandle: live?.fromCandle ?? false,
-      };
+      return { ...base, mean, stdDev, min, max, rangePips, volatility, zScore };
     });
   });
 
@@ -3439,8 +3758,8 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     const stats = this.perSymbolStats();
     const matrix = this.corrMatrix();
     const dataPoints = stats.reduce((sum, s) => sum + s.points, 0);
-    const vols = stats.map((s) => s.volatility).filter((v) => v > 0);
-    const ranges = stats.map((s) => s.rangePips).filter((r) => r > 0);
+    const vols = stats.map((s) => s.volatility).filter((v): v is number => v !== null && v > 0);
+    const ranges = stats.map((s) => s.rangePips).filter((r): r is number => r !== null && r > 0);
     const avgVolatility = vols.length > 0 ? vols.reduce((a, b) => a + b, 0) / vols.length : null;
     const maxVolatility = vols.length > 0 ? Math.max(...vols) : null;
     const avgRange = ranges.length > 0 ? ranges.reduce((a, b) => a + b, 0) / ranges.length : null;
@@ -3450,7 +3769,8 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     let strongNeg = 0;
     for (let i = 0; i < matrix.length; i++) {
       for (let j = i + 1; j < matrix.length; j++) {
-        const r = matrix[i]?.[j] ?? 0;
+        const r = matrix[i]?.[j];
+        if (r === null || r === undefined) continue;
         if (r >= 0.7) strongPos++;
         if (r <= -0.7) strongNeg++;
       }
@@ -3470,7 +3790,12 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   // Lets an operator spot out-of-shape pairs at a glance — e.g. a quiet pair
   // suddenly producing wide range or a normally choppy pair that's locked up.
   rangeVsVolatilityOptions = computed<EChartsOption>(() => {
-    const stats = this.perSymbolStats().filter((s) => s.points >= 2);
+    // Only symbols with a defined range AND volatility — a dot at the origin
+    // for every flat series is a label pile-up over the 0 tick, not a chart.
+    const stats = this.perSymbolStats().filter(
+      (s): s is typeof s & { rangePips: number; volatility: number } =>
+        s.rangePips !== null && s.volatility !== null && s.rangePips > 0,
+    );
     if (stats.length === 0) return {};
     return {
       grid: { top: 30, right: 30, bottom: 40, left: 60 },
@@ -3525,44 +3850,90 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     };
   });
 
-  spreadHeatmapOptions: EChartsOption = {
-    grid: { top: 10, right: 20, bottom: 40, left: 80 },
-    xAxis: {
-      type: 'category',
-      data: Array.from({ length: 24 }, (_, i) => `${i}h`),
-      axisLabel: { fontSize: 9, color: '#6E6E73' },
-    },
-    yAxis: {
-      type: 'category',
-      data: ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD'],
-      axisLabel: { fontSize: 11, color: '#6E6E73' },
-    },
-    visualMap: {
-      min: 0.5,
-      max: 4,
-      show: true,
-      orient: 'horizontal',
-      bottom: 0,
-      left: 'center',
-      itemWidth: 10,
-      itemHeight: 80,
-      text: ['Wide', 'Tight'],
-      textStyle: { fontSize: 10, color: '#6E6E73' },
-      inRange: { color: ['#34C759', '#FF9500', '#FF3B30'] },
-    },
-    series: [
-      {
-        type: 'heatmap',
-        data: Array.from({ length: 96 }, (_, i) => [
-          i % 24,
-          Math.floor(i / 24),
-          +(0.8 + Math.random() * 3).toFixed(1),
-        ]),
-        label: { show: false },
-        itemStyle: { borderColor: 'var(--bg-primary)', borderWidth: 1, borderRadius: 2 },
+  /**
+   * Average live spread per UTC hour, per major pair, from ticks seen this
+   * session. Cells with no observation are left blank rather than invented.
+   * Null when nothing has been observed yet so the card shows an empty state.
+   */
+  spreadHeatmapOptions = computed<EChartsOption | null>(() => {
+    this.hourlySpreadRev();
+    const rows: { symbol: string; cells: (number | null)[] }[] = [];
+    let maxSpread = 0;
+    let minSpread = Infinity;
+    let observed = 0;
+    for (const apiSym of this.watchedSymbols()) {
+      const agg = this.hourlySpread[apiSym];
+      if (!agg) continue;
+      const display = this.formatPairSymbol(apiSym);
+      if (this.isExoticPair(display)) continue; // 20,000-pip exotics flatten the scale
+      const cells = agg.map((h) => {
+        if (h.count === 0) return null;
+        const v = +(h.sum / h.count).toFixed(2);
+        observed++;
+        if (v > maxSpread) maxSpread = v;
+        if (v < minSpread) minSpread = v;
+        return v;
+      });
+      rows.push({ symbol: display, cells });
+    }
+    if (observed === 0) return null;
+    const data: [number, number, number][] = [];
+    rows.forEach((r, y) =>
+      r.cells.forEach((v, x) => {
+        if (v !== null) data.push([x, y, v]);
+      }),
+    );
+    return {
+      tooltip: {
+        formatter: (p: any) =>
+          `${rows[p.value[1]].symbol} · ${String(p.value[0]).padStart(2, '0')}:00 UTC<br/>avg spread ${p.value[2].toFixed(2)} pips`,
       },
-    ],
-  };
+      grid: { top: 10, right: 20, bottom: 44, left: 80 },
+      xAxis: {
+        type: 'category',
+        data: Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}h`),
+        axisLabel: { fontSize: 9, color: '#6E6E73', hideOverlap: true },
+      },
+      yAxis: {
+        type: 'category',
+        data: rows.map((r) => r.symbol),
+        axisLabel: { fontSize: 11, color: '#6E6E73' },
+      },
+      visualMap: {
+        min: Math.max(0, minSpread),
+        max: Math.max(maxSpread, minSpread + 0.1),
+        show: true,
+        orient: 'horizontal',
+        bottom: 0,
+        left: 'center',
+        itemWidth: 10,
+        itemHeight: 80,
+        text: ['Wide', 'Tight'],
+        textStyle: { fontSize: 10, color: '#6E6E73' },
+        inRange: { color: ['#34C759', '#FF9500', '#FF3B30'] },
+      },
+      series: [
+        {
+          type: 'heatmap',
+          data,
+          label: { show: false },
+          itemStyle: { borderWidth: 1, borderRadius: 2 },
+        },
+      ],
+    };
+  });
+
+  /** Hours observed so far for the spread heatmap caption. */
+  spreadHeatmapCaption = computed(() => {
+    this.hourlySpreadRev();
+    const hours = new Set<number>();
+    for (const agg of Object.values(this.hourlySpread)) {
+      agg.forEach((h, i) => {
+        if (h.count > 0) hours.add(i);
+      });
+    }
+    return `Average live spread by UTC hour · ${hours.size} of 24 hours observed this session`;
+  });
 
   // The eight FX majors. A pair with a leg outside this set is "exotic"
   // (USD/NGN, USD/CNH) — those carry huge spreads and flat/dead price history,
@@ -3674,9 +4045,16 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     };
   });
 
+  /**
+   * Price movement, rebased to % change from each series' first point. Raw
+   * bids share one axis only within a currency family: with XAU/USD at 4,434
+   * and USD/NGN at 1,320 on the same scale, twenty-one FX lines were a flat
+   * stripe at zero. Symbols that have not moved are dropped from the plot.
+   */
   priceHistoryOptions = computed<EChartsOption>(() => {
+    this.livePrices();
     const history = this.priceHistory;
-    const symbols = Object.keys(history).filter((s) => history[s].length > 1);
+    const symbols = Object.keys(history).filter((s) => this.hasMovement(history[s], s));
     if (symbols.length === 0) return {};
     const colors = [
       '#0071E3',
@@ -3690,8 +4068,14 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     ];
     const maxLen = Math.max(...symbols.map((s) => history[s].length));
     return {
-      grid: { top: 30, right: 20, bottom: 30, left: 70 },
-      legend: { top: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
+      // Scrollable legend pinned above the plot, with grid.top reserved for
+      // it, so four rows of series names no longer draw over the lines.
+      grid: { top: 44, right: 20, bottom: 30, left: 56 },
+      legend: {
+        type: 'scroll',
+        top: 0,
+        textStyle: { fontSize: 10, color: '#6E6E73' },
+      },
       xAxis: {
         type: 'category',
         data: Array.from({ length: maxLen }, (_, i) => `${i}`),
@@ -3702,18 +4086,29 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
       yAxis: {
         type: 'value',
         scale: true,
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        axisLabel: {
+          fontSize: 10,
+          color: '#6E6E73',
+          formatter: (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`,
+        },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
-      tooltip: { trigger: 'axis' },
-      series: symbols.map((sym, i) => ({
-        name: sym,
-        type: 'line',
-        data: history[sym],
-        smooth: true,
-        symbol: 'none',
-        lineStyle: { color: colors[i % colors.length], width: 1.5 },
-      })),
+      tooltip: {
+        trigger: 'axis',
+        valueFormatter: (v: unknown) =>
+          typeof v === 'number' ? `${v >= 0 ? '+' : ''}${v.toFixed(3)}%` : '—',
+      },
+      series: symbols.map((sym, i) => {
+        const base = history[sym][0];
+        return {
+          name: this.formatPairSymbol(sym),
+          type: 'line',
+          data: history[sym].map((v) => +(((v - base) / base) * 100).toFixed(4)),
+          smooth: true,
+          symbol: 'none',
+          lineStyle: { color: colors[i % colors.length], width: 1.5 },
+        };
+      }),
     };
   });
 
@@ -3754,20 +4149,16 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   });
 
   volatilityOptions = computed<EChartsOption>(() => {
-    const prices = this.livePrices();
-    if (prices.length === 0) return {};
-    // Calculate tick-to-tick volatility from price history
-    const volData = this.displaySymbols()
-      .slice(0, 8)
-      .map((sym, i) => {
-        const apiSym = this.watchedSymbols()[i];
-        const hist = this.priceHistory[apiSym] || [];
-        if (hist.length < 3) return { name: sym, vol: 0 };
-        const returns = hist.slice(1).map((v, j) => Math.abs((v - hist[j]) / hist[j]) * 10000);
-        const avgVol = returns.reduce((a, b) => a + b, 0) / returns.length;
-        return { name: sym, vol: +avgVol.toFixed(2) };
-      })
-      .sort((a, b) => b.vol - a.vol);
+    // Only symbols with a measured volatility. Zero-height bars each carried
+    // a "0" value label at the same x, which stacked into the garbled glyph
+    // cluster above the axis title.
+    const volData = this.perSymbolStats()
+      .filter((s): s is typeof s & { volatility: number } => s.volatility !== null)
+      .map((s) => ({ name: s.symbol, vol: +s.volatility.toFixed(2) }))
+      .filter((d) => d.vol > 0)
+      .sort((a, b) => b.vol - a.vol)
+      .slice(0, 12);
+    if (volData.length === 0) return {};
 
     return {
       grid: { top: 10, right: 40, bottom: 30, left: 80 },
@@ -3802,32 +4193,40 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     };
   });
 
+  /** Which symbol the price-distribution histogram describes (for its caption). */
+  priceDistSymbol = computed(() => {
+    this.livePrices();
+    const sym = this.watchedSymbols().find((s) => this.hasMovement(this.priceHistory[s] ?? [], s));
+    return sym ? this.formatPairSymbol(sym) : null;
+  });
+
   priceDistOptions = computed<EChartsOption>(() => {
-    const prices = this.livePrices();
-    if (prices.length === 0) return {};
-    // Show distribution for first symbol
-    const firstSym = this.watchedSymbols()[0];
-    const hist = this.priceHistory[firstSym] || [];
-    if (hist.length < 5) return {};
+    this.livePrices();
+    // First symbol that has actually moved: a flat series is one bar with
+    // twenty identical rotated labels, which is what the tab used to show.
+    const sym = this.watchedSymbols().find((s) => this.hasMovement(this.priceHistory[s] ?? [], s));
+    if (!sym) return {};
+    const hist = this.priceHistory[sym];
 
     const min = Math.min(...hist);
     const max = Math.max(...hist);
-    const range = max - min || 0.001;
-    const bins = 20;
+    const range = max - min;
+    const bins = Math.min(12, Math.max(4, Math.floor(hist.length / 5)));
     const binWidth = range / bins;
     const counts = new Array(bins).fill(0);
     hist.forEach((v) => {
       const idx = Math.min(Math.floor((v - min) / binWidth), bins - 1);
       counts[idx]++;
     });
-    const labels = counts.map((_, i) => (min + i * binWidth + binWidth / 2).toFixed(5));
+    const labels = counts.map((_, i) => this.formatPrice(min + i * binWidth + binWidth / 2, sym));
 
     return {
       grid: { top: 10, right: 20, bottom: 30, left: 50 },
+      tooltip: { trigger: 'axis', formatter: (p: any) => `${p[0].name}<br/>${p[0].value} ticks` },
       xAxis: {
         type: 'category',
         data: labels,
-        axisLabel: { fontSize: 8, color: '#6E6E73', rotate: 45 },
+        axisLabel: { fontSize: 9, color: '#6E6E73', hideOverlap: true },
         axisTick: { show: false },
       },
       yAxis: {
@@ -4026,8 +4425,16 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     // recent M5 candle when the cache returns nothing for a symbol. The
     // candle-derived entry is flagged so spread KPIs / charts can exclude it
     // (a synthetic spread of 0 would otherwise distort the average).
-    const requests = this.watchedSymbols().map((symbol, i) =>
-      this.marketDataService.getLivePrice(symbol).pipe(
+    // The display symbol is derived from the request's own symbol, never
+    // looked up by index inside the async callback. The watched-pair
+    // catalogue is replaced when the CurrencyPair fetch lands, so a poll
+    // that was in flight across that swap resolved `displaySymbols()[i]`
+    // against the NEW list and stamped USD/JPY's 156.2 quote onto the
+    // AUD/USD row — which is where the "−1,555,274.9 pip" activity-feed
+    // entries came from.
+    const requests = this.watchedSymbols().map((symbol) => {
+      const displaySymbol = this.formatPairSymbol(symbol);
+      return this.marketDataService.getLivePrice(symbol).pipe(
         catchError(() => of(null as any)),
         switchMap((res: any) => {
           const live = res?.data;
@@ -4038,8 +4445,8 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
             // otherwise miss the displaySymbols-keyed `find` calls.
             return of({
               symbol,
-              displaySymbol: this.displaySymbols()[i],
-              data: { ...(live as LivePriceDto), symbol: this.displaySymbols()[i] },
+              displaySymbol,
+              data: { ...(live as LivePriceDto), symbol: displaySymbol },
               fromCandle: false,
             });
           }
@@ -4050,9 +4457,9 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
               if (!candle?.close) return null;
               return {
                 symbol,
-                displaySymbol: this.displaySymbols()[i],
+                displaySymbol,
                 data: {
-                  symbol: this.displaySymbols()[i],
+                  symbol: displaySymbol,
                   bid: candle.close,
                   ask: candle.close,
                   spread: 0,
@@ -4063,8 +4470,8 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
             }),
           );
         }),
-      ),
-    );
+      );
+    });
 
     forkJoin(requests)
       .pipe(takeUntil(this.destroy$))
@@ -4076,15 +4483,18 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
             const { symbol: sym, data, fromCandle } = r;
 
             const prev = current.find((p) => p.symbol === data.symbol);
-            const prevBid = prev?.bid ?? data.bid;
+            // A source switch (candle-fallback ↔ live tick) is not a price
+            // move: compare only like with like, otherwise the M5 close vs
+            // the next live bid logs a phantom direction change.
+            const comparable = prev && prev.fromCandle === fromCandle;
+            const prevBid = comparable ? prev.bid : data.bid;
             const change = data.bid - prevBid;
 
             // Engine returns spread in raw price units (ask - bid); operators
             // expect FX spread in pips. Convert at the source so every
             // downstream consumer (KPIs / chart / matrix / ribbon badges)
             // gets the pip value without each having to know the pipFactor.
-            const isJPY = (data.symbol ?? sym).includes('JPY');
-            const pipFactor = isJPY ? 100 : 10000;
+            const pipFactor = this.pipFactorFor(sym);
             const spreadPips = +(data.spread * pipFactor).toFixed(1);
 
             if (!this.priceHistory[sym]) this.priceHistory[sym] = [];
@@ -4100,6 +4510,17 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
               // Stash so the spread KPIs / comparison chart have a fallback
               // when the EA tick stream goes stale and every row is a candle.
               this.lastLiveSpread[sym] = spreadPips;
+              // Accumulate the by-hour average that feeds the spread heatmap.
+              // Only real ticks count — a candle-fallback row has no spread.
+              const hour = new Date(data.timestamp).getUTCHours();
+              if (Number.isFinite(hour)) {
+                const row = (this.hourlySpread[sym] ??= Array.from({ length: 24 }, () => ({
+                  sum: 0,
+                  count: 0,
+                })));
+                row[hour].sum += spreadPips;
+                row[hour].count++;
+              }
             }
 
             // Timeframe-aligned candle closes — NOT the live-tick buffer.
@@ -4129,6 +4550,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
           .filter(Boolean) as PriceEntry[];
 
         this.livePrices.set(newPrices);
+        this.hourlySpreadRev.update((n) => n + 1);
 
         // Capture direction-change events into the rolling activity buffer
         // (separate from livePrices so the feed survives quiet polls).
@@ -4141,8 +4563,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
         }[] = [];
         for (const p of newPrices) {
           if (p.direction !== 'up' && p.direction !== 'down') continue;
-          const isJPY = (p.symbol ?? '').includes('JPY');
-          const pipFactor = isJPY ? 100 : 10000;
+          const pipFactor = this.pipFactorFor(p.symbol);
           newEvents.push({
             time: new Date(p.timestamp),
             symbol: p.symbol ?? '',
@@ -4253,9 +4674,101 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
       });
   }
 
+  /**
+   * Quote-precision by instrument. Five decimals is the FX-major convention;
+   * JPY crosses quote to three; metals and large-figure exotics (XAU/USD at
+   * 4,434, USD/NGN at 1,320) quote to two — printing those to five decimals
+   * produced "4434.12000", which overflowed every price cell it sat in.
+   */
   formatPrice(price: number, symbol: string | null): string {
-    const isJPY = (symbol ?? '').includes('JPY');
-    return price.toFixed(isJPY ? 3 : 5);
+    return price.toFixed(this.decimalsFor(symbol, price));
+  }
+
+  /**
+   * Per-symbol statistics are `null` for a pair whose history has not moved
+   * (a dead feed, or a session that has only just started). Those cells
+   * render "—" rather than a fabricated 0.000000.
+   */
+  formatPriceOrDash(price: number | null, symbol: string | null): string {
+    return price === null ? '—' : this.formatPrice(price, symbol);
+  }
+
+  fixedOrDash(value: number | null, digits: number): string {
+    return value === null ? '—' : value.toFixed(digits);
+  }
+
+  private decimalsFor(symbol: string | null, price?: number): number {
+    const s = (symbol ?? '').toUpperCase();
+    if (s.includes('XAU')) return 2;
+    if (s.includes('XAG')) return 3;
+    if (s.includes('JPY')) return 3;
+    if (price !== undefined && Math.abs(price) >= 1000) return 2;
+    return 5;
+  }
+
+  /**
+   * Price units per pip. One definition for the whole page — the same
+   * `isJPY ? 100 : 10000` guess was repeated in a dozen places and was wrong
+   * for metals, where a pip is 0.1 (XAU) / 0.01 (XAG).
+   */
+  private pipFactorFor(symbol: string | null): number {
+    const s = (symbol ?? '').toUpperCase();
+    if (s.includes('XAU')) return 10;
+    if (s.includes('XAG')) return 100;
+    if (s.includes('JPY')) return 100;
+    return 10000;
+  }
+
+  /** "93,551 s" is unreadable; render feed / snapshot ages as 1d 2h, 5m 12s, 40s. */
+  formatAge(totalSec: number | null): string {
+    if (totalSec === null || !Number.isFinite(totalSec)) return '—';
+    const s = Math.max(0, Math.floor(totalSec));
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ${s % 60}s`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ${m % 60}m`;
+    const d = Math.floor(h / 24);
+    return `${d}d ${h % 24}h`;
+  }
+
+  /** Seconds since an ISO timestamp, against the 30 s wall-clock signal. */
+  ageSecOf(iso: string | null | undefined): number | null {
+    if (!iso) return null;
+    const t = new Date(iso).getTime();
+    if (!Number.isFinite(t)) return null;
+    return Math.max(0, Math.floor((this.nowMs() - t) / 1000));
+  }
+
+  /** "HH:mm:ss" UTC of the freshest live tick — the stale banner and feed-age tile cite it. */
+  lastLiveTickLabel = computed(() => {
+    const prices = this.livePrices();
+    if (prices.length === 0) return null;
+    const newest = Math.max(...prices.map((p) => new Date(p.timestamp).getTime()));
+    if (!Number.isFinite(newest)) return null;
+    const d = new Date(newest);
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+  });
+
+  /**
+   * Whether a chart option object carries anything to draw. The computeds on
+   * this page return `{}` for "nothing yet"; the template swaps in a titled
+   * empty state instead of handing ECharts an empty canvas.
+   */
+  hasSeries(opts: EChartsOption): boolean {
+    const s = (opts as { series?: unknown }).series;
+    return Array.isArray(s) ? s.length > 0 : s != null;
+  }
+
+  /** A sparkline of identical values is a flat line that says "moving" — draw only real movement. */
+  sparkHasMovement(data: number[]): boolean {
+    return data.length > 1 && Math.max(...data) > Math.min(...data);
+  }
+
+  /** Colour only for a sign; zero is neutral, never green. */
+  sparkColor(change: number): string {
+    return change > 0 ? '#34C759' : change < 0 ? '#FF3B30' : '#8E8E93';
   }
 
   getRangePosition(price: PriceEntry): number {
@@ -4272,14 +4785,40 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   }
 
   fetchCandles = (params: PagerRequest): Observable<PagedData<CandleDto>> => {
+    if (this.showSampleCandles()) return of(this.generateSampleCandles(params));
+    const empty: PagedData<CandleDto> = {
+      pager: {
+        totalItemCount: 0,
+        currentPage: params.currentPage ?? 1,
+        itemCountPerPage: params.itemCountPerPage ?? 25,
+        pageNo: 0,
+        pageSize: params.itemCountPerPage ?? 25,
+        filter: null,
+      },
+      data: [],
+    };
     return this.marketDataService.listCandles(params).pipe(
       map((res: ResponseData<PagedData<CandleDto>>) => {
-        if (res.data && res.data.data && res.data.data.length > 0) return res.data;
-        return this.generateSampleCandles(params);
+        const rows = res.data?.data ?? [];
+        this.candleSourceEmpty.set(rows.length === 0);
+        return rows.length > 0 ? res.data! : empty;
       }),
-      catchError(() => of(this.generateSampleCandles(params))),
+      catchError(() => {
+        this.candleSourceEmpty.set(true);
+        return of(empty);
+      }),
     );
   };
+
+  /** Flip the sample-data toggle and rebuild both the analytics sample and the table. */
+  toggleSampleCandles(): void {
+    this.showSampleCandles.update((v) => !v);
+    this.candleAnalyticsLoaded = false;
+    this.candleAnalyticsSample.set([]);
+    this.loadCandleAnalytics();
+    // The data table re-fetches when its fetchData input identity changes.
+    this.fetchCandles = this.fetchCandles.bind(this);
+  }
 
   private generateSampleCandles(params: PagerRequest): PagedData<CandleDto> {
     const symbols = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD'];
@@ -4316,7 +4855,9 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
         totalItemCount: 200,
         currentPage: params.currentPage ?? 1,
         itemCountPerPage: pageSize,
-        pageNo: 8,
+        // Page count must follow the page size the table asked for — a fixed
+        // 8 with a 25-row page printed "1–25 of 200" over a three-page pager.
+        pageNo: Math.ceil(200 / pageSize),
         pageSize,
         filter: null,
       },

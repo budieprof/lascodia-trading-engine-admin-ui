@@ -14,7 +14,10 @@ export const PROMPT_TEMPLATES_ROUTES: Routes = [
   {
     path: '',
     pathMatch: 'full',
-    data: { breadcrumb: 'Prompt templates' },
+    // Must match app.routes' label exactly: the breadcrumb builder only
+    // collapses parent + empty-child crumbs when label AND url are equal, and
+    // the case mismatch produced "Prompt Templates › Prompt templates".
+    data: { breadcrumb: 'Prompt Templates' },
     canActivate: [requirePermission('prompttemplate.view')],
     loadComponent: () =>
       import('./pages/prompt-templates-list-page/prompt-templates-list-page.component').then(

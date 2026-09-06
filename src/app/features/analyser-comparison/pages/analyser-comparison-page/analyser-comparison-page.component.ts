@@ -95,8 +95,8 @@ const TIMEFRAMES: (Timeframe | '')[] = ['', 'M1', 'M5', 'M15', 'H1', 'H4', 'D1']
       } @else if (summary()) {
         <section class="window-meta">
           <span>
-            Window: {{ summary()!.fromUtc | date: 'short' }} →
-            {{ summary()!.toUtc | date: 'short' }}
+            Window: {{ summary()!.fromUtc | date: 'MMM d, yyyy HH:mm' }} →
+            {{ summary()!.toUtc | date: 'MMM d, yyyy HH:mm' }}
             ({{ summary()!.symbol ?? 'all symbols' }},
             {{ summary()!.timeframe ?? 'all timeframes' }})
           </span>
@@ -192,33 +192,37 @@ const TIMEFRAMES: (Timeframe | '')[] = ['', 'M1', 'M5', 'M15', 'H1', 'H4', 'D1']
   `,
   styles: [
     `
+      /* No page-level padding — the layout shell already provides the 32px
+         gutter, so content here used to start 16px to the right of every
+         other route. */
       .page {
-        padding: 1rem;
+        padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
-        gap: 1rem;
+        gap: var(--space-4);
       }
       .header-controls {
         display: flex;
-        gap: 1rem;
-        align-items: center;
+        gap: var(--space-4);
+        align-items: flex-end;
         flex-wrap: wrap;
       }
       .chip-group {
         display: inline-flex;
-        gap: 0.25rem;
+        gap: var(--space-1);
       }
       .chip {
-        border: 1px solid var(--border, #2a2f3a);
+        border: 1px solid var(--border);
         background: transparent;
-        color: inherit;
-        padding: 0.25rem 0.6rem;
-        border-radius: 9999px;
+        color: var(--text-primary);
+        padding: 4px 10px;
+        border-radius: var(--radius-full);
         cursor: pointer;
-        font-size: 0.85rem;
+        font-size: var(--text-xs);
+        font-family: inherit;
       }
       .chip--active {
-        background: var(--accent, #4f8cff);
+        background: var(--accent);
         color: #fff;
         border-color: transparent;
       }
@@ -226,108 +230,147 @@ const TIMEFRAMES: (Timeframe | '')[] = ['', 'M1', 'M5', 'M15', 'H1', 'H4', 'D1']
         display: inline-flex;
         flex-direction: column;
         gap: 2px;
-        font-size: 0.85rem;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
       }
       .field input,
       .field select {
-        padding: 0.25rem 0.5rem;
-        background: transparent;
-        color: inherit;
-        border: 1px solid var(--border, #2a2f3a);
-        border-radius: 4px;
-        min-width: 80px;
+        height: 32px;
+        padding: 0 var(--space-2);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        min-width: 90px;
+        font-size: var(--text-sm);
+        font-family: inherit;
       }
       .audit-link {
-        color: var(--accent, #4f8cff);
+        color: var(--accent);
         text-decoration: none;
-        font-size: 0.9rem;
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        padding-bottom: 6px;
       }
       .audit-link:hover {
         text-decoration: underline;
       }
       .status {
-        padding: 1rem;
-        opacity: 0.7;
+        padding: var(--space-4);
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
       }
       .status.error {
-        color: #f66;
+        color: var(--loss);
       }
       .window-meta {
-        font-size: 0.85rem;
-        opacity: 0.7;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
       }
+      /* Exactly two sources are ever returned, so lay out two equal columns —
+         auto-fit produced a third, empty column on wide screens. */
       .grid {
         display: grid;
-        gap: 1rem;
-        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: var(--space-4);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-items: start;
+      }
+      @media (max-width: 900px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
       }
       .source-card {
-        background: var(--card-bg, #1a1f2b);
-        border: 1px solid var(--border, #2a2f3a);
-        border-radius: 8px;
-        padding: 1rem;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
         display: flex;
         flex-direction: column;
-        gap: 0.75rem;
+        gap: var(--space-3);
+        min-width: 0;
       }
       .source-card--llm {
-        border-left: 4px solid #b07cff;
+        border-left: 4px solid #af52de;
       }
       .source-card--syn {
-        border-left: 4px solid #4fd1c5;
+        border-left: 4px solid #0071e3;
       }
       .source-card header {
         display: flex;
-        align-items: baseline;
+        align-items: center;
         justify-content: space-between;
-        gap: 0.5rem;
+        gap: var(--space-2);
       }
       .source-card h2 {
         margin: 0;
-        font-size: 1.05rem;
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
       }
       .source-card h3 {
         margin: 0;
-        font-size: 0.85rem;
-        opacity: 0.7;
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
         text-transform: uppercase;
         letter-spacing: 0.05em;
       }
       .badge {
-        background: var(--badge-bg, #2a2f3a);
-        border-radius: 9999px;
-        padding: 0.15rem 0.5rem;
-        font-size: 0.75rem;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        border-radius: var(--radius-full);
+        padding: 2px 10px;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        white-space: nowrap;
+        flex-shrink: 0;
+        font-variant-numeric: tabular-nums;
       }
+      /* One label/value pair per row: the earlier two-column grid put the
+         label and the value in one flex line and let the value wrap into the
+         label ("Backfilled2,905 /"). Label left, value right, nothing wraps. */
       .kv {
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 0.25rem 1rem;
+        grid-template-columns: 1fr;
+        gap: 2px;
         margin: 0;
       }
       .kv > div {
-        display: flex;
-        justify-content: space-between;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
         align-items: baseline;
-        padding: 0.15rem 0;
+        gap: var(--space-3);
+        padding: 3px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .kv > div:last-child {
+        border-bottom: none;
       }
       .kv dt {
-        font-size: 0.8rem;
-        opacity: 0.7;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .kv dd {
         margin: 0;
         font-variant-numeric: tabular-nums;
-        font-weight: 600;
+        font-weight: var(--font-semibold);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+        white-space: nowrap;
+        text-align: right;
       }
       .kv--pnl dd {
-        font-size: 1.05rem;
+        font-size: var(--text-base);
       }
       .profit {
-        color: #4fd1c5;
+        color: var(--profit);
       }
       .loss {
-        color: #ff7a7a;
+        color: var(--loss);
       }
     `,
   ],

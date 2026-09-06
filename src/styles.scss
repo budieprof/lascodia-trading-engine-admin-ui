@@ -102,6 +102,25 @@
   animation-delay: 280ms;
 }
 
+// Overlays must not take part in the choreography. `animation … both` keeps
+// the final `transform: translateY(0)` applied, and a transformed element is
+// the containing block for every `position: fixed` descendant — so a dialog
+// rendered inside a page section was centred on that section, clipped by
+// it, and lost its full-viewport backdrop (Create Strategy, Apply Template,
+// the spread-floor override that appeared to render nothing). Anything that
+// declares itself an overlay is excluded here; the pages no longer need to
+// opt out one by one with `display: contents`.
+.page > .overlay,
+.page > .modal-backdrop,
+.page > .modal-host,
+.page > [role='dialog'],
+.page > dialog,
+.page > *:has(> [role='dialog']),
+.page > *:has(> dialog[open]) {
+  animation: none;
+  transform: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .page > * {
     animation: none;

@@ -38,6 +38,12 @@ export class NotificationService {
   }
 
   private addToast(type: NotificationType, message: string): void {
+    // One live toast per distinct message. A burst of identical failures
+    // (every tile on a page hitting the same refused endpoint) used to
+    // stack a red column over the header; the repeat carries no new
+    // information, so the existing toast simply stays up.
+    if (this._toasts().some((t) => t.type === type && t.message === message)) return;
+
     const id = this.nextId++;
     const toast: Toast = { id, type, message };
 

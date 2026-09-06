@@ -7,7 +7,7 @@ import {
   signal,
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { catchError, map, of } from 'rxjs';
 import type { EChartsOption } from 'echarts';
@@ -22,6 +22,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 
 type LookbackDays = 7 | 30 | 90 | 365;
 
@@ -32,8 +33,8 @@ type LookbackDays = 7 | 30 | 90 | 365;
   imports: [
     DatePipe,
     DecimalPipe,
-    RouterLink,
     PageHeaderComponent,
+    CompositeMlNavComponent,
     ChartCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
@@ -47,123 +48,132 @@ type LookbackDays = 7 | 30 | 90 | 365;
         [subtitle]="
           layerKey()
             ? layerKey() + ' · ' + scopeLabelDisplay()
-            : 'No layer key in URL — open from the drift summary'
+            : 'Observed-count time series for one catalogue entry'
         "
-      >
-        <a routerLink="/composite-ml/drift" class="btn btn-secondary">← Drift Summary</a>
-      </app-page-header>
-
-      <section class="controls">
-        <div class="control-group">
-          <span class="control-label">Lookback</span>
-          <div class="lookback-pills">
-            @for (option of LOOKBACK_OPTIONS; track option) {
-              <button
-                type="button"
-                [class.active]="lookback() === option"
-                (click)="lookback.set(option)"
-              >
-                {{ option }}d
-              </button>
-            }
-          </div>
-        </div>
-        <span class="hint muted">
-          {{ pointCount() }} sample{{ pointCount() === 1 ? '' : 's' }} loaded
-        </span>
-      </section>
+      />
+      <app-composite-ml-nav
+        backLink="/composite-ml/drift"
+        backLabel="Drift Summary"
+        [showRefresh]="!!layerKey()"
+        [refreshing]="resource.loading()"
+        (refresh)="resource.refresh()"
+      />
 
       @if (!layerKey()) {
         <app-empty-state
           title="Pick an entry from the drift summary"
-          description="This page renders a time-series for one (layerKey, symbol, timeframe). Navigate from the Drift Summary's History → link."
-        />
-      } @else if (loading()) {
-        <app-card-skeleton [lines]="6" />
-      } @else if (resource.error()) {
-        <app-error-state
-          title="Could not load drift history"
-          message="Engine returned an error. The drift monitor worker may not have evaluated this layer-key yet."
-          (retry)="resource.refresh()"
-        />
-      } @else if (points().length === 0) {
-        <app-empty-state
-          title="No samples in this window"
-          description="No drift snapshots recorded for this layer in the selected lookback. Try a larger window."
+          description="This page charts one (layer key, symbol, timeframe) over time. Open it from the History link on a Drift Summary row."
+          actionLabel="Go to Drift Summary"
+          (actionClick)="router.navigate(['/composite-ml/drift'])"
         />
       } @else {
-        <section class="meta-strip">
-          <span class="meta">
-            Latest observed: <strong>{{ latestPoint()?.observedCount ?? 0 }}</strong> vs threshold
-            <strong>{{ latestPoint()?.threshold ?? 0 }}</strong>
-          </span>
-          @if (latestPoint(); as p) {
-            @if (p.isWarm) {
-              <span class="warm-pill warm">currently warm</span>
-            } @else {
-              <span class="warm-pill cold">currently cold</span>
-            }
-          }
-          <span class="meta muted">
-            Window: <strong>{{ loaded()?.lookbackDays ?? 0 }} days</strong>
-          </span>
-          @if (latestPoint(); as p) {
-            <span class="meta muted" [title]="p.evaluatedAtUtc | date: 'yyyy-MM-dd HH:mm:ss UTC'">
-              Last sample: <strong>{{ p.evaluatedAtUtc | relativeTime }}</strong>
-            </span>
-          }
-        </section>
-
-        <app-chart-card
-          title="Observed count vs threshold"
-          subtitle="Solid = observed; dashed = required warm threshold"
-          [options]="chartOptions()"
-          height="320px"
-        />
-
-        <section class="card">
-          <h3 class="table-title">Recent samples (newest first)</h3>
-          <table class="samples-table">
-            <thead>
-              <tr>
-                <th>Evaluated</th>
-                <th class="num">Observed</th>
-                <th class="num">Threshold</th>
-                <th class="num">Δ vs threshold</th>
-                <th>Warm</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (p of recentPoints(); track p.evaluatedAtUtc) {
-                <tr>
-                  <td
-                    class="time mono"
-                    [title]="p.evaluatedAtUtc | date: 'yyyy-MM-dd HH:mm:ss UTC'"
-                  >
-                    {{ p.evaluatedAtUtc | relativeTime }}
-                  </td>
-                  <td class="num mono">{{ p.observedCount | number: '1.0-0' }}</td>
-                  <td class="num mono">{{ p.threshold | number: '1.0-0' }}</td>
-                  <td
-                    class="num mono"
-                    [class.positive]="p.observedCount >= p.threshold"
-                    [class.negative]="p.observedCount < p.threshold"
-                  >
-                    {{ p.observedCount - p.threshold > 0 ? '+' : ''
-                    }}{{ p.observedCount - p.threshold }}
-                  </td>
-                  <td>
-                    @if (p.isWarm) {
-                      <span class="warm-pill warm">warm</span>
-                    } @else {
-                      <span class="warm-pill cold">cold</span>
-                    }
-                  </td>
-                </tr>
+        <section class="controls">
+          <div class="control-group">
+            <span class="control-label">Lookback</span>
+            <div class="lookback-pills">
+              @for (option of LOOKBACK_OPTIONS; track option) {
+                <button
+                  type="button"
+                  [class.active]="lookback() === option"
+                  (click)="lookback.set(option)"
+                >
+                  {{ option }}d
+                </button>
               }
-            </tbody>
-          </table>
+            </div>
+          </div>
+          <span class="hint muted">
+            {{ pointCount() }} sample{{ pointCount() === 1 ? '' : 's' }} loaded
+          </span>
         </section>
+
+        @if (loading()) {
+          <app-card-skeleton [lines]="6" />
+        } @else if (resource.error()) {
+          <app-error-state
+            title="Could not load drift history"
+            message="Engine returned an error. The drift monitor worker may not have evaluated this layer-key yet."
+            (retry)="resource.refresh()"
+          />
+        } @else if (points().length === 0) {
+          <app-empty-state
+            title="No samples in this window"
+            description="No drift snapshots recorded for this layer in the selected lookback. Try a larger window."
+          />
+        } @else {
+          <section class="meta-strip">
+            <span class="meta">
+              Latest observed: <strong>{{ latestPoint()?.observedCount ?? 0 }}</strong> vs threshold
+              <strong>{{ latestPoint()?.threshold ?? 0 }}</strong>
+            </span>
+            @if (latestPoint(); as p) {
+              @if (p.isWarm) {
+                <span class="warm-pill warm">currently warm</span>
+              } @else {
+                <span class="warm-pill cold">currently cold</span>
+              }
+            }
+            <span class="meta muted">
+              Window: <strong>{{ loaded()?.lookbackDays ?? 0 }} days</strong>
+            </span>
+            @if (latestPoint(); as p) {
+              <span class="meta muted" [title]="p.evaluatedAtUtc | date: 'yyyy-MM-dd HH:mm:ss UTC'">
+                Last sample: <strong>{{ p.evaluatedAtUtc | relativeTime }}</strong>
+              </span>
+            }
+          </section>
+
+          <app-chart-card
+            title="Observed count vs threshold"
+            subtitle="Solid = observed; dashed = required warm threshold"
+            [options]="chartOptions()"
+            height="320px"
+          />
+
+          <section class="card">
+            <h3 class="table-title">Recent samples (newest first)</h3>
+            <table class="samples-table">
+              <thead>
+                <tr>
+                  <th>Evaluated</th>
+                  <th class="num">Observed</th>
+                  <th class="num">Threshold</th>
+                  <th class="num">Δ vs threshold</th>
+                  <th>Warm</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (p of recentPoints(); track p.evaluatedAtUtc) {
+                  <tr>
+                    <td
+                      class="time mono"
+                      [title]="p.evaluatedAtUtc | date: 'yyyy-MM-dd HH:mm:ss UTC'"
+                    >
+                      {{ p.evaluatedAtUtc | relativeTime }}
+                    </td>
+                    <td class="num mono">{{ p.observedCount | number: '1.0-0' }}</td>
+                    <td class="num mono">{{ p.threshold | number: '1.0-0' }}</td>
+                    <td
+                      class="num mono"
+                      [class.positive]="p.observedCount >= p.threshold"
+                      [class.negative]="p.observedCount < p.threshold"
+                    >
+                      {{ p.observedCount - p.threshold > 0 ? '+' : ''
+                      }}{{ p.observedCount - p.threshold }}
+                    </td>
+                    <td>
+                      @if (p.isWarm) {
+                        <span class="warm-pill warm">warm</span>
+                      } @else {
+                        <span class="warm-pill cold">cold</span>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </section>
+        }
       }
     </div>
   `,
@@ -250,9 +260,10 @@ type LookbackDays = 7 | 30 | 90 | 365;
         background: rgba(52, 199, 89, 0.12);
         color: #248a3d;
       }
+      /* Cold = amber, the same warning pair the cold-start and drift pages use. */
       .warm-pill.cold {
-        background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
+        background: rgba(255, 149, 0, 0.12);
+        color: #c93400;
       }
       .card {
         background: var(--bg-secondary);
@@ -313,6 +324,7 @@ type LookbackDays = 7 | 30 | 90 | 365;
 export class DriftHistoryPageComponent {
   private readonly compositeMl = inject(CompositeMLService);
   private readonly route = inject(ActivatedRoute);
+  protected readonly router = inject(Router);
 
   protected readonly LOOKBACK_OPTIONS: readonly LookbackDays[] = [7, 30, 90, 365] as const;
   protected readonly lookback = signal<LookbackDays>(30);

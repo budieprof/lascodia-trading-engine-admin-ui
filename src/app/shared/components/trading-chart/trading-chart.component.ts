@@ -37,6 +37,15 @@ import {
 } from '@core/api/api.types';
 import { applyTickToCandles, preserveFormingBar } from '@shared/utils/live-candle';
 
+/**
+ * Every price line (BID, ASK, entry, SL, TP) pins a tag to the right edge
+ * of the chart. In a tight market those prices sit a few pixels apart and
+ * the tags overprinted each other — "S 55.71 @ 1.16…" over "SL 1.163…" over
+ * "ASK". ECharts' label layout shifts overlapping labels apart vertically
+ * while leaving the lines where the prices are.
+ */
+const RIGHT_EDGE_LABEL_LAYOUT = { moveOverlap: 'shiftY' } as const;
+
 // ── Candle countdown helpers ─────────────────────────────────────────────
 // Timeframes align to the UTC grid (M1 → top of each minute, H1 → top of
 // each hour, H4 → 00/04/…/20 UTC, D1 → 00:00 UTC) so `now % tfMs` is the
@@ -364,9 +373,11 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
           <div
             class="candle-countdown"
             [class.imminent]="candleCountdown().startsWith('00:0')"
-            [title]="'Time until ' + selectedTimeframe() + ' candle closes'"
+            [title]="
+              'Time remaining until the current ' + selectedTimeframe() + ' candle closes (mm:ss)'
+            "
           >
-            <span class="countdown-label">Next {{ selectedTimeframe() }}</span>
+            <span class="countdown-label">{{ selectedTimeframe() }} closes in</span>
             <span class="countdown-value">{{ candleCountdown() }}</span>
           </div>
           @if (openPositionsPnL(); as pnl) {
@@ -2840,6 +2851,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
         xAxisIndex: 0,
         yAxisIndex: 0,
         z: 10,
+        labelLayout: RIGHT_EDGE_LABEL_LAYOUT,
       },
       // ── Live ASK line ────────────────────────────────────────────
       {
@@ -2866,6 +2878,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
         xAxisIndex: 0,
         yAxisIndex: 0,
         z: 10,
+        labelLayout: RIGHT_EDGE_LABEL_LAYOUT,
       },
     ],
   };
@@ -4197,6 +4210,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
         xAxisIndex: 0,
         yAxisIndex: 0,
         z: 9,
+        labelLayout: RIGHT_EDGE_LABEL_LAYOUT,
       });
 
       // ── Stop-loss line ────────────────────────────────────────
@@ -4225,6 +4239,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
           xAxisIndex: 0,
           yAxisIndex: 0,
           z: 8,
+          labelLayout: RIGHT_EDGE_LABEL_LAYOUT,
         });
       }
 
@@ -4258,6 +4273,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
           xAxisIndex: 0,
           yAxisIndex: 0,
           z: 8,
+          labelLayout: RIGHT_EDGE_LABEL_LAYOUT,
         });
       }
     }

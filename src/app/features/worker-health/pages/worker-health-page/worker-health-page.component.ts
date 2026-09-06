@@ -8,7 +8,7 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DecimalPipe } from '@angular/common';
-import { catchError, map, of } from 'rxjs';
+import { map } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
 import { WorkersService } from '@core/services/workers.service';
@@ -20,11 +20,17 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 type StatusFilter = 'all' | WorkerHealthStatus;
 type SortMode = 'category' | 'p95' | 'errors' | 'backlog';
 type ViewMode = 'cards' | 'table';
+
+/** Rows per category chart; past this the axis labels collide. */
+const TOP_CATEGORIES = 12;
+/** Card grids larger than this scroll inside a capped box. */
+const CARD_GRID_CAP = 12;
 
 @Component({
   selector: 'app-worker-health-page',
@@ -36,6 +42,7 @@ type ViewMode = 'cards' | 'table';
     ChartCardComponent,
     CardSkeletonComponent,
     EmptyStateComponent,
+    ErrorStateComponent,
     FormsModule,
     DecimalPipe,
     RelativeTimePipe,
@@ -58,6 +65,12 @@ type ViewMode = 'cards' | 'table';
 
       @if (loading()) {
         <app-card-skeleton [lines]="6" />
+      } @else if (resource.error() && workers().length === 0) {
+        <app-error-state
+          title="Could not load worker health"
+          message="The engine's /health/workers endpoint did not respond."
+          (retry)="refresh()"
+        />
       } @else if (workers().length > 0) {
         <!-- 10-card KPI strip — fleet status + tail-latency + traffic -->
         <div class="kpis">
@@ -124,19 +137,23 @@ type ViewMode = 'cards' | 'table';
             title="Status distribution"
             subtitle="Healthy · Degraded · Failed · Idle"
             [options]="statusDonutOptions()"
-            height="220px"
+            height="300px"
           />
           <app-chart-card
             title="Workers by category"
-            subtitle="Composition of the {{ workers().length }}-worker fleet"
+            [subtitle]="categoryChartSubtitle()"
             [options]="workersByCategoryOptions()"
-            height="220px"
+            height="300px"
           />
           <app-chart-card
             title="P95 cycle by category"
-            subtitle="Avg tail latency per category — long bars are slow"
+            [subtitle]="
+              'Average P95 per category, slowest ' +
+              topCategoryLimit +
+              ' shown — hover a bar for the value'
+            "
             [options]="cycleByCategoryOptions()"
-            height="220px"
+            height="300px"
           />
         </div>
 
@@ -291,235 +308,294 @@ type ViewMode = 'cards' | 'table';
           </span>
         </div>
 
-        @for (group of groupedByCategory(); track group.category) {
-          <section class="category-section" [class.collapsed]="!isExpanded(group.category)">
-            <header
-              class="category-head"
-              role="button"
-              tabindex="0"
-              [attr.aria-expanded]="isExpanded(group.category)"
-              [attr.aria-controls]="'cat-body-' + group.category"
-              (click)="toggleCategory(group.category)"
-              (keydown.enter)="toggleCategory(group.category)"
-              (keydown.space)="toggleCategory(group.category); $event.preventDefault()"
+        <!-- Collapsed categories pack two per row; an expanded one takes the
+             full width. 38 single-line headers each on their own 60 px row
+             was 60 % empty screen. -->
+        <div class="categories">
+          @for (group of groupedByCategory(); track group.category) {
+            <section
+              class="category-section"
+              [class.collapsed]="!isExpanded(group.category)"
+              [class.expanded]="isExpanded(group.category)"
             >
-              <span class="chevron" aria-hidden="true">
-                {{ isExpanded(group.category) ? '▾' : '▸' }}
-              </span>
-              <h3>{{ group.category }}</h3>
-              <span class="muted">{{ group.workers.length }} workers</span>
-              <span class="agg-pill" title="Average P95 cycle duration in this category">
-                avg P95 {{ group.avgP95 | number: '1.0-0' }} ms
-              </span>
-              <span
-                class="agg-pill"
-                [class.bad-pill]="group.errorsLastHour > 0"
-                [title]="
-                  group.errorsLastHour +
-                  ' errors / ' +
-                  group.successesLastHour +
-                  ' successes in the last hour'
-                "
+              <header
+                class="category-head"
+                role="button"
+                tabindex="0"
+                [attr.aria-expanded]="isExpanded(group.category)"
+                [attr.aria-controls]="'cat-body-' + group.category"
+                (click)="toggleCategory(group.category)"
+                (keydown.enter)="toggleCategory(group.category)"
+                (keydown.space)="toggleCategory(group.category); $event.preventDefault()"
               >
-                {{ group.errorsLastHour }} err · {{ group.successesLastHour }} ok
-              </span>
-              @if (group.totalBacklog > 0) {
-                <span class="agg-pill" [class.warn-pill]="group.totalBacklog > 100">
-                  backlog {{ group.totalBacklog | number }}
+                <span class="chevron" aria-hidden="true">
+                  {{ isExpanded(group.category) ? '▾' : '▸' }}
                 </span>
-              }
-              @if (group.failedCount > 0) {
-                <span class="pill" data-status="Failed">{{ group.failedCount }} failed</span>
-              }
-              @if (group.degradedCount > 0) {
-                <span class="pill" data-status="Degraded">
-                  {{ group.degradedCount }} degraded
+                <h3>{{ group.category }}</h3>
+                <span class="muted">
+                  {{ group.workers.length }} worker{{ group.workers.length === 1 ? '' : 's' }}
                 </span>
-              }
-              @if (group.staleCount > 0) {
-                <span class="pill pill-stale">{{ group.staleCount }} stale</span>
-              }
-            </header>
+                <span
+                  class="agg-pill"
+                  [class.warn-pill]="group.avgP95 > 1000"
+                  [class.bad-pill]="group.avgP95 > 5000"
+                  title="Average P95 cycle duration in this category"
+                >
+                  avg P95 {{ group.avgP95 | number: '1.0-0' }} ms
+                </span>
+                <span
+                  class="agg-pill"
+                  [class.bad-pill]="group.errorsLastHour > 0"
+                  [title]="
+                    group.errorsLastHour +
+                    ' errors / ' +
+                    group.successesLastHour +
+                    ' successes in the last hour'
+                  "
+                >
+                  {{ group.errorsLastHour }} err · {{ group.successesLastHour }} ok
+                </span>
+                @if (group.totalBacklog > 0) {
+                  <span class="agg-pill" [class.warn-pill]="group.totalBacklog > 100">
+                    backlog {{ group.totalBacklog | number }}
+                  </span>
+                }
+                @if (group.failedCount > 0) {
+                  <span class="pill" data-status="Failed">{{ group.failedCount }} failed</span>
+                }
+                @if (group.degradedCount > 0) {
+                  <span class="pill" data-status="Degraded">
+                    {{ group.degradedCount }} degraded
+                  </span>
+                }
+                @if (group.staleCount > 0) {
+                  <span class="pill pill-stale">{{ group.staleCount }} stale</span>
+                }
+              </header>
 
-            @if (isExpanded(group.category)) {
-              <div [id]="'cat-body-' + group.category">
-                @if (viewMode() === 'cards') {
-                  <div class="grid-scroll">
-                    <div class="grid">
-                      @for (w of group.workers; track w.name) {
-                        <article class="card" [attr.data-status]="w.status">
-                          <header class="card-head">
-                            <span class="status-dot" [attr.data-status]="w.status"></span>
-                            <div class="title">
-                              <h4 [title]="w.name">{{ w.name }}</h4>
-                              <span class="muted">
+              @if (isExpanded(group.category)) {
+                <div [id]="'cat-body-' + group.category">
+                  @if (viewMode() === 'cards') {
+                    @if (group.workers.length > cardGridCap) {
+                      <p class="grid-cap-note muted">
+                        All {{ group.workers.length }} workers — this group scrolls.
+                      </p>
+                    }
+                    <div class="grid-scroll" [class.capped]="group.workers.length > cardGridCap">
+                      <div class="grid">
+                        @for (w of group.workers; track w.name) {
+                          <article class="card" [attr.data-status]="w.status">
+                            <header class="card-head">
+                              <span class="status-dot" [attr.data-status]="w.status"></span>
+                              <div class="title">
+                                <h4 [title]="w.name">{{ w.name }}</h4>
+                                <span class="muted">
+                                  @if (w.isCompleted) {
+                                    one-shot · completed
+                                  } @else {
+                                    every {{ formatInterval(w.configuredIntervalSeconds) }}
+                                  }
+                                </span>
+                              </div>
+                              <!-- A Healthy pill next to "(stale)" in the footer
+                                 contradicted itself; the stale flag is part of
+                                 the status line now. A finished one-shot is stale
+                                 by construction, so it is exempt. -->
+                              @if (w.isStale && !w.isCompleted) {
+                                <span
+                                  class="pill pill-stale"
+                                  title="Status as last reported, but no successful cycle recently"
+                                >
+                                  {{ w.status }} · stale
+                                </span>
+                              } @else {
+                                <span class="pill" [attr.data-status]="w.status">{{
+                                  w.status
+                                }}</span>
+                              }
+                            </header>
+
+                            <dl class="metrics-grid">
+                              <div>
+                                <dt>Cycle (p50/p95)</dt>
+                                <dd class="mono">
+                                  {{ w.cycleDurationP50Ms | number: '1.0-0' }} /
+                                  <span
+                                    [class.warn]="w.cycleDurationP95Ms > 1000"
+                                    [class.bad]="w.cycleDurationP95Ms > 5000"
+                                    [title]="
+                                      w.cycleDurationP95Ms > 5000
+                                        ? 'P95 above 5 s'
+                                        : w.cycleDurationP95Ms > 1000
+                                          ? 'P95 above 1 s'
+                                          : ''
+                                    "
+                                  >
+                                    {{ w.cycleDurationP95Ms | number: '1.0-0' }}
+                                  </span>
+                                  ms
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>Last cycle</dt>
+                                <dd class="mono">
+                                  {{ w.lastCycleDurationMs | number: '1.0-0' }} ms
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>Errors / Successes (1h)</dt>
+                                <dd
+                                  class="mono"
+                                  [class.bad]="w.errorRate > 0.05"
+                                  [class.warn]="w.errorRate > 0 && w.errorRate <= 0.05"
+                                >
+                                  {{ w.errorsLastHour }} / {{ w.successesLastHour }}
+                                  @if (w.errorRate > 0) {
+                                    <span class="err-rate">
+                                      ({{ w.errorRate * 100 | number: '1.0-1' }}%)
+                                    </span>
+                                  }
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>Backlog</dt>
+                                <dd class="mono" [class.bad]="w.backlogDepth > 100">
+                                  {{ w.backlogDepth | number }}
+                                </dd>
+                              </div>
+                              @if (w.consecutiveFailures > 0) {
+                                <div class="span-2">
+                                  <dt class="bad-label">Consecutive failures</dt>
+                                  <dd class="mono bad">{{ w.consecutiveFailures }}</dd>
+                                </div>
+                              }
+                            </dl>
+
+                            <footer class="card-foot">
+                              @if (w.lastSuccessAt) {
+                                <span class="foot-line">
+                                  <span class="muted">Last success</span>
+                                  <span [class.warn]="w.isStale && !w.isCompleted">
+                                    {{ w.lastSuccessAt | relativeTime }}
+                                    @if (w.isStale && !w.isCompleted) {
+                                      (stale)
+                                    }
+                                  </span>
+                                </span>
+                              } @else {
+                                <span class="foot-line muted">No successful cycle yet</span>
+                              }
+                              @if (w.lastErrorAt) {
+                                <span class="foot-line err">
+                                  <span class="muted">Last error</span>
+                                  <span>{{ w.lastErrorAt | relativeTime }}</span>
+                                </span>
+                              }
+                              @if (w.lastErrorMessage) {
+                                <span class="foot-line msg" [title]="w.lastErrorMessage">
+                                  {{ w.lastErrorMessage }}
+                                </span>
+                              }
+                            </footer>
+                          </article>
+                        }
+                      </div>
+                    </div>
+                  } @else {
+                    <!-- Dense table mode: ~15× more workers per screen -->
+                    <div class="dense-wrap">
+                      <table class="dense">
+                        <thead>
+                          <tr>
+                            <th>Status</th>
+                            <th>Worker</th>
+                            <th>Schedule</th>
+                            <th class="num">P50 / P95</th>
+                            <th class="num">Last cycle</th>
+                            <th class="num">Err / Ok (1h)</th>
+                            <th class="num">Err rate</th>
+                            <th class="num">Backlog</th>
+                            <th class="num">Cons. fail</th>
+                            <th>Last success</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (w of group.workers; track w.name) {
+                            <tr>
+                              <td>
+                                @if (w.isStale && !w.isCompleted) {
+                                  <span class="pill pill-stale">{{ w.status }} · stale</span>
+                                } @else {
+                                  <span class="pill" [attr.data-status]="w.status">
+                                    {{ w.status }}
+                                  </span>
+                                }
+                              </td>
+                              <td class="mono name" [title]="w.name">{{ w.name }}</td>
+                              <td class="mono muted">
                                 @if (w.isCompleted) {
-                                  one-shot · completed
+                                  one-shot
                                 } @else {
                                   every {{ formatInterval(w.configuredIntervalSeconds) }}
                                 }
-                              </span>
-                            </div>
-                            <span class="pill" [attr.data-status]="w.status">{{ w.status }}</span>
-                          </header>
-
-                          <dl class="metrics-grid">
-                            <div>
-                              <dt>Cycle (p50/p95)</dt>
-                              <dd class="mono">
+                              </td>
+                              <td class="num mono">
                                 {{ w.cycleDurationP50Ms | number: '1.0-0' }} /
-                                {{ w.cycleDurationP95Ms | number: '1.0-0' }} ms
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Last cycle</dt>
-                              <dd class="mono">{{ w.lastCycleDurationMs | number: '1.0-0' }} ms</dd>
-                            </div>
-                            <div>
-                              <dt>Errors / Successes (1h)</dt>
-                              <dd
-                                class="mono"
+                                <span
+                                  [class.warn]="w.cycleDurationP95Ms > 1000"
+                                  [class.bad]="w.cycleDurationP95Ms > 5000"
+                                >
+                                  {{ w.cycleDurationP95Ms | number: '1.0-0' }}
+                                </span>
+                              </td>
+                              <td class="num mono">
+                                {{ w.lastCycleDurationMs | number: '1.0-0' }}
+                              </td>
+                              <td class="num mono">
+                                <span [class.bad]="w.errorsLastHour > 0">{{
+                                  w.errorsLastHour
+                                }}</span>
+                                / {{ w.successesLastHour }}
+                              </td>
+                              <td
+                                class="num mono"
                                 [class.bad]="w.errorRate > 0.05"
                                 [class.warn]="w.errorRate > 0 && w.errorRate <= 0.05"
                               >
-                                {{ w.errorsLastHour }} / {{ w.successesLastHour }}
-                                @if (w.errorRate > 0) {
-                                  <span class="err-rate">
-                                    ({{ w.errorRate * 100 | number: '1.0-1' }}%)
-                                  </span>
+                                @if (w.errorsLastHour + w.successesLastHour > 0) {
+                                  {{ w.errorRate * 100 | number: '1.0-1' }}%
+                                } @else {
+                                  —
                                 }
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Backlog</dt>
-                              <dd class="mono" [class.bad]="w.backlogDepth > 100">
-                                {{ w.backlogDepth | number }}
-                              </dd>
-                            </div>
-                            @if (w.consecutiveFailures > 0) {
-                              <div class="span-2">
-                                <dt class="bad-label">Consecutive failures</dt>
-                                <dd class="mono bad">{{ w.consecutiveFailures }}</dd>
-                              </div>
-                            }
-                          </dl>
-
-                          <footer class="card-foot">
-                            @if (w.lastSuccessAt) {
-                              <span class="foot-line">
-                                <span class="muted">Last success</span>
-                                <span [class.warn]="w.isStale">
-                                  {{ w.lastSuccessAt | relativeTime }}
-                                  @if (w.isStale) {
-                                    (stale)
-                                  }
-                                </span>
-                              </span>
-                            } @else {
-                              <span class="foot-line muted">No successful cycle yet</span>
-                            }
-                            @if (w.lastErrorAt) {
-                              <span class="foot-line err">
-                                <span class="muted">Last error</span>
-                                <span>{{ w.lastErrorAt | relativeTime }}</span>
-                              </span>
-                            }
-                            @if (w.lastErrorMessage) {
-                              <span class="foot-line msg" [title]="w.lastErrorMessage">
-                                {{ w.lastErrorMessage }}
-                              </span>
-                            }
-                          </footer>
-                        </article>
-                      }
-                    </div>
-                  </div>
-                } @else {
-                  <!-- Dense table mode: ~15× more workers per screen -->
-                  <div class="dense-wrap">
-                    <table class="dense">
-                      <thead>
-                        <tr>
-                          <th>Status</th>
-                          <th>Worker</th>
-                          <th>Schedule</th>
-                          <th class="num">P50 / P95</th>
-                          <th class="num">Last cycle</th>
-                          <th class="num">Err / Ok (1h)</th>
-                          <th class="num">Err rate</th>
-                          <th class="num">Backlog</th>
-                          <th class="num">Cons. fail</th>
-                          <th>Last success</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        @for (w of group.workers; track w.name) {
-                          <tr>
-                            <td>
-                              <span class="pill" [attr.data-status]="w.status">{{ w.status }}</span>
-                            </td>
-                            <td class="mono name" [title]="w.name">{{ w.name }}</td>
-                            <td class="mono muted">
-                              @if (w.isCompleted) {
-                                one-shot
-                              } @else {
-                                every {{ formatInterval(w.configuredIntervalSeconds) }}
-                              }
-                            </td>
-                            <td class="num mono">
-                              {{ w.cycleDurationP50Ms | number: '1.0-0' }} /
-                              <span
-                                [class.warn]="w.cycleDurationP95Ms > 1000"
-                                [class.bad]="w.cycleDurationP95Ms > 5000"
+                              </td>
+                              <td
+                                class="num mono"
+                                [class.warn]="w.backlogDepth > 100"
+                                [class.bad]="w.backlogDepth > 1000"
                               >
-                                {{ w.cycleDurationP95Ms | number: '1.0-0' }}
-                              </span>
-                            </td>
-                            <td class="num mono">
-                              {{ w.lastCycleDurationMs | number: '1.0-0' }}
-                            </td>
-                            <td class="num mono">
-                              <span [class.bad]="w.errorsLastHour > 0">{{ w.errorsLastHour }}</span>
-                              / {{ w.successesLastHour }}
-                            </td>
-                            <td
-                              class="num mono"
-                              [class.bad]="w.errorRate > 0.05"
-                              [class.warn]="w.errorRate > 0 && w.errorRate <= 0.05"
-                            >
-                              @if (w.errorsLastHour + w.successesLastHour > 0) {
-                                {{ w.errorRate * 100 | number: '1.0-1' }}%
-                              } @else {
-                                —
-                              }
-                            </td>
-                            <td
-                              class="num mono"
-                              [class.warn]="w.backlogDepth > 100"
-                              [class.bad]="w.backlogDepth > 1000"
-                            >
-                              {{ w.backlogDepth | number }}
-                            </td>
-                            <td class="num mono" [class.bad]="w.consecutiveFailures > 0">
-                              {{ w.consecutiveFailures }}
-                            </td>
-                            <td class="mono" [class.warn]="w.isStale">
-                              @if (w.lastSuccessAt) {
-                                {{ w.lastSuccessAt | relativeTime }}
-                              } @else {
-                                never
-                              }
-                            </td>
-                          </tr>
-                        }
-                      </tbody>
-                    </table>
-                  </div>
-                }
-              </div>
-            }
-          </section>
-        }
+                                {{ w.backlogDepth | number }}
+                              </td>
+                              <td class="num mono" [class.bad]="w.consecutiveFailures > 0">
+                                {{ w.consecutiveFailures }}
+                              </td>
+                              <td class="mono" [class.warn]="w.isStale && !w.isCompleted">
+                                @if (w.lastSuccessAt) {
+                                  {{ w.lastSuccessAt | relativeTime }}
+                                } @else {
+                                  never
+                                }
+                              </td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                  }
+                </div>
+              }
+            </section>
+          }
+        </div>
       } @else {
         <app-empty-state
           title="No worker data"
@@ -569,28 +645,25 @@ type ViewMode = 'cards' | 'table';
         }
       }
 
-      /* 10-card KPI strip */
+      /* KPI strip — 10 cards as 2 rows of 5; minmax(0, 1fr) keeps the columns
+         equal regardless of how long the formatted value is. */
       .kpis {
         display: grid;
-        grid-template-columns: repeat(10, 1fr);
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: var(--space-2);
-      }
-      @media (max-width: 1500px) {
-        .kpis {
-          grid-template-columns: repeat(5, 1fr);
-        }
       }
       @media (max-width: 900px) {
         .kpis {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
 
       /* 3-col chart row */
       .chart-row {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: var(--space-3);
+        align-items: start;
       }
       @media (max-width: 1100px) {
         .chart-row {
@@ -781,31 +854,54 @@ type ViewMode = 'cards' | 'table';
       table.dense .warn {
         color: #c93400;
       }
+      .categories {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--space-1) var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .categories {
+          grid-template-columns: 1fr;
+        }
+      }
       .category-section {
         display: flex;
         flex-direction: column;
         gap: var(--space-3);
+        min-width: 0;
         border: 1px solid transparent;
         border-radius: var(--radius-md);
         transition: border-color 0.15s ease;
       }
-      /* Collapsed state — keep header tight; no body height. */
+      .category-section.expanded {
+        grid-column: 1 / -1;
+        margin: var(--space-2) 0;
+      }
+      /* Collapsed state — a single 36 px header row, nothing else. */
       .category-section.collapsed {
         gap: 0;
       }
       .category-head {
         display: flex;
-        align-items: baseline;
+        align-items: center;
         gap: var(--space-3);
         flex-wrap: wrap;
+        min-height: 36px;
         cursor: pointer;
         user-select: none;
-        padding: var(--space-2) var(--space-3);
+        padding: 4px var(--space-3);
         border-radius: var(--radius-sm);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
         transition: background 0.12s ease;
       }
       .category-head:hover {
-        background: var(--bg-secondary);
+        background: var(--bg-tertiary);
+      }
+      .grid-cap-note {
+        margin: 0 0 var(--space-1);
+        padding: 0 var(--space-3);
       }
       .category-head:focus-visible {
         outline: 2px solid var(--accent);
@@ -883,10 +979,14 @@ type ViewMode = 'cards' | 'table';
          push every other category off-screen. The wrapper holds the cap so
          the inner grid keeps its native auto-fill / minmax behaviour. */
       .grid-scroll {
-        max-height: 540px;
+        position: relative;
+      }
+      /* Only the big groups (ML etc.) get the cap — a 540 px box sliced the
+         last row of a 14-card group in half, which read as a broken layout. */
+      .grid-scroll.capped {
+        max-height: 620px;
         overflow-y: auto;
         padding-right: 4px;
-        position: relative;
       }
       .grid {
         display: grid;
@@ -1004,11 +1104,13 @@ type ViewMode = 'cards' | 'table';
         font-family: 'SF Mono', 'Fira Code', monospace;
         font-size: var(--text-xs);
       }
-      .metrics-grid dd.bad {
+      .metrics-grid dd.bad,
+      .metrics-grid dd .bad {
         color: var(--loss);
       }
-      .metrics-grid dd.warn {
-        color: var(--warning);
+      .metrics-grid dd.warn,
+      .metrics-grid dd .warn {
+        color: #c93400;
       }
       .err-rate {
         opacity: 0.7;
@@ -1049,18 +1151,21 @@ type ViewMode = 'cards' | 'table';
 export class WorkerHealthPageComponent {
   private readonly workersService = inject(WorkersService);
 
+  // No catchError: the polled resource records failures in `.error()` and
+  // keeps polling. Swallowing them rendered an outage as "No worker data".
   protected readonly resource = createPolledResource(
     () =>
       this.workersService.list().pipe(
         // /health/workers returns a raw array (no ResponseData envelope) — see WorkersService.
         map((rows) => rows ?? []),
-        catchError(() => of([] as WorkerHealthDto[])),
       ),
     { intervalMs: 30_000 },
   );
 
   readonly workers = computed(() => this.resource.value() ?? []);
   readonly loading = computed(() => this.resource.loading() && this.resource.value() === null);
+  readonly topCategoryLimit = TOP_CATEGORIES;
+  readonly cardGridCap = CARD_GRID_CAP;
 
   readonly search = signal('');
   readonly statusFilter = signal<StatusFilter>('all');
@@ -1151,7 +1256,10 @@ export class WorkerHealthPageComponent {
   );
   readonly failedCount = computed(() => this.workers().filter((w) => w.status === 'Failed').length);
   readonly idleCount = computed(() => this.workers().filter((w) => w.status === 'Idle').length);
-  readonly staleCount = computed(() => this.workers().filter((w) => w.isStale).length);
+  // Completed one-shots are excluded: they have no next cycle to be late for.
+  readonly staleCount = computed(
+    () => this.workers().filter((w) => w.isStale && !w.isCompleted).length,
+  );
 
   readonly categoryCounts = computed(() => {
     const counts: Record<string, number> = {};
@@ -1208,7 +1316,7 @@ export class WorkerHealthPageComponent {
             workers: [...workers].sort(cmp),
             failedCount: workers.filter((w) => w.status === 'Failed').length,
             degradedCount: workers.filter((w) => w.status === 'Degraded').length,
-            staleCount: workers.filter((w) => w.isStale).length,
+            staleCount: workers.filter((w) => w.isStale && !w.isCompleted).length,
             avgP95,
             errorsLastHour: workers.reduce((s, w) => s + (w.errorsLastHour ?? 0), 0),
             successesLastHour: workers.reduce((s, w) => s + (w.successesLastHour ?? 0), 0),
@@ -1295,30 +1403,67 @@ export class WorkerHealthPageComponent {
     };
   });
 
+  // Largest categories, the rest folded into one "Other" row. With 40+
+  // categories on one axis ECharts dropped two of every three labels and the
+  // survivors no longer sat beside their own bars.
+  private readonly workersByCategoryRows = computed(() => {
+    const entries = Object.entries(this.categoryCounts())
+      .map(([category, total]) => ({ category, total }))
+      .sort((a, b) => b.total - a.total);
+    if (entries.length <= TOP_CATEGORIES) return entries;
+    const head = entries.slice(0, TOP_CATEGORIES - 1);
+    const tail = entries.slice(TOP_CATEGORIES - 1);
+    return [
+      ...head,
+      {
+        category: `Other (${tail.length} more)`,
+        total: tail.reduce((s, r) => s + r.total, 0),
+      },
+    ];
+  });
+
+  readonly categoryChartSubtitle = computed(() => {
+    const all = this.categories().length;
+    const shown = this.workersByCategoryRows().length;
+    const n = this.workers().length;
+    if (all <= shown) return `Composition of the ${n}-worker fleet · ${all} categories`;
+    return `Largest ${shown - 1} of ${all} categories · remainder grouped as Other · ${n} workers`;
+  });
+
   readonly workersByCategoryOptions = computed<EChartsOption>(() => {
-    const counts = this.categoryCounts();
-    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-    if (entries.length === 0) return {};
+    const rows = this.workersByCategoryRows();
+    if (rows.length === 0) return {};
     return {
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      grid: { top: 10, right: 30, bottom: 30, left: 100 },
+      grid: { top: 10, right: 36, bottom: 30, left: 130 },
       xAxis: {
         type: 'value',
+        minInterval: 1,
         axisLabel: { fontSize: 10, color: '#6E6E73' },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
       yAxis: {
         type: 'category',
-        data: entries.map(([cat]) => cat).reverse(),
-        axisLabel: { fontSize: 11, color: '#6E6E73' },
+        data: rows.map((r) => r.category).reverse(),
+        // Every row keeps its label — that is the point of capping the rows.
+        axisLabel: {
+          fontSize: 11,
+          color: '#6E6E73',
+          interval: 0,
+          width: 120,
+          overflow: 'truncate',
+        },
       },
       series: [
         {
           type: 'bar',
-          data: entries
-            .map(([, value]) => ({
-              value,
-              itemStyle: { color: '#0071E3', borderRadius: [0, 4, 4, 0] },
+          data: rows
+            .map((r) => ({
+              value: r.total,
+              itemStyle: {
+                color: r.category.startsWith('Other (') ? '#8E8E93' : '#0071E3',
+                borderRadius: [0, 4, 4, 0],
+              },
             }))
             .reverse(),
           barWidth: 12,
@@ -1338,9 +1483,13 @@ export class WorkerHealthPageComponent {
       groups[cat].sum += w.cycleDurationP95Ms;
       groups[cat].count++;
     }
+    // Slowest categories only; the long tail of sub-100 ms categories is what
+    // piled forty "NN ms" labels into a 40 px strip. The value is on hover;
+    // bar length and colour band carry the reading.
     const rows = Object.entries(groups)
       .map(([cat, g]) => ({ cat, avg: g.count > 0 ? g.sum / g.count : 0 }))
-      .sort((a, b) => b.avg - a.avg);
+      .sort((a, b) => b.avg - a.avg)
+      .slice(0, TOP_CATEGORIES);
     if (rows.length === 0) return {};
     return {
       tooltip: {
@@ -1348,10 +1497,10 @@ export class WorkerHealthPageComponent {
         axisPointer: { type: 'shadow' },
         formatter: (params: any) => {
           const p = Array.isArray(params) ? params[0] : params;
-          return `${p.name}<br/>Avg P95: ${Math.round(p.value)} ms`;
+          return `${p.name}<br/>Avg P95: ${Math.round(p.value).toLocaleString()} ms`;
         },
       },
-      grid: { top: 10, right: 60, bottom: 30, left: 100 },
+      grid: { top: 10, right: 24, bottom: 30, left: 130 },
       xAxis: {
         type: 'value',
         name: 'ms',
@@ -1362,7 +1511,13 @@ export class WorkerHealthPageComponent {
       yAxis: {
         type: 'category',
         data: rows.map((r) => r.cat).reverse(),
-        axisLabel: { fontSize: 11, color: '#6E6E73' },
+        axisLabel: {
+          fontSize: 11,
+          color: '#6E6E73',
+          interval: 0,
+          width: 120,
+          overflow: 'truncate',
+        },
       },
       series: [
         {
@@ -1377,13 +1532,7 @@ export class WorkerHealthPageComponent {
             }))
             .reverse(),
           barWidth: 12,
-          label: {
-            show: true,
-            position: 'right',
-            fontSize: 10,
-            color: '#6E6E73',
-            formatter: '{c} ms',
-          },
+          label: { show: false },
         },
       ],
     };

@@ -19,16 +19,17 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
+import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 /**
  * Operator-facing dead-letter triage console — same dense layout as
  * /alert-triage, /positions/deltas, and /trade-signals/feedback.
  *
- * The page structure stays visible at zero count (page-empty is the
- * baseline state, not an exception) so the operator can see "queue
- * is quiet" with confidence rather than wondering if the view
- * actually fetched.
+ * Zero count is the baseline state, not an exception, so it gets a
+ * single "queue is quiet" card rather than eight zero tiles, a
+ * four-column insights block and two empty tables. The full layout
+ * only materialises once the window actually holds a record.
  *
  * Engine: POST /dead-letter/list (filter: handlerName, eventType,
  * isResolved, from, to). Replay + resolve actions are inline per row.
@@ -63,6 +64,14 @@ interface ParsedRow extends DeadLetterDto {
   parsedError: string;
 }
 
+// Same locale + separator rules as the `| number` pipe so the strip and the
+// tiles never disagree on how a figure is written.
+const AGE_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+
 @Component({
   selector: 'app-dead-letter-page',
   standalone: true,
@@ -75,6 +84,7 @@ interface ParsedRow extends DeadLetterDto {
     MetricCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
+    EmptyStateComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -157,63 +167,72 @@ interface ParsedRow extends DeadLetterDto {
           message="Engine returned an error. The dead-letter list endpoint may be unhealthy — check System Health."
           (retry)="resource.refresh()"
         />
+      } @else if (totalCount() === 0) {
+        <!-- One compact state instead of eight zero tiles + empty tables. -->
+        <app-empty-state
+          title="Queue is quiet"
+          [description]="
+            'No dead letters in the ' +
+            windowLabel() +
+            '. The engine is processing every integration event cleanly — widen the window to look further back.'
+          "
+        />
       } @else {
-        <!-- KPI strip — always rendered, zero counts visible -->
+        <!-- Primary counts: four equal tiles, one-line labels. -->
         <div class="kpi-strip">
           <app-metric-card
             label="Total"
             [value]="totalCount()"
             format="number"
-            [dotColor]="totalCount() > 0 ? '#FF9500' : '#34C759'"
+            dotColor="var(--warning)"
           />
           <app-metric-card
             label="Unresolved"
             [value]="unresolvedCount()"
             format="number"
-            [dotColor]="unresolvedCount() > 0 ? '#FF3B30' : '#34C759'"
+            [dotColor]="unresolvedCount() > 0 ? 'var(--loss)' : 'var(--text-tertiary)'"
           />
           <app-metric-card
             label="Resolved"
             [value]="resolvedCount()"
             format="number"
-            dotColor="#34C759"
+            [dotColor]="resolvedCount() > 0 ? 'var(--profit)' : 'var(--text-tertiary)'"
           />
           <app-metric-card
             label="Event types"
             [value]="typeBuckets().length"
             format="number"
-            dotColor="#AF52DE"
+            dotColor="var(--text-tertiary)"
           />
-          <app-metric-card
-            label="Avg attempts"
-            [value]="avgAttempts()"
-            format="number"
-            dotColor="#0071E3"
-          />
-          <app-metric-card
-            label="Max attempts"
-            [value]="maxAttempts()"
-            format="number"
-            [dotColor]="maxAttempts() >= 5 ? '#FF3B30' : maxAttempts() >= 3 ? '#FF9500' : '#34C759'"
-          />
-          <app-metric-card
-            label="Oldest unres (min)"
-            [value]="oldestUnresolvedMinutes()"
-            format="number"
-            [dotColor]="
-              oldestUnresolvedMinutes() >= 60 * 24
-                ? '#FF3B30'
-                : oldestUnresolvedMinutes() >= 60
-                  ? '#FF9500'
-                  : '#34C759'
-            "
-          />
-          <app-metric-card
-            label="Newest (min)"
-            [value]="newestMinutes()"
-            format="number"
-            dotColor="#AF52DE"
-          />
+        </div>
+
+        <!-- Secondary stats demoted to a strip. app-metric-card cannot
+             render a unit next to its value, so the two durations live
+             here where "12 min" / "3.2 h" can be shown as text. -->
+        <div class="stat-strip">
+          <span class="stat">
+            <strong>{{ avgAttempts() | number: '1.1-1' }}</strong> avg attempts
+          </span>
+          <span
+            class="stat"
+            [class.bad]="maxAttempts() >= 5"
+            [class.warn]="maxAttempts() >= 3 && maxAttempts() < 5"
+          >
+            <strong>{{ maxAttempts() | number }}</strong> max attempts
+          </span>
+          <span
+            class="stat"
+            [class.bad]="oldestUnresolvedMinutes() >= 60 * 24"
+            [class.warn]="oldestUnresolvedMinutes() >= 60 && oldestUnresolvedMinutes() < 60 * 24"
+          >
+            <strong>{{
+              unresolvedCount() > 0 ? formatAge(oldestUnresolvedMinutes()) : '—'
+            }}</strong>
+            oldest unresolved
+          </span>
+          <span class="stat">
+            <strong>{{ formatAge(newestMinutes()) }}</strong> since newest
+          </span>
         </div>
 
         <!-- Insights row -->
@@ -221,7 +240,7 @@ interface ParsedRow extends DeadLetterDto {
           <header class="insights-head">
             <h3>Queue insights</h3>
             <span class="muted">
-              {{ filteredRows().length }} matching · last {{ windowHours() }}h
+              {{ filteredRows().length | number }} matching · {{ windowLabel() }}
             </span>
           </header>
           <div class="insights-grid">
@@ -293,7 +312,7 @@ interface ParsedRow extends DeadLetterDto {
                           [style.width.%]="b.share * 100"
                         ></span>
                       </span>
-                      <span class="mono num">{{ b.count }}</span>
+                      <span class="mono num">{{ b.count | number }}</span>
                       <span class="muted small">{{ b.share * 100 | number: '1.0-0' }}%</span>
                     </li>
                   }
@@ -316,7 +335,7 @@ interface ParsedRow extends DeadLetterDto {
                       <span class="bd-bar">
                         <span class="bd-fill amber" [style.width.%]="b.share * 100"></span>
                       </span>
-                      <span class="mono num">{{ b.count }}</span>
+                      <span class="mono num">{{ b.count | number }}</span>
                       <span class="muted small">{{ b.share * 100 | number: '1.0-0' }}%</span>
                     </li>
                   }
@@ -330,7 +349,7 @@ interface ParsedRow extends DeadLetterDto {
         <section class="data-table-card">
           <header class="board-head">
             <h3>By event type</h3>
-            <span class="muted">{{ typeRollups().length }} touched</span>
+            <span class="muted">{{ typeRollups().length | number }} touched</span>
           </header>
           <table class="board-table">
             <thead>
@@ -352,12 +371,12 @@ interface ParsedRow extends DeadLetterDto {
                 @for (r of typeRollups(); track r.eventType) {
                   <tr [class.row-warn]="r.unresolved > 0">
                     <td class="mono small">{{ r.eventType }}</td>
-                    <td class="num">{{ r.total }}</td>
+                    <td class="num">{{ r.total | number }}</td>
                     <td class="num" [class.sev-warn]="r.unresolved > 0">
-                      {{ r.unresolved }}
+                      {{ r.unresolved | number }}
                     </td>
                     <td class="num" [class.sev-warn]="r.maxAttempts >= 5">
-                      {{ r.maxAttempts }}
+                      {{ r.maxAttempts | number }}
                     </td>
                     <td class="time">
                       @if (r.oldest) {
@@ -384,7 +403,9 @@ interface ParsedRow extends DeadLetterDto {
         <section class="data-table-card">
           <header class="board-head">
             <h3>Queue</h3>
-            <span class="muted">{{ filteredRows().length }} shown · click row for payload</span>
+            <span class="muted"
+              >{{ filteredRows().length | number }} shown · click row for payload</span
+            >
           </header>
           <table class="board-table">
             <thead>
@@ -420,7 +441,9 @@ interface ParsedRow extends DeadLetterDto {
                         {{ a.isResolved ? 'Resolved' : 'Unresolved' }}
                       </span>
                     </td>
-                    <td class="num" [class.sev-warn]="a.attemptCount >= 5">{{ a.attemptCount }}</td>
+                    <td class="num" [class.sev-warn]="a.attemptCount >= 5">
+                      {{ a.attemptCount | number }}
+                    </td>
                     <td class="reason small">{{ a.parsedError }}</td>
                     <td class="time" [title]="a.createdAt">
                       {{ a.createdAt | relativeTime }}
@@ -610,21 +633,60 @@ interface ParsedRow extends DeadLetterDto {
         border-left: none;
       }
 
-      /* ── KPI strip ── */
+      /* ── KPI strip ──
+         Four equal tiles. Eight-across wrapped every label onto two lines
+         at laptop widths; four gives each label a full line. align-items:
+         start keeps a short tile from being stretched to its neighbour. */
       .kpi-strip {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: var(--space-2);
-      }
-      @media (max-width: 1400px) {
-        .kpi-strip {
-          grid-template-columns: repeat(4, 1fr);
-        }
+        align-items: start;
       }
       @media (max-width: 720px) {
         .kpi-strip {
           grid-template-columns: repeat(2, 1fr);
         }
+      }
+
+      /* ── Secondary stat strip ──
+         Same visual as the engine-config page's stats strip so the two
+         consoles read as one system. Colour is applied only when a value
+         crosses a threshold; zero and healthy values stay neutral. */
+      .stat-strip {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: var(--space-3);
+        padding: 6px var(--space-3);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .stat {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 5px;
+        white-space: nowrap;
+      }
+      .stat strong {
+        color: var(--text-primary);
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+        font-size: 13px;
+      }
+      .stat.warn strong {
+        color: var(--warning);
+      }
+      .stat.bad strong {
+        color: var(--loss);
+      }
+      .stat + .stat::before {
+        content: '·';
+        margin-right: var(--space-3);
+        color: var(--text-tertiary);
       }
 
       /* ── Insights ── */
@@ -1085,6 +1147,30 @@ export class DeadLetterPageComponent {
   protected readonly loading = computed(
     () => this.resource.loading() && (this.resource.value() ?? []).length === 0,
   );
+
+  /**
+   * Human label for the active window. The presets are stored in hours,
+   * but "last 168h" is a computer's way of saying "last 7 days"; anything
+   * from two days up reads as days.
+   */
+  protected readonly windowLabel = computed(() => {
+    const h = this.windowHours();
+    if (h < 48) return `last ${h}h`;
+    const days = Math.round(h / 24);
+    return `last ${days} day${days === 1 ? '' : 's'}`;
+  });
+
+  /**
+   * Age in minutes → "12 min" / "3.2 h" / "2.1 d". Always carries a unit;
+   * the old "(min)" tile suffix silently became meaningless once a value
+   * exceeded a couple of hours.
+   */
+  protected formatAge(minutes: number): string {
+    if (minutes < 1) return '<1 min';
+    if (minutes < 60) return `${AGE_FORMAT.format(Math.floor(minutes))} min`;
+    if (minutes < 60 * 48) return `${AGE_FORMAT_1DP.format(minutes / 60)} h`;
+    return `${AGE_FORMAT_1DP.format(minutes / (60 * 24))} d`;
+  }
 
   // ── KPI metrics ────────────────────────────────────────────────────
 

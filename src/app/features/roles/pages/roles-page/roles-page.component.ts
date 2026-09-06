@@ -11,6 +11,15 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 
 type PermissionGroup = { category: string; permissions: PermissionDto[] };
 
+/**
+ * The right-hand panel is a single editor with three modes. The create form
+ * used to live under the role list in the left column, which pushed the
+ * "Create role" button and half of its permission grid below the fold while
+ * the right column showed a 230px "Select a role" placeholder beside 1,400px
+ * of empty space. One panel, one place to look.
+ */
+type EditorMode = 'idle' | 'edit' | 'create';
+
 @Component({
   selector: 'app-roles-page',
   standalone: true,
@@ -21,109 +30,60 @@ type PermissionGroup = { category: string; permissions: PermissionDto[] };
       <app-page-header
         title="Roles & Permissions"
         subtitle="Define roles and the permission keys they grant. System roles are code-managed — their permissions can't be edited here."
-      />
+      >
+        <button type="button" class="btn btn-secondary" (click)="reload()" [disabled]="loading()">
+          {{ loading() ? 'Loading…' : 'Refresh' }}
+        </button>
+        <button type="button" class="btn btn-primary" (click)="startCreate()">New role</button>
+      </app-page-header>
 
       <div class="layout">
-        <!-- Left: role list + new-role form -->
-        <div class="col">
-          <section class="card">
-            <header class="card-head">
-              <h3>Roles</h3>
-              <span class="muted">{{ roles().length }} total</span>
-              <button
-                type="button"
-                class="btn btn-ghost btn-xs reload"
-                (click)="reload()"
-                [disabled]="loading()"
-              >
-                {{ loading() ? 'Loading…' : 'Refresh' }}
-              </button>
-            </header>
+        <!-- Left: role list -->
+        <section class="card">
+          <header class="card-head">
+            <h3>Roles</h3>
+            <span class="muted">{{ roles().length }} total</span>
+          </header>
 
-            @if (loading() && roles().length === 0) {
-              <p class="muted small pad">Loading…</p>
-            } @else if (roles().length === 0) {
-              <app-empty-state title="No roles" description="Create a role using the form below." />
-            } @else {
-              <ul class="role-list">
-                @for (r of roles(); track r.id) {
-                  <li class="role-row" [class.selected]="selectedId() === r.id" (click)="select(r)">
-                    <div class="role-main">
-                      <span class="role-name">{{ r.name }}</span>
-                      @if (r.isSystem) {
-                        <span class="chip system">system</span>
-                      }
-                    </div>
-                    <p class="role-desc muted small">{{ r.description || 'No description' }}</p>
-                    <div class="role-meta muted small">
-                      {{ r.permissionKeys.length }} permissions · {{ r.userCount }} users
-                    </div>
-                  </li>
-                }
-              </ul>
-            }
-          </section>
-
-          <section class="card">
-            <header class="card-head">
-              <h3>New role</h3>
-            </header>
-            <form class="form" (ngSubmit)="createRole()">
-              <label class="field">
-                <span class="label">Name</span>
-                <input
-                  class="input"
-                  [(ngModel)]="newName"
-                  name="newName"
-                  placeholder="e.g. analyst-readonly"
-                  required
-                />
-              </label>
-              <label class="field">
-                <span class="label">Description</span>
-                <input
-                  class="input"
-                  [(ngModel)]="newDescription"
-                  name="newDescription"
-                  placeholder="What this role is for"
-                />
-              </label>
-              <fieldset class="matrix">
-                <legend class="label">Permissions</legend>
-                @for (g of permissionGroups(); track g.category) {
-                  <div class="matrix-group">
-                    <span class="matrix-cat">{{ g.category }}</span>
-                    <div class="matrix-checks">
-                      @for (p of g.permissions; track p.key) {
-                        <label class="check" [title]="p.description">
-                          <input
-                            type="checkbox"
-                            [checked]="newPermissions().has(p.key)"
-                            (change)="toggleNewPermission(p.key)"
-                          />
-                          <span>{{ p.key }}</span>
-                        </label>
-                      }
-                    </div>
-                  </div>
-                }
-              </fieldset>
-              <div class="form-actions">
-                <button
-                  type="submit"
-                  class="btn btn-primary"
-                  [disabled]="createPending() || !newName.trim()"
+          @if (loading() && roles().length === 0) {
+            <p class="muted small pad">Loading…</p>
+          } @else if (roles().length === 0) {
+            <app-empty-state
+              title="No roles"
+              description="Create the first role to start granting permissions."
+              actionLabel="New role"
+              (actionClick)="startCreate()"
+            />
+          } @else {
+            <ul class="role-list">
+              @for (r of roles(); track r.id) {
+                <li
+                  class="role-row"
+                  [class.selected]="mode() === 'edit' && selectedId() === r.id"
+                  (click)="select(r)"
                 >
-                  {{ createPending() ? 'Creating…' : 'Create role' }}
-                </button>
-              </div>
-            </form>
-          </section>
-        </div>
+                  <div class="role-main">
+                    <span class="role-name">{{ r.name }}</span>
+                    @if (r.isSystem) {
+                      <span class="chip system">system</span>
+                    }
+                  </div>
+                  <p class="role-desc muted small">{{ r.description || 'No description' }}</p>
+                  <div class="role-meta muted small">
+                    {{ r.permissionKeys.length }} permission{{
+                      r.permissionKeys.length === 1 ? '' : 's'
+                    }}
+                    · {{ r.userCount }} user{{ r.userCount === 1 ? '' : 's' }}
+                  </div>
+                </li>
+              }
+            </ul>
+          }
+        </section>
 
-        <!-- Right: role editor -->
+        <!-- Right: editor (edit / create / idle) -->
         <section class="card editor">
-          @if (selectedRole(); as role) {
+          @if (mode() === 'edit' && selectedRole(); as role) {
             <header class="card-head">
               <h3>Edit · {{ role.name }}</h3>
               @if (role.isSystem) {
@@ -149,7 +109,10 @@ type PermissionGroup = { category: string; permissions: PermissionDto[] };
               }
 
               <fieldset class="matrix" [disabled]="role.isSystem">
-                <legend class="label">Permissions</legend>
+                <legend class="label">
+                  Permissions
+                  <span class="muted">· {{ editPermissions().size }} selected</span>
+                </legend>
                 @for (g of permissionGroups(); track g.category) {
                   <div class="matrix-group">
                     <span class="matrix-cat">{{ g.category }}</span>
@@ -192,11 +155,80 @@ type PermissionGroup = { category: string; permissions: PermissionDto[] };
                 </button>
               </div>
             </div>
+          } @else if (mode() === 'create') {
+            <header class="card-head">
+              <h3>New role</h3>
+              <button type="button" class="link-btn close" (click)="clearSelection()">
+                Cancel
+              </button>
+            </header>
+            <form class="editor-body" (ngSubmit)="createRole()">
+              <div class="field-row">
+                <label class="field">
+                  <span class="label">Name</span>
+                  <input
+                    class="input"
+                    [(ngModel)]="newName"
+                    name="newName"
+                    placeholder="e.g. analyst-readonly"
+                    required
+                  />
+                </label>
+                <label class="field">
+                  <span class="label">Description</span>
+                  <input
+                    class="input"
+                    [(ngModel)]="newDescription"
+                    name="newDescription"
+                    placeholder="What this role is for"
+                  />
+                </label>
+              </div>
+              <fieldset class="matrix">
+                <legend class="label">
+                  Permissions
+                  <span class="muted">· {{ newPermissions().size }} selected</span>
+                </legend>
+                @for (g of permissionGroups(); track g.category) {
+                  <div class="matrix-group">
+                    <span class="matrix-cat">{{ g.category }}</span>
+                    <div class="matrix-checks">
+                      @for (p of g.permissions; track p.key) {
+                        <label class="check" [title]="p.description">
+                          <input
+                            type="checkbox"
+                            [checked]="newPermissions().has(p.key)"
+                            (change)="toggleNewPermission(p.key)"
+                          />
+                          <span>{{ p.key }}</span>
+                        </label>
+                      }
+                    </div>
+                  </div>
+                }
+              </fieldset>
+              <div class="editor-actions">
+                <span class="spacer"></span>
+                <button
+                  type="submit"
+                  class="btn btn-primary"
+                  [disabled]="createPending() || !newName.trim()"
+                >
+                  {{ createPending() ? 'Creating…' : 'Create role' }}
+                </button>
+              </div>
+            </form>
           } @else {
-            <app-empty-state
-              title="Select a role"
-              description="Pick a role from the list to view and edit its permission matrix."
-            />
+            <div class="idle">
+              <p class="idle-title">Select a role</p>
+              <p class="muted small">
+                Pick a role from the list to view and edit its permission matrix, or create a new
+                one.
+              </p>
+              <button type="button" class="btn btn-secondary" (click)="startCreate()">
+                New role
+              </button>
+            </div>
           }
         </section>
       </div>
@@ -212,7 +244,7 @@ type PermissionGroup = { category: string; permissions: PermissionDto[] };
       }
       .layout {
         display: grid;
-        grid-template-columns: 1fr 1.4fr;
+        grid-template-columns: minmax(280px, 1fr) 2fr;
         gap: var(--space-3);
         align-items: start;
       }
@@ -220,11 +252,6 @@ type PermissionGroup = { category: string; permissions: PermissionDto[] };
         .layout {
           grid-template-columns: 1fr;
         }
-      }
-      .col {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
       }
       .card {
         background: var(--bg-secondary);
@@ -244,12 +271,11 @@ type PermissionGroup = { category: string; permissions: PermissionDto[] };
         font-size: var(--text-sm);
         font-weight: var(--font-semibold);
       }
-      .card-head .reload,
       .card-head .close {
         margin-left: auto;
       }
       .muted {
-        color: var(--text-tertiary);
+        color: var(--text-secondary);
       }
       .small {
         font-size: var(--text-xs);
@@ -258,13 +284,15 @@ type PermissionGroup = { category: string; permissions: PermissionDto[] };
         padding: var(--space-3) var(--space-4);
       }
 
-      /* Role list */
+      /* Role list — no max-height. The old 420px cap cut the seventh role off
+         at the card edge with no scrollbar (macOS overlay scrollbars are
+         invisible until you scroll), so "7 total" showed six. The list is
+         short and the layout is align-items:start, so let it be as tall as
+         it needs. */
       .role-list {
         list-style: none;
         margin: 0;
         padding: 0;
-        max-height: 420px;
-        overflow-y: auto;
       }
       .role-row {
         padding: var(--space-2) var(--space-4);
@@ -299,18 +327,28 @@ type PermissionGroup = { category: string; permissions: PermissionDto[] };
         font-variant-numeric: tabular-nums;
       }
 
-      /* Forms */
-      .form,
+      /* Editor */
       .editor-body {
         display: flex;
         flex-direction: column;
         gap: var(--space-3);
         padding: var(--space-3) var(--space-4);
       }
+      .field-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-3);
+      }
+      @media (max-width: 720px) {
+        .field-row {
+          grid-template-columns: 1fr;
+        }
+      }
       .field {
         display: flex;
         flex-direction: column;
         gap: var(--space-1);
+        min-width: 0;
       }
       .label {
         font-size: var(--text-xs);
@@ -325,9 +363,29 @@ type PermissionGroup = { category: string; permissions: PermissionDto[] };
         color: var(--text-primary);
         font-size: var(--text-sm);
         outline: none;
+        width: 100%;
+        box-sizing: border-box;
       }
       .input:focus {
         border-color: var(--accent);
+      }
+      .idle {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-2);
+        padding: var(--space-5) var(--space-4);
+      }
+      .idle p {
+        margin: 0;
+      }
+      .idle-title {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      .idle .btn {
+        margin-top: var(--space-2);
       }
 
       /* Permission matrix */
@@ -359,9 +417,9 @@ type PermissionGroup = { category: string; permissions: PermissionDto[] };
         color: var(--text-secondary);
       }
       .matrix-checks {
-        display: flex;
-        flex-wrap: wrap;
-        gap: var(--space-2) var(--space-4);
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: var(--space-1) var(--space-3);
       }
       .check {
         display: flex;
@@ -370,6 +428,12 @@ type PermissionGroup = { category: string; permissions: PermissionDto[] };
         font-size: var(--text-xs);
         color: var(--text-primary);
         cursor: pointer;
+        min-width: 0;
+      }
+      .check span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .note {
         margin: 0;
@@ -380,7 +444,6 @@ type PermissionGroup = { category: string; permissions: PermissionDto[] };
         padding: var(--space-2) var(--space-3);
       }
 
-      .form-actions,
       .editor-actions {
         display: flex;
         align-items: center;
@@ -399,36 +462,28 @@ type PermissionGroup = { category: string; permissions: PermissionDto[] };
         font-weight: var(--font-medium);
         border: 1px solid transparent;
         cursor: pointer;
+        font-family: inherit;
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
       }
       .btn-primary {
         background: var(--accent);
         color: #fff;
       }
-      .btn-primary:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-      .btn-ghost {
+      .btn-secondary {
         background: transparent;
-        color: var(--text-secondary);
+        color: var(--text-primary);
         border-color: var(--border);
       }
-      .btn-ghost:hover:not(:disabled) {
+      .btn-secondary:hover:not(:disabled) {
         background: var(--bg-tertiary);
-        color: var(--text-primary);
       }
       .btn-danger {
         background: transparent;
         color: var(--loss);
         border-color: var(--loss);
-      }
-      .btn-danger:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-      .btn-xs {
-        padding: 4px 10px;
-        font-size: var(--text-xs);
       }
       .link-btn {
         background: transparent;
@@ -438,6 +493,7 @@ type PermissionGroup = { category: string; permissions: PermissionDto[] };
         font-weight: var(--font-medium);
         color: var(--accent);
         cursor: pointer;
+        font-family: inherit;
       }
       .link-btn:hover {
         text-decoration: underline;
@@ -471,6 +527,7 @@ export class RolesPageComponent {
   readonly createPending = signal(false);
   readonly savePending = signal(false);
 
+  readonly mode = signal<EditorMode>('idle');
   readonly selectedId = signal<number | null>(null);
   readonly selectedRole = computed(
     () => this.roles().find((r) => r.id === this.selectedId()) ?? null,
@@ -522,18 +579,25 @@ export class RolesPageComponent {
         this.loading.set(false);
         // Re-sync the open editor with fresh data.
         const sel = this.selectedRole();
-        if (sel) this.hydrateEditor(sel);
+        if (sel && this.mode() === 'edit') this.hydrateEditor(sel);
       });
   }
 
   // ── Selection / editor ───────────────────────────────────────────────────
   select(role: RoleDto): void {
     this.selectedId.set(role.id);
+    this.mode.set('edit');
     this.hydrateEditor(role);
+  }
+
+  startCreate(): void {
+    this.selectedId.set(null);
+    this.mode.set('create');
   }
 
   clearSelection(): void {
     this.selectedId.set(null);
+    this.mode.set('idle');
   }
 
   private hydrateEditor(role: RoleDto): void {

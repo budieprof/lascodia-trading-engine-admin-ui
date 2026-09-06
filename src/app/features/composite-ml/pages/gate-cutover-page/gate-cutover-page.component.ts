@@ -1,7 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
 import { catchError, finalize, map, of } from 'rxjs';
 
 import { CompositeMLService } from '@core/services/composite-ml.service';
@@ -14,6 +13,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 
 interface PendingFlip {
   row: GateCutoverStatusRowDto;
@@ -29,8 +29,8 @@ const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
   imports: [
     DatePipe,
     FormsModule,
-    RouterLink,
     PageHeaderComponent,
+    CompositeMlNavComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
@@ -41,17 +41,12 @@ const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
       <app-page-header
         title="CompositeML — Gate Cutover"
         subtitle="Flip cold-start catalogue layers between ledger (cutover) and legacy idiom (default)"
-      >
-        <a routerLink="/composite-ml" class="btn btn-secondary">← Active Policies</a>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
-      </app-page-header>
+      />
+      <app-composite-ml-nav
+        [showRefresh]="true"
+        [refreshing]="resource.loading()"
+        (refresh)="resource.refresh()"
+      />
 
       @if (loading()) {
         <app-card-skeleton [lines]="6" />
@@ -95,10 +90,10 @@ const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
               <tbody>
                 @for (row of rows(); track row.layerKey) {
                   <tr [class.on-ledger]="row.returnLedgerCount">
-                    <td class="mono">{{ row.layerKey }}</td>
-                    <td class="mono small">{{ row.coveredKnob }}</td>
-                    <td class="desc">{{ row.description }}</td>
-                    <td>
+                    <td class="mono key-cell">{{ row.layerKey }}</td>
+                    <td class="mono small knob-cell">{{ row.coveredKnob }}</td>
+                    <td class="desc" [title]="row.description">{{ row.description }}</td>
+                    <td class="state-cell">
                       @if (row.returnLedgerCount) {
                         <span class="state-pill ledger">ledger</span>
                       } @else {
@@ -114,7 +109,7 @@ const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
                         <span class="muted">never</span>
                       }
                     </td>
-                    <td>
+                    <td class="action-cell">
                       <button
                         type="button"
                         class="flip-btn"
@@ -222,8 +217,14 @@ const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
         box-shadow: var(--shadow-sm);
         overflow-x: auto;
       }
+      /* Fixed layout with the description as the only elastic column. With
+         auto layout the unbreakable mono layer keys claimed the width, the
+         description squeezed to nothing and the flip button fell off the
+         card edge — "FLI" / "ne…" on every row. */
       .cutover-table {
         width: 100%;
+        min-width: 900px;
+        table-layout: fixed;
         border-collapse: collapse;
         font-size: var(--text-sm);
       }
@@ -240,12 +241,40 @@ const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
         font-size: var(--text-xs);
         text-transform: uppercase;
         letter-spacing: 0.04em;
+        white-space: nowrap;
       }
       .cutover-table tr.on-ledger {
         background: rgba(52, 199, 89, 0.04);
       }
+      .cutover-table th:nth-child(1) {
+        width: 22%;
+      }
+      .cutover-table th:nth-child(2) {
+        width: 16%;
+      }
+      .cutover-table th:nth-child(4) {
+        width: 120px;
+      }
+      .cutover-table th:nth-child(5) {
+        width: 130px;
+      }
+      .cutover-table th:nth-child(6) {
+        width: 150px;
+      }
+      .key-cell,
+      .knob-cell {
+        overflow-wrap: anywhere;
+        line-height: 1.35;
+      }
       .desc {
         color: var(--text-secondary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .state-cell,
+      .action-cell {
+        white-space: nowrap;
       }
       .mono {
         font-family: var(--font-mono);

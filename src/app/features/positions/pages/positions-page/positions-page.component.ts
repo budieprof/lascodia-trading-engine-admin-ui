@@ -148,15 +148,15 @@ import {
               <div class="open-insights">
                 <app-chart-card
                   title="Exposure by symbol"
-                  subtitle="Open lots, sorted"
+                  subtitle="Open lots per symbol, every open symbol shown"
                   [options]="exposureBySymbolChart()"
-                  height="180px"
+                  [height]="exposureChartHeight()"
                 />
                 <app-chart-card
                   title="Long vs Short"
                   subtitle="By open lots and unrealized P&L"
                   [options]="longShortChart()"
-                  height="180px"
+                  height="140px"
                 />
               </div>
             }
@@ -262,6 +262,18 @@ import {
                 >
                   Losses <span class="chip-count">{{ closedLossesCount() }}</span>
                 </button>
+                @if (closedFlatCount() > 0) {
+                  <button
+                    type="button"
+                    role="tab"
+                    class="chip"
+                    [class.active]="closedFilter() === 'flat'"
+                    (click)="closedFilter.set('flat')"
+                    title="Closed at exactly 0.00 — counted as neither a win nor a loss"
+                  >
+                    Breakeven <span class="chip-count">{{ closedFlatCount() }}</span>
+                  </button>
+                }
                 <button
                   type="button"
                   role="tab"
@@ -293,7 +305,9 @@ import {
                     <tr>
                       <th>Symbol</th>
                       <th class="num">Trades</th>
-                      <th class="num">Wins / Losses</th>
+                      <th class="num" title="Wins / losses · breakeven (closed at 0.00)">
+                        W / L · BE
+                      </th>
                       <th class="num">Win %</th>
                       <th class="num">Net P&L</th>
                       <th class="num">Avg P&L</th>
@@ -311,6 +325,9 @@ import {
                           <span class="profit">{{ s.wins }}</span>
                           <span class="muted"> / </span>
                           <span class="loss">{{ s.losses }}</span>
+                          @if (s.flat > 0) {
+                            <span class="muted"> · {{ s.flat }}</span>
+                          }
                         </td>
                         <td
                           class="num mono"
@@ -564,21 +581,20 @@ import {
         padding: var(--space-2) 0;
       }
 
-      .metrics-strip {
+      /* Tile rows wrap via auto-fit instead of forcing eight (or nine) fixed
+         columns past the viewport; align-items:start stops short tiles from
+         stretching to the tallest one. */
+      .metrics-strip,
+      .closed-stats,
+      .analytics-kpis {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
         gap: var(--space-3);
+        margin-bottom: var(--space-3);
+        align-items: start;
+      }
+      .metrics-strip {
         margin-bottom: var(--space-4);
-      }
-      @media (max-width: 1400px) {
-        .metrics-strip {
-          grid-template-columns: repeat(4, 1fr);
-        }
-      }
-      @media (max-width: 720px) {
-        .metrics-strip {
-          grid-template-columns: repeat(2, 1fr);
-        }
       }
 
       .open-insights {
@@ -586,27 +602,11 @@ import {
         grid-template-columns: 1fr 1fr;
         gap: var(--space-4);
         margin-bottom: var(--space-3);
+        align-items: start;
       }
       @media (max-width: 1200px) {
         .open-insights {
           grid-template-columns: 1fr;
-        }
-      }
-
-      .closed-stats {
-        display: grid;
-        grid-template-columns: repeat(8, 1fr);
-        gap: var(--space-3);
-        margin-bottom: var(--space-3);
-      }
-      @media (max-width: 1400px) {
-        .closed-stats {
-          grid-template-columns: repeat(4, 1fr);
-        }
-      }
-      @media (max-width: 720px) {
-        .closed-stats {
-          grid-template-columns: repeat(2, 1fr);
         }
       }
 
@@ -678,23 +678,6 @@ import {
       @media (max-width: 1024px) {
         .charts-grid {
           grid-template-columns: 1fr;
-        }
-      }
-
-      .analytics-kpis {
-        display: grid;
-        grid-template-columns: repeat(8, 1fr);
-        gap: var(--space-3);
-        margin-bottom: var(--space-3);
-      }
-      @media (max-width: 1400px) {
-        .analytics-kpis {
-          grid-template-columns: repeat(4, 1fr);
-        }
-      }
-      @media (max-width: 720px) {
-        .analytics-kpis {
-          grid-template-columns: repeat(2, 1fr);
         }
       }
 
@@ -1157,13 +1140,8 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       width: 110,
       valueFormatter: (p: any) => this.relativeTimePipe.transform(p.value),
     },
-    {
-      field: 'status',
-      headerName: 'Status',
-      width: 95,
-      cellRenderer: StatusPillCellComponent,
-      cellRendererParams: { label: 'Position status' },
-    },
+    // No Status column here: every row on the Open tab is "Open", and the
+    // 15-column grid was truncating eight headers to make room for it.
     {
       headerName: 'Actions',
       colId: 'actions',
@@ -1303,7 +1281,11 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   ];
 
   // ── Filters ────────────────────────────────────────────────────────
-  readonly closedFilter = signal<'all' | 'wins' | 'losses' | 'today'>('all');
+  readonly closedFilter = signal<'all' | 'wins' | 'losses' | 'flat' | 'today'>('all');
+  /** Closed at exactly 0.00 — the remainder that made "Wins + Losses ≠ Closed". */
+  readonly closedFlatCount = computed(
+    () => this.closedPositions().filter((p) => p.realizedPnL === 0).length,
+  );
 
   readonly closedWinsCount = computed(
     () => this.closedPositions().filter((p) => p.realizedPnL > 0).length,
@@ -2074,6 +2056,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
           trades: s.trades,
           wins: s.wins,
           losses: s.losses,
+          flat: s.trades - s.wins - s.losses,
           winRatePct: s.trades > 0 ? (s.wins / s.trades) * 100 : 0,
           netPnL,
           avgPnL,
@@ -2095,9 +2078,9 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       if (!p.symbol) continue;
       map.set(p.symbol, (map.get(p.symbol) ?? 0) + p.openLots);
     }
-    const sorted = Array.from(map.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8);
+    // Every open symbol is listed — a capped top-N hid NZDUSD while two of its
+    // positions were open, which defeats an exposure view. Card height scales.
+    const sorted = Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
     return {
       tooltip: { trigger: 'axis' },
       grid: { top: 4, right: 16, bottom: 24, left: 70 },
@@ -2116,6 +2099,16 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
         },
       ],
     };
+  });
+
+  /** ~22px per symbol row so labels stay legible; content-height, not a fixed 180px. */
+  readonly exposureChartHeight = computed(() => {
+    const symbols = new Set(
+      this.openPositions()
+        .map((p) => p.symbol)
+        .filter(Boolean),
+    ).size;
+    return `${Math.min(360, Math.max(120, 40 + symbols * 22))}px`;
   });
 
   readonly longShortChart = computed<EChartsOption>(() => {
@@ -2213,6 +2206,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
     const f = this.closedFilter();
     if (f === 'wins') rows = rows.filter((p) => p.realizedPnL > 0);
     else if (f === 'losses') rows = rows.filter((p) => p.realizedPnL < 0);
+    else if (f === 'flat') rows = rows.filter((p) => p.realizedPnL === 0);
     else if (f === 'today') {
       const start = new Date();
       start.setHours(0, 0, 0, 0);
@@ -2237,8 +2231,11 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
 
     const min = Math.min(...pnls);
     const max = Math.max(...pnls);
+    // With every P&L in one narrow band (max ≈ min) twelve auto bins collapse
+    // into a single bar; widen the range so at least 8 bins carry a label.
     const binCount = 12;
-    const binSize = (max - min) / binCount || 1;
+    const rawSpan = max - min;
+    const binSize = rawSpan > 0 ? rawSpan / binCount : Math.max(1, Math.abs(max) / 4 || 1);
     const bins = Array(binCount).fill(0);
     const binLabels: string[] = [];
 
@@ -2262,7 +2259,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
     return {
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: binLabels, axisLabel: { fontSize: 10 } },
-      yAxis: { type: 'value', name: 'Count' },
+      yAxis: { type: 'value', name: 'Count', nameGap: 14, minInterval: 1 },
       series: [
         {
           type: 'bar',
@@ -2270,7 +2267,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
           barWidth: '80%',
         },
       ],
-      grid: { left: 50, right: 20, bottom: 40, top: 20 },
+      grid: { left: 50, right: 20, bottom: 40, top: 34 },
     };
   });
 
@@ -2289,14 +2286,20 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       else if (p.realizedPnL < 0) entry.losses++;
     });
 
-    const symbols = Array.from(symbolMap.keys());
+    // Sized to the card: the 12 busiest symbols fit a 220px chart; beyond
+    // that rows were being cut off at the bottom with no scroll.
+    const symbols = Array.from(symbolMap.entries())
+      .sort((a, b) => b[1].wins + b[1].losses - (a[1].wins + a[1].losses))
+      .slice(0, 12)
+      .map(([s]) => s)
+      .reverse();
     const wins = symbols.map((s) => symbolMap.get(s)!.wins);
     const losses = symbols.map((s) => -symbolMap.get(s)!.losses);
 
     return {
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      xAxis: { type: 'value' },
-      yAxis: { type: 'category', data: symbols },
+      xAxis: { type: 'value', minInterval: 1 },
+      yAxis: { type: 'category', data: symbols, axisLabel: { fontSize: 10 } },
       series: [
         { name: 'Wins', type: 'bar', stack: 'total', data: wins, itemStyle: { color: '#34C759' } },
         {
@@ -2328,7 +2331,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
         formatter: (params: any) => `Duration: ${params.value[0]}h<br/>P&L: $${params.value[1]}`,
       },
       xAxis: { type: 'value', name: 'Duration (hours)', nameLocation: 'middle', nameGap: 30 },
-      yAxis: { type: 'value', name: 'P&L ($)' },
+      yAxis: { type: 'value', name: 'P&L ($)', nameGap: 14 },
       series: [
         {
           type: 'scatter',
@@ -2339,7 +2342,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
           },
         },
       ],
-      grid: { left: 60, right: 20, bottom: 50, top: 20 },
+      grid: { left: 60, right: 20, bottom: 50, top: 34 },
     };
   });
 
@@ -2374,7 +2377,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
         },
       },
       xAxis: { type: 'category', data: sessions },
-      yAxis: { type: 'value', name: 'P&L ($)' },
+      yAxis: { type: 'value', name: 'P&L ($)', nameGap: 14 },
       series: [
         {
           type: 'bar',
@@ -2385,7 +2388,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
           barWidth: '50%',
         },
       ],
-      grid: { left: 60, right: 20, bottom: 40, top: 20 },
+      grid: { left: 60, right: 20, bottom: 40, top: 34 },
     };
   });
 
@@ -2423,7 +2426,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
     return {
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 10 } },
-      yAxis: { type: 'value', name: 'Count' },
+      yAxis: { type: 'value', name: 'Count', nameGap: 14, minInterval: 1 },
       series: [
         {
           type: 'bar',
@@ -2434,7 +2437,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
           barWidth: '80%',
         },
       ],
-      grid: { left: 50, right: 20, bottom: 40, top: 20 },
+      grid: { left: 50, right: 20, bottom: 40, top: 34 },
     };
   });
 

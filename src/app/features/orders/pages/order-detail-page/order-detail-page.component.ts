@@ -8,11 +8,27 @@ import {
 } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ReactiveFormsModule, FormBuilder } from '@angular/forms';
-import { DatePipe, DecimalPipe } from '@angular/common';
+import { DatePipe, DecimalPipe, formatDate } from '@angular/common';
 
 import { OrdersService } from '@core/services/orders.service';
+import { PositionsService } from '@core/services/positions.service';
 import { NotificationService } from '@core/notifications/notification.service';
-import type { OrderDto, ModifyOrderRequest } from '@core/api/api.types';
+import type { OrderDto, ModifyOrderRequest, PositionDto } from '@core/api/api.types';
+
+/** One timestamp format for every tab; the timeline used a 12-hour locale string. */
+const DETAIL_DATE_FORMAT = 'MMM d, yyyy HH:mm:ss';
+
+interface TimelineStep {
+  label: string;
+  timestamp: string | null;
+  description: string;
+  /** The order reached this step. */
+  active: boolean;
+  /** The order is sitting at this step right now (rendered outlined). */
+  current: boolean;
+  /** A reached step that is a negative outcome (cancelled / rejected / expired). */
+  failed: boolean;
+}
 
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
@@ -185,7 +201,7 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                 <div class="detail-grid-3">
                   <div class="detail-item">
                     <span class="detail-label">Symbol</span>
-                    <span class="detail-value">{{ order()!.symbol ?? '-' }}</span>
+                    <span class="detail-value">{{ order()!.symbol ?? '—' }}</span>
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Order Type</span>
@@ -212,19 +228,19 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                     <span class="detail-value mono">{{
                       order()!.filledPrice !== null
                         ? (order()!.filledPrice! | number: '1.5-5')
-                        : '-'
+                        : '—'
                     }}</span>
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Stop Loss</span>
                     <span class="detail-value mono">{{
-                      order()!.stopLoss !== null ? (order()!.stopLoss! | number: '1.5-5') : '-'
+                      order()!.stopLoss !== null ? (order()!.stopLoss! | number: '1.5-5') : '—'
                     }}</span>
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Take Profit</span>
                     <span class="detail-value mono">{{
-                      order()!.takeProfit !== null ? (order()!.takeProfit! | number: '1.5-5') : '-'
+                      order()!.takeProfit !== null ? (order()!.takeProfit! | number: '1.5-5') : '—'
                     }}</span>
                   </div>
                   <div class="detail-item">
@@ -232,7 +248,7 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                     <span class="detail-value mono">{{
                       order()!.filledQuantity !== null
                         ? (order()!.filledQuantity! | number: '1.2-2')
-                        : '-'
+                        : '—'
                     }}</span>
                   </div>
                   <div class="detail-item">
@@ -261,7 +277,7 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Broker Order ID</span>
-                    <span class="detail-value mono">{{ order()!.brokerOrderId ?? '-' }}</span>
+                    <span class="detail-value mono">{{ order()!.brokerOrderId ?? '—' }}</span>
                   </div>
                   <div class="detail-item">
                     <span class="detail-label">Trade Signal ID</span>
@@ -284,7 +300,7 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                   <div class="detail-item">
                     <span class="detail-label">Filled At</span>
                     <span class="detail-value">{{
-                      order()!.filledAt ? (order()!.filledAt | date: 'MMM d, yyyy HH:mm:ss') : '-'
+                      order()!.filledAt ? (order()!.filledAt | date: 'MMM d, yyyy HH:mm:ss') : '—'
                     }}</span>
                   </div>
                   @if (order()!.notes) {
@@ -415,11 +431,12 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                       class="timeline-step"
                       [class.active]="step.active"
                       [class.current]="step.current"
+                      [class.failed]="step.failed"
                     >
                       <div class="timeline-dot-container">
                         <div class="timeline-dot">
                           @if (step.active) {
-                            <span class="dot-check">&#10003;</span>
+                            <span class="dot-check">{{ step.failed ? '✕' : '✓' }}</span>
                           }
                         </div>
                         @if (!$last) {
@@ -431,7 +448,11 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                       </div>
                       <div class="timeline-content">
                         <span class="timeline-label">{{ step.label }}</span>
-                        <span class="timeline-time">{{ step.timestamp ?? 'Pending' }}</span>
+                        <!-- A reached step with no timestamp is "not recorded", never
+                             "Pending" — a rejected order is not pending anything. -->
+                        <span class="timeline-time">{{
+                          step.timestamp ?? (step.active ? 'Time not recorded' : 'Pending')
+                        }}</span>
                         @if (step.description) {
                           <span class="timeline-desc">{{ step.description }}</span>
                         }
@@ -464,11 +485,26 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                   </div>
                   <div class="related-item">
                     <span class="related-label">Position</span>
-                    @if (order()!.status === 'Filled' || statusNumeric() === 3) {
-                      <a class="related-link" [routerLink]="['/positions']">
-                        View Positions
-                        <span class="link-arrow">&rarr;</span>
-                      </a>
+                    @if (statusLabel() === 'Filled' || statusLabel() === 'PartialFill') {
+                      @if (relatedPosition(); as p) {
+                        <a class="related-link" [routerLink]="['/positions', p.id]">
+                          Position #{{ p.id }}
+                          <span class="related-value muted">
+                            · {{ p.direction }}
+                            {{ p.tradedLots ?? p.openLots | number: '1.2-2' }} lots · {{ p.status }}
+                          </span>
+                          <span class="link-arrow">&rarr;</span>
+                        </a>
+                      } @else if (relatedPositionLoading()) {
+                        <span class="related-empty">Looking up the position…</span>
+                      } @else {
+                        <span class="related-empty">
+                          No position matched this fill.
+                          <a class="related-link inline" [routerLink]="['/positions']">
+                            Browse positions <span class="link-arrow">&rarr;</span>
+                          </a>
+                        </span>
+                      }
                     } @else {
                       <span class="related-empty">No position created yet</span>
                     }
@@ -534,12 +570,23 @@ export class OrderDetailPageComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly ordersService = inject(OrdersService);
+  private readonly positionsService = inject(PositionsService);
   private readonly notifications = inject(NotificationService);
   private readonly fb = inject(FormBuilder);
 
   order = signal<OrderDto | null>(null);
   loading = signal(true);
   actionLoading = signal(false);
+
+  /**
+   * The position this fill opened. OrderDto carries no position id (the link
+   * is Position.OpenOrderId, server-side only), so it is resolved here:
+   * MT5 assigns a position the ticket of its opening order, so
+   * brokerPositionId === brokerOrderId is an exact match; otherwise the
+   * same symbol + account opened within ten minutes of the fill.
+   */
+  relatedPosition = signal<PositionDto | null>(null);
+  relatedPositionLoading = signal(false);
 
   showCancelDialog = signal(false);
   showDeleteDialog = signal(false);
@@ -630,32 +677,24 @@ export class OrderDetailPageComponent implements OnInit {
     const o = this.order();
     if (!o) return [];
     const status = this.statusLabel();
-    const fmt = (d: string | null) =>
-      d
-        ? new Date(d).toLocaleString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-          })
-        : null;
+    const fmt = (d: string | null) => (d ? formatDate(d, DETAIL_DATE_FORMAT, 'en-US') : null);
 
-    const created = {
+    const created: TimelineStep = {
       label: 'Created',
       timestamp: fmt(o.createdAt),
       description: 'Order was created in the system',
       active: true,
       current: status === 'Pending',
+      failed: false,
     };
 
-    const submitted = {
+    const submitted: TimelineStep = {
       label: 'Submitted',
       timestamp: ['Submitted', 'PartialFill', 'Filled'].includes(status) ? fmt(o.createdAt) : null,
       description: 'Order submitted to broker for execution',
       active: ['Submitted', 'PartialFill', 'Filled'].includes(status),
       current: status === 'Submitted',
+      failed: false,
     };
 
     const terminal = this.getTerminalStep(status, o, fmt);
@@ -678,6 +717,7 @@ export class OrderDetailPageComponent implements OnInit {
       next: (response) => {
         this.order.set(response.data);
         this.loading.set(false);
+        if (response.data) this.resolvePosition(response.data);
       },
       error: () => {
         this.loading.set(false);
@@ -686,33 +726,77 @@ export class OrderDetailPageComponent implements OnInit {
     });
   }
 
+  private resolvePosition(o: OrderDto): void {
+    const status = this.statusLabel();
+    if (status !== 'Filled' && status !== 'PartialFill') return;
+    this.relatedPositionLoading.set(true);
+    this.positionsService
+      .list({
+        currentPage: 1,
+        itemCountPerPage: 200,
+        filter: { symbol: o.symbol ?? undefined, isPaper: o.isPaper },
+        sortBy: 'openedAt',
+        sortDirection: 'desc',
+      })
+      .subscribe({
+        next: (res) => {
+          this.relatedPositionLoading.set(false);
+          const rows = res.data?.data ?? [];
+          const sameScope = rows.filter(
+            (p) =>
+              (o.tradingAccountId === undefined || p.tradingAccountId === o.tradingAccountId) &&
+              (o.symbol === null || p.symbol === o.symbol),
+          );
+          const byTicket = o.brokerOrderId
+            ? sameScope.find((p) => p.brokerPositionId === o.brokerOrderId)
+            : undefined;
+          if (byTicket) {
+            this.relatedPosition.set(byTicket);
+            return;
+          }
+          const filledMs = o.filledAt ? new Date(o.filledAt).getTime() : NaN;
+          const TEN_MIN = 10 * 60_000;
+          const byTime = Number.isFinite(filledMs)
+            ? sameScope
+                .map((p) => ({ p, gap: Math.abs(new Date(p.openedAt).getTime() - filledMs) }))
+                .filter((x) => x.gap <= TEN_MIN)
+                .sort((a, b) => a.gap - b.gap)[0]?.p
+            : undefined;
+          this.relatedPosition.set(byTime ?? null);
+        },
+        error: () => {
+          this.relatedPositionLoading.set(false);
+          this.relatedPosition.set(null);
+        },
+      });
+  }
+
   private getTerminalStep(
     status: string,
     o: OrderDto,
     fmt: (d: string | null) => string | null,
-  ): {
-    label: string;
-    timestamp: string | null;
-    description: string;
-    active: boolean;
-    current: boolean;
-  } {
+  ): TimelineStep {
+    // Terminal states are reached, not "current": the last node used to render
+    // outlined (in-progress) on a filled order. `failed` gives the negative
+    // outcomes their own tone instead of the same green tick as a fill.
     switch (status) {
       case 'Filled':
         return {
           label: 'Filled',
           timestamp: fmt(o.filledAt),
-          description: `Filled at ${o.filledPrice?.toFixed(5) ?? '-'} for ${o.filledQuantity?.toFixed(2) ?? '-'} lots`,
+          description: `Filled at ${o.filledPrice?.toFixed(5) ?? '—'} for ${o.filledQuantity?.toFixed(2) ?? '—'} lots`,
           active: true,
-          current: true,
+          current: false,
+          failed: false,
         };
       case 'PartialFill':
         return {
           label: 'Partially Filled',
           timestamp: fmt(o.filledAt),
-          description: `Partial fill: ${o.filledQuantity?.toFixed(2) ?? '?'} of ${o.quantity?.toFixed(2)} lots`,
+          description: `Partial fill: ${o.filledQuantity?.toFixed(2) ?? '?'} of ${o.quantity?.toFixed(2)} lots — waiting for the remainder`,
           active: true,
           current: true,
+          failed: false,
         };
       case 'Cancelled':
         return {
@@ -720,7 +804,8 @@ export class OrderDetailPageComponent implements OnInit {
           timestamp: null,
           description: 'Order was cancelled',
           active: true,
-          current: true,
+          current: false,
+          failed: true,
         };
       case 'Rejected':
         return {
@@ -728,7 +813,8 @@ export class OrderDetailPageComponent implements OnInit {
           timestamp: null,
           description: o.rejectionReason ?? 'Order was rejected by the broker',
           active: true,
-          current: true,
+          current: false,
+          failed: true,
         };
       case 'Expired':
         return {
@@ -736,7 +822,8 @@ export class OrderDetailPageComponent implements OnInit {
           timestamp: null,
           description: 'Order expired without being filled',
           active: true,
-          current: true,
+          current: false,
+          failed: true,
         };
       default:
         return {
@@ -745,6 +832,7 @@ export class OrderDetailPageComponent implements OnInit {
           description: 'Waiting for fill or terminal state',
           active: false,
           current: false,
+          failed: false,
         };
     }
   }

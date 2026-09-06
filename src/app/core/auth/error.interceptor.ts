@@ -4,6 +4,7 @@ import { catchError, switchMap, throwError } from 'rxjs';
 import { AuthService } from './auth.service';
 import { NotificationService } from '../notifications/notification.service';
 import { ResponseData } from '../api/api.types';
+import { SUPPRESS_ERROR_TOAST } from '../api/api.service';
 
 /**
  * Paths we never try to silently refresh on a 401 — refreshing during login
@@ -87,6 +88,12 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
           authService.logout({ expired: true });
           notificationService.error('Session expired. Please log in again.');
         }
+        return throwError(() => error);
+      }
+
+      // The caller owns the error presentation (inline error state + retry).
+      // Session handling above still applies; only the toast is withheld.
+      if (req.context.get(SUPPRESS_ERROR_TOAST)) {
         return throwError(() => error);
       }
 

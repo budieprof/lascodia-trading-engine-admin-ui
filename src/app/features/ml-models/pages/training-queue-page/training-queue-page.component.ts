@@ -86,18 +86,15 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             format="number"
             [dotColor]="runningCount() > 0 ? '#34C759' : '#8E8E93'"
           />
-          <!-- Custom text tile — MetricCard is numeric-only and the queue age
-               is a human-readable duration string ("3.2h", "1.4d"). -->
-          <div class="text-metric" [class.warn]="oldestQueueWarning()">
-            <div class="text-metric-label">
-              <span
-                class="dot"
-                [style.background]="oldestQueueWarning() ? '#FF3B30' : '#8E8E93'"
-              ></span>
-              Oldest queue age
-            </div>
-            <div class="text-metric-value">{{ oldestQueueAge() }}</div>
-          </div>
+          <!-- Same tile as its three neighbours: the age is expressed in hours
+               so it fits MetricCard's numeric contract, and an empty queue
+               renders the card's own placeholder rather than a custom one. -->
+          <app-metric-card
+            label="Oldest queue age (h)"
+            [value]="oldestQueueAgeHours()"
+            format="number"
+            [dotColor]="oldestQueueWarning() ? '#FF3B30' : '#8E8E93'"
+          />
         </section>
 
         <!-- ── Auto-pick blocklist ──────────────────────────────────────────
@@ -252,42 +249,14 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       }
       .kpis {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        grid-template-columns: repeat(4, 1fr);
         gap: var(--space-3);
+        align-items: start;
       }
-      .text-metric {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-3) var(--space-4);
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        min-height: 90px;
-        justify-content: center;
-      }
-      .text-metric-label {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .text-metric-label .dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        display: inline-block;
-      }
-      .text-metric-value {
-        font-size: var(--text-2xl);
-        font-weight: var(--font-semibold);
-        font-variant-numeric: tabular-nums;
-      }
-      .text-metric.warn .text-metric-value {
-        color: #d70015;
+      @media (max-width: 720px) {
+        .kpis {
+          grid-template-columns: repeat(2, 1fr);
+        }
       }
       .card {
         background: var(--bg-secondary);
@@ -502,25 +471,19 @@ export class TrainingQueuePageComponent {
   );
 
   /**
-   * Oldest queue age across the active set, rendered as a relative string.
-   * Used both for the "Oldest queue age" KPI tile and to drive the warning
-   * colour when it exceeds 6h — the empirical threshold above which the
-   * operator should investigate (worker gated off, pair stuck on quality
-   * gate, etc.).
+   * Oldest queue age across the active set, in hours (one decimal). Drives
+   * the "Oldest queue age" KPI tile and the warning colour when it exceeds
+   * 6h — the empirical threshold above which the operator should investigate
+   * (worker gated off, pair stuck on quality gate, etc.). Null when nothing
+   * is queued so the tile shows its placeholder rather than a fake 0.
    */
-  protected readonly oldestQueueAge = computed(() => {
+  protected readonly oldestQueueAgeHours = computed<number | null>(() => {
     const arr = this.runs();
-    if (arr.length === 0) return '—';
+    if (arr.length === 0) return null;
     const oldestMs = Math.min(...arr.map((r) => new Date(r.startedAt).getTime()));
-    const ageS = Math.max(0, (Date.now() - oldestMs) / 1000);
-    return this.formatDuration(ageS);
+    return +Math.max(0, (Date.now() - oldestMs) / 3_600_000).toFixed(1);
   });
-  protected readonly oldestQueueWarning = computed(() => {
-    const arr = this.runs();
-    if (arr.length === 0) return false;
-    const oldestMs = Math.min(...arr.map((r) => new Date(r.startedAt).getTime()));
-    return Date.now() - oldestMs > 6 * 60 * 60 * 1000; // > 6h
-  });
+  protected readonly oldestQueueWarning = computed(() => (this.oldestQueueAgeHours() ?? 0) > 6);
 
   protected readonly cancelling = signal<Set<number>>(new Set());
 
@@ -630,13 +593,5 @@ export class TrainingQueuePageComponent {
   protected truncate(s: string, n: number): string {
     if (s.length <= n) return s;
     return s.slice(0, n - 1) + '…';
-  }
-
-  private formatDuration(seconds: number): string {
-    if (seconds < 60) return `${Math.floor(seconds)}s`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-    const hours = seconds / 3600;
-    if (hours < 24) return `${hours.toFixed(1)}h`;
-    return `${(hours / 24).toFixed(1)}d`;
   }
 }

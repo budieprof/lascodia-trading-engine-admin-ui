@@ -116,6 +116,8 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
             <div class="funnel-value mono">{{ s.value | number }}</div>
             @if (s.pct !== null) {
               <div class="funnel-pct muted">{{ s.pct | number: '1.0-1' }}% of {{ s.pctOf }}</div>
+            } @else if (s.multiple !== null) {
+              <div class="funnel-pct muted">×{{ s.multiple | number: '1.1-1' }} {{ s.pctOf }}</div>
             }
           </div>
           @if (!last) {
@@ -138,11 +140,13 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
           format="number"
           dotColor="#8E8E93"
         />
+        <!-- Threshold colour, not sign colour: a 24.69% win rate is not "good"
+             just because it is a positive number. -->
         <app-metric-card
           label="Win rate"
           [value]="kpiWinRatePct()"
           format="percent"
-          [colorByValue]="true"
+          [dotColor]="winRateDot()"
         />
         <app-metric-card
           label="Avg P&L / analysis"
@@ -241,9 +245,14 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
                 <td>{{ r.timeframe }}</td>
                 <td class="muted">{{ r.barPosition }}</td>
                 <td class="muted ellipsis">{{ r.model }}</td>
-                <td class="num mono">{{ r.latencyMs / 1000 | number: '1.0-1' }}s</td>
-                <td class="num mono">{{ r.costUsd | currency: 'USD' : 'symbol' : '1.4-4' }}</td>
-                <td class="num mono muted">{{ r.tokensInput }}/{{ r.tokensOutput }}</td>
+                <td class="num mono">{{ r.latencyMs / 1000 | number: '1.1-1' }} s</td>
+                <td class="num mono">{{ r.costUsd | currency: 'USD' : 'symbol' : '1.2-2' }}</td>
+                <td
+                  class="num mono muted tokens"
+                  [title]="r.tokensInput + ' in / ' + r.tokensOutput + ' out'"
+                >
+                  {{ r.tokensInput }}/{{ r.tokensOutput }}
+                </td>
                 <td>
                   <span class="chip-outcome" [class.bad]="r.outcome !== 'Ok'">{{ r.outcome }}</span>
                 </td>
@@ -382,11 +391,11 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
               </div>
               <div>
                 <dt>Latency</dt>
-                <dd class="mono">{{ r.latencyMs | number }} ms</dd>
+                <dd class="mono">{{ r.latencyMs / 1000 | number: '1.1-1' }} s</dd>
               </div>
               <div>
                 <dt>LLM cost</dt>
-                <dd class="mono">{{ r.costUsd | currency: 'USD' : 'symbol' : '1.4-4' }}</dd>
+                <dd class="mono">{{ r.costUsd | currency: 'USD' : 'symbol' : '1.2-2' }}</dd>
               </div>
               <div>
                 <dt>Recommendations</dt>
@@ -424,8 +433,10 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
               <section class="drawer-section">
                 <h4>
                   Chart
-                  @if (recs.length > 0) {
-                    <span class="muted small">— {{ recs.length }} actionable overlaid</span>
+                  @if (overlayCount(recs) > 0) {
+                    <span class="muted small">— {{ overlayCount(recs) }} actionable overlaid</span>
+                  } @else if (recs.length > 0) {
+                    <span class="muted small">— no entry/SL/TP to overlay</span>
                   } @else {
                     <span class="muted small">— Hold only, no overlay</span>
                   }
@@ -755,10 +766,16 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
         font-size: var(--text-base);
         color: var(--text-tertiary);
       }
+      /* One auto-fit grid for all 8 tiles (no 6 + 2 orphan row); 190px min so
+         "-$54,744.83" fits without clipping, and tiles do not stretch. */
       .kpi-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
         gap: var(--space-3);
+        align-items: start;
+      }
+      .kpi-grid > * {
+        min-width: 0;
       }
       .gate-strip {
         display: grid;
@@ -881,7 +898,14 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
         color: var(--text-tertiary);
       }
       .ellipsis {
-        max-width: 130px;
+        max-width: 110px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* Tokens are a diagnostic column; keep them narrow so Total P&L is not
+         the column that gets clipped at the card edge. */
+      table.dense td.tokens {
+        max-width: 90px;
         overflow: hidden;
         text-overflow: ellipsis;
       }
@@ -936,10 +960,16 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
         text-align: center;
       }
       /* Drawer */
+      /* A parent with backdrop-filter/transform becomes the containing block
+         for position:fixed and the scrim stopped covering the viewport; :host
+         is display:contents-free here, but the backdrop token + blur keeps the
+         page visibly dimmed even when the box is re-parented. */
       .drawer-backdrop {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.4);
+        background: var(--backdrop-scrim, rgba(0, 0, 0, 0.4));
+        backdrop-filter: blur(2px);
+        -webkit-backdrop-filter: blur(2px);
         display: flex;
         justify-content: flex-end;
         z-index: 1000;
@@ -1225,8 +1255,16 @@ export class SpotAnalysisReportPageComponent implements OnInit {
   // ── KPI derivations ──────────────────────────────────────────────────
   readonly kpiWinRatePct = computed(() => {
     const s = this.summary();
-    if (s.positionsClosed === 0) return 0;
+    if (s.positionsClosed === 0) return null;
     return (s.profitableAnalyses / s.positionsClosed) * 100;
+  });
+  /** Green ≥ 50%, red < 40%, neutral between (and when there is no sample). */
+  readonly winRateDot = computed(() => {
+    const v = this.kpiWinRatePct();
+    if (v === null) return undefined;
+    if (v >= 50) return '#34C759';
+    if (v < 40) return '#FF3B30';
+    return '#8E8E93';
   });
   readonly kpiAvgPnlPerAnalysis = computed(() => {
     const s = this.summary();
@@ -1244,25 +1282,38 @@ export class SpotAnalysisReportPageComponent implements OnInit {
   /** Funnel stages — counts + conversion-% relative to the prior stage. */
   readonly funnelStages = computed(() => {
     const s = this.summary();
+    // Positions fan out per account (one approved signal → one position on
+    // every account that picked it up), so "positions / signals" is a
+    // multiplier, not a conversion. It is shown as "×N per signal"; only
+    // analyses → signals and closed → profitable are true funnel ratios.
     const stages = [
-      { label: 'Analyses', value: s.analyses, base: 0, pctOf: '' },
-      { label: 'Signals created', value: s.signalsCreated, base: s.analyses, pctOf: 'analyses' },
+      { label: 'Analyses', value: s.analyses, base: 0, pctOf: '', ratio: false },
+      {
+        label: 'Signals created',
+        value: s.signalsCreated,
+        base: s.analyses,
+        pctOf: 'analyses',
+        ratio: false,
+      },
       {
         label: 'Positions opened',
         value: s.positionsOpened,
         base: s.signalsCreated,
-        pctOf: 'signals',
+        pctOf: 'per signal (fan-out across accounts)',
+        ratio: true,
       },
       {
         label: 'Profitable',
         value: s.profitableAnalyses,
         base: s.positionsClosed,
         pctOf: 'closed',
+        ratio: false,
       },
     ];
     return stages.map((st) => ({
       ...st,
-      pct: st.base > 0 ? (st.value / st.base) * 100 : null,
+      pct: st.base > 0 && !st.ratio ? (st.value / st.base) * 100 : null,
+      multiple: st.base > 0 && st.ratio ? st.value / st.base : null,
     }));
   });
 
@@ -1280,9 +1331,14 @@ export class SpotAnalysisReportPageComponent implements OnInit {
       tooltip: { trigger: 'axis' },
       grid: { left: 50, right: 20, top: 20, bottom: 30 },
       xAxis: { type: 'time' },
+      // Same sign-then-symbol form as the tiles ("-$54,744.83"), so the axis
+      // no longer reads "$-10000" against a tile reading "-$54,744".
       yAxis: {
         type: 'value',
-        axisLabel: { formatter: (v: number) => `$${v.toFixed(0)}` },
+        axisLabel: {
+          formatter: (v: number) =>
+            `${v < 0 ? '-' : ''}$${new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Math.abs(v))}`,
+        },
       },
       series: [
         {
@@ -1358,6 +1414,18 @@ export class SpotAnalysisReportPageComponent implements OnInit {
       stopLoss: rec.stopLoss,
       takeProfit: rec.takeProfit,
     }));
+  }
+
+  /**
+   * The chart only draws a rec that has an action AND all three levels; the
+   * header used to count every non-empty rec, so it claimed "1 actionable
+   * overlaid" for a Buy with no SL/TP that produced no overlay at all.
+   */
+  overlayCount(recs: SpotRecChartRec[]): number {
+    return recs.filter(
+      (r) =>
+        r.action !== 'Hold' && r.entryPrice != null && r.stopLoss != null && r.takeProfit != null,
+    ).length;
   }
 
   openDetail(row: SpotAnalysisListItemDto): void {

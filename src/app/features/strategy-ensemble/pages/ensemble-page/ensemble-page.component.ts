@@ -12,6 +12,7 @@ import { ChartCardComponent } from '@shared/components/chart-card/chart-card.com
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 
@@ -37,6 +38,7 @@ const PALETTE = [
     PageHeaderComponent,
     TabsComponent,
     EmptyStateComponent,
+    ErrorStateComponent,
     CardSkeletonComponent,
     ConfirmDialogComponent,
     DatePipe,
@@ -65,12 +67,28 @@ const PALETTE = [
         @if (activeTab() === 'allocation') {
           @if (allocationsLoading()) {
             <app-card-skeleton [lines]="6" />
-          } @else if (allocations().length > 0) {
-            <!-- 8-card KPI strip — fleet-wide allocation roll-ups -->
+          } @else if (allocationsFailed()) {
+            <app-error-state
+              title="Could not load allocations"
+              message="The strategy-ensemble endpoint returned an error — the allocation is unknown, not empty."
+              (retry)="allocationsResource.refresh()"
+            />
+          } @else if (currentAllocations().length > 0) {
+            @if (staleAllocations().length > 0) {
+              <p class="stale-note">
+                Showing the latest rebalance ({{ allocStats().lastRebalanceLabel }}).
+                {{ staleAllocations().length }} earlier allocation row{{
+                  staleAllocations().length === 1 ? '' : 's'
+                }}
+                ({{ staleAllocationLabel() }}) still carry weight in the engine table but were not
+                part of that rebalance — they are excluded from every figure on this tab.
+              </p>
+            }
+            <!-- KPI strip — fleet-wide allocation roll-ups, latest epoch only -->
             <div class="ens-kpis">
               <div class="ens-kpi">
                 <span class="kpi-label">Active strategies</span>
-                <span class="kpi-value">{{ allocations().length }}</span>
+                <span class="kpi-value">{{ currentAllocations().length }}</span>
               </div>
               <div class="ens-kpi">
                 <span class="kpi-label">Total weight</span>
@@ -94,7 +112,9 @@ const PALETTE = [
               </div>
               <div class="ens-kpi">
                 <span class="kpi-label">Best Sharpe</span>
-                <span class="kpi-value good">{{ allocStats().bestSharpe.toFixed(2) }}</span>
+                <span class="kpi-value" [class.good]="allocStats().bestSharpe > 0">{{
+                  allocStats().bestSharpe.toFixed(2)
+                }}</span>
               </div>
               <div class="ens-kpi">
                 <span class="kpi-label">Worst Sharpe</span>
@@ -118,10 +138,6 @@ const PALETTE = [
                   {{ allocStats().top3Share.toFixed(1) }}%
                 </span>
               </div>
-              <div class="ens-kpi">
-                <span class="kpi-label">Last rebalance</span>
-                <span class="kpi-value sm">{{ allocStats().lastRebalanceLabel }}</span>
-              </div>
             </div>
 
             <div class="layout">
@@ -134,7 +150,10 @@ const PALETTE = [
               <section class="list">
                 <header class="list-head">
                   <h3>Strategy Weights</h3>
-                  <span class="muted">Total: {{ (totalWeight() * 100).toFixed(1) }}%</span>
+                  <span class="muted">
+                    Total: {{ (totalWeight() * 100).toFixed(1) }}% · rebalanced
+                    {{ allocStats().lastRebalanceLabel }}
+                  </span>
                 </header>
                 <div class="ens-scroll">
                   <table class="table sticky-head">
@@ -149,7 +168,7 @@ const PALETTE = [
                     </thead>
                     <tbody>
                       @for (row of rankedAllocations(); track row.id; let i = $index) {
-                        <tr>
+                        <tr [class.zero-weight]="row.weight === 0">
                           <td>{{ i + 1 }}</td>
                           <td>
                             <span class="dot" [style.background]="colorFor(i)"></span>
@@ -166,7 +185,7 @@ const PALETTE = [
                           <td class="muted">
                             {{
                               row.lastRebalancedAt
-                                ? (row.lastRebalancedAt | date: 'MMM d, HH:mm')
+                                ? (row.lastRebalancedAt | date: 'MMM d, yyyy HH:mm')
                                 : '—'
                             }}
                           </td>
@@ -200,7 +219,8 @@ const PALETTE = [
                 <header class="ens-board-head">
                   <h3>Per-symbol allocation</h3>
                   <span class="muted">
-                    Aggregated weight + avg Sharpe per symbol — diversification view
+                    Aggregated weight + avg Sharpe per symbol — diversification view. Symbols are
+                    read from strategy names; rows without one are grouped as "No symbol in name".
                   </span>
                 </header>
                 <table class="ens-board-table">
@@ -250,6 +270,12 @@ const PALETTE = [
         @if (activeTab() === 'history') {
           @if (historyLoading()) {
             <app-card-skeleton [lines]="6" />
+          } @else if (historyFailed()) {
+            <app-error-state
+              title="Could not load allocation history"
+              message="The strategy-ensemble list endpoint returned an error."
+              (retry)="historyResource.refresh()"
+            />
           } @else if (historyChart()) {
             <!-- 6-card KPI strip — historical rebalance stats -->
             <div class="ens-kpis ens-kpis-six">
@@ -263,11 +289,15 @@ const PALETTE = [
               </div>
               <div class="ens-kpi">
                 <span class="kpi-label">First rebalance</span>
-                <span class="kpi-value sm">{{ historyStats().firstDate }}</span>
+                <span class="kpi-value sm">{{
+                  (historyStats().firstDate | date: 'MMM d, yyyy') ?? '—'
+                }}</span>
               </div>
               <div class="ens-kpi">
                 <span class="kpi-label">Last rebalance</span>
-                <span class="kpi-value sm">{{ historyStats().lastDate }}</span>
+                <span class="kpi-value sm">{{
+                  (historyStats().lastDate | date: 'MMM d, yyyy') ?? '—'
+                }}</span>
               </div>
               <div class="ens-kpi">
                 <span class="kpi-label">Avg cadence</span>
@@ -338,8 +368,17 @@ const PALETTE = [
                     </thead>
                     <tbody>
                       @for (row of perStrategyHistory(); track row.strategyId) {
-                        <tr>
-                          <td class="mono">{{ row.strategyName }}</td>
+                        <tr [class.zero-weight]="row.latestWeight === 0">
+                          <td class="mono">
+                            {{ row.strategyName }}
+                            @if (row.latestWeight === 0) {
+                              <span
+                                class="ens-pill"
+                                title="Latest rebalance set this strategy to 0% — it no longer receives allocation."
+                                >deallocated</span
+                              >
+                            }
+                          </td>
                           <td class="num mono">{{ row.appearances }}</td>
                           <td class="num mono">{{ (row.avgWeight * 100).toFixed(1) }}%</td>
                           <td class="num mono">{{ (row.maxWeight * 100).toFixed(1) }}%</td>
@@ -394,9 +433,18 @@ const PALETTE = [
                     <tbody>
                       @for (row of rebalanceLog(); track row.date) {
                         <tr>
-                          <td class="mono">{{ row.date }}</td>
+                          <td class="mono">{{ row.date | date: 'MMM d, yyyy' }}</td>
                           <td class="num mono">{{ row.strategies }}</td>
-                          <td class="num mono">{{ (row.totalWeight * 100).toFixed(1) }}%</td>
+                          <td class="num mono" [class.muted]="row.totalWeight === 0">
+                            {{ (row.totalWeight * 100).toFixed(1) }}%
+                            @if (row.totalWeight === 0) {
+                              <span
+                                class="ens-pill"
+                                title="Every strategy in this event was set to 0% — a deallocation, not a rebalance."
+                                >deallocated</span
+                              >
+                            }
+                          </td>
                           <td class="num mono">{{ (row.topWeight * 100).toFixed(1) }}%</td>
                           <td class="mono">{{ row.topStrategy }}</td>
                           <td class="ens-pair-list">
@@ -468,6 +516,7 @@ const PALETTE = [
         display: grid;
         grid-template-columns: 1fr 1.5fr;
         gap: var(--space-4);
+        align-items: start;
       }
       .list {
         background: var(--bg-secondary);
@@ -550,12 +599,26 @@ const PALETTE = [
       /* Ensemble density additions */
       .ens-kpis {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(6, 1fr);
         gap: var(--space-2);
         margin-bottom: var(--space-3);
+        align-items: start;
       }
       .ens-kpis.ens-kpis-six {
         grid-template-columns: repeat(6, 1fr);
+      }
+      .stale-note {
+        margin: 0 0 var(--space-3);
+        padding: var(--space-2) var(--space-3);
+        border: 1px solid rgba(255, 149, 0, 0.35);
+        border-left: 3px solid var(--warning);
+        border-radius: var(--radius-sm);
+        background: rgba(255, 149, 0, 0.08);
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      tr.zero-weight td {
+        color: var(--text-tertiary);
       }
       @media (max-width: 1400px) {
         .ens-kpis,
@@ -740,31 +803,84 @@ export class EnsemblePageComponent {
   readonly showRebalance = signal(false);
   readonly rebalancing = signal(false);
 
-  private readonly allocationsResource = createPolledResource(
+  readonly allocationsFailed = signal(false);
+  readonly historyFailed = signal(false);
+
+  protected readonly allocationsResource = createPolledResource(
     () =>
       this.service.getAllocations().pipe(
-        map((r) => r.data ?? []),
-        catchError(() => of([] as StrategyAllocationDto[])),
+        map((r) => {
+          this.allocationsFailed.set(!r.status);
+          return r.data ?? [];
+        }),
+        catchError(() => {
+          this.allocationsFailed.set(true);
+          return of([] as StrategyAllocationDto[]);
+        }),
       ),
     { intervalMs: 60_000 },
   );
 
+  /** Every allocation row the engine returned, including stale epochs. */
   readonly allocations = computed(() => this.allocationsResource.value() ?? []);
   readonly allocationsLoading = computed(
     () => this.allocationsResource.loading() && this.allocationsResource.value() === null,
   );
 
-  readonly rankedAllocations = computed(() =>
-    [...this.allocations()].sort((a, b) => b.weight - a.weight),
+  /**
+   * The engine's allocation table is append/update per strategy and never
+   * purges rows for strategies a later rebalance did not touch, so a 100%
+   * row from July sat next to three 33.3% rows from August and the page
+   * summed them to 200%. A rebalance writes every row in one pass, so the
+   * current epoch is "everything stamped within an hour of the newest
+   * stamp"; within it the newest row per strategy wins.
+   */
+  private readonly epochSplit = computed(() => {
+    const all = this.allocations();
+    const ts = (a: StrategyAllocationDto) =>
+      a.lastRebalancedAt ? new Date(a.lastRebalancedAt).getTime() : 0;
+    const newest = all.reduce((m, a) => Math.max(m, ts(a)), 0);
+    if (newest === 0) return { current: all, stale: [] as StrategyAllocationDto[] };
+    const cutoff = newest - EPOCH_WINDOW_MS;
+    const latestByStrategy = new Map<number, StrategyAllocationDto>();
+    const stale: StrategyAllocationDto[] = [];
+    for (const a of all) {
+      if (ts(a) < cutoff) {
+        stale.push(a);
+        continue;
+      }
+      const prev = latestByStrategy.get(a.strategyId);
+      if (!prev || ts(a) > ts(prev)) {
+        if (prev) stale.push(prev);
+        latestByStrategy.set(a.strategyId, a);
+      } else {
+        stale.push(a);
+      }
+    }
+    return { current: [...latestByStrategy.values()], stale };
+  });
+
+  readonly currentAllocations = computed(() => this.epochSplit().current);
+  readonly staleAllocations = computed(() => this.epochSplit().stale);
+  readonly staleAllocationLabel = computed(() =>
+    this.staleAllocations()
+      .map((a) => `${a.strategyName ?? '#' + a.strategyId} ${(a.weight * 100).toFixed(0)}%`)
+      .join(', '),
   );
-  readonly totalWeight = computed(() => this.allocations().reduce((s, a) => s + a.weight, 0));
+
+  readonly rankedAllocations = computed(() =>
+    [...this.currentAllocations()].sort((a, b) => b.weight - a.weight),
+  );
+  readonly totalWeight = computed(() =>
+    this.currentAllocations().reduce((s, a) => s + a.weight, 0),
+  );
 
   // Exposed so templates can call Math.abs() in [class] bindings.
   readonly Math = Math;
 
   // ── Allocation tab — analytics roll-ups ─────────────────────────────
   readonly allocStats = computed(() => {
-    const all = this.allocations();
+    const all = this.currentAllocations();
     if (all.length === 0) {
       return {
         avgSharpe: 0,
@@ -793,15 +909,17 @@ export class EnsemblePageComponent {
         ? new Date(lastRebalance).toLocaleString('en-US', {
             month: 'short',
             day: 'numeric',
+            year: 'numeric',
             hour: '2-digit',
             minute: '2-digit',
+            hour12: false,
           })
         : '—',
     };
   });
 
   readonly sharpeBarOptions = computed<EChartsOption>(() => {
-    const data = [...this.allocations()]
+    const data = [...this.currentAllocations()]
       .filter((a) => Number.isFinite(a.rollingSharpRatio))
       .sort((a, b) => b.rollingSharpRatio - a.rollingSharpRatio);
     if (data.length === 0) return {};
@@ -843,7 +961,7 @@ export class EnsemblePageComponent {
   });
 
   readonly weightSharpeScatterOptions = computed<EChartsOption>(() => {
-    const allocs = this.allocations().filter((a) => Number.isFinite(a.rollingSharpRatio));
+    const allocs = this.currentAllocations().filter((a) => Number.isFinite(a.rollingSharpRatio));
     if (allocs.length === 0) return {};
     // Detect collisions: when two or more strategies share the same
     // (Sharpe, weight) coordinate, jitter their labels via dataIndex so
@@ -871,24 +989,31 @@ export class EnsemblePageComponent {
         formatter: (p: any) =>
           `${p.data.name}<br/>Sharpe: ${p.value[0]}<br/>Weight: ${p.value[1]}%`,
       },
+      // Plain (wrapping) legend instead of a paginated one — "1/3" pagers
+      // hide two thirds of the strategies behind clicks.
       legend: {
         bottom: 0,
-        type: 'scroll',
+        type: 'plain',
         textStyle: { fontSize: 10, color: '#6E6E73' },
         data: data.map((d) => d.name),
+        formatter: (name: string) => shortName(name),
       },
-      grid: { top: 20, right: 30, bottom: 60, left: 50 },
+      grid: { top: 36, right: 40, bottom: 70, left: 56, containLabel: false },
       xAxis: {
         type: 'value',
         name: 'Sharpe',
         nameLocation: 'middle',
         nameGap: 28,
+        scale: true,
         axisLabel: { fontSize: 10, color: '#6E6E73' },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
       yAxis: {
         type: 'value',
         name: 'Weight %',
+        nameGap: 14,
+        min: 0,
+        max: 100,
         axisLabel: { fontSize: 10, color: '#6E6E73' },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
@@ -902,13 +1027,15 @@ export class EnsemblePageComponent {
         itemStyle: d.itemStyle,
         // Hide the in-chart label entirely when there's a collision (the
         // legend below covers identification); otherwise show a small label.
+        // In-chart labels only when nothing collides; the legend identifies
+        // the rest. Short names keep the labels from overprinting each other.
         label: {
           show: d._collision === 0,
           position: 'right',
           distance: 8,
           fontSize: 10,
           color: '#6E6E73',
-          formatter: () => d.name,
+          formatter: () => shortName(d.name),
         },
       })),
     };
@@ -924,11 +1051,12 @@ export class EnsemblePageComponent {
       _sharpeSum: number;
     };
     const groups: Record<string, Row> = {};
-    for (const a of this.allocations()) {
-      // Best-effort symbol extraction from "EURUSD MA Crossover H1" naming.
+    for (const a of this.currentAllocations()) {
+      // Best-effort symbol extraction — "EURUSD MA Crossover H1" and
+      // "LLM: GBPJPY ADX Trend Following D" both carry the pair mid-name.
       const name = a.strategyName ?? '';
-      const match = name.match(/^([A-Z]{6})/);
-      const symbol = match ? match[1] : 'unknown';
+      const match = name.match(/\b(XA[UG][A-Z]{3}|[A-Z]{3}(?:USD|EUR|GBP|JPY|CHF|AUD|CAD|NZD))\b/);
+      const symbol = match ? match[1] : 'No symbol in name';
       if (!groups[symbol])
         groups[symbol] = {
           symbol,
@@ -956,8 +1084,8 @@ export class EnsemblePageComponent {
       return {
         rebalanceCount: 0,
         strategyCount: 0,
-        firstDate: '—',
-        lastDate: '—',
+        firstDate: null as string | null,
+        lastDate: null as string | null,
         avgCadence: '—',
         topStrategyName: '—',
       };
@@ -999,8 +1127,8 @@ export class EnsemblePageComponent {
     return {
       rebalanceCount: dates.size,
       strategyCount: strategies.size,
-      firstDate: sortedDates[0] ?? '—',
-      lastDate: sortedDates[sortedDates.length - 1] ?? '—',
+      firstDate: sortedDates[0] ?? null,
+      lastDate: sortedDates[sortedDates.length - 1] ?? null,
       avgCadence,
       topStrategyName: topName,
     };
@@ -1094,22 +1222,30 @@ export class EnsemblePageComponent {
       (r) => r.lastRebalancedAt && r.lastRebalancedAt.slice(0, 10) === latestDay,
     );
     const data = onLatest
+      .filter((r) => r.weight > 0)
       .sort((a, b) => b.weight - a.weight)
       .map((r, i) => ({
         name: r.strategyName ?? `#${r.strategyId}`,
         value: +(r.weight * 100).toFixed(2),
         itemStyle: { color: PALETTE[i % PALETTE.length] },
       }));
+    if (data.length === 0) return {};
     return {
       tooltip: { trigger: 'item', formatter: '{b}: {d}%' },
-      legend: { bottom: 0, type: 'scroll', textStyle: { fontSize: 10, color: '#6E6E73' } },
+      legend: {
+        bottom: 0,
+        type: 'plain',
+        textStyle: { fontSize: 10, color: '#6E6E73' },
+        formatter: (name: string) => shortName(name),
+      },
       series: [
         {
           type: 'pie',
-          radius: ['45%', '70%'],
-          center: ['50%', '45%'],
-          itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
-          label: { show: true, formatter: '{b}\n{d}%', fontSize: 11 },
+          radius: ['45%', '68%'],
+          center: ['50%', '42%'],
+          itemStyle: { borderRadius: 6, borderColor: 'transparent', borderWidth: 2 },
+          label: { show: false },
+          emphasis: { label: { show: true, formatter: '{b}\n{d}%', fontSize: 11 } },
           data,
         },
       ],
@@ -1177,10 +1313,11 @@ export class EnsemblePageComponent {
       xAxis: {
         type: 'category',
         data: entries.map(([w]) => w),
-        axisLabel: { fontSize: 9, color: '#6E6E73', rotate: 35 },
+        axisLabel: { fontSize: 10, color: '#6E6E73', hideOverlap: true },
       },
       yAxis: {
         type: 'value',
+        minInterval: 1,
         axisLabel: { fontSize: 10, color: '#6E6E73' },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
@@ -1191,7 +1328,8 @@ export class EnsemblePageComponent {
             value: v,
             itemStyle: { color: '#5AC8FA', borderRadius: [4, 4, 0, 0] },
           })),
-          barWidth: '60%',
+          barWidth: '40%',
+          label: { show: true, position: 'top', fontSize: 10, color: '#6E6E73' },
         },
       ],
     };
@@ -1231,33 +1369,50 @@ export class EnsemblePageComponent {
   });
 
   readonly donutChart = computed<EChartsOption>(() => {
-    const data = this.rankedAllocations().map((a, i) => ({
-      name: a.strategyName ?? `#${a.strategyId}`,
-      value: +(a.weight * 100).toFixed(2),
-      itemStyle: { color: PALETTE[i % PALETTE.length] },
-    }));
+    // Zero-weight rows are real (deallocated) but a 0% slice is a label with
+    // no arc; the table beside the chart still lists them.
+    const data = this.rankedAllocations()
+      .filter((a) => a.weight > 0)
+      .map((a, i) => ({
+        name: a.strategyName ?? `#${a.strategyId}`,
+        value: +(a.weight * 100).toFixed(2),
+        itemStyle: { color: PALETTE[i % PALETTE.length] },
+      }));
+    if (data.length === 0) return {};
     return {
       tooltip: { trigger: 'item', formatter: '{b}: {d}%' },
-      legend: { bottom: 0, type: 'scroll' },
+      legend: {
+        bottom: 0,
+        type: 'plain',
+        textStyle: { fontSize: 10 },
+        formatter: (name: string) => shortName(name),
+      },
       series: [
         {
           type: 'pie',
-          radius: ['45%', '72%'],
-          center: ['50%', '45%'],
+          radius: ['45%', '68%'],
+          center: ['50%', '42%'],
           avoidLabelOverlap: true,
-          itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
-          label: { show: true, formatter: '{b}\n{d}%', fontSize: 11 },
+          itemStyle: { borderRadius: 6, borderColor: 'transparent', borderWidth: 2 },
+          label: { show: false },
+          emphasis: { label: { show: true, formatter: '{b}\n{d}%', fontSize: 11 } },
           data,
         },
       ],
     };
   });
 
-  private readonly historyResource = createPolledResource(
+  protected readonly historyResource = createPolledResource(
     () =>
       this.service.list({ currentPage: 1, itemCountPerPage: 500 }).pipe(
-        map((r) => r.data?.data ?? []),
-        catchError(() => of([] as StrategyAllocationDto[])),
+        map((r) => {
+          this.historyFailed.set(!r.status);
+          return r.data?.data ?? [];
+        }),
+        catchError(() => {
+          this.historyFailed.set(true);
+          return of([] as StrategyAllocationDto[]);
+        }),
       ),
     { intervalMs: 300_000 },
   );
@@ -1284,26 +1439,56 @@ export class EnsemblePageComponent {
 
     const dates = Array.from(buckets.keys()).sort();
     const strategyIds = Array.from(strategyNames.keys());
+    // Time axis, not categories: four events 49 days apart must not look
+    // like four consecutive weeks.
     const series = strategyIds.map((id, i) => ({
       name: strategyNames.get(id)!,
       type: 'line' as const,
       stack: 'total',
+      step: 'end' as const,
       areaStyle: { color: PALETTE[i % PALETTE.length], opacity: 0.5 },
       lineStyle: { width: 0 },
       itemStyle: { color: PALETTE[i % PALETTE.length] },
       emphasis: { focus: 'series' as const },
       data: dates.map((d) => {
         const w = buckets.get(d)?.get(id) ?? 0;
-        return +(w * 100).toFixed(2);
+        return [new Date(d).getTime(), +(w * 100).toFixed(2)];
       }),
     }));
 
     return {
-      tooltip: { trigger: 'axis' },
-      legend: { bottom: 0, type: 'scroll' },
-      grid: { left: 60, right: 20, top: 20, bottom: 60 },
-      xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 10 } },
-      yAxis: { type: 'value', name: 'Weight %', max: 100 },
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const items = (Array.isArray(params) ? params : [params]).filter(
+            (p: any) => p.value?.[1] > 0,
+          );
+          if (items.length === 0) return '';
+          const day = new Date(items[0].value[0]).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          });
+          return (
+            `<b>${day}</b><br/>` +
+            items
+              .map((p: any) => `${p.marker} ${shortName(p.seriesName)}: ${p.value[1]}%`)
+              .join('<br/>')
+          );
+        },
+      },
+      legend: {
+        bottom: 0,
+        type: 'plain',
+        textStyle: { fontSize: 10 },
+        formatter: (name: string) => shortName(name),
+      },
+      grid: { left: 60, right: 24, top: 36, bottom: 70 },
+      xAxis: {
+        type: 'time',
+        axisLabel: { fontSize: 10, hideOverlap: true },
+      },
+      yAxis: { type: 'value', name: 'Weight %', nameGap: 14, max: 100 },
       series,
     };
   });
@@ -1332,6 +1517,22 @@ export class EnsemblePageComponent {
       },
     });
   }
+}
+
+/**
+ * One rebalance stamps every row within seconds; anything older than this
+ * relative to the newest stamp belongs to an earlier epoch.
+ */
+const EPOCH_WINDOW_MS = 60 * 60 * 1000;
+
+/**
+ * Legend / label form of a strategy name. Names like
+ * "LLM: GBPJPY ADX Trend Following D1" overflow a chart legend; the pair +
+ * first two words carry the identity.
+ */
+function shortName(name: string): string {
+  const trimmed = name.replace(/^LLM:\s*/i, '');
+  return trimmed.length > 26 ? trimmed.slice(0, 24) + '…' : trimmed;
 }
 
 // ISO 8601 week label (`YYYY-Www`) — used to bucket rebalance events on the

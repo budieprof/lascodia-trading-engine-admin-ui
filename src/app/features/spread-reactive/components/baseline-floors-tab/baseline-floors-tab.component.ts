@@ -1,4 +1,13 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  computed,
+  effect,
+  inject,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -125,7 +134,7 @@ interface OverrideDraft {
                       {{ r.source === 'OperatorOverride' ? 'Override' : 'Auto' }}
                     </span>
                   </td>
-                  <td class="mono small">{{ formatTs(r.floorObservedAt) }}</td>
+                  <td class="mono small nowrap">{{ formatTs(r.floorObservedAt) }}</td>
                   <td class="num mono">{{ r.sampleCountAtFloor }}</td>
                   <td class="num mono">
                     @if (r.lowerCandidate !== null) {
@@ -134,7 +143,7 @@ interface OverrideDraft {
                       <span class="muted">—</span>
                     }
                   </td>
-                  <td class="mono small">
+                  <td class="mono small nowrap">
                     @if (r.lowerCandidateObservedAt) {
                       {{ formatTs(r.lowerCandidateObservedAt) }}
                     } @else {
@@ -149,13 +158,17 @@ interface OverrideDraft {
                     }
                   </td>
                   <td class="note">
-                    @if (r.note) {
+                    @if (noteTag(r.note); as tag) {
+                      <!-- Engine writes bracketed markers ("[reset]") on
+                           system actions; shown as a tag, not free text. -->
+                      <span class="note-tag" [title]="'System marker: ' + tag">{{ tag }}</span>
+                    } @else if (r.note) {
                       <span [title]="r.note">{{ r.note }}</span>
                     } @else {
                       <span class="muted">—</span>
                     }
                   </td>
-                  <td class="mono small">{{ formatTs(r.lastUpdatedAt) }}</td>
+                  <td class="mono small nowrap">{{ formatTs(r.lastUpdatedAt) }}</td>
                   <td class="actions-cell">
                     <button type="button" class="btn ghost xs" (click)="openEdit(r)">
                       Override
@@ -177,102 +190,124 @@ interface OverrideDraft {
       </div>
     </section>
 
-    <!-- ───────── Override modal ───────── -->
-    @if (overrideDraft(); as d) {
-      <div class="modal-backdrop" (click)="closeOverride()"></div>
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-        <header class="modal-head">
-          <h3 id="modal-title">
-            {{ d.mode === 'create' ? 'New floor override' : 'Override floor' }}
-          </h3>
-          <button type="button" class="modal-close" (click)="closeOverride()">×</button>
-        </header>
-        <div class="modal-body">
-          <label class="field">
-            <span>Trading account ID</span>
-            <input
-              type="number"
-              min="1"
-              step="1"
-              [(ngModel)]="d.tradingAccountId"
-              [disabled]="d.mode === 'edit'"
-            />
-          </label>
-          <label class="field">
-            <span>Symbol</span>
-            <input
-              type="text"
-              [(ngModel)]="d.symbol"
-              [disabled]="d.mode === 'edit'"
-              placeholder="e.g. EURUSD"
-            />
-          </label>
-          <label class="field">
-            <span>Floor baseline (price units)</span>
-            <input
-              type="number"
-              min="0"
-              step="0.00001"
-              [(ngModel)]="d.floorBaseline"
-              placeholder="0.00010"
-            />
-            <small class="muted">
-              The lowest stable spread you've observed for this pair, in absolute price units. Pairs
-              classify as Elevated when current ≥ floor × spread-multiplier.
-            </small>
-          </label>
-          <label class="field">
-            <span>Note (optional)</span>
-            <textarea
-              rows="2"
-              [(ngModel)]="d.note"
-              placeholder="Why this value — e.g. ECN spread post-broker-switch"
-            ></textarea>
-          </label>
-          @if (overrideError(); as e) {
-            <div class="banner error">{{ e }}</div>
-          }
+    <!-- ───────── Override modal ─────────
+         Native <dialog> + showModal(): it renders in the browser's top layer,
+         so it is immune to the layout's backdrop-filter / transform, which
+         turned the previous position:fixed overlay into a containing-block
+         victim — "+ New override" visibly did nothing. -->
+    <dialog
+      #overrideDialog
+      class="dialog"
+      aria-labelledby="modal-title"
+      (close)="closeOverride()"
+      (click)="onDialogBackdropClick($event, 'override')"
+    >
+      @if (overrideDraft(); as d) {
+        <div class="dialog-inner" role="document" (click)="$event.stopPropagation()">
+          <header class="modal-head">
+            <h3 id="modal-title">
+              {{ d.mode === 'create' ? 'New floor override' : 'Override floor' }}
+            </h3>
+            <button type="button" class="modal-close" (click)="closeOverride()" aria-label="Close">
+              ×
+            </button>
+          </header>
+          <div class="modal-body">
+            <label class="field">
+              <span>Trading account ID</span>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                [(ngModel)]="d.tradingAccountId"
+                [disabled]="d.mode === 'edit'"
+              />
+            </label>
+            <label class="field">
+              <span>Symbol</span>
+              <input
+                type="text"
+                [(ngModel)]="d.symbol"
+                [disabled]="d.mode === 'edit'"
+                placeholder="e.g. EURUSD"
+              />
+            </label>
+            <label class="field">
+              <span>Floor baseline (price units)</span>
+              <input
+                type="number"
+                min="0"
+                step="0.00001"
+                [(ngModel)]="d.floorBaseline"
+                placeholder="0.00010"
+              />
+              <small class="muted">
+                The lowest stable spread you've observed for this pair, in absolute price units.
+                Pairs classify as Elevated when current ≥ floor × spread-multiplier.
+              </small>
+            </label>
+            <label class="field">
+              <span>Note (optional)</span>
+              <textarea
+                rows="2"
+                [(ngModel)]="d.note"
+                placeholder="Why this value — e.g. ECN spread post-broker-switch"
+              ></textarea>
+            </label>
+            @if (overrideError(); as e) {
+              <div class="banner error">{{ e }}</div>
+            }
+          </div>
+          <footer class="modal-foot">
+            <button type="button" class="btn ghost" (click)="closeOverride()">Cancel</button>
+            <button
+              type="button"
+              class="btn primary"
+              [disabled]="!isOverrideValid(d) || busy()"
+              (click)="saveOverride(d)"
+            >
+              {{ busy() ? 'Saving…' : 'Save override' }}
+            </button>
+          </footer>
         </div>
-        <footer class="modal-foot">
-          <button type="button" class="btn ghost" (click)="closeOverride()">Cancel</button>
-          <button
-            type="button"
-            class="btn primary"
-            [disabled]="!isOverrideValid(d) || busy()"
-            (click)="saveOverride(d)"
-          >
-            {{ busy() ? 'Saving…' : 'Save override' }}
-          </button>
-        </footer>
-      </div>
-    }
+      }
+    </dialog>
 
     <!-- ───────── Reset confirm ───────── -->
-    @if (resetTarget(); as t) {
-      <div class="modal-backdrop" (click)="cancelReset()"></div>
-      <div class="modal small" role="dialog" aria-modal="true" aria-labelledby="reset-title">
-        <header class="modal-head">
-          <h3 id="reset-title">Reset floor for {{ t.symbol }} / {{ t.tradingAccountId }}?</h3>
-          <button type="button" class="modal-close" (click)="cancelReset()">×</button>
-        </header>
-        <div class="modal-body">
-          <p class="muted">
-            The pair will return to stand-down (no bumps, no reverts) until auto-capture
-            re-establishes a floor or you set another override. Existing active bumps are
-            <strong>not</strong> reverted by this action.
-          </p>
-          @if (overrideError(); as e) {
-            <div class="banner error">{{ e }}</div>
-          }
+    <dialog
+      #resetDialog
+      class="dialog small"
+      aria-labelledby="reset-title"
+      (close)="cancelReset()"
+      (click)="onDialogBackdropClick($event, 'reset')"
+    >
+      @if (resetTarget(); as t) {
+        <div class="dialog-inner" role="document" (click)="$event.stopPropagation()">
+          <header class="modal-head">
+            <h3 id="reset-title">Reset floor for {{ t.symbol }} / {{ t.tradingAccountId }}?</h3>
+            <button type="button" class="modal-close" (click)="cancelReset()" aria-label="Close">
+              ×
+            </button>
+          </header>
+          <div class="modal-body">
+            <p class="muted">
+              The pair will return to stand-down (no bumps, no reverts) until auto-capture
+              re-establishes a floor or you set another override. Existing active bumps are
+              <strong>not</strong> reverted by this action.
+            </p>
+            @if (overrideError(); as e) {
+              <div class="banner error">{{ e }}</div>
+            }
+          </div>
+          <footer class="modal-foot">
+            <button type="button" class="btn ghost" (click)="cancelReset()">Cancel</button>
+            <button type="button" class="btn danger" [disabled]="busy()" (click)="executeReset(t)">
+              {{ busy() ? 'Clearing…' : 'Reset floor' }}
+            </button>
+          </footer>
         </div>
-        <footer class="modal-foot">
-          <button type="button" class="btn ghost" (click)="cancelReset()">Cancel</button>
-          <button type="button" class="btn danger" [disabled]="busy()" (click)="executeReset(t)">
-            {{ busy() ? 'Clearing…' : 'Reset floor' }}
-          </button>
-        </footer>
-      </div>
-    }
+      }
+    </dialog>
   `,
   styles: [
     `
@@ -352,6 +387,10 @@ interface OverrideDraft {
         font-size: 12px;
         font-weight: 600;
         color: var(--text-secondary, #555);
+        white-space: nowrap;
+      }
+      .floors-table .nowrap {
+        white-space: nowrap;
       }
       .floors-table .num {
         text-align: right;
@@ -429,30 +468,33 @@ interface OverrideDraft {
         background: color-mix(in srgb, var(--profit, #2c8a3f) 14%, transparent);
         color: var(--profit, #2c8a3f);
       }
-      /* Modal */
-      .modal-backdrop {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.35);
-        z-index: 100;
-      }
-      .modal {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
+      /* Modal — native <dialog>, centred by the UA in the top layer. */
+      dialog.dialog {
+        padding: 0;
         background: var(--bg-primary, #fff);
+        color: var(--text-primary);
         border: 1px solid var(--border, #ccc);
         border-radius: var(--radius-md, 8px);
-        padding: 0;
         width: min(480px, 92vw);
-        z-index: 101;
+        max-height: 90vh;
+        box-shadow: var(--shadow-lg, 0 12px 36px rgba(0, 0, 0, 0.18));
+      }
+      dialog.dialog:modal {
+        position: fixed;
+        inset: 0;
+        margin: auto;
+      }
+      dialog.dialog::backdrop {
+        background: var(--backdrop-scrim, rgba(0, 0, 0, 0.4));
+        backdrop-filter: blur(2px);
+      }
+      dialog.dialog.small {
+        width: min(400px, 90vw);
+      }
+      .dialog-inner {
         display: flex;
         flex-direction: column;
-        box-shadow: 0 12px 36px rgba(0, 0, 0, 0.18);
-      }
-      .modal.small {
-        width: min(360px, 90vw);
+        max-height: 90vh;
       }
       .modal-head {
         display: flex;
@@ -478,13 +520,17 @@ interface OverrideDraft {
         display: flex;
         flex-direction: column;
         gap: 12px;
+        overflow-y: auto;
       }
       .modal-foot {
+        position: sticky;
+        bottom: 0;
         display: flex;
         justify-content: flex-end;
         gap: 10px;
         padding: 12px 16px;
         border-top: 1px solid var(--border, #eee);
+        background: var(--bg-primary, #fff);
       }
       .field {
         display: flex;
@@ -500,14 +546,55 @@ interface OverrideDraft {
         padding: 6px 8px;
         border-radius: 4px;
         border: 1px solid var(--border, #ccc);
-        background: var(--bg-primary, #fff);
+        background: var(--bg-secondary, #fff);
+        color: var(--text-primary);
         font-family: inherit;
+      }
+      .note-tag {
+        display: inline-block;
+        padding: 1px 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
       }
     `,
   ],
 })
 export class BaselineFloorsTabComponent {
   private readonly service = inject(SpreadReactiveService);
+
+  private readonly overrideDialog =
+    viewChild.required<ElementRef<HTMLDialogElement>>('overrideDialog');
+  private readonly resetDialog = viewChild.required<ElementRef<HTMLDialogElement>>('resetDialog');
+
+  constructor() {
+    // Drive the native dialogs from the signals so every open/close path
+    // (button, Escape, backdrop click, successful save) stays consistent.
+    effect(() => {
+      const el = this.overrideDialog().nativeElement;
+      if (this.overrideDraft()) {
+        if (!el.open) el.showModal();
+      } else if (el.open) {
+        el.close();
+      }
+    });
+    effect(() => {
+      const el = this.resetDialog().nativeElement;
+      if (this.resetTarget()) {
+        if (!el.open) el.showModal();
+      } else if (el.open) {
+        el.close();
+      }
+    });
+  }
+
+  /** A click on the <dialog> itself (outside .dialog-inner) is a backdrop click. */
+  protected onDialogBackdropClick(ev: MouseEvent, which: 'override' | 'reset'): void {
+    if (ev.target !== ev.currentTarget) return;
+    if (which === 'override') this.closeOverride();
+    else this.cancelReset();
+  }
 
   protected filterAccountId: number | null = null;
   protected filterSymbol = '';
@@ -628,12 +715,20 @@ export class BaselineFloorsTabComponent {
       });
   }
 
+  /** ISO `yyyy-MM-dd HH:mm` (local) — one date format across the spread-reactive tabs. */
   protected formatTs(iso: string | null | undefined): string {
     if (!iso) return '—';
     const t = new Date(iso).getTime();
     if (!Number.isFinite(t)) return iso;
     const d = new Date(t);
-    return d.toLocaleString();
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  /** "[reset]" → "reset"; null for free-text notes. */
+  protected noteTag(note: string | null | undefined): string | null {
+    const m = /^\s*\[([^\]]+)\]\s*$/.exec(note ?? '');
+    return m ? m[1] : null;
   }
 
   private buildFilters() {

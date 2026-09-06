@@ -12,7 +12,7 @@ import {
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { NgTemplateOutlet } from '@angular/common';
+import { DecimalPipe, NgTemplateOutlet } from '@angular/common';
 import { AgGridAngular } from 'ag-grid-angular';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import type {
@@ -37,7 +37,7 @@ type SortDir = 'asc' | 'desc';
 @Component({
   selector: 'app-data-table',
   standalone: true,
-  imports: [AgGridAngular, FormsModule, NgTemplateOutlet],
+  imports: [AgGridAngular, FormsModule, NgTemplateOutlet, DecimalPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="data-table-wrapper">
@@ -97,6 +97,7 @@ type SortDir = 'asc' | 'desc';
           [rowData]="rowData()"
           [columnDefs]="columnDefs()"
           [defaultColDef]="defaultColDef"
+          [domLayout]="'autoHeight'"
           [suppressMovableColumns]="true"
           [animateRows]="true"
           [loading]="loading()"
@@ -111,16 +112,19 @@ type SortDir = 'asc' | 'desc';
       </div>
       @if (!loading() && totalItems() === 0) {
         <div class="empty-state" role="status" aria-live="polite">
-          <div class="empty-icon" aria-hidden="true">📭</div>
-          <h3 class="empty-title">No data found</h3>
-          <p class="empty-description">Try adjusting your search or filters</p>
+          <div class="empty-icon" aria-hidden="true">◌</div>
+          <h3 class="empty-title">{{ emptyTitle() }}</h3>
+          @if (emptyDescription(); as description) {
+            <p class="empty-description">{{ description }}</p>
+          }
         </div>
       }
 
       @if (!loading() && totalItems() > 0) {
         <nav class="pagination" aria-label="Table pagination">
           <span class="pagination-info" aria-live="polite">
-            Showing {{ startItem() }}–{{ endItem() }} of {{ totalItems() }}
+            Showing {{ startItem() | number }}–{{ endItem() | number }} of
+            {{ totalItems() | number }}
           </span>
           <div class="pagination-controls" role="group" aria-label="Pagination controls">
             <button
@@ -275,9 +279,17 @@ type SortDir = 'asc' | 'desc';
         }
       }
 
+      /*
+       * Auto-height, not a fixed 480px. The grid used to render a 480px viewport with its own
+       * inner scrollbar, so a 25-row page showed ~10 rows under a footer reading "Showing 1–25
+       * of N" — every reviewer read that as the table lying about its page size. With
+       * domLayout="autoHeight" the grid grows to the page's rows and the browser scrolls.
+       */
       .grid-wrapper {
         width: 100%;
-        height: 480px;
+        /* A wide column set scrolls inside the card instead of running past
+           its right edge ("STARTI", "ELIGIE" clipped headers). */
+        overflow-x: auto;
       }
       .grid-wrapper.hidden {
         display: none;
@@ -392,6 +404,14 @@ export class DataTableComponent<T> implements OnInit, OnDestroy {
   columnDefs = input.required<ColDef[]>();
   fetchData = input.required<(params: PagerRequest) => Observable<PagedData<T>>>();
   searchable = input(true);
+  /**
+   * Empty-state copy. The default suits a filtered list; a page whose empty
+   * table is a fact rather than a filter result ("No signals yet for this
+   * strategy") overrides both so the reader is not told to adjust filters
+   * that do not exist.
+   */
+  emptyTitle = input('No data found');
+  emptyDescription = input<string | null>('Try adjusting your search or filters');
   selectable = input(false);
 
   // AG Grid v33 replaced the string `rowSelection` + `suppressRowClickSelection`
@@ -449,6 +469,14 @@ export class DataTableComponent<T> implements OnInit, OnDestroy {
     sortable: true,
     resizable: true,
     suppressHeaderMenuButton: true,
+    // Headers wrap onto a second line instead of truncating to "STRA…" / "CONSISTEN…", and no
+    // column is squeezed below a readable width by sizeColumnsToFit — when the page is narrower
+    // than the sum of minimums the grid scrolls horizontally, which beats clipping the last
+    // column at the card edge with no scrollbar (the orders table lost CREATED and its status
+    // pill that way).
+    wrapHeaderText: true,
+    autoHeaderHeight: true,
+    minWidth: 88,
   };
 
   private gridApi?: GridApi;

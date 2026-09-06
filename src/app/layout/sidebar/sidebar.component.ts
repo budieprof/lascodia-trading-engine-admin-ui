@@ -215,6 +215,21 @@ interface NavGroup {
         flex: 1;
         padding: var(--space-3) var(--space-2);
         overflow-y: auto;
+        /* macOS overlay scrollbars hide until scrolled, so on a 1000px-tall window the nav
+         * appeared to end at "Spread-Reactive" with twenty more routes below and no cue that
+         * they existed. A thin, always-present scrollbar is the cue. */
+        scrollbar-width: thin;
+        scrollbar-color: var(--border) transparent;
+      }
+      .sidebar-nav::-webkit-scrollbar {
+        width: 6px;
+      }
+      .sidebar-nav::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: var(--radius-full);
+      }
+      .sidebar-nav::-webkit-scrollbar-thumb:hover {
+        background: var(--text-tertiary);
       }
 
       .nav-group-label {

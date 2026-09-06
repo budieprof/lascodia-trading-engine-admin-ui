@@ -3,6 +3,7 @@ import { RouterOutlet } from '@angular/router';
 import { ToastContainerComponent } from '@shared/components/toast/toast-container.component';
 import { AuthService } from '@core/auth/auth.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
+import { ThemeService } from '@core/theme/theme.service';
 
 @Component({
   selector: 'app-root',
@@ -17,6 +18,11 @@ import { RealtimeService } from '@core/realtime/realtime.service';
 export class AppComponent {
   private readonly auth = inject(AuthService);
   private readonly realtime = inject(RealtimeService);
+  // Instantiated at the root on purpose. ThemeService writes `data-theme` on <html> when it is
+  // first constructed, and until now nothing outside the authenticated layout injected it — so
+  // the login route, which renders outside that layout, was the one light-themed screen in a
+  // dark console.
+  private readonly theme = inject(ThemeService);
 
   constructor() {
     // If a cookie-backed session is already established, ask the engine who

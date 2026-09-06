@@ -28,10 +28,16 @@ export class PendingSignalRecsService {
   query(
     request: PendingSignalRecQueryRequest,
   ): Observable<ResponseData<PagedData<PendingSignalRecDto>>> {
-    return this.api.post<ResponseData<PagedData<PendingSignalRecDto>>>(
-      `${this.base}/query`,
-      request,
-    );
+    // The engine binds this query as PagerRequestWithFilterType<PendingSignalRecQueryFilter>:
+    // `search` / `states` are only read from the nested `filter` object, and
+    // top-level copies are silently ignored — which is why the cockpit's
+    // Parked/Revalidating chips used to return every state (1,589 rows).
+    const { search, states, ...pager } = request;
+    const filter: Record<string, unknown> = {};
+    if (search != null && search !== '') filter['search'] = search;
+    if (states && states.length > 0) filter['states'] = states;
+    const body = Object.keys(filter).length > 0 ? { ...pager, filter } : pager;
+    return this.api.post<ResponseData<PagedData<PendingSignalRecDto>>>(`${this.base}/query`, body);
   }
 
   /**

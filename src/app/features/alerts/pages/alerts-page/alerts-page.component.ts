@@ -200,13 +200,13 @@ const CHANNEL_DEFS: ChannelDef[] = [
           <div class="alerts-charts">
             <app-chart-card
               title="Severity distribution"
-              subtitle="Critical · High · Medium · Info"
+              [subtitle]="severitySubtitle()"
               [options]="severityDonutOptions()"
               height="240px"
             />
             <app-chart-card
               title="Rules by symbol"
-              subtitle="Top 10 symbols with most alert rules"
+              [subtitle]="bySymbolSubtitle()"
               [options]="bySymbolOptions()"
               height="240px"
             />
@@ -218,14 +218,18 @@ const CHANNEL_DEFS: ChannelDef[] = [
             />
           </div>
 
-          <!-- Recently triggered feed -->
+          <!-- Recently triggered feed — a fixed count of rows, no scroll box
+               (the old 320px box showed seven rows and half of an eighth). -->
           @if (recentlyTriggered().length > 0) {
             <section class="recent-trig">
               <header class="rt-head">
                 <h3>Recently triggered</h3>
-                <span class="muted"
-                  >Last {{ recentlyTriggered().length }} firings — newest first</span
-                >
+                <span class="muted">
+                  Last {{ recentlyTriggered().length }} firing{{
+                    recentlyTriggered().length === 1 ? '' : 's'
+                  }}
+                  — newest first
+                </span>
               </header>
               <ul class="rt-list">
                 @for (a of recentlyTriggered(); track a.id) {
@@ -236,7 +240,7 @@ const CHANNEL_DEFS: ChannelDef[] = [
                     <span class="rt-time">
                       {{ a.lastTriggeredAt ? (a.lastTriggeredAt | relativeTime) : '—' }}
                     </span>
-                    <span class="rt-cd">cooldown {{ a.cooldownSeconds }}s</span>
+                    <span class="rt-cd">cooldown {{ fmtDuration(a.cooldownSeconds) }}</span>
                     <button class="btn btn-ghost rt-btn" (click)="openEditRule(a)">Open</button>
                   </li>
                 }
@@ -247,7 +251,7 @@ const CHANNEL_DEFS: ChannelDef[] = [
           <section class="rules-toolbar">
             <input
               type="search"
-              class="input"
+              class="input rules-search"
               placeholder="Search symbol or dedup key…"
               [ngModel]="search()"
               (ngModelChange)="search.set($event)"
@@ -293,20 +297,40 @@ const CHANNEL_DEFS: ChannelDef[] = [
                     }
                   </header>
 
-                  <pre class="condition mono">{{ formatConditionJson(a.conditionJson) }}</pre>
+                  <!-- One-line human summary of the condition; the raw JSON
+                       is behind a toggle. Nine thousand cards each carrying a
+                       clipped JSON blob was unreadable. -->
+                  <div class="condition-row">
+                    <span class="condition-summary" [title]="summarizeCondition(a.conditionJson)">
+                      {{ summarizeCondition(a.conditionJson) }}
+                    </span>
+                    <button
+                      type="button"
+                      class="link-btn"
+                      (click)="toggleJson(a.id)"
+                      [attr.aria-expanded]="isJsonOpen(a.id)"
+                    >
+                      {{ isJsonOpen(a.id) ? 'Hide JSON' : 'JSON' }}
+                    </button>
+                  </div>
+                  @if (isJsonOpen(a.id)) {
+                    <pre class="condition mono">{{ formatConditionJson(a.conditionJson) }}</pre>
+                  }
 
                   <dl class="rule-meta">
                     <div>
                       <dt>Cooldown</dt>
-                      <dd>{{ a.cooldownSeconds }}s</dd>
+                      <dd>{{ fmtDuration(a.cooldownSeconds) }}</dd>
                     </div>
                     <div>
                       <dt>Dedup key</dt>
-                      <dd class="trunc">{{ a.deduplicationKey ?? '—' }}</dd>
+                      <dd class="trunc" [title]="a.deduplicationKey ?? ''">
+                        {{ a.deduplicationKey ?? '—' }}
+                      </dd>
                     </div>
                     <div>
                       <dt>Last triggered</dt>
-                      <dd>
+                      <dd class="trunc" [title]="a.lastTriggeredAt ?? 'never'">
                         {{ a.lastTriggeredAt ? (a.lastTriggeredAt | relativeTime) : 'never' }}
                       </dd>
                     </div>
@@ -391,7 +415,9 @@ const CHANNEL_DEFS: ChannelDef[] = [
           @if (channelsLoading()) {
             <app-card-skeleton [lines]="6" />
           } @else {
-            <!-- 6-card KPI strip — channel + outbound-alert posture -->
+            <!-- 6-card KPI strip — channel + outbound-alert posture.
+                 "Enabled" is the number that matters for delivery: a channel
+                 can be fully configured and switched off. -->
             <div class="alerts-kpis ch-kpis">
               <div class="alerts-kpi">
                 <span class="kpi-label">Channels</span>
@@ -399,16 +425,16 @@ const CHANNEL_DEFS: ChannelDef[] = [
               </div>
               <div class="alerts-kpi">
                 <span class="kpi-label">Configured</span>
-                <span class="kpi-value good">{{ channelKpis().configured }}</span>
+                <span class="kpi-value">{{ channelKpis().configured }}</span>
               </div>
               <div class="alerts-kpi">
-                <span class="kpi-label">Not configured</span>
+                <span class="kpi-label">Delivering</span>
                 <span
                   class="kpi-value"
-                  [class.warn]="channelKpis().notConfigured > 0"
-                  [class.good]="channelKpis().notConfigured === 0"
+                  [class.good]="channelKpis().enabled > 0"
+                  [class.warn]="channelKpis().enabled === 0"
                 >
-                  {{ channelKpis().notConfigured }}
+                  {{ channelKpis().enabled }}
                 </span>
               </div>
               <div class="alerts-kpi">
@@ -416,7 +442,7 @@ const CHANNEL_DEFS: ChannelDef[] = [
                 <span class="kpi-value">{{ ruleStats().active }}</span>
               </div>
               <div class="alerts-kpi">
-                <span class="kpi-label">Pending channel changes</span>
+                <span class="kpi-label">Unsaved changes</span>
                 <span class="kpi-value" [class.warn]="channelKpis().dirtyChannels > 0">
                   {{ channelKpis().dirtyChannels }}
                 </span>
@@ -440,18 +466,18 @@ const CHANNEL_DEFS: ChannelDef[] = [
             <!-- Action toolbar — bulk operations across all channels -->
             <section class="ch-toolbar">
               <p class="channel-intro muted">
-                Channels are global — every triggered alert broadcasts to every configured channel.
-                Settings are stored as engine config keys; changes take effect on the next worker
-                cycle without an engine restart.
+                Channels are global — every triggered alert broadcasts to every channel that is
+                configured <em>and</em> switched on. Settings are stored as engine config keys;
+                changes take effect on the next worker cycle without an engine restart.
               </p>
               <div class="ch-actions">
                 <button
                   class="btn btn-ghost"
                   (click)="testAllChannels()"
-                  [disabled]="channelKpis().configured === 0 || busy()"
-                  title="Send a test alert to every configured channel"
+                  [disabled]="channelKpis().enabled === 0 || busy()"
+                  title="Send a test alert to every channel that is configured and switched on"
                 >
-                  Test all configured
+                  Test all delivering
                 </button>
               </div>
             </section>
@@ -461,9 +487,12 @@ const CHANNEL_DEFS: ChannelDef[] = [
               <section class="ch-history">
                 <header class="ch-history-head">
                   <h3>Test history</h3>
-                  <span class="muted"
-                    >Last {{ testHistory().length }} test attempts — newest first</span
-                  >
+                  <span class="muted">
+                    Last {{ testHistory().length }} test attempt{{
+                      testHistory().length === 1 ? '' : 's'
+                    }}
+                    — newest first
+                  </span>
                   <button class="btn btn-ghost ch-clear" (click)="clearTestHistory()">Clear</button>
                 </header>
                 <ul class="ch-history-list">
@@ -485,19 +514,14 @@ const CHANNEL_DEFS: ChannelDef[] = [
                   class="channel-card"
                   [class.channel-disabled]="channelStatus(def.channel)?.isEnabled === false"
                 >
+                  <!-- Title, state pill and switch share one row; the
+                       description gets the full card width beneath instead
+                       of being squeezed into ~250px beside the toggle. -->
                   <header class="channel-head">
-                    <div>
+                    <div class="channel-head-row">
                       <h4>{{ def.title }}</h4>
-                      <span class="muted">{{ def.description }}</span>
-                    </div>
-                    <div class="channel-head-right">
-                      <span
-                        class="pill"
-                        [attr.data-state]="channelStatus(def.channel)?.isConfigured ? 'on' : 'off'"
-                      >
-                        {{
-                          channelStatus(def.channel)?.isConfigured ? 'Configured' : 'Not configured'
-                        }}
+                      <span class="pill" [attr.data-state]="channelState(def.channel)">
+                        {{ channelStateLabel(def.channel) }}
                       </span>
                       <!-- Per-channel kill-switch — short-circuits engine
                            dispatch without touching credentials. -->
@@ -525,6 +549,7 @@ const CHANNEL_DEFS: ChannelDef[] = [
                         </span>
                       </label>
                     </div>
+                    <p class="channel-desc muted">{{ def.description }}</p>
                   </header>
 
                   @if (channelStatus(def.channel); as s) {
@@ -554,7 +579,7 @@ const CHANNEL_DEFS: ChannelDef[] = [
                       <span class="ch-dirty">Unsaved changes</span>
                     }
                     <span class="ch-timeout">
-                      Timeout {{ channelStatus(def.channel)?.timeoutSeconds ?? '—' }}s
+                      Timeout {{ fmtDuration(channelStatus(def.channel)?.timeoutSeconds) }}
                     </span>
                   </div>
 
@@ -762,9 +787,28 @@ const CHANNEL_DEFS: ChannelDef[] = [
         background: transparent;
         border: 1px solid var(--border);
       }
+      /* Outline danger — red text on a red tint read as a disabled button. */
       .btn-destructive {
-        background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+        background: transparent;
+        color: var(--loss);
+        border: 1px solid var(--loss);
+      }
+      .btn-destructive:hover:not(:disabled) {
+        background: rgba(255, 59, 48, 0.08);
+      }
+      .link-btn {
+        background: transparent;
+        border: none;
+        padding: 0;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        color: var(--accent);
+        cursor: pointer;
+        font-family: inherit;
+        white-space: nowrap;
+      }
+      .link-btn:hover {
+        text-decoration: underline;
       }
       .input {
         height: 36px;
@@ -812,22 +856,25 @@ const CHANNEL_DEFS: ChannelDef[] = [
       .spacer {
         flex: 1;
       }
+      /* Wide enough for its own placeholder ("Search symbol or dedup key…"). */
+      .rules-search {
+        flex: 1 1 280px;
+        min-width: 260px;
+        max-width: 420px;
+      }
 
-      /* Alerts-page density additions */
+      /* Alerts-page density additions. Eight tiles as two rows of four, so
+         labels stay on one line and tiles match the width used elsewhere. */
       .alerts-kpis {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: var(--space-2);
         margin-bottom: var(--space-3);
-      }
-      @media (max-width: 1400px) {
-        .alerts-kpis {
-          grid-template-columns: repeat(4, 1fr);
-        }
+        align-items: start;
       }
       @media (max-width: 720px) {
         .alerts-kpis {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
       .alerts-kpi {
@@ -845,6 +892,9 @@ const CHANNEL_DEFS: ChannelDef[] = [
         color: var(--text-tertiary);
         text-transform: uppercase;
         letter-spacing: 0.04em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .alerts-kpi .kpi-value {
         font-size: var(--text-xl);
@@ -900,8 +950,6 @@ const CHANNEL_DEFS: ChannelDef[] = [
         list-style: none;
         margin: 0;
         padding: 0;
-        max-height: 320px;
-        overflow-y: auto;
       }
       .rt-item {
         display: grid;
@@ -989,16 +1037,16 @@ const CHANNEL_DEFS: ChannelDef[] = [
 
       /* Channels-tab density additions */
       .ch-kpis {
-        grid-template-columns: repeat(6, 1fr);
+        grid-template-columns: repeat(6, minmax(0, 1fr));
       }
       @media (max-width: 1100px) {
         .ch-kpis {
-          grid-template-columns: repeat(3, 1fr);
+          grid-template-columns: repeat(3, minmax(0, 1fr));
         }
       }
       @media (max-width: 600px) {
         .ch-kpis {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
 
@@ -1181,6 +1229,8 @@ const CHANNEL_DEFS: ChannelDef[] = [
         color: var(--text-secondary);
         text-transform: uppercase;
         letter-spacing: 0.04em;
+        white-space: nowrap;
+        flex-shrink: 0;
       }
       .pill[data-sev='Critical'] {
         background: rgba(255, 59, 48, 0.12);
@@ -1210,6 +1260,26 @@ const CHANNEL_DEFS: ChannelDef[] = [
         background: rgba(255, 149, 0, 0.12);
         color: #c93400;
       }
+      /* Configured but switched off: credentials exist, nothing is sent. */
+      .pill[data-state='disabled'] {
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+      }
+      .condition-row {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-2);
+        min-width: 0;
+      }
+      .condition-summary {
+        flex: 1;
+        min-width: 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
       .condition {
         margin: 0;
         padding: var(--space-2) var(--space-3);
@@ -1220,14 +1290,17 @@ const CHANNEL_DEFS: ChannelDef[] = [
         color: var(--text-primary);
         white-space: pre-wrap;
         word-break: break-word;
-        max-height: 100px;
+        max-height: 220px;
         overflow: auto;
       }
       .rule-meta {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: var(--space-2);
         margin: 0;
+      }
+      .rule-meta > div {
+        min-width: 0;
       }
       .rule-meta dt {
         font-size: 10px;
@@ -1286,20 +1359,27 @@ const CHANNEL_DEFS: ChannelDef[] = [
       }
       .channel-head {
         display: flex;
-        gap: var(--space-3);
-        align-items: flex-start;
-        justify-content: space-between;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .channel-head-row {
+        display: flex;
+        gap: var(--space-2);
+        align-items: center;
+        flex-wrap: wrap;
       }
       .channel-head h4 {
-        margin: 0 0 2px;
+        margin: 0;
         font-size: var(--text-sm);
         font-weight: var(--font-semibold);
+        flex: 1;
+        min-width: 0;
       }
-      .channel-head-right {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-end;
-        gap: 6px;
+      .channel-head-row .ch-toggle {
+        margin-left: auto;
+      }
+      .channel-desc {
+        margin: 0;
       }
 
       /* Per-channel enable/disable toggle (iOS-style switch). */
@@ -1367,18 +1447,28 @@ const CHANNEL_DEFS: ChannelDef[] = [
         font-size: var(--text-xs);
         color: var(--text-secondary);
       }
+      /* minmax(0, 1fr) + width:100% on the inputs: a grid track defaults to
+         min-content width, so a text input's intrinsic size pushed the
+         right-hand column (PORT / PASSWORD / TIMEOUT / CHAT ID) past the
+         card border. */
       .channel-fields {
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: var(--space-3);
       }
       .channel-fields .field-checkbox {
         grid-column: 1 / -1;
       }
+      .channel-fields .input {
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+      }
       .field {
         display: flex;
         flex-direction: column;
         gap: 4px;
+        min-width: 0;
       }
       .field-checkbox {
         flex-direction: row;
@@ -1641,8 +1731,10 @@ export class AlertsPageComponent {
   bySymbolOptions = computed<EChartsOption>(() => {
     const map: Record<string, number> = {};
     for (const a of this.alerts()) {
-      const k = a.symbol ?? 'system-wide';
-      map[k] = (map[k] ?? 0) + 1;
+      // System-wide (null-symbol) rules are not a symbol; the "Symbols
+      // covered" tile does not count them, so the chart must not either.
+      if (!a.symbol) continue;
+      map[a.symbol] = (map[a.symbol] ?? 0) + 1;
     }
     const entries = Object.entries(map)
       .sort((a, b) => b[1] - a[1])
@@ -1717,8 +1809,110 @@ export class AlertsPageComponent {
       .sort(
         (a, b) => new Date(b.lastTriggeredAt!).getTime() - new Date(a.lastTriggeredAt!).getTime(),
       )
-      .slice(0, 12),
+      .slice(0, 8),
   );
+
+  /** Lists only the severities that actually have rules, so the legend and the subtitle agree. */
+  severitySubtitle = computed(() => {
+    const present = new Set(this.alerts().map((a) => a.severity));
+    const ordered = ['Critical', 'High', 'Medium', 'Info'].filter((s) =>
+      present.has(s as AlertSeverity),
+    );
+    return ordered.length > 0 ? ordered.join(' · ') : 'No rules yet';
+  });
+
+  bySymbolSubtitle = computed(() => {
+    const systemWide = this.alerts().filter((a) => !a.symbol).length;
+    return systemWide > 0
+      ? `Top 10 symbols by rule count · ${new Intl.NumberFormat('en-US').format(systemWide)} system-wide rules not shown`
+      : 'Top 10 symbols by rule count';
+  });
+
+  // ── Rule-card helpers ─────────────────────────────────────────────────
+  /** Rule IDs whose raw condition JSON is expanded. */
+  readonly openJson = signal<Set<number>>(new Set());
+
+  isJsonOpen(id: number): boolean {
+    return this.openJson().has(id);
+  }
+
+  toggleJson(id: number): void {
+    const next = new Set(this.openJson());
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    this.openJson.set(next);
+  }
+
+  /**
+   * A one-line reading of a rule's condition. Detector payloads are small
+   * objects; the two or three keys an operator needs are pulled out, and
+   * anything unfamiliar becomes "key: value" pairs. The raw JSON stays one
+   * click away.
+   */
+  summarizeCondition(json: string): string {
+    let c: Record<string, unknown>;
+    try {
+      c = JSON.parse(json) as Record<string, unknown>;
+    } catch {
+      return json.length > 120 ? json.slice(0, 120) + '…' : json;
+    }
+    if (c == null || typeof c !== 'object') return String(c);
+    if (typeof c['WorkerName'] === 'string') {
+      const elapsed = c['ElapsedSeconds'];
+      return typeof elapsed === 'number'
+        ? `${c['WorkerName']} · stale for ${this.fmtDuration(elapsed)}`
+        : String(c['WorkerName']);
+    }
+    if (typeof c['reason'] === 'string') {
+      const parts: string[] = [c['reason'] as string];
+      if (typeof c['modelId'] === 'number') parts.push(`model #${c['modelId']}`);
+      if (typeof c['timeframe'] === 'string') parts.push(c['timeframe'] as string);
+      if (typeof c['consecutiveSkips'] === 'number') parts.push(`${c['consecutiveSkips']} skips`);
+      return parts.join(' · ');
+    }
+    if (typeof c['price'] === 'number') {
+      return `${c['direction'] ?? 'crosses'} ${c['price']}`;
+    }
+    const entries = Object.entries(c);
+    if (entries.length === 0) return 'No condition — fires on every evaluation';
+    return entries
+      .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
+      .join(' · ');
+  }
+
+  /** "90s" / "5m" / "6h" / "24h" — cooldowns and timeouts as durations, not raw seconds. */
+  fmtDuration(seconds: number | null | undefined): string {
+    if (seconds == null || !Number.isFinite(seconds)) return '—';
+    const s = Math.round(seconds);
+    if (s < 60) return `${s}s`;
+    if (s < 3600) return s % 60 === 0 ? `${s / 60}m` : `${Math.floor(s / 60)}m ${s % 60}s`;
+    if (s < 86_400) {
+      const h = Math.floor(s / 3600);
+      const m = Math.round((s % 3600) / 60);
+      return m === 0 ? `${h}h` : `${h}h ${m}m`;
+    }
+    const d = Math.floor(s / 86_400);
+    const h = Math.round((s % 86_400) / 3600);
+    return h === 0 ? `${d}d` : `${d}d ${h}h`;
+  }
+
+  /** 'on' configured + enabled · 'disabled' configured but switched off · 'off' not configured. */
+  channelState(c: AlertChannel): 'on' | 'disabled' | 'off' {
+    const s = this.channelStatus(c);
+    if (!s?.isConfigured) return 'off';
+    return s.isEnabled === false ? 'disabled' : 'on';
+  }
+
+  channelStateLabel(c: AlertChannel): string {
+    switch (this.channelState(c)) {
+      case 'on':
+        return 'Configured';
+      case 'disabled':
+        return 'Configured · off';
+      default:
+        return 'Not configured';
+    }
+  }
 
   // ── Channels state ───────────────────────────────────────────────────
   readonly channelStatuses = signal<AlertChannelStatusDto[]>([]);
@@ -1734,7 +1928,9 @@ export class AlertsPageComponent {
 
   // Rolling chronological log of every test fired this session — gives the
   // operator a paper-trail when debugging delivery (a one-shot lastTestResult
-  // forgets the previous attempt every time you click Send test).
+  // forgets the previous attempt every time you click Send test). Kept in
+  // sessionStorage so leaving the page and coming back does not erase the
+  // Email test that was sent two minutes ago.
   readonly testHistory = signal<
     {
       channel: AlertChannel;
@@ -1742,7 +1938,7 @@ export class AlertsPageComponent {
       destination: string;
       attemptedAt: string;
     }[]
-  >([]);
+  >(readTestHistory());
 
   // Channel currently mid-toggle, so we can disable the affected switch and
   // suppress double-clicks. `null` when no toggle is in flight.
@@ -1810,13 +2006,20 @@ export class AlertsPageComponent {
   // ── Channels-tab analytics ───────────────────────────────────────────
   channelKpis = computed(() => {
     let configured = 0;
+    let enabled = 0;
     let dirtyChannels = 0;
     for (const def of this.channelDefs) {
-      if (this.channelStatus(def.channel)?.isConfigured) configured++;
+      const s = this.channelStatus(def.channel);
+      if (s?.isConfigured) {
+        configured++;
+        if (s.isEnabled !== false) enabled++;
+      }
       if (this.isChannelDirty(def)) dirtyChannels++;
     }
     return {
       configured,
+      /** Configured AND switched on — the channels that will actually deliver. */
+      enabled,
       notConfigured: this.channelDefs.length - configured,
       dirtyChannels,
     };
@@ -1842,7 +2045,7 @@ export class AlertsPageComponent {
 
   testAllChannels(): void {
     for (const def of this.channelDefs) {
-      if (this.channelStatus(def.channel)?.isConfigured) {
+      if (this.channelState(def.channel) === 'on') {
         this.testChannel(def.channel);
       }
     }
@@ -1850,6 +2053,7 @@ export class AlertsPageComponent {
 
   clearTestHistory(): void {
     this.testHistory.set([]);
+    writeTestHistory([]);
   }
 
   constructor() {
@@ -2141,7 +2345,9 @@ export class AlertsPageComponent {
           };
           this.lastTestResult.set(entry);
           // Prepend so newest is first; cap at 20 to keep the panel tidy.
-          this.testHistory.set([entry, ...this.testHistory()].slice(0, 20));
+          const history = [entry, ...this.testHistory()].slice(0, 20);
+          this.testHistory.set(history);
+          writeTestHistory(history);
           if (data.delivered) {
             this.notifications.success(`Test sent via ${channel}`);
           } else {
@@ -2174,6 +2380,32 @@ export class AlertsPageComponent {
     this.alertsService.getChannelStatus().subscribe({
       next: (res) => this.channelStatuses.set(res.data ?? []),
     });
+  }
+}
+
+type TestHistoryEntry = {
+  channel: AlertChannel;
+  delivered: boolean;
+  destination: string;
+  attemptedAt: string;
+};
+
+const TEST_HISTORY_KEY = 'lascodia.alert-channel-tests';
+
+function readTestHistory(): TestHistoryEntry[] {
+  try {
+    const raw = sessionStorage.getItem(TEST_HISTORY_KEY);
+    return raw ? (JSON.parse(raw) as TestHistoryEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeTestHistory(entries: TestHistoryEntry[]): void {
+  try {
+    sessionStorage.setItem(TEST_HISTORY_KEY, JSON.stringify(entries));
+  } catch {
+    /* best-effort */
   }
 }
 

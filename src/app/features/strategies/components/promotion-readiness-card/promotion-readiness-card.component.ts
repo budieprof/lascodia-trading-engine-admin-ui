@@ -65,8 +65,14 @@ interface ParsedDiagnostic {
           <div class="verdict-icon">{{ g.passed ? '✓' : '✗' }}</div>
           <div class="verdict-text">
             <strong>{{ g.passed ? 'All gates passed' : 'Promotion gates failed' }}</strong>
-            @if (!g.passed && g.failureSummary) {
-              <p class="failure">{{ g.failureSummary }}</p>
+            @if (!g.passed && failureItems().length > 0) {
+              <!-- One item per failed gate, neutral text with a red rule —
+                   a six-line red-on-maroon paragraph was unreadable. -->
+              <ul class="failure-list">
+                @for (f of failureItems(); track f) {
+                  <li>{{ f }}</li>
+                }
+              </ul>
             }
             @if (g.passed) {
               <p class="muted">Strategy is ready for activation.</p>
@@ -232,9 +238,18 @@ interface ParsedDiagnostic {
         font-size: var(--text-base);
         color: var(--text-primary);
       }
-      .verdict-text .failure {
-        margin: var(--space-1) 0 0;
-        color: #b91c1c;
+      .failure-list {
+        margin: var(--space-2) 0 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .failure-list li {
+        padding: 2px 0 2px var(--space-3);
+        border-left: 3px solid #b91c1c;
+        color: var(--text-primary);
         font-size: var(--text-sm);
         line-height: 1.4;
       }
@@ -373,7 +388,30 @@ export class PromotionReadinessCardComponent {
   readonly parsedDiagnostics = computed<ParsedDiagnostic[]>(() => {
     const g = this.gates();
     if (!g) return [];
-    return g.diagnostics.map((d) => parseDiagnostic(d));
+    const failed = this.failureItems().map((f) => f.toLowerCase());
+    return g.diagnostics.map((d) => {
+      const row = parseDiagnostic(d);
+      // A gate named in the failure summary IS a failed gate, whatever the
+      // free-form line says — the keyword sniff alone left failed gates
+      // pilled "Info" under a "Promotion gates failed" banner.
+      if (!g.passed && row.tone === 'info') {
+        const gate = row.gate.toLowerCase();
+        if (failed.some((f) => f.includes(gate) || gate.includes(f.split(/[:(]/)[0].trim()))) {
+          row.tone = 'fail';
+        }
+      }
+      return row;
+    });
+  });
+
+  /** Failure summary split into one entry per gate (engine joins them with ';' or newlines). */
+  readonly failureItems = computed<string[]>(() => {
+    const g = this.gates();
+    if (!g || g.passed || !g.failureSummary) return [];
+    return g.failureSummary
+      .split(/\s*(?:;|\n|\|)\s*|(?<=\.)\s+(?=[A-Z])/)
+      .map((x) => x.trim().replace(/\.$/, ''))
+      .filter((x) => x.length > 0);
   });
 
   constructor() {
@@ -530,11 +568,18 @@ function parseDiagnostic(raw: string): ParsedDiagnostic {
   // Extract `Key=Value` pairs (numbers, percents, dates) for tabular display.
   // Strip leading bullets / spaces. We accept μ/σ/P(...) too.
   const values: Array<{ k: string; v: string }> = [];
-  const pairRe = /([A-Za-zμσμσ()<>=+\-_·][A-Za-zμσμσ()<>=+\-_·0-9 ]*?)=([^\s,;|]+)/g;
+  // A value may carry a parenthesised qualifier with spaces inside —
+  // "unmeasured(<30 trades)" — so the match must consume a balanced group
+  // before stopping at the next separator; otherwise it printed "unmeasured(<30".
+  const pairRe =
+    /([A-Za-zμσμσ()<>=+\-_·][A-Za-zμσμσ()<>=+\-_·0-9 ]*?)=([^\s,;|(]*(?:\([^)]*\))?[^\s,;|]*)/g;
   let m: RegExpExecArray | null;
   while ((m = pairRe.exec(detail)) !== null) {
     const k = m[1].trim();
-    const v = m[2].trim();
+    let v = m[2].trim();
+    const open = (v.match(/\(/g) ?? []).length;
+    const close = (v.match(/\)/g) ?? []).length;
+    if (open > close) v += ')'.repeat(open - close);
     if (k && v) values.push({ k, v });
   }
 

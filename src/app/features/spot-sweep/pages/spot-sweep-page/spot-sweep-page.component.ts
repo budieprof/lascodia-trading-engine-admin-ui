@@ -188,7 +188,7 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
             }
             <div>
               <dt>LLM cost today</dt>
-              <dd class="mono">{{ st.today.costUsd | number: '1.3-3' }} $</dd>
+              <dd class="mono">{{ '$' + (st.today.costUsd | number: '1.2-2') }}</dd>
             </div>
           </dl>
         </section>
@@ -796,7 +796,7 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
                       } @else if (r.signalId) {
                         <span class="chip">signal #{{ r.signalId }}</span>
                       }
-                      <span class="muted small">{{ r.costUsd | number: '1.3-3' }} $</span>
+                      <span class="muted small">{{ '$' + (r.costUsd | number: '1.2-2') }}</span>
                     </li>
                   }
                 </ul>
@@ -858,7 +858,7 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
                           {{ r.mode }}
                         </span>
                       </td>
-                      <td class="num mono">{{ r.costUsd | number: '1.3-3' }}</td>
+                      <td class="num mono">{{ '$' + (r.costUsd | number: '1.2-2') }}</td>
                     </tr>
                   }
                 </tbody>
@@ -920,23 +920,26 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
         text-transform: uppercase;
         letter-spacing: 0.04em;
       }
+      /* LIVE is the armed state, not an error — accent, not red; PAPER stays neutral. */
       .mode-badge.live {
-        background: var(--loss);
-        color: #fff;
+        background: rgba(0, 113, 227, 0.16);
+        color: var(--accent);
       }
+      /* Start is the primary action; Stop is a destructive-outline button so
+         "■ Stop sweep" no longer wears the green of a healthy status. */
       .power-btn {
-        border: 1px solid var(--border);
-        background: var(--bg-secondary);
-        color: var(--text-primary);
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: #fff;
         border-radius: var(--radius-full);
         padding: 8px 18px;
         font-weight: var(--font-semibold);
         cursor: pointer;
       }
       .power-btn.on {
-        background: var(--profit);
-        border-color: var(--profit);
-        color: #fff;
+        background: transparent;
+        border-color: var(--loss);
+        color: var(--loss);
       }
       .power-btn:disabled {
         opacity: 0.5;
@@ -1541,9 +1544,14 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
         color: var(--profit);
         margin-left: auto;
       }
+      /* Always-visible scroll region: the last run was being cut in half by a
+         max-height with no visible affordance. */
       .hist-scroll {
         max-height: 360px;
-        overflow-y: auto;
+        overflow: auto;
+        scrollbar-gutter: stable;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
       }
       .hist-table {
         width: 100%;

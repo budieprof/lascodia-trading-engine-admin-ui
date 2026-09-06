@@ -303,7 +303,12 @@ type DirectionChip = 'all' | TradeDirection;
             <span>ML disagrees only</span>
           </label>
 
-          <span class="muted">{{ visibleSignals().length }} of {{ recentSignals().length }}</span>
+          <span
+            class="muted"
+            title="Chip counts and KPIs are computed over the most recent 500 signals; the table below pages through the full history."
+          >
+            {{ visibleSignals().length }} of the last {{ recentSignals().length }} signals match
+          </span>
         </div>
 
         <!-- Charts row -->
@@ -402,18 +407,16 @@ type DirectionChip = 'all' | TradeDirection;
               <dl class="drawer-grid">
                 <div>
                   <dt>Entry</dt>
-                  <dd class="mono">{{ s.entryPrice | number: '1.4-5' }}</dd>
+                  <dd class="mono">{{ formatPrice(s.entryPrice, s) }}</dd>
                 </div>
                 <div>
                   <dt>Stop loss</dt>
-                  <dd class="mono">
-                    {{ s.stopLoss !== null ? (s.stopLoss | number: '1.4-5') : '—' }}
-                  </dd>
+                  <dd class="mono">{{ formatPrice(s.stopLoss, s) }}</dd>
                 </div>
                 <div>
                   <dt>Take profit</dt>
                   <dd class="mono">
-                    {{ s.takeProfit !== null ? (s.takeProfit | number: '1.4-5') : '—' }}
+                    {{ formatPrice(s.takeProfit, s) }}
                     @if (s.originalTakeProfit !== null && s.originalTakeProfit !== s.takeProfit) {
                       <!-- Engine shrunk the LLM's TP via SpotAnalysisTakeProfitShrinkage.
                            Show the original underneath so the operator sees the
@@ -422,15 +425,15 @@ type DirectionChip = 'all' | TradeDirection;
                         class="tp-original"
                         [title]="
                           'LLM proposed ' +
-                          (s.originalTakeProfit | number: '1.4-5') +
+                          formatPrice(s.originalTakeProfit, s) +
                           ' — shrunk to ' +
-                          (s.takeProfit | number: '1.4-5') +
+                          formatPrice(s.takeProfit, s) +
                           ' (' +
                           (tpReductionPct(s) ?? '0%') +
                           ' reduction of the profit-target distance) before the signal was filed.'
                         "
                       >
-                        LLM original: {{ s.originalTakeProfit | number: '1.4-5' }}
+                        LLM original: {{ formatPrice(s.originalTakeProfit, s) }}
                         @if (tpReductionPct(s); as pct) {
                           <span class="tp-reduction">−{{ pct }}</span>
                         }
@@ -440,7 +443,12 @@ type DirectionChip = 'all' | TradeDirection;
                 </div>
                 <div>
                   <dt>Risk : Reward</dt>
-                  <dd class="mono">{{ formatRR(s) }}</dd>
+                  <dd class="mono">
+                    {{ formatRR(s) }}
+                    @if (hasImpossibleStop(s)) {
+                      <span class="rr-flag" [title]="impossibleStopHint">⚠ Impossible stop</span>
+                    }
+                  </dd>
                 </div>
                 <div>
                   <dt>Lot size</dt>
@@ -678,7 +686,8 @@ type DirectionChip = 'all' | TradeDirection;
       .chip[data-status='Pending'].active {
         color: #c93400;
       }
-      .chip[data-status='Approved'].active {
+      .chip[data-status='Approved'].active,
+      .chip[data-status='Executed'].active {
         color: #248a3d;
       }
       .chip[data-status='Rejected'].active {
@@ -992,6 +1001,18 @@ type DirectionChip = 'all' | TradeDirection;
         color: var(--loss);
         font-weight: var(--font-semibold);
       }
+      .rr-flag {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 1px 8px;
+        border-radius: var(--radius-full);
+        background: rgba(255, 59, 48, 0.12);
+        color: var(--loss);
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        font-family: inherit;
+        cursor: help;
+      }
       .disagree-badge {
         display: inline-block;
         margin-left: 8px;
@@ -1081,7 +1102,14 @@ export class SignalsPageComponent {
   readonly symbolFilter = signal('');
   readonly mlDisagreementOnly = signal(false);
 
-  readonly statusChips: StatusChip[] = ['all', 'Pending', 'Approved', 'Rejected', 'Expired'];
+  readonly statusChips: StatusChip[] = [
+    'all',
+    'Pending',
+    'Approved',
+    'Executed',
+    'Rejected',
+    'Expired',
+  ];
   readonly directionChips: DirectionChip[] = ['all', 'Buy', 'Sell'];
 
   // ── Recent-signals snapshot for KPIs / charts ────────────────────────
@@ -1208,7 +1236,7 @@ export class SignalsPageComponent {
       const t = new Date(Date.now() - h * 3600_000);
       t.setMinutes(0, 0, 0);
       const k = t.toISOString().slice(11, 16);
-      buckets.set(k, { Pending: 0, Approved: 0, Rejected: 0, Expired: 0 });
+      buckets.set(k, { Pending: 0, Approved: 0, Executed: 0, Rejected: 0, Expired: 0 });
     }
     for (const s of this.recentSignals()) {
       const ts = new Date(s.generatedAt).getTime();
@@ -1222,8 +1250,23 @@ export class SignalsPageComponent {
       b[status] = (b[status] ?? 0) + 1;
     }
     const xs = Array.from(buckets.keys());
+    const total = Array.from(buckets.values()).reduce(
+      (acc, b) => acc + Object.values(b).reduce((a, n) => a + n, 0),
+      0,
+    );
+    if (total === 0) {
+      return {
+        title: {
+          text: 'No signals generated in the last 24h',
+          left: 'center',
+          top: 'center',
+          textStyle: { fontSize: 12, color: '#8E8E93' },
+        },
+      };
+    }
     const series = [
       { name: 'Approved', color: '#34C759' },
+      { name: 'Executed', color: '#0071E3' },
       { name: 'Pending', color: '#FF9500' },
       { name: 'Rejected', color: '#FF3B30' },
       { name: 'Expired', color: '#8E8E93' },
@@ -1239,7 +1282,7 @@ export class SignalsPageComponent {
       legend: { bottom: 0, textStyle: { fontSize: 10 } },
       grid: { top: 12, right: 16, bottom: 36, left: 36 },
       xAxis: { type: 'category', data: xs, axisLabel: { fontSize: 10, hideOverlap: true } },
-      yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
+      yAxis: { type: 'value', minInterval: 1, axisLabel: { fontSize: 10 } },
       series,
     };
   });
@@ -1272,7 +1315,7 @@ export class SignalsPageComponent {
       tooltip: { trigger: 'axis' },
       legend: { bottom: 0, textStyle: { fontSize: 10 } },
       grid: { top: 12, right: 16, bottom: 36, left: 70 },
-      xAxis: { type: 'value', axisLabel: { fontSize: 10 } },
+      xAxis: { type: 'value', minInterval: 1, axisLabel: { fontSize: 10 } },
       yAxis: { type: 'category', data: sorted.map(([s]) => s), axisLabel: { fontSize: 10 } },
       series: [
         {
@@ -1435,30 +1478,35 @@ export class SignalsPageComponent {
     {
       headerName: 'Entry',
       field: 'entryPrice',
-      width: 100,
+      width: 96,
       cellClass: 'mono',
-      valueFormatter: (p) => (p.value != null ? Number(p.value).toFixed(5) : '—'),
+      valueFormatter: (p) => this.formatPrice(p.value, p.data),
     },
     {
       headerName: 'SL',
       field: 'stopLoss',
-      width: 100,
+      width: 96,
       cellClass: 'mono',
-      valueFormatter: (p) => (p.value != null ? Number(p.value).toFixed(5) : '—'),
+      valueFormatter: (p) => this.formatPrice(p.value, p.data),
     },
     {
       headerName: 'TP',
       field: 'takeProfit',
-      width: 100,
+      width: 96,
       cellClass: 'mono',
-      valueFormatter: (p) => (p.value != null ? Number(p.value).toFixed(5) : '—'),
+      valueFormatter: (p) => this.formatPrice(p.value, p.data),
     },
     {
       headerName: 'R:R',
       colId: 'rr',
-      width: 75,
+      width: 96,
       cellClass: 'mono',
       valueGetter: (p) => this.formatRR(p.data as TradeSignalDto),
+      cellRenderer: (p: { value: string; data: TradeSignalDto }) => {
+        if (!this.hasImpossibleStop(p.data)) return escapeHtml(p.value ?? '—');
+        const risk = Math.abs(p.data.entryPrice - (p.data.stopLoss ?? p.data.entryPrice));
+        return `<span title="Stop is ${escapeHtml(this.formatPrice(risk, p.data))} from entry — ${IMPOSSIBLE_STOP_HINT}" style="color:#D70015;background:rgba(255,59,48,0.12);padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600">⚠ ${escapeHtml(p.value)}</span>`;
+      },
     },
     {
       headerName: 'Lots',
@@ -1664,12 +1712,38 @@ export class SignalsPageComponent {
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────
+  readonly impossibleStopHint = IMPOSSIBLE_STOP_HINT;
+
   formatRR(s: TradeSignalDto | null): string {
     if (!s || s.stopLoss === null || s.takeProfit === null) return '—';
     const risk = Math.abs(s.entryPrice - s.stopLoss);
     const reward = Math.abs(s.takeProfit - s.entryPrice);
     if (risk === 0) return '—';
     return `1:${(reward / risk).toFixed(2)}`;
+  }
+
+  /**
+   * Corrupt SL geometry guard.  A handful of XAUUSD signals carried stops
+   * ~1,500 points from entry (entry 4471 / SL 2888 / TP 4493), which is a
+   * reward:risk of 0.014 — no broker-side risk model would ever produce
+   * it.  Flag anything under 0.05 so the row does not pass as a normal
+   * signal.  The threshold is deliberately far below any legitimate
+   * "thin" geometry (the viability gate warns at 1.0).
+   */
+  hasImpossibleStop(s: TradeSignalDto | null): boolean {
+    if (!s || s.stopLoss === null || s.takeProfit === null) return false;
+    const risk = Math.abs(s.entryPrice - s.stopLoss);
+    const reward = Math.abs(s.takeProfit - s.entryPrice);
+    if (risk === 0 || reward === 0) return false;
+    return reward / risk < 0.05;
+  }
+
+  /** Price precision by instrument family — metals 2 dp, JPY crosses 3 dp, else 5 dp. */
+  formatPrice(value: number | null | undefined, s: TradeSignalDto | null | undefined): string {
+    if (value == null) return '—';
+    const sym = (s?.symbol ?? '').toUpperCase();
+    const dp = sym.startsWith('XAU') || sym.startsWith('XAG') ? 2 : sym.includes('JPY') ? 3 : 5;
+    return Number(value).toFixed(dp);
   }
 
   /**
@@ -1698,6 +1772,9 @@ export class SignalsPageComponent {
     return `${Math.round(reductionPct)}%`;
   }
 }
+
+const IMPOSSIBLE_STOP_HINT =
+  'reward:risk below 0.05. This is corrupt stop geometry from the engine, not a tradeable plan; treat the row as data to be fixed server-side.';
 
 function escapeHtml(s: string): string {
   return s

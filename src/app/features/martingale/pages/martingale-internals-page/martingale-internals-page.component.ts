@@ -74,34 +74,14 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         <a class="mode-link" routerLink="/martingale">Configure ladders →</a>
       </section>
 
-      <!-- The scoreboard. Debt and banked surplus are kept apart deliberately. -->
+      <!--
+        The scoreboard. Two money figures carry the page — has laddering paid, and how much is
+        still at risk — so they are set large; the chain counts are bookkeeping and sit smaller.
+        Debt and banked surplus are kept apart deliberately. Money is in each account's own
+        currency: the overview spans accounts, so no single unit is honest.
+      -->
       <section class="totals">
-        <div class="stat">
-          <span class="stat-label">Open chains</span>
-          <span class="stat-value">{{ v.totals.openChains }}</span>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Outstanding debt</span>
-          <span class="stat-value neg">{{ v.totals.outstandingDeficit | number: '1.2-2' }}</span>
-          <span class="stat-note">still to win back</span>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Banked surplus</span>
-          <span class="stat-value pos">{{ v.totals.bankedSurplus | number: '1.2-2' }}</span>
-          <span class="stat-note">progress toward targets</span>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Recovered</span>
-          <span class="stat-value">{{ v.totals.recoveredChains }}</span>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Abandoned</span>
-          <span class="stat-value">{{ v.totals.abandonedChains }}</span>
-          <span class="stat-note"
-            >{{ v.totals.abandonedDeficit | number: '1.2-2' }} written off</span
-          >
-        </div>
-        <div class="stat wide">
+        <div class="stat primary">
           <span class="stat-label">Lifetime realised P&amp;L</span>
           <span
             class="stat-value"
@@ -110,7 +90,48 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
           >
             {{ v.totals.lifetimeRealisedPnl | number: '1.2-2' }}
           </span>
-          <span class="stat-note">every close attributed to a chain — has laddering paid?</span>
+          <span class="stat-note">account currency · every close attributed to a chain</span>
+        </div>
+        <div class="stat primary">
+          <span class="stat-label">Outstanding debt</span>
+          <span class="stat-value" [class.neg]="v.totals.outstandingDeficit > 0">
+            {{ v.totals.outstandingDeficit | number: '1.2-2' }}
+          </span>
+          <span class="stat-note">account currency · still to win back</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Banked surplus</span>
+          <span class="stat-value" [class.pos]="v.totals.bankedSurplus > 0">
+            {{ v.totals.bankedSurplus | number: '1.2-2' }}
+          </span>
+          <span class="stat-note">progress toward targets</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Open chains</span>
+          <span class="stat-value">{{ v.totals.openChains }}</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Recovered</span>
+          <span class="stat-value">{{ v.totals.recoveredChains }}</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Abandoned</span>
+          <span class="stat-value">{{ v.totals.abandonedChains }}</span>
+          <span class="stat-note">
+            {{ v.totals.abandonedDeficit | number: '1.2-2' }} written off
+            @if (mismatchWriteOff(); as m) {
+              <br />
+              <span
+                class="warn"
+                title="These chains carry a stored depth the ledger does not support (legacy replay ledgers). Their write-off is a bookkeeping artefact of the inflated depth as much as a trading loss."
+              >
+                {{ m.amount | number: '1.2-2' }} of that from {{ m.count }} depth-mismatch chain{{
+                  m.count === 1 ? '' : 's'
+                }}
+                in view
+              </span>
+            }
+          </span>
         </div>
       </section>
 
@@ -171,7 +192,15 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                   <th class="num">Target R</th>
                   <th class="num">Stake cap</th>
                   <th class="num">Age cap</th>
-                  <th class="num">Worst case</th>
+                  <th class="num" title="Model estimate at the profile's assumed ~0.5R geometry">
+                    Worst case (model)
+                  </th>
+                  <th
+                    class="num"
+                    title="Next rung's stake at the open chain's actual entry geometry"
+                  >
+                    Next rung (live)
+                  </th>
                   <th>Live now</th>
                 </tr>
               </thead>
@@ -200,6 +229,25 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                     <td class="num" [class.neg]="s.worstCaseDrawdownPct > 50">
                       {{ s.worstCaseDrawdownPct | number: '1.1-1' }}%
                     </td>
+                    <td class="num">
+                      @if (liveRungFor(s); as r) {
+                        <span
+                          [class.neg]="r.stakePctEquity > s.effectiveMaxStakePctEquity"
+                          [title]="
+                            'Depth ' +
+                            r.depth +
+                            (r.geometryR !== null
+                              ? ' at ' + (r.geometryR | number: '1.2-2') + 'R'
+                              : '') +
+                            ' — next-rung estimate for the open chain'
+                          "
+                        >
+                          {{ r.stakePctEquity | number: '1.1-1' }}%
+                        </span>
+                      } @else {
+                        <span class="dim">—</span>
+                      }
+                    </td>
                     <td>
                       @if (s.openPositions || s.ordersInFlight) {
                         <span class="dim">
@@ -215,9 +263,11 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
             </table>
           </div>
           <p class="foot">
-            <b>Worst case</b> is the cumulative loss if every rung to the depth cap loses. Each rung
-            must recover the whole running debt plus the target, so the stake roughly triples per
-            rung — the series grows far faster than the depth number suggests.
+            <b>Worst case (model)</b> is the cumulative loss if every rung to the depth cap loses,
+            estimated at the profile's assumed geometry (~0.5R, stake roughly tripling per rung).
+            <b>Next rung (live)</b> is what the open chain would actually risk next, at the real
+            entry geometry of its last close — a thin-geometry chain can need more on a single rung
+            than the whole model series, which is why both are shown.
           </p>
         }
       </section>
@@ -246,64 +296,86 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
             description="A chain opens on the first losing close of a laddered symbol."
           />
         } @else {
+          <!--
+            Fixed columns: status · title · depth · owed · net · flags · toggle. A flex row
+            wrapped differently for every chain, so the eye had to re-find "owed" on each line.
+          -->
+          <div class="chain-cols dim" aria-hidden="true">
+            <span>Status</span>
+            <span>Chain</span>
+            <span class="num">Depth</span>
+            <span class="num">Balance</span>
+            <span class="num">Net P&amp;L</span>
+            <span>Flags</span>
+            <span></span>
+          </div>
           @for (c of v.chains; track c.id) {
-            <article class="chain" [attr.data-status]="c.status">
+            <article
+              class="chain"
+              [attr.data-status]="c.status"
+              [attr.data-reset]="isOperatorReset(c) ? 'true' : null"
+            >
               <header class="chain-head" (click)="toggle(c.id)">
-                <span class="chain-status">{{ c.status }}</span>
+                <span class="chain-status" [title]="c.closureReason ?? ''">
+                  {{ statusLabel(c) }}
+                </span>
                 <span class="chain-title">
                   <b>{{ c.symbol }}</b> · {{ c.accountName }}
                   <span class="dim">#{{ c.tradingAccountId }}</span>
                 </span>
 
-                <span class="chain-depth" [class.neg]="c.depth >= c.maxDepth">
-                  depth {{ c.depth }}/{{ c.maxDepth }}
+                <span class="chain-depth num" [class.neg]="c.depth >= c.maxDepth">
+                  {{ c.depth }}/{{ c.maxDepth }}
                 </span>
 
                 <!--
                   A negative deficit is banked surplus, not debt. Showing it as "-2605.32 owed"
-                  reads as a bigger hole when it is the opposite.
+                  reads as a bigger hole when it is the opposite. A closed chain that ended level
+                  says so in its status, so the balance cell stays quiet.
                 -->
                 @if (c.deficitAmount > 0) {
-                  <span class="chain-money neg">
+                  <span class="chain-money num neg">
                     {{ c.deficitAmount | number: '1.2-2' }} owed
                   </span>
                 } @else if (c.deficitAmount < 0) {
-                  <span class="chain-money pos">
+                  <span class="chain-money num pos">
                     {{ -c.deficitAmount | number: '1.2-2' }} banked
                   </span>
                 } @else {
-                  <span class="chain-money dim">level</span>
+                  <span class="chain-money num dim">level</span>
                 }
 
                 <span
-                  class="chain-pnl"
+                  class="chain-pnl num"
                   [class.pos]="c.realisedPnl > 0"
                   [class.neg]="c.realisedPnl < 0"
                 >
-                  {{ c.realisedPnl | number: '1.2-2' }} net
+                  {{ c.realisedPnl | number: '1.2-2' }}
                 </span>
 
-                @if (c.depthDivergesFromLedger) {
-                  <span class="pill pill-bad">depth mismatch</span>
-                }
-                @if (c.isStale && c.waitingOnOpenPosition) {
-                  <span
-                    class="pill"
-                    title="Its rung is still open at the broker; the chain advances when it closes."
-                  >
-                    waiting on open position
-                  </span>
-                } @else if (c.isStale) {
-                  <span
-                    class="pill pill-warn"
-                    title="No advance inside the sweeper's stale window and nothing live on the symbol."
-                  >
-                    stale
-                  </span>
-                }
-                @if (c.status === 'Open' && c.rungSkipCount > 0) {
-                  <span class="pill pill-bad">rung skipped ×{{ c.rungSkipCount }}</span>
-                }
+                <span class="chain-flags">
+                  @if (c.depthDivergesFromLedger) {
+                    <span class="pill pill-bad">depth mismatch</span>
+                  }
+                  @if (c.isStale && c.waitingOnOpenPosition) {
+                    <span
+                      class="pill"
+                      title="Its rung is still open at the broker; the chain advances when it closes."
+                    >
+                      waiting on open position
+                    </span>
+                  } @else if (c.isStale) {
+                    <span
+                      class="pill pill-warn"
+                      title="No advance inside the sweeper's stale window and nothing live on the symbol."
+                    >
+                      stale
+                    </span>
+                  }
+                  @if (c.status === 'Open' && c.rungSkipCount > 0) {
+                    <span class="pill pill-bad">rung skipped ×{{ c.rungSkipCount }}</span>
+                  }
+                </span>
 
                 <span class="chain-toggle">{{ expanded().has(c.id) ? '−' : '+' }}</span>
               </header>
@@ -325,15 +397,19 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                     </div>
                     <div>
                       <dt>Target</dt>
-                      <dd>{{ c.targetAmount | number: '1.2-2' }}</dd>
+                      <dd>
+                        {{ c.targetAmount | number: '1.2-2' }} <span class="dim">acct ccy</span>
+                      </dd>
                     </div>
                     <div>
                       <dt>Base stake</dt>
-                      <dd>{{ c.baseStakeAmount | number: '1.2-2' }}</dd>
+                      <dd>
+                        {{ c.baseStakeAmount | number: '1.2-2' }} <span class="dim">acct ccy</span>
+                      </dd>
                     </div>
                     @if (c.closureReason) {
                       <div class="wide">
-                        <dt>Closed because</dt>
+                        <dt>{{ isOperatorReset(c) ? 'Reset by operator' : 'Closed because' }}</dt>
                         <dd>{{ c.closureReason }}</dd>
                       </div>
                     }
@@ -404,12 +480,12 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                         — <b>{{ r.stakePctEquity | number: '1.1-2' }}% of equity</b>, the figure the
                         stake ceiling is tested against.
                         @if (r.estimatedRungLots !== null) {
-                          Roughly <b>{{ r.estimatedRungLots | number: '1.0-2' }} lots</b>
                           @if (r.brokerMaxLotSize !== null) {
-                            against a broker ceiling of
-                            {{ r.brokerMaxLotSize | number: '1.0-0' }} lots
+                            Roughly <b>{{ r.estimatedRungLots | number: '1.0-2' }} lots</b> against
+                            a broker ceiling of {{ r.brokerMaxLotSize | number: '1.0-0' }} lots.
+                          } @else {
+                            Roughly <b>{{ r.estimatedRungLots | number: '1.0-2' }} lots</b>.
                           }
-                          .
                           <span class="dim">{{ r.estimateBasis }}</span>
                         }
                       </p>
@@ -646,21 +722,21 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         align-items: center;
         gap: 0.75rem;
         flex-wrap: wrap;
-        border: 1px solid var(--border-default);
+        border: 1px solid var(--border);
         border-left-width: 4px;
         border-radius: 8px;
         padding: 0.75rem 1rem;
         margin-bottom: 1rem;
-        background: var(--surface-raised);
+        background: var(--bg-secondary);
       }
       .mode[data-mode='Live'] {
-        border-left-color: var(--color-danger, #d64545);
+        border-left-color: var(--loss);
       }
       .mode[data-mode='Shadow'] {
-        border-left-color: var(--color-warning, #d69e2e);
+        border-left-color: var(--warning);
       }
       .mode[data-mode='Off'] {
-        border-left-color: var(--border-default);
+        border-left-color: var(--border);
       }
       .mode-badge {
         font-weight: 700;
@@ -675,51 +751,72 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         font-size: 0.875rem;
       }
 
+      /* Two primary money tiles span two columns each and set their value
+         larger; the four count tiles share the remaining width at one weight. */
       .totals {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+        grid-template-columns: repeat(8, minmax(0, 1fr));
         gap: 0.75rem;
         margin-bottom: 1rem;
+        align-items: stretch;
       }
       .stat {
         display: flex;
         flex-direction: column;
         gap: 0.15rem;
-        border: 1px solid var(--border-default);
+        border: 1px solid var(--border);
         border-radius: 8px;
         padding: 0.7rem 0.85rem;
-        background: var(--surface-raised);
+        background: var(--bg-secondary);
+        min-width: 0;
       }
-      .stat.wide {
+      .stat.primary {
         grid-column: span 2;
+      }
+      .stat.primary .stat-value {
+        font-size: 1.75rem;
+      }
+      @media (max-width: 1100px) {
+        .totals {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 640px) {
+        .totals {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
       .stat-label {
         font-size: 0.72rem;
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        color: var(--text-muted);
+        color: var(--text-secondary);
       }
       .stat-value {
-        font-size: 1.3rem;
+        font-size: 1.2rem;
         font-weight: 600;
         font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .stat-note {
         font-size: 0.72rem;
-        color: var(--text-muted);
+        color: var(--text-secondary);
+        line-height: 1.35;
       }
 
       .sweeper,
       .symbols,
       .chains {
-        border: 1px solid var(--border-default);
+        border: 1px solid var(--border);
         border-radius: 8px;
         padding: 1rem;
         margin-bottom: 1rem;
-        background: var(--surface-raised);
+        background: var(--bg-secondary);
       }
       .sweeper-off {
-        border-left: 4px solid var(--color-danger, #d64545);
+        border-left: 4px solid var(--loss);
       }
       h2 {
         margin: 0 0 0.6rem;
@@ -745,7 +842,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         gap: 0.35rem;
       }
       .filter {
-        border: 1px solid var(--border-default);
+        border: 1px solid var(--border);
         background: transparent;
         color: inherit;
         border-radius: 999px;
@@ -754,57 +851,100 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         cursor: pointer;
       }
       .filter-on {
-        background: var(--surface-sunken, rgba(127, 127, 127, 0.15));
+        background: var(--bg-tertiary);
         font-weight: 600;
       }
 
       .chain {
-        border: 1px solid var(--border-default);
+        border: 1px solid var(--border);
         border-radius: 8px;
         margin-top: 0.6rem;
         overflow: hidden;
       }
       .chain[data-status='Open'] {
-        border-left: 4px solid var(--color-warning, #d69e2e);
+        border-left: 4px solid var(--warning);
       }
       .chain[data-status='Recovered'] {
-        border-left: 4px solid var(--color-success, #2f855a);
+        border-left: 4px solid var(--profit);
       }
       .chain[data-status='Abandoned'] {
-        border-left: 4px solid var(--color-danger, #d64545);
+        border-left: 4px solid var(--loss);
       }
+      /* An operator reset is a deliberate write-off, not a ladder that ran out of road. */
+      .chain[data-status='Abandoned'][data-reset='true'] {
+        border-left-color: var(--text-tertiary);
+      }
+      .chain-cols,
       .chain-head {
-        display: flex;
+        display: grid;
+        grid-template-columns: 7.5rem minmax(10rem, 1fr) 4rem 9rem 8rem minmax(8rem, 1.2fr) 1.2rem;
         align-items: center;
         gap: 0.75rem;
-        flex-wrap: wrap;
         padding: 0.6rem 0.85rem;
+      }
+      .chain-cols {
+        margin-top: 0.75rem;
+        padding-top: 0;
+        padding-bottom: 0.2rem;
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .chain-head {
         cursor: pointer;
+      }
+      .chain-head > .num,
+      .chain-cols > .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
       }
       .chain-status {
         font-size: 0.72rem;
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        color: var(--text-muted);
-        min-width: 5.5rem;
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .chain-title {
-        flex: 1 1 14rem;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .chain-depth,
       .chain-money,
       .chain-pnl {
         font-variant-numeric: tabular-nums;
         font-size: 0.875rem;
+        white-space: nowrap;
+      }
+      .chain-flags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.3rem;
+        min-width: 0;
       }
       .chain-toggle {
         font-size: 1.1rem;
         width: 1rem;
         text-align: center;
       }
+      @media (max-width: 900px) {
+        .chain-cols {
+          display: none;
+        }
+        .chain-head {
+          grid-template-columns: 1fr 1fr;
+        }
+        .chain-head > .num {
+          text-align: left;
+        }
+      }
       .chain-body {
         padding: 0 0.85rem 0.85rem;
-        border-top: 1px solid var(--border-default);
+        border-top: 1px solid var(--border);
       }
 
       .chain-meta {
@@ -820,7 +960,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         font-size: 0.72rem;
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        color: var(--text-muted);
+        color: var(--text-secondary);
       }
       .chain-meta dd {
         margin: 0;
@@ -828,20 +968,20 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       }
 
       .rung {
-        border: 1px solid var(--border-default);
+        border: 1px solid var(--border);
         border-radius: 6px;
         padding: 0.6rem 0.8rem;
         margin-top: 0.9rem;
-        background: var(--surface-sunken, rgba(127, 127, 127, 0.06));
+        background: var(--bg-tertiary);
       }
       .rung h3 {
         margin-top: 0;
       }
       .rung-blocked {
-        border-left: 3px solid var(--color-warning, #d69e2e);
+        border-left: 3px solid var(--warning);
       }
       .rung-abandon {
-        border-left: 3px solid var(--color-danger, #d64545);
+        border-left: 3px solid var(--loss);
       }
       .rung p {
         margin: 0.25rem 0;
@@ -860,14 +1000,14 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       td {
         text-align: left;
         padding: 0.4rem 0.6rem;
-        border-bottom: 1px solid var(--border-default);
+        border-bottom: 1px solid var(--border);
         white-space: nowrap;
       }
       th {
         font-size: 0.72rem;
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        color: var(--text-muted);
+        color: var(--text-secondary);
         font-weight: 600;
       }
       td.num,
@@ -881,26 +1021,26 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 
       .pill {
         display: inline-block;
-        border: 1px solid var(--border-default);
+        border: 1px solid var(--border);
         border-radius: 999px;
         padding: 0.05rem 0.5rem;
         font-size: 0.72rem;
         white-space: nowrap;
       }
       .pill-on {
-        border-color: var(--color-success, #2f855a);
+        border-color: var(--profit);
       }
       .pill-warn {
-        border-color: var(--color-warning, #d69e2e);
+        border-color: var(--warning);
       }
       .pill-bad {
-        border-color: var(--color-danger, #d64545);
-        color: var(--color-danger, #d64545);
+        border-color: var(--loss);
+        color: var(--loss);
         font-weight: 600;
       }
 
       .divergence {
-        border: 1px solid var(--color-danger, #d64545);
+        border: 1px solid var(--loss);
         border-left-width: 3px;
         border-radius: 6px;
         padding: 0.6rem 0.8rem;
@@ -908,40 +1048,40 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       }
       .divergence h3 {
         margin-top: 0;
-        color: var(--color-danger, #d64545);
+        color: var(--loss);
       }
       .divergence p {
         margin: 0.25rem 0;
       }
 
       .pos {
-        color: var(--color-success, #2f855a);
+        color: var(--profit);
       }
       .neg {
-        color: var(--color-danger, #d64545);
+        color: var(--loss);
       }
       .dim {
-        color: var(--text-muted);
+        color: var(--text-secondary);
       }
       .mono {
-        font-family: var(--font-mono, ui-monospace, monospace);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       }
       .warn {
-        color: var(--color-warning, #b7791f);
+        color: var(--warning);
       }
       .ok {
-        color: var(--color-success, #2f855a);
+        color: var(--profit);
       }
       .foot {
         margin: 0.5rem 0 0;
         font-size: 0.8rem;
-        color: var(--text-muted);
+        color: var(--text-secondary);
       }
 
       /* Rung-skip trace: same visual weight as the depth-divergence callout — both mean the
          module's paper state and its money state disagree. */
       .skiptrace {
-        border: 1px solid var(--color-danger, #d64545);
+        border: 1px solid var(--loss);
         border-left-width: 4px;
         border-radius: 6px;
         padding: 0.6rem 0.8rem;
@@ -954,7 +1094,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         margin: 0 0 0.3rem;
       }
       .rung-skip {
-        border-left: 4px solid var(--color-warning, #d69e2e);
+        border-left: 4px solid var(--warning);
       }
 
       .reset {
@@ -964,15 +1104,15 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         flex-wrap: wrap;
         margin-top: 0.9rem;
         padding-top: 0.75rem;
-        border-top: 1px dashed var(--border-default);
+        border-top: 1px dashed var(--border);
         font-size: 0.85rem;
       }
       .reset-reason {
         flex: 1 1 18rem;
         padding: 0.35rem 0.5rem;
-        border: 1px solid var(--border-default);
+        border: 1px solid var(--border);
         border-radius: 6px;
-        background: var(--surface-base, transparent);
+        background: var(--bg-primary);
         color: inherit;
         font: inherit;
       }
@@ -986,8 +1126,8 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         cursor: pointer;
       }
       .btn-danger {
-        border: 1px solid var(--color-danger, #d64545);
-        background: var(--color-danger, #d64545);
+        border: 1px solid var(--loss);
+        background: var(--loss);
         color: #fff;
       }
       .btn-danger:disabled {
@@ -995,18 +1135,18 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         cursor: not-allowed;
       }
       .btn-danger-outline {
-        border: 1px solid var(--color-danger, #d64545);
+        border: 1px solid var(--loss);
         background: none;
-        color: var(--color-danger, #d64545);
+        color: var(--loss);
       }
       .btn-plain {
-        border: 1px solid var(--border-default);
+        border: 1px solid var(--border);
         background: none;
         color: inherit;
       }
       .generated {
         font-size: 0.8rem;
-        color: var(--text-muted);
+        color: var(--text-secondary);
       }
       .link {
         background: none;
@@ -1032,6 +1172,43 @@ export class MartingaleInternalsPageComponent {
 
   private readonly data = signal<MartingaleOverviewDto | null>(null);
   readonly view = computed(() => this.data());
+
+  /**
+   * Written-off money that belongs to chains whose stored depth the ledger does not support.
+   * The headline "written off" total is dominated by these (legacy replay ledgers), so the
+   * scoreboard names the share rather than presenting it as a clean trading loss. Computed over
+   * the chains in view — the list is capped and status-filtered — and the label says so.
+   */
+  readonly mismatchWriteOff = computed<{ amount: number; count: number } | null>(() => {
+    const chains = this.data()?.chains ?? [];
+    const rows = chains.filter((c) => c.status === 'Abandoned' && c.depthDivergesFromLedger);
+    if (rows.length === 0) return null;
+    return {
+      amount: rows.reduce((s, c) => s + Math.max(0, c.deficitAmount), 0),
+      count: rows.length,
+    };
+  });
+
+  /** Open chain by id, for joining laddered symbols to their live next-rung estimate. */
+  private readonly openChainById = computed(() => {
+    const map = new Map<number, MartingaleChainViewDto>();
+    for (const c of this.data()?.chains ?? []) if (c.status === 'Open') map.set(c.id, c);
+    return map;
+  });
+
+  liveRungFor(s: { openChainId: number | null }): MartingaleChainViewDto['nextRung'] {
+    if (s.openChainId == null) return null;
+    return this.openChainById().get(s.openChainId)?.nextRung ?? null;
+  }
+
+  /** The service records manual resets as "Manually reset by operator at depth …: <reason>". */
+  isOperatorReset(c: MartingaleChainViewDto): boolean {
+    return c.status === 'Abandoned' && (c.closureReason ?? '').startsWith('Manually reset');
+  }
+
+  statusLabel(c: MartingaleChainViewDto): string {
+    return this.isOperatorReset(c) ? 'Reset by operator' : c.status;
+  }
 
   constructor() {
     this.reload();

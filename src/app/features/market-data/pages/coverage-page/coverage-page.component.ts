@@ -10,7 +10,6 @@ import type { CandleCoverageDto, Timeframe } from '@core/api/api.types';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
-import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
@@ -35,7 +34,6 @@ interface CoverageResult {
     PageHeaderComponent,
     MetricCardComponent,
     CardSkeletonComponent,
-    ErrorStateComponent,
     EmptyStateComponent,
     RelativeTimePipe,
   ],

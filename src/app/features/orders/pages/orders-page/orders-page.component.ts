@@ -21,7 +21,6 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, merge, of, throttleTime } from 'rxjs';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import type { OrderDto, PagedData, PagerRequest, CreateOrderRequest } from '@core/api/api.types';
-import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -52,20 +51,23 @@ interface OrdersViewState {
     ChartCardComponent,
     TabsComponent,
     ConfirmDialogComponent,
-    RelativeTimePipe,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <app-page-header title="Orders" subtitle="Manage and monitor trading orders">
+        <!-- While the form is open the primary action is its own Create
+             button; a primary-blue "Close Form" outranked it. -->
         <button
           type="button"
-          class="btn btn-primary"
+          class="btn"
+          [class.btn-primary]="!showCreateForm()"
+          [class.btn-secondary]="showCreateForm()"
           (click)="toggleCreateForm()"
           [attr.aria-expanded]="showCreateForm()"
         >
           @if (showCreateForm()) {
-            Close Form
+            Close form
           } @else {
             + Create Order
           }
@@ -288,30 +290,6 @@ interface OrdersViewState {
         </div>
       }
 
-      <!-- Saved views -->
-      <div class="saved-views">
-        @for (v of pinnedSavedViews(); track v.id) {
-          <button
-            type="button"
-            class="view-pill"
-            (click)="applySavedView(v)"
-            [attr.aria-label]="'Restore saved view ' + v.label"
-          >
-            <span class="view-label">{{ v.label }}</span>
-            <span
-              class="view-remove"
-              role="button"
-              tabindex="0"
-              aria-label="Remove saved view"
-              (click)="removeSavedView(v.id, $event)"
-              (keydown.enter)="removeSavedView(v.id, $event)"
-              >×</span
-            >
-          </button>
-        }
-        <button type="button" class="view-save" (click)="saveCurrentView()">+ Save view</button>
-      </div>
-
       <!-- Tabs -->
       <ui-tabs [tabs]="tabItems" [(activeTab)]="activeTab">
         @switch (activeTab()) {
@@ -319,7 +297,7 @@ interface OrdersViewState {
             <!-- Summary Metrics — 8 dense tiles, recent-orders-scoped (last 500) -->
             <div class="metrics-strip">
               <app-metric-card
-                label="Total (recent)"
+                label="Orders (recent window)"
                 [value]="totalOrders()"
                 format="number"
                 dotColor="#0071E3"
@@ -355,8 +333,8 @@ interface OrdersViewState {
                 dotColor="#0071E3"
               />
               <app-metric-card
-                label="Avg fill latency"
-                [value]="avgFillLatencyMs()"
+                label="Avg fill latency (min)"
+                [value]="avgFillLatencyMin()"
                 format="number"
                 dotColor="#AF52DE"
               />
@@ -434,6 +412,32 @@ interface OrdersViewState {
               @if (hasActiveFilters()) {
                 <button class="chip chip-clear" (click)="clearFilters()">Clear filters</button>
               }
+              <!-- Saved views live with the filters they restore, at the end of
+                   the same row, instead of floating above the tab strip. -->
+              <div class="saved-views">
+                @for (v of pinnedSavedViews(); track v.id) {
+                  <button
+                    type="button"
+                    class="view-pill"
+                    (click)="applySavedView(v)"
+                    [attr.aria-label]="'Restore saved view ' + v.label"
+                  >
+                    <span class="view-label">{{ v.label }}</span>
+                    <span
+                      class="view-remove"
+                      role="button"
+                      tabindex="0"
+                      aria-label="Remove saved view"
+                      (click)="removeSavedView(v.id, $event)"
+                      (keydown.enter)="removeSavedView(v.id, $event)"
+                      >×</span
+                    >
+                  </button>
+                }
+                <button type="button" class="view-save" (click)="saveCurrentView()">
+                  + Save view
+                </button>
+              </div>
             </div>
 
             <!-- Data Table -->
@@ -459,31 +463,38 @@ interface OrdersViewState {
           }
 
           @case ('analytics') {
-            <!-- Analytics-specific KPI strip -->
+            <!-- Analytics-specific KPI strip. Fill latency is createdAt → filledAt,
+                 which for limit orders is minutes to hours — so the unit is minutes
+                 and it is in the label. -->
             <div class="metrics-strip">
               <app-metric-card
-                label="Latency p50"
-                [value]="latencyP50Ms()"
+                label="Fill latency p50 (min)"
+                [value]="latencyP50Min()"
                 format="number"
                 dotColor="#5856D6"
               />
               <app-metric-card
-                label="Latency p95"
-                [value]="latencyP95Ms()"
+                label="Fill latency p95 (min)"
+                [value]="latencyP95Min()"
                 format="number"
                 dotColor="#AF52DE"
               />
+              <!-- Negative slippage = filled better than the order price = good,
+                   so the colour is inverted to match the per-symbol table. -->
               <app-metric-card
                 label="Avg slippage (pips)"
                 [value]="avgSlippagePips()"
                 format="number"
                 [colorByValue]="true"
+                [invertColor]="true"
               />
               <app-metric-card
                 label="Reject rate"
                 [value]="rejectRate()"
                 format="percent"
-                [dotColor]="rejectRate() > 5 ? '#FF3B30' : '#34C759'"
+                [colorByValue]="true"
+                [invertColor]="true"
+                [dotColor]="rejectRate() > 5 ? '#FF3B30' : '#8E8E93'"
               />
               <app-metric-card
                 label="Paper share"
@@ -492,26 +503,27 @@ interface OrdersViewState {
                 dotColor="#0071E3"
               />
               <app-metric-card
-                label="Top symbol"
+                [label]="topSymbolLabel()"
                 [value]="topSymbolCount()"
                 format="number"
                 dotColor="#5AC8FA"
               />
               <app-metric-card
-                label="Top reject reason"
+                [label]="topRejectionLabel()"
                 [value]="topRejectionCount()"
                 format="number"
                 [dotColor]="topRejectionCount() > 0 ? '#FF3B30' : '#8E8E93'"
               />
               <app-metric-card
-                label="Window size"
+                label="Orders in window"
                 [value]="totalOrders()"
                 format="number"
                 dotColor="#8E8E93"
               />
             </div>
 
-            <!-- 4-column chart grid — 8 charts, 2 rows on standard widths -->
+            <!-- Four-column grid: donuts take one column, anything with an
+                 x-axis takes two so its tick labels have room to breathe. -->
             <div class="analytics-grid">
               <app-chart-card
                 title="Orders by Status"
@@ -520,15 +532,10 @@ interface OrdersViewState {
                 height="240px"
               />
               <app-chart-card
-                title="Activity (hour of day)"
+                class="span-2"
+                title="Activity (hour of day, UTC)"
                 subtitle="When the engine places orders"
                 [options]="hourlyActivityChart()"
-                height="240px"
-              />
-              <app-chart-card
-                title="Top Symbols"
-                subtitle="By order count, stacked Buy/Sell"
-                [options]="topSymbolsChart()"
                 height="240px"
               />
               <app-chart-card
@@ -538,26 +545,37 @@ interface OrdersViewState {
                 height="240px"
               />
               <app-chart-card
+                class="span-2"
+                title="Top Symbols"
+                subtitle="By order count, stacked Buy/Sell"
+                [options]="topSymbolsChart()"
+                height="240px"
+              />
+              <app-chart-card
+                class="span-2"
                 title="Fill Latency"
                 [subtitle]="latencySubtitle()"
                 [options]="latencyHistogramChart()"
                 height="240px"
               />
               <app-chart-card
+                class="span-2"
                 title="Slippage Distribution"
-                subtitle="Filled price vs order price (pips)"
+                [subtitle]="slippageSubtitle()"
                 [options]="slippageHistogramChart()"
                 height="240px"
               />
               <app-chart-card
+                class="span-2"
                 title="Top Rejection Reasons"
-                subtitle="Most common reject causes"
+                subtitle="Most common reject causes — hover for the full text"
                 [options]="rejectionReasonsChart()"
                 height="240px"
               />
               <app-chart-card
+                class="span-4"
                 title="Daily Volume + Fill %"
-                subtitle="Last 30 days, count & fill rate"
+                subtitle="Last 30 days, order count and fill rate"
                 [options]="dailyVolumeWithFillChart()"
                 height="240px"
               />
@@ -580,8 +598,8 @@ interface OrdersViewState {
                       <th class="num">Filled</th>
                       <th class="num">Rejected</th>
                       <th class="num">Fill %</th>
-                      <th class="num">Avg latency</th>
-                      <th class="num">Avg slippage</th>
+                      <th class="num">Avg fill latency</th>
+                      <th class="num">Avg slippage (pips)</th>
                       <th class="num">Volume (lots)</th>
                     </tr>
                   </thead>
@@ -589,7 +607,7 @@ interface OrdersViewState {
                     @for (s of perSymbolStats(); track s.symbol) {
                       <tr>
                         <td class="mono">{{ s.symbol }}</td>
-                        <td class="num mono">{{ s.total }}</td>
+                        <td class="num mono">{{ s.total | number }}</td>
                         <td class="num">
                           <span class="profit">{{ s.buys }}</span>
                           <span class="muted"> / </span>
@@ -609,18 +627,16 @@ interface OrdersViewState {
                         <td class="num mono">{{ formatLatencyValue(s.avgLatencyMs) }}</td>
                         <td
                           class="num mono"
-                          [class.profit]="s.avgSlippagePips !== null && s.avgSlippagePips <= 0"
+                          [class.profit]="s.avgSlippagePips !== null && s.avgSlippagePips < 0"
                           [class.loss]="s.avgSlippagePips !== null && s.avgSlippagePips > 0"
                         >
                           {{
                             s.avgSlippagePips !== null
-                              ? (s.avgSlippagePips >= 0 ? '+' : '') +
-                                s.avgSlippagePips.toFixed(2) +
-                                'p'
+                              ? (s.avgSlippagePips > 0 ? '+' : '') + s.avgSlippagePips.toFixed(2)
                               : '—'
                           }}
                         </td>
-                        <td class="num mono">{{ s.volume.toFixed(2) }}</td>
+                        <td class="num mono">{{ s.volume | number: '1.2-2' }}</td>
                       </tr>
                     }
                   </tbody>
@@ -690,7 +706,7 @@ interface OrdersViewState {
                   <dt>Slippage</dt>
                   <dd
                     class="mono"
-                    [class.profit]="orderSlippage(o) !== null && orderSlippage(o)! <= 0"
+                    [class.profit]="orderSlippage(o) !== null && orderSlippage(o)! < 0"
                     [class.loss]="orderSlippage(o) !== null && orderSlippage(o)! > 0"
                   >
                     {{ orderSlippage(o) !== null ? slippageLabel(o) : '—' }}
@@ -776,13 +792,13 @@ interface OrdersViewState {
         padding: var(--space-2) 0;
       }
 
-      /* Saved views */
+      /* Saved views — trailing group of the filter row */
       .saved-views {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
         gap: var(--space-2);
-        margin-bottom: var(--space-4);
+        margin-left: auto;
       }
       .view-pill {
         display: inline-flex;
@@ -870,17 +886,14 @@ interface OrdersViewState {
         opacity: 0.8;
       }
 
-      /* Metrics Strip — 8 tiles fit 4×2 on standard widths, 2×4 on tablets */
+      /* Metrics Strip — two rows of four keep every label on one line;
+         eight across forced two- and three-line labels. */
       .metrics-strip {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: var(--space-3);
         margin-bottom: var(--space-4);
-      }
-      @media (max-width: 1400px) {
-        .metrics-strip {
-          grid-template-columns: repeat(4, 1fr);
-        }
+        align-items: stretch;
       }
       @media (max-width: 720px) {
         .metrics-strip {
@@ -1314,15 +1327,29 @@ interface OrdersViewState {
         grid-template-columns: repeat(4, 1fr);
         gap: var(--space-3);
         margin-bottom: var(--space-4);
+        align-items: start;
+      }
+      .analytics-grid > .span-2 {
+        grid-column: span 2;
+      }
+      .analytics-grid > .span-4 {
+        grid-column: span 4;
       }
       @media (max-width: 1400px) {
         .analytics-grid {
           grid-template-columns: repeat(2, 1fr);
         }
+        .analytics-grid > .span-4 {
+          grid-column: span 2;
+        }
       }
       @media (max-width: 720px) {
         .analytics-grid {
           grid-template-columns: 1fr;
+        }
+        .analytics-grid > .span-2,
+        .analytics-grid > .span-4 {
+          grid-column: span 1;
         }
       }
 
@@ -1541,17 +1568,18 @@ export class OrdersPageComponent {
       .reduce((s, o) => s + (o.filledQuantity ?? o.quantity ?? 0), 0);
   });
 
-  // Mean ms between createdAt → filledAt for orders filled in the recent
-  // window. Tells the operator at a glance whether the broker round-trip is
-  // healthy without opening the analytics tab.
-  readonly avgFillLatencyMs = computed(() => {
+  // Mean createdAt → filledAt for orders filled in the recent window, in
+  // minutes (limit orders sit for minutes to hours, so ms is unreadable).
+  // Null when nothing has a fill timestamp — the tile shows "-" rather
+  // than a zero-latency broker.
+  readonly avgFillLatencyMin = computed(() => {
     const filled = this.recentOrders().filter((o) => o.status === 'Filled' && o.filledAt !== null);
-    if (filled.length === 0) return 0;
+    if (filled.length === 0) return null;
     const sum = filled.reduce((acc, o) => {
       const ms = new Date(o.filledAt!).getTime() - new Date(o.createdAt).getTime();
       return acc + Math.max(0, ms);
     }, 0);
-    return Math.round(sum / filled.length);
+    return +(sum / filled.length / 60_000).toFixed(1);
   });
 
   readonly symbolsTraded = computed(() => {
@@ -2005,14 +2033,6 @@ export class OrdersPageComponent {
 
   // ── Analytics-tab KPIs + charts ─────────────────────────────────────
 
-  // Pip size for the few major symbols we deal with — JPY pairs use 0.01,
-  // everything else 0.0001. Used to convert raw price deltas (slippage) to
-  // pips so the operator's eye can compare across symbols.
-  private pipSizeFor(symbol: string | null): number {
-    if (!symbol) return 0.0001;
-    return symbol.toUpperCase().includes('JPY') ? 0.01 : 0.0001;
-  }
-
   /** Precomputed list of fill latencies (ms) over the recent window. */
   private readonly fillLatencies = computed<number[]>(() => {
     const out: number[] = [];
@@ -2023,46 +2043,78 @@ export class OrdersPageComponent {
     return out;
   });
 
-  /** Precomputed slippage in pips per filled order, signed (positive = paid more). */
-  private readonly slippagesPips = computed<number[]>(() => {
-    const out: number[] = [];
+  /**
+   * Signed slippage in pips per FILLED order (positive = paid more than the
+   * order price). Only filled orders carry a fill price worth comparing; and
+   * anything beyond ±SLIPPAGE_OUTLIER_PIPS is a data artefact — a limit order
+   * cannot fill 186 pips through its price — so it is counted and reported,
+   * not averaged in.
+   */
+  private readonly slippageSamples = computed(() => {
+    const values: { symbol: string; pips: number }[] = [];
+    let excluded = 0;
     for (const o of this.recentOrders()) {
-      if (o.filledPrice === null || o.price === 0) continue;
-      const pip = this.pipSizeFor(o.symbol);
-      out.push((o.filledPrice - o.price) / pip);
+      const pips = slippagePips(o);
+      if (pips === null) continue;
+      if (Math.abs(pips) > SLIPPAGE_OUTLIER_PIPS) {
+        excluded++;
+        continue;
+      }
+      values.push({ symbol: o.symbol ?? '', pips });
     }
-    return out;
+    return { values, excluded };
   });
 
-  // When there are no measurable fills (e.g. paper-trading runs without
-  // filledAt timestamps), return null so the metric card renders `-` rather
-  // than implying a zero-latency broker. Same for slippage on market orders
-  // that have no order-price reference.
-  readonly latencyP50Ms = computed(() => {
+  // Percentiles in minutes (one decimal). Null when there are no measurable
+  // fills (e.g. paper-trading runs without filledAt timestamps) so the metric
+  // card renders "-" rather than implying a zero-latency broker.
+  private readonly latencyP50Ms = computed(() => {
     const xs = this.fillLatencies();
     return xs.length === 0 ? null : Math.round(percentile(xs, 0.5));
   });
-  readonly latencyP95Ms = computed(() => {
+  private readonly latencyP95Ms = computed(() => {
     const xs = this.fillLatencies();
     return xs.length === 0 ? null : Math.round(percentile(xs, 0.95));
   });
-  readonly latencyP99Ms = computed(() => {
+  private readonly latencyP99Ms = computed(() => {
     const xs = this.fillLatencies();
     return xs.length === 0 ? null : Math.round(percentile(xs, 0.99));
   });
+  readonly latencyP50Min = computed(() => msToMinutes(this.latencyP50Ms()));
+  readonly latencyP95Min = computed(() => msToMinutes(this.latencyP95Ms()));
   readonly latencySubtitle = computed(() => {
     const p50 = this.latencyP50Ms();
     const p95 = this.latencyP95Ms();
     const p99 = this.latencyP99Ms();
     if (p50 === null) return 'No fills with timestamps yet';
-    return `p50 ${formatLatencyMs(p50)} · p95 ${formatLatencyMs(p95)} · p99 ${formatLatencyMs(p99)}`;
+    return `createdAt → filledAt · p50 ${formatLatencyMs(p50)} · p95 ${formatLatencyMs(p95)} · p99 ${formatLatencyMs(p99)}`;
   });
 
   readonly avgSlippagePips = computed(() => {
-    const slips = this.slippagesPips();
-    if (slips.length === 0) return null;
-    const mean = slips.reduce((s, x) => s + x, 0) / slips.length;
+    const { values } = this.slippageSamples();
+    if (values.length === 0) return null;
+    const mean = values.reduce((s, x) => s + x.pips, 0) / values.length;
     return +mean.toFixed(2);
+  });
+
+  readonly slippageSubtitle = computed(() => {
+    const { values, excluded } = this.slippageSamples();
+    const base = `Filled price − order price, in pips · negative = filled better · ${values.length} fills`;
+    return excluded > 0
+      ? `${base} · ${excluded} beyond ±${SLIPPAGE_OUTLIER_PIPS} pips excluded as bad data`
+      : base;
+  });
+
+  readonly topSymbolLabel = computed(() => {
+    const top = this.perSymbolStats()[0];
+    return top ? `Top symbol · ${top.symbol}` : 'Top symbol';
+  });
+
+  readonly topRejectionLabel = computed(() => {
+    const top = this.rejectionReasonBuckets()[0];
+    if (!top) return 'Top reject reason';
+    const reason = top.reason.length > 34 ? top.reason.slice(0, 32).trimEnd() + '…' : top.reason;
+    return `Top reject · ${reason}`;
   });
 
   readonly rejectRate = computed(() => {
@@ -2132,10 +2184,9 @@ export class OrdersPageComponent {
       if (o.status === 'Rejected') s.rejected++;
       const lat = fillLatencyMs(o);
       if (lat !== null) s.latencies.push(lat);
-      if (o.filledPrice !== null && o.price !== 0) {
-        const pip = this.pipSizeFor(o.symbol);
-        s.slippagesPips.push((o.filledPrice - o.price) / pip);
-      }
+      // Same sample rule as the tile and histogram, so the three agree.
+      const pips = slippagePips(o);
+      if (pips !== null && Math.abs(pips) <= SLIPPAGE_OUTLIER_PIPS) s.slippagesPips.push(pips);
     }
     return Array.from(map.values())
       .map((s) => ({
@@ -2246,19 +2297,20 @@ export class OrdersPageComponent {
   latencyHistogramChart = computed<EChartsOption>(() => {
     const lats = this.fillLatencies();
     if (lats.length === 0) return emptyChartTitle('No filled orders yet');
-    // Log-ish buckets; we care about p50 vs p95 vs p99 contour, not exact ms.
-    const edges = [0, 50, 100, 200, 500, 1000, 2000, 5000, 10_000, 30_000, Infinity];
+    // createdAt → filledAt spans sub-second market fills to hours for resting
+    // limit orders, so the buckets are log-spaced and every label carries its
+    // own unit — the old ms-only buckets put p50 (~2 min) in a lone ">30s" bar.
+    const MIN = 60_000;
+    const edges = [0, 1000, 10_000, MIN, 5 * MIN, 15 * MIN, 60 * MIN, 240 * MIN, Infinity];
     const labels = [
-      '<50ms',
-      '50–100',
-      '100–200',
-      '200–500',
-      '500ms–1s',
-      '1–2s',
-      '2–5s',
-      '5–10s',
-      '10–30s',
-      '>30s',
+      '<1 s',
+      '1–10 s',
+      '10–60 s',
+      '1–5 min',
+      '5–15 min',
+      '15–60 min',
+      '1–4 h',
+      '>4 h',
     ];
     const counts = new Array(labels.length).fill(0) as number[];
     for (const lat of lats) {
@@ -2271,11 +2323,11 @@ export class OrdersPageComponent {
     }
     return {
       tooltip: { trigger: 'axis' },
-      grid: { top: 12, right: 12, bottom: 36, left: 36 },
+      grid: { top: 12, right: 12, bottom: 28, left: 36 },
       xAxis: {
         type: 'category',
         data: labels,
-        axisLabel: { fontSize: 9, color: '#8E8E93', rotate: 30 },
+        axisLabel: { fontSize: 10, color: '#8E8E93', interval: 0 },
       },
       yAxis: {
         type: 'value',
@@ -2294,22 +2346,22 @@ export class OrdersPageComponent {
   });
 
   slippageHistogramChart = computed<EChartsOption>(() => {
-    const slips = this.slippagesPips();
+    const slips = this.slippageSamples().values.map((s) => s.pips);
     if (slips.length === 0) return emptyChartTitle('No filled orders yet');
-    // Symmetric pip buckets centred on 0; tail-clip at ±5 pips so a couple
-    // of outliers don't flatten the centre of the distribution.
+    // Symmetric pip buckets centred on 0; the two tail buckets absorb the
+    // rest of the (already outlier-trimmed) range.
     const edges = [-Infinity, -5, -2, -1, -0.5, 0, 0.5, 1, 2, 5, Infinity];
     const labels = [
-      '<-5p',
-      '-5..-2',
-      '-2..-1',
-      '-1..-0.5',
-      '-0.5..0',
-      '0..0.5',
-      '0.5..1',
-      '1..2',
-      '2..5',
-      '>5p',
+      '< −5',
+      '−5…−2',
+      '−2…−1',
+      '−1…−0.5',
+      '−0.5…0',
+      '0…0.5',
+      '0.5…1',
+      '1…2',
+      '2…5',
+      '> 5',
     ];
     const counts = new Array(labels.length).fill(0) as number[];
     for (const slip of slips) {
@@ -2333,12 +2385,16 @@ export class OrdersPageComponent {
       };
     });
     return {
-      tooltip: { trigger: 'axis' },
-      grid: { top: 12, right: 12, bottom: 36, left: 36 },
+      tooltip: { trigger: 'axis', formatter: (p: any) => `${p[0].name} pips: ${p[0].value}` },
+      grid: { top: 12, right: 12, bottom: 28, left: 36 },
       xAxis: {
         type: 'category',
+        name: 'pips',
+        nameLocation: 'end',
+        nameGap: 4,
+        nameTextStyle: { fontSize: 9, color: '#8E8E93' },
         data: labels,
-        axisLabel: { fontSize: 9, color: '#8E8E93', rotate: 30 },
+        axisLabel: { fontSize: 10, color: '#8E8E93', interval: 0 },
       },
       yAxis: {
         type: 'value',
@@ -2358,14 +2414,28 @@ export class OrdersPageComponent {
   rejectionReasonsChart = computed<EChartsOption>(() => {
     const buckets = this.rejectionReasonBuckets();
     if (buckets.length === 0) return emptyChartTitle('No rejected orders');
+    const maxCount = Math.max(1, ...buckets.map((b) => b.count));
     return {
-      tooltip: { trigger: 'axis' },
-      grid: { top: 8, right: 16, bottom: 24, left: 140 },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        // Full reason text lives in the tooltip; the axis only has room for a prefix.
+        formatter: (params: any) => {
+          const p = Array.isArray(params) ? params[0] : params;
+          const full = buckets[buckets.length - 1 - p.dataIndex]?.reason ?? p.name;
+          return `${full}<br/><strong>${p.value}</strong> rejected`;
+        },
+      },
+      grid: { top: 8, right: 16, bottom: 24, left: 8, containLabel: true },
       xAxis: {
         type: 'value',
-        // Counts are integers — without minInterval ECharts auto-scales to
-        // fractional ticks like 0.51, 1.02 when the max bar is small.
+        // Integer counts on a fixed range — no fractional ticks, no dashed
+        // gridline wandering through the bars.
+        min: 0,
+        max: maxCount,
         minInterval: 1,
+        splitNumber: Math.min(4, maxCount),
+        splitLine: { show: false },
         axisLabel: {
           fontSize: 9,
           color: '#8E8E93',
@@ -2374,10 +2444,14 @@ export class OrdersPageComponent {
       },
       yAxis: {
         type: 'category',
-        data: buckets
-          .map((b) => (b.reason.length > 24 ? b.reason.slice(0, 22) + '…' : b.reason))
-          .reverse(),
-        axisLabel: { fontSize: 9, color: '#8E8E93' },
+        data: buckets.map((b) => b.reason).reverse(),
+        axisLabel: {
+          fontSize: 9,
+          color: '#8E8E93',
+          width: 190,
+          overflow: 'truncate',
+          ellipsis: '…',
+        },
       },
       series: [
         {
@@ -2421,7 +2495,8 @@ export class OrdersPageComponent {
       xAxis: {
         type: 'category',
         data: days.map((d) => d.slice(5)),
-        axisLabel: { fontSize: 9, color: '#8E8E93', rotate: 45, interval: 4 },
+        // Every fifth day, upright: thirty rotated labels collided into a smear.
+        axisLabel: { fontSize: 9, color: '#8E8E93', interval: 4, hideOverlap: true },
       },
       yAxis: [
         {
@@ -2600,16 +2675,16 @@ export class OrdersPageComponent {
   readonly selectedDetail = signal<OrderDto | null>(null);
 
   // ── Helpers consumed by template + columns ──────────────────────────
+  /** Signed slippage in pips for the drawer; null when the order never filled. */
   orderSlippage(o: OrderDto): number | null {
-    if (o.filledPrice === null || o.price === 0) return null;
-    return o.filledPrice - o.price;
+    return slippagePips(o);
   }
 
   slippageLabel(o: OrderDto): string {
     const slip = this.orderSlippage(o);
     if (slip === null) return '—';
-    const sign = slip >= 0 ? '+' : '';
-    return `${sign}${slip.toFixed(5)}`;
+    const sign = slip > 0 ? '+' : '';
+    return `${sign}${slip.toFixed(2)} pips`;
   }
 
   fillLatencyLabel(o: OrderDto): string {
@@ -2715,11 +2790,46 @@ function fillLatencyMs(o: OrderDto | null | undefined): number | null {
   return ms < 0 ? null : ms;
 }
 
+/** Always carries a unit — "67m" read as metres or months, never as minutes. */
 function formatLatencyMs(ms: number | null): string {
   if (ms === null) return '—';
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.round(ms / 60_000)}m`;
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  if (ms < 3_600_000) return `${(ms / 60_000).toFixed(1)} min`;
+  return `${(ms / 3_600_000).toFixed(1)} h`;
+}
+
+function msToMinutes(ms: number | null): number | null {
+  return ms === null ? null : +(ms / 60_000).toFixed(1);
+}
+
+/**
+ * Beyond this a "slippage" reading is a data artefact (a stale order price,
+ * a re-quoted entry), not execution quality — a limit order cannot legally
+ * fill 186 pips through its price. Such rows are counted and reported, never
+ * averaged into the tile.
+ */
+const SLIPPAGE_OUTLIER_PIPS = 50;
+
+/**
+ * Pip size by instrument class. The old rule (JPY = 0.01, everything else
+ * 0.0001) turned a $2 move on gold into 20,000 "pips" and made index and
+ * crypto slippage meaningless.
+ */
+function pipSizeFor(symbol: string | null): number {
+  const s = (symbol ?? '').toUpperCase();
+  if (!s) return 0.0001;
+  if (s.startsWith('XAU') || s.startsWith('GOLD')) return 0.1;
+  if (s.startsWith('XAG') || s.startsWith('SILVER')) return 0.01;
+  if (/^(US30|US500|SPX|NAS|USTEC|GER|DE40|UK100|JP225|BTC|ETH)/.test(s)) return 1;
+  if (s.includes('JPY')) return 0.01;
+  return 0.0001;
+}
+
+/** Signed fill slippage in pips; positive = filled worse than the order price. */
+function slippagePips(o: OrderDto): number | null {
+  if (o.status !== 'Filled' || o.filledPrice === null || !o.price) return null;
+  return (o.filledPrice - o.price) / pipSizeFor(o.symbol);
 }
 
 function escapeAttribute(s: string): string {

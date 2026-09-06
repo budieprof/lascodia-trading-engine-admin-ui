@@ -93,6 +93,19 @@ interface ConfigForm {
           >
         }
         <a routerLink="/ea-instances" class="btn btn-secondary">← All EA Instances</a>
+        @if (ea()) {
+          <!-- Coordinator-only maintenance action; lives with the other
+               page-level actions rather than as a lone button at the foot
+               of a 3,000px page. -->
+          <button
+            type="button"
+            class="btn btn-secondary"
+            (click)="askRefreshSpecs()"
+            [disabled]="submitting()"
+          >
+            Refresh symbol specs
+          </button>
+        }
         <button
           type="button"
           class="btn btn-secondary"
@@ -373,7 +386,9 @@ interface ConfigForm {
                 @if (spreadPadServer() === true) {
                   <span class="fm-pill ok">On</span>
                 } @else if (spreadPadServer() === false) {
-                  <span class="fm-pill warn">Off</span>
+                  <!-- Off is the default, not a warning — same muted pill the
+                       breakeven and profit-target cards use for their off state. -->
+                  <span class="fm-pill muted">Off</span>
                 } @else {
                   <span class="fm-pill muted">…</span>
                 }
@@ -845,36 +860,47 @@ interface ConfigForm {
               </div>
             </div>
 
-            <!-- Secondary kv: margin used, credit, broker SO call/stop-out -->
+            <!-- Secondary kv: margin used, credit, broker SO call/stop-out.
+                 Each label/value pair is one grid item, so a wrap can never
+                 separate a label from its value (it used to drop the
+                 margin-call figure onto the next row on its own). -->
             <dl class="account-kv">
-              <dt>Margin used</dt>
-              <dd class="mono">{{ acct.marginUsed | number: '1.2-2' }} {{ acct.currency }}</dd>
-              <dt>Credit</dt>
-              <dd class="mono">
-                @if (acct.credit > 0) {
-                  {{ acct.credit | number: '1.2-2' }} {{ acct.currency }}
-                } @else {
-                  <span class="muted">0</span>
-                }
-              </dd>
-              <dt>Margin-call</dt>
-              <dd class="mono">
-                @if (acct.marginSoCall > 0) {
-                  {{ acct.marginSoCall | number: '1.0-1'
-                  }}{{ acct.marginSoMode === 'Percent' ? '%' : ' ' + acct.currency }}
-                } @else {
-                  <span class="muted">—</span>
-                }
-              </dd>
-              <dt>Stop-out</dt>
-              <dd class="mono">
-                @if (acct.marginSoStopOut > 0) {
-                  {{ acct.marginSoStopOut | number: '1.0-1'
-                  }}{{ acct.marginSoMode === 'Percent' ? '%' : ' ' + acct.currency }}
-                } @else {
-                  <span class="muted">—</span>
-                }
-              </dd>
+              <div class="kv-pair">
+                <dt>Margin used</dt>
+                <dd class="mono">{{ acct.marginUsed | number: '1.2-2' }} {{ acct.currency }}</dd>
+              </div>
+              <div class="kv-pair">
+                <dt>Credit</dt>
+                <dd class="mono">
+                  @if (acct.credit > 0) {
+                    {{ acct.credit | number: '1.2-2' }} {{ acct.currency }}
+                  } @else {
+                    <span class="muted">0.00 {{ acct.currency }}</span>
+                  }
+                </dd>
+              </div>
+              <div class="kv-pair">
+                <dt>Margin call</dt>
+                <dd class="mono">
+                  @if (acct.marginSoCall > 0) {
+                    {{ acct.marginSoCall | number: '1.0-1'
+                    }}{{ acct.marginSoMode === 'Percent' ? '%' : ' ' + acct.currency }}
+                  } @else {
+                    <span class="muted">—</span>
+                  }
+                </dd>
+              </div>
+              <div class="kv-pair">
+                <dt>Stop-out</dt>
+                <dd class="mono">
+                  @if (acct.marginSoStopOut > 0) {
+                    {{ acct.marginSoStopOut | number: '1.0-1'
+                    }}{{ acct.marginSoMode === 'Percent' ? '%' : ' ' + acct.currency }}
+                  } @else {
+                    <span class="muted">—</span>
+                  }
+                </dd>
+              </div>
             </dl>
           </section>
         }
@@ -899,6 +925,7 @@ interface ConfigForm {
           [state]="adminState()"
           [lastUpdated]="adminLastStateUpdatedAt()"
           [loading]="detailLoading()"
+          [currency]="account()?.currency ?? null"
         />
 
         <!-- Phase-5b admin: live open positions + working orders, narrowed
@@ -913,6 +940,7 @@ interface ConfigForm {
             [tradingAccountId]="ea()!.tradingAccountId"
             [instanceId]="ea()!.instanceId"
             [ownedSymbolsCsv]="ea()!.symbols"
+            [reportedOpenCount]="adminState()?.positionCount ?? null"
           />
           <app-ea-pending-orders-panel
             [tradingAccountId]="ea()!.tradingAccountId"
@@ -949,25 +977,6 @@ interface ConfigForm {
           <app-ea-audit-timeline [instanceId]="ea()!.instanceId" />
         </div>
         <app-ea-rejections-panel [instanceId]="ea()!.instanceId" />
-
-        <!--
-          Phase 4d: the "Push safety config…" button is retired — all 10
-          safety knobs are now covered by the new EAConfigPanel in the
-          "Safety — per-instance" + "Safety — fleet" groups, which post
-          the same payload through /admin/ea/{instanceId}/config.
-          "Refresh symbol specs" stays — it's a coordinator-only action
-          that doesn't fit the per-instance config push surface.
-        -->
-        <section class="actions-row">
-          <button
-            type="button"
-            class="action-btn ok"
-            (click)="askRefreshSpecs()"
-            [disabled]="submitting()"
-          >
-            Refresh symbol specs
-          </button>
-        </section>
       }
 
       @if (askingRefresh()) {
@@ -1372,6 +1381,9 @@ interface ConfigForm {
         padding-top: var(--space-2);
         border-top: 1px dashed var(--border);
       }
+      .kv-pair {
+        min-width: 0;
+      }
       .account-kv dt {
         font-size: var(--text-xs);
         color: var(--text-tertiary);
@@ -1437,6 +1449,11 @@ interface ConfigForm {
         align-items: flex-start;
         align-content: flex-start;
       }
+      /* Five cards in a two-column grid left the last one alone at half
+         width; the profit-target card takes the full row instead. */
+      .ea-cards-grid > .dpt-panel {
+        grid-column: 1 / -1;
+      }
       /* ── Logs + Audit timeline side-by-side ────────────────────────
          2-up grid wrapping the Phase-9 live log tail and the Phase-2A
          safety-audit timeline so they share one row instead of each
@@ -1463,6 +1480,9 @@ interface ConfigForm {
         min-width: 0;
       }
       /* ── Trading enable/disable control ──────────────────────────── */
+      /* One neutral card style for every operator panel: the state pill in
+         each headline carries the colour, so a second accent stripe on the
+         card edge only competed with it (four cards, four colours, no key). */
       .trading-control {
         display: flex;
         align-items: center;
@@ -1471,20 +1491,8 @@ interface ConfigForm {
         flex-wrap: wrap;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
-        border-left-width: 3px;
-        border-left-color: var(--border);
         border-radius: var(--radius-md);
         padding: var(--card-padding);
-      }
-      .trading-control[data-state='enabled'] {
-        border-left-color: #34c759;
-      }
-      .trading-control[data-state='disabled-compliance'],
-      .trading-control[data-state='disabled-kill'] {
-        border-left-color: #ff3b30;
-      }
-      .trading-control[data-state='disabled-auto'] {
-        border-left-color: #ff9500;
       }
       .tc-info {
         display: flex;
@@ -1543,22 +1551,8 @@ interface ConfigForm {
         flex-wrap: wrap;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
-        border-left-width: 3px;
-        border-left-color: var(--border);
         border-radius: var(--radius-md);
         padding: var(--card-padding);
-      }
-      .fill-mode-panel[data-mode='Market'] {
-        border-left-color: #34c759;
-      }
-      .fill-mode-panel[data-mode='Limit'] {
-        border-left-color: #ff9500;
-      }
-      .fill-mode-panel[data-mode='On'] {
-        border-left-color: #34c759;
-      }
-      .fill-mode-panel[data-mode='Off'] {
-        border-left-color: #8e8e93;
       }
       .fm-info {
         display: flex;
@@ -1691,13 +1685,8 @@ interface ConfigForm {
         flex-wrap: wrap;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
-        border-left-width: 3px;
-        border-left-color: var(--border);
         border-radius: var(--radius-md);
         padding: var(--card-padding);
-      }
-      .be-panel[data-arm='on'] {
-        border-left-color: #ff9500;
       }
       .be-info {
         display: flex;
@@ -1821,13 +1810,10 @@ interface ConfigForm {
         flex-wrap: wrap;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
-        border-left-width: 3px;
-        border-left-color: #34c759;
         border-radius: var(--radius-md);
         padding: var(--card-padding);
       }
       .dpt-panel.is-hit {
-        border-left-color: #30b0c7;
         background: rgba(48, 176, 199, 0.06);
       }
       .dpt-info {
@@ -1920,11 +1906,6 @@ interface ConfigForm {
       .dpt-buttons {
         display: flex;
         gap: var(--space-2);
-      }
-      .actions-row {
-        display: flex;
-        gap: var(--space-3);
-        flex-wrap: wrap;
       }
       .action-btn {
         padding: 10px 20px;

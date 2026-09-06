@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../auth.service';
 import { DEFAULT_POST_LOGIN_ROUTE, RETURN_URL_PARAM, sanitizeReturnUrl } from '../return-url';
+import { ThemeService } from '@core/theme/theme.service';
 import { LogoComponent } from '@shared/components/logo/logo.component';
 
 @Component({
@@ -47,7 +48,7 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
             [attr.aria-selected]="mode() === 'dev'"
             (click)="mode.set('dev')"
           >
-            Developer
+            Developer <span class="dev-tag">dev</span>
           </button>
         </div>
 
@@ -147,6 +148,10 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
           <p class="dev-note">Engine auth — JWT carries role claims.</p>
         } @else {
           <form (ngSubmit)="onDevLogin()" class="login-form">
+            <p class="dev-warning" role="note">
+              Development only — mints a shared-library token with no role claims. Not for operating
+              a live engine.
+            </p>
             <div class="field">
               <label for="userId">User ID</label>
               <input
@@ -261,6 +266,36 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
+        /* Reserve the height of the tallest form (Developer: four fields) so
+         * the card does not resize when the operator switches tabs; the
+         * submit button is pinned to the bottom so it stays put as well. */
+        min-height: 348px;
+      }
+      .login-form .login-btn {
+        margin-top: auto;
+      }
+      .dev-tag {
+        display: inline-block;
+        margin-left: 4px;
+        padding: 0 5px;
+        border-radius: var(--radius-full);
+        background: rgba(255, 149, 0, 0.18);
+        color: #b25000;
+        font-size: 9px;
+        font-weight: var(--font-bold);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        vertical-align: 1px;
+      }
+      .dev-warning {
+        margin: 0;
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-sm);
+        background: rgba(255, 149, 0, 0.08);
+        border: 1px solid rgba(255, 149, 0, 0.3);
+        color: #b25000;
+        font-size: var(--text-xs);
+        line-height: 1.4;
       }
 
       .field {
@@ -392,6 +427,14 @@ export class LoginComponent {
   private auth = inject(AuthService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
+  constructor() {
+    // ThemeService writes `data-theme` on <html> from its constructor effect,
+    // but nothing on the login route (no sidebar, no chart card) injected it,
+    // so the service was never instantiated and the page always rendered the
+    // light palette. Resolving it here makes the login screen honour the
+    // stored / system theme like every other route.
+    inject(ThemeService);
+  }
 
   /**
    * Where to land after a successful login.

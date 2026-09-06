@@ -107,7 +107,9 @@ interface AnalyticsPanel {
             <div class="tile">
               <span class="tile-k">Sessions</span>
               <span class="tile-v">{{ d.totals.sessions | number }}</span>
-              <span class="tile-s muted">{{ d.totals.contracts }} contract(s)</span>
+              <span class="tile-s muted">
+                {{ d.totals.contracts }} {{ d.totals.contracts === 1 ? 'contract' : 'contracts' }}
+              </span>
             </div>
             <div class="tile">
               <span class="tile-k">Trades</span>
@@ -124,7 +126,8 @@ interface AnalyticsPanel {
               <span class="tile-v">{{ d.totals.sessionsWithBook }}/{{ d.totals.sessions }}</span>
               <span class="tile-s muted">
                 @if (d.totals.sessionsTradesOnly > 0) {
-                  {{ d.totals.sessionsTradesOnly }} session(s) tape-only
+                  {{ d.totals.sessionsTradesOnly }}
+                  {{ d.totals.sessionsTradesOnly === 1 ? 'session' : 'sessions' }} tape-only
                 } @else {
                   every session has MBP-10
                 }
@@ -134,7 +137,8 @@ interface AnalyticsPanel {
               <span class="tile-k">Span</span>
               <span class="tile-v">{{ d.totals.firstSession }} → {{ d.totals.lastSession }}</span>
               <span class="tile-s muted">
-                {{ d.totals.calendarGapDays }} weekday(s) with no session
+                {{ d.totals.calendarGapDays }}
+                {{ d.totals.calendarGapDays === 1 ? 'weekday' : 'weekdays' }} with no session
               </span>
             </div>
             <div class="tile">

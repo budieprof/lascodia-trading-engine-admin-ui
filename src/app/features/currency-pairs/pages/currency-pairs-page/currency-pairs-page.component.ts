@@ -27,6 +27,8 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
+import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import {
   FormFieldComponent,
   FormFieldControlDirective,
@@ -44,6 +46,8 @@ import {
     FormFieldControlDirective,
     MetricCardComponent,
     ChartCardComponent,
+    ErrorStateComponent,
+    EmptyStateComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -163,116 +167,128 @@ import {
         </form>
       }
 
-      <!-- 8-card KPI strip -->
+      <!-- KPI strip — six tiles so every label fits on one line. The
+           "JPY pairs" and "Avg max lot" tiles were dropped: the former is
+           readable off the base/quote charts, the latter averaged a
+           broker-imposed cap and answered no operator question. -->
+      <!-- Tiles read "—" while the catalogue fetch is failing: a dead
+           endpoint must not look like an empty catalogue of zero pairs. -->
       <div class="cp-kpis">
         <app-metric-card
           label="Total pairs"
-          [value]="cpStats().total"
+          [value]="sampleError() ? null : cpStats().total"
           format="number"
           dotColor="#0071E3"
         />
         <app-metric-card
           label="Active"
-          [value]="cpStats().active"
+          [value]="sampleError() ? null : cpStats().active"
           format="number"
           dotColor="#34C759"
         />
         <app-metric-card
           label="Inactive"
-          [value]="cpStats().inactive"
+          [value]="sampleError() ? null : cpStats().inactive"
           format="number"
           [dotColor]="cpStats().inactive > 0 ? '#FF9500' : '#34C759'"
         />
         <app-metric-card
           label="Base currencies"
-          [value]="cpStats().baseCurrencies"
+          [value]="sampleError() ? null : cpStats().baseCurrencies"
           format="number"
           dotColor="#AF52DE"
         />
         <app-metric-card
           label="Quote currencies"
-          [value]="cpStats().quoteCurrencies"
+          [value]="sampleError() ? null : cpStats().quoteCurrencies"
           format="number"
           dotColor="#5AC8FA"
         />
         <app-metric-card
-          label="JPY pairs"
-          [value]="cpStats().jpyPairs"
-          format="number"
-          dotColor="#FF9500"
-        />
-        <app-metric-card
           label="USD pairs"
-          [value]="cpStats().usdPairs"
+          [value]="sampleError() ? null : cpStats().usdPairs"
           format="number"
           dotColor="#FF2D55"
         />
-        <app-metric-card
-          label="Avg max lot"
-          [value]="cpStats().avgMaxLot"
-          format="number"
-          dotColor="#30D158"
-        />
       </div>
 
-      <!-- 3-col chart row: by base, by quote, currency exposure -->
-      <div class="cp-charts">
-        <app-chart-card
-          title="Pairs by base currency"
-          subtitle="How many pairs use each currency as the base"
-          [options]="byBaseOptions()"
-          height="260px"
-        />
-        <app-chart-card
-          title="Pairs by quote currency"
-          subtitle="How many pairs use each currency as the quote"
-          [options]="byQuoteOptions()"
-          height="260px"
-        />
-        <app-chart-card
-          title="Currency exposure"
-          subtitle="Total appearances (base + quote) per currency"
-          [options]="exposureOptions()"
-          height="260px"
-        />
-      </div>
-
-      <!-- Currency exposure matrix -->
-      @if (exposureRows().length > 0) {
+      @if (sampleError()) {
         <section class="cp-matrix">
-          <header class="cp-matrix-head">
-            <h3>Currency exposure matrix</h3>
-            <span class="muted">Sorted by total appearances</span>
-          </header>
-          <table class="cp-matrix-table">
-            <thead>
-              <tr>
-                <th>Currency</th>
-                <th class="num">As base</th>
-                <th class="num">As quote</th>
-                <th class="num">Total pairs</th>
-                <th class="num">Active pairs</th>
-                <th>Pairs</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (row of exposureRows(); track row.currency) {
-                <tr>
-                  <td class="mono">{{ row.currency }}</td>
-                  <td class="num mono">{{ row.asBase }}</td>
-                  <td class="num mono">{{ row.asQuote }}</td>
-                  <td class="num mono">{{ row.total }}</td>
-                  <td class="num mono">{{ row.activeCount }}</td>
-                  <td class="cp-pair-list">
-                    @for (sym of row.pairs; track sym) {
-                      <span class="cp-pill">{{ sym }}</span>
-                    }
-                  </td>
-                </tr>
-              }
-            </tbody>
-          </table>
+          <app-error-state
+            title="Could not load the currency-pair catalogue"
+            [message]="sampleError()"
+            (retry)="loadPairsSample()"
+          />
         </section>
+      } @else if (pairsSample().length === 0) {
+        <section class="cp-matrix">
+          <app-empty-state
+            title="No currency pairs yet"
+            description="Charts and the exposure matrix appear once the first pair is added."
+            actionLabel="+ Add Pair"
+            (actionClick)="openCreate()"
+          />
+        </section>
+      } @else {
+        <!-- 3-col chart row: by base, by quote, currency exposure -->
+        <div class="cp-charts">
+          <app-chart-card
+            title="Pairs by base currency"
+            subtitle="How many pairs use each currency as the base"
+            [options]="byBaseOptions()"
+            height="260px"
+          />
+          <app-chart-card
+            title="Pairs by quote currency"
+            subtitle="How many pairs use each currency as the quote"
+            [options]="byQuoteOptions()"
+            height="260px"
+          />
+          <app-chart-card
+            title="Currency exposure"
+            subtitle="Total appearances (base + quote) per currency"
+            [options]="exposureOptions()"
+            height="260px"
+          />
+        </div>
+
+        <!-- Currency exposure matrix -->
+        @if (exposureRows().length > 0) {
+          <section class="cp-matrix">
+            <header class="cp-matrix-head">
+              <h3>Currency exposure matrix</h3>
+              <span class="muted">Sorted by total appearances</span>
+            </header>
+            <table class="cp-matrix-table">
+              <thead>
+                <tr>
+                  <th>Currency</th>
+                  <th class="num">As base</th>
+                  <th class="num">As quote</th>
+                  <th class="num">Total pairs</th>
+                  <th class="num">Active pairs</th>
+                  <th>Pairs</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of exposureRows(); track row.currency) {
+                  <tr>
+                    <td class="mono">{{ row.currency }}</td>
+                    <td class="num mono">{{ row.asBase }}</td>
+                    <td class="num mono">{{ row.asQuote }}</td>
+                    <td class="num mono">{{ row.total }}</td>
+                    <td class="num mono">{{ row.activeCount }}</td>
+                    <td class="cp-pair-list">
+                      @for (sym of row.pairs; track sym) {
+                        <span class="cp-pill">{{ sym }}</span>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </section>
+        }
       }
 
       <app-data-table
@@ -430,26 +446,30 @@ import {
       }
 
       /* Currency-pairs density additions */
+      /* minmax(0, 1fr): a bare 1fr track refuses to shrink below its content,
+         which is how a tile row escapes the content column. */
       .cp-kpis {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(6, minmax(0, 1fr));
         gap: var(--space-2);
+        align-items: start;
       }
-      @media (max-width: 1400px) {
+      @media (max-width: 1200px) {
         .cp-kpis {
-          grid-template-columns: repeat(4, 1fr);
+          grid-template-columns: repeat(3, minmax(0, 1fr));
         }
       }
       @media (max-width: 720px) {
         .cp-kpis {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
 
       .cp-charts {
         display: grid;
-        grid-template-columns: 1fr 1fr 1.4fr;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr);
         gap: var(--space-3);
+        align-items: start;
       }
       @media (max-width: 1100px) {
         .cp-charts {
@@ -545,6 +565,8 @@ export class CurrencyPairsPageComponent implements OnInit {
   // Analytics sample, separate from the paged table source so KPIs/charts
   // stay stable as the user pages or filters the grid.
   readonly pairsSample = signal<CurrencyPairDto[]>([]);
+  /** Why the catalogue sample failed to load, or null. */
+  readonly sampleError = signal<string | null>(null);
 
   cpStats = computed(() => {
     const rows = this.pairsSample();
@@ -555,24 +577,18 @@ export class CurrencyPairsPageComponent implements OnInit {
         inactive: 0,
         baseCurrencies: 0,
         quoteCurrencies: 0,
-        jpyPairs: 0,
         usdPairs: 0,
-        avgMaxLot: null as number | null,
       };
     }
     const baseSet = new Set<string>();
     const quoteSet = new Set<string>();
     let active = 0;
-    let jpy = 0;
     let usd = 0;
-    let lotSum = 0;
     for (const r of rows) {
       if (r.baseCurrency) baseSet.add(r.baseCurrency);
       if (r.quoteCurrency) quoteSet.add(r.quoteCurrency);
       if (r.isActive) active++;
-      if ((r.symbol ?? '').includes('JPY')) jpy++;
       if (r.baseCurrency === 'USD' || r.quoteCurrency === 'USD') usd++;
-      lotSum += r.maxLotSize ?? 0;
     }
     return {
       total: rows.length,
@@ -580,79 +596,86 @@ export class CurrencyPairsPageComponent implements OnInit {
       inactive: rows.length - active,
       baseCurrencies: baseSet.size,
       quoteCurrencies: quoteSet.size,
-      jpyPairs: jpy,
       usdPairs: usd,
-      avgMaxLot: +(lotSum / rows.length).toFixed(2),
     };
   });
 
-  byBaseOptions = computed<EChartsOption>(() => {
+  /**
+   * Category axis for a handful of 3-letter currency codes. `interval: 0`
+   * forces every label — the theme's overlap-hiding otherwise dropped
+   * labels on a 7-bar axis and left bars unidentifiable — and the codes are
+   * short enough that they never actually collide at these widths.
+   */
+  private categoryAxis(categories: string[]): EChartsOption['xAxis'] {
+    return {
+      type: 'category',
+      data: categories,
+      axisLabel: {
+        fontSize: 11,
+        color: '#6E6E73',
+        interval: 0,
+        hideOverlap: false,
+        rotate: categories.length > 9 ? 35 : 0,
+      },
+    };
+  }
+
+  /**
+   * Count axis with headroom for the bar-top value labels — the tallest
+   * bar's label was clipped by the plot edge with a tight top margin.
+   */
+  private countAxis(maxValue: number): EChartsOption['yAxis'] {
+    return {
+      type: 'value',
+      minInterval: 1,
+      max: Math.max(1, Math.ceil(maxValue * 1.2)),
+      axisLabel: { fontSize: 10, color: '#6E6E73' },
+      splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+    };
+  }
+
+  private countByCurrency(pick: (r: CurrencyPairDto) => string | null): [string, number][] {
     const map: Record<string, number> = {};
     for (const r of this.pairsSample()) {
-      const k = r.baseCurrency ?? '—';
+      const k = pick(r) ?? '—';
       map[k] = (map[k] ?? 0) + 1;
     }
-    const entries = Object.entries(map).sort((a, b) => b[1] - a[1]);
+    return Object.entries(map).sort((a, b) => b[1] - a[1]);
+  }
+
+  private countBarOptions(entries: [string, number][], color: string): EChartsOption {
     if (entries.length === 0) return {};
     return {
-      grid: { top: 10, right: 30, bottom: 30, left: 50 },
-      xAxis: {
-        type: 'category',
-        data: entries.map(([k]) => k),
-        axisLabel: { fontSize: 11, color: '#6E6E73' },
-      },
-      yAxis: {
-        type: 'value',
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-      },
+      grid: { top: 24, right: 20, bottom: 30, left: 40, containLabel: false },
+      xAxis: this.categoryAxis(entries.map(([k]) => k)),
+      yAxis: this.countAxis(Math.max(...entries.map(([, v]) => v))),
       series: [
         {
           type: 'bar',
           data: entries.map(([, v]) => ({
             value: v,
-            itemStyle: { color: '#AF52DE', borderRadius: [4, 4, 0, 0] },
+            itemStyle: { color, borderRadius: [4, 4, 0, 0] },
           })),
           barWidth: '60%',
           label: { show: true, position: 'top', fontSize: 10, color: '#6E6E73' },
         },
       ],
     };
-  });
+  }
 
-  byQuoteOptions = computed<EChartsOption>(() => {
-    const map: Record<string, number> = {};
-    for (const r of this.pairsSample()) {
-      const k = r.quoteCurrency ?? '—';
-      map[k] = (map[k] ?? 0) + 1;
-    }
-    const entries = Object.entries(map).sort((a, b) => b[1] - a[1]);
-    if (entries.length === 0) return {};
-    return {
-      grid: { top: 10, right: 30, bottom: 30, left: 50 },
-      xAxis: {
-        type: 'category',
-        data: entries.map(([k]) => k),
-        axisLabel: { fontSize: 11, color: '#6E6E73' },
-      },
-      yAxis: {
-        type: 'value',
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-      },
-      series: [
-        {
-          type: 'bar',
-          data: entries.map(([, v]) => ({
-            value: v,
-            itemStyle: { color: '#5AC8FA', borderRadius: [4, 4, 0, 0] },
-          })),
-          barWidth: '60%',
-          label: { show: true, position: 'top', fontSize: 10, color: '#6E6E73' },
-        },
-      ],
-    };
-  });
+  byBaseOptions = computed<EChartsOption>(() =>
+    this.countBarOptions(
+      this.countByCurrency((r) => r.baseCurrency),
+      '#AF52DE',
+    ),
+  );
+
+  byQuoteOptions = computed<EChartsOption>(() =>
+    this.countBarOptions(
+      this.countByCurrency((r) => r.quoteCurrency),
+      '#5AC8FA',
+    ),
+  );
 
   exposureRows = computed(() => {
     type Row = {
@@ -693,17 +716,11 @@ export class CurrencyPairsPageComponent implements OnInit {
     const rows = this.exposureRows();
     if (rows.length === 0) return {};
     return {
-      grid: { top: 10, right: 30, bottom: 30, left: 50 },
-      xAxis: {
-        type: 'category',
-        data: rows.map((r) => r.currency),
-        axisLabel: { fontSize: 11, color: '#6E6E73' },
-      },
-      yAxis: {
-        type: 'value',
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-      },
+      // Legend sits in the top band; the plot starts below it so the
+      // stacked-total labels have room above the tallest bar.
+      grid: { top: 40, right: 20, bottom: 30, left: 40, containLabel: false },
+      xAxis: this.categoryAxis(rows.map((r) => r.currency)),
+      yAxis: this.countAxis(Math.max(...rows.map((r) => r.total))),
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
       legend: { top: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
       series: [
@@ -738,11 +755,18 @@ export class CurrencyPairsPageComponent implements OnInit {
     this.loadPairsSample();
   }
 
-  private loadPairsSample(): void {
+  loadPairsSample(): void {
     this.service.list({ currentPage: 1, itemCountPerPage: 200, filter: null }).subscribe({
       next: (res) => {
-        if (res?.data?.data) this.pairsSample.set(res.data.data);
+        if (res?.data?.data) {
+          this.pairsSample.set(res.data.data);
+          this.sampleError.set(null);
+        } else {
+          this.sampleError.set(res?.message || 'The engine returned no catalogue data.');
+        }
       },
+      error: (err: { message?: string }) =>
+        this.sampleError.set(err?.message || 'Network error — is the engine reachable?'),
     });
   }
 
@@ -778,11 +802,12 @@ export class CurrencyPairsPageComponent implements OnInit {
         return `<span style="background:${v.bg};color:${v.color};padding:2px 10px;border-radius:999px;font-size:11px;font-weight:600">${p.value}</span>`;
       },
     },
-    { headerName: 'Digits', field: 'decimalPlaces', width: 80 },
+    { headerName: 'Digits', field: 'decimalPlaces', width: 90, minWidth: 90 },
     {
       headerName: 'Pip size',
       field: 'decimalPlaces',
       width: 100,
+      minWidth: 100,
       valueFormatter: (p: any) => {
         const d = p.value as number;
         if (d == null) return '—';
@@ -791,37 +816,43 @@ export class CurrencyPairsPageComponent implements OnInit {
       },
     },
     {
-      headerName: 'Contract Size',
+      headerName: 'Contract size',
       field: 'contractSize',
-      width: 120,
-      valueFormatter: (p) => (p.value as number)?.toLocaleString() ?? '-',
+      width: 130,
+      minWidth: 130,
+      valueFormatter: (p) => formatCount(p.value as number | null | undefined),
     },
     {
-      headerName: 'Min Lot',
+      headerName: 'Min lot',
       field: 'minLotSize',
-      width: 90,
-      valueFormatter: (p) => (p.value as number)?.toFixed(2) ?? '-',
+      width: 100,
+      minWidth: 100,
+      valueFormatter: (p) => formatLots(p.value as number | null | undefined),
     },
     {
-      headerName: 'Max Lot',
-      field: 'maxLotSize',
-      width: 90,
-      valueFormatter: (p) => (p.value as number)?.toFixed(2) ?? '-',
-    },
-    {
-      headerName: 'Step',
-      field: 'lotStep',
-      width: 90,
-      valueFormatter: (p) => (p.value as number)?.toFixed(2) ?? '-',
-    },
-    {
-      headerName: 'Lot range',
+      headerName: 'Max lot',
       field: 'maxLotSize',
       width: 110,
+      minWidth: 110,
+      valueFormatter: (p) => formatLots(p.value as number | null | undefined),
+    },
+    {
+      headerName: 'Lot step',
+      field: 'lotStep',
+      width: 100,
+      minWidth: 100,
+      valueFormatter: (p) => formatLots(p.value as number | null | undefined),
+    },
+    {
+      headerName: 'Lot steps',
+      field: 'maxLotSize',
+      width: 110,
+      minWidth: 110,
       valueGetter: (p: any) =>
         (p.data?.maxLotSize ?? 0) > 0
           ? Math.round((p.data.maxLotSize - (p.data.minLotSize ?? 0)) / (p.data.lotStep || 1))
           : 0,
+      valueFormatter: (p) => formatCount(p.value as number | null | undefined),
       headerTooltip: 'Number of distinct lot sizes between min and max',
     },
     {
@@ -945,6 +976,21 @@ export class CurrencyPairsPageComponent implements OnInit {
       },
     });
   }
+}
+
+/* One number format per page: counts get thousands separators, lot sizes
+   get separators plus exactly two decimals — "100,000" beside "49999" and
+   "500.00" beside "0.01" came from three formatters on one table. */
+const COUNT_FMT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+const LOTS_FMT = new Intl.NumberFormat('en-US', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+function formatCount(v: number | null | undefined): string {
+  return v == null || !Number.isFinite(v) ? '—' : COUNT_FMT.format(v);
+}
+function formatLots(v: number | null | undefined): string {
+  return v == null || !Number.isFinite(v) ? '—' : LOTS_FMT.format(v);
 }
 
 function emptyPager() {

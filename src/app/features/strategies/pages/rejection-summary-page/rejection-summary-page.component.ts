@@ -9,7 +9,7 @@ import {
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { catchError, map, of } from 'rxjs';
+import { map } from 'rxjs';
 
 import { StrategiesService } from '@core/services/strategies.service';
 import type { StrategyRejectionSummaryDto } from '@core/api/api.types';
@@ -157,10 +157,11 @@ type SortMode = 'count' | 'recent' | 'strategy';
                     <td class="mono small">{{ r.stage }}</td>
                     <td class="reason">{{ r.reason }}</td>
                     <td class="num mono">{{ r.count }}</td>
-                    <td class="num">
+                    <td class="num share-cell">
                       <span class="bar-track" [title]="(rowShare(r) * 100 | number: '1.0-1') + '%'">
                         <span class="bar-fill" [style.width.%]="rowShare(r) * 100"></span>
                       </span>
+                      <span class="mono share-num">{{ rowShare(r) * 100 | number: '1.1-1' }}%</span>
                     </td>
                     <td class="time" [title]="r.latestRejectedAt | date: 'yyyy-MM-dd HH:mm:ss UTC'">
                       {{ r.latestRejectedAt | relativeTime }}
@@ -176,6 +177,35 @@ type SortMode = 'count' | 'recent' | 'strategy';
   `,
   styles: [
     `
+      /* Header actions were \`.btn btn-secondary\` with no matching rule on
+         this page, so they rendered as bare text links. */
+      .btn {
+        height: 36px;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-full);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        font-family: inherit;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-2);
+        text-decoration: none;
+        border: none;
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .btn-secondary {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+      }
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -290,6 +320,16 @@ type SortMode = 'count' | 'recent' | 'strategy';
         background: #ff9500;
         border-radius: var(--radius-full);
       }
+      .share-cell {
+        white-space: nowrap;
+      }
+      .share-num {
+        display: inline-block;
+        min-width: 3.6em;
+        margin-left: var(--space-2);
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
     `,
   ],
 })
@@ -303,8 +343,13 @@ export class RejectionSummaryPageComponent {
   protected readonly resource = createPolledResource(
     () =>
       this.strategies.getRejectionSummary(this.windowDays() * 24, 100).pipe(
-        map((res) => res.data ?? []),
-        catchError(() => of<StrategyRejectionSummaryDto[]>([])),
+        map((res) => {
+          // Propagate failures to resource.error(); a swallowed error kept
+          // showing the previous window's rows under a FAILED request.
+          if (!res.status)
+            throw new Error(res.message ?? 'strategy/rejection-summary returned an error');
+          return res.data ?? [];
+        }),
       ),
     { intervalMs: 60_000 },
   );

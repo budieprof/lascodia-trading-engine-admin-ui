@@ -151,42 +151,77 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
         </form>
       }
 
-      <!-- 8-card KPI strip — fleet-wide optimization-run posture -->
+      @if (failureLoop(); as loop) {
+        <!-- A run of failures is the single most important fact on this
+             page and used to be invisible: the tiles painted "Completed 0"
+             green and the donut was silently all red. -->
+        <div class="notice bad" role="alert">
+          <strong>
+            {{ loop.failed }} of the last {{ loop.window }} optimization runs failed
+          </strong>
+          — {{ loop.strategies }} strateg{{ loop.strategies === 1 ? 'y' : 'ies' }}, most recent
+          {{ loop.latestAt | date: 'MMM d, HH:mm' }}.
+          @if (loop.topError) {
+            Most common error: <code class="mono">{{ loop.topError }}</code>
+          } @else {
+            The runs recorded no error message; check the optimisation worker logs.
+          }
+        </div>
+      }
+
+      <!-- KPI strip — roll-ups over the analytics sample. The first tile names
+           the window honestly (the sample is capped at 5,000 most-recent runs). -->
       <div class="op-kpis">
         <div class="op-kpi">
-          <span class="kpi-label">Total runs</span>
-          <span class="kpi-value">{{ optStats().total }}</span>
+          <span class="kpi-label">{{ windowLabel() }}</span>
+          <span class="kpi-value">{{ optStats().total | number }}</span>
         </div>
         <div class="op-kpi">
           <span class="kpi-label">Running</span>
-          <span class="kpi-value info">{{ optStats().running }}</span>
+          <span class="kpi-value" [class.info]="optStats().running > 0">
+            {{ optStats().running | number }}
+          </span>
         </div>
         <div class="op-kpi">
           <span class="kpi-label">Completed</span>
-          <span class="kpi-value good">{{ optStats().completed }}</span>
+          <span class="kpi-value" [class.good]="optStats().completed > 0">
+            {{ optStats().completed | number }}
+          </span>
+        </div>
+        <div class="op-kpi">
+          <span class="kpi-label">Failed</span>
+          <span class="kpi-value" [class.bad]="optStats().failed > 0">
+            {{ optStats().failed | number }}
+          </span>
         </div>
         <div class="op-kpi">
           <span class="kpi-label">Abandoned</span>
-          <span
-            class="kpi-value"
-            [class.warn]="optStats().abandoned > 0"
-            [class.good]="optStats().abandoned === 0"
-          >
-            {{ optStats().abandoned }}
+          <span class="kpi-value" [class.warn]="optStats().abandoned > 0">
+            {{ optStats().abandoned | number }}
           </span>
         </div>
         <div class="op-kpi">
           <span class="kpi-label">Approved</span>
-          <span class="kpi-value good">{{ optStats().approved }}</span>
-        </div>
-        <div class="op-kpi">
-          <span class="kpi-label">Avg iterations</span>
-          <span class="kpi-value">
-            {{ optStats().avgIterations !== null ? optStats().avgIterations!.toFixed(1) : '—' }}
+          <span class="kpi-value" [class.good]="optStats().approved > 0">
+            {{ optStats().approved | number }}
           </span>
         </div>
         <div class="op-kpi">
-          <span class="kpi-label">Avg lift</span>
+          <span class="kpi-label">Failure rate</span>
+          <span
+            class="kpi-value"
+            [class.bad]="optStats().failureRate !== null && optStats().failureRate! >= 50"
+            [class.warn]="
+              optStats().failureRate !== null &&
+              optStats().failureRate! > 0 &&
+              optStats().failureRate! < 50
+            "
+          >
+            {{ optStats().failureRate !== null ? optStats().failureRate!.toFixed(1) + '%' : '—' }}
+          </span>
+        </div>
+        <div class="op-kpi">
+          <span class="kpi-label">Avg lift (completed)</span>
           <span
             class="kpi-value"
             [class.good]="optStats().avgLift !== null && optStats().avgLift! > 0"
@@ -199,17 +234,13 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
             }
           </span>
         </div>
-        <div class="op-kpi">
-          <span class="kpi-label">Strategies covered</span>
-          <span class="kpi-value">{{ optStats().strategiesCovered }}</span>
-        </div>
       </div>
 
       <!-- 3-col chart row -->
       <div class="op-charts">
         <app-chart-card
           title="Status distribution"
-          subtitle="Run lifecycle states across the fleet"
+          subtitle="Share of runs by status in the window"
           [options]="optStatusDonutOptions()"
           height="240px"
         />
@@ -252,8 +283,10 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
                   @for (r of topLifts(); track r.id) {
                     <tr (click)="select(r)">
                       <td class="mono">#{{ r.id }}</td>
-                      <td class="num mono">#{{ r.strategyId }}</td>
-                      <td class="num mono">{{ r.iterations }}</td>
+                      <td class="num" [title]="'Strategy #' + r.strategyId">
+                        {{ strategyName(r.strategyId) }}
+                      </td>
+                      <td class="num mono">{{ r.iterations | number }}</td>
                       <td class="num mono">
                         {{
                           r.baselineHealthScore !== null
@@ -304,19 +337,27 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
                     <th>Strategy</th>
                     <th class="num">Runs</th>
                     <th class="num">Completed</th>
+                    <th class="num">Failed</th>
                     <th class="num">Abandoned</th>
-                    <th class="num">Avg iter</th>
+                    <th class="num">Avg iterations</th>
                     <th class="num">Best lift</th>
                   </tr>
                 </thead>
                 <tbody>
                   @for (row of perStrategyBreakdown(); track row.strategyId) {
                     <tr>
-                      <td class="mono">#{{ row.strategyId }}</td>
-                      <td class="num mono">{{ row.runs }}</td>
-                      <td class="num mono profit">{{ row.completed }}</td>
+                      <td [title]="'Strategy #' + row.strategyId">
+                        {{ strategyName(row.strategyId) }}
+                      </td>
+                      <td class="num mono">{{ row.runs | number }}</td>
+                      <td class="num mono" [class.profit]="row.completed > 0">
+                        {{ row.completed }}
+                      </td>
+                      <td class="num mono" [class.loss]="row.failed > 0">{{ row.failed }}</td>
                       <td class="num mono" [class.warn]="row.abandoned > 0">{{ row.abandoned }}</td>
-                      <td class="num mono">{{ row.avgIterations.toFixed(1) }}</td>
+                      <td class="num mono">
+                        {{ row.avgIterations !== null ? row.avgIterations.toFixed(1) : '—' }}
+                      </td>
                       <td
                         class="num mono"
                         [class.profit]="row.bestLift !== null && row.bestLift > 0"
@@ -356,7 +397,7 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
           <section class="detail">
             <header class="detail-head">
               <div class="title">
-                <h3>Run #{{ r.id }} — Strategy {{ r.strategyId }}</h3>
+                <h3>Run #{{ r.id }} — {{ strategyName(r.strategyId) }}</h3>
                 <span class="pill" [attr.data-status]="r.status">{{ r.status }}</span>
               </div>
               <div class="actions">
@@ -615,15 +656,31 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
       }
 
       /* Optimizations density additions */
+      .notice {
+        padding: var(--space-3) var(--space-4);
+        border-radius: var(--radius-md);
+        font-size: var(--text-sm);
+        line-height: 1.5;
+      }
+      .notice.bad {
+        background: rgba(255, 59, 48, 0.08);
+        border: 1px solid rgba(255, 59, 48, 0.32);
+        color: #d70015;
+      }
+      .notice code {
+        font-size: var(--text-xs);
+        padding: 1px 6px;
+        border-radius: 4px;
+        background: rgba(255, 59, 48, 0.1);
+        color: var(--text-primary);
+        word-break: break-word;
+      }
+      /* Two rows of four keep every label on one line; eight across forced
+         two-line labels at common widths. */
       .op-kpis {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: var(--space-2);
-      }
-      @media (max-width: 1400px) {
-        .op-kpis {
-          grid-template-columns: repeat(4, 1fr);
-        }
       }
       @media (max-width: 720px) {
         .op-kpis {
@@ -638,6 +695,7 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
         display: flex;
         flex-direction: column;
         gap: 4px;
+        min-height: 68px;
       }
       .op-kpi .kpi-label {
         font-size: 10px;
@@ -645,8 +703,12 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
         color: var(--text-tertiary);
         text-transform: uppercase;
         letter-spacing: 0.04em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .op-kpi .kpi-value {
+        margin-top: auto;
         font-size: var(--text-xl);
         font-weight: var(--font-semibold);
         color: var(--text-primary);
@@ -669,6 +731,7 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
         display: grid;
         grid-template-columns: 1fr 1fr 1.4fr;
         gap: var(--space-3);
+        align-items: start;
       }
       @media (max-width: 1100px) {
         .op-charts {
@@ -676,10 +739,13 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
         }
       }
 
+      /* start-aligned: a one-sentence "no lifts yet" panel must not stretch
+         to the height of the per-strategy table beside it */
       .op-board-row {
         display: grid;
         grid-template-columns: 1.5fr 1fr;
         gap: var(--space-3);
+        align-items: start;
       }
       @media (max-width: 1100px) {
         .op-board-row {
@@ -737,6 +803,7 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
         font-weight: var(--font-semibold);
         text-transform: uppercase;
         letter-spacing: 0.04em;
+        white-space: nowrap;
         position: sticky;
         top: 0;
         z-index: 1;
@@ -911,8 +978,24 @@ export class OptimizationsPageComponent implements OnInit {
   readonly dryRunLoading = signal(false);
 
   // Analytics sample — drives KPI strip, charts, breakdown tables. Loaded
-  // via probe-and-fetch so totals reflect the whole DB; capped at 5000 rows.
+  // via probe-and-fetch; capped at 5000 rows, and the first KPI label says
+  // so whenever the server total is larger.
+  private static readonly SAMPLE_CAP = 5000;
   readonly optsSample = signal<OptimizationRunDto[]>([]);
+  readonly optsTotal = signal(0);
+  readonly windowLabel = computed(() => {
+    const sample = this.optsSample().length;
+    const total = this.optsTotal();
+    return total > sample && sample > 0
+      ? `Runs (latest ${sample.toLocaleString('en-US')} of ${total.toLocaleString('en-US')})`
+      : 'Total runs';
+  });
+
+  /** Strategy name for an id, falling back to "#id" until the list loads. */
+  strategyName(id: number): string {
+    const s = this.strategies().find((x) => x.id === id);
+    return s?.name ? s.name : `#${id}`;
+  }
 
   optStats = computed(() => {
     const all = this.optsSample();
@@ -921,43 +1004,81 @@ export class OptimizationsPageComponent implements OnInit {
         total: 0,
         running: 0,
         completed: 0,
+        failed: 0,
         abandoned: 0,
         approved: 0,
-        avgIterations: null as number | null,
+        failureRate: null as number | null,
         avgLift: null as number | null,
         strategiesCovered: 0,
       };
     }
     let running = 0;
     let completed = 0;
+    let failed = 0;
     let abandoned = 0;
     let approved = 0;
-    let iterSum = 0;
     let liftSum = 0;
     let liftCount = 0;
     const strategies = new Set<number>();
     for (const r of all) {
       const status = String(r.status);
+      // "Approved" is its own status on the wire (a completed run whose
+      // parameters were adopted) — it still counts as a completed search.
       if (status === 'Running') running++;
-      else if (status === 'Completed') completed++;
+      else if (status === 'Completed' || status === 'Approved') completed++;
+      else if (status === 'Failed') failed++;
       else if (status === 'Abandoned') abandoned++;
-      if (r.approvedAt) approved++;
-      iterSum += r.iterations ?? 0;
+      if (status === 'Approved' || r.approvedAt) approved++;
       strategies.add(r.strategyId);
-      if (r.bestHealthScore != null && r.baselineHealthScore != null) {
+      if (
+        (status === 'Completed' || status === 'Approved') &&
+        r.bestHealthScore != null &&
+        r.baselineHealthScore != null
+      ) {
         liftSum += r.bestHealthScore - r.baselineHealthScore;
         liftCount++;
       }
     }
+    const finished = completed + failed + abandoned;
     return {
       total: all.length,
       running,
       completed,
+      failed,
       abandoned,
       approved,
-      avgIterations: +(iterSum / all.length).toFixed(1),
+      failureRate: finished > 0 ? +((failed / finished) * 100).toFixed(1) : null,
       avgLift: liftCount > 0 ? +(liftSum / liftCount).toFixed(3) : null,
       strategiesCovered: strategies.size,
+    };
+  });
+
+  /**
+   * Detects a failure loop in the most recent runs. The threshold is
+   * deliberately high (80% of the last 10) so a single flaky run does not
+   * shout, while the observed "every run fails, in batches" pattern does.
+   */
+  readonly failureLoop = computed(() => {
+    const window = 10;
+    const recent = [...this.optsSample()]
+      .filter((r) => !!r.startedAt)
+      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
+      .slice(0, window);
+    if (recent.length < 5) return null;
+    const failedRuns = recent.filter((r) => String(r.status) === 'Failed');
+    if (failedRuns.length < Math.ceil(recent.length * 0.8)) return null;
+    const errors = new Map<string, number>();
+    for (const r of failedRuns) {
+      const key = (r.errorMessage ?? '').trim().slice(0, 160);
+      if (key) errors.set(key, (errors.get(key) ?? 0) + 1);
+    }
+    const topError = [...errors.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    return {
+      failed: failedRuns.length,
+      window: recent.length,
+      strategies: new Set(failedRuns.map((r) => r.strategyId)).size,
+      latestAt: failedRuns[0].startedAt,
+      topError,
     };
   });
 
@@ -971,6 +1092,7 @@ export class OptimizationsPageComponent implements OnInit {
     const colors: Record<string, string> = {
       Running: '#0071E3',
       Completed: '#34C759',
+      Approved: '#AF52DE',
       Abandoned: '#FF9500',
       Failed: '#FF3B30',
     };
@@ -1003,10 +1125,18 @@ export class OptimizationsPageComponent implements OnInit {
     const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
     if (entries.length === 0) return {};
     return {
-      grid: { top: 10, right: 30, bottom: 30, left: 100 },
+      grid: { top: 10, right: 40, bottom: 30, left: 100 },
       xAxis: {
         type: 'value',
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        // Counts are integers and the range is small; without these the axis
+        // drew a dozen ticks that collided into "1,00200800000".
+        minInterval: 1,
+        splitNumber: 4,
+        axisLabel: {
+          fontSize: 10,
+          color: '#6E6E73',
+          formatter: (v: number) => (Number.isInteger(v) ? v.toLocaleString('en-US') : ''),
+        },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
       yAxis: {
@@ -1090,10 +1220,12 @@ export class OptimizationsPageComponent implements OnInit {
       strategyId: number;
       runs: number;
       completed: number;
+      failed: number;
       abandoned: number;
-      avgIterations: number;
+      avgIterations: number | null;
       bestLift: number | null;
       _iterSum: number;
+      _iterCount: number;
     };
     const groups: Record<number, Row> = {};
     for (const r of this.optsSample()) {
@@ -1102,23 +1234,34 @@ export class OptimizationsPageComponent implements OnInit {
           strategyId: r.strategyId,
           runs: 0,
           completed: 0,
+          failed: 0,
           abandoned: 0,
-          avgIterations: 0,
+          avgIterations: null,
           bestLift: null,
           _iterSum: 0,
+          _iterCount: 0,
         };
       const g = groups[r.strategyId];
+      const status = String(r.status);
       g.runs++;
-      g._iterSum += r.iterations ?? 0;
-      if (String(r.status) === 'Completed') g.completed++;
-      else if (String(r.status) === 'Abandoned') g.abandoned++;
+      // Failed runs die at iteration 0 — averaging them in reports the crash
+      // rate, not how long a search runs.
+      if (status === 'Completed' || status === 'Approved') {
+        g.completed++;
+        g._iterSum += r.iterations ?? 0;
+        g._iterCount++;
+      } else if (status === 'Failed') g.failed++;
+      else if (status === 'Abandoned') g.abandoned++;
       if (r.bestHealthScore != null && r.baselineHealthScore != null) {
         const lift = r.bestHealthScore - r.baselineHealthScore;
         if (g.bestLift == null || lift > g.bestLift) g.bestLift = lift;
       }
     }
     return Object.values(groups)
-      .map((g) => ({ ...g, avgIterations: g.runs > 0 ? g._iterSum / g.runs : 0 }))
+      .map((g) => ({
+        ...g,
+        avgIterations: g._iterCount > 0 ? g._iterSum / g._iterCount : null,
+      }))
       .sort((a, b) => b.runs - a.runs);
   });
 
@@ -1132,6 +1275,7 @@ export class OptimizationsPageComponent implements OnInit {
       .pipe(catchError(() => of(null)))
       .subscribe((probe) => {
         const total = probe?.data?.pager?.totalItemCount ?? 0;
+        this.optsTotal.set(total);
         if (total === 0) {
           this.optsSample.set([]);
           return;
@@ -1139,7 +1283,7 @@ export class OptimizationsPageComponent implements OnInit {
         this.service
           .listOptimizationRuns({
             currentPage: 1,
-            itemCountPerPage: Math.min(total, 5000),
+            itemCountPerPage: Math.min(total, OptimizationsPageComponent.SAMPLE_CAP),
             filter: null,
           })
           .pipe(catchError(() => of(null)))
@@ -1156,20 +1300,32 @@ export class OptimizationsPageComponent implements OnInit {
 
   readonly columns: ColDef<OptimizationRunDto>[] = [
     { headerName: 'ID', field: 'id', width: 90 },
-    { headerName: 'Strategy', field: 'strategyId', width: 110 },
+    {
+      headerName: 'Strategy',
+      field: 'strategyId',
+      flex: 1,
+      minWidth: 160,
+      valueFormatter: (p) => this.strategyName(p.value as number),
+      tooltipValueGetter: (p) => `Strategy #${p.value}`,
+    },
     { headerName: 'Trigger', field: 'triggerType', width: 130 },
-    { headerName: 'Iterations', field: 'iterations', width: 120 },
+    {
+      headerName: 'Iterations',
+      field: 'iterations',
+      width: 110,
+      valueFormatter: (p) => (p.value as number).toLocaleString('en-US'),
+    },
     {
       headerName: 'Baseline',
       field: 'baselineHealthScore',
-      width: 120,
-      valueFormatter: (p) => (p.value as number)?.toFixed(2) ?? '-',
+      width: 110,
+      valueFormatter: (p) => (p.value as number | null)?.toFixed(2) ?? '—',
     },
     {
       headerName: 'Best',
       field: 'bestHealthScore',
-      width: 120,
-      valueFormatter: (p) => (p.value as number)?.toFixed(2) ?? '-',
+      width: 110,
+      valueFormatter: (p) => (p.value as number | null)?.toFixed(2) ?? '—',
     },
     {
       headerName: 'Status',

@@ -308,9 +308,14 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
                             >
                           </td>
                           <td class="col-current">
-                            <span class="current mono">{{
-                              formatCurrent(field.key) || '(blank)'
-                            }}</span>
+                            <!-- Long CSV / URL values break after each "," or "/"
+                                 (a <wbr> per segment) instead of mid-token. -->
+                            <span class="current mono" [title]="formatCurrent(field.key)">
+                              @for (seg of currentSegments(field.key); track $index) {
+                                <span>{{ seg }}</span
+                                ><wbr />
+                              }
+                            </span>
                           </td>
                           <td class="col-actions">
                             @if (isDirty(field)) {
@@ -343,18 +348,21 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
           </div>
         }
       } @else {
+        <!-- One note covers every card: a "restart required" badge on all
+             fourteen was fourteen copies of the same sentence, wrapping
+             onto two lines in the narrower cards. -->
         <p class="hint muted">
-          These inputs are read at attach-time and cached on objects that don't expose live setters.
-          Re-attach the EA in MT5 after editing the input dialog to apply changes.
+          Every value here is read at attach-time and cached on objects that don't expose live
+          setters — a restart is required to change any of them. Re-attach the EA in MT5 after
+          editing the input dialog to apply changes.
         </p>
         <div class="form-grid">
           @for (field of READ_ONLY_FIELDS; track field.key) {
             <div class="ro-field">
-              <span class="field-label">
-                {{ field.label }}
-                <span class="badge tone-muted">restart required</span>
-              </span>
-              <span class="ro-value mono">{{ formatCurrent(field.key) }}</span>
+              <span class="field-label">{{ field.label }}</span>
+              @if (readOnlyValue(field.key); as v) {
+                <span class="ro-value mono" [class.muted]="v.empty">{{ v.text }}</span>
+              }
             </div>
           }
         </div>
@@ -416,6 +424,7 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
         font-weight: var(--font-semibold);
         letter-spacing: 0.04em;
         text-transform: uppercase;
+        white-space: nowrap;
       }
       .badge.tone-ok,
       .badge[data-badge='live'] {
@@ -496,7 +505,11 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
         color: var(--text-primary);
         font-weight: var(--font-medium);
         font-variant-numeric: tabular-nums;
-        word-break: break-all;
+        overflow-wrap: anywhere;
+      }
+      .ro-value.muted {
+        color: var(--text-tertiary);
+        font-weight: var(--font-normal, 400);
       }
       .mono {
         font-family: var(--font-mono);
@@ -682,17 +695,18 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
       }
 
       /* ── Master-detail body (sidebar | editor) ──────────────── */
+      /* Sized by content, capped by the table's own scroll box: a fixed
+         440-720px frame left a three-field section mostly empty and cut
+         the last row of a long one in half at every height. */
       .cfg-body {
         display: grid;
         grid-template-columns: 200px 1fr;
         gap: var(--space-3);
-        height: min(70vh, 720px);
-        min-height: 440px;
+        align-items: stretch;
       }
       @media (max-width: 900px) {
         .cfg-body {
           grid-template-columns: 1fr;
-          height: auto;
         }
       }
 
@@ -838,6 +852,10 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
       .cfg-table-scroll {
         flex: 1;
         overflow: auto;
+        max-height: min(64vh, 640px);
+      }
+      .cfg-sidebar {
+        max-height: min(64vh, 640px);
       }
       .cfg-table {
         width: 100%;
@@ -908,7 +926,10 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
         font-family: var(--font-mono);
         font-size: 11px;
         color: var(--text-secondary);
-        word-break: break-all;
+        /* Prefer the <wbr> after each separator; only split inside a
+           segment when one segment alone is wider than the column. */
+        overflow-wrap: anywhere;
+        word-break: normal;
       }
       .btn-row-save {
         height: 24px;
@@ -1554,6 +1575,30 @@ export class EAConfigPanelComponent {
     if (v == null) return '—';
     if (typeof v === 'boolean') return v ? 'yes' : 'no';
     return String(v);
+  }
+
+  /**
+   * Current value split so the template can put a <wbr> after every "," and
+   * "/" — a CSV of symbols or a URL then wraps at its natural joints.
+   */
+  protected currentSegments(key: string): string[] {
+    const text = this.formatCurrent(key);
+    if (!text) return ['(blank)'];
+    return text.split(/(?<=[,/])/);
+  }
+
+  /**
+   * Read-only cards: the envelope sends "" for an input the operator never
+   * set (symbol map, instance label, cert fingerprint), and omits keys an
+   * older build does not report. Both used to render as an empty card.
+   */
+  protected readOnlyValue(key: string): { text: string; empty: boolean } {
+    const inputs = this.inputs();
+    const v = inputs?.[key];
+    if (v == null) return { text: 'not reported', empty: true };
+    if (typeof v === 'boolean') return { text: v ? 'yes' : 'no', empty: false };
+    const text = String(v).trim();
+    return text ? { text, empty: false } : { text: 'not set', empty: true };
   }
 
   protected hasDirty(): boolean {

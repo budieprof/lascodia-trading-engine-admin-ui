@@ -65,7 +65,7 @@ import {
       } @else if (rows().length === 0) {
         <app-empty-state
           title="No pending orders"
-          description="No working orders attributed to this trading account. Orders that have been filled appear as positions in the panel above; cancelled/rejected/expired orders are hidden here."
+          description="No working orders attributed to this trading account. Filled orders appear as positions in the panel beside; cancelled, rejected and expired orders are hidden here."
         />
       } @else {
         <div class="scroll-wrap">
@@ -329,9 +329,12 @@ export class EAPendingOrdersPanelComponent {
   protected readonly ownedSymbolSet = computed<Set<string> | null>(() => {
     const csv = (this.ownedSymbolsCsv() ?? '').trim();
     if (!csv) return null;
+    // Same separators the detail page accepts (comma, semicolon or
+    // whitespace) — a comma-only split turned "EURUSD GBPUSD" into one
+    // token that matched nothing and emptied the panel.
     return new Set(
       csv
-        .split(',')
+        .split(/[\s,;]+/)
         .map((s) => s.trim().toUpperCase())
         .filter(Boolean),
     );

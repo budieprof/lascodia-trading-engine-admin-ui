@@ -83,11 +83,32 @@ interface IncidentGroup {
   alertType: string;
   count: number;
   alerts: ParsedAlert[];
+  /** Alerts folded by subject — see IncidentRow. */
+  rows: IncidentRow[];
   topSymbols: string[];
   symbolOverflow: number;
   latestAt: string;
   snoozedCount: number;
 }
+
+/**
+ * One subject inside an incident. The engine creates a fresh alert per
+ * firing, so a single crashed worker shows up as four WorkerCrash alerts
+ * that differ only by ElapsedSeconds. Rows fold alerts whose symbol and
+ * reason (digits stripped) match, keep the newest, and act on all of them.
+ */
+interface IncidentRow {
+  key: string;
+  symbol: string | null;
+  reason: string;
+  alerts: ParsedAlert[];
+  count: number;
+  latestAt: string | null;
+  cooldownSeconds: number;
+  snoozedCount: number;
+}
+
+const SYSTEM_WIDE = 'system-wide';
 
 const SEVERITY_ORDER: Record<AlertSeverity, number> = {
   Critical: 0,
@@ -211,43 +232,45 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
           (retry)="resource.refresh()"
         />
       } @else {
-        <!-- KPI strip — always rendered. -->
+        <!-- KPI strip — always rendered. Colour only where it means
+             something: severity dots light up when the count is above zero
+             and are neutral at zero. -->
         <div class="kpi-strip">
           <app-metric-card
             label="Active total"
             [value]="activeCount()"
             format="number"
-            [dotColor]="activeCount() > 0 ? '#FF9500' : '#34C759'"
+            [dotColor]="activeCount() > 0 ? '#FF9500' : '#8E8E93'"
           />
           <app-metric-card
             label="Critical"
             [value]="severityCount('Critical')"
             format="number"
-            [dotColor]="severityCount('Critical') > 0 ? '#FF3B30' : '#34C759'"
+            [dotColor]="severityCount('Critical') > 0 ? '#FF3B30' : '#8E8E93'"
           />
           <app-metric-card
             label="High"
             [value]="severityCount('High')"
             format="number"
-            [dotColor]="severityCount('High') > 0 ? '#FF9500' : '#34C759'"
+            [dotColor]="severityCount('High') > 0 ? '#FF9500' : '#8E8E93'"
           />
           <app-metric-card
             label="Medium"
             [value]="severityCount('Medium')"
             format="number"
-            dotColor="#0071E3"
+            dotColor="#8E8E93"
           />
           <app-metric-card
             label="Symbols"
             [value]="distinctSymbols()"
             format="number"
-            dotColor="#AF52DE"
+            dotColor="#8E8E93"
           />
           <app-metric-card
             label="Types"
             [value]="typeBuckets().length"
             format="number"
-            dotColor="#AF52DE"
+            dotColor="#8E8E93"
           />
           <app-metric-card
             label="Snoozed"
@@ -259,14 +282,14 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
             label="Newest (min ago)"
             [value]="newestMinutes()"
             format="number"
-            dotColor="#AF52DE"
+            dotColor="#8E8E93"
           />
         </div>
 
         @if (allFilteredRows().length === 0) {
           <app-empty-state
             title="Nothing to triage"
-            message="No alerts match the active filters. Widen severity, type, or status to see more."
+            description="No alerts match the active filters. Widen severity, type, or status to see more."
           />
         } @else {
           <!-- Insights row -->
@@ -284,25 +307,45 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
               <article class="insight-card">
                 <header class="insight-head">
                   <span class="insight-title">Activity</span>
-                  <span class="muted insight-status">
-                    peak {{ peakHour() }} · avg {{ avgHour() | number: '1.1-1' }}/h
-                  </span>
-                </header>
-                <div class="histogram">
-                  @for (h of hourBuckets(); track h.label) {
-                    <div class="hist-col" [title]="h.label + ': ' + h.count + ' alerts'">
-                      <span
-                        class="hist-bar"
-                        [style.height.%]="hourBarHeight(h.count)"
-                        [class.zero]="h.count === 0"
-                      ></span>
-                    </div>
+                  @if (triggerTimesRecorded() > 0) {
+                    <span class="muted insight-status">
+                      peak {{ peakHour() }} · avg {{ avgHour() | number: '1.1-1' }}/h
+                    </span>
                   }
-                </div>
-                <footer class="hist-axis">
-                  <span>{{ hourBuckets()[0]?.label ?? '' }}</span>
-                  <span>now</span>
-                </footer>
+                </header>
+                @if (triggerTimesRecorded() === 0) {
+                  <!-- Every matching alert has a null lastTriggeredAt, so an
+                       hour-by-hour chart would just be an empty box with
+                       "peak 0" — say what is actually missing instead. -->
+                  <p class="empty-line muted">
+                    No trigger times recorded — the engine returned no
+                    <code>lastTriggeredAt</code> for any of these alerts, so activity over time
+                    cannot be shown.
+                  </p>
+                } @else {
+                  @if (triggerTimesRecorded() < allFilteredRows().length) {
+                    <p class="empty-line muted">
+                      {{ allFilteredRows().length - triggerTimesRecorded() }} of
+                      {{ allFilteredRows().length }} alerts have no trigger time and are not
+                      plotted.
+                    </p>
+                  }
+                  <div class="histogram">
+                    @for (h of hourBuckets(); track h.label) {
+                      <div class="hist-col" [title]="h.label + ': ' + h.count + ' alerts'">
+                        <span
+                          class="hist-bar"
+                          [style.height.%]="hourBarHeight(h.count)"
+                          [class.zero]="h.count === 0"
+                        ></span>
+                      </div>
+                    }
+                  </div>
+                  <footer class="hist-axis">
+                    <span>{{ hourBuckets()[0]?.label ?? '' }}</span>
+                    <span>now</span>
+                  </footer>
+                }
               </article>
 
               <article class="insight-card">
@@ -366,13 +409,20 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
             </div>
           </section>
 
-          <!-- By symbol breakdown -->
+          <!-- By symbol breakdown. No height cap: the old 320px scroll box
+               hid the eleventh row behind an invisible overlay scrollbar, so
+               "11 touched" showed ten rows whose totals did not add up. -->
           <section class="data-table-card">
             <header class="board-head">
               <h3>By symbol</h3>
-              <span class="muted">{{ symbolRollups().length }} touched</span>
+              <span class="muted">
+                {{ distinctSymbols() }} symbol{{ distinctSymbols() === 1 ? '' : 's' }}
+                @if (hasSystemWideRollup()) {
+                  + system-wide
+                }
+              </span>
             </header>
-            <div class="table-scroll table-scroll--rollup">
+            <div class="table-scroll">
               <table class="board-table">
                 <thead>
                   <tr>
@@ -394,7 +444,7 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                       (click)="filterBySymbol(r.symbol)"
                       [title]="'Filter queue to ' + r.symbol"
                     >
-                      <td class="mono">{{ r.symbol }}</td>
+                      <td class="mono" [class.muted]="r.symbol === systemWide">{{ r.symbol }}</td>
                       <td class="num">{{ r.total }}</td>
                       <td class="num" [class.sev-cell-crit]="r.critical > 0">
                         {{ r.critical }}
@@ -407,7 +457,7 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                         @if (r.recentAt) {
                           {{ r.recentAt | relativeTime }}
                         } @else {
-                          —
+                          not recorded
                         }
                       </td>
                     </tr>
@@ -472,7 +522,7 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                   No actionable alerts under current filters.
                 </p>
               } @else {
-                <div class="table-scroll table-scroll--events">
+                <div class="table-scroll">
                   <div class="incident-list">
                     @for (g of incidentGroups(); track g.key) {
                       <article class="incident" [attr.data-sev]="g.severity">
@@ -496,25 +546,28 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                           }
                           <span class="incident-symbols">
                             @for (s of g.topSymbols; track s) {
-                              <button
-                                type="button"
-                                class="sym-chip"
-                                (click)="filterBySymbol(s); $event.stopPropagation()"
-                                [title]="'Filter by ' + s"
-                              >
-                                {{ s }}
-                              </button>
+                              @if (s === systemWide) {
+                                <span class="sym-chip sym-chip--static">{{ s }}</span>
+                              } @else {
+                                <button
+                                  type="button"
+                                  class="sym-chip"
+                                  (click)="filterBySymbol(s); $event.stopPropagation()"
+                                  [title]="'Filter by ' + s"
+                                >
+                                  {{ s }}
+                                </button>
+                              }
                             }
                             @if (g.symbolOverflow > 0) {
                               <span class="sym-overflow muted">+{{ g.symbolOverflow }}</span>
                             }
                           </span>
                           <span class="incident-time muted">
-                            latest
                             @if (g.latestAt) {
-                              {{ g.latestAt | relativeTime }}
+                              latest {{ g.latestAt | relativeTime }}
                             } @else {
-                              —
+                              trigger time not recorded
                             }
                           </span>
                           <div
@@ -537,11 +590,11 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                               (click)="snoozeGroup(g, 60)"
                               [disabled]="g.snoozedCount === g.count"
                             >
-                              1h
+                              Snooze 1h
                             </button>
                             <button
                               type="button"
-                              class="btn btn-secondary btn-xs"
+                              class="btn btn-accent btn-xs"
                               (click)="ackGroup(g)"
                               [disabled]="g.snoozedCount === g.count"
                             >
@@ -561,48 +614,61 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                               </tr>
                             </thead>
                             <tbody>
-                              @for (a of g.alerts; track a.id) {
-                                <tr [class.snoozed]="isSnoozed(a.id) !== null">
-                                  <td class="mono">{{ a.symbol ?? '—' }}</td>
-                                  <td class="reason small">{{ a.parsedReason }}</td>
-                                  <td class="time" [title]="a.lastTriggeredAt">
-                                    @if (a.lastTriggeredAt) {
-                                      {{ a.lastTriggeredAt | relativeTime }}
-                                    } @else {
-                                      —
+                              @for (row of g.rows; track row.key) {
+                                <tr [class.snoozed]="row.snoozedCount === row.count">
+                                  <td class="mono" [class.muted]="!row.symbol">
+                                    {{ row.symbol ?? systemWide }}
+                                  </td>
+                                  <td class="reason small">
+                                    {{ row.reason }}
+                                    @if (row.count > 1) {
+                                      <span
+                                        class="fold-count"
+                                        [title]="
+                                          row.count +
+                                          ' alerts for the same subject, differing only by their timing figures — latest shown'
+                                        "
+                                        >×{{ row.count }}</span
+                                      >
                                     }
                                   </td>
-                                  <td class="num small mono">{{ a.cooldownSeconds }}s</td>
+                                  <td class="time" [title]="row.latestAt ?? ''">
+                                    @if (row.latestAt) {
+                                      {{ row.latestAt | relativeTime }}
+                                    } @else {
+                                      not recorded
+                                    }
+                                  </td>
+                                  <td class="num small mono">
+                                    {{ fmtDuration(row.cooldownSeconds) }}
+                                  </td>
                                   <td class="actions">
-                                    @if (isSnoozed(a.id); as until) {
+                                    @if (row.snoozedCount === row.count) {
                                       <span class="snooze-tag small muted">
-                                        snoozed → {{ until | date: 'HH:mm' }}
+                                        snoozed → {{ rowSnoozedUntil(row) | date: 'HH:mm' }}
                                       </span>
                                     } @else {
                                       <button
                                         class="btn btn-ghost btn-xs"
-                                        (click)="snooze(a.id, 15)"
+                                        (click)="snoozeRow(row, 15)"
                                       >
                                         15m
                                       </button>
                                       <button
                                         class="btn btn-ghost btn-xs"
-                                        (click)="snooze(a.id, 60)"
+                                        (click)="snoozeRow(row, 60)"
                                       >
                                         1h
                                       </button>
-                                      <button
-                                        class="btn btn-secondary btn-xs"
-                                        (click)="acknowledge(a)"
-                                      >
+                                      <button class="btn btn-accent btn-xs" (click)="ackRow(row)">
                                         Ack
                                       </button>
                                     }
-                                    @if (a.symbol) {
+                                    @if (row.symbol) {
                                       <a
                                         class="link small"
                                         [routerLink]="['/market-data']"
-                                        [queryParams]="{ symbol: a.symbol }"
+                                        [queryParams]="{ symbol: row.symbol }"
                                         >chart</a
                                       >
                                     }
@@ -618,7 +684,10 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                 </div>
               }
             } @else {
-              <div class="table-scroll table-scroll--events">
+              <!-- Flat view is paginated instead of scrolled inside a fixed
+                   box: 166 rows in 560px ended on a half-visible row with
+                   nothing to say more existed. -->
+              <div class="table-scroll">
                 <table class="board-table">
                   <thead>
                     <tr>
@@ -639,7 +708,7 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                         </td>
                       </tr>
                     } @else {
-                      @for (a of triageQueue(); track a.id) {
+                      @for (a of flatPageRows(); track a.id) {
                         <tr [class.snoozed]="isSnoozed(a.id) !== null">
                           <td>
                             <span class="sev-pill" [attr.data-sev]="a.severity">{{
@@ -647,16 +716,18 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                             }}</span>
                           </td>
                           <td class="small mono">{{ a.alertType }}</td>
-                          <td class="mono">{{ a.symbol ?? '—' }}</td>
+                          <td class="mono" [class.muted]="!a.symbol">
+                            {{ a.symbol ?? systemWide }}
+                          </td>
                           <td class="reason small">{{ a.parsedReason }}</td>
                           <td class="time" [title]="a.lastTriggeredAt">
                             @if (a.lastTriggeredAt) {
                               {{ a.lastTriggeredAt | relativeTime }}
                             } @else {
-                              —
+                              not recorded
                             }
                           </td>
-                          <td class="num small mono">{{ a.cooldownSeconds }}s</td>
+                          <td class="num small mono">{{ fmtDuration(a.cooldownSeconds) }}</td>
                           <td class="actions">
                             @if (isSnoozed(a.id); as until) {
                               <span class="snooze-tag small muted">
@@ -669,7 +740,7 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                               <button class="btn btn-ghost btn-xs" (click)="snooze(a.id, 60)">
                                 1h
                               </button>
-                              <button class="btn btn-secondary btn-xs" (click)="acknowledge(a)">
+                              <button class="btn btn-accent btn-xs" (click)="acknowledge(a)">
                                 Ack
                               </button>
                             }
@@ -688,6 +759,33 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                   </tbody>
                 </table>
               </div>
+              @if (triageQueue().length > flatPageSize) {
+                <footer class="pager">
+                  <span class="muted small">
+                    Showing {{ flatPageStart() | number }}–{{ flatPageEnd() | number }} of
+                    {{ triageQueue().length | number }}
+                  </span>
+                  <div class="pager-controls">
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-xs"
+                      [disabled]="flatPage() <= 1"
+                      (click)="flatPage.set(flatPage() - 1)"
+                    >
+                      Previous
+                    </button>
+                    <span class="small muted">Page {{ flatPage() }} of {{ flatPageCount() }}</span>
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-xs"
+                      [disabled]="flatPage() >= flatPageCount()"
+                      (click)="flatPage.set(flatPage() + 1)"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </footer>
+              }
             }
           </section>
         }
@@ -703,6 +801,9 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
         gap: var(--space-4);
       }
 
+      /* Not sticky. Pinned at top:8px it slid over the KPI tiles the moment
+         the page scrolled, hiding their values; no other filter bar in the
+         app is sticky either. */
       .filter-bar {
         display: flex;
         align-items: flex-end;
@@ -712,9 +813,6 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         padding: var(--space-3) var(--space-4);
-        position: sticky;
-        top: var(--space-2);
-        z-index: 5;
       }
       .fb-field {
         display: flex;
@@ -770,19 +868,18 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
         border-left: none;
       }
 
+      /* Eight tiles as two rows of four — eight across wrapped "Newest (min
+         ago)" onto two lines and made the tiles narrower than any other
+         page's. */
       .kpi-strip {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: var(--space-2);
-      }
-      @media (max-width: 1400px) {
-        .kpi-strip {
-          grid-template-columns: repeat(4, 1fr);
-        }
+        align-items: start;
       }
       @media (max-width: 720px) {
         .kpi-strip {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
 
@@ -1015,17 +1112,44 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
       }
-      /* Bound each table — operator pages must not grow unbounded as the
-         alert backlog grows; rollup + queue become scroll surfaces with
-         sticky headers so they stay below the fold. */
+      /* Horizontal overflow only. Vertical growth is bounded by pagination
+         (flat view) and by grouping (incident view), not by a scroll box that
+         hid rows behind an invisible overlay scrollbar. */
       .table-scroll {
-        overflow: auto;
+        overflow-x: auto;
       }
-      .table-scroll--rollup {
-        max-height: 320px;
+      .pager {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        padding: var(--space-2) var(--space-4);
+        border-top: 1px solid var(--border);
+        flex-wrap: wrap;
       }
-      .table-scroll--events {
-        max-height: 560px;
+      .pager-controls {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .fold-count {
+        display: inline-block;
+        margin-left: 4px;
+        padding: 0 6px;
+        border-radius: var(--radius-full);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        font-size: 10px;
+        font-weight: var(--font-bold);
+        font-variant-numeric: tabular-nums;
+        cursor: help;
+      }
+      .board-table td.muted {
+        color: var(--text-tertiary);
+      }
+      code {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: 0.95em;
       }
       .row-warn {
         background: rgba(239, 68, 68, 0.05);
@@ -1114,6 +1238,10 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
         cursor: pointer;
         font-family: inherit;
       }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
       .btn-xs {
         padding: 3px 8px;
         font-size: 10.5px;
@@ -1123,11 +1251,25 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
         color: var(--text-secondary);
         border-color: var(--border);
       }
-      .btn-ghost:hover {
+      .btn-ghost:hover:not(:disabled) {
         background: var(--bg-tertiary);
         color: var(--text-primary);
       }
+      /* Page-level action (Refresh): the same outline secondary button every
+         page uses. The solid accent style is reserved for Ack. */
       .btn-secondary {
+        height: 36px;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-full);
+        font-size: var(--text-sm);
+        background: transparent;
+        color: var(--text-primary);
+        border-color: var(--border);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+      }
+      .btn-accent {
         background: var(--accent);
         color: white;
         border-color: var(--accent);
@@ -1290,6 +1432,15 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
         background: var(--bg-tertiary);
         color: var(--text-primary);
       }
+      .sym-chip--static {
+        cursor: default;
+        color: var(--text-tertiary);
+        font-style: italic;
+      }
+      .sym-chip--static:hover {
+        background: var(--bg-primary);
+        color: var(--text-tertiary);
+      }
       .sym-overflow {
         font-size: 10.5px;
       }
@@ -1343,6 +1494,12 @@ export class AlertTriagePageComponent {
   /** Set of incident keys the operator has expanded. */
   protected readonly openGroups = signal<Set<string>>(new Set());
 
+  protected readonly systemWide = SYSTEM_WIDE;
+
+  // Flat-view pagination (client-side over the sorted queue).
+  protected readonly flatPageSize = 50;
+  protected readonly flatPage = signal(1);
+
   // Snooze map kept in sessionStorage so an operator's triage state survives
   // tab refreshes within a session but doesn't leak across days.
   protected readonly snoozedUntil = signal<Record<number, number>>(this.readSnoozes());
@@ -1371,6 +1528,16 @@ export class AlertTriagePageComponent {
     effect(() => {
       this.windowHours();
       this.resource.refresh();
+    });
+    // Any filter change restarts the flat view on page 1 — otherwise a
+    // narrower result set can leave the operator on a page past the end.
+    effect(() => {
+      this.severityFilter();
+      this.typeFilter();
+      this.symbolFilter();
+      this.statusFilter();
+      this.windowHours();
+      this.flatPage.set(1);
     });
   }
 
@@ -1447,6 +1614,21 @@ export class AlertTriagePageComponent {
     }),
   );
 
+  protected readonly flatPageCount = computed(() =>
+    Math.max(1, Math.ceil(this.triageQueue().length / this.flatPageSize)),
+  );
+  protected readonly flatPageRows = computed<ParsedAlert[]>(() => {
+    const page = Math.min(this.flatPage(), this.flatPageCount());
+    const start = (page - 1) * this.flatPageSize;
+    return this.triageQueue().slice(start, start + this.flatPageSize);
+  });
+  protected readonly flatPageStart = computed(() =>
+    this.triageQueue().length === 0 ? 0 : (this.flatPage() - 1) * this.flatPageSize + 1,
+  );
+  protected readonly flatPageEnd = computed(() =>
+    Math.min(this.flatPage() * this.flatPageSize, this.triageQueue().length),
+  );
+
   /**
    * Triage queue bucketed by `severity × alertType`. Drives the grouped
    * view. Sort: severity first, then count desc, then most-recent
@@ -1469,7 +1651,7 @@ export class AlertTriagePageComponent {
       let latestAt = '';
       let snoozedCount = 0;
       for (const a of alerts) {
-        const s = a.symbol ?? '—';
+        const s = a.symbol ?? SYSTEM_WIDE;
         if (!symbols.includes(s)) symbols.push(s);
         const t = a.lastTriggeredAt ?? '';
         if (t > latestAt) latestAt = t;
@@ -1481,6 +1663,7 @@ export class AlertTriagePageComponent {
         alertType,
         count: alerts.length,
         alerts,
+        rows: this.foldRows(alerts, snoozed, now),
         topSymbols: symbols.slice(0, 5),
         symbolOverflow: Math.max(0, symbols.length - 5),
         latestAt,
@@ -1496,6 +1679,52 @@ export class AlertTriagePageComponent {
     });
   });
 
+  /**
+   * Fold a group's alerts into subject rows. Identity is symbol + reason with
+   * measured quantities (a number carrying a unit: "11038.3s", "42%", "3 skips")
+   * blanked, so "StrategyPromotionWorker (11038.3s stale)" and "(11045.2s stale)"
+   * are one row while "model #12" and "model #13" stay apart. The newest alert
+   * is the face of the row; the row's actions apply to every alert behind it.
+   */
+  private foldRows(
+    alerts: ParsedAlert[],
+    snoozed: Record<number, number>,
+    now: number,
+  ): IncidentRow[] {
+    const map = new Map<string, IncidentRow>();
+    for (const a of alerts) {
+      const subject = a.parsedReason.replace(/\d+(\.\d+)?\s*(ms|s|m|h|%|skips?)\b/g, '#');
+      const key = `${a.symbol ?? ''}::${subject}`;
+      const existing = map.get(key);
+      const t = a.lastTriggeredAt ?? null;
+      const isSnoozed = (snoozed[a.id] ?? 0) > now;
+      if (existing) {
+        existing.alerts.push(a);
+        existing.count++;
+        if (isSnoozed) existing.snoozedCount++;
+        if (t && (!existing.latestAt || t > existing.latestAt)) {
+          existing.latestAt = t;
+          existing.reason = a.parsedReason;
+          existing.cooldownSeconds = a.cooldownSeconds;
+        }
+      } else {
+        map.set(key, {
+          key,
+          symbol: a.symbol,
+          reason: a.parsedReason,
+          alerts: [a],
+          count: 1,
+          latestAt: t,
+          cooldownSeconds: a.cooldownSeconds,
+          snoozedCount: isSnoozed ? 1 : 0,
+        });
+      }
+    }
+    return Array.from(map.values()).sort((x, y) =>
+      (y.latestAt ?? '').localeCompare(x.latestAt ?? ''),
+    );
+  }
+
   protected readonly loading = computed(
     () => this.resource.loading() && (this.resource.value() ?? []).length === 0,
   );
@@ -1508,24 +1737,54 @@ export class AlertTriagePageComponent {
   protected severityCount(sev: AlertSeverity): number {
     return this.allFilteredRows().filter((a) => a.severity === sev).length;
   }
+  /** Real instruments only — system-wide (null-symbol) alerts are not a symbol. */
   protected readonly distinctSymbols = computed(
-    () => new Set(this.allFilteredRows().map((a) => a.symbol ?? '—')).size,
+    () =>
+      new Set(
+        this.allFilteredRows()
+          .map((a) => a.symbol)
+          .filter((s): s is string => !!s),
+      ).size,
+  );
+  protected readonly hasSystemWideRollup = computed(() =>
+    this.allFilteredRows().some((a) => !a.symbol),
   );
   protected readonly snoozedCount = computed(() => {
     const now = Date.now();
     const snoozed = this.snoozedUntil();
     return this.allFilteredRows().filter((a) => (snoozed[a.id] ?? 0) > now).length;
   });
-  protected readonly newestMinutes = computed(() => {
+  /** Matching alerts that carry a lastTriggeredAt at all. */
+  protected readonly triggerTimesRecorded = computed(
+    () => this.allFilteredRows().filter((a) => !!a.lastTriggeredAt).length,
+  );
+  /** Minutes since the newest trigger, or null when no alert has a trigger time (shows "-"). */
+  protected readonly newestMinutes = computed<number | null>(() => {
     const rows = this.allFilteredRows();
-    if (rows.length === 0) return 0;
+    if (rows.length === 0) return null;
     const latest = rows.reduce((max, r) => {
       const t = r.lastTriggeredAt ?? r.autoResolvedAt ?? '';
       return t > max ? t : max;
     }, '');
-    if (!latest) return 0;
+    if (!latest) return null;
     return Math.floor((Date.now() - new Date(latest).getTime()) / 60_000);
   });
+
+  /** "90s" / "5m" / "6h" / "24h" / "2d" — cooldowns read as durations, not raw seconds. */
+  protected fmtDuration(seconds: number | null | undefined): string {
+    if (seconds == null || !Number.isFinite(seconds)) return '—';
+    const s = Math.round(seconds);
+    if (s < 60) return `${s}s`;
+    if (s < 3600) return s % 60 === 0 ? `${s / 60}m` : `${Math.floor(s / 60)}m ${s % 60}s`;
+    if (s < 86_400) {
+      const h = Math.floor(s / 3600);
+      const m = Math.round((s % 3600) / 60);
+      return m === 0 ? `${h}h` : `${h}h ${m}m`;
+    }
+    const d = Math.floor(s / 86_400);
+    const h = Math.round((s % 86_400) / 3600);
+    return h === 0 ? `${d}d` : `${d}d ${h}h`;
+  }
 
   // ── Breakdowns ────────────────────────────────────────────────────
 
@@ -1549,7 +1808,7 @@ export class AlertTriagePageComponent {
     const rows = this.allFilteredRows();
     const map = new Map<string, AlertDto[]>();
     for (const a of rows) {
-      const key = a.symbol ?? '—';
+      const key = a.symbol ?? SYSTEM_WIDE;
       const list = map.get(key) ?? [];
       list.push(a);
       map.set(key, list);
@@ -1659,7 +1918,7 @@ export class AlertTriagePageComponent {
     if (rows.length >= 10) {
       const rollups = this.symbolRollups();
       const top = rollups[0];
-      if (top && top.symbol !== '—' && top.total / rows.length >= 0.5) {
+      if (top && top.symbol !== SYSTEM_WIDE && top.total / rows.length >= 0.5) {
         flags.push({
           kind: 'symbol-concentration',
           detail: `${top.symbol} accounts for ${top.total} of ${rows.length} alerts (${((top.total / rows.length) * 100).toFixed(0)}%).`,
@@ -1728,6 +1987,31 @@ export class AlertTriagePageComponent {
     this.notify.info(`Acknowledged ${g.count} ${g.alertType} alerts (snoozed 24h)`);
   }
 
+  /** Row-level actions cover every alert folded into the row, not just the newest. */
+  snoozeRow(row: IncidentRow, minutes: number): void {
+    this.bulkSnooze(row.alerts, minutes);
+    this.notify.success(
+      row.count === 1
+        ? `Snoozed for ${minutes} min`
+        : `Snoozed ${row.count} alerts for ${minutes} min`,
+    );
+  }
+
+  ackRow(row: IncidentRow): void {
+    this.bulkSnooze(row.alerts, 60 * 24);
+    this.notify.info(
+      row.count === 1
+        ? 'Acknowledged locally (snoozed 24h). Engine-side ack pending.'
+        : `Acknowledged ${row.count} alerts (snoozed 24h). Engine-side ack pending.`,
+    );
+  }
+
+  /** Latest snooze expiry across a row's alerts, for the "snoozed → HH:mm" tag. */
+  rowSnoozedUntil(row: IncidentRow): number {
+    const map = this.snoozedUntil();
+    return row.alerts.reduce((max, a) => Math.max(max, map[a.id] ?? 0), 0);
+  }
+
   toggleGroup(key: string): void {
     const next = new Set(this.openGroups());
     if (next.has(key)) next.delete(key);
@@ -1753,7 +2037,7 @@ export class AlertTriagePageComponent {
    * the queue narrows to just that pair.
    */
   filterBySymbol(symbol: string): void {
-    this.symbolFilter.set(symbol === '—' ? '' : symbol);
+    this.symbolFilter.set(symbol === SYSTEM_WIDE ? '' : symbol);
   }
 
   // ── Helpers ────────────────────────────────────────────────────────

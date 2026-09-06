@@ -52,24 +52,33 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           (retry)="resource.refresh()"
         />
       } @else {
+        <!-- Colour carries meaning only: Diverged goes red when > 0 (the bad
+             case) and is neutral at zero; Accruing is an in-progress state,
+             not a warning, so it takes the accent rather than amber. -->
         <section class="kpis">
           <app-metric-card
             label="Tracked changes"
             [value]="rows().length"
             format="number"
-            dotColor="#8b5cf6"
+            dotColor="#8E8E93"
+          />
+          <app-metric-card
+            label="Confirmed"
+            [value]="confirmedCount()"
+            format="number"
+            [dotColor]="confirmedCount() > 0 ? '#34C759' : '#8E8E93'"
           />
           <app-metric-card
             label="Diverged"
             [value]="divergedCount()"
             format="number"
-            [dotColor]="divergedCount() > 0 ? '#FF3B30' : '#34C759'"
+            [dotColor]="divergedCount() > 0 ? '#FF3B30' : '#8E8E93'"
           />
           <app-metric-card
             label="Accruing"
             [value]="accruingCount()"
             format="number"
-            dotColor="#FF9500"
+            [dotColor]="accruingCount() > 0 ? '#0071E3' : '#8E8E93'"
           />
         </section>
 
@@ -134,11 +143,45 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
   `,
   styles: [
     `
+      .page {
+        padding: var(--space-2) 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+      }
+      /* Fixed six-column strip: the tiles keep the same width as every other
+         page's KPI row instead of stretching three tiles across the viewport. */
       .kpis {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-        gap: 12px;
-        margin-bottom: 16px;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: var(--space-2);
+        align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .kpis {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+      }
+      .btn {
+        height: 36px;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-full);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .btn-secondary {
+        background: transparent;
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
       }
       .card {
         background: var(--bg-secondary);
@@ -200,6 +243,9 @@ export class AlgoEngineerScorecardPageComponent {
 
   protected readonly rows = computed(() => this.resource.value() ?? []);
   protected readonly loading = computed(() => this.resource.loading() && this.rows().length === 0);
+  protected readonly confirmedCount = computed(
+    () => this.rows().filter((r) => r.outcomeStatus === 'Confirmed').length,
+  );
   protected readonly divergedCount = computed(
     () => this.rows().filter((r) => r.outcomeStatus === 'Diverged').length,
   );
@@ -214,7 +260,7 @@ export class AlgoEngineerScorecardPageComponent {
       case 'Diverged':
         return '#FF3B30';
       case 'Accruing':
-        return '#FF9500';
+        return '#0071E3';
       default:
         return '#8E8E93';
     }

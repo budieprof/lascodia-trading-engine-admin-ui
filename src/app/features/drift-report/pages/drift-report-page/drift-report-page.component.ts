@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  ViewChild,
   computed,
   effect,
   inject,
@@ -23,7 +24,6 @@ import type {
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
-import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import {
   TimeRangePickerComponent,
@@ -37,6 +37,62 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
   Critical: '#D70015',
 };
 
+/** Display order for severities wherever they are listed side by side. */
+const SEVERITY_ORDER: AlertSeverity[] = ['Critical', 'High', 'Medium', 'Info'];
+
+/**
+ * The engine emits fleet-wide drift alerts under the symbol sentinel "ALL"
+ * and some detectors emit with no symbol at all. Neither is an instrument, so
+ * they must not count towards "symbols hit" — but they still carry alerts the
+ * operator needs to see, hence they get their own labelled entries instead of
+ * being dropped.
+ */
+const FLEET_WIDE_SYMBOL = 'ALL';
+const FLEET_WIDE_LABEL = 'Fleet-wide (ALL)';
+const NO_SYMBOL_LABEL = 'No symbol';
+const NO_DETECTOR_LABEL = 'No detector recorded';
+const SENTINEL_COLOR = '#8E8E93';
+
+/** Analytics sample cap — keeps the browser snappy on large ranges. */
+const SAMPLE_CAP = 5000;
+
+const DAY_MS = 24 * 3600 * 1000;
+
+/** One date format for the whole page; timestamps are rendered in UTC. */
+const DATE_FMT = 'd MMM yyyy, HH:mm:ss';
+
+const numberFmt = new Intl.NumberFormat('en-US');
+const fmt = (n: number): string => numberFmt.format(n);
+
+function symbolLabel(symbol: string | null): string {
+  if (!symbol || symbol.toLowerCase() === 'unknown') return NO_SYMBOL_LABEL;
+  if (symbol === FLEET_WIDE_SYMBOL) return FLEET_WIDE_LABEL;
+  return symbol;
+}
+
+function isRealSymbol(symbol: string | null): boolean {
+  return !!symbol && symbol.toLowerCase() !== 'unknown' && symbol !== FLEET_WIDE_SYMBOL;
+}
+
+function detectorLabel(detector: string | null): string {
+  return detector || NO_DETECTOR_LABEL;
+}
+
+/**
+ * Mirrors the picker's "7d" preset. The picker computes its default lazily and
+ * never writes it back, so a null seed would leave the table and analytics
+ * unbounded while the picker *displays* 7d — the two would disagree on load.
+ */
+function defaultRange(): TimeRange {
+  return { preset: '7d', from: new Date(Date.now() - 7 * DAY_MS).toISOString(), to: null };
+}
+
+type SeverityCounts = Record<AlertSeverity, number>;
+
+function emptySeverityCounts(): SeverityCounts {
+  return { Critical: 0, High: 0, Medium: 0, Info: 0 };
+}
+
 @Component({
   selector: 'app-drift-report-page',
   standalone: true,
@@ -45,7 +101,6 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
     FormsModule,
     PageHeaderComponent,
     DataTableComponent,
-    EmptyStateComponent,
     DatePipe,
     TimeRangePickerComponent,
     ChartCardComponent,
@@ -57,59 +112,57 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
         subtitle="ML drift alerts across all detector families"
       />
 
-      <!-- 8-card KPI strip — fleet-wide drift posture across the active range -->
+      <!-- KPI strip — fleet-wide drift posture across the active range -->
       <div class="dr-kpis">
         <div class="dr-kpi">
           <span class="kpi-label">Total alerts</span>
-          <span class="kpi-value">{{ driftStats().total }}</span>
+          <span class="kpi-value">{{ fmt(driftStats().total) }}</span>
         </div>
         <div class="dr-kpi">
           <span class="kpi-label">Critical</span>
-          <span class="kpi-value bad">{{ driftStats().critical }}</span>
+          <span class="kpi-value" [class.bad]="driftStats().critical > 0">
+            {{ fmt(driftStats().critical) }}
+          </span>
         </div>
         <div class="dr-kpi">
           <span class="kpi-label">High</span>
-          <span class="kpi-value warn">{{ driftStats().high }}</span>
+          <span class="kpi-value" [class.warn]="driftStats().high > 0">
+            {{ fmt(driftStats().high) }}
+          </span>
         </div>
         <div class="dr-kpi">
           <span class="kpi-label">Active</span>
-          <span class="kpi-value">{{ driftStats().active }}</span>
-        </div>
-        <div class="dr-kpi">
-          <span class="kpi-label">Auto-resolved</span>
-          <span class="kpi-value good">{{ driftStats().autoResolved }}</span>
+          <span class="kpi-value">{{ fmt(driftStats().active) }}</span>
         </div>
         <div class="dr-kpi">
           <span class="kpi-label">Symbols hit</span>
-          <span class="kpi-value">{{ driftStats().symbolCount }}</span>
-        </div>
-        <div class="dr-kpi">
-          <span class="kpi-label">Detectors firing</span>
-          <span class="kpi-value">{{ driftStats().detectorCount }}</span>
+          <span class="kpi-value">{{ fmt(driftStats().symbolCount) }}</span>
         </div>
         <div class="dr-kpi">
           <span class="kpi-label">Triggered &lt; 1h</span>
-          <span
-            class="kpi-value"
-            [class.bad]="driftStats().lastHour > 0"
-            [class.good]="driftStats().lastHour === 0"
-          >
-            {{ driftStats().lastHour }}
+          <span class="kpi-value" [class.bad]="driftStats().lastHour > 0">
+            {{ fmt(driftStats().lastHour) }}
           </span>
         </div>
       </div>
+      @if (sampleCapped()) {
+        <p class="note">
+          Tiles, charts and breakdowns cover the first {{ fmt(sampleCap) }} of
+          {{ fmt(sampleTotal()) }} alerts in this range; the table below pages through all of them.
+        </p>
+      }
 
       <!-- 3-col chart row -->
       <div class="dr-charts">
         <app-chart-card
           title="Severity distribution"
-          subtitle="Critical · High · Medium · Info"
-          [options]="severityDonutOptions()"
+          [subtitle]="severitySubtitle()"
+          [options]="severityBarOptions()"
           height="240px"
         />
         <app-chart-card
           title="Top symbols by alert count"
-          subtitle="Most-impacted instruments in this range"
+          subtitle="Fleet-wide and symbol-less alerts listed separately"
           [options]="bySymbolOptions()"
           height="240px"
         />
@@ -134,9 +187,9 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
                 <tr>
                   <th>Detector</th>
                   <th class="num">Total</th>
-                  <th class="num">Critical</th>
-                  <th class="num">High</th>
-                  <th class="num">Med/Info</th>
+                  @for (lvl of severityLevels(); track lvl) {
+                    <th class="num">{{ lvl }}</th>
+                  }
                   <th class="num">Active %</th>
                 </tr>
               </thead>
@@ -144,15 +197,17 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
                 @for (row of perDetectorBreakdown(); track row.detector) {
                   <tr>
                     <td class="mono">{{ row.detector }}</td>
-                    <td class="num mono">{{ row.total }}</td>
-                    <td class="num mono bad">{{ row.critical }}</td>
-                    <td class="num mono warn">{{ row.high }}</td>
-                    <td class="num mono">{{ row.mediumOrInfo }}</td>
-                    <td
-                      class="num mono"
-                      [class.bad]="row.activePct >= 50"
-                      [class.good]="row.activePct === 0"
-                    >
+                    <td class="num mono">{{ fmt(row.total) }}</td>
+                    @for (lvl of severityLevels(); track lvl) {
+                      <td
+                        class="num mono"
+                        [class.bad]="lvl === 'Critical' && row.counts[lvl] > 0"
+                        [class.warn]="lvl === 'High' && row.counts[lvl] > 0"
+                      >
+                        {{ fmt(row.counts[lvl]) }}
+                      </td>
+                    }
+                    <td class="num mono" [class.bad]="row.activePct >= 50">
                       {{ row.activePct.toFixed(0) }}%
                     </td>
                   </tr>
@@ -160,14 +215,14 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
               </tbody>
             </table>
           } @else {
-            <p class="muted" style="padding: var(--space-4)">No alerts in this range.</p>
+            <p class="muted board-empty">No alerts in this range.</p>
           }
         </section>
 
         <section class="dr-board">
           <header class="dr-board-head">
             <h3>Most-recent firings</h3>
-            <span class="muted">Last 10 in the active range</span>
+            <span class="muted">Last 10 in the active range · times in UTC</span>
           </header>
           @if (recentFirings().length > 0) {
             <table class="dr-board-table">
@@ -182,8 +237,8 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
               <tbody>
                 @for (a of recentFirings(); track a.id) {
                   <tr (click)="selectRow(a)">
-                    <td class="mono">{{ a.symbol ?? '—' }}</td>
-                    <td class="mono">{{ a.detectorType ?? '—' }}</td>
+                    <td class="mono">{{ symbolLabel(a.symbol) }}</td>
+                    <td class="mono">{{ detectorLabel(a.detectorType) }}</td>
                     <td>
                       <span
                         class="severity-pill"
@@ -194,14 +249,14 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
                       </span>
                     </td>
                     <td class="mono">
-                      {{ a.lastTriggeredAt ? (a.lastTriggeredAt | date: 'MMM d HH:mm:ss') : '—' }}
+                      {{ a.lastTriggeredAt ? (a.lastTriggeredAt | date: dateFmt : 'UTC') : '—' }}
                     </td>
                   </tr>
                 }
               </tbody>
             </table>
           } @else {
-            <p class="muted" style="padding: var(--space-4)">No firings in this range.</p>
+            <p class="muted board-empty">No firings in this range.</p>
           }
         </section>
       </div>
@@ -209,7 +264,9 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
       <section class="dr-board">
         <header class="dr-board-head">
           <h3>All drift alerts</h3>
-          <span class="muted">Server-paged — filters apply to this table only</span>
+          <span class="muted">
+            Server-paged · the range and filters below apply to the whole page · times in UTC
+          </span>
         </header>
         <section class="filter-bar">
           <label class="filter">
@@ -223,7 +280,7 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
           </label>
           <label class="filter">
             <span class="filter-label">Detector</span>
-            <select [(ngModel)]="filterDetector" (change)="reload()">
+            <select [(ngModel)]="filterDetector" (ngModelChange)="reload()">
               <option value="">All</option>
               <option value="DriftAgreement">DriftAgreement</option>
               <option value="CUSUM">CUSUM</option>
@@ -234,7 +291,7 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
           </label>
           <label class="filter">
             <span class="filter-label">Severity</span>
-            <select [(ngModel)]="filterSeverity" (change)="reload()">
+            <select [(ngModel)]="filterSeverity" (ngModelChange)="reload()">
               <option value="">All</option>
               <option value="Info">Info</option>
               <option value="Medium">Medium</option>
@@ -243,7 +300,7 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
             </select>
           </label>
           <label class="filter checkbox">
-            <input type="checkbox" [(ngModel)]="unresolvedOnly" (change)="reload()" />
+            <input type="checkbox" [(ngModel)]="unresolvedOnly" (ngModelChange)="reload()" />
             <span>Unresolved only</span>
           </label>
           <div class="filter">
@@ -257,7 +314,8 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
         </section>
 
         <app-data-table
-          [columnDefs]="columns"
+          #table
+          [columnDefs]="columns()"
           [fetchData]="fetchPage"
           (rowClick)="selectRow($event)"
           stateKey="drift-report"
@@ -267,7 +325,7 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
       @if (selected(); as alert) {
         <section class="detail">
           <header class="detail-head">
-            <h3>Alert #{{ alert.id }} — {{ alert.symbol || '(no symbol)' }}</h3>
+            <h3>Alert #{{ alert.id }} — {{ symbolLabel(alert.symbol) }}</h3>
             <span
               class="severity-pill"
               [style.background]="severityBg(alert.severity)"
@@ -279,35 +337,33 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
           <dl class="detail-grid">
             <div>
               <dt>Detector</dt>
-              <dd>{{ alert.detectorType || '—' }}</dd>
+              <dd>{{ detectorLabel(alert.detectorType) }}</dd>
             </div>
             <div>
               <dt>Alert type</dt>
               <dd>{{ alert.alertType }}</dd>
             </div>
             <div>
-              <dt>Active</dt>
-              <dd>{{ alert.isActive ? 'Yes' : 'No' }}</dd>
+              <dt>Status</dt>
+              <dd>{{ alert.isActive ? 'Active' : 'Resolved' }}</dd>
             </div>
             <div>
-              <dt>Auto-resolved</dt>
+              <dt>Auto-resolved (UTC)</dt>
               <dd>
-                {{ alert.autoResolvedAt ? (alert.autoResolvedAt | date: 'MMM d, HH:mm:ss') : '—' }}
+                {{ alert.autoResolvedAt ? (alert.autoResolvedAt | date: dateFmt : 'UTC') : '—' }}
               </dd>
             </div>
             <div>
-              <dt>Last triggered</dt>
+              <dt>Last triggered (UTC)</dt>
               <dd>
                 {{
-                  alert.lastTriggeredAt
-                    ? (alert.lastTriggeredAt | date: 'MMM d, HH:mm:ss')
-                    : 'Never'
+                  alert.lastTriggeredAt ? (alert.lastTriggeredAt | date: dateFmt : 'UTC') : 'Never'
                 }}
               </dd>
             </div>
             <div>
               <dt>Cooldown</dt>
-              <dd>{{ alert.cooldownSeconds }} s</dd>
+              <dd>{{ fmt(alert.cooldownSeconds) }} s</dd>
             </div>
             <div class="full">
               <dt>Dedup key</dt>
@@ -320,11 +376,6 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
             <pre class="json">{{ formatJson(alert.conditionJson) }}</pre>
           </details>
         </section>
-      } @else {
-        <app-empty-state
-          title="No alert selected"
-          description="Click a row above to inspect the detector payload."
-        />
       }
     </div>
   `,
@@ -335,6 +386,11 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
         display: flex;
         flex-direction: column;
         gap: var(--space-5);
+      }
+      .note {
+        margin: calc(-1 * var(--space-3)) 0 0;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
       }
       .filter-bar {
         display: flex;
@@ -445,20 +501,21 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
         word-break: break-word;
       }
 
-      /* Drift Report density additions */
+      /* KPI strip — six equal tiles, one-line labels */
       .dr-kpis {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(6, minmax(0, 1fr));
         gap: var(--space-2);
+        align-items: start;
       }
-      @media (max-width: 1400px) {
+      @media (max-width: 1100px) {
         .dr-kpis {
-          grid-template-columns: repeat(4, 1fr);
+          grid-template-columns: repeat(3, minmax(0, 1fr));
         }
       }
       @media (max-width: 720px) {
         .dr-kpis {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
       .dr-kpi {
@@ -469,6 +526,7 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
         display: flex;
         flex-direction: column;
         gap: 4px;
+        min-width: 0;
       }
       .dr-kpi .kpi-label {
         font-size: 10px;
@@ -476,6 +534,9 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
         color: var(--text-tertiary);
         text-transform: uppercase;
         letter-spacing: 0.04em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .dr-kpi .kpi-value {
         font-size: var(--text-xl);
@@ -483,20 +544,18 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
         color: var(--text-primary);
         font-variant-numeric: tabular-nums;
       }
-      .dr-kpi .kpi-value.good {
-        color: var(--profit);
-      }
       .dr-kpi .kpi-value.bad {
         color: var(--loss);
       }
       .dr-kpi .kpi-value.warn {
-        color: #c93400;
+        color: var(--warning);
       }
 
       .dr-charts {
         display: grid;
         grid-template-columns: 1fr 1fr 1.2fr;
         gap: var(--space-3);
+        align-items: start;
       }
       @media (max-width: 1100px) {
         .dr-charts {
@@ -504,10 +563,13 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
         }
       }
 
+      /* Boards size to their own content — a 3-row breakdown must not be
+         stretched to the height of its neighbour. */
       .dr-board-row {
         display: grid;
         grid-template-columns: 1.4fr 1fr;
         gap: var(--space-3);
+        align-items: start;
       }
       @media (max-width: 1100px) {
         .dr-board-row {
@@ -537,6 +599,10 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
         color: var(--text-tertiary);
         font-size: var(--text-xs);
       }
+      .board-empty {
+        margin: 0;
+        padding: var(--space-4);
+      }
       .dr-board-table {
         width: 100%;
         border-collapse: collapse;
@@ -547,6 +613,9 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
         text-align: left;
         border-bottom: 1px solid var(--border);
         font-size: var(--text-xs);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .dr-board-table tbody tr:last-child td {
         border-bottom: none;
@@ -577,11 +646,8 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
       .dr-board-table .bad {
         color: var(--loss);
       }
-      .dr-board-table .good {
-        color: var(--profit);
-      }
       .dr-board-table .warn {
-        color: #c93400;
+        color: var(--warning);
       }
       .muted {
         color: var(--text-tertiary);
@@ -600,132 +666,151 @@ const SEVERITY_COLOR: Record<AlertSeverity, string> = {
 })
 export class DriftReportPageComponent {
   private readonly mlService = inject(MLModelsService);
+  private readonly datePipe = new DatePipe('en-US');
+
+  @ViewChild('table') table?: DataTableComponent<DriftAlertDto>;
+
+  readonly dateFmt = DATE_FMT;
+  readonly sampleCap = SAMPLE_CAP;
+  readonly fmt = fmt;
+  readonly symbolLabel = symbolLabel;
+  readonly detectorLabel = detectorLabel;
 
   filterSymbol = '';
   filterDetector = '';
   filterSeverity = '';
   unresolvedOnly = false;
 
-  // Default 7d is computed lazily by the picker itself when left null, but
-  // we seed a signal so the picker can emit into it via [(value)].
-  readonly range = signal<TimeRange | null>(null);
+  readonly range = signal<TimeRange | null>(defaultRange());
 
   readonly selected = signal<DriftAlertDto | null>(null);
   private reloadTick = signal(0);
 
   // ── Analytics sample ─────────────────────────────────────────────────
-  // Cap at 5000 to keep the browser snappy; the paged table below still
-  // shows everything. KPIs/charts/tables compute over this sample, which
-  // already represents the active filter range.
+  // KPIs/charts/breakdowns compute over this sample, which is fetched with
+  // exactly the same filter + range as the paged table so the two agree.
   readonly driftSample = signal<DriftAlertDto[]>([]);
+  readonly sampleTotal = signal(0);
+  readonly sampleCapped = computed(() => this.sampleTotal() > SAMPLE_CAP);
 
   driftStats = computed(() => {
     const all = this.driftSample();
-    if (all.length === 0) {
-      return {
-        total: 0,
-        critical: 0,
-        high: 0,
-        active: 0,
-        autoResolved: 0,
-        symbolCount: 0,
-        detectorCount: 0,
-        lastHour: 0,
-      };
-    }
     let critical = 0;
     let high = 0;
     let active = 0;
-    let autoResolved = 0;
     let lastHour = 0;
     const symbols = new Set<string>();
-    const detectors = new Set<string>();
     const oneHourAgo = Date.now() - 3600_000;
     for (const a of all) {
       if (a.severity === 'Critical') critical++;
       else if (a.severity === 'High') high++;
       if (a.isActive) active++;
-      if (a.autoResolvedAt) autoResolved++;
-      if (a.symbol) symbols.add(a.symbol);
-      if (a.detectorType) detectors.add(a.detectorType);
+      if (isRealSymbol(a.symbol)) symbols.add(a.symbol!);
       if (a.lastTriggeredAt && new Date(a.lastTriggeredAt).getTime() >= oneHourAgo) lastHour++;
     }
-    return {
-      total: all.length,
-      critical,
-      high,
-      active,
-      autoResolved,
-      symbolCount: symbols.size,
-      detectorCount: detectors.size,
-      lastHour,
-    };
+    return { total: all.length, critical, high, active, symbolCount: symbols.size, lastHour };
   });
 
-  severityDonutOptions = computed<EChartsOption>(() => {
-    const counts: Record<string, number> = {
-      Critical: 0,
-      High: 0,
-      Medium: 0,
-      Info: 0,
-    };
+  readonly severityCounts = computed<SeverityCounts>(() => {
+    const counts = emptySeverityCounts();
     for (const a of this.driftSample()) counts[a.severity] = (counts[a.severity] ?? 0) + 1;
-    if (this.driftSample().length === 0) return {};
+    return counts;
+  });
+
+  /** Severities actually present in the sample — drives subtitle, legend and table alike. */
+  readonly severityLevels = computed<AlertSeverity[]>(() => {
+    const counts = this.severityCounts();
+    return SEVERITY_ORDER.filter((lvl) => counts[lvl] > 0);
+  });
+
+  readonly severitySubtitle = computed(() => {
+    const levels = this.severityLevels();
+    return levels.length > 0 ? levels.join(' · ') : 'No alerts in this range';
+  });
+
+  /** Whether any alert in the sample ever auto-resolved; decides if the column earns its space. */
+  readonly hasAutoResolved = computed(() => this.driftSample().some((a) => !!a.autoResolvedAt));
+
+  // A single stacked horizontal bar reads correctly even when one severity
+  // dominates (a donut with a 95% slice hides the rest).
+  severityBarOptions = computed<EChartsOption>(() => {
+    const counts = this.severityCounts();
+    const levels = this.severityLevels();
+    const total = this.driftSample().length;
+    if (total === 0) return {};
+    const share = (n: number) => (n / total) * 100;
     return {
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+      tooltip: {
+        trigger: 'item',
+        formatter: (p: any) => `${p.seriesName}: ${fmt(p.value)} (${share(p.value).toFixed(1)}%)`,
+      },
       legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
-      series: [
-        {
-          type: 'pie',
-          radius: ['45%', '70%'],
-          center: ['50%', '45%'],
-          avoidLabelOverlap: true,
-          label: { show: false },
-          data: Object.entries(counts)
-            .map(([name, value]) => ({
-              name,
-              value,
-              itemStyle: { color: SEVERITY_COLOR[name as AlertSeverity] ?? '#8E8E93' },
-            }))
-            .filter((d) => d.value > 0),
+      grid: { top: 24, right: 16, bottom: 44, left: 16 },
+      xAxis: { type: 'value', max: total, show: false },
+      yAxis: { type: 'category', data: ['Alerts'], show: false },
+      series: levels.map((lvl) => ({
+        name: lvl,
+        type: 'bar' as const,
+        stack: 'severity',
+        data: [counts[lvl]],
+        barWidth: 40,
+        itemStyle: { color: SEVERITY_COLOR[lvl] },
+        label: {
+          show: true,
+          position: 'inside' as const,
+          fontSize: 10,
+          color: '#fff',
+          // Thin segments cannot fit a label; the tooltip and legend still cover them.
+          formatter: (p: any) =>
+            share(p.value) >= 8 ? `${fmt(p.value)} · ${share(p.value).toFixed(0)}%` : '',
         },
-      ],
+      })),
     };
   });
 
   bySymbolOptions = computed<EChartsOption>(() => {
     const counts: Record<string, number> = {};
     for (const a of this.driftSample()) {
-      const k = a.symbol ?? 'unknown';
+      const k = symbolLabel(a.symbol);
       counts[k] = (counts[k] ?? 0) + 1;
     }
     const entries = Object.entries(counts)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 12);
     if (entries.length === 0) return {};
+    const isSentinel = (label: string) => label === FLEET_WIDE_LABEL || label === NO_SYMBOL_LABEL;
     return {
-      grid: { top: 10, right: 30, bottom: 30, left: 90 },
+      grid: { top: 10, right: 40, bottom: 30, left: 110 },
       xAxis: {
         type: 'value',
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        axisLabel: { fontSize: 10, color: '#6E6E73', hideOverlap: true },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
       yAxis: {
         type: 'category',
         data: entries.map(([k]) => k).reverse(),
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        axisLabel: { fontSize: 10, color: '#6E6E73', hideOverlap: true },
       },
       series: [
         {
           type: 'bar',
           data: entries
-            .map(([, v]) => ({
+            .map(([k, v]) => ({
               value: v,
-              itemStyle: { color: '#FF3B30', borderRadius: [0, 4, 4, 0] },
+              itemStyle: {
+                color: isSentinel(k) ? SENTINEL_COLOR : '#FF3B30',
+                borderRadius: [0, 4, 4, 0],
+              },
             }))
             .reverse(),
           barWidth: 14,
-          label: { show: true, position: 'right', fontSize: 10, color: '#6E6E73' },
+          label: {
+            show: true,
+            position: 'right',
+            fontSize: 10,
+            color: '#6E6E73',
+            formatter: (p: any) => fmt(p.value),
+          },
         },
       ],
     };
@@ -734,34 +819,43 @@ export class DriftReportPageComponent {
   byDetectorOptions = computed<EChartsOption>(() => {
     const counts: Record<string, number> = {};
     for (const a of this.driftSample()) {
-      const k = a.detectorType ?? 'unspecified';
+      const k = detectorLabel(a.detectorType);
       counts[k] = (counts[k] ?? 0) + 1;
     }
     const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
     if (entries.length === 0) return {};
     return {
-      grid: { top: 10, right: 30, bottom: 30, left: 130 },
+      grid: { top: 10, right: 40, bottom: 30, left: 140 },
       xAxis: {
         type: 'value',
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        axisLabel: { fontSize: 10, color: '#6E6E73', hideOverlap: true },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
       yAxis: {
         type: 'category',
         data: entries.map(([k]) => k).reverse(),
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        axisLabel: { fontSize: 10, color: '#6E6E73', hideOverlap: true },
       },
       series: [
         {
           type: 'bar',
           data: entries
-            .map(([, v]) => ({
+            .map(([k, v]) => ({
               value: v,
-              itemStyle: { color: '#AF52DE', borderRadius: [0, 4, 4, 0] },
+              itemStyle: {
+                color: k === NO_DETECTOR_LABEL ? SENTINEL_COLOR : '#AF52DE',
+                borderRadius: [0, 4, 4, 0],
+              },
             }))
             .reverse(),
           barWidth: 12,
-          label: { show: true, position: 'right', fontSize: 10, color: '#6E6E73' },
+          label: {
+            show: true,
+            position: 'right',
+            fontSize: 10,
+            color: '#6E6E73',
+            formatter: (p: any) => fmt(p.value),
+          },
         },
       ],
     };
@@ -771,30 +865,23 @@ export class DriftReportPageComponent {
     type Row = {
       detector: string;
       total: number;
-      critical: number;
-      high: number;
-      mediumOrInfo: number;
+      counts: SeverityCounts;
       active: number;
       activePct: number;
     };
     const groups: Record<string, Row> = {};
     for (const a of this.driftSample()) {
-      const k = a.detectorType ?? 'unspecified';
-      if (!groups[k])
-        groups[k] = {
-          detector: k,
-          total: 0,
-          critical: 0,
-          high: 0,
-          mediumOrInfo: 0,
-          active: 0,
-          activePct: 0,
-        };
+      const k = detectorLabel(a.detectorType);
+      groups[k] ??= {
+        detector: k,
+        total: 0,
+        counts: emptySeverityCounts(),
+        active: 0,
+        activePct: 0,
+      };
       const g = groups[k];
       g.total++;
-      if (a.severity === 'Critical') g.critical++;
-      else if (a.severity === 'High') g.high++;
-      else g.mediumOrInfo++;
+      g.counts[a.severity] = (g.counts[a.severity] ?? 0) + 1;
       if (a.isActive) g.active++;
     }
     return Object.values(groups)
@@ -812,9 +899,9 @@ export class DriftReportPageComponent {
   );
 
   constructor() {
-    // Re-fetch the analytics sample whenever the filter range or any of the
-    // filter inputs change. reloadTick already flips on every filter event,
-    // so binding to it covers symbol/detector/severity/unresolvedOnly too.
+    // Re-fetch the analytics sample whenever the range or any filter changes.
+    // reloadTick flips on every filter event, so binding to it covers
+    // symbol/detector/severity/unresolvedOnly too.
     effect(() => {
       this.reloadTick();
       this.range();
@@ -822,9 +909,9 @@ export class DriftReportPageComponent {
     });
   }
 
-  private loadDriftAnalyticsSample(): void {
+  private currentFilter(): DriftReportQueryFilter {
     const r = this.range();
-    const filter: DriftReportQueryFilter = {
+    return {
       symbol: this.filterSymbol || undefined,
       detectorType: this.filterDetector || undefined,
       severity: this.filterSeverity || undefined,
@@ -832,14 +919,18 @@ export class DriftReportPageComponent {
       fromDate: r?.from ?? undefined,
       toDate: r?.to ?? undefined,
     };
+  }
+
+  private loadDriftAnalyticsSample(): void {
+    const filter = this.currentFilter();
     // Probe-and-fetch: read the true total from a 1-row query, then bring
-    // back min(total, 5000) rows so the analytics panel always reflects
-    // the same range as the table below — without unbounded fetches.
+    // back min(total, cap) rows — without unbounded fetches.
     this.mlService
       .listDriftReport({ currentPage: 1, itemCountPerPage: 1, filter })
       .pipe(catchError(() => of(null)))
       .subscribe((probe) => {
         const total = probe?.data?.pager?.totalItemCount ?? 0;
+        this.sampleTotal.set(total);
         if (total === 0) {
           this.driftSample.set([]);
           return;
@@ -847,7 +938,7 @@ export class DriftReportPageComponent {
         this.mlService
           .listDriftReport({
             currentPage: 1,
-            itemCountPerPage: Math.min(total, 5000),
+            itemCountPerPage: Math.min(total, SAMPLE_CAP),
             filter,
           })
           .pipe(catchError(() => of(null)))
@@ -857,61 +948,67 @@ export class DriftReportPageComponent {
       });
   }
 
-  readonly columns: ColDef<DriftAlertDto>[] = [
-    { headerName: 'ID', field: 'id', width: 90 },
-    { headerName: 'Symbol', field: 'symbol', width: 110 },
-    {
-      headerName: 'Detector',
-      field: 'detectorType',
-      width: 160,
-      valueFormatter: (p) => (p.value as string | null) ?? '—',
-    },
-    {
-      headerName: 'Severity',
-      field: 'severity',
-      width: 120,
-      cellRenderer: (p: { value: AlertSeverity }) => {
-        const color = SEVERITY_COLOR[p.value] ?? 'currentColor';
-        return `<span style="color: ${color}; font-weight: 600;">${p.value}</span>`;
+  // The auto-resolved column only appears once at least one alert in the
+  // sample carries a timestamp — a column of dashes tells the operator nothing.
+  readonly columns = computed<ColDef<DriftAlertDto>[]>(() => {
+    const cols: ColDef<DriftAlertDto>[] = [
+      { headerName: 'ID', field: 'id', width: 90 },
+      {
+        headerName: 'Symbol',
+        field: 'symbol',
+        width: 130,
+        valueFormatter: (p) => symbolLabel((p.value as string | null) ?? null),
       },
-    },
-    {
-      headerName: 'Active',
-      field: 'isActive',
-      width: 90,
-      valueFormatter: (p) => (p.value ? 'Yes' : 'No'),
-    },
-    {
-      headerName: 'Last triggered',
-      field: 'lastTriggeredAt',
-      width: 200,
-      valueFormatter: (p) => (p.value ? new Date(p.value as string).toLocaleString() : '—'),
-    },
-    {
-      headerName: 'Auto-resolved',
-      field: 'autoResolvedAt',
-      width: 200,
-      valueFormatter: (p) => (p.value ? new Date(p.value as string).toLocaleString() : '—'),
-    },
-  ];
+      {
+        headerName: 'Detector',
+        field: 'detectorType',
+        width: 160,
+        valueFormatter: (p) => (p.value as string | null) || 'Not recorded',
+      },
+      {
+        headerName: 'Severity',
+        field: 'severity',
+        width: 120,
+        cellRenderer: (p: { value: AlertSeverity }) => {
+          const color = SEVERITY_COLOR[p.value] ?? 'currentColor';
+          return `<span style="color: ${color}; font-weight: 600;">${p.value}</span>`;
+        },
+      },
+      {
+        headerName: 'Status',
+        field: 'isActive',
+        width: 110,
+        cellRenderer: (p: { value: boolean }) =>
+          p.value
+            ? `<span style="background:rgba(255,59,48,0.12);color:#D70015;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">Active</span>`
+            : `<span style="background:var(--bg-tertiary);color:var(--text-secondary);padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">Resolved</span>`,
+      },
+      {
+        headerName: 'Last triggered (UTC)',
+        field: 'lastTriggeredAt',
+        width: 200,
+        valueFormatter: (p) => this.formatDate(p.value as string | null),
+      },
+    ];
+    if (this.hasAutoResolved()) {
+      cols.push({
+        headerName: 'Auto-resolved (UTC)',
+        field: 'autoResolvedAt',
+        width: 200,
+        valueFormatter: (p) => this.formatDate(p.value as string | null),
+      });
+    }
+    return cols;
+  });
 
   readonly fetchPage = (params: PagerRequest) => {
-    // Touch reloadTick so changing filters re-runs the fetcher.
-    this.reloadTick();
-    const r = this.range();
-    const filter: DriftReportQueryFilter = {
-      symbol: this.filterSymbol || undefined,
-      detectorType: this.filterDetector || undefined,
-      severity: this.filterSeverity || undefined,
-      unresolvedOnly: this.unresolvedOnly || undefined,
-      fromDate: r?.from ?? undefined,
-      toDate: r?.to ?? undefined,
-    };
     return this.mlService
       .listDriftReport({
         currentPage: params.currentPage,
         itemCountPerPage: params.itemCountPerPage,
-        filter,
+        sortBy: params.sortBy,
+        sortDirection: params.sortDirection,
+        filter: this.currentFilter(),
       })
       .pipe(
         map((res): PagedData<DriftAlertDto> => res.data ?? this.emptyPage()),
@@ -920,9 +1017,12 @@ export class DriftReportPageComponent {
   };
 
   reload(): void {
-    // Force the table to refetch by bumping the tick and clearing selection.
     this.selected.set(null);
     this.reloadTick.update((n) => n + 1);
+    // The data-table only refetches on its own page/sort/search events, so a
+    // filter change must ask it explicitly. Deferred a microtask so the
+    // ngModel write that triggered this call has landed before the fetch.
+    queueMicrotask(() => this.table?.loadData());
   }
 
   onRangeChange(_range: TimeRange | null): void {
@@ -950,6 +1050,10 @@ export class DriftReportPageComponent {
     } catch {
       return raw;
     }
+  }
+
+  private formatDate(iso: string | null): string {
+    return iso ? (this.datePipe.transform(iso, DATE_FMT, 'UTC') ?? '—') : '—';
   }
 
   private emptyPage(): PagedData<DriftAlertDto> {

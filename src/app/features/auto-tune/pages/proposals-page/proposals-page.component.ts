@@ -9,7 +9,7 @@ import {
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { catchError, finalize, map, of } from 'rxjs';
+import { finalize, map } from 'rxjs';
 
 import { AutoTuneService } from '@core/services/auto-tune.service';
 import { AuditTrailService } from '@core/services/audit-trail.service';
@@ -37,6 +37,9 @@ const STATUS_TABS: readonly (AutoTuneProposalStatus | 'All')[] = [
   'All',
 ] as const;
 
+/** Newest-N window the summary tiles are computed over. Matches the table's page size. */
+const SUMMARY_WINDOW = 200;
+
 @Component({
   selector: 'app-auto-tune-proposals-page',
   standalone: true,
@@ -63,7 +66,7 @@ const STATUS_TABS: readonly (AutoTuneProposalStatus | 'All')[] = [
         <button
           type="button"
           class="btn btn-secondary"
-          (click)="resource.refresh()"
+          (click)="refreshAll()"
           [disabled]="resource.loading()"
         >
           Refresh
@@ -94,50 +97,55 @@ const STATUS_TABS: readonly (AutoTuneProposalStatus | 'All')[] = [
             (ngModelChange)="keyFilter.set($event)"
           />
         </div>
-        <span class="result-count">{{ proposals().length }} loaded</span>
+        <span class="result-count">
+          @if (listFailed()) {
+            not loaded
+          } @else {
+            {{ proposals().length }} loaded
+          }
+        </span>
       </section>
+
+      <!--
+        The tiles are computed over the newest SUMMARY_WINDOW proposals regardless of the status
+        tab, so "Applied" can be non-zero while the operator is looking at Pending. They read "-"
+        when that summary call has never succeeded — a failed fetch is not "0 pending".
+      -->
+      <section class="kpis">
+        <app-metric-card
+          label="Pending review"
+          [value]="summaryCount('Pending')"
+          format="number"
+          [dotColor]="(summaryCount('Pending') ?? 0) > 0 ? '#FF9500' : undefined"
+        />
+        <app-metric-card label="Applied" [value]="summaryCount('Applied')" format="number" />
+        <app-metric-card label="Rejected" [value]="summaryCount('Rejected')" format="number" />
+        <app-metric-card label="Stale" [value]="summaryCount('Stale')" format="number" />
+      </section>
+      <p class="kpi-caption">Counts cover the newest {{ SUMMARY_WINDOW }} proposals.</p>
 
       @if (loading()) {
         <app-card-skeleton [lines]="6" />
-      } @else if (resource.error()) {
-        <app-error-state
-          title="Could not load auto-tune proposals"
-          message="Engine returned an error. The CompositeMLAutoTuningWorker may not be running — check System Health."
-          (retry)="resource.refresh()"
-        />
-      } @else {
-        <section class="kpis">
-          <app-metric-card
-            label="Pending review"
-            [value]="countOf('Pending')"
-            format="number"
-            [dotColor]="countOf('Pending') > 0 ? '#FF9500' : '#34C759'"
-          />
-          <app-metric-card
-            label="Applied (this batch)"
-            [value]="countOf('Applied')"
-            format="number"
-            dotColor="#34C759"
-          />
-          <app-metric-card
-            label="Rejected"
-            [value]="countOf('Rejected')"
-            format="number"
-            dotColor="#FF3B30"
-          />
-          <app-metric-card
-            label="Stale"
-            [value]="countOf('Stale')"
-            format="number"
-            dotColor="#8E8E93"
+      } @else if (listFailed()) {
+        <section class="card">
+          <app-error-state
+            title="Could not load auto-tune proposals"
+            [message]="errorMessage()"
+            (retry)="refreshAll()"
           />
         </section>
+      } @else {
+        @if (resource.error()) {
+          <p class="stale-banner" role="status">
+            Last refresh failed — showing the previous result.
+            <button type="button" class="link" (click)="refreshAll()">Retry</button>
+          </p>
+        }
 
         @if (proposals().length === 0) {
-          <app-empty-state
-            title="No proposals match"
-            description="No auto-tune proposals match the current filters. The worker emits new proposals on its own schedule."
-          />
+          <section class="card">
+            <app-empty-state [title]="emptyTitle()" [description]="emptyDescription()" />
+          </section>
         } @else {
           <section class="card">
             <table class="proposals-table">
@@ -151,7 +159,7 @@ const STATUS_TABS: readonly (AutoTuneProposalStatus | 'All')[] = [
                   <th class="num">Evidence</th>
                   <th>Status</th>
                   <th>Proposed</th>
-                  <th></th>
+                  <th class="actions-head">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -171,13 +179,16 @@ const STATUS_TABS: readonly (AutoTuneProposalStatus | 'All')[] = [
                       [{{ p.confidenceLow | number: '1.0-3' }},
                       {{ p.confidenceHigh | number: '1.0-3' }}]
                     </td>
-                    <td class="num mono">{{ p.evidenceCount }}</td>
+                    <td class="num mono">{{ p.evidenceCount | number }}</td>
                     <td>
                       <span class="status-pill" [attr.data-status]="p.status">
                         {{ p.status }}
                       </span>
                     </td>
-                    <td class="time" [title]="p.proposedAtUtc | date: 'yyyy-MM-dd HH:mm:ss UTC'">
+                    <td
+                      class="time"
+                      [title]="(p.proposedAtUtc | date: 'yyyy-MM-dd HH:mm:ss' : 'UTC') + ' UTC'"
+                    >
                       {{ p.proposedAtUtc | relativeTime }}
                     </td>
                     <td class="actions">
@@ -212,9 +223,10 @@ const STATUS_TABS: readonly (AutoTuneProposalStatus | 'All')[] = [
                         @if (p.reviewedAtUtc) {
                           <p class="muted small">
                             Reviewed by <strong>{{ p.reviewedBy ?? '—' }}</strong> at
-                            {{ p.reviewedAtUtc | date: 'yyyy-MM-dd HH:mm UTC' }}
+                            {{ p.reviewedAtUtc | date: 'yyyy-MM-dd HH:mm' : 'UTC' }} UTC
                             @if (p.appliedAtUtc) {
-                              · applied at {{ p.appliedAtUtc | date: 'yyyy-MM-dd HH:mm UTC' }}
+                              · applied at {{ p.appliedAtUtc | date: 'yyyy-MM-dd HH:mm' : 'UTC' }}
+                              UTC
                             }
                           </p>
                         }
@@ -339,11 +351,35 @@ const STATUS_TABS: readonly (AutoTuneProposalStatus | 'All')[] = [
         font-size: var(--text-sm);
         color: var(--text-secondary);
         margin-left: auto;
+        font-variant-numeric: tabular-nums;
       }
       .kpis {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 800px) {
+        .kpis {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      .kpi-caption {
+        margin: calc(-1 * var(--space-3)) 0 0;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .stale-banner {
+        margin: 0;
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-sm);
+        border: 1px solid rgba(255, 149, 0, 0.35);
+        background: rgba(255, 149, 0, 0.08);
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        display: flex;
+        gap: var(--space-2);
+        align-items: center;
       }
       .card {
         background: var(--bg-secondary);
@@ -377,6 +413,9 @@ const STATUS_TABS: readonly (AutoTuneProposalStatus | 'All')[] = [
         text-align: right;
         font-variant-numeric: tabular-nums;
       }
+      .proposals-table th.actions-head {
+        text-align: right;
+      }
       .proposals-table tr.expanded {
         background: var(--bg-primary);
       }
@@ -397,10 +436,10 @@ const STATUS_TABS: readonly (AutoTuneProposalStatus | 'All')[] = [
         font-size: var(--text-xs);
       }
       .positive {
-        color: #248a3d;
+        color: var(--profit);
       }
       .negative {
-        color: #d70015;
+        color: var(--loss);
       }
       .status-pill {
         font-size: var(--text-xs);
@@ -432,6 +471,7 @@ const STATUS_TABS: readonly (AutoTuneProposalStatus | 'All')[] = [
         display: flex;
         gap: 6px;
         align-items: center;
+        justify-content: flex-end;
         white-space: nowrap;
       }
       .link {
@@ -562,15 +602,37 @@ const STATUS_TABS: readonly (AutoTuneProposalStatus | 'All')[] = [
         justify-content: flex-end;
         gap: var(--space-3);
       }
-      .btn-primary {
-        padding: 8px 18px;
+
+      /* One button vocabulary for the page: outlined secondary for navigation and Refresh,
+         filled accent only for the confirming action inside a modal. */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        height: 32px;
+        padding: 0 14px;
         border-radius: var(--radius-sm);
-        background: var(--accent);
-        color: #fff;
         font-size: var(--text-sm);
         font-weight: var(--font-medium);
-        border: none;
         cursor: pointer;
+        text-decoration: none;
+        line-height: 1;
+      }
+      .btn-secondary {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        color: var(--text-primary);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+      }
+      .btn-secondary:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+        border: none;
       }
       .btn-primary:disabled {
         background: var(--bg-tertiary, #d1d1d6);
@@ -584,9 +646,15 @@ export class AutoTuneProposalsPageComponent {
   private readonly auditTrail = inject(AuditTrailService);
 
   protected readonly STATUS_TABS = STATUS_TABS;
+  protected readonly SUMMARY_WINDOW = SUMMARY_WINDOW;
   protected readonly statusFilter = signal<AutoTuneProposalStatus | 'All'>('Pending');
   protected readonly keyFilter = signal<string>('');
 
+  /**
+   * The filtered list feeding the table. Errors are deliberately NOT swallowed here: the polled
+   * resource captures them into `error()`, which is what lets the page distinguish "the engine
+   * said there are none" from "the call never came back".
+   */
   protected readonly resource = createPolledResource(
     () => {
       const s = this.statusFilter();
@@ -595,13 +663,22 @@ export class AutoTuneProposalsPageComponent {
         .listProposals({
           status,
           proposalKey: this.keyFilter().trim() || null,
-          limit: 200,
+          limit: SUMMARY_WINDOW,
         })
-        .pipe(
-          map((res) => res.data ?? []),
-          catchError(() => of<AutoTuneProposalDto[]>([])),
-        );
+        .pipe(map((res) => res.data ?? []));
     },
+    { intervalMs: 60_000 },
+  );
+
+  /**
+   * Unfiltered newest-N window for the status tiles. Computing the tiles from the filtered list
+   * meant every tile except the active tab's was always 0.
+   */
+  protected readonly summaryResource = createPolledResource(
+    () =>
+      this.autoTune
+        .listProposals({ status: null, proposalKey: null, limit: SUMMARY_WINDOW })
+        .pipe(map((res) => res.data ?? [])),
     { intervalMs: 60_000 },
   );
 
@@ -615,11 +692,41 @@ export class AutoTuneProposalsPageComponent {
 
   protected readonly proposals = computed(() => this.resource.value() ?? []);
   protected readonly loading = computed(
-    () => this.resource.loading() && this.proposals().length === 0,
+    () => this.resource.loading() && this.resource.value() === null,
+  );
+  /** True only when the list has never loaded — a later poll failure keeps the last result. */
+  protected readonly listFailed = computed(
+    () => this.resource.error() !== null && this.resource.value() === null,
+  );
+  protected readonly errorMessage = computed(() => {
+    const err = this.resource.error() as { status?: number; error?: { message?: string } } | null;
+    const detail = err?.error?.message ?? (err?.status ? `HTTP ${err.status}` : null);
+    return (
+      (detail ? `${detail}. ` : '') +
+      'The CompositeMLAutoTuningWorker may not be running — check System Health.'
+    );
+  });
+
+  protected summaryCount(status: AutoTuneProposalStatus): number | null {
+    const xs = this.summaryResource.value();
+    if (xs === null) return null;
+    return xs.filter((p) => p.status === status).length;
+  }
+
+  protected readonly emptyTitle = computed(() => {
+    if (this.keyFilter().trim()) return 'No proposals match';
+    const s = this.statusFilter();
+    return s === 'All' ? 'No proposals yet' : `No ${s.toLowerCase()} proposals`;
+  });
+  protected readonly emptyDescription = computed(() =>
+    this.keyFilter().trim()
+      ? 'Nothing matches the knob filter. Clear it or switch status tabs.'
+      : 'The worker emits new proposals on its own schedule; there is nothing to review right now.',
   );
 
-  protected countOf(status: AutoTuneProposalStatus): number {
-    return this.proposals().filter((p) => p.status === status).length;
+  protected refreshAll(): void {
+    this.resource.refresh();
+    this.summaryResource.refresh();
   }
 
   protected deltaPct(p: AutoTuneProposalDto): number {
@@ -668,7 +775,7 @@ export class AutoTuneProposalsPageComponent {
         finalize(() => {
           this.submitting.set(false);
           this.pending.set(null);
-          this.resource.refresh();
+          this.refreshAll();
         }),
       )
       .subscribe({

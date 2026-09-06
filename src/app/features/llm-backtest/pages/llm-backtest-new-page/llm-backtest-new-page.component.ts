@@ -152,14 +152,20 @@ const MULTI_SAMPLE_DEFAULT = 3;
           <h3>Window</h3>
           <div class="row">
             <label class="field">
-              <span>Start (UTC)</span>
+              <span>Start (local time)</span>
               <input type="datetime-local" formControlName="windowStartLocal" />
             </label>
             <label class="field">
-              <span>End (UTC)</span>
+              <span>End (local time)</span>
               <input type="datetime-local" formControlName="windowEndLocal" />
             </label>
           </div>
+          <!-- The native picker prints the browser locale ("29/08/2026, 23:00");
+               echo the resolved UTC window in the same format the index and
+               detail pages use so the two never look like different dates. -->
+          @if (windowUtcLabel(); as w) {
+            <p class="muted small window-echo">Sent as UTC: {{ w }}</p>
+          }
           @if (form.errors?.['windowOrder']) {
             <p class="error-text">End must be after Start.</p>
           }
@@ -454,7 +460,7 @@ const MULTI_SAMPLE_DEFAULT = 3;
           } @else if (estimateError()) {
             <p class="error-text">{{ estimateError() }}</p>
           } @else {
-            <p class="muted">Fill the form to see a preview.</p>
+            <p class="muted">{{ estimateEmptyReason() }}</p>
           }
 
           @if (form.value.dryRun && estimate()) {
@@ -468,7 +474,12 @@ const MULTI_SAMPLE_DEFAULT = 3;
                 server-side. Each row renders as a progress bar coloured
                 by the remaining-fraction tier. Disabled caps show an
                 inline pill instead of a bar. -->
-          <h3 class="budget-heading">Rolling budget</h3>
+          <h3 class="budget-heading">Rolling backtest budget</h3>
+          <p class="muted small budget-source">
+            Caps come from <code>Llm:MaxDailyBacktestUsd</code> /
+            <code>Llm:MaxWeeklyBacktestUsd</code> — separate from the live
+            <code>Llm:DailyCapUsd</code> shown on LLM Settings.
+          </p>
           @if (budgetStatus(); as bs) {
             <div class="budget-rows">
               <div class="budget-row">
@@ -627,6 +638,30 @@ const MULTI_SAMPLE_DEFAULT = 3;
       }
       .form-card h3:first-of-type {
         margin-top: 0;
+      }
+      /* Breathing room between stacked controls: labels sat directly on the
+         bottom edge of the previous select / textarea. */
+      .form-card > .field,
+      .form-card > .chk,
+      .form-card > .row + .row {
+        margin-top: var(--space-4);
+      }
+      .form-card > .chk + .muted,
+      .form-card > .chk + .field {
+        margin-top: var(--space-2);
+      }
+      .window-echo {
+        margin: var(--space-2) 0 0;
+        font-variant-numeric: tabular-nums;
+      }
+      .budget-source {
+        margin: 0 0 var(--space-3);
+        line-height: 1.5;
+      }
+      .budget-source code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.72rem;
+        color: var(--text-primary);
       }
       .chips {
         display: flex;
@@ -912,6 +947,17 @@ export class LlmBacktestNewPageComponent implements OnInit, OnDestroy {
   readonly tfControl: FormControl<Timeframe[]>;
 
   private formSub?: Subscription;
+  private formTickSub?: Subscription;
+
+  /**
+   * Bumped on every form value/status change. The `computed` gates below read
+   * `form.value` / `form.valid`, which are not signals, so without a signal
+   * dependency they were evaluated once and then cached — `canSubmit` could
+   * stay true after the operator deselected every symbol, and the sweep /
+   * multi-sample validators never re-ran. Reading this tick first makes
+   * every one of them recompute with the form.
+   */
+  private readonly formTick = signal(0);
 
   constructor() {
     const { start, end } = this.defaultWindow();
@@ -967,8 +1013,40 @@ export class LlmBacktestNewPageComponent implements OnInit, OnDestroy {
 
   /** Active knob metadata signal — drives the default-value label + UI ranges. */
   readonly activeKnobMeta = computed(() => {
+    this.formTick();
     const knob = this.form?.value.sweepKnob ?? GuardKnob.MinConfidence;
     return GUARD_KNOB_META[knob as GuardKnob];
+  });
+
+  /** Resolved UTC window in the index page's `yyyy-MM-dd HH:mm` format. */
+  readonly windowUtcLabel = computed<string | null>(() => {
+    this.formTick();
+    const start = this.form?.value.windowStartLocal as string | null;
+    const end = this.form?.value.windowEndLocal as string | null;
+    if (!start || !end) return null;
+    const s = new Date(start);
+    const e = new Date(end);
+    if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return null;
+    const fmt = (d: Date) => {
+      const pad = (n: number) => n.toString().padStart(2, '0');
+      return (
+        `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
+        `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
+      );
+    };
+    return `${fmt(s)} → ${fmt(e)} UTC`;
+  });
+
+  /** Why there is no estimate yet — names the missing input instead of "fill the form". */
+  readonly estimateEmptyReason = computed(() => {
+    this.formTick();
+    const v = this.form?.value;
+    if (!v?.symbols || v.symbols.length === 0) return 'Pick at least one symbol to estimate cost.';
+    if (!v.timeframes || v.timeframes.length === 0) {
+      return 'Pick at least one timeframe to estimate cost.';
+    }
+    if (!v.windowStartLocal || !v.windowEndLocal) return 'Set the window to estimate cost.';
+    return 'Estimate will appear once the inputs are valid.';
   });
 
   /** Suggested HTML `step` attribute for the start/end/step inputs (purely a UI hint). */
@@ -1007,6 +1085,7 @@ export class LlmBacktestNewPageComponent implements OnInit, OnDestroy {
    * but inconsistent.
    */
   readonly sweepCount = computed(() => {
+    this.formTick();
     if (!this.form.value.sweepEnabled) return 0;
     const start = this.form.value.sweepStart;
     const end = this.form.value.sweepEnd;
@@ -1024,6 +1103,7 @@ export class LlmBacktestNewPageComponent implements OnInit, OnDestroy {
    * block the operator toggles on second.
    */
   readonly multiSampleError = computed<string | null>(() => {
+    this.formTick();
     if (!this.form.value.multiSampleEnabled) return null;
     if (this.form.value.sweepEnabled) {
       return 'Sweep mode and multi-sample mode are mutually exclusive — pick one.';
@@ -1040,6 +1120,7 @@ export class LlmBacktestNewPageComponent implements OnInit, OnDestroy {
 
   /** Effective multiplier the cost preview applies. 1 when multi-sample is off. */
   readonly multiSampleMultiplier = computed<number>(() => {
+    this.formTick();
     if (!this.form.value.multiSampleEnabled) return 1;
     if (this.multiSampleError() !== null) return 1;
     const n = this.form.value.sampleCount;
@@ -1048,6 +1129,7 @@ export class LlmBacktestNewPageComponent implements OnInit, OnDestroy {
 
   /** Inline-error message for the sweep block; null when the block is valid. */
   readonly sweepError = computed<string | null>(() => {
+    this.formTick();
     if (!this.form.value.sweepEnabled) return null;
     const start = this.form.value.sweepStart;
     const end = this.form.value.sweepEnd;
@@ -1105,6 +1187,10 @@ export class LlmBacktestNewPageComponent implements OnInit, OnDestroy {
     this.formSub = this.form.valueChanges
       .pipe(debounceTime(300))
       .subscribe(() => this.refreshEstimate());
+
+    // Undebounced: the submit gate and inline validators must follow the
+    // form immediately, not 300 ms later.
+    this.formTickSub = this.form.valueChanges.subscribe(() => this.formTick.update((n) => n + 1));
 
     // Kick off an initial estimate so the right-side card isn't empty on load.
     this.refreshEstimate();
@@ -1177,6 +1263,7 @@ export class LlmBacktestNewPageComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.formSub?.unsubscribe();
+    this.formTickSub?.unsubscribe();
   }
 
   // ── Chip handlers ───────────────────────────────────────────────────────
@@ -1304,8 +1391,12 @@ export class LlmBacktestNewPageComponent implements OnInit, OnDestroy {
    * estimate refresh is in flight to avoid racing the budget check.
    */
   readonly canSubmit = computed(() => {
+    this.formTick();
     if (this.submitting()) return false;
     if (this.estimating()) return false;
+    // Hard gate on the two chip pickers: an estimate from a previous
+    // selection must not keep Launch enabled after everything is deselected.
+    if (this.symbolsControl.value.length === 0 || this.tfControl.value.length === 0) return false;
     const e = this.estimate();
     // Use the effective (multi-sample-multiplied) cost for the budget gate —
     // backend will reject if the *actual* spend overruns, so the launch form

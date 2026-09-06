@@ -7,10 +7,15 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule, DatePipe } from '@angular/common';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { catchError, forkJoin, of } from 'rxjs';
 
-import { PromptTemplate, PromptTemplateService } from '@core/services/prompt-template.service';
+import {
+  PromptTemplate,
+  PromptTemplateService,
+  PromptTemplateSummary,
+} from '@core/services/prompt-template.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 
@@ -34,7 +39,7 @@ import { lineDiff, LineDiffResult } from '../../utils/line-diff.util';
   selector: 'app-prompt-template-diff-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, DatePipe, RouterLink, PageHeaderComponent],
+  imports: [CommonModule, DatePipe, FormsModule, RouterLink, PageHeaderComponent],
   template: `
     <div class="page">
       <app-page-header
@@ -44,10 +49,68 @@ import { lineDiff, LineDiffResult } from '../../utils/line-diff.util';
         <a routerLink="/prompt-templates" class="btn-secondary">‹ Back to list</a>
       </app-page-header>
 
-      @if (loading()) {
+      <!-- Picker: direct navigation without ?left=&right= used to render a
+           red developer message. Now the operator chooses both sides here
+           (defaults: active version vs. the most recent other version). -->
+      @if (needsPick()) {
+        <section class="card picker">
+          <h3 class="picker-title">Choose two versions to compare</h3>
+          @if (pickerLoading()) {
+            <p class="muted">Loading versions…</p>
+          } @else if (pickerRows().length < 2) {
+            <p class="muted">
+              Fewer than two versions exist for <span class="mono">{{ pickerName }}</span> — fork
+              one from the list first.
+            </p>
+          } @else {
+            <div class="picker-grid">
+              <label class="picker-field">
+                <span class="side-label" style="color:#c4290a">Baseline (left)</span>
+                <select [(ngModel)]="pickLeft">
+                  @for (t of pickerRows(); track t.id) {
+                    <option [ngValue]="t.id">
+                      #{{ t.id }} · {{ t.version }} · {{ statusLabelSummary(t) }}
+                    </option>
+                  }
+                </select>
+              </label>
+              <label class="picker-field">
+                <span class="side-label" style="color:#1f8a3d">Candidate (right)</span>
+                <select [(ngModel)]="pickRight">
+                  @for (t of pickerRows(); track t.id) {
+                    <option [ngValue]="t.id">
+                      #{{ t.id }} · {{ t.version }} · {{ statusLabelSummary(t) }}
+                    </option>
+                  }
+                </select>
+              </label>
+            </div>
+            @if (pickLeft !== null && pickLeft === pickRight) {
+              <p class="muted">Pick two different versions.</p>
+            }
+            <div class="picker-actions">
+              <button
+                type="button"
+                class="btn-primary"
+                [disabled]="pickLeft === null || pickRight === null || pickLeft === pickRight"
+                (click)="applyPick()"
+              >
+                Compare
+              </button>
+            </div>
+          }
+        </section>
+      } @else if (loading()) {
         <section class="card empty">Loading both prompts…</section>
       } @else if (errorMessage(); as err) {
-        <section class="card empty error">{{ err }}</section>
+        <section class="card empty error">
+          {{ err }}
+          <div class="picker-actions">
+            <button type="button" class="btn-secondary" (click)="needsPick.set(true)">
+              Choose versions
+            </button>
+          </div>
+        </section>
       } @else if (left() && right()) {
         <!-- Header: side-by-side metadata --------------------------------- -->
         <section class="card header-card">
@@ -188,6 +251,56 @@ import { lineDiff, LineDiffResult } from '../../utils/line-diff.util';
       }
       .empty.error {
         color: #c4290a;
+      }
+      .picker-title {
+        margin: 0 0 var(--space-3);
+        font-size: 1rem;
+      }
+      .picker-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-4);
+      }
+      @media (max-width: 800px) {
+        .picker-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .picker-field {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+      .picker-field select {
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 0.5rem 0.65rem;
+        font: inherit;
+      }
+      .picker-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: var(--space-3);
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+        border: 1px solid var(--accent);
+        padding: 0.45rem 0.85rem;
+        border-radius: var(--radius-sm);
+        font-weight: 600;
+        font-size: 0.85rem;
+        cursor: pointer;
+      }
+      .btn-primary:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .muted {
+        color: var(--text-secondary);
+        font-size: 0.85rem;
       }
       .header-card {
         display: grid;
@@ -355,6 +468,7 @@ import { lineDiff, LineDiffResult } from '../../utils/line-diff.util';
 export class PromptTemplateDiffPageComponent implements OnInit {
   private readonly svc = inject(PromptTemplateService);
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly notifications = inject(NotificationService);
 
   readonly left = signal<PromptTemplate | null>(null);
@@ -372,6 +486,15 @@ export class PromptTemplateDiffPageComponent implements OnInit {
     return lineDiff(l.systemPrompt, r.systemPrompt);
   });
 
+  // ── Version picker (shown when the URL carries no valid pair) ─────────
+  readonly needsPick = signal(false);
+  readonly pickerLoading = signal(false);
+  readonly pickerRows = signal<PromptTemplateSummary[]>([]);
+  /** Logical prompt group to list; `?name=` overrides the default. */
+  pickerName = 'spot-analysis';
+  pickLeft: number | null = null;
+  pickRight: number | null = null;
+
   ngOnInit(): void {
     const q = this.route.snapshot.queryParamMap;
     const leftRaw = q.get('left');
@@ -379,9 +502,8 @@ export class PromptTemplateDiffPageComponent implements OnInit {
     const leftId = Number(leftRaw);
     const rightId = Number(rightRaw);
     if (!Number.isFinite(leftId) || !Number.isFinite(rightId) || leftId <= 0 || rightId <= 0) {
-      this.errorMessage.set(
-        'Diff page requires ?left= and ?right= query params with valid template ids.',
-      );
+      this.pickerName = q.get('name') ?? this.pickerName;
+      this.openPicker();
       return;
     }
     if (leftId === rightId) {
@@ -389,6 +511,43 @@ export class PromptTemplateDiffPageComponent implements OnInit {
       return;
     }
     this.fetchBoth(leftId, rightId);
+  }
+
+  private openPicker(): void {
+    this.needsPick.set(true);
+    this.pickerLoading.set(true);
+    this.svc
+      .list({ currentPage: 1, itemCountPerPage: 100, name: this.pickerName, includeArchived: true })
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        this.pickerLoading.set(false);
+        const rows = [...(res?.data?.data ?? [])].sort((a, b) => b.id - a.id);
+        this.pickerRows.set(rows);
+        // Sensible default: the live version on the left, newest other version on the right.
+        const active = rows.find((r) => r.isActive) ?? rows[1] ?? null;
+        const other = rows.find((r) => r.id !== active?.id) ?? null;
+        this.pickLeft = active?.id ?? null;
+        this.pickRight = other?.id ?? null;
+      });
+  }
+
+  applyPick(): void {
+    if (this.pickLeft === null || this.pickRight === null || this.pickLeft === this.pickRight)
+      return;
+    this.needsPick.set(false);
+    this.errorMessage.set(null);
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { left: this.pickLeft, right: this.pickRight },
+      replaceUrl: true,
+    });
+    this.fetchBoth(this.pickLeft, this.pickRight);
+  }
+
+  statusLabelSummary(r: PromptTemplateSummary): string {
+    if (r.isActive) return 'Active';
+    if (r.isArchived) return 'Archived';
+    return 'Draft';
   }
 
   private fetchBoth(leftId: number, rightId: number): void {

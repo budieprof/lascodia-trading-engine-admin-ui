@@ -85,7 +85,11 @@ import type {
                 <div class="field span-2 auto-pick">
                   <span class="label">Strategy</span>
                   @if (autoPickedStrategy(); as s) {
-                    <div class="auto-pick-result">
+                    <div
+                      class="auto-pick-result"
+                      title="Read-only — chosen by auto-pick. Uncheck 'Auto-pick strategy' to select one yourself."
+                    >
+                      <span class="auto-badge">auto</span>
                       <strong>#{{ s.id }}</strong> · {{ s.symbol }} {{ s.timeframe }} ·
                       {{ s.name }}
                       <span class="hint">{{ autoPickHint() }}</span>
@@ -411,11 +415,13 @@ import type {
         cursor: pointer;
         user-select: none;
       }
+      /* Solid read-only chip, not a dashed panel: dashed borders read as
+         a disabled control, and this field is an informational result. */
       .auto-pick-result {
         padding: 8px 10px;
-        background: var(--bg-tertiary);
-        border: 1px dashed var(--border);
-        border-radius: var(--radius-sm);
+        background: rgba(0, 113, 227, 0.08);
+        border: 1px solid rgba(0, 113, 227, 0.3);
+        border-radius: var(--radius-full);
         font-size: var(--text-sm);
         color: var(--text-primary);
         display: flex;
@@ -425,6 +431,19 @@ import type {
       }
       .auto-pick-result.empty {
         color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        border-color: var(--border);
+      }
+      .auto-badge {
+        font-size: 10px;
+        font-weight: var(--font-semibold, 600);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 1px 7px;
+        border-radius: var(--radius-full);
+        background: var(--accent);
+        color: #fff;
+        align-self: center;
       }
       .auto-pick-result strong {
         font-weight: var(--font-semibold, 600);

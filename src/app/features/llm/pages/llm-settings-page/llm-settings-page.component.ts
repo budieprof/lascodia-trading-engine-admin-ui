@@ -52,6 +52,16 @@ const OPTION_CATALOG: Record<string, readonly string[]> = {
   'Llm:DeepSeek:ReasoningEffort': ['high', 'medium', 'low'],
 };
 
+/**
+ * Keys the engine stores but does not read. Rendering them as a live select
+ * invited operators to "tune" a knob that changes nothing; they are shown
+ * read-only with an explicit "not consumed" badge instead.
+ */
+const INERT_KEYS: ReadonlySet<string> = new Set(['Llm:DeepSeek:ReasoningEffort']);
+
+/** Descriptions longer than this are clamped to two lines with a "more" toggle. */
+const DESCRIPTION_CLAMP_CHARS = 160;
+
 @Component({
   selector: 'app-llm-settings-page',
   standalone: true,
@@ -67,10 +77,20 @@ const OPTION_CATALOG: Record<string, readonly string[]> = {
         <button type="button" class="btn-test" [disabled]="testing()" (click)="testProviders()">
           {{ testing() ? 'Testing…' : '🔌 Test connection' }}
         </button>
+        @if (dirtyCount() > 0) {
+          <span class="dirty-pill">{{ dirtyCount() }} unsaved</span>
+        }
         <button type="button" class="btn-save" [disabled]="dirtyCount() === 0" (click)="save()">
-          💾 Save {{ dirtyCount() ? '(' + dirtyCount() + ')' : '' }}
+          {{ dirtyCount() > 0 ? 'Save ' + dirtyCount() + ' change(s)' : 'No changes to save' }}
         </button>
       </app-page-header>
+
+      <p class="secrets-hint">
+        Secrets (keys containing <code>ApiKey</code>, <code>Secret</code> or <code>Token</code>)
+        read back as <code>***SET</code> / <code>***UNSET</code>. Saving a row that still holds one
+        of those sentinels is a no-op — type a real value to overwrite a secret. Rows marked
+        <span class="badge cold">restart</span> only take effect after an engine restart.
+      </p>
 
       <!-- ── Connectivity probe result ─────────────────────────────── -->
       @if (testResult(); as tr) {
@@ -147,50 +167,58 @@ const OPTION_CATALOG: Record<string, readonly string[]> = {
             override per pair.
           </div>
         } @else {
-          <table class="table">
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>TP shrinkage</th>
-                <th>SL shrinkage</th>
-                <th>Last updated</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (row of psoRows(); track row.symbol) {
+          <div class="table-scroll">
+            <table class="table">
+              <thead>
                 <tr>
-                  <td class="mono">{{ row.symbol }}</td>
-                  <td class="mono">
-                    @if (row.tpShrinkage !== null) {
-                      {{ row.tpShrinkage }}
-                    } @else {
-                      <span class="muted">— (global {{ row.globalTpShrinkage }})</span>
-                    }
-                  </td>
-                  <td class="mono">
-                    @if (row.slShrinkage !== null) {
-                      {{ row.slShrinkage }}
-                    } @else {
-                      <span class="muted">— (global {{ row.globalSlShrinkage }})</span>
-                    }
-                  </td>
-                  <td class="mono nowrap">{{ row.lastUpdatedAt | date: 'MMM d, HH:mm' }}</td>
-                  <td>
-                    <button
-                      type="button"
-                      class="btn-delete"
-                      (click)="psoDeleteSymbol(row.symbol)"
-                      [disabled]="psoSymbolBusy(row.symbol)"
-                      [title]="'Delete override for ' + row.symbol"
-                    >
-                      {{ psoSymbolBusy(row.symbol) ? '…' : '✕ Delete' }}
-                    </button>
-                  </td>
+                  <th>Symbol</th>
+                  <th>TP shrinkage</th>
+                  <th>SL shrinkage</th>
+                  <th>Last updated</th>
+                  <th></th>
                 </tr>
-              }
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                @for (row of psoRows(); track row.symbol) {
+                  <tr>
+                    <td class="mono">{{ row.symbol }}</td>
+                    <td class="mono">
+                      @if (row.tpShrinkage !== null) {
+                        {{ row.tpShrinkage }}
+                      } @else {
+                        <span class="muted">— (global {{ row.globalTpShrinkage }})</span>
+                      }
+                    </td>
+                    <td class="mono">
+                      @if (row.slShrinkage !== null) {
+                        {{ row.slShrinkage }}
+                      } @else {
+                        <span class="muted">— (global {{ row.globalSlShrinkage }})</span>
+                      }
+                    </td>
+                    <td class="mono nowrap">
+                      @if (isNeverUpdated(row.lastUpdatedAt)) {
+                        <span class="muted">never</span>
+                      } @else {
+                        {{ row.lastUpdatedAt | date: 'yyyy-MM-dd HH:mm' }}
+                      }
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        class="btn-delete"
+                        (click)="psoDeleteSymbol(row.symbol)"
+                        [disabled]="psoSymbolBusy(row.symbol)"
+                        [title]="'Delete override for ' + row.symbol"
+                      >
+                        {{ psoSymbolBusy(row.symbol) ? '…' : '✕ Delete' }}
+                      </button>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
           <p class="muted small note-inline">
             Deletions soft-delete the EngineConfig rows (<code>IsDeleted = true</code>) so an
             operator can restore them with a single SQL UPDATE if needed. The engine reloads
@@ -214,79 +242,114 @@ const OPTION_CATALOG: Record<string, readonly string[]> = {
               <h3>{{ group.label }}</h3>
               <span class="muted">{{ group.entries.length }} key(s)</span>
             </header>
-            <table class="table">
-              <thead>
-                <tr>
-                  <th>Key</th>
-                  <th>Value</th>
-                  <th>Type</th>
-                  <th>Hot-reload?</th>
-                  <th>Last updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (e of group.entries; track e.key) {
-                  <tr [class.dirty]="e.isDirty">
-                    <td class="mono key">
-                      {{ e.key }}
-                      @if (e.isSecret) {
-                        <span class="secret-badge">SECRET</span>
-                      }
-                    </td>
-                    <td>
-                      @if (e.dataType === 'Bool') {
-                        <select
-                          class="value-input"
-                          [(ngModel)]="e.editedValue"
-                          (ngModelChange)="markDirty(e)"
-                        >
-                          <option value="true">true</option>
-                          <option value="false">false</option>
-                        </select>
-                      } @else if (optionsFor(e.key); as opts) {
-                        <select
-                          class="value-input"
-                          [(ngModel)]="e.editedValue"
-                          (ngModelChange)="markDirty(e)"
-                        >
-                          @for (opt of opts; track opt) {
-                            <option [value]="opt">{{ opt }}</option>
-                          }
-                        </select>
-                      } @else {
-                        <input
-                          class="value-input"
-                          [type]="e.isSecret ? 'password' : 'text'"
-                          [(ngModel)]="e.editedValue"
-                          (ngModelChange)="markDirty(e)"
-                        />
-                      }
-                      @if (e.description) {
-                        <div class="description">{{ e.description }}</div>
-                      }
-                    </td>
-                    <td class="mono">{{ typeLabel(e.dataType) }}</td>
-                    <td>
-                      @if (e.isHotReloadable) {
-                        <span class="badge hot">hot</span>
-                      } @else {
-                        <span class="badge cold">restart</span>
-                      }
-                    </td>
-                    <td class="mono nowrap">{{ e.lastUpdatedAt | date: 'MMM d, HH:mm' }}</td>
+            <div class="table-scroll">
+              <!--
+                Fixed column widths shared by every section. With auto layout each
+                section sized its own key column from its longest key, so short
+                sections wrapped "Llm:Enabled" into three fragments while others
+                got 300px — the same table rendered four different ways.
+              -->
+              <table class="table">
+                <colgroup>
+                  <col class="col-key" />
+                  <col class="col-value" />
+                  <col class="col-type" />
+                  <col class="col-hot" />
+                  <col class="col-updated" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Key</th>
+                    <th>Value</th>
+                    <th>Type</th>
+                    <th>Reload</th>
+                    <th>Last updated</th>
                   </tr>
-                }
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  @for (e of group.entries; track e.key) {
+                    <tr [class.dirty]="e.isDirty" [class.inert]="isInert(e.key)">
+                      <td class="mono key">
+                        <span class="key-text">{{ e.key }}</span>
+                        @if (e.isSecret) {
+                          <span class="secret-badge">secret</span>
+                        }
+                        @if (isInert(e.key)) {
+                          <span
+                            class="inert-badge"
+                            title="Stored in EngineConfig but not read by any engine code path"
+                          >
+                            not consumed
+                          </span>
+                        }
+                      </td>
+                      <td>
+                        @if (e.dataType === 'Bool') {
+                          <select
+                            class="value-input"
+                            [(ngModel)]="e.editedValue"
+                            (ngModelChange)="markDirty(e)"
+                            [disabled]="isInert(e.key)"
+                          >
+                            <option value="true">true</option>
+                            <option value="false">false</option>
+                          </select>
+                        } @else if (optionsFor(e.key); as opts) {
+                          <select
+                            class="value-input"
+                            [(ngModel)]="e.editedValue"
+                            (ngModelChange)="markDirty(e)"
+                            [disabled]="isInert(e.key)"
+                          >
+                            @for (opt of opts; track opt) {
+                              <option [value]="opt">{{ opt }}</option>
+                            }
+                          </select>
+                        } @else {
+                          <input
+                            class="value-input"
+                            [type]="e.isSecret ? 'password' : 'text'"
+                            [(ngModel)]="e.editedValue"
+                            (ngModelChange)="markDirty(e)"
+                            [disabled]="isInert(e.key)"
+                          />
+                        }
+                        @if (e.description) {
+                          <div
+                            class="description"
+                            [class.clamped]="isLongDescription(e) && !isDescExpanded(e.key)"
+                          >
+                            {{ e.description }}
+                          </div>
+                          @if (isLongDescription(e)) {
+                            <button type="button" class="desc-toggle" (click)="toggleDesc(e.key)">
+                              {{ isDescExpanded(e.key) ? 'less' : 'more' }}
+                            </button>
+                          }
+                        }
+                      </td>
+                      <td class="mono">{{ typeLabel(e.dataType) }}</td>
+                      <td>
+                        @if (e.isHotReloadable) {
+                          <span class="badge hot">hot</span>
+                        } @else {
+                          <span class="badge cold">restart</span>
+                        }
+                      </td>
+                      <td class="mono nowrap">
+                        @if (isNeverUpdated(e.lastUpdatedAt)) {
+                          <span class="muted">never</span>
+                        } @else {
+                          {{ e.lastUpdatedAt | date: 'yyyy-MM-dd HH:mm' }}
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
           </section>
         }
-
-        <div class="note info">
-          Secrets (anything containing <code>ApiKey</code>, <code>Secret</code>, or
-          <code>Token</code>) are masked on read as <code>***SET</code> / <code>***UNSET</code>.
-          Saving a row whose value still equals one of those sentinels is a no-op — you have to type
-          a real string to overwrite a secret.
-        </div>
       }
     </div>
   `,
@@ -325,6 +388,29 @@ const OPTION_CATALOG: Record<string, readonly string[]> = {
       .btn-save:disabled {
         opacity: 0.4;
         cursor: not-allowed;
+      }
+      .dirty-pill {
+        padding: 3px 10px;
+        border-radius: var(--radius-full);
+        background: rgba(255, 149, 0, 0.16);
+        color: #b25000;
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        white-space: nowrap;
+      }
+      .secrets-hint {
+        margin: 0;
+        padding: var(--space-2) var(--space-4);
+        border-radius: var(--radius-sm);
+        background: rgba(0, 113, 227, 0.05);
+        border: 1px solid rgba(0, 113, 227, 0.18);
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        line-height: 1.5;
+      }
+      .secrets-hint code {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        color: var(--text-primary);
       }
       /* ── Per-symbol shrinkage card actions ─────────────────────── */
       .card-head-actions {
@@ -500,9 +586,28 @@ const OPTION_CATALOG: Record<string, readonly string[]> = {
         color: var(--text-tertiary);
         font-size: var(--text-xs);
       }
+      .table-scroll {
+        overflow-x: auto;
+      }
       .table {
         width: 100%;
         border-collapse: collapse;
+        /* Fixed layout + <colgroup> so every section renders identical column
+           widths regardless of its longest key. */
+        table-layout: fixed;
+        min-width: 860px;
+      }
+      .col-key {
+        width: 30%;
+      }
+      .col-type {
+        width: 80px;
+      }
+      .col-hot {
+        width: 84px;
+      }
+      .col-updated {
+        width: 150px;
       }
       .table th,
       .table td {
@@ -511,6 +616,39 @@ const OPTION_CATALOG: Record<string, readonly string[]> = {
         border-bottom: 1px solid var(--border);
         text-align: left;
         vertical-align: top;
+      }
+      .table tr.inert .value-input {
+        opacity: 0.55;
+      }
+      .key-text {
+        overflow-wrap: anywhere;
+      }
+      .inert-badge {
+        margin-left: var(--space-2);
+        padding: 1px 6px;
+        border-radius: 3px;
+        background: rgba(142, 142, 147, 0.18);
+        color: var(--text-secondary);
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+      .description.clamped {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .desc-toggle {
+        margin-top: 2px;
+        padding: 0;
+        border: none;
+        background: none;
+        color: var(--accent);
+        font-size: var(--text-xs);
+        cursor: pointer;
       }
       .table th {
         background: var(--bg-tertiary);
@@ -528,8 +666,7 @@ const OPTION_CATALOG: Record<string, readonly string[]> = {
         background: rgba(255, 149, 0, 0.06);
       }
       .key {
-        max-width: 320px;
-        word-break: break-all;
+        overflow-wrap: anywhere;
       }
       .secret-badge {
         margin-left: var(--space-2);
@@ -540,6 +677,8 @@ const OPTION_CATALOG: Record<string, readonly string[]> = {
         font-size: 10px;
         font-weight: var(--font-semibold);
         letter-spacing: 0.04em;
+        text-transform: uppercase;
+        white-space: nowrap;
       }
       .value-input {
         width: 100%;
@@ -866,6 +1005,38 @@ export class LlmSettingsPageComponent implements OnInit {
    *  effort knobs). Returning a readonly array is fine for `@for`. */
   optionsFor(key: string): readonly string[] | undefined {
     return OPTION_CATALOG[key];
+  }
+
+  isInert(key: string): boolean {
+    return INERT_KEYS.has(key);
+  }
+
+  /**
+   * Rows the engine seeded but nobody has ever saved carry the epoch
+   * sentinel (0001-01-01 / 1970-01-01) as their timestamp. Rendering that
+   * as "Jan 1, 00:00" reads like a real edit; show "never" instead.
+   */
+  isNeverUpdated(iso: string | null | undefined): boolean {
+    if (!iso) return true;
+    const t = new Date(iso).getTime();
+    return !Number.isFinite(t) || t <= 0 || new Date(iso).getUTCFullYear() < 2000;
+  }
+
+  // ── Description clamp ────────────────────────────────────────────────
+  private readonly expandedDescriptions = signal<ReadonlySet<string>>(new Set());
+
+  isLongDescription(e: EditableEntry): boolean {
+    return (e.description?.length ?? 0) > DESCRIPTION_CLAMP_CHARS;
+  }
+
+  isDescExpanded(key: string): boolean {
+    return this.expandedDescriptions().has(key);
+  }
+
+  toggleDesc(key: string): void {
+    const next = new Set(this.expandedDescriptions());
+    if (!next.delete(key)) next.add(key);
+    this.expandedDescriptions.set(next);
   }
 }
 

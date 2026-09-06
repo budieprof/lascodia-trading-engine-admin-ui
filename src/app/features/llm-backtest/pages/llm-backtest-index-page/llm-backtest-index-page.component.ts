@@ -57,6 +57,37 @@ const TIMEFRAME_LABEL: Record<number, string> = {
 const LIVE_TICK_MS = 5000;
 
 /**
+ * The list endpoint serialises `status` as the enum NAME ("Completed") while
+ * the TypeScript enum is numeric. Every `r.status === BacktestStatus.X`
+ * comparison therefore failed: the KPI strip reported "0 ✓ · 0 ▶ · 0 ✗" and
+ * "across 0 completed" above a table of completed rows, Cancel never showed
+ * for running rows, and the progress bar never turned green. Normalise once.
+ */
+function normalizeStatus(s: BacktestStatus | string | null | undefined): BacktestStatus {
+  if (typeof s === 'number') return s;
+  switch ((s ?? '').toString().toLowerCase()) {
+    case 'pending':
+    case '0':
+      return BacktestStatus.Pending;
+    case 'running':
+    case '1':
+      return BacktestStatus.Running;
+    case 'completed':
+    case '2':
+      return BacktestStatus.Completed;
+    case 'failed':
+    case '3':
+      return BacktestStatus.Failed;
+    case 'cancelled':
+    case 'canceled':
+    case '4':
+      return BacktestStatus.Cancelled;
+    default:
+      return BacktestStatus.Pending;
+  }
+}
+
+/**
  * Dense LLM-Backtest index page.
  *
  * Layout:
@@ -411,8 +442,8 @@ const LIVE_TICK_MS = 5000;
                         <div
                           class="progress-fill"
                           [style.width.%]="progressPct(r)"
-                          [class.bar--done]="r.status === BacktestStatus.Completed"
-                          [class.bar--bad]="r.status === BacktestStatus.Failed"
+                          [class.bar--done]="statusOf(r) === BacktestStatus.Completed"
+                          [class.bar--bad]="statusOf(r) === BacktestStatus.Failed"
                         ></div>
                       </div>
                       <div class="progress-text">
@@ -422,22 +453,18 @@ const LIVE_TICK_MS = 5000;
                     </div>
                   </td>
                   <td class="col-llmcalls">
-                    <div class="stack">
-                      <div>{{ llmCallCount(r) }} call(s)</div>
-                      <div class="muted small">
-                        cache {{ r.cacheHits }} ({{ r.cacheHitRatio ?? 0 | percent: '1.0-0' }})
-                      </div>
-                    </div>
+                    {{ llmCallCount(r) }} calls
+                    <span class="muted">
+                      · {{ r.cacheHits }} cached ({{ r.cacheHitRatio ?? 0 | percent: '1.0-0' }})
+                    </span>
                   </td>
-                  <td class="col-cost">
-                    <div class="stack">
-                      <div class="cost-actual">
-                        {{ r.actualCostUsd | currency: 'USD' : 'symbol' : '1.2-4' }}
-                      </div>
-                      <div class="cost-est muted small">
-                        est {{ r.estimatedCostUsd | currency: 'USD' : 'symbol' : '1.2-2' }}
-                      </div>
-                    </div>
+                  <td class="col-cost" [title]="costTitle(r)">
+                    <span class="cost-actual">
+                      {{ r.actualCostUsd | currency: 'USD' : 'symbol' : '1.2-2' }}
+                    </span>
+                    <span class="muted">
+                      (est {{ r.estimatedCostUsd | currency: 'USD' : 'symbol' : '1.2-2' }})
+                    </span>
                   </td>
                   <td class="col-hr">
                     @if (r.hitRate !== null) {
@@ -490,7 +517,7 @@ const LIVE_TICK_MS = 5000;
                     {{ durationLabel(r) }}
                   </td>
                   <td class="col-actions">
-                    @if (canCancel(r.status)) {
+                    @if (canCancel(statusOf(r))) {
                       <button
                         type="button"
                         class="btn-danger-sm"
@@ -590,10 +617,22 @@ const LIVE_TICK_MS = 5000;
       }
 
       /* ── KPI strip ───────────────────────────────────────────────────── */
+      /* Six fixed columns: auto-fit wrapped the sixth tile onto its own row. */
       .kpi-strip {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        grid-template-columns: repeat(6, minmax(0, 1fr));
         gap: var(--space-3);
+        align-items: stretch;
+      }
+      @media (max-width: 1200px) {
+        .kpi-strip {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 720px) {
+        .kpi-strip {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
       .kpi-card {
         background: var(--bg-secondary);
@@ -616,6 +655,9 @@ const LIVE_TICK_MS = 5000;
         font-weight: 700;
         font-variant-numeric: tabular-nums;
         line-height: 1.1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .kpi-sub {
         font-size: 11px;
@@ -734,12 +776,15 @@ const LIVE_TICK_MS = 5000;
       }
 
       /* ── Dense table ─────────────────────────────────────────────────── */
+      /* The wrapper scrolls horizontally only. A viewport-relative max-height
+         made the table its own scroll box: rows were cut mid-way and only the
+         first nine of fifty were reachable without discovering the inner
+         scrollbar. The page scrolls instead. */
       .table-wrap {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        overflow: auto;
-        max-height: calc(100vh - 380px);
+        overflow-x: auto;
       }
       .dense-table {
         width: 100%;
@@ -808,10 +853,12 @@ const LIVE_TICK_MS = 5000;
         width: 180px;
       }
       .col-llmcalls {
-        width: 110px;
+        width: 170px;
+        white-space: nowrap;
       }
       .col-cost {
-        width: 110px;
+        width: 150px;
+        white-space: nowrap;
       }
       .col-hr {
         width: 64px;
@@ -1181,29 +1228,39 @@ export class LlmBacktestIndexPageComponent implements OnInit, OnDestroy {
   readonly visibleCount = computed(() => this.filteredRuns().length);
   readonly totalPages = computed(() => Math.max(1, Math.ceil(this.totalItems() / this.pageSize)));
   readonly hasRunning = computed(() =>
-    this.runs().some((r) => r.status === BacktestStatus.Running),
+    this.runs().some((r) => this.statusOf(r) === BacktestStatus.Running),
   );
 
   readonly statusBreakdownLabel = computed(() => {
     const rs = this.filteredRuns();
-    const c = (s: BacktestStatus) => rs.filter((r) => r.status === s).length;
-    return `${c(BacktestStatus.Completed)} ✓ · ${c(BacktestStatus.Running)} ▶ · ${c(BacktestStatus.Failed)} ✗`;
+    const c = (s: BacktestStatus) => rs.filter((r) => this.statusOf(r) === s).length;
+    const parts = [
+      `${c(BacktestStatus.Completed)} completed`,
+      `${c(BacktestStatus.Running)} running`,
+      `${c(BacktestStatus.Failed)} failed`,
+    ];
+    const cancelled = c(BacktestStatus.Cancelled);
+    if (cancelled > 0) parts.push(`${cancelled} cancelled`);
+    return parts.join(' · ');
   });
 
-  readonly completedRowsInView = computed(
-    () =>
-      this.filteredRuns().filter((r) => r.status === BacktestStatus.Completed && r.hitRate != null)
-        .length,
+  /** Completed rows that carry a scored hit-rate — the averages below use exactly these. */
+  private readonly scoredCompletedRuns = computed(() =>
+    this.filteredRuns().filter(
+      (r) => this.statusOf(r) === BacktestStatus.Completed && r.hitRate != null,
+    ),
   );
 
+  readonly completedRowsInView = computed(() => this.scoredCompletedRuns().length);
+
   readonly avgHitRate = computed(() => {
-    const rs = this.filteredRuns().filter((r) => r.hitRate != null);
+    const rs = this.scoredCompletedRuns();
     if (rs.length === 0) return null;
     return rs.reduce((s, r) => s + (r.hitRate as number), 0) / rs.length;
   });
 
   readonly avgExpectedR = computed(() => {
-    const rs = this.filteredRuns().filter((r) => r.expectedR != null);
+    const rs = this.scoredCompletedRuns().filter((r) => r.expectedR != null);
     if (rs.length === 0) return null;
     return rs.reduce((s, r) => s + (r.expectedR as number), 0) / rs.length;
   });
@@ -1410,8 +1467,28 @@ export class LlmBacktestIndexPageComponent implements OnInit, OnDestroy {
   }
 
   // ── Presentation ────────────────────────────────────────────────────
-  statusLabel(s: BacktestStatus): string {
-    return BacktestStatusName[s] ?? String(s);
+  statusOf(r: LlmBacktestRunSummary): BacktestStatus {
+    return normalizeStatus(r.status);
+  }
+  statusLabel(s: BacktestStatus | string): string {
+    return BacktestStatusName[normalizeStatus(s)] ?? String(s);
+  }
+  /**
+   * Actual cost is whatever the engine attributed from LlmInvocation rows.
+   * claudecode runs are subscription-billed and attribute $0, so a $0.00
+   * beside a real call count is expected there — the tooltip says so rather
+   * than leaving the operator to guess whether attribution broke.
+   */
+  costTitle(r: LlmBacktestRunSummary): string {
+    const calls = this.llmCallCount(r);
+    if (r.dryRun) return 'Dry run — no LLM calls, no cost.';
+    if (calls > 0 && r.actualCostUsd <= 0) {
+      return (
+        `Engine attributed $0.00 to ${calls} call(s). Expected when the deep tier runs on ` +
+        `claudecode (subscription-billed); otherwise cost attribution is missing for this run.`
+      );
+    }
+    return 'Actual cost attributed from LlmInvocation rows; estimate from the launch form.';
   }
   progressPct(r: LlmBacktestRunSummary): number {
     if (r.totalPoints <= 0) return 0;

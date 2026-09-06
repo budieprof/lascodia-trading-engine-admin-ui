@@ -48,6 +48,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  *  77 categories × dozens-to-thousands of keys would otherwise materialise
  *  ~5,700 input fields into the DOM on first paint. */
 const ALL_RENDER_CAP = 250;
+/** Same locale as the `| number` pipe, so "5,795 keys" reads the same in
+ *  the strip, the subtitle and the search placeholder. */
+const COUNT_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 
 @Component({
   selector: 'app-config-page',
@@ -86,7 +89,7 @@ const ALL_RENDER_CAP = 250;
             ><strong>{{ entries().length | number }}</strong> keys</span
           >
           <span class="stat"
-            ><strong>{{ totalGroupCount() }}</strong> categories</span
+            ><strong>{{ totalGroupCount() | number }}</strong> categories</span
           >
           <span class="stat ok"
             ><strong>{{ hotReloadCount() | number }}</strong> hot-reload</span
@@ -100,7 +103,7 @@ const ALL_RENDER_CAP = 250;
           >
           @if (dirtyCount() > 0) {
             <span class="stat bad"
-              ><strong>{{ dirtyCount() }}</strong> unsaved</span
+              ><strong>{{ dirtyCount() | number }}</strong> unsaved</span
             >
           }
           <button class="overview-toggle" (click)="showOverview.set(!showOverview())">
@@ -158,11 +161,11 @@ const ALL_RENDER_CAP = 250;
             aria-label="Filter by data type"
           >
             <option value="all">All types</option>
-            <option value="String">String ({{ dataTypeCounts().String }})</option>
-            <option value="Int">Int ({{ dataTypeCounts().Int }})</option>
-            <option value="Decimal">Decimal ({{ dataTypeCounts().Decimal }})</option>
-            <option value="Bool">Bool ({{ dataTypeCounts().Bool }})</option>
-            <option value="Json">Json ({{ dataTypeCounts().Json }})</option>
+            <option value="String">String ({{ dataTypeCounts().String | number }})</option>
+            <option value="Int">Int ({{ dataTypeCounts().Int | number }})</option>
+            <option value="Decimal">Decimal ({{ dataTypeCounts().Decimal | number }})</option>
+            <option value="Bool">Bool ({{ dataTypeCounts().Bool | number }})</option>
+            <option value="Json">Json ({{ dataTypeCounts().Json | number }})</option>
           </select>
           <select
             class="input"
@@ -195,7 +198,7 @@ const ALL_RENDER_CAP = 250;
             @if (bulkSaving()) {
               <span class="spinner"></span> Saving…
             } @else {
-              Save {{ dirtyCount() }} unsaved
+              Save {{ dirtyCount() | number }} unsaved
             }
           </button>
         </div>
@@ -205,7 +208,14 @@ const ALL_RENDER_CAP = 250;
           <aside class="sidebar" aria-label="Categories">
             <div class="sb-head">
               <span>Categories</span>
-              <span class="muted">{{ sidebarGroups().length }}</span>
+              <span class="muted">{{ sidebarGroups().length | number }}</span>
+            </div>
+            <!-- The row dots had no key: an operator saw orange beside
+                 "Drawdown" and could not tell whether it was a warning.
+                 It only ever meant "a key here changed in the last 24h". -->
+            <div class="sb-legend" aria-hidden="true">
+              <span><span class="dot bad"></span> unsaved edits</span>
+              <span><span class="dot warn"></span> changed in last 24h</span>
             </div>
             <input
               type="search"
@@ -231,17 +241,15 @@ const ALL_RENDER_CAP = 250;
                   class="cat"
                   [class.active]="selectedCategory() === g.prefix"
                   (click)="selectCategory(g.prefix)"
+                  [attr.title]="categoryTitle(g)"
                 >
                   <span class="cat-name">{{ g.prefix }}</span>
                   <span class="cat-badges">
                     @if (g.dirtyCount > 0) {
-                      <span class="dot bad" [attr.title]="g.dirtyCount + ' unsaved'"></span>
+                      <span class="dot bad"></span>
                     }
                     @if (g.recent24hCount > 0) {
-                      <span
-                        class="dot warn"
-                        [attr.title]="g.recent24hCount + ' updated 24h'"
-                      ></span>
+                      <span class="dot warn"></span>
                     }
                     <span class="cat-count">{{ g.configs.length | number }}</span>
                   </span>
@@ -290,11 +298,30 @@ const ALL_RENDER_CAP = 250;
                     @for (config of visibleEntries(); track config.id) {
                       <tr [class.row-dirty]="config.dirty">
                         <td class="col-key">
-                          <code class="config-key" [title]="config.key ?? ''">{{
-                            config.key
-                          }}</code>
+                          <!-- Segments with a <wbr> after each ":" so a long key
+                               breaks at a section boundary instead of mid-token
+                               ("AccountCoverage:AutoDeactivate" / "d:18"). -->
+                          <code class="config-key" [title]="config.key ?? ''">
+                            @for (seg of keySegments(config.key); track $index) {
+                              <span class="key-seg">{{ seg }}</span>
+                              @if (!$last) {
+                                <span class="key-sep">:</span><wbr />
+                              }
+                            }
+                          </code>
                           @if (config.description) {
-                            <span class="config-desc">{{ config.description }}</span>
+                            <span class="config-desc" [class.clamped]="!isDescExpanded(config)">{{
+                              config.description
+                            }}</span>
+                            @if (descNeedsToggle(config.description)) {
+                              <button
+                                type="button"
+                                class="desc-toggle"
+                                (click)="toggleDesc(config)"
+                              >
+                                {{ isDescExpanded(config) ? 'less' : 'more' }}
+                              </button>
+                            }
                           }
                         </td>
                         <td class="col-value">
@@ -381,7 +408,7 @@ const ALL_RENDER_CAP = 250;
                 </table>
                 @if (renderCapped()) {
                   <div class="capped-footer">
-                    Showing first {{ ALL_RENDER_CAP }} of
+                    Showing first {{ ALL_RENDER_CAP | number }} of
                     {{ filteredEntries().length | number }} keys. Refine the search or pick a
                     category to see more.
                   </div>
@@ -664,6 +691,22 @@ const ALL_RENDER_CAP = 250;
       .sb-filter:focus {
         border-color: var(--accent);
       }
+      .sb-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px var(--space-3);
+        padding: 0 var(--space-3) 6px;
+        font-size: 10px;
+        color: var(--text-tertiary);
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .sb-legend > span {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        white-space: nowrap;
+      }
       .sb-list {
         flex: 1;
         overflow-y: auto;
@@ -817,8 +860,12 @@ const ALL_RENDER_CAP = 250;
         min-width: 240px;
         max-width: 380px;
       }
+      /* A declared share of the row: without it the auto table layout gave
+         the value column whatever the key column left over, and long
+         values were cut off at the cell edge. */
       .col-value {
-        min-width: 220px;
+        width: 34%;
+        min-width: 240px;
       }
       .col-type {
         width: 80px;
@@ -840,15 +887,47 @@ const ALL_RENDER_CAP = 250;
         font-size: 12px;
         color: var(--text-primary);
         display: block;
-        word-break: break-all;
+        /* break-all split tokens anywhere; anywhere + the <wbr> after each
+           ":" means the browser prefers the section boundary and only
+           splits inside a segment when a single segment is wider than the
+           column. */
+        overflow-wrap: anywhere;
+        word-break: normal;
+      }
+      .key-sep {
+        color: var(--text-tertiary);
       }
       .config-desc {
         font-size: var(--text-xs);
         color: var(--text-tertiary);
         display: block;
         margin-top: 2px;
+        line-height: 1.4;
+      }
+      /* Two lines by default. Seven-line descriptions repeated on every
+         row of a category pushed the value column off the fold. */
+      .config-desc.clamped {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .desc-toggle {
+        appearance: none;
+        background: transparent;
+        border: none;
+        padding: 0;
+        margin-top: 1px;
+        font-family: inherit;
+        font-size: 10.5px;
+        color: var(--accent, #0071e3);
+        cursor: pointer;
+      }
+      .desc-toggle:hover {
+        text-decoration: underline;
       }
       .config-input {
+        box-sizing: border-box;
         width: 100%;
         height: 28px;
         padding: 0 8px;
@@ -1222,13 +1301,56 @@ export class ConfigPageComponent implements OnInit {
   });
 
   readonly selectedCategorySubtitle = computed(() => {
-    const total = this.filteredEntries().length;
+    const total = COUNT_FORMAT.format(this.filteredEntries().length);
     if (this.search().trim()) return `${total} matches`;
     if (this.selectedCategory() === ALL_CATEGORY) return `${total} keys`;
     return '';
   });
 
   readonly categoryDirtyAllSaved = computed(() => false);
+
+  /** Whole-row hover text for the sidebar dots, in words rather than colour. */
+  categoryTitle(g: ConfigGroup): string {
+    const parts = [`${COUNT_FORMAT.format(g.configs.length)} keys`];
+    if (g.dirtyCount > 0) parts.push(`${COUNT_FORMAT.format(g.dirtyCount)} unsaved`);
+    if (g.recent24hCount > 0)
+      parts.push(`${COUNT_FORMAT.format(g.recent24hCount)} changed in last 24h`);
+    return parts.join(' · ');
+  }
+
+  // ── Key rendering / description clamp ─────────────────────────
+  keySegments(key: string | null): string[] {
+    return (key ?? '').split(':');
+  }
+
+  /** Keys the operator has expanded past the two-line clamp. */
+  private readonly expandedDescKeys = signal<ReadonlySet<string>>(new Set());
+
+  private descId(config: ConfigEntry): string {
+    return config.key ?? String(config.id);
+  }
+
+  isDescExpanded(config: ConfigEntry): boolean {
+    return this.expandedDescKeys().has(this.descId(config));
+  }
+
+  toggleDesc(config: ConfigEntry): void {
+    const id = this.descId(config);
+    const next = new Set(this.expandedDescKeys());
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    this.expandedDescKeys.set(next);
+  }
+
+  /**
+   * Only offer the toggle when the text can plausibly exceed two lines;
+   * measuring the DOM per row would cost a layout pass on a 250-row table.
+   * ~55 chars per line at the key-column width, so two lines ≈ 110.
+   */
+  descNeedsToggle(description: string | null): boolean {
+    if (!description) return false;
+    return description.length > 110 || description.includes('\n');
+  }
 
   // ── Charts (overview drawer) ───────────────────────────────────
   readonly dataTypeDonutOptions = computed<EChartsOption>(() => {
@@ -1308,8 +1430,7 @@ export class ConfigPageComponent implements OnInit {
   }
 
   searchPlaceholder(): string {
-    const n = this.entries().length;
-    return `Search ${n.toLocaleString()} keys, descriptions…`;
+    return `Search ${COUNT_FORMAT.format(this.entries().length)} keys, descriptions…`;
   }
 
   // ── Edit / save ────────────────────────────────────────────────
@@ -1404,9 +1525,13 @@ export class ConfigPageComponent implements OnInit {
   private finishBulkSave(total: number, failures: number): void {
     this.bulkSaving.set(false);
     if (failures === 0) {
-      this.notifications.success(`Saved ${total} configuration${total === 1 ? '' : 's'}`);
+      this.notifications.success(
+        `Saved ${COUNT_FORMAT.format(total)} configuration${total === 1 ? '' : 's'}`,
+      );
     } else {
-      this.notifications.error(`Saved ${total - failures} of ${total} · ${failures} failed`);
+      this.notifications.error(
+        `Saved ${COUNT_FORMAT.format(total - failures)} of ${COUNT_FORMAT.format(total)} · ${COUNT_FORMAT.format(failures)} failed`,
+      );
     }
   }
 

@@ -15,6 +15,7 @@ import type { TradingAccountDto } from '@core/api/api.types';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { ToggleComponent } from '@shared/components/ui/toggle/toggle.component';
 
 /**
  * Operator control for the per-symbol recovery ladder.
@@ -34,6 +35,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
     PageHeaderComponent,
     CardSkeletonComponent,
     EmptyStateComponent,
+    ToggleComponent,
   ],
   template: `
     <app-page-header
@@ -160,8 +162,9 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         -->
         <div class="pform">
           <label class="fld master">
-            <input type="checkbox" [(ngModel)]="pf.enabled" [disabled]="savingProfile()" />
+            <ui-toggle [(ngModel)]="pf.enabled" [disabled]="savingProfile()" />
             <span>Allow martingale on this profile</span>
+            <span class="pill" [class.on]="pf.enabled">{{ pf.enabled ? 'allowed' : 'off' }}</span>
           </label>
 
           <label
@@ -201,8 +204,11 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
           </label>
 
           <label class="fld master">
-            <input type="checkbox" [(ngModel)]="pf.abandonAtCap" [disabled]="savingProfile()" />
+            <ui-toggle [(ngModel)]="pf.abandonAtCap" [disabled]="savingProfile()" />
             <span>Abandon at depth cap</span>
+            <span class="pill" [class.on]="pf.abandonAtCap" [class.danger-pill]="!pf.abandonAtCap">
+              {{ pf.abandonAtCap ? 'bounded' : 'unbounded' }}
+            </span>
           </label>
         </div>
 
@@ -235,8 +241,18 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
           }
         </p>
 
+        <!--
+          Deliberately a secondary button: saving defaults is bookkeeping. The
+          risk-bearing action on this page is switching a symbol's ladder on
+          below, and the visual weight should say so.
+        -->
         <div class="pactions">
-          <button type="button" (click)="saveProfile()" [disabled]="savingProfile()">
+          <button
+            type="button"
+            class="secondary"
+            (click)="saveProfile()"
+            [disabled]="savingProfile()"
+          >
             {{ savingProfile() ? 'Saving…' : 'Save profile defaults' }}
           </button>
           <button type="button" class="ghost" (click)="resetProfileForm()">Reset</button>
@@ -264,12 +280,28 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       @if (v.symbols.length === 0) {
         <app-empty-state title="No currency pairs configured." />
       } @else {
+        <!--
+          With no per-symbol override every row repeats the profile defaults, so
+          say that once above the table and mute the inherited cells — the eye
+          then lands on the two things that vary: the ladder switch and any
+          override that has been set.
+        -->
+        <p class="table-summary">
+          <b>{{ v.symbols.length }} symbols</b> · <b>{{ enabledCount() }}</b> laddered ·
+          @if (overrideCount() === 0) {
+            all inherit the profile defaults (depth {{ v.defaultMaxDepth }} ·
+            {{ v.defaultWorstCaseDrawdownPct | number: '1.0-1' }}% worst case ·
+            {{ v.defaultTargetProfitR }}R · {{ v.defaultMaxStakePctEquity }}% stake)
+          } @else {
+            <b>{{ overrideCount() }}</b> with overrides; muted values inherit the profile defaults
+          }
+        </p>
         <div class="table-wrap">
           <table class="mtg">
             <thead>
               <tr>
                 <th>Symbol</th>
-                <th class="c">Ladder</th>
+                <th>Ladder</th>
                 <th class="n">Depth cap</th>
                 <th class="n">Worst case</th>
                 <th class="n">Target</th>
@@ -279,33 +311,61 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
               </tr>
             </thead>
             <tbody>
-              @for (s of v.symbols; track s.symbol) {
+              <!--
+                Rows are keyed on (symbol, rowRev): the switch is a control-value
+                accessor that flips its own visual state on click, so when the
+                operator dismisses the reason prompt the model stays false
+                while the knob shows "on". Bumping rowRev re-creates the row and
+                the switch re-reads the model.
+              -->
+              @for (s of v.symbols; track s.symbol + ':' + rowRev()) {
                 <tr [class.active]="s.effectivelyActive">
                   <td class="sym">{{ s.symbol }}</td>
-                  <td class="c">
-                    <input
-                      type="checkbox"
-                      [checked]="s.enabled"
-                      [disabled]="saving() || (!s.enabled && !v.profileMartingaleEnabled)"
-                      (change)="toggle(s, $any($event.target).checked)"
-                      [attr.aria-label]="'Ladder ' + s.symbol"
-                    />
-                    @if (s.enabled && !s.effectivelyActive) {
-                      <span class="inert" title="Profile does not allow martingale">inert</span>
-                    }
+                  <td>
+                    <div class="ladder-cell">
+                      <ui-toggle
+                        [ngModel]="s.enabled"
+                        (ngModelChange)="toggle(s, $event)"
+                        [disabled]="saving() || (!s.enabled && !v.profileMartingaleEnabled)"
+                        [attr.aria-label]="'Ladder ' + s.symbol"
+                      />
+                      @if (s.effectivelyActive) {
+                        <span class="pill on">enabled</span>
+                      } @else if (s.enabled) {
+                        <span class="pill inert-pill" title="Profile does not allow martingale"
+                          >inert</span
+                        >
+                      } @else {
+                        <span class="pill">off</span>
+                      }
+                    </div>
                   </td>
-                  <td class="n">{{ s.effectiveMaxDepth }}</td>
+                  <td class="n" [class.inherit]="(s.maxDepthOverride ?? null) === null">
+                    {{ s.effectiveMaxDepth }}
+                  </td>
                   <!--
                     Worst case is shown on every row, not just enabled ones, because it is the
                     number that decides whether the depth cap is safe: a rung is exempt from
-                    Reduced recovery, so these caps are all that keeps a chain inside the 20%
-                    halt boundary.
+                    Reduced recovery, so these caps are all that keeps a chain inside the halt
+                    boundary. The threshold is the profile's own Halted %, not a hard-coded 20.
                   -->
-                  <td class="n" [class.danger]="s.worstCaseDrawdownPct >= 20">
+                  <td
+                    class="n"
+                    [class.inherit]="(s.maxDepthOverride ?? null) === null"
+                    [class.danger]="s.worstCaseDrawdownPct >= v.haltedDrawdownPct"
+                    [class.warn]="
+                      s.worstCaseDrawdownPct >= v.reducedDrawdownPct &&
+                      s.worstCaseDrawdownPct < v.haltedDrawdownPct
+                    "
+                  >
                     {{ s.worstCaseDrawdownPct | number: '1.0-1' }}%
                   </td>
-                  <td class="n">{{ s.effectiveTargetProfitR }}R</td>
-                  <td class="n">{{ s.effectiveMaxStakePctEquity }}%</td>
+                  <td class="n" [class.inherit]="(s.targetProfitROverride ?? null) === null">
+                    {{ s.effectiveTargetProfitR }}R
+                  </td>
+                  <td class="n" [class.inherit]="(s.maxStakePctEquityOverride ?? null) === null">
+                    {{ s.effectiveMaxStakePctEquity }}%
+                  </td>
                   <td>
                     @if (s.hasOpenChain) {
                       <span class="chain">
@@ -421,16 +481,16 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
        * moves money, so it is the only one that reads as an alarm.
        */
       .mode {
-        border: 1px solid var(--border-default);
+        border: 1px solid var(--border);
         border-left-width: 4px;
         border-radius: 12px;
         padding: var(--space-3) var(--space-4);
         margin-bottom: var(--space-4);
-        background: var(--surface-raised);
+        background: var(--bg-secondary);
       }
       .mode[data-mode='Live'] {
         border-left-color: #ff3b30;
-        background: color-mix(in srgb, #ff3b30 7%, var(--surface-raised));
+        background: color-mix(in srgb, #ff3b30 7%, var(--bg-secondary));
       }
       .mode[data-mode='Shadow'] {
         border-left-color: #0a84ff;
@@ -476,23 +536,44 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       .mode-actions {
         display: flex;
         align-items: center;
-        gap: var(--space-2);
+        gap: 0;
         margin-top: var(--space-3);
       }
+      .mode-actions .saving {
+        margin-left: var(--space-3);
+      }
+      /* Segmented control: the three modes read as one switch with a
+         selected segment, not three words of plain text. */
       .mode-btn {
         padding: 5px 14px;
-        border-radius: 8px;
-        border: 1px solid var(--border-default);
-        background: transparent;
+        border: 1px solid var(--border);
+        background: var(--bg-tertiary);
         color: var(--text-secondary);
         font-size: 13px;
         cursor: pointer;
+        margin-right: -1px;
+      }
+      .mode-btn:first-of-type {
+        border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+      }
+      .mode-btn:nth-of-type(3) {
+        border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      }
+      .mode-btn:hover:not(:disabled) {
+        color: var(--text-primary);
       }
       .mode-btn.sel {
-        background: var(--surface-base);
-        color: var(--text-primary);
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
         font-weight: 600;
         cursor: default;
+        position: relative;
+        z-index: 1;
+      }
+      .mode[data-mode='Live'] .mode-btn.sel {
+        background: #ff3b30;
+        border-color: #ff3b30;
       }
       .mode-btn:disabled:not(.sel) {
         opacity: 0.5;
@@ -508,8 +589,8 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       .acct-bar select {
         padding: 6px 10px;
         border-radius: 8px;
-        border: 1px solid var(--border-default);
-        background: var(--surface-raised);
+        border: 1px solid var(--border);
+        background: var(--bg-secondary);
         color: var(--text-primary);
       }
       .saving {
@@ -530,14 +611,14 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       }
 
       .gate {
-        border: 1px solid var(--border-default);
+        border: 1px solid var(--border);
         border-radius: 12px;
         padding: var(--space-4);
         margin-bottom: var(--space-4);
-        background: var(--surface-raised);
+        background: var(--bg-secondary);
       }
       .gate-off {
-        border-color: color-mix(in srgb, #ff9500 40%, var(--border-default));
+        border-color: color-mix(in srgb, #ff9500 40%, var(--border));
       }
       .gate-head {
         display: flex;
@@ -565,6 +646,14 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         background: color-mix(in srgb, #34c759 18%, transparent);
         color: #248a3d;
       }
+      .pill.danger-pill {
+        background: color-mix(in srgb, #ff3b30 16%, transparent);
+        color: #ff3b30;
+      }
+      .pill.inert-pill {
+        background: color-mix(in srgb, #ff9500 18%, transparent);
+        color: #b25000;
+      }
       .gate-note {
         margin: var(--space-2) 0 0;
         font-size: 12px;
@@ -591,16 +680,17 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       .fld.master {
         flex-direction: row;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
         font-size: 13px;
         color: var(--text-primary);
+        cursor: pointer;
       }
       .fld input[type='number'] {
         width: 120px;
         padding: 6px 8px;
         border-radius: 8px;
-        border: 1px solid var(--border-default);
-        background: var(--surface-base);
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
         color: var(--text-primary);
         font-variant-numeric: tabular-nums;
       }
@@ -624,11 +714,19 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       .edit-actions button {
         padding: 6px 14px;
         border-radius: 8px;
-        border: 1px solid var(--border-default);
+        border: 1px solid var(--border);
         background: var(--accent, #0a84ff);
         color: #fff;
         font-size: 13px;
         cursor: pointer;
+      }
+      .pactions button.secondary {
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-weight: 600;
+      }
+      .pactions button.secondary:hover:not(:disabled) {
+        background: var(--bg-tertiary);
       }
       .pactions button.ghost,
       .edit-actions button.ghost {
@@ -650,7 +748,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         padding: 0;
       }
       tr.editrow > td {
-        background: var(--surface-raised);
+        background: var(--bg-secondary);
       }
       .edit {
         display: flex;
@@ -673,7 +771,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       }
 
       .chains {
-        border: 1px solid color-mix(in srgb, #ff9500 35%, var(--border-default));
+        border: 1px solid color-mix(in srgb, #ff9500 35%, var(--border));
         border-radius: 12px;
         padding: var(--space-4);
         margin-bottom: var(--space-4);
@@ -693,9 +791,21 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         color: var(--text-secondary);
       }
 
+      .table-summary {
+        margin: 0 0 var(--space-2);
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+      .table-summary b {
+        color: var(--text-primary);
+        font-weight: 600;
+      }
       /* Wide content scrolls inside its own container so the page never scrolls sideways. */
       .table-wrap {
         overflow-x: auto;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
       }
       table.mtg {
         width: 100%;
@@ -704,15 +814,24 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       }
       table.mtg th,
       table.mtg td {
-        padding: 8px 10px;
-        border-bottom: 1px solid var(--border-subtle);
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
         text-align: left;
         white-space: nowrap;
       }
       table.mtg th {
+        background: var(--bg-tertiary);
         font-weight: 600;
         color: var(--text-secondary);
-        font-size: 12px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      table.mtg tbody tr:nth-child(even):not(.active):not(.editrow) {
+        background: color-mix(in srgb, var(--bg-tertiary) 45%, transparent);
+      }
+      table.mtg tbody tr:last-child td {
+        border-bottom: none;
       }
       .n {
         text-align: right;
@@ -724,18 +843,24 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       .sym {
         font-weight: 600;
       }
+      .ladder-cell {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
       tr.active {
         background: color-mix(in srgb, #34c759 8%, transparent);
+      }
+      td.inherit {
+        color: var(--text-tertiary);
       }
       .danger {
         color: #ff3b30;
         font-weight: 700;
       }
-      .inert {
-        margin-left: 6px;
-        font-size: 10px;
-        text-transform: uppercase;
+      .warn {
         color: #b25000;
+        font-weight: 600;
       }
       .chain {
         color: #b25000;
@@ -758,10 +883,18 @@ export class MartingalePageComponent {
   readonly error = signal<string | null>(null);
 
   readonly openChains = computed(() => (this.view()?.symbols ?? []).filter((s) => s.hasOpenChain));
+  readonly enabledCount = computed(
+    () => (this.view()?.symbols ?? []).filter((s) => s.effectivelyActive).length,
+  );
+  readonly overrideCount = computed(
+    () => (this.view()?.symbols ?? []).filter((s) => this.hasOverrides(s)).length,
+  );
 
   readonly savingProfile = signal(false);
   readonly savingMode = signal(false);
   readonly editing = signal<string | null>(null);
+  /** See the @for track comment in the template — forces switch re-creation. */
+  readonly rowRev = signal(0);
 
   readonly modes: MartingaleMode[] = ['Off', 'Shadow', 'Live'];
 
@@ -836,6 +969,7 @@ export class MartingalePageComponent {
       next: (v) => {
         this.view.set(v);
         this.resetProfileForm();
+        this.rowRev.update((n) => n + 1);
         this.loading.set(false);
       },
       error: (e: { message?: string }) => {
@@ -1073,7 +1207,11 @@ export class MartingalePageComponent {
           `${symbol.worstCaseDrawdownPct.toFixed(1)}% of equity.\n\n` +
           `Reason (required):`,
       );
-      if (!reason || !reason.trim()) return;
+      if (!reason || !reason.trim()) {
+        // Prompt dismissed: the switch already flipped itself on; snap it back.
+        this.rowRev.update((n) => n + 1);
+        return;
+      }
     }
 
     this.saving.set(true);

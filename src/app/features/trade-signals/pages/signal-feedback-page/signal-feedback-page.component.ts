@@ -9,7 +9,7 @@ import {
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { catchError, map, of } from 'rxjs';
+import { map } from 'rxjs';
 
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import type { TradeSignalDto } from '@core/api/api.types';
@@ -231,18 +231,16 @@ interface AnomalyFlag {
             format="number"
             dotColor="#0071E3"
           />
-          <app-metric-card
-            label="Last exit (min ago)"
-            [value]="lastExitMinutes()"
-            format="number"
-            dotColor="#AF52DE"
-          />
+          <div class="tile tile--text">
+            <span class="tile-label">Last exit</span>
+            <span class="tile-value">{{ lastExitLabel() }}</span>
+          </div>
         </div>
 
         @if (filteredRows().length === 0) {
           <app-empty-state
             title="No signal exits in this window"
-            message="Either no signals were rejected or expired in the chosen window, or the active filters exclude everything. Widen the window via the presets above or clear filters."
+            description="Either no signals were rejected or expired in the chosen window, or the active filters exclude everything. Widen the window via the presets above or clear filters."
           />
         } @else {
           <!-- Insights row — histogram + notable patterns + breakdowns -->
@@ -484,6 +482,35 @@ interface AnomalyFlag {
   `,
   styles: [
     `
+      /* Header actions were \`.btn btn-secondary\` with no matching rule on
+         this page, so they rendered as bare text links. */
+      .btn {
+        height: 36px;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-full);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        font-family: inherit;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-2);
+        text-decoration: none;
+        border: none;
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .btn-secondary {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+      }
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -559,13 +586,35 @@ interface AnomalyFlag {
       /* ── KPI strip ── */
       .kpi-strip {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: var(--space-2);
+        align-items: start;
       }
-      @media (max-width: 1400px) {
-        .kpi-strip {
-          grid-template-columns: repeat(4, 1fr);
-        }
+      /* Text-valued tile matching app-metric-card's chrome, for values that
+         are labels ("3 min ago" / "—") rather than numbers. */
+      .tile--text {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        min-height: 100%;
+      }
+      .tile-label {
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        font-weight: var(--font-medium);
+        line-height: 1.3;
+        min-height: 2.6em;
+      }
+      .tile-value {
+        font-size: var(--text-2xl);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        line-height: 1.2;
+        font-variant-numeric: tabular-nums;
       }
       @media (max-width: 720px) {
         .kpi-strip {
@@ -962,8 +1011,10 @@ export class SignalFeedbackPageComponent {
           filter: { ...statusFilter, from: since },
         })
         .pipe(
-          map((res) => res.data?.data ?? []),
-          catchError(() => of<TradeSignalDto[]>([])),
+          map((res) => {
+            if (!res.status) throw new Error(res.message ?? 'trade-signal/list returned an error');
+            return res.data?.data ?? [];
+          }),
         );
     },
     { intervalMs: 30_000 },
@@ -1019,14 +1070,23 @@ export class SignalFeedbackPageComponent {
     () => new Set(this.filteredRows().map((r) => r.symbol ?? '—')).size,
   );
 
-  protected readonly lastExitMinutes = computed(() => {
+  /**
+   * "Last exit" as a relative label rather than a numeric tile: a numeric
+   * tile had to show 0 for "no exits", which reads as "an exit just now".
+   */
+  protected readonly lastExitLabel = computed(() => {
     const rows = this.filteredRows();
-    if (rows.length === 0) return 0;
+    if (rows.length === 0) return '—';
     const latest = rows.reduce(
       (max, r) => (r.generatedAt > max ? r.generatedAt : max),
       rows[0].generatedAt,
     );
-    return Math.floor((Date.now() - new Date(latest).getTime()) / 60_000);
+    const mins = Math.floor((Date.now() - new Date(latest).getTime()) / 60_000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} min ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 48) return `${hrs} h ago`;
+    return `${Math.floor(hrs / 24)} d ago`;
   });
 
   protected readonly sourceBuckets = computed<KvBucket[]>(() =>

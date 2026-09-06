@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { catchError, finalize, map, of } from 'rxjs';
+import { finalize, map } from 'rxjs';
 
 import { AutoTuneService } from '@core/services/auto-tune.service';
 import { AuditTrailService } from '@core/services/audit-trail.service';
@@ -49,9 +49,6 @@ interface EditForm {
         subtitle="Per-knob safety gates for autonomous proposal application. Operator-only."
       >
         <a routerLink="/auto-tune" class="btn btn-secondary">← Proposals</a>
-        <button type="button" class="btn btn-primary" (click)="openEditor(null)">
-          + New config
-        </button>
         <button
           type="button"
           class="btn btn-secondary"
@@ -60,45 +57,53 @@ interface EditForm {
         >
           Refresh
         </button>
+        <!-- The empty state carries its own "New config" CTA; two buttons for one action is noise. -->
+        @if (configs().length > 0) {
+          <button type="button" class="btn btn-primary" (click)="openEditor(null)">
+            New config
+          </button>
+        }
       </app-page-header>
+
+      <!-- Tiles stay mounted through errors and read "-" rather than a fabricated 0. -->
+      <section class="kpis">
+        <app-metric-card label="Configs" [value]="tileCount('all')" format="number" />
+        <app-metric-card
+          label="Auto-apply enabled"
+          [value]="tileCount('enabled')"
+          format="number"
+          [dotColor]="(tileCount('enabled') ?? 0) > 0 ? '#FF9500' : undefined"
+        />
+        <app-metric-card label="Review-only" [value]="tileCount('disabled')" format="number" />
+      </section>
 
       @if (loading()) {
         <app-card-skeleton [lines]="6" />
-      } @else if (resource.error()) {
-        <app-error-state
-          title="Could not load auto-apply configs"
-          message="Engine returned an error fetching the per-knob safety-gate configs."
-          (retry)="resource.refresh()"
-        />
-      } @else {
-        <section class="kpis">
-          <app-metric-card
-            label="Configs"
-            [value]="configs().length"
-            format="number"
-            dotColor="#0071E3"
-          />
-          <app-metric-card
-            label="Auto-apply enabled"
-            [value]="enabledCount()"
-            format="number"
-            [dotColor]="enabledCount() > 0 ? '#FF9500' : '#34C759'"
-          />
-          <app-metric-card
-            label="Review-only"
-            [value]="disabledCount()"
-            format="number"
-            dotColor="#34C759"
+      } @else if (listFailed()) {
+        <section class="card">
+          <app-error-state
+            title="Could not load auto-apply configs"
+            [message]="errorMessage()"
+            (retry)="resource.refresh()"
           />
         </section>
+      } @else {
+        @if (resource.error()) {
+          <p class="stale-banner" role="status">
+            Last refresh failed — showing the previous result.
+            <button type="button" class="link" (click)="resource.refresh()">Retry</button>
+          </p>
+        }
 
         @if (configs().length === 0) {
-          <app-empty-state
-            title="No per-knob configs"
-            description="Without configs, all auto-tune proposals require operator review. Add a config to enable autonomous application for a specific knob."
-            actionLabel="Add config"
-            (actionClick)="openEditor(null)"
-          />
+          <section class="card">
+            <app-empty-state
+              title="No per-knob configs"
+              description="Without configs, all auto-tune proposals require operator review. Add a config to enable autonomous application for a specific knob."
+              actionLabel="New config"
+              (actionClick)="openEditor(null)"
+            />
+          </section>
         } @else {
           <section class="card">
             <table class="configs-table">
@@ -112,7 +117,7 @@ interface EditForm {
                   <th class="num">Min</th>
                   <th class="num">Max</th>
                   <th>Last updated</th>
-                  <th></th>
+                  <th class="actions-head">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -143,7 +148,10 @@ interface EditForm {
                         <span class="muted">—</span>
                       }
                     </td>
-                    <td class="time" [title]="c.lastUpdatedAt | date: 'yyyy-MM-dd HH:mm:ss UTC'">
+                    <td
+                      class="time"
+                      [title]="(c.lastUpdatedAt | date: 'yyyy-MM-dd HH:mm:ss' : 'UTC') + ' UTC'"
+                    >
                       {{ c.lastUpdatedAt | relativeTime }}
                     </td>
                     <td class="actions">
@@ -291,8 +299,26 @@ interface EditForm {
       }
       .kpis {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 720px) {
+        .kpis {
+          grid-template-columns: 1fr;
+        }
+      }
+      .stale-banner {
+        margin: 0;
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-sm);
+        border: 1px solid rgba(255, 149, 0, 0.35);
+        background: rgba(255, 149, 0, 0.08);
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        display: flex;
+        gap: var(--space-2);
+        align-items: center;
       }
       .card {
         background: var(--bg-secondary);
@@ -325,6 +351,9 @@ interface EditForm {
       .configs-table th.num {
         text-align: right;
         font-variant-numeric: tabular-nums;
+      }
+      .configs-table th.actions-head {
+        text-align: right;
       }
       .configs-table tr.enabled {
         background: rgba(255, 149, 0, 0.04);
@@ -362,6 +391,7 @@ interface EditForm {
       .actions {
         display: flex;
         gap: 8px;
+        justify-content: flex-end;
         white-space: nowrap;
       }
       .link {
@@ -383,29 +413,45 @@ interface EditForm {
       .link:hover:not(:disabled) {
         text-decoration: underline;
       }
-      .btn-primary {
-        padding: 8px 18px;
+      /* Same button vocabulary as the proposals page: outlined secondary for navigation and
+         Refresh, one filled accent for the page's primary action, filled red only to destroy. */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        height: 32px;
+        padding: 0 14px;
         border-radius: var(--radius-sm);
-        background: var(--accent);
-        color: #fff;
         font-size: var(--text-sm);
         font-weight: var(--font-medium);
-        border: none;
         cursor: pointer;
+        text-decoration: none;
+        line-height: 1;
+      }
+      .btn-secondary {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        color: var(--text-primary);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+      }
+      .btn-secondary:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+        border: none;
       }
       .btn-primary:disabled {
         background: var(--bg-tertiary, #d1d1d6);
         cursor: not-allowed;
       }
       .btn-danger {
-        padding: 8px 18px;
-        border-radius: var(--radius-sm);
-        background: #d70015;
+        background: var(--loss);
         color: #fff;
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
         border: none;
-        cursor: pointer;
       }
       .btn-danger:disabled {
         opacity: 0.55;
@@ -425,6 +471,8 @@ interface EditForm {
         box-shadow: var(--shadow-lg);
         max-width: 560px;
         width: 90%;
+        max-height: 90vh;
+        overflow: auto;
         padding: var(--space-5);
         display: flex;
         flex-direction: column;
@@ -432,6 +480,13 @@ interface EditForm {
       }
       .modal.small {
         max-width: 440px;
+      }
+      .modal-foot {
+        position: sticky;
+        bottom: calc(-1 * var(--space-5));
+        margin-bottom: calc(-1 * var(--space-5));
+        padding: var(--space-3) 0 var(--space-5);
+        background: var(--bg-primary);
       }
       .modal-head {
         display: flex;
@@ -513,25 +568,40 @@ export class AutoApplyConfigPageComponent {
   private readonly autoTune = inject(AutoTuneService);
   private readonly auditTrail = inject(AuditTrailService);
 
+  /**
+   * Errors are left to the polled resource on purpose: swallowing them into `[]` rendered a
+   * failed fetch as "No per-knob configs", which reads as "every knob is review-only" when in
+   * fact nothing is known.
+   */
   protected readonly resource = createPolledResource(
-    () =>
-      this.autoTune.listAutoApplyConfigs().pipe(
-        map((res) => res.data ?? []),
-        catchError(() => of<AutoApplyConfigDto[]>([])),
-      ),
+    () => this.autoTune.listAutoApplyConfigs().pipe(map((res) => res.data ?? [])),
     { intervalMs: 120_000 },
   );
 
   protected readonly configs = computed(() => this.resource.value() ?? []);
   protected readonly loading = computed(
-    () => this.resource.loading() && this.configs().length === 0,
+    () => this.resource.loading() && this.resource.value() === null,
   );
-  protected readonly enabledCount = computed(
-    () => this.configs().filter((c) => c.autoApplyEnabled).length,
+  /** True only when the list has never loaded — a later poll failure keeps the last result. */
+  protected readonly listFailed = computed(
+    () => this.resource.error() !== null && this.resource.value() === null,
   );
-  protected readonly disabledCount = computed(
-    () => this.configs().filter((c) => !c.autoApplyEnabled).length,
-  );
+  protected readonly errorMessage = computed(() => {
+    const err = this.resource.error() as { status?: number; error?: { message?: string } } | null;
+    const detail = err?.error?.message ?? (err?.status ? `HTTP ${err.status}` : null);
+    return (
+      (detail ? `${detail}. ` : '') +
+      'The engine could not return the per-knob safety-gate configs.'
+    );
+  });
+
+  /** Null (rendered "-") until the list has loaded at least once. */
+  protected tileCount(which: 'all' | 'enabled' | 'disabled'): number | null {
+    const xs = this.resource.value();
+    if (xs === null) return null;
+    if (which === 'all') return xs.length;
+    return xs.filter((c) => c.autoApplyEnabled === (which === 'enabled')).length;
+  }
 
   // Edit modal -------------------------------------------------------------
   protected readonly editing = signal<boolean>(false);

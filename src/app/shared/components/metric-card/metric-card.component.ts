@@ -119,12 +119,38 @@ export class MetricCardComponent {
   dotColor = input<string>();
   colorByValue = input(false);
 
-  isPositive = computed(() => this.colorByValue() && (this.value() ?? 0) > 0);
-  isNegative = computed(() => this.colorByValue() && (this.value() ?? 0) < 0);
+  /**
+   * For metrics where a POSITIVE number is the bad direction — drawdown, loss streaks, error
+   * rates. With `colorByValue` alone a 7.62% drawdown painted itself green, which reads as good
+   * news on a number that had just moved the account into Reduced recovery.
+   */
+  invertColor = input(false);
+
+  /**
+   * Literal text to show instead of the formatted number: "∞" for a profit
+   * factor with no losing trades, "n/a" for a ratio whose denominator is
+   * zero, "—" for a value the API never returned. Without it those cards
+   * rendered a bare "-" or a sentinel like 9,999 as if it were measured.
+   * Colour-by-value still follows `value` so a literal can keep its tone.
+   */
+  displayValue = input<string | null>(null);
+
+  isPositive = computed(() => {
+    if (!this.colorByValue()) return false;
+    const v = this.value() ?? 0;
+    return this.invertColor() ? v < 0 : v > 0;
+  });
+  isNegative = computed(() => {
+    if (!this.colorByValue()) return false;
+    const v = this.value() ?? 0;
+    return this.invertColor() ? v > 0 : v < 0;
+  });
 
   formattedValue = computed(() => {
+    const literal = this.displayValue();
+    if (literal != null) return literal;
     const v = this.value();
-    if (v == null) return '-';
+    if (v == null) return '—';
     switch (this.format()) {
       case 'currency':
         return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v);

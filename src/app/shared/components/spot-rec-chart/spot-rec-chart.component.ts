@@ -102,8 +102,8 @@ export interface SpotRecChartMarker {
             ▾
           </button>
         }
-        <span class="legend-item legend-item--asof">
-          <span class="dot dot--asof"></span> asOfUtc bar
+        <span class="legend-item legend-item--asof" title="The bar the analysis was run on (UTC)">
+          <span class="dot dot--asof"></span> Analysis bar (UTC)
         </span>
         @if (windowTruncated()) {
           <span
@@ -755,6 +755,10 @@ export class SpotRecChartComponent {
             xAxis: signalIdx,
             itemStyle: { color: 'rgba(31, 138, 61, 0.14)' },
             name: 'TP zone',
+            // Anchor at the zone's left edge (the signal bar): the right
+            // edge is where the entry/TP/SL price pills and the outcome
+            // marker sit, and the zone names printed over them.
+            label: { position: 'insideTopLeft', distance: 6 },
           },
           { yAxis: rec.takeProfit, xAxis: lastIdx },
         ]);
@@ -773,6 +777,7 @@ export class SpotRecChartComponent {
             xAxis: signalIdx,
             itemStyle: { color: 'rgba(196, 41, 10, 0.14)' },
             name: 'SL zone',
+            label: { position: 'insideBottomLeft', distance: 6 },
           },
           { yAxis: rec.stopLoss, xAxis: lastIdx },
         ]);

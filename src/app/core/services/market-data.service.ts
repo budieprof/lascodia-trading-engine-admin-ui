@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { ApiService } from '@core/api/api.service';
+import { ApiService, type ApiCallOptions } from '@core/api/api.service';
 import {
   ResponseData,
   PagedData,
@@ -51,8 +51,16 @@ export class MarketDataService {
     );
   }
 
-  listCandles(params: PagerRequest): Observable<ResponseData<PagedData<CandleDto>>> {
-    return this.api.post(`/market-data/candle/list`, params);
+  /**
+   * @param opts `silent: true` when the caller renders its own error state
+   *   (the watchlist's per-tile "Failed to load — retry"), so the global
+   *   interceptor does not also toast every failure.
+   */
+  listCandles(
+    params: PagerRequest,
+    opts?: ApiCallOptions,
+  ): Observable<ResponseData<PagedData<CandleDto>>> {
+    return this.api.post(`/market-data/candle/list`, params, opts);
   }
 
   getCandleCoverage(

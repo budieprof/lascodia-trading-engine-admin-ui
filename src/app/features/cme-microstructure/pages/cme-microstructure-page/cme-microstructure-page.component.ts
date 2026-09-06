@@ -31,15 +31,23 @@ interface ChartPanel {
   title: string;
   caption: string;
   zeroY: number;
+  yMaxLabel: string;
+  yMinLabel: string;
   bars: ChartBar[];
-  xLabels: { key: string; text: string }[];
+  xLabels: { key: string; text: string; title: string }[];
+}
+
+/** A run in the history table, with identical consecutive re-runs folded into it. */
+interface RunGroup {
+  run: CmeExperimentRunDto;
+  count: number;
+  ids: number[];
 }
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
-import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { CmeHistoricAnalyticsComponent } from '@features/cme-microstructure/components/cme-historic-analytics.component';
 import { CmeExperimentTradesComponent } from '@features/cme-microstructure/components/cme-experiment-trades.component';
@@ -65,7 +73,6 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
     MetricCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
-    EmptyStateComponent,
     RelativeTimePipe,
     CmeHistoricAnalyticsComponent,
     CmeExperimentTradesComponent,
@@ -90,36 +97,21 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
           (retry)="load()"
         />
       } @else if (status(); as s) {
+        <!-- Hot-tier counts. No status dots: these are inventory numbers, not health signals —
+             a zero here is expected after a bulk import (see the warm-tier callout). -->
         <section class="kpis">
+          <app-metric-card label="Contracts seeded" [value]="s.contractCount" format="number" />
           <app-metric-card
-            label="Contracts seeded"
-            [value]="s.contractCount"
-            format="number"
-            [dotColor]="s.contractCount > 0 ? '#34C759' : '#FF9500'"
-          />
-          <app-metric-card
-            label="Trades ingested"
+            label="Trades ingested (hot tier)"
             [value]="s.tradeCount"
             format="number"
-            [dotColor]="s.tradeCount > 0 ? '#34C759' : '#8E8E93'"
           />
-          <app-metric-card
-            label="Book snapshots"
-            [value]="s.bookSnapshotCount"
-            format="number"
-            dotColor="#0071E3"
-          />
-          <app-metric-card
-            label="Derived bars"
-            [value]="s.barCount"
-            format="number"
-            dotColor="#8b5cf6"
-          />
+          <app-metric-card label="Book snapshots" [value]="s.bookSnapshotCount" format="number" />
+          <app-metric-card label="Derived bars" [value]="s.barCount" format="number" />
           <app-metric-card
             label="Shadow would-haves"
             [value]="s.shadowSignalCount"
             format="number"
-            dotColor="#FF9500"
           />
         </section>
 
@@ -206,7 +198,7 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
                           {{ m.requiresRealFlow ? 'Yes' : 'No' }}
                         </span>
                       </td>
-                      <td>{{ m.trainedAt ? (m.trainedAt | date: 'short') : '—' }}</td>
+                      <td>{{ m.trainedAt ? (m.trainedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}</td>
                     </tr>
                   }
                 </tbody>
@@ -223,7 +215,8 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
         @if (status()?.warmTier?.sessionCount) {
           <section class="banner" data-tone="info">
             <strong
-              >Warm tier holds {{ status()!.warmTier.sessionCount }} imported session(s).</strong
+              >Warm tier holds {{ status()!.warmTier.sessionCount }} imported
+              {{ status()!.warmTier.sessionCount === 1 ? 'session' : 'sessions' }}.</strong
             >
             {{ status()!.warmTier.contracts.join(', ') }} ·
             {{ status()!.warmTier.earliestSession }} → {{ status()!.warmTier.latestSession }}. Raw
@@ -254,10 +247,22 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
           </header>
 
           <div class="toolbar">
-            <input class="input sm" placeholder="Root (6E)" [(ngModel)]="seedRoot" />
-            <input class="input sm" placeholder="Spot (EURUSD)" [(ngModel)]="seedSpot" />
-            <input class="input sm" type="date" [(ngModel)]="seedFrom" />
-            <input class="input sm" type="date" [(ngModel)]="seedTo" />
+            <label class="field">
+              <span>Root</span>
+              <input class="input sm" placeholder="6E" [(ngModel)]="seedRoot" />
+            </label>
+            <label class="field">
+              <span>Spot symbol</span>
+              <input class="input sm" placeholder="EURUSD" [(ngModel)]="seedSpot" />
+            </label>
+            <label class="field">
+              <span>From</span>
+              <input class="input sm" type="date" [(ngModel)]="seedFrom" />
+            </label>
+            <label class="field">
+              <span>To</span>
+              <input class="input sm" type="date" [(ngModel)]="seedTo" />
+            </label>
             <button
               type="button"
               class="btn btn-primary"
@@ -278,10 +283,10 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
           </div>
 
           @if (s.contracts.length === 0) {
-            <app-empty-state
-              title="No contracts seeded"
-              description="Seed a root → spot mapping (e.g. 6E → EURUSD) so the futures→spot resolver has a chain to resolve."
-            />
+            <p class="empty-line">
+              No contracts seeded — seed a root → spot mapping (e.g. 6E → EURUSD) so the
+              futures→spot resolver has a chain to resolve.
+            </p>
           } @else {
             <div class="table-wrap">
               <table>
@@ -292,7 +297,11 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
                     <th>Expiry</th>
                     <th>Roll</th>
                     <th class="num">Back-adjust</th>
-                    <th>Ingested through</th>
+                    <th
+                      title="Newest trade in the hot tables only. Bulk-imported sessions live in the Parquet warm tier and do not advance this column."
+                    >
+                      Hot tier ingested through
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -309,17 +318,36 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
                       <td>{{ c.rollDate ? (c.rollDate | date: 'yyyy-MM-dd') : '—' }}</td>
                       <td class="num">{{ c.priceAdjustment | number: '1.0-5' }}</td>
                       <td>
-                        {{
-                          c.lastTradeEventTimestamp
-                            ? (c.lastTradeEventTimestamp | relativeTime)
-                            : '—'
-                        }}
+                        @if (c.lastTradeEventTimestamp) {
+                          <span
+                            [title]="
+                              (c.lastTradeEventTimestamp | date: 'yyyy-MM-dd HH:mm' : 'UTC') +
+                              ' UTC'
+                            "
+                            >{{ c.lastTradeEventTimestamp | relativeTime }}</span
+                          >
+                        } @else if (inWarmTier(c.contractCode)) {
+                          <span
+                            class="muted"
+                            title="Not in the hot tables; see the warm-tier callout above"
+                          >
+                            warm tier only
+                          </span>
+                        } @else {
+                          <span class="muted">nothing ingested</span>
+                        }
                       </td>
                     </tr>
                   }
                 </tbody>
               </table>
             </div>
+            @if (status()?.warmTier?.sessionCount) {
+              <p class="muted small footnote">
+                The warm tier is not broken down per contract by the status endpoint — use
+                “Downloaded historic slice” below for per-contract session spans.
+              </p>
+            }
           }
         </section>
 
@@ -334,10 +362,22 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
           </header>
 
           <div class="toolbar">
-            <input class="input sm" placeholder="Contract (6EU5)" [(ngModel)]="expContract" />
-            <input class="input sm" type="date" [(ngModel)]="expFrom" />
-            <input class="input sm" type="date" [(ngModel)]="expTo" />
-            <input class="input xs" type="number" min="1" max="50" [(ngModel)]="expFolds" />
+            <label class="field">
+              <span>Contract</span>
+              <input class="input sm" placeholder="6EU5" [(ngModel)]="expContract" />
+            </label>
+            <label class="field">
+              <span>From</span>
+              <input class="input sm" type="date" [(ngModel)]="expFrom" />
+            </label>
+            <label class="field">
+              <span>To</span>
+              <input class="input sm" type="date" [(ngModel)]="expTo" />
+            </label>
+            <label class="field">
+              <span>OOS folds</span>
+              <input class="input xs" type="number" min="1" max="50" [(ngModel)]="expFolds" />
+            </label>
             <button
               type="button"
               class="btn btn-primary"
@@ -360,7 +400,7 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
               <div class="verdict" [attr.data-good]="verdictIsClean(x)">
                 <div class="verdict-headline">{{ verdictHeadline(x) }}</div>
                 <div class="verdict-sub muted small">
-                  OOS net-PnL delta {{ x.oosNetPnlDelta | number: '1.2-2' }} · PF delta
+                  OOS net-PnL delta {{ x.oosNetPnlDelta | number: '1.2-2' }} USD · PF delta
                   {{ x.oosProfitFactorDelta | number: '1.2-2' }} ·
                   {{ x.fractionFoldsRealBeatsProxy * 100 | number: '1.0-0' }}% of
                   {{ x.foldsScored }} sessions · {{ x.eventsLoaded | number }} events
@@ -406,7 +446,7 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
                   <thead>
                     <tr>
                       <th>Arm</th>
-                      <th class="num">Net PnL</th>
+                      <th class="num">Net PnL (USD)</th>
                       <th class="num">Profit factor</th>
                       <th class="num">Trades</th>
                       <th class="num">Win rate</th>
@@ -422,7 +462,7 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
                         </td>
                         <td class="num">{{ arm.netPnl | number: '1.2-2' }}</td>
                         <td class="num">{{ arm.profitFactor | number: '1.2-2' }}</td>
-                        <td class="num">{{ arm.tradeCount }}</td>
+                        <td class="num">{{ arm.tradeCount | number }}</td>
                         <td class="num">{{ arm.winRate * 100 | number: '1.0-1' }}%</td>
                       </tr>
                     }
@@ -449,9 +489,10 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
           <header class="card-head">
             <h3>Verdict history</h3>
             <span class="muted small">
-              Every recorded run, newest first. A verdict that exists only in one HTTP response
-              can't be revisited or compared — and a decision that gates real money should be
-              auditable long after the run.
+              Every recorded run, newest first in the table; the charts read left-to-right in run
+              order and share the run numbers. Identical consecutive re-runs are collapsed with a ×N
+              badge. A verdict that exists only in one HTTP response can't be revisited or compared
+              — and a decision that gates real money should be auditable long after the run.
             </span>
           </header>
 
@@ -472,41 +513,51 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
                     <span class="muted small">{{ panel.caption }}</span>
                   </figcaption>
 
-                  <svg
-                    class="chart-svg"
-                    [attr.viewBox]="'0 0 ' + chartWidth + ' ' + chartHeight"
-                    role="img"
-                    [attr.aria-label]="panel.title + ' — real aggressor versus tick-rule proxy'"
-                    preserveAspectRatio="xMidYMid meet"
-                  >
-                    <!-- zero line: the reference that makes a loss legible as a loss -->
-                    <line
-                      class="axis-zero"
-                      [attr.x1]="0"
-                      [attr.x2]="chartWidth"
-                      [attr.y1]="panel.zeroY"
-                      [attr.y2]="panel.zeroY"
-                    />
+                  <!-- A labelled axis: max, zero and min in USD, so the bars are readable
+                       without hovering. Losses hang below the zero line by construction. -->
+                  <div class="plot">
+                    <div class="yaxis muted small" aria-hidden="true">
+                      <span class="ytick" [style.top.%]="0">{{ panel.yMaxLabel }}</span>
+                      <span class="ytick zero" [style.top.%]="(panel.zeroY / chartHeight) * 100">
+                        0
+                      </span>
+                      <span class="ytick" [style.top.%]="100">{{ panel.yMinLabel }}</span>
+                    </div>
+                    <svg
+                      class="chart-svg"
+                      [attr.viewBox]="'0 0 ' + chartWidth + ' ' + chartHeight"
+                      role="img"
+                      [attr.aria-label]="panel.title + ' — real aggressor versus tick-rule proxy'"
+                      preserveAspectRatio="none"
+                    >
+                      <!-- zero line: the reference that makes a loss legible as a loss -->
+                      <line
+                        class="axis-zero"
+                        [attr.x1]="0"
+                        [attr.x2]="chartWidth"
+                        [attr.y1]="panel.zeroY"
+                        [attr.y2]="panel.zeroY"
+                      />
 
-                    @for (bar of panel.bars; track bar.key) {
-                      <rect
-                        [attr.x]="bar.x"
-                        [attr.y]="bar.y"
-                        [attr.width]="bar.width"
-                        [attr.height]="bar.height"
-                        [attr.rx]="3"
-                        [attr.fill]="
-                          bar.series === 'real' ? 'var(--series-real)' : 'var(--series-proxy)'
-                        "
-                      >
-                        <title>{{ bar.tooltip }}</title>
-                      </rect>
-                    }
-                  </svg>
+                      @for (bar of panel.bars; track bar.key) {
+                        <rect
+                          [attr.x]="bar.x"
+                          [attr.y]="bar.y"
+                          [attr.width]="bar.width"
+                          [attr.height]="bar.height"
+                          [attr.fill]="
+                            bar.series === 'real' ? 'var(--series-real)' : 'var(--series-proxy)'
+                          "
+                        >
+                          <title>{{ bar.tooltip }}</title>
+                        </rect>
+                      }
+                    </svg>
+                  </div>
 
                   <div class="chart-xaxis">
                     @for (label of panel.xLabels; track label.key) {
-                      <span class="muted small">{{ label.text }}</span>
+                      <span class="muted small" [title]="label.title">{{ label.text }}</span>
                     }
                   </div>
                 </figure>
@@ -526,26 +577,44 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
               <table>
                 <thead>
                   <tr>
+                    <th class="num">#</th>
                     <th>Run</th>
                     <th>Window</th>
                     <th class="num">Sessions</th>
                     <th class="num">Real PF</th>
                     <th class="num">Proxy PF</th>
-                    <th class="num">Net Δ</th>
-                    <th class="num">Per-trade Δ</th>
+                    <th class="num">Net Δ (USD)</th>
+                    <th class="num">Per-trade Δ (USD)</th>
                     <th>Entry</th>
                     <th>Verdict</th>
                   </tr>
                 </thead>
                 <tbody>
-                  @for (r of runs(); track r.id) {
+                  @for (g of collapsedRuns(); track g.run.id) {
+                    @let r = g.run;
                     <tr>
+                      <td class="num">
+                        #{{ r.id }}
+                        @if (g.count > 1) {
+                          <span
+                            class="dup-badge"
+                            [title]="
+                              'Identical result recorded ' +
+                              g.count +
+                              ' times: runs ' +
+                              g.ids.join(', ')
+                            "
+                            >×{{ g.count }}</span
+                          >
+                        }
+                      </td>
                       <td>
-                        {{ r.createdAtUtc | date: 'MMM d, HH:mm' }}
+                        {{ r.createdAtUtc | date: 'yyyy-MM-dd HH:mm' : 'UTC' }}
                         <span class="muted small">· {{ r.contract }}</span>
                       </td>
                       <td class="muted small">
-                        {{ r.fromUtc | date: 'MMM d' }} – {{ r.toUtc | date: 'MMM d' }}
+                        {{ r.fromUtc | date: 'yyyy-MM-dd' : 'UTC' }} –
+                        {{ r.toUtc | date: 'yyyy-MM-dd' : 'UTC' }}
                       </td>
                       <td class="num">{{ r.foldsScored }}</td>
                       <td class="num">{{ r.realProfitFactor | number: '1.2-2' }}</td>
@@ -588,19 +657,22 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
         @if (runs().length > 0) {
           <section class="card">
             <div class="toolbar">
-              <label class="muted small" for="trade-run">Inspect run</label>
-              <select
-                id="trade-run"
-                class="input sm"
-                [ngModel]="tradeRunId()"
-                (ngModelChange)="tradeRunId.set(+$event)"
-              >
-                @for (r of runs(); track r.id) {
-                  <option [value]="r.id">
-                    #{{ r.id }} · {{ r.contract }} · {{ r.createdAtUtc | date: 'dd MMM HH:mm' }}
-                  </option>
-                }
-              </select>
+              <label class="field">
+                <span>Inspect run</span>
+                <select
+                  id="trade-run"
+                  class="input select-wide"
+                  [ngModel]="tradeRunId()"
+                  (ngModelChange)="tradeRunId.set(+$event)"
+                >
+                  @for (r of runs(); track r.id) {
+                    <option [value]="r.id">
+                      #{{ r.id }} · {{ r.contract }} ·
+                      {{ r.createdAtUtc | date: 'yyyy-MM-dd HH:mm' : 'UTC' }}
+                    </option>
+                  }
+                </select>
+              </label>
             </div>
             <app-cme-experiment-trades [runId]="tradeRunId()" />
           </section>
@@ -620,18 +692,21 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
           </header>
 
           <div class="toolbar">
-            <select class="input sm" [(ngModel)]="synthRegime">
-              <option value="NoEdge">NoEdge (null control)</option>
-              <option value="DeltaLeadsPrice">DeltaLeadsPrice (planted edge)</option>
-            </select>
-            <input
-              class="input xs"
-              type="number"
-              min="1"
-              [(ngModel)]="synthMinutes"
-              title="Minutes"
-            />
-            <input class="input xs" type="number" [(ngModel)]="synthSeed" title="Seed" />
+            <label class="field">
+              <span>Regime</span>
+              <select class="input select-wide" [(ngModel)]="synthRegime">
+                <option value="NoEdge">NoEdge (control)</option>
+                <option value="DeltaLeadsPrice">DeltaLeadsPrice (planted edge)</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Minutes</span>
+              <input class="input xs" type="number" min="1" [(ngModel)]="synthMinutes" />
+            </label>
+            <label class="field">
+              <span>Seed</span>
+              <input class="input md" type="number" [(ngModel)]="synthSeed" />
+            </label>
             <button
               type="button"
               class="btn btn-secondary"
@@ -655,10 +730,10 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
           </header>
 
           @if (s.recentShadowSignals.length === 0) {
-            <app-empty-state
-              title="No shadow signals yet"
-              description="The shadow monitor ships disabled (Microstructure:SignalEnabled=false) and needs live CME flow."
-            />
+            <p class="empty-line">
+              No shadow signals yet — the monitor ships disabled
+              (<code>Microstructure:SignalEnabled=false</code>) and needs live CME flow.
+            </p>
           } @else {
             <div class="table-wrap">
               <table>
@@ -767,9 +842,20 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
 
       .kpis {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 12px;
         margin-bottom: 16px;
+        align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .kpis {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 640px) {
+        .kpis {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
       .banner {
         background: var(--bg-secondary);
@@ -792,9 +878,12 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
         padding: 16px;
         margin-bottom: 16px;
       }
+      /* Children hug their content: as a stretched column the feed-health pill filled the
+         card width and read as a disabled progress bar. */
       .card-head {
         display: flex;
         flex-direction: column;
+        align-items: flex-start;
         gap: 4px;
         margin-bottom: 12px;
       }
@@ -806,9 +895,20 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
       .toolbar {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
-        align-items: center;
+        gap: 10px;
+        align-items: flex-end;
         margin-bottom: 12px;
+      }
+      /* Every input carries a visible label — "600" and "2026080" meant nothing bare. */
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .field > span {
+        font-size: 11px;
+        color: var(--text-secondary);
+        font-weight: var(--font-medium);
       }
       .input {
         height: 30px;
@@ -819,12 +919,44 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
         color: var(--text-primary);
         font-family: inherit;
         font-size: 12px;
+        font-variant-numeric: tabular-nums;
       }
       .input.sm {
         width: 140px;
       }
+      /* Eight-digit seeds (20260808) clipped to seven in the 70px box. */
+      .input.md {
+        width: 110px;
+      }
       .input.xs {
         width: 70px;
+      }
+      /* Room for "#5 · 6EU6 · 2026-08-13 14:02" and the chevron. */
+      select.input.select-wide {
+        min-width: 280px;
+        width: auto;
+        padding-right: 28px;
+      }
+      .empty-line {
+        margin: 0;
+        padding: 12px 0 4px;
+        color: var(--text-tertiary);
+        font-size: 12.5px;
+      }
+      .footnote {
+        margin: 8px 0 0;
+      }
+      .dup-badge {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 0 6px;
+        border-radius: 999px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        font-size: 10.5px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        cursor: help;
       }
       .table-wrap {
         overflow-x: auto;
@@ -970,9 +1102,28 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
         font-weight: 600;
         color: var(--text-primary);
       }
+      .plot {
+        display: grid;
+        grid-template-columns: 64px 1fr;
+        gap: 6px;
+      }
+      .yaxis {
+        position: relative;
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+      }
+      .ytick {
+        position: absolute;
+        right: 0;
+        transform: translateY(-50%);
+        white-space: nowrap;
+      }
+      .ytick.zero {
+        color: var(--text-secondary);
+      }
       .chart-svg {
         width: 100%;
-        height: auto;
+        height: 120px;
         display: block;
         overflow: visible;
       }
@@ -985,6 +1136,7 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
         display: flex;
         justify-content: space-around;
         margin-top: 2px;
+        margin-left: 70px;
         font-variant-numeric: tabular-nums;
       }
 
@@ -1080,6 +1232,49 @@ export class CmeMicrostructurePageComponent {
 
   protected readonly hasData = computed(() => (this.status()?.tradeCount ?? 0) > 0);
 
+  /** Whether the warm tier lists this contract — the status endpoint has no per-contract span. */
+  protected inWarmTier(contractCode: string): boolean {
+    return (this.status()?.warmTier?.contracts ?? []).includes(contractCode);
+  }
+
+  /**
+   * Identical consecutive runs (same contract, window, folds and every reported number) are one
+   * result recorded N times, not N results. Folding them keeps the table and both charts honest
+   * about how much independent evidence exists.
+   */
+  protected readonly collapsedRuns = computed<RunGroup[]>(() => {
+    const groups: RunGroup[] = [];
+    for (const r of this.runs()) {
+      const last = groups[groups.length - 1];
+      if (last && this.sameResult(last.run, r)) {
+        last.count++;
+        last.ids.push(r.id);
+      } else {
+        groups.push({ run: r, count: 1, ids: [r.id] });
+      }
+    }
+    return groups;
+  });
+
+  private sameResult(a: CmeExperimentRunDto, b: CmeExperimentRunDto): boolean {
+    return (
+      a.contract === b.contract &&
+      a.fromUtc === b.fromUtc &&
+      a.toUtc === b.toUtc &&
+      a.ran === b.ran &&
+      a.reason === b.reason &&
+      a.foldsScored === b.foldsScored &&
+      a.eventsLoaded === b.eventsLoaded &&
+      a.passiveEntry === b.passiveEntry &&
+      a.realNetPnl === b.realNetPnl &&
+      a.proxyNetPnl === b.proxyNetPnl &&
+      a.realTradeCount === b.realTradeCount &&
+      a.proxyTradeCount === b.proxyTradeCount &&
+      a.realProfitFactor === b.realProfitFactor &&
+      a.proxyProfitFactor === b.proxyProfitFactor
+    );
+  }
+
   // ── Verdict interpretation ───────────────────────────────────────────────
   // These guard the single most misleading reading of this experiment: that a positive headline
   // delta means real flow carries edge. It can equally mean the real arm simply traded less.
@@ -1125,7 +1320,9 @@ export class CmeMicrostructurePageComponent {
    * matters: do the aggregate and per-trade views point the same way?
    */
   protected readonly chartPanels = computed<ChartPanel[]>(() => {
-    const scored = this.runs()
+    // Same collapsed list as the table, so a ×3 row is one group of bars, not three.
+    const scored = this.collapsedRuns()
+      .map((g) => g.run)
       .filter((r) => r.ran)
       .slice(0, 8)
       .reverse();
@@ -1134,7 +1331,7 @@ export class CmeMicrostructurePageComponent {
     return [
       this.buildPanel(
         'net',
-        'Net PnL by run',
+        'Net PnL by run (USD)',
         'Total across all scored sessions.',
         scored,
         (r) => r.realNetPnl,
@@ -1142,7 +1339,7 @@ export class CmeMicrostructurePageComponent {
       ),
       this.buildPanel(
         'perTrade',
-        'PnL per trade by run',
+        'PnL per trade by run (USD)',
         'Trade-count neutral — the comparison selectivity cannot flatter.',
         scored,
         (r) => r.realPnlPerTrade,
@@ -1192,18 +1389,27 @@ export class CmeMicrostructurePageComponent {
           y: Math.min(y, zeroY),
           // Always at least 1px so a near-zero value is visibly present rather than absent.
           height: Math.max(1, Math.abs(zeroY - y)),
-          tooltip: `${series === 'real' ? 'Real' : 'Proxy'} · ${title}: ${value.toFixed(2)} (${r.contract}, ${runs.length > 1 ? new Date(r.createdAtUtc).toLocaleDateString() : ''})`,
+          tooltip: `${series === 'real' ? 'Real' : 'Proxy'} · ${title}: ${value.toFixed(2)} USD (#${r.id}, ${r.contract}, ${r.createdAtUtc.slice(0, 10)})`,
         });
       });
     });
+
+    const usd = (v: number) =>
+      v.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 0 });
 
     return {
       key,
       title,
       caption,
       zeroY,
+      yMaxLabel: max > 0 ? `+${usd(max)}` : '0',
+      yMinLabel: min < 0 ? `−${usd(Math.abs(min))}` : '0',
       bars,
-      xLabels: runs.map((r) => ({ key: `${key}-x-${r.id}`, text: `#${r.id}` })),
+      xLabels: runs.map((r) => ({
+        key: `${key}-x-${r.id}`,
+        text: `#${r.id}`,
+        title: `Run #${r.id} · ${r.contract} · ${r.createdAtUtc.slice(0, 16).replace('T', ' ')} UTC`,
+      })),
     };
   }
 
@@ -1267,10 +1473,29 @@ export class CmeMicrostructurePageComponent {
           if (!this.expContract && res.data.frontMonthContract) {
             this.expContract = res.data.frontMonthContract;
           }
+          this.defaultExperimentWindow(res.data);
         }
       });
 
     this.loadRuns();
+  }
+
+  /** Set once; a background refresh must not overwrite dates the operator has typed. */
+  private expWindowDefaulted = false;
+
+  /**
+   * The experiment window defaults to the ingested data, ending on the newest imported session
+   * rather than today: a window that runs past the data silently scores nothing at its tail.
+   */
+  private defaultExperimentWindow(s: CmeStatusDto): void {
+    if (this.expWindowDefaulted) return;
+    const latest = toIsoDate(s.warmTier?.latestSession ?? s.latestBarUtc);
+    if (!latest) return;
+    const earliest = toIsoDate(s.warmTier?.earliestSession);
+    const ninetyBack = shiftIsoDate(latest, -90);
+    this.expTo = latest;
+    this.expFrom = earliest && earliest > ninetyBack ? earliest : ninetyBack;
+    this.expWindowDefaulted = true;
   }
 
   /**
@@ -1301,12 +1526,15 @@ export class CmeMicrostructurePageComponent {
         fromUtc: `${this.seedFrom}T00:00:00Z`,
         toUtc: `${this.seedTo}T00:00:00Z`,
       }),
-      (n) => `Seeded ${n} contract(s).`,
+      (n) => `Seeded ${n} ${n === 1 ? 'contract' : 'contracts'}.`,
     );
   }
 
   protected backAdjust(): void {
-    this.run(this.cme.backAdjust(this.seedRoot), (n) => `Back-adjusted ${n} contract(s).`);
+    this.run(
+      this.cme.backAdjust(this.seedRoot),
+      (n) => `Back-adjusted ${n} ${n === 1 ? 'contract' : 'contracts'}.`,
+    );
   }
 
   /** Populate the CME tables with synthetic tape/depth so the rest of this page can be exercised. */
@@ -1411,5 +1639,17 @@ export class CmeMicrostructurePageComponent {
 function isoDate(offsetDays: number): string {
   const d = new Date();
   d.setDate(d.getDate() + offsetDays);
+  return d.toISOString().slice(0, 10);
+}
+
+/** First ten characters of anything that starts like an ISO date, else null. */
+function toIsoDate(v: string | null | undefined): string | null {
+  if (!v) return null;
+  return /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null;
+}
+
+function shiftIsoDate(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }

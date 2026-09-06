@@ -300,12 +300,18 @@ export interface SlTpModifiedEvent {
         background: color-mix(in srgb, #000 55%, transparent);
         backdrop-filter: blur(2px);
       }
-      .modal {
+      /* Encapsulation is None (the ::backdrop rule needs it), so every rule
+         below is scoped under the dialog class. Unscoped ".modal-foot" /
+         ".btn" / ".dot" leaked into sibling components on the EA detail
+         page — the operator-controls dialog inherited this footer's
+         column layout and rendered its Cancel/Confirm pair stacked
+         full-width. */
+      .trade-chart-dialog .modal {
         display: flex;
         flex-direction: column;
         height: 100%;
       }
-      .modal-head {
+      .trade-chart-dialog .modal-head {
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
@@ -313,41 +319,41 @@ export interface SlTpModifiedEvent {
         padding: var(--space-4) var(--space-5);
         border-bottom: 1px solid var(--border);
       }
-      .head-left h2 {
+      .trade-chart-dialog .head-left h2 {
         margin: 0;
         font-size: var(--text-md);
         font-weight: var(--font-semibold);
       }
-      .modal-sub {
+      .trade-chart-dialog .modal-sub {
         margin: 4px 0 0;
         font-size: var(--text-xs);
         color: var(--text-secondary);
       }
-      .ref-label {
+      .trade-chart-dialog .ref-label {
         font-weight: var(--font-semibold);
         color: var(--text-primary);
       }
-      .modal-sub.latency {
+      .trade-chart-dialog .modal-sub.latency {
         margin-top: 2px;
         color: var(--text-tertiary);
       }
-      .modal-sub.latency strong {
+      .trade-chart-dialog .modal-sub.latency strong {
         color: var(--accent, #0071e3);
         font-variant-numeric: tabular-nums;
       }
-      .head-right {
+      .trade-chart-dialog .head-right {
         display: inline-flex;
         align-items: center;
         gap: var(--space-3);
       }
-      .tf-toolbar {
+      .trade-chart-dialog .tf-toolbar {
         display: inline-flex;
         gap: 2px;
         background: var(--bg-tertiary);
         padding: 3px;
         border-radius: var(--radius-sm);
       }
-      .tf-btn {
+      .trade-chart-dialog .tf-btn {
         padding: 4px 10px;
         background: transparent;
         border: none;
@@ -357,15 +363,15 @@ export interface SlTpModifiedEvent {
         cursor: pointer;
         border-radius: 4px;
       }
-      .tf-btn:hover {
+      .trade-chart-dialog .tf-btn:hover {
         color: var(--text-primary);
       }
-      .tf-btn--active {
+      .trade-chart-dialog .tf-btn--active {
         background: var(--bg-primary);
         color: var(--text-primary);
         box-shadow: var(--shadow-sm);
       }
-      .modal-close {
+      .trade-chart-dialog .modal-close {
         width: 32px;
         height: 32px;
         font-size: 22px;
@@ -376,11 +382,11 @@ export interface SlTpModifiedEvent {
         cursor: pointer;
         border-radius: var(--radius-sm);
       }
-      .modal-close:hover {
+      .trade-chart-dialog .modal-close:hover {
         background: var(--bg-tertiary);
         color: var(--text-primary);
       }
-      .modal-body {
+      .trade-chart-dialog .modal-body {
         flex: 1;
         padding: var(--space-4) var(--space-5);
         display: flex;
@@ -388,12 +394,12 @@ export interface SlTpModifiedEvent {
         gap: var(--space-3);
         min-height: 0;
       }
-      .chart-instance {
+      .trade-chart-dialog .chart-instance {
         flex: 1;
         min-height: 360px;
         height: 60vh;
       }
-      .chart-legend {
+      .trade-chart-dialog .chart-legend {
         display: flex;
         flex-wrap: wrap;
         gap: var(--space-4);
@@ -401,36 +407,36 @@ export interface SlTpModifiedEvent {
         font-size: var(--text-xs);
         color: var(--text-secondary);
       }
-      .legend-item {
+      .trade-chart-dialog .legend-item {
         display: inline-flex;
         align-items: center;
         gap: 6px;
       }
-      .dot {
+      .trade-chart-dialog .dot {
         width: 10px;
         height: 10px;
         border-radius: 50%;
         display: inline-block;
       }
-      .dot--entry {
+      .trade-chart-dialog .dot--entry {
         background: #000;
       }
-      .dot--sl {
+      .trade-chart-dialog .dot--sl {
         background: #c4290a;
       }
-      .dot--tp {
+      .trade-chart-dialog .dot--tp {
         background: #1f8a3d;
       }
-      .dot--now {
+      .trade-chart-dialog .dot--now {
         background: #0071e3;
       }
-      .dot--ask {
+      .trade-chart-dialog .dot--ask {
         background: #5ac8fa;
       }
-      .dot--exit {
+      .trade-chart-dialog .dot--exit {
         background: #5e5ce6;
       }
-      .status {
+      .trade-chart-dialog .status {
         flex: 1;
         display: flex;
         align-items: center;
@@ -438,27 +444,27 @@ export interface SlTpModifiedEvent {
         color: var(--text-secondary);
         min-height: 360px;
       }
-      .status.error {
+      .trade-chart-dialog .status.error {
         color: #c4290a;
       }
-      .modal-foot {
+      .trade-chart-dialog .modal-foot {
         padding: var(--space-3) var(--space-5) var(--space-4);
         border-top: 1px solid var(--border);
         display: flex;
         flex-direction: column;
         gap: var(--space-2);
       }
-      .action-desc {
+      .trade-chart-dialog .action-desc {
         margin: 0;
         font-size: var(--text-xs);
         color: var(--text-secondary);
       }
-      .action-row {
+      .trade-chart-dialog .action-row {
         display: flex;
         gap: var(--space-2);
         justify-content: flex-end;
       }
-      .btn {
+      .trade-chart-dialog .btn {
         height: 34px;
         padding: 0 16px;
         border-radius: var(--radius-sm);
@@ -467,26 +473,26 @@ export interface SlTpModifiedEvent {
         cursor: pointer;
         border: 1px solid transparent;
       }
-      .btn:disabled {
+      .trade-chart-dialog .btn:disabled {
         opacity: 0.55;
         cursor: not-allowed;
       }
-      .btn-secondary {
+      .trade-chart-dialog .btn-secondary {
         background: var(--bg-primary);
         border-color: var(--border);
         color: var(--text-primary);
       }
-      .btn-secondary:hover:not(:disabled) {
+      .trade-chart-dialog .btn-secondary:hover:not(:disabled) {
         background: var(--bg-tertiary);
       }
-      .btn-danger {
+      .trade-chart-dialog .btn-danger {
         background: #c4290a;
         color: #fff;
       }
-      .btn-danger:hover:not(:disabled) {
+      .trade-chart-dialog .btn-danger:hover:not(:disabled) {
         background: #a72207;
       }
-      .btn-danger--armed {
+      .trade-chart-dialog .btn-danger--armed {
         animation: ui-confirm-pulse 1.4s ease-in-out infinite;
       }
       @keyframes ui-confirm-pulse {

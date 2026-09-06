@@ -83,7 +83,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           } @else {
             <app-empty-state
               title="No performance history yet"
-              description="StrategyHealthWorker hasn't written any snapshots for this strategy."
+              description="Health snapshots are written every 60 s once the strategy is active and has trades to score."
             />
           }
         }
@@ -135,7 +135,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           } @else {
             <app-empty-state
               title="No capacity profile yet"
-              description="StrategyCapacityWorker hasn't profiled this strategy yet."
+              description="The capacity sweep runs periodically once the strategy has enough live evidence; nothing has been profiled for it so far."
             />
           }
         }
@@ -203,7 +203,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           } @else {
             <app-empty-state
               title="No variants for this strategy"
-              description="A/B variants are created via the variants admin tools (not yet exposed in the UI)."
+              description="Create A/B shadow variants from the Variants tab on the strategy detail page; they will appear here with their shadow results."
             />
           }
         }
@@ -709,12 +709,15 @@ export class StrategyAnalyticsPageComponent {
       width: 80,
       valueFormatter: (p: { value: number | null }) => (p.value != null ? `${p.value}` : '—'),
     },
+    // One pipe per metric, matching the backtest detail page: percentages
+    // carry their sign, ratios two decimals, the engine's 9999 "undefined
+    // ratio" sentinel reads as ∞ instead of a number.
     {
       field: 'winRate',
-      headerName: 'Win %',
-      width: 80,
+      headerName: 'Win rate',
+      width: 90,
       valueFormatter: (p: { value: number | null }) =>
-        p.value != null ? `${(p.value * 100).toFixed(1)}` : '—',
+        p.value != null ? `${(p.value * 100).toFixed(2)}%` : '—',
     },
     {
       field: 'sharpeRatio',
@@ -726,19 +729,22 @@ export class StrategyAnalyticsPageComponent {
       field: 'profitFactor',
       headerName: 'PF',
       width: 70,
-      valueFormatter: (p: { value: number | null }) => (p.value != null ? p.value.toFixed(2) : '—'),
+      valueFormatter: (p: { value: number | null }) =>
+        p.value == null ? '—' : p.value >= 9999 ? '∞' : p.value.toFixed(2),
     },
     {
       field: 'maxDrawdownPct',
-      headerName: 'Max DD %',
+      headerName: 'Max DD',
       width: 100,
-      valueFormatter: (p: { value: number | null }) => (p.value != null ? p.value.toFixed(1) : '—'),
+      valueFormatter: (p: { value: number | null }) =>
+        p.value != null ? `${p.value.toFixed(2)}%` : '—',
     },
     {
       field: 'totalReturn',
-      headerName: 'Return %',
+      headerName: 'Return',
       width: 100,
-      valueFormatter: (p: { value: number | null }) => (p.value != null ? p.value.toFixed(1) : '—'),
+      valueFormatter: (p: { value: number | null }) =>
+        p.value != null ? `${p.value > 0 ? '+' : ''}${p.value.toFixed(2)}%` : '—',
     },
     {
       field: 'completedAt',

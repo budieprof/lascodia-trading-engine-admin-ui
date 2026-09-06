@@ -56,12 +56,20 @@ import { NotificationBellComponent } from './notification-bell.component';
         @if (auth.user(); as user) {
           <div
             class="user-pill"
-            [attr.aria-label]="'Signed in as ' + user.firstName + ' ' + user.lastName"
+            [attr.aria-label]="
+              'Signed in as ' + (user.firstName || '') + ' ' + (user.lastName || '')
+            "
           >
+            <!--
+              Optional-chained: a session restored from an older token shape, or a user record
+              without a last name, threw "charAt of undefined" from the header on EVERY change
+              detection pass — which spammed the global error handler on every page.
+            -->
             <div class="user-avatar" aria-hidden="true">
-              {{ user.firstName.charAt(0) }}{{ user.lastName.charAt(0) }}
+              {{ (user.firstName || user.email || '?').charAt(0)
+              }}{{ (user.lastName || '').charAt(0) }}
             </div>
-            <span class="user-name">{{ user.firstName }}</span>
+            <span class="user-name">{{ user.firstName || user.email }}</span>
           </div>
         }
         <button

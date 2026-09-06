@@ -32,6 +32,7 @@ import type {
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import {
   FormFieldComponent,
   FormFieldControlDirective,
@@ -46,6 +47,7 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
     PageHeaderComponent,
     DataTableComponent,
     ChartCardComponent,
+    ErrorStateComponent,
     ReactiveFormsModule,
     FormFieldComponent,
     FormFieldControlDirective,
@@ -142,15 +144,31 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
         </form>
       }
 
-      <!-- 8-card KPI strip — fleet-wide walk-forward posture -->
+      @if (sampleFailed()) {
+        <app-error-state
+          title="Could not load walk-forward analytics"
+          message="The walk-forward list endpoint returned an error — the tiles and charts below are unknown, not zero."
+          (retry)="loadAnalyticsSample()"
+        />
+      }
+      @if (wfStats().wipedOut > 0) {
+        <p class="wiped-note">
+          {{ wfStats().wipedOut }} run{{ wfStats().wipedOut === 1 ? '' : 's' }} with a corrupt OOS
+          Sharpe (not a finite number, or beyond ±100) are excluded from the OOS averages, best
+          scores and histogram below. They still count toward run totals.
+        </p>
+      }
+      <!-- KPI strip — fleet-wide walk-forward posture -->
       <div class="wf-kpis">
         <div class="wf-kpi">
           <span class="kpi-label">Total runs</span>
-          <span class="kpi-value">{{ wfStats().total }}</span>
+          <span class="kpi-value">{{ sampleFailed() ? '—' : wfStats().total }}</span>
         </div>
         <div class="wf-kpi">
           <span class="kpi-label">Completed</span>
-          <span class="kpi-value good">{{ wfStats().completed }}</span>
+          <span class="kpi-value" [class.good]="wfStats().completed > 0">{{
+            sampleFailed() ? '—' : wfStats().completed
+          }}</span>
         </div>
         <div class="wf-kpi">
           <span class="kpi-label">Failed</span>
@@ -163,15 +181,25 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
           </span>
         </div>
         <div class="wf-kpi">
-          <span class="kpi-label">Avg OOS score</span>
-          <span class="kpi-value">
-            {{ wfStats().avgOos !== null ? (wfStats().avgOos! * 100).toFixed(1) + '%' : '—' }}
+          <span class="kpi-label" title="Mean out-of-sample Sharpe ratio across each run's windows"
+            >Avg OOS Sharpe</span
+          >
+          <span
+            class="kpi-value"
+            [class.good]="wfStats().avgOos !== null && wfStats().avgOos! > 0"
+            [class.bad]="wfStats().avgOos !== null && wfStats().avgOos! < 0"
+          >
+            {{ sharpe(wfStats().avgOos) }}
           </span>
         </div>
         <div class="wf-kpi">
-          <span class="kpi-label">Best OOS</span>
-          <span class="kpi-value good">
-            {{ wfStats().bestOos !== null ? (wfStats().bestOos! * 100).toFixed(1) + '%' : '—' }}
+          <span class="kpi-label">Best OOS Sharpe</span>
+          <span
+            class="kpi-value"
+            [class.good]="wfStats().bestOos !== null && wfStats().bestOos! > 0"
+            [class.bad]="wfStats().bestOos !== null && wfStats().bestOos! < 0"
+          >
+            {{ sharpe(wfStats().bestOos) }}
           </span>
         </div>
         <div class="wf-kpi">
@@ -199,8 +227,8 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
           height="240px"
         />
         <app-chart-card
-          title="OOS score distribution"
-          subtitle="Histogram of avg out-of-sample scores"
+          title="OOS Sharpe distribution"
+          subtitle="Completed runs · mean out-of-sample Sharpe, bins from −10 to +5, outliers pooled at the edges"
           [options]="oosHistogramOptions()"
           height="240px"
         />
@@ -217,7 +245,7 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
         <section class="wf-board">
           <header class="wf-board-head">
             <h3>Top performers</h3>
-            <span class="muted">Highest avg OOS score across completed runs</span>
+            <span class="muted">Highest mean OOS Sharpe across completed runs</span>
           </header>
           @if (topOos().length > 0) {
             <table class="wf-board-table">
@@ -227,7 +255,7 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
                   <th>Strategy</th>
                   <th>Symbol</th>
                   <th>TF</th>
-                  <th class="num">Avg OOS</th>
+                  <th class="num">Avg OOS Sharpe</th>
                   <th class="num">Consistency</th>
                   <th class="num">IS / OOS</th>
                 </tr>
@@ -239,12 +267,12 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
                     <td class="mono">#{{ r.strategyId }}</td>
                     <td class="mono">{{ r.symbol }}</td>
                     <td class="mono">{{ r.timeframe }}</td>
-                    <td class="num mono profit">
-                      {{
-                        r.averageOutOfSampleScore !== null
-                          ? (r.averageOutOfSampleScore * 100).toFixed(1) + '%'
-                          : '—'
-                      }}
+                    <td
+                      class="num mono"
+                      [class.profit]="(r.averageOutOfSampleScore ?? 0) > 0"
+                      [class.loss]="(r.averageOutOfSampleScore ?? 0) < 0"
+                    >
+                      {{ sharpe(r.averageOutOfSampleScore) }}
                     </td>
                     <td class="num mono">
                       {{ r.scoreConsistency !== null ? r.scoreConsistency.toFixed(3) : '—' }}
@@ -270,7 +298,7 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
             </span>
           </header>
           @if (perStrategyBreakdown().length > 0) {
-            <div class="wf-scroll">
+            <div class="wf-scroll wf-scroll-x">
               <table class="wf-board-table sticky-head">
                 <thead>
                   <tr>
@@ -278,8 +306,8 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
                     <th class="num">Runs</th>
                     <th class="num">Completed</th>
                     <th class="num">Failed</th>
-                    <th class="num">Avg OOS</th>
-                    <th class="num">Best OOS</th>
+                    <th class="num">Avg OOS Sharpe</th>
+                    <th class="num">Best OOS Sharpe</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -287,13 +315,30 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
                     <tr>
                       <td class="mono">#{{ row.strategyId }}</td>
                       <td class="num mono">{{ row.runs }}</td>
-                      <td class="num mono profit">{{ row.completed }}</td>
-                      <td class="num mono" [class.bad]="row.failed > 0">{{ row.failed }}</td>
-                      <td class="num mono">
-                        {{ row.avgOos !== null ? (row.avgOos * 100).toFixed(1) + '%' : '—' }}
+                      <td class="num mono" [class.profit]="row.completed > 0">
+                        {{ row.completed }}
                       </td>
-                      <td class="num mono profit">
-                        {{ row.bestOos !== null ? (row.bestOos * 100).toFixed(1) + '%' : '—' }}
+                      <td class="num mono" [class.bad]="row.failed > 0">{{ row.failed }}</td>
+                      <td
+                        class="num mono"
+                        [class.profit]="(row.avgOos ?? 0) > 0"
+                        [class.loss]="(row.avgOos ?? 0) < 0"
+                      >
+                        {{ sharpe(row.avgOos) }}
+                      </td>
+                      <td
+                        class="num mono"
+                        [class.profit]="(row.bestOos ?? 0) > 0"
+                        [class.loss]="(row.bestOos ?? 0) < 0"
+                      >
+                        {{ sharpe(row.bestOos) }}
+                        @if (row.wipedOut > 0) {
+                          <span
+                            class="wiped-pill"
+                            title="Runs whose OOS Sharpe is not a real number (non-finite or beyond ±100), excluded from the averages"
+                            >{{ row.wipedOut }} corrupt</span
+                          >
+                        }
                       </td>
                     </tr>
                   }
@@ -441,13 +486,33 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
       /* Walk-Forward density additions */
       .wf-kpis {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: var(--space-2);
+        align-items: start;
       }
-      @media (max-width: 1400px) {
-        .wf-kpis {
-          grid-template-columns: repeat(4, 1fr);
-        }
+      .wiped-note {
+        margin: 0;
+        padding: var(--space-2) var(--space-3);
+        border: 1px solid rgba(255, 149, 0, 0.35);
+        border-left: 3px solid var(--warning);
+        border-radius: var(--radius-sm);
+        background: rgba(255, 149, 0, 0.08);
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .wiped-pill {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 1px 6px;
+        border-radius: var(--radius-full);
+        background: rgba(255, 149, 0, 0.15);
+        color: var(--warning);
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        font-family: inherit;
+      }
+      .wf-scroll-x {
+        overflow-x: auto;
       }
       @media (max-width: 720px) {
         .wf-kpis {
@@ -555,6 +620,7 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
         font-weight: var(--font-semibold);
         text-transform: uppercase;
         letter-spacing: 0.04em;
+        white-space: nowrap;
       }
       .wf-board-table th.num,
       .wf-board-table td.num {
@@ -611,6 +677,8 @@ export class WalkForwardPageComponent implements OnInit {
   // Analytics sample — probe-and-fetch capped at 5000.
   readonly wfSample = signal<WalkForwardRunDto[]>([]);
 
+  readonly sampleFailed = signal(false);
+
   wfStats = computed(() => {
     const all = this.wfSample();
     if (all.length === 0) {
@@ -618,6 +686,7 @@ export class WalkForwardPageComponent implements OnInit {
         total: 0,
         completed: 0,
         failed: 0,
+        wipedOut: 0,
         avgOos: null as number | null,
         bestOos: null as number | null,
         avgConsistency: null as number | null,
@@ -627,6 +696,7 @@ export class WalkForwardPageComponent implements OnInit {
     }
     let completed = 0;
     let failed = 0;
+    let wipedOut = 0;
     let oosSum = 0;
     let oosCount = 0;
     let bestOos = -Infinity;
@@ -638,12 +708,13 @@ export class WalkForwardPageComponent implements OnInit {
       const status = String(r.status);
       if (status === 'Completed') completed++;
       else if (status === 'Failed') failed++;
-      if (r.averageOutOfSampleScore != null) {
-        oosSum += r.averageOutOfSampleScore;
+      if (isWipedOut(r)) wipedOut++;
+      if (hasUsableScore(r)) {
+        oosSum += r.averageOutOfSampleScore!;
         oosCount++;
-        if (r.averageOutOfSampleScore > bestOos) bestOos = r.averageOutOfSampleScore;
+        if (r.averageOutOfSampleScore! > bestOos) bestOos = r.averageOutOfSampleScore!;
       }
-      if (r.scoreConsistency != null) {
+      if (r.scoreConsistency != null && hasUsableScore(r)) {
         consSum += r.scoreConsistency;
         consCount++;
       }
@@ -654,6 +725,7 @@ export class WalkForwardPageComponent implements OnInit {
       total: all.length,
       completed,
       failed,
+      wipedOut,
       avgOos: oosCount > 0 ? +(oosSum / oosCount).toFixed(4) : null,
       bestOos: bestOos === -Infinity ? null : +bestOos.toFixed(4),
       avgConsistency: consCount > 0 ? +(consSum / consCount).toFixed(3) : null,
@@ -695,53 +767,60 @@ export class WalkForwardPageComponent implements OnInit {
   });
 
   oosHistogramOptions = computed<EChartsOption>(() => {
+    // Completed runs only (a failed run's score is whatever the engine
+    // wrote before it died). The score is a mean out-of-sample SHARPE, not
+    // a percentage: fixed bins from −10 to +5 so one −18 outlier cannot
+    // stretch the axis into a single bar; anything beyond the range pools
+    // into the edge buckets.
     const scores = this.wfSample()
-      .filter((r) => r.averageOutOfSampleScore != null)
-      .map((r) => (r.averageOutOfSampleScore ?? 0) * 100);
-    if (scores.length === 0) return {};
-    const min = Math.min(...scores);
-    const max = Math.max(...scores);
-    if (max === min) {
+      .filter((r) => hasUsableScore(r))
+      .map((r) => r.averageOutOfSampleScore ?? 0);
+    if (scores.length === 0) {
       return {
-        grid: { top: 10, right: 20, bottom: 30, left: 40 },
-        xAxis: { type: 'category', data: [`${min.toFixed(0)}%`] },
-        yAxis: { type: 'value' },
-        series: [
-          {
-            type: 'bar',
-            data: [{ value: scores.length, itemStyle: { color: '#0071E3' } }],
-            barWidth: '40%',
-          },
-        ],
+        title: {
+          text: 'No completed runs with an OOS score',
+          left: 'center',
+          top: 'center',
+          textStyle: { fontSize: 12, color: '#8E8E93' },
+        },
       };
     }
-    const bins = 12;
-    const width = (max - min) / bins;
-    const counts = new Array(bins).fill(0);
-    const labels: string[] = [];
-    for (let i = 0; i < bins; i++) labels.push(`${(min + i * width).toFixed(0)}%`);
+    const lo = -10;
+    const hi = 5;
+    const step = 1;
+    const inner = (hi - lo) / step; // 15 bins
+    const labels: string[] = [`< ${lo}`];
+    for (let i = 0; i < inner; i++) labels.push(`${lo + i * step}`);
+    labels.push(`> ${hi}`);
+    const counts = new Array(labels.length).fill(0);
     for (const v of scores) {
-      const idx = Math.min(Math.floor((v - min) / width), bins - 1);
-      counts[idx]++;
+      if (v < lo) counts[0]++;
+      else if (v >= hi) counts[counts.length - 1]++;
+      else counts[1 + Math.floor((v - lo) / step)]++;
     }
     return {
+      tooltip: { trigger: 'axis' },
       grid: { top: 10, right: 20, bottom: 30, left: 40 },
       xAxis: {
         type: 'category',
         data: labels,
-        axisLabel: { fontSize: 9, color: '#6E6E73', rotate: 35 },
+        axisLabel: { fontSize: 10, color: '#6E6E73', hideOverlap: true },
       },
       yAxis: {
         type: 'value',
+        minInterval: 1,
         axisLabel: { fontSize: 10, color: '#6E6E73' },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
       series: [
         {
           type: 'bar',
-          data: counts.map((c) => ({
+          data: counts.map((c, i) => ({
             value: c,
-            itemStyle: { color: '#0071E3', borderRadius: [4, 4, 0, 0] },
+            itemStyle: {
+              color: i === 0 ? '#FF3B30' : labels[i].startsWith('-') ? '#FF9500' : '#0071E3',
+              borderRadius: [4, 4, 0, 0],
+            },
           })),
           barWidth: '80%',
         },
@@ -789,7 +868,7 @@ export class WalkForwardPageComponent implements OnInit {
 
   topOos = computed(() =>
     [...this.wfSample()]
-      .filter((r) => r.averageOutOfSampleScore != null)
+      .filter((r) => hasUsableScore(r))
       .sort((a, b) => (b.averageOutOfSampleScore ?? 0) - (a.averageOutOfSampleScore ?? 0))
       .slice(0, 8),
   );
@@ -802,6 +881,7 @@ export class WalkForwardPageComponent implements OnInit {
       failed: number;
       avgOos: number | null;
       bestOos: number | null;
+      wipedOut: number;
       _oosSum: number;
       _oosCount: number;
     };
@@ -815,6 +895,7 @@ export class WalkForwardPageComponent implements OnInit {
           failed: 0,
           avgOos: null,
           bestOos: null,
+          wipedOut: 0,
           _oosSum: 0,
           _oosCount: 0,
         };
@@ -823,11 +904,12 @@ export class WalkForwardPageComponent implements OnInit {
       const status = String(r.status);
       if (status === 'Completed') g.completed++;
       else if (status === 'Failed') g.failed++;
-      if (r.averageOutOfSampleScore != null) {
-        g._oosSum += r.averageOutOfSampleScore;
+      if (isWipedOut(r)) g.wipedOut++;
+      if (hasUsableScore(r)) {
+        g._oosSum += r.averageOutOfSampleScore!;
         g._oosCount++;
-        if (g.bestOos == null || r.averageOutOfSampleScore > g.bestOos)
-          g.bestOos = r.averageOutOfSampleScore;
+        if (g.bestOos == null || r.averageOutOfSampleScore! > g.bestOos)
+          g.bestOos = r.averageOutOfSampleScore!;
       }
     }
     return Object.values(groups)
@@ -919,9 +1001,14 @@ export class WalkForwardPageComponent implements OnInit {
     this.loadAnalyticsSample();
   }
 
-  private loadAnalyticsSample(): void {
+  protected loadAnalyticsSample(): void {
+    this.sampleFailed.set(false);
     this.service.list({ currentPage: 1, itemCountPerPage: 1, filter: null }).subscribe({
       next: (probe) => {
+        if (!probe?.status) {
+          this.sampleFailed.set(true);
+          return;
+        }
         const total = probe?.data?.pager?.totalItemCount ?? 0;
         if (total === 0) {
           this.wfSample.set([]);
@@ -930,9 +1017,14 @@ export class WalkForwardPageComponent implements OnInit {
         this.service
           .list({ currentPage: 1, itemCountPerPage: Math.min(total, 5000), filter: null })
           .subscribe({
-            next: (full) => this.wfSample.set(full?.data?.data ?? []),
+            next: (full) => {
+              this.sampleFailed.set(!full?.status);
+              this.wfSample.set(full?.data?.data ?? []);
+            },
+            error: () => this.sampleFailed.set(true),
           });
       },
+      error: () => this.sampleFailed.set(true),
     });
   }
 
@@ -973,6 +1065,34 @@ export class WalkForwardPageComponent implements OnInit {
   goToDetail(row: WalkForwardRunDto): void {
     if (row?.id != null) this.router.navigate(['/walk-forward', row.id]);
   }
+
+  /** "+1.23" / "−1.23" / "—" — the OOS score is a Sharpe ratio, not a percentage. */
+  sharpe(value: number | null | undefined): string {
+    if (value == null || !Number.isFinite(value)) return '—';
+    return `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
+  }
+}
+
+/**
+ * The engine's "average out-of-sample score" is the mean OOS Sharpe ratio
+ * across a run's windows (WalkForwardWorker: OosHealthScore =
+ * oosResult.SharpeRatio). A Sharpe of −18 is a bad strategy, not a broken
+ * run; only a non-finite value or an absurd magnitude (beyond ±100) marks
+ * the score corrupt. Same exclusion rule the backtests page applies: such
+ * runs stay in the counts but never enter an average, a "best" or a histogram.
+ */
+function isWipedOut(r: WalkForwardRunDto): boolean {
+  const s = r.averageOutOfSampleScore;
+  return s != null && (!Number.isFinite(s) || Math.abs(s) > 100);
+}
+
+function hasUsableScore(r: WalkForwardRunDto): boolean {
+  return (
+    String(r.status) === 'Completed' &&
+    r.averageOutOfSampleScore != null &&
+    Number.isFinite(r.averageOutOfSampleScore) &&
+    !isWipedOut(r)
+  );
 }
 
 function emptyPager() {

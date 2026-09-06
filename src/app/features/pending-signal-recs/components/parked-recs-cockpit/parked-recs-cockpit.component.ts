@@ -58,15 +58,27 @@ interface AuditEntry {
           }
         </span>
       </div>
+      <!-- One control, one state word: the switch itself shows the current
+           setting; the caption names the action so "Off" next to an unchecked
+           box labelled "Disabled" can no longer read as two different things. -->
       <label class="conv-switch" [class.busy]="conversionSaving()">
+        <span class="conv-switch-label">Conversion</span>
         <input
           type="checkbox"
+          role="switch"
           [checked]="conversionEnabled() === true"
+          [attr.aria-checked]="conversionEnabled() === true"
           [disabled]="conversionEnabled() === null || conversionSaving()"
           (change)="setConversion($any($event.target).checked)"
         />
-        <span>{{
-          conversionSaving() ? 'Saving…' : conversionEnabled() ? 'Enabled' : 'Disabled'
+        <span class="conv-state" [class.on]="conversionEnabled() === true">{{
+          conversionSaving()
+            ? 'Saving…'
+            : conversionEnabled() === null
+              ? '—'
+              : conversionEnabled()
+                ? 'On'
+                : 'Off'
         }}</span>
       </label>
     </div>
@@ -232,7 +244,9 @@ interface AuditEntry {
                   {{ r.takeProfit === null ? '—' : (r.takeProfit | number: '1.0-5') }}
                 </td>
                 <td class="num">{{ r.atrAtGeneration | number: '1.0-5' }}</td>
-                <td class="num">{{ r.confidence | number: '1.2-2' }}</td>
+                <!-- Same unit as the "Avg confidence" tile (percent), so a
+                     0.58 row and a 61.37% tile no longer look like two scales. -->
+                <td class="num">{{ r.confidence * 100 | number: '1.0-0' }}%</td>
                 <td>
                   <span class="state state-{{ r.state.toLowerCase() }}">{{ r.state }}</span>
                 </td>
@@ -575,10 +589,55 @@ interface AuditEntry {
         cursor: pointer;
         user-select: none;
       }
+      .conv-switch-label {
+        font-size: var(--text-xs, 12px);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      /* Native checkbox restyled as a pill switch so the control reads as
+         On/Off at a glance instead of "checkbox + adjective". */
       .conv-switch input {
-        width: 16px;
-        height: 16px;
-        accent-color: var(--accent);
+        appearance: none;
+        width: 34px;
+        height: 20px;
+        margin: 0;
+        border-radius: var(--radius-full, 999px);
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border);
+        position: relative;
+        cursor: pointer;
+        transition: background 120ms ease;
+      }
+      .conv-switch input::after {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--bg-primary);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+        transition: transform 120ms ease;
+      }
+      .conv-switch input:checked {
+        background: var(--profit);
+        border-color: var(--profit);
+      }
+      .conv-switch input:checked::after {
+        transform: translateX(14px);
+      }
+      .conv-switch input:disabled {
+        cursor: not-allowed;
+      }
+      .conv-state {
+        min-width: 2.2em;
+        font-weight: var(--font-semibold, 600);
+        color: var(--text-secondary);
+      }
+      .conv-state.on {
+        color: var(--profit);
       }
       .conv-switch.busy {
         opacity: 0.6;

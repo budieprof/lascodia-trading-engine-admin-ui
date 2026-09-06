@@ -8,12 +8,12 @@ import {
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
-import { catchError, map, of } from 'rxjs';
+import { map } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { NotificationsFeedService } from '@core/services/notifications-feed.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
-import type { NotificationFeedItem, NotificationFeedResult } from '@core/api/api.types';
+import type { NotificationFeedItem } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { NotificationService } from '@core/notifications/notification.service';
@@ -972,8 +972,17 @@ export class NotificationBellComponent {
           limit: NotificationBellComponent.LIST_CAP,
         })
         .pipe(
-          map((res) => res.data ?? null),
-          catchError(() => of<NotificationFeedResult | null>(null)),
+          // The engine answers a missing user context with HTTP 200 and a
+          // `status:false` envelope ("User context not available").  Swallowing
+          // that into `null` rendered "No recent notifications" while the
+          // Alerts page was full — the bell must show its error state instead,
+          // so the polled resource's `.error()` receives a real rejection.
+          map((res) => {
+            if (!res.status || !res.data) {
+              throw new Error(res.message || 'Notification feed unavailable');
+            }
+            return res.data;
+          }),
         ),
     { intervalMs: 30_000 },
   );

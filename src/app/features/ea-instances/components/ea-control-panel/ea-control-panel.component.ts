@@ -199,11 +199,6 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
                     <option value="D1">D1</option>
                   </select>
                 </label>
-                <p class="hint muted">
-                  Opens a new chart on the SAME MT5 terminal as this EA and attaches a sibling
-                  instance. The new instance registers with the engine independently. To override
-                  its config after attach, push a config update from the new instance's detail page.
-                </p>
               }
             }
 
@@ -400,6 +395,9 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
         margin: 0;
         font-size: var(--text-sm);
         color: var(--text-primary);
+        /* Descriptions carry paragraph breaks ("\\n\\n"); honour them
+           instead of collapsing three paragraphs into one run of text. */
+        white-space: pre-line;
       }
       .warning {
         margin: 0;
@@ -448,8 +446,17 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
       .mono {
         font-family: var(--font-mono);
       }
+      /* Stays visible while a long description scrolls: pulled out to the
+         dialog edges so its background covers the content passing under. */
       .modal-foot {
+        position: sticky;
+        bottom: calc(-1 * var(--space-5));
+        margin: var(--space-2) calc(-1 * var(--space-5)) calc(-1 * var(--space-5));
+        padding: var(--space-3) var(--space-5) var(--space-5);
+        background: var(--bg-primary);
+        border-top: 1px solid var(--border);
         display: flex;
+        flex-direction: row;
         justify-content: flex-end;
         gap: var(--space-3);
       }

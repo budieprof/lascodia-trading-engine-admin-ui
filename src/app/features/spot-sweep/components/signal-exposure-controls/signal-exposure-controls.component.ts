@@ -148,11 +148,14 @@ import type {
   `,
   styles: [
     `
+      /* Card + inputs on the app's surface tokens: the previous
+         var(--surface, #fff) fallback painted a white card on the dark page. */
       .card {
-        border: 1px solid var(--border-color, #e5e5ea);
-        border-radius: 12px;
-        padding: 1rem 1.15rem;
-        background: var(--surface, #fff);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md, 12px);
+        padding: var(--space-4, 1rem) var(--space-5, 1.15rem);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
       }
       .head h3 {
         margin: 0 0 0.2rem;
@@ -163,7 +166,7 @@ import type {
         max-width: 60ch;
       }
       .muted {
-        color: var(--text-muted, #8e8e93);
+        color: var(--text-secondary);
       }
       .small {
         font-size: 0.8rem;
@@ -205,8 +208,10 @@ import type {
       .num-input input {
         width: 5.5rem;
         padding: 0.35rem 0.5rem;
-        border: 1px solid var(--border-color, #e5e5ea);
-        border-radius: 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm, 8px);
+        background: var(--bg-primary);
+        color: var(--text-primary);
         text-align: right;
         font-variant-numeric: tabular-nums;
       }
@@ -221,17 +226,18 @@ import type {
         margin-top: 1rem;
       }
       .btn {
-        border: 1px solid var(--border-color, #e5e5ea);
+        border: 1px solid var(--border);
         background: transparent;
-        border-radius: 8px;
+        color: var(--text-primary);
+        border-radius: var(--radius-sm, 8px);
         padding: 0.4rem 0.9rem;
         cursor: pointer;
-        font-size: 0.9rem;
+        font-size: var(--text-sm, 0.9rem);
       }
       .btn-primary {
-        background: #0071e3;
+        background: var(--accent);
         color: #fff;
-        border-color: #0071e3;
+        border-color: var(--accent);
       }
       .btn:disabled {
         opacity: 0.5;

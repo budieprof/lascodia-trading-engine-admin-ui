@@ -15,8 +15,25 @@ import { catchError, map, of } from 'rxjs';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
-import { ProgressBarComponent } from '@shared/components/ui/progress-bar/progress-bar.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+
+/** Rows per page on the instance board. */
+const PAGE_SIZE = 25;
+
+/** Fallback liveness window when the fleet summary has not loaded yet. */
+const DEFAULT_STALE_MINUTES = 10;
+
+interface EaStats {
+  total: number;
+  active: number;
+  disconnected: number;
+  shuttingDown: number;
+  idleOverStale: number;
+  coordinatorsLive: number;
+  accounts: number;
+  versions: number;
+}
 
 /**
  * Phase-16: single-glance health page for the engine + fleet.
@@ -44,7 +61,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     FormsModule,
     PageHeaderComponent,
     CardSkeletonComponent,
-    ProgressBarComponent,
+    ErrorStateComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -53,44 +70,71 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         title="Fleet Health"
         subtitle="Engine + EA + daemon vitals — refreshes every 10 s."
       >
+        <!-- Inline so a refresh never shifts the layout; the old full-width bar reserved a 6px
+             grey track between the header and the tiles even when idle. -->
+        @if (loading() && !initialLoading()) {
+          <span class="refreshing" role="status">Refreshing…</span>
+        }
         <a class="btn-secondary" [href]="metricsHref()" target="_blank" rel="noopener"
           >Open /metrics ↗</a
         >
       </app-page-header>
-
-      <ui-progress-bar [active]="loading()" />
 
       @if (initialLoading()) {
         <app-card-skeleton [lines]="6" />
       } @else {
         <!-- ── Summary cards row ─────────────────────────────────── -->
         <section class="summary-grid">
-          @if (fleet(); as f) {
-            <article class="kpi-card" [attr.data-tone]="eaTone(f)">
+          <!--
+            Every number on this card is derived from the SAME instance list the table renders,
+            so the tile and the table can never disagree. The engine's fleet summary omitted the
+            ShuttingDown instances (51 vs 55) and counted coordinators whose last heartbeat was
+            months old; those numbers are kept off this card.
+          -->
+          @if (eaStats(); as s) {
+            <article class="kpi-card" [attr.data-tone]="eaTone(s)">
               <header class="kpi-head">
-                <h4>EAs</h4>
-                <span class="kpi-total">{{ f.eas.total }}</span>
+                <h4>EA instances</h4>
+                <span class="kpi-total">{{ s.total }}</span>
               </header>
               <div class="kpi-headline">
-                <span class="hl-value ok">{{ f.eas.active }}</span>
+                <span class="hl-value" [class.ok]="s.active > 0">{{ s.active }}</span>
                 <span class="hl-sep">/</span>
-                <span class="hl-total">{{ f.eas.total }}</span>
+                <span class="hl-total">{{ s.total }}</span>
                 <span class="hl-label">active</span>
               </div>
               <dl class="kpi-grid">
-                <dt>Idle &gt;10m</dt>
-                <dd [class.warn]="f.eas.idleOverStale > 0">{{ f.eas.idleOverStale }}</dd>
+                <dt>Idle &gt;{{ staleMinutes() }}m</dt>
+                <dd [class.warn]="s.idleOverStale > 0">{{ s.idleOverStale }}</dd>
                 <dt>Disconnected</dt>
-                <dd [class.bad]="f.eas.disconnected > 0">{{ f.eas.disconnected }}</dd>
-                <dt>Coordinators</dt>
-                <dd>{{ f.eas.coordinators }}</dd>
+                <dd [class.bad]="s.disconnected > 0">{{ s.disconnected }}</dd>
+                <dt>Shutting down</dt>
+                <dd [class.warn]="s.shuttingDown > 0">{{ s.shuttingDown }}</dd>
+                <dt title="Coordinator flag set AND heartbeat inside the liveness window">
+                  Coordinators (live)
+                </dt>
+                <dd>{{ s.coordinatorsLive }}</dd>
                 <dt>Accounts</dt>
-                <dd>{{ f.eas.distinctAccounts }}</dd>
+                <dd>{{ s.accounts }}</dd>
                 <dt>Versions</dt>
-                <dd>{{ f.eas.distinctVersions }}</dd>
+                <dd>{{ s.versions }}</dd>
               </dl>
             </article>
+          } @else {
+            <article class="kpi-card" data-tone="neutral">
+              <header class="kpi-head">
+                <h4>EA instances</h4>
+                <span class="kpi-total">—</span>
+              </header>
+              <div class="kpi-headline">
+                <span class="hl-value">—</span>
+                <span class="hl-label">not loaded</span>
+              </div>
+              <p class="empty-inline muted">Instance list unavailable — see the board below.</p>
+            </article>
+          }
 
+          @if (fleet(); as f) {
             <article class="kpi-card" [attr.data-tone]="f.daemons.offline ? 'bad' : 'ok'">
               <header class="kpi-head">
                 <h4>Daemons</h4>
@@ -110,20 +154,23 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
               </dl>
             </article>
 
-            <article class="kpi-card" data-tone="ok">
+            <!-- Zero running sessions is a fact, not good news: tone and value stay neutral. -->
+            <article class="kpi-card" [attr.data-tone]="f.sessions.running > 0 ? 'ok' : 'neutral'">
               <header class="kpi-head">
                 <h4>Sessions</h4>
                 <span class="kpi-total">{{ f.sessions.running + f.sessions.closed }}</span>
               </header>
               <div class="kpi-headline">
-                <span class="hl-value ok">{{ f.sessions.running }}</span>
+                <span class="hl-value" [class.ok]="f.sessions.running > 0">{{
+                  f.sessions.running
+                }}</span>
                 <span class="hl-sep">/</span>
                 <span class="hl-total">{{ f.sessions.running + f.sessions.closed }}</span>
                 <span class="hl-label">running</span>
               </div>
               <dl class="kpi-grid">
                 <dt>Running</dt>
-                <dd class="ok">{{ f.sessions.running }}</dd>
+                <dd [class.ok]="f.sessions.running > 0">{{ f.sessions.running }}</dd>
                 <dt>Closed</dt>
                 <dd class="muted">{{ f.sessions.closed }}</dd>
               </dl>
@@ -134,27 +181,33 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             <article class="kpi-card" [attr.data-tone]="dbTier(e.dbLatencyMs)">
               <header class="kpi-head">
                 <h4>Engine</h4>
-                <span class="kpi-total" [attr.data-tier]="dbTier(e.dbLatencyMs)">
-                  {{ e.dbLatencyMs | number: '1.0-0' }} ms
-                </span>
+                <span class="kpi-total">db latency</span>
               </header>
               <div class="kpi-headline">
                 <span class="hl-value" [attr.data-tier]="dbTier(e.dbLatencyMs)">{{
                   e.dbLatencyMs | number: '1.0-0'
                 }}</span>
-                <span class="hl-label">ms db latency</span>
+                <span class="hl-unit">ms</span>
+                <span class="hl-label">{{ dbTierLabel(e.dbLatencyMs) }}</span>
               </div>
               <dl class="kpi-grid">
                 <dt>Open positions</dt>
-                <dd>{{ e.openPositions }}</dd>
+                <dd>{{ e.openPositions | number }}</dd>
                 <dt>Working orders</dt>
-                <dd>{{ e.workingOrders }}</dd>
+                <dd>{{ e.workingOrders | number }}</dd>
                 <dt>Active accounts</dt>
-                <dd>{{ e.activeAccounts }}</dd>
+                <dd>{{ e.activeAccounts | number }}</dd>
                 <dt>Outbox pending</dt>
-                <dd [class.warn]="(e.outboxPending ?? 0) > 100">
-                  {{ e.outboxPending ?? '—' }}
-                </dd>
+                @if (e.outboxPending === null) {
+                  <dd
+                    class="muted"
+                    title="The engine did not report an outbox depth — the outbox table may not be enabled on this build."
+                  >
+                    n/a
+                  </dd>
+                } @else {
+                  <dd [class.warn]="e.outboxPending > 100">{{ e.outboxPending | number }}</dd>
+                }
               </dl>
             </article>
           }
@@ -187,7 +240,8 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
               <input
                 type="search"
                 class="filter-input"
-                placeholder="Search instance, account, version…"
+                placeholder="Search instances…"
+                title="Matches instance id, account id and EA version"
                 [ngModel]="searchTerm()"
                 (ngModelChange)="searchTerm.set($event)"
                 aria-label="Search EA instances"
@@ -195,12 +249,20 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             </div>
           </header>
 
-          @if (instances().length === 0) {
+          @if (instancesFailed()) {
+            <app-error-state
+              title="Could not load the EA instance list"
+              message="The engine did not return /admin/ea/fleet. The tiles above are read from the same call and stay blank until it succeeds."
+              (retry)="instancesResource.refresh()"
+            />
+          } @else if (instances().length === 0) {
             <p class="empty">No EA instances registered.</p>
           } @else if (filteredInstances().length === 0) {
             <p class="empty">No instances match the current filter.</p>
           } @else {
-            <div class="table-scroll table-scroll--events">
+            <!-- Paged rather than an internal scroll: the scroll surface hid rows 16-55 behind
+                 an invisible scrollbar while the header claimed "55 of 55". -->
+            <div class="table-scroll">
               <table class="board-table">
                 <thead>
                   <tr>
@@ -208,30 +270,58 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                     <th>Status</th>
                     <th>Version</th>
                     <th>Last heartbeat</th>
-                    <th class="ctr">Coord</th>
+                    <th
+                      class="ctr"
+                      title="Coordinator flag, shown only while the heartbeat is live"
+                    >
+                      Coord
+                    </th>
                     <th>Account</th>
                     <th class="row-actions"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  @for (i of filteredInstances(); track i.instanceId) {
+                  @for (i of pagedInstances(); track i.instanceId) {
                     <tr [attr.data-status]="i.status">
                       <td class="instance-cell">
                         <span class="mono trunc" [title]="i.instanceId">{{ i.instanceId }}</span>
                       </td>
                       <td>
-                        <span class="status-pill" [attr.data-status]="i.status">{{
-                          i.status
-                        }}</span>
+                        <span
+                          class="status-pill"
+                          [attr.data-status]="displayStatus(i).key"
+                          [title]="displayStatus(i).hint"
+                          >{{ displayStatus(i).label }}</span
+                        >
                       </td>
-                      <td class="mono">{{ i.eaVersion }}</td>
+                      <td class="mono">
+                        @if (isReleaseVersion(i.eaVersion)) {
+                          {{ i.eaVersion }}
+                        } @else {
+                          <span class="version-pill" title="Not a release build">
+                            {{ i.eaVersion || 'unknown' }}
+                          </span>
+                        }
+                      </td>
                       <td>
-                        <span [title]="i.lastHeartbeat | date: 'yyyy-MM-dd HH:mm:ss UTC'">
+                        <span
+                          [title]="(i.lastHeartbeat | date: 'yyyy-MM-dd HH:mm:ss' : 'UTC') + ' UTC'"
+                        >
                           {{ i.lastHeartbeat | relativeTime }}
                         </span>
                       </td>
-                      <td class="ctr">{{ i.isCoordinator ? '✓' : '' }}</td>
-                      <td>#{{ i.tradingAccountId }}</td>
+                      <td class="ctr">
+                        @if (i.isCoordinator && isLive(i)) {
+                          ✓
+                        } @else if (i.isCoordinator) {
+                          <span
+                            class="muted"
+                            title="Coordinator flag is set but the heartbeat is outside the liveness window"
+                            >stale</span
+                          >
+                        }
+                      </td>
+                      <td class="mono">#{{ i.tradingAccountId }}</td>
                       <td class="row-actions">
                         <button type="button" class="btn-link" (click)="expand(i.instanceId)">
                           @if (expanded() === i.instanceId) {
@@ -312,6 +402,32 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 </tbody>
               </table>
             </div>
+            @if (pageCount() > 1) {
+              <footer class="pager">
+                <span class="muted">
+                  {{ pageStart() + 1 }}–{{ pageEnd() }} of {{ filteredInstances().length }}
+                </span>
+                <div class="pager-controls">
+                  <button
+                    type="button"
+                    class="btn-secondary"
+                    [disabled]="page() === 0"
+                    (click)="page.set(page() - 1)"
+                  >
+                    Previous
+                  </button>
+                  <span class="muted">Page {{ page() + 1 }} of {{ pageCount() }}</span>
+                  <button
+                    type="button"
+                    class="btn-secondary"
+                    [disabled]="page() >= pageCount() - 1"
+                    (click)="page.set(page() + 1)"
+                  >
+                    Next
+                  </button>
+                </div>
+              </footer>
+            }
           }
         </section>
       }
@@ -319,21 +435,36 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
   `,
   styles: [
     `
+      /* Same body inset as every other route — the extra padding put the h1 16px right of
+         its siblings. */
       .page {
-        max-width: var(--page-max-width);
-        margin: 0 auto;
-        padding: var(--space-4);
+        padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
+      }
+      .refreshing {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        align-self: center;
       }
 
       /* ── Summary cards row ─────────────────────────────────────── */
       .summary-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: var(--space-3);
-        align-items: stretch;
+        align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .summary-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 600px) {
+        .summary-grid {
+          grid-template-columns: 1fr;
+        }
       }
       .kpi-card {
         display: flex;
@@ -360,6 +491,9 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       }
       .kpi-card[data-tone='slow'] {
         border-left-color: #c93631;
+      }
+      .kpi-card[data-tone='neutral'] {
+        border-left-color: var(--border);
       }
       .kpi-head {
         display: flex;
@@ -411,6 +545,11 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       .kpi-headline .hl-sep {
         color: var(--text-tertiary);
         font-size: 22px;
+      }
+      .kpi-headline .hl-unit {
+        color: var(--text-secondary);
+        font-size: 14px;
+        font-weight: var(--font-semibold);
       }
       .kpi-headline .hl-total {
         color: var(--text-secondary);
@@ -538,7 +677,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         font-size: 12px;
         padding: 5px 10px;
         border-radius: var(--radius-sm);
-        width: 220px;
+        width: 200px;
       }
       .filter-input:focus {
         outline: none;
@@ -546,10 +685,39 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       }
 
       .table-scroll {
-        overflow: auto;
+        overflow-x: auto;
       }
-      .table-scroll--events {
-        max-height: 560px;
+      .pager {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        padding: var(--space-2) var(--space-4);
+        border-top: 1px solid var(--border);
+        font-size: var(--text-xs);
+        font-variant-numeric: tabular-nums;
+      }
+      .pager-controls {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .pager .btn-secondary {
+        font-family: inherit;
+        cursor: pointer;
+      }
+      .pager .btn-secondary:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .version-pill {
+        display: inline-block;
+        padding: 1px 8px;
+        border-radius: var(--radius-full);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        background: color-mix(in srgb, #888 18%, transparent);
+        color: var(--text-secondary);
       }
       .board-table {
         width: 100%;
@@ -628,6 +796,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         background: color-mix(in srgb, #cb8a17 22%, transparent);
         color: #b07412;
       }
+      .status-pill[data-status='ShutdownStale'],
       .status-pill[data-status='Deregistered'] {
         background: color-mix(in srgb, #888 18%, transparent);
         color: var(--text-secondary);
@@ -680,6 +849,10 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       .small {
         font-size: 12px;
       }
+      .empty-inline {
+        margin: 0;
+        font-size: 12px;
+      }
       .empty {
         margin: 0;
         padding: var(--space-4);
@@ -725,18 +898,90 @@ export class FleetHealthPageComponent {
       ),
     { intervalMs: 10_000 },
   );
+  /**
+   * Not caught into `[]`: an empty list is "no EAs registered", and a failed call must not be
+   * allowed to say that.
+   */
   protected readonly instancesResource = createPolledResource(
-    () =>
-      this.eaAdmin.listFleet().pipe(
-        map((r) => r.data ?? []),
-        catchError(() => of<EAFleetItem[]>([])),
-      ),
+    () => this.eaAdmin.listFleet().pipe(map((r) => r.data ?? [])),
     { intervalMs: 10_000 },
   );
 
   protected readonly fleet = computed(() => this.fleetResource.value());
   protected readonly engine = computed(() => this.engineResource.value());
   protected readonly instances = computed(() => this.instancesResource.value() ?? []);
+  protected readonly instancesFailed = computed(
+    () => this.instancesResource.error() !== null && this.instancesResource.value() === null,
+  );
+
+  /** Liveness window, from the engine's fleet summary when available. */
+  protected readonly staleMinutes = computed(
+    () => this.fleet()?.staleThresholdMinutes ?? DEFAULT_STALE_MINUTES,
+  );
+
+  /** Heartbeat inside the liveness window — the only sense in which "coordinator" means anything. */
+  protected isLive(i: EAFleetItem): boolean {
+    const t = Date.parse(i.lastHeartbeat);
+    if (Number.isNaN(t)) return false;
+    return Date.now() - t <= this.staleMinutes() * 60_000;
+  }
+
+  /**
+   * One source of truth for the EA card: the same list the table renders. The engine's summary
+   * dropped ShuttingDown from its total and counted coordinators regardless of heartbeat age.
+   */
+  protected readonly eaStats = computed<EaStats | null>(() => {
+    if (this.instancesResource.value() === null) return null;
+    const xs = this.instances();
+    const accounts = new Set<number>();
+    const versions = new Set<string>();
+    let active = 0;
+    let disconnected = 0;
+    let shuttingDown = 0;
+    let idleOverStale = 0;
+    let coordinatorsLive = 0;
+    for (const i of xs) {
+      accounts.add(i.tradingAccountId);
+      versions.add(i.eaVersion ?? '');
+      const live = this.isLive(i);
+      if (i.status === 'Active') {
+        active++;
+        if (!live) idleOverStale++;
+      } else if (i.status === 'Disconnected') disconnected++;
+      else if (i.status === 'ShuttingDown') shuttingDown++;
+      if (i.isCoordinator && live) coordinatorsLive++;
+    }
+    return {
+      total: xs.length,
+      active,
+      disconnected,
+      shuttingDown,
+      idleOverStale,
+      coordinatorsLive,
+      accounts: accounts.size,
+      versions: versions.size,
+    };
+  });
+
+  /**
+   * A ShuttingDown row whose heartbeat is months old is not shutting down — the terminal died
+   * mid-shutdown and the engine never aged it. Label it so instead of pretending it is in flight.
+   */
+  protected displayStatus(i: EAFleetItem): { key: string; label: string; hint: string } {
+    if (i.status === 'ShuttingDown' && !this.isLive(i)) {
+      return {
+        key: 'ShutdownStale',
+        label: 'Shutdown (stale)',
+        hint: `Reported ShuttingDown but no heartbeat for more than ${this.staleMinutes()} minutes`,
+      };
+    }
+    if (i.status === 'ShuttingDown') return { key: i.status, label: 'Shutting down', hint: '' };
+    return { key: i.status, label: i.status, hint: '' };
+  }
+
+  protected isReleaseVersion(v: string | null | undefined): boolean {
+    return /^\d+\.\d+/.test(v ?? '');
+  }
   protected readonly loading = computed(
     () =>
       this.fleetResource.loading() ||
@@ -786,6 +1031,21 @@ export class FleetHealthPageComponent {
     });
   });
 
+  // ── Pagination ───────────────────────────────────────────────────
+  protected readonly page = signal(0);
+  protected readonly pageCount = computed(() =>
+    Math.max(1, Math.ceil(this.filteredInstances().length / PAGE_SIZE)),
+  );
+  /** Clamped so a filter that shrinks the list never leaves the operator on an empty page. */
+  private readonly safePage = computed(() => Math.min(this.page(), this.pageCount() - 1));
+  protected readonly pageStart = computed(() => this.safePage() * PAGE_SIZE);
+  protected readonly pageEnd = computed(() =>
+    Math.min(this.pageStart() + PAGE_SIZE, this.filteredInstances().length),
+  );
+  protected readonly pagedInstances = computed(() =>
+    this.filteredInstances().slice(this.pageStart(), this.pageEnd()),
+  );
+
   // ── Expand-row state for per-EA detail ───────────────────────────
   protected readonly expanded = signal<string | null>(null);
   protected readonly detail = signal<EAObservabilityDto | null>(null);
@@ -831,15 +1091,19 @@ export class FleetHealthPageComponent {
     if (ms < 200) return 'warn';
     return 'slow';
   }
+  protected dbTierLabel(ms: number): string {
+    const tier = this.dbTier(ms);
+    return tier === 'fast' ? 'fast' : tier === 'warn' ? 'slow' : 'very slow';
+  }
   /**
    * EA-card tone. Bad when anything is disconnected, warn when stale-idle
-   * but still nominally connected, ok otherwise. Surfacing this on the
-   * left border lets a glance over the dashboard immediately tell
-   * "fleet healthy" vs "something to look at".
+   * or stuck shutting down, neutral when nothing is active at all (an
+   * empty fleet is not "healthy"), ok otherwise.
    */
-  protected eaTone(f: FleetObservabilityDto): 'ok' | 'warn' | 'bad' {
-    if (f.eas.disconnected > 0) return 'bad';
-    if (f.eas.idleOverStale > 0) return 'warn';
+  protected eaTone(s: EaStats): 'ok' | 'warn' | 'bad' | 'neutral' {
+    if (s.disconnected > 0) return 'bad';
+    if (s.idleOverStale > 0 || s.shuttingDown > 0) return 'warn';
+    if (s.active === 0) return 'neutral';
     return 'ok';
   }
   protected boolEmoji(v: boolean | null | undefined, invertGreen = false): string {

@@ -24,6 +24,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 
 type WindowDays = 1 | 7 | 30;
 type SortMode = 'layer' | 'drop' | 'recent';
@@ -44,6 +45,7 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
     FormsModule,
     RouterLink,
     PageHeaderComponent,
+    CompositeMlNavComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
@@ -54,17 +56,12 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
       <app-page-header
         title="CompositeML — Catalogue Drift"
         subtitle="Latest-vs-prior observed counts across catalogue entries; drop alerts flag sharp decay"
-      >
-        <a routerLink="/composite-ml" class="btn btn-secondary">← Active Policies</a>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
-      </app-page-header>
+      />
+      <app-composite-ml-nav
+        [showRefresh]="true"
+        [refreshing]="resource.loading()"
+        (refresh)="resource.refresh()"
+      />
 
       <section class="controls">
         <div class="control-group">
@@ -148,7 +145,7 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
                   <th>Layer key</th>
                   <th>Scope</th>
                   <th class="num">Latest / Threshold</th>
-                  <th>Warm</th>
+                  <th>State</th>
                   <th class="num">Prior</th>
                   <th class="num">Δ abs</th>
                   <th class="num">Δ %</th>
@@ -404,9 +401,11 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
         background: rgba(52, 199, 89, 0.12);
         color: #248a3d;
       }
+      /* Cold is a warning state, amber everywhere in CompositeML (cold-start
+         page uses the same pair) — it was blue here and read as "info". */
       .warm-pill.cold {
-        background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
+        background: rgba(255, 149, 0, 0.12);
+        color: #c93400;
       }
       .alert-pill {
         font-size: var(--text-xs);

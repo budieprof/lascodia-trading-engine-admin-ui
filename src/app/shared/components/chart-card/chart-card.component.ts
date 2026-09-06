@@ -28,6 +28,14 @@ import { ThemeService } from '@core/theme/theme.service';
           <div class="chart-skeleton" role="status" aria-label="Loading chart">
             <div class="shimmer"></div>
           </div>
+        } @else if (emptyMessage(); as empty) {
+          <div class="chart-empty" role="status">
+            <span class="chart-empty-icon" aria-hidden="true">◌</span>
+            <span class="chart-empty-text">{{ empty }}</span>
+            @if (emptyHint(); as hint) {
+              <span class="chart-empty-hint">{{ hint }}</span>
+            }
+          </div>
         } @else {
           <div
             echarts
@@ -94,6 +102,34 @@ import { ThemeService } from '@core/theme/theme.service';
         height: 100%;
       }
 
+      /* Compact in-card empty state: an empty axis box with fractional
+         ticks reads as a broken chart; a sentence reads as an answer. */
+      .chart-empty {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-1);
+        text-align: center;
+        color: var(--text-tertiary);
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-sm);
+        padding: var(--space-4);
+      }
+      .chart-empty-icon {
+        font-size: var(--text-xl);
+        line-height: 1;
+        opacity: 0.6;
+      }
+      .chart-empty-text {
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+      }
+      .chart-empty-hint {
+        font-size: var(--text-xs);
+      }
+
       .chart-skeleton {
         width: 100%;
         height: 100%;
@@ -140,6 +176,14 @@ export class ChartCardComponent {
   options = input<EChartsOption>({});
   height = input('300px');
   loading = input(false);
+  /**
+   * When set, the card shows this sentence in place of the chart. Pages pass
+   * `null` while there is something to plot, so a chart with no series never
+   * renders as a bare axis box.
+   */
+  emptyMessage = input<string | null>(null);
+  /** Optional second line under `emptyMessage` ("Need ≥ 3 trades", "Feed resumes at market open"). */
+  emptyHint = input<string | null>(null);
 
   /** Registered echarts theme name, driven by the global ThemeService. */
   readonly echartsTheme = computed(() =>

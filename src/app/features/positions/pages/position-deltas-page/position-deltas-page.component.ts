@@ -252,7 +252,9 @@ interface AnomalyFlag {
         @if (filteredRows().length === 0) {
           <app-empty-state
             title="No position deltas in this window"
-            message="Either no positions changed in the chosen window, or the active filters exclude everything. Widen the window or clear filters."
+            [description]="emptyStateDescription()"
+            [actionLabel]="windowHours() < 168 ? 'Try last 7 days' : null"
+            (actionClick)="windowHours.set(168)"
           />
         } @else {
           <!-- Insights row — histogram + notable patterns + breakdowns -->
@@ -593,21 +595,12 @@ interface AnomalyFlag {
         border-left: none;
       }
 
-      /* ── KPI strip — canonical 8-col grid (matches market-data) ── */
+      /* ── KPI strip — wraps via auto-fit; short tiles do not stretch ── */
       .kpi-strip {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
         gap: var(--space-2);
-      }
-      @media (max-width: 1400px) {
-        .kpi-strip {
-          grid-template-columns: repeat(4, 1fr);
-        }
-      }
-      @media (max-width: 720px) {
-        .kpi-strip {
-          grid-template-columns: repeat(2, 1fr);
-        }
+        align-items: start;
       }
 
       /* ── Insights section — board-style wrapper + 1px-border grid trick ── */
@@ -988,20 +981,23 @@ export class PositionDeltasPageComponent {
   protected readonly resource = createPolledResource(
     () => {
       const since = new Date(Date.now() - this.windowHours() * 60 * 60 * 1000).toISOString();
-      return this.positions
-        .listLifecycleEvents({
-          currentPage: 1,
-          itemCountPerPage: 200,
-          filter: {
-            from: since,
-            source: this.sourceFilter() || null,
-            eventType: this.eventTypeFilter() || null,
-          },
-        })
-        .pipe(
-          map((res) => res.data?.data ?? []),
-          catchError(() => of<PositionLifecycleEventDto[]>([])),
-        );
+      return (
+        this.positions
+          .listLifecycleEvents({
+            currentPage: 1,
+            itemCountPerPage: 200,
+            filter: {
+              from: since,
+              source: this.sourceFilter() || null,
+              eventType: this.eventTypeFilter() || null,
+            },
+          })
+          // No catchError here: swallowing the failure into an empty array made
+          // an engine error render as eight "0" tiles and a clean "No position
+          // deltas" empty state. The polled resource records the error and the
+          // template shows the retry state instead.
+          .pipe(map((res) => res.data?.data ?? []))
+      );
     },
     { intervalMs: 30_000 },
   );
@@ -1050,6 +1046,18 @@ export class PositionDeltasPageComponent {
   protected readonly loading = computed(
     () => this.resource.loading() && this.rawRows().length === 0,
   );
+
+  /** Restates the active window + filters so an empty result is verifiable at a glance. */
+  protected readonly emptyStateDescription = computed(() => {
+    const h = this.windowHours();
+    const window = h < 24 ? `${h}h` : `${h / 24}d`;
+    const active = [
+      this.sourceFilter() ? `source ${this.sourceFilter()}` : '',
+      this.eventTypeFilter() ? `type ${this.eventTypeFilter()}` : '',
+    ].filter(Boolean);
+    const scope = active.length > 0 ? ` with ${active.join(', ')}` : '';
+    return `No position changed in the last ${window}${scope}. Widen the window or clear a filter to look further back.`;
+  });
 
   protected readonly lastEventMinutes = computed(() => {
     const rows = this.filteredRows();

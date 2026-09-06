@@ -34,6 +34,24 @@
     border-right: none;
   }
 
+  // Alpine draws a permanent vertical bar for every column's resize handle, which rendered as
+  // stray "|" glyphs between header labels on every table in the app. Keep the handle, but only
+  // reveal it while the header is hovered.
+  .ag-header-cell-resize::after {
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  .ag-header-cell:hover .ag-header-cell-resize::after {
+    opacity: 1;
+  }
+
+  // Wrapped header text (wrapHeaderText + autoHeaderHeight) should read as two tidy lines,
+  // not a tall uppercase block.
+  .ag-header-cell-text {
+    line-height: 1.25;
+    white-space: normal;
+  }
+
   // Row styles
   .ag-row {
     border-bottom: 1px solid var(--border);

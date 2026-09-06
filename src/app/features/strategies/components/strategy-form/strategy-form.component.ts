@@ -363,6 +363,9 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                 </select>
               </div>
             }
+            <button type="button" class="dialog-close" (click)="onCancel()" aria-label="Close">
+              ×
+            </button>
           </div>
           <form [formGroup]="form" (ngSubmit)="onSubmit()" class="dialog-body">
             <!-- Tab strip — TradingView-style — splits the modal into discrete config sections -->
@@ -1222,15 +1225,27 @@ const TIMEFRAME_LABELS: Record<string, string> = {
   `,
   styles: [
     `
+      /* The host is a direct child of the page's \`.page\` wrapper, whose
+         entry animation leaves a transform on every child. A transformed
+         ancestor becomes the containing block for position: fixed, which
+         pinned the overlay inside the page flow — no backdrop, clipped by
+         the viewport, footer unreachable. display: contents removes the
+         host box so the overlay is positioned against the viewport. */
+      :host {
+        display: contents;
+      }
+
       .overlay {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.4);
-        backdrop-filter: blur(8px);
+        background: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
         display: flex;
         align-items: center;
         justify-content: center;
         z-index: 1000;
+        padding: var(--space-4);
         animation: fadeIn 0.15s ease;
       }
 
@@ -1240,18 +1255,54 @@ const TIMEFRAME_LABELS: Record<string, string> = {
         border-radius: var(--radius-lg);
         box-shadow: var(--shadow-lg);
         width: 100%;
-        max-width: 560px;
+        max-width: 640px;
         max-height: 90vh;
-        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
         animation: scaleIn 0.2s ease-out;
       }
 
       .dialog-header {
-        padding: var(--space-5) var(--space-6) 0;
+        padding: var(--space-4) var(--space-6);
         display: flex;
         justify-content: space-between;
         align-items: center;
         gap: 16px;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      .dialog-close {
+        background: transparent;
+        border: none;
+        font-size: 1.5rem;
+        line-height: 1;
+        padding: 2px 8px;
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .dialog-close:hover {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+      /* The form is the scroll container; the action row below it is
+         sticky so Create / Cancel stay reachable on every tab. */
+      .dialog-body {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        flex: 1 1 auto;
+        overflow-y: auto;
+      }
+      .dialog-actions {
+        position: sticky;
+        bottom: 0;
+        background: var(--bg-secondary);
+        border-top: 1px solid var(--border);
+        margin: var(--space-4) calc(-1 * var(--space-6)) calc(-1 * var(--space-5));
+        padding: var(--space-3) var(--space-6);
       }
 
       .dialog-title {

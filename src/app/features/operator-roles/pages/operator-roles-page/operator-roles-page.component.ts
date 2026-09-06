@@ -1,7 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { catchError, of } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
 import { OperatorRolesService } from '@core/services/operator-roles.service';
@@ -13,6 +12,7 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 // Canonical roles the engine will accept, mirroring `OperatorRoleNames`.
@@ -71,6 +71,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
     MetricCardComponent,
     ChartCardComponent,
     EmptyStateComponent,
+    ErrorStateComponent,
     DatePipe,
     RelativeTimePipe,
   ],
@@ -81,71 +82,52 @@ const DAY_MS = 24 * 60 * 60 * 1000;
         subtitle="Grant or revoke platform roles for trading accounts. Changes affect future logins — combine with a forced logout for immediate effect."
       />
 
-      <!-- 8-card KPI strip — fleet-wide grant overview -->
+      <!-- Five tiles: the per-role counts fold into one so labels stay on one line. Tiles read
+           "-" when the grant list has never loaded — a failed fetch is not "0 grants". -->
       <div class="kpis">
-        <app-metric-card
-          label="Total grants"
-          [value]="grants().length"
-          format="number"
-          dotColor="#0071E3"
-        />
-        <app-metric-card
-          label="Accounts"
-          [value]="rows().length"
-          format="number"
-          dotColor="#5AC8FA"
-        />
-        <app-metric-card
-          label="Admin"
-          [value]="roleCounts().Admin"
-          format="number"
-          [dotColor]="roleCounts().Admin > 0 ? '#FF3B30' : '#34C759'"
-        />
-        <app-metric-card
-          label="Operator"
-          [value]="roleCounts().Operator"
-          format="number"
-          dotColor="#0071E3"
-        />
-        <app-metric-card
-          label="Trader / Analyst"
-          [value]="roleCounts().Trader + roleCounts().Analyst"
-          format="number"
-          dotColor="#AF52DE"
-        />
-        <app-metric-card
-          label="Viewer"
-          [value]="roleCounts().Viewer"
-          format="number"
-          dotColor="#8E8E93"
-        />
+        <app-metric-card label="Total grants" [value]="tile(grants().length)" format="number" />
+        <app-metric-card label="Accounts" [value]="tile(rows().length)" format="number" />
         <app-metric-card
           label="Multi-role accounts"
-          [value]="multiRoleCount()"
+          [value]="tile(multiRoleCount())"
           format="number"
-          [dotColor]="multiRoleCount() > 0 ? '#FF9500' : '#34C759'"
         />
-        <app-metric-card
-          label="Granted (7d)"
-          [value]="recent7dCount()"
-          format="number"
-          dotColor="#34C759"
-        />
+        <app-metric-card label="Granted (7d)" [value]="tile(recent7dCount())" format="number" />
+        <div class="role-tile">
+          <span class="role-tile-label">By role</span>
+          @if (loaded()) {
+            <ul class="role-tile-list">
+              @for (r of roleReference(); track r.role) {
+                <li>
+                  <span class="role-tile-dot" [style.background]="r.color"></span>
+                  <span class="role-tile-name">{{ r.role }}</span>
+                  <span class="role-tile-count">{{ roleCount(r.role) }}</span>
+                </li>
+              }
+            </ul>
+          } @else {
+            <span class="role-tile-empty">-</span>
+          }
+        </div>
       </div>
 
-      <!-- 2-col chart row: role distribution donut + grant timeline (30d) -->
+      <!-- 2-col chart row: role distribution donut + grant timeline -->
       <div class="chart-row">
         <app-chart-card
           title="Role distribution"
           subtitle="Across all current grants"
           [options]="roleDonutOptions()"
-          height="220px"
+          height="200px"
         />
         <app-chart-card
-          title="Grants over time (last 30 days)"
-          subtitle="When operators were given access"
+          [title]="'Grants over time (last ' + timelineDays() + ' days)'"
+          [subtitle]="
+            timelineDays() === 30
+              ? 'When operators were given access'
+              : 'Nothing in the last 30 days — widened to 90'
+          "
           [options]="grantsTimelineOptions()"
-          height="220px"
+          height="200px"
         />
       </div>
 
@@ -241,8 +223,19 @@ const DAY_MS = 24 * 60 * 60 * 1000;
             </span>
           </header>
 
-          @if (loading() && rows().length === 0) {
+          @if (loading() && !loaded()) {
             <p class="muted small">Loading…</p>
+          } @else if (loadError(); as err) {
+            <app-error-state
+              title="Could not load role grants"
+              [message]="err"
+              (retry)="reload()"
+            />
+          } @else if (rows().length === 0) {
+            <app-empty-state
+              title="No role grants yet"
+              description="Use the form above to grant the first role."
+            />
           } @else if (filteredRows().length === 0) {
             <app-empty-state
               title="No role grants match"
@@ -255,7 +248,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
                   <tr>
                     <th>Account</th>
                     <th>Roles</th>
-                    <th class="num">Tier</th>
+                    <th>Tier</th>
                     <th>First assigned</th>
                     <th>Granted by</th>
                     <th class="actions">Revoke</th>
@@ -264,7 +257,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
                 <tbody>
                   @for (row of filteredRows(); track row.tradingAccountId) {
                     <tr>
-                      <td class="num mono">{{ row.tradingAccountId }}</td>
+                      <!-- An account id is an identifier, not a quantity: left-aligned like its header. -->
+                      <td class="mono">#{{ row.tradingAccountId }}</td>
                       <td>
                         @for (role of row.roles; track role) {
                           <span
@@ -276,8 +270,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
                           </span>
                         }
                       </td>
-                      <td class="num mono" [class.tier-high]="row.highestTier >= 3">
-                        {{ row.highestTier }}
+                      <td>
+                        <span class="tier-pill">Tier {{ row.highestTier }}</span>
                       </td>
                       <td class="muted">
                         {{ row.assignedAt | date: 'MMM d, yyyy HH:mm' }}
@@ -312,7 +306,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
         <section class="activity-card">
           <header class="card-head">
             <h3>Recent activity</h3>
-            <span class="muted">Last 12 grants chronologically</span>
+            <span class="muted">Last 12 grants, newest first</span>
           </header>
           @if (recentActivity().length === 0) {
             <p class="muted small">No grant activity yet.</p>
@@ -354,21 +348,74 @@ const DAY_MS = 24 * 60 * 60 * 1000;
         gap: var(--space-3);
       }
 
-      /* 8-card KPI strip */
+      /* Five-tile KPI strip; the By-role tile takes a double column so six rows fit. */
       .kpis {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 1.4fr);
+        gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 1200px) {
+        .kpis {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .role-tile {
+          grid-column: 1 / -1;
+        }
+      }
+      @media (max-width: 600px) {
+        .kpis {
+          grid-template-columns: 1fr;
+        }
+      }
+      .role-tile {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+        box-shadow: var(--shadow-sm);
+        display: flex;
+        flex-direction: column;
         gap: var(--space-2);
       }
-      @media (max-width: 1400px) {
-        .kpis {
-          grid-template-columns: repeat(4, 1fr);
-        }
+      .role-tile-label {
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        font-weight: var(--font-medium);
+        line-height: 1.3;
       }
-      @media (max-width: 720px) {
-        .kpis {
-          grid-template-columns: repeat(2, 1fr);
-        }
+      .role-tile-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 2px var(--space-3);
+      }
+      .role-tile-list li {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: var(--text-xs);
+      }
+      .role-tile-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .role-tile-name {
+        color: var(--text-secondary);
+        flex: 1;
+      }
+      .role-tile-count {
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+      }
+      .role-tile-empty {
+        font-size: var(--text-2xl);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
       }
 
       /* 2-col chart row */
@@ -432,9 +479,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
         opacity: 0.6;
         transition: opacity 0.12s ease;
       }
+      /* Presence is carried by the count badge alone — an accent border read as "selected". */
       .ref-cell.ref-active {
         opacity: 1;
-        border-color: var(--accent);
       }
       .ref-cell-head {
         display: flex;
@@ -624,9 +671,20 @@ const DAY_MS = 24 * 60 * 60 * 1000;
       .roles-table td.mono {
         font-family: 'SF Mono', 'Menlo', monospace;
       }
-      .roles-table td.tier-high {
-        color: var(--loss);
+      /* Tier is a rank, not an alarm: same grey pill the reference cards use. */
+      .tier-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 1px 8px;
+        border-radius: var(--radius-full);
+        font-size: 10px;
         font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
       }
       .roles-table .actions {
         text-align: right;
@@ -698,8 +756,16 @@ export class OperatorRolesPageComponent {
 
   readonly grants = signal<OperatorRoleDto[]>([]);
   readonly loading = signal(false);
+  /** True once the grant list has come back at least once — tiles read "-" before that. */
+  readonly loaded = signal(false);
+  readonly loadError = signal<string | null>(null);
   readonly grantPending = signal(false);
   readonly revokePending = signal(false);
+
+  /** Null (rendered "-") until the first successful load, so a failure never reads as 0. */
+  tile(n: number): number | null {
+    return this.loaded() ? n : null;
+  }
 
   /** Groups grants by account so the table renders one row per account. */
   readonly rows = computed<RoleRow[]>(() => {
@@ -839,9 +905,20 @@ export class OperatorRolesPageComponent {
     };
   });
 
-  // Daily grant counts for the last 30 days, stacked by role.
+  /**
+   * 30 days, widening to 90 when the last month is empty — an empty chart card teaches nothing,
+   * while the 90-day view still shows the most recent access changes.
+   */
+  readonly timelineDays = computed<30 | 90>(() => {
+    const now = Date.now();
+    const within = (days: number) =>
+      this.grants().some((g) => now - new Date(g.assignedAt).getTime() < days * DAY_MS);
+    return within(30) || !within(90) ? 30 : 90;
+  });
+
+  // Daily grant counts over the timeline window, stacked by role.
   readonly grantsTimelineOptions = computed<EChartsOption>(() => {
-    const days = 30;
+    const days = this.timelineDays();
     const startDay = (() => {
       const d = new Date();
       d.setHours(0, 0, 0, 0);
@@ -868,7 +945,7 @@ export class OperatorRolesPageComponent {
     if (totalAcrossDays === 0) {
       return {
         title: {
-          text: 'No grants in the last 30 days',
+          text: `No grants in the last ${days} days`,
           left: 'center',
           top: 'middle',
           textStyle: { fontSize: 12, color: '#8E8E93', fontWeight: 'normal' },
@@ -882,7 +959,7 @@ export class OperatorRolesPageComponent {
       xAxis: {
         type: 'category',
         data: labels,
-        axisLabel: { fontSize: 9, color: '#6E6E73', interval: 3 },
+        axisLabel: { fontSize: 9, color: '#6E6E73', interval: days === 30 ? 3 : 9 },
       },
       yAxis: {
         type: 'value',
@@ -926,17 +1003,29 @@ export class OperatorRolesPageComponent {
     this.reload();
   }
 
+  /**
+   * A failed list call is surfaced, not swallowed into `[]` — an empty roster looks exactly like
+   * "nobody has access", which is the one thing an operator must never be told by mistake.
+   */
   reload(): void {
     this.loading.set(true);
-    this.service
-      .list()
-      .pipe(catchError(() => of({ data: [] as OperatorRoleDto[] } as any)))
-      .subscribe({
-        next: (res) => {
+    this.service.list().subscribe({
+      next: (res) => {
+        if (res?.status === false) {
+          this.loadError.set(res.message ?? 'The engine rejected the request.');
+        } else {
           this.grants.set(res?.data ?? []);
-          this.loading.set(false);
-        },
-      });
+          this.loaded.set(true);
+          this.loadError.set(null);
+        }
+        this.loading.set(false);
+      },
+      error: (err: { status?: number; error?: { message?: string } }) => {
+        const detail = err?.error?.message ?? (err?.status ? `HTTP ${err.status}` : null);
+        this.loadError.set(detail ? `${detail}.` : 'The engine could not be reached.');
+        this.loading.set(false);
+      },
+    });
   }
 
   grant(): void {

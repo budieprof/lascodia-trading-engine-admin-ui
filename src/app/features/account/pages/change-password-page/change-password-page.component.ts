@@ -14,12 +14,12 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
   imports: [FormsModule, PageHeaderComponent],
   template: `
     <div class="page">
-      <div class="panel">
-        <app-page-header
-          title="Change Password"
-          subtitle="Choose a strong password — at least 8 characters with upper, lower, and a digit."
-        />
+      <app-page-header
+        title="Change Password"
+        subtitle="Choose a strong password — at least 8 characters with upper, lower, and a digit."
+      />
 
+      <div class="panel">
         @if (mustChange()) {
           <div class="banner">You must change your password before continuing.</div>
         }
@@ -80,24 +80,25 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
   `,
   styles: [
     `
+      /* Same top-left page header + card layout as every other page; this was
+         the only route that centred a card on the viewport, which read as a
+         different app. */
       .page {
-        /* Focused single-task screen — center the panel in the content area. */
-        min-height: calc(100vh - 160px);
-        padding: var(--space-6) var(--space-4);
+        padding: var(--space-2) 0;
         display: flex;
-        align-items: center;
-        justify-content: center;
+        flex-direction: column;
+        gap: var(--space-3);
       }
       .panel {
         width: 100%;
-        max-width: 480px;
+        max-width: 560px;
         display: flex;
         flex-direction: column;
         gap: var(--space-3);
       }
       .banner {
         background: rgba(255, 149, 0, 0.12);
-        border: 1px solid var(--loss);
+        border: 1px solid var(--warning);
         color: var(--text-primary);
         border-radius: var(--radius-md);
         padding: var(--space-3) var(--space-4);
@@ -148,9 +149,11 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
         flex-direction: column;
         gap: 4px;
       }
+      /* text-secondary, not text-tertiary: the unmet-rule state was #636366 on
+         #2c2c2e in dark mode — below 2:1 contrast, effectively invisible. */
       .rules li {
         font-size: var(--text-xs);
-        color: var(--text-tertiary);
+        color: var(--text-secondary);
         position: relative;
         padding-left: 18px;
       }

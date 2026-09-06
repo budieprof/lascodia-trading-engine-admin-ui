@@ -277,15 +277,19 @@ export class StrategyCapacityCardComponent {
     if (!id) return;
     this.loading.set(true);
     this.error.set(false);
+    // A successful response with no payload means the sweep has not
+    // profiled this strategy yet — that is the empty state, not an error.
+    // Only a failed response / transport error shows the error state; the
+    // analytics page already made this distinction and the two disagreed.
     this.strategies
       .getCapacityProfile(id)
       .pipe(
-        map((res) => (res.status ? (res.data ?? null) : null)),
-        catchError(() => of(null)),
+        map((res) => ({ ok: !!res.status, data: res.status ? (res.data ?? null) : null })),
+        catchError(() => of({ ok: false, data: null })),
         finalize(() => this.loading.set(false)),
       )
-      .subscribe((data) => {
-        if (data === null) this.error.set(true);
+      .subscribe(({ ok, data }) => {
+        if (!ok) this.error.set(true);
         else this.profile.set(data);
       });
   }

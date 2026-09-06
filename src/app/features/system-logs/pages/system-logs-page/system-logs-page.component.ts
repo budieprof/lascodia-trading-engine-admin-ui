@@ -12,6 +12,7 @@ import { FormsModule } from '@angular/forms';
 import { DatePipe } from '@angular/common';
 import { Subject, timer, takeUntil, catchError, of } from 'rxjs';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { SystemLogsService } from '@core/services/system-logs.service';
 import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
 
@@ -19,7 +20,7 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
   selector: 'app-system-logs-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FormsModule, PageHeaderComponent],
+  imports: [DatePipe, FormsModule, PageHeaderComponent, ErrorStateComponent],
   template: `
     <div class="page">
       <app-page-header
@@ -100,7 +101,8 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
           <span class="muted">{{ pageData()?.bufferCapacity ?? 0 }}</span>
         </div>
         <div class="meta-item">
-          Showing <strong>{{ pageData()?.entries?.length ?? 0 }}</strong> entries
+          <strong>{{ pageData()?.entries?.length ?? 0 }}</strong> entries loaded
+          <span class="muted">(limit {{ limit }} · scroll the table)</span>
         </div>
         @if ((pageData()?.droppedCount ?? 0) > 0) {
           <div class="meta-item warn">
@@ -128,7 +130,11 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
             @if (loading()) {
               <span class="muted">Loading…</span>
             } @else if (errorMessage()) {
-              <span class="muted">No data — see the error above.</span>
+              <app-error-state
+                title="Could not load engine logs"
+                [message]="errorMessage()"
+                (retry)="fetchNow()"
+              />
             } @else {
               <span class="muted">No log entries match the current filters.</span>
               <span class="empty-hint">
@@ -162,7 +168,7 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
                       {{ e.level }}
                     </span>
                   </td>
-                  <td class="col-cat mono">{{ shortCategory(e.category) }}</td>
+                  <td class="col-cat mono" [title]="e.category">{{ shortCategory(e.category) }}</td>
                   <td class="col-msg">
                     <span class="msg-text">{{ e.message }}</span>
                     @if (e.exception) {
@@ -206,7 +212,7 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
   styles: [
     `
       .page {
-        padding: var(--space-4) var(--space-6);
+        padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
         gap: var(--space-3);
@@ -358,9 +364,14 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
       .col-level {
         width: 90px;
       }
+      /* Fixed column, one line, ellipsis — the full namespace is on the
+         title and in the expanded row. break-all wrapped it mid-word. */
       .col-cat {
         width: 220px;
-        word-break: break-all;
+        max-width: 220px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .col-msg {
         word-break: break-word;
@@ -600,11 +611,11 @@ export class SystemLogsPageComponent implements OnInit, OnDestroy {
     this.expandedIndex.set(this.expandedIndex() === index ? null : index);
   }
 
-  /** Trim category to the last segment to keep the table readable. */
+  /** Last two namespace segments; the cell's title carries the full name. */
   shortCategory(category: string): string {
     if (!category) return '';
     const parts = category.split('.');
     if (parts.length <= 2) return category;
-    return `…${parts.slice(-2).join('.')}`;
+    return parts.slice(-2).join('.');
   }
 }

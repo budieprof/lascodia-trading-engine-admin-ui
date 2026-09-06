@@ -64,12 +64,42 @@ import {
 
       <ui-progress-bar [active]="resource.loading()" />
 
+      <!--
+        The list is narrowed to symbols this instance owns; the EA's own
+        heartbeat count is the other source of truth. When the two
+        disagree, say so — a silent "No open positions" under a live-state
+        tile reading 2 is worse than either number alone.
+      -->
+      @if (hiddenByScope() > 0 || reportedMismatch()) {
+        <p class="scope-note">
+          @if (hiddenByScope() > 0) {
+            {{ hiddenByScope() }} more open position{{ hiddenByScope() === 1 ? '' : 's' }} on this
+            account {{ hiddenByScope() === 1 ? 'is' : 'are' }} on symbols this instance does not
+            own.
+            <button type="button" class="link-btn" (click)="showAllAccount.set(!showAllAccount())">
+              {{ showAllAccount() ? 'Show only this instance' : 'Show all account positions' }}
+            </button>
+          }
+          @if (reportedMismatch()) {
+            The EA's heartbeat reports {{ reportedOpenCount() }} open position{{
+              reportedOpenCount() === 1 ? '' : 's'
+            }}
+            but the engine lists {{ rows().length }} for this instance — the engine's position
+            attribution may be stale.
+          }
+        </p>
+      }
+
       @if (!resource.value() && resource.loading()) {
         <p class="hint muted">Loading positions…</p>
       } @else if (rows().length === 0) {
         <app-empty-state
           title="No open positions"
-          description="This trading account currently has no open positions. Pending orders are shown in the panel below."
+          [description]="
+            hiddenByScope() > 0
+              ? 'None on the symbols this instance owns. Pending orders are shown in the panel beside.'
+              : 'This trading account currently has no open positions. Pending orders are shown in the panel beside.'
+          "
         />
       } @else {
         <div class="scroll-wrap">
@@ -315,6 +345,30 @@ import {
         margin: 0;
         font-size: var(--text-xs);
       }
+      .scope-note {
+        margin: 0;
+        padding: 6px 10px;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        background: rgba(255, 149, 0, 0.08);
+        border: 1px solid rgba(255, 149, 0, 0.3);
+        border-radius: var(--radius-sm);
+        line-height: 1.5;
+      }
+      .link-btn {
+        appearance: none;
+        background: transparent;
+        border: none;
+        padding: 0;
+        margin-left: 4px;
+        font: inherit;
+        font-weight: var(--font-medium);
+        color: var(--accent);
+        cursor: pointer;
+      }
+      .link-btn:hover {
+        text-decoration: underline;
+      }
       .bumped-tag {
         display: inline-block;
         margin-left: 4px;
@@ -354,19 +408,31 @@ export class EAPositionsPanelComponent {
   // versa).  Empty / null = show everything for the account (backward-
   // compatible with callers that haven't been updated).
   readonly ownedSymbolsCsv = input<string | null>(null);
+  /**
+   * Open-position count the EA itself reports in its heartbeat envelope.
+   * Compared against what the engine returns for this instance so a
+   * disagreement is shown rather than silently rendering the smaller number.
+   */
+  readonly reportedOpenCount = input<number | null>(null);
 
   private readonly positions = inject(PositionsService);
 
   protected readonly ownedSymbolSet = computed<Set<string> | null>(() => {
     const csv = (this.ownedSymbolsCsv() ?? '').trim();
     if (!csv) return null;
+    // Same separators the detail page accepts (comma, semicolon or
+    // whitespace) — a comma-only split turned "EURUSD GBPUSD" into one
+    // token that matched nothing and emptied the panel.
     return new Set(
       csv
-        .split(',')
+        .split(/[\s,;]+/)
         .map((s) => s.trim().toUpperCase())
         .filter(Boolean),
     );
   });
+
+  /** Operator override: list every open position on the account, not just owned symbols. */
+  protected readonly showAllAccount = signal(false);
 
   protected readonly resource = createPolledResource(
     () => {
@@ -389,11 +455,27 @@ export class EAPositionsPanelComponent {
     { intervalMs: 10_000 },
   );
 
-  protected readonly rows = computed(() => {
+  private readonly scopedRows = computed(() => {
     const all = this.resource.value() ?? [];
     const owned = this.ownedSymbolSet();
     if (!owned) return all;
     return all.filter((p) => owned.has((p.symbol ?? '').toUpperCase()));
+  });
+
+  protected readonly rows = computed(() =>
+    this.showAllAccount() ? (this.resource.value() ?? []) : this.scopedRows(),
+  );
+
+  /** Account positions the owned-symbol scope removed from view. */
+  protected readonly hiddenByScope = computed(
+    () => (this.resource.value() ?? []).length - this.scopedRows().length,
+  );
+
+  /** True once the engine has answered and its count differs from the EA's own. */
+  protected readonly reportedMismatch = computed(() => {
+    const reported = this.reportedOpenCount();
+    if (reported == null || this.resource.value() === null) return false;
+    return reported !== this.scopedRows().length;
   });
 
   // ── Phase-6 click-to-chart ───────────────────────────────────────────────

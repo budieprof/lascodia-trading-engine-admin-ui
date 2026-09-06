@@ -155,7 +155,11 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
           </div>
         </div>
         <span class="result-count">
-          {{ proposals().length }} proposal{{ proposals().length === 1 ? '' : 's' }} loaded
+          @if (resource.error()) {
+            load failed
+          } @else {
+            {{ proposals().length }} proposal{{ proposals().length === 1 ? '' : 's' }}
+          }
         </span>
       </section>
 
@@ -201,8 +205,11 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
               format="number"
               [dotColor]="st.dslInvalidCount > 0 ? '#FF3B30' : '#8E8E93'"
             />
+            <!-- Approved ÷ (approved + rejected): invalid DSL and duplicates
+                 never reached a reviewer, so they are not part of the rate.
+                 The label says so instead of leaving the base implicit. -->
             <app-metric-card
-              label="Approval rate"
+              label="Approval rate (of reviewed)"
               [value]="percent(st.approvalRateAllTime)"
               format="percent"
               [colorByValue]="true"
@@ -220,8 +227,8 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
             </header>
             <dl class="status-grid">
               <div>
-                <dt>Enabled</dt>
-                <dd>{{ st.workerEnabled ? 'true' : 'false' }}</dd>
+                <dt>Worker</dt>
+                <dd>{{ st.workerEnabled ? 'Enabled' : 'Disabled' }}</dd>
               </div>
               <div>
                 <dt>API key</dt>
@@ -286,7 +293,10 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
             <section class="card">
               <header class="card-head">
                 <h3>Recent activity</h3>
-                <span class="muted">last {{ st.recentActivity.length }} proposal(s)</span>
+                <span class="muted">
+                  most recent {{ st.recentActivity.length }}
+                  {{ st.recentActivity.length === 1 ? 'proposal' : 'proposals' }}
+                </span>
               </header>
               <table class="recent-table">
                 <thead>
@@ -300,7 +310,9 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
                 <tbody>
                   @for (r of st.recentActivity; track r.id) {
                     <tr>
-                      <td class="time">{{ r.proposedAt | date: 'MMM d, HH:mm' }}</td>
+                      <td class="time" [title]="r.proposedAt | date: 'yyyy-MM-dd HH:mm:ss UTC'">
+                        {{ r.proposedAt | relativeTime }}
+                      </td>
                       <td class="mono">{{ r.name }}</td>
                       <td class="mono">{{ r.symbol }}</td>
                       <td>
@@ -474,6 +486,35 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
   `,
   styles: [
     `
+      /* Header actions were \`.btn btn-secondary\` with no matching rule on
+         this page, so they rendered as bare text links. */
+      .btn {
+        height: 36px;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-full);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        font-family: inherit;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-2);
+        text-decoration: none;
+        border: none;
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .btn-secondary {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+      }
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -1018,9 +1059,14 @@ export class LlmProposalsPageComponent {
   protected readonly resource = createPolledResource(
     () => {
       const s = this.statusFilter();
+      // Errors propagate to resource.error() so the page shows the error
+      // state — swallowing them left "1 proposal loaded" over stale rows.
       return this.strategies.listLlmProposals({ status: s === 'All' ? null : s, limit: 200 }).pipe(
-        map((res) => res.data ?? []),
-        catchError(() => of<LlmProposalDto[]>([])),
+        map((res) => {
+          if (!res.status)
+            throw new Error(res.message ?? 'strategy/llm-proposals returned an error');
+          return res.data ?? [];
+        }),
       );
     },
     { intervalMs: 60_000 },

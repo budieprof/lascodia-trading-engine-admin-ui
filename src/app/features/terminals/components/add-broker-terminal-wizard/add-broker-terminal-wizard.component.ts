@@ -71,9 +71,9 @@ import type { DaemonCloneMt5Response, DaemonInstallDto } from '@core/api/api.typ
       @if (stage() === 1) {
         <section class="stage">
           <p class="lead">
-            Clones <code>/Applications/MetaTrader 5.app</code> on <strong>{{ daemonName() }}</strong
-            >'s host with a unique CFBundleIdentifier so macOS provisions an isolated Wine prefix.
-            Takes ~10–30 s for the cp + codesign.
+            Clones <code>/Applications/MetaTrader 5.app</code> on the host of
+            <strong>{{ daemonName() }}</strong> with a unique CFBundleIdentifier so macOS provisions
+            an isolated Wine prefix. Takes ~10–30 s for the cp + codesign.
           </p>
           <label class="field">
             <span class="label">Broker slug</span>

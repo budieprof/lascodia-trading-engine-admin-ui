@@ -1,11 +1,13 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   OnInit,
   computed,
   effect,
   inject,
   signal,
+  viewChildren,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { map } from 'rxjs';
@@ -20,7 +22,10 @@ import type { CurrencyPairDto, PositionDto, OrderDto } from '@core/api/api.types
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 
-import { MiniChartTileComponent } from '../../components/mini-chart-tile/mini-chart-tile.component';
+import {
+  MiniChartTileComponent,
+  type TileLoadError,
+} from '../../components/mini-chart-tile/mini-chart-tile.component';
 import { SpotAnalysisModalComponent } from '@shared/components/spot-analysis-modal/spot-analysis-modal.component';
 
 /**
@@ -236,6 +241,20 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
         </span>
       </section>
 
+      <!-- One inline notice for every tile whose candle fetch failed; the
+           tiles themselves carry the per-symbol error and a Retry. -->
+      @if (failedTiles().size > 0) {
+        <div class="load-banner" role="status">
+          <span>
+            <strong>{{ failedTiles().size }} of {{ entries().length }}</strong> tiles could not load
+            {{ globalTimeframe() }} candles — {{ lastFailureReason() }}.
+          </span>
+          <button type="button" class="btn-ghost" (click)="retryFailed()">
+            Retry failed tiles
+          </button>
+        </div>
+      }
+
       <!-- ── Grid / empty state ──────────────────────────────────── -->
       @if (seeding()) {
         <section class="empty" role="status">
@@ -290,6 +309,8 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
               [showOrders]="showOrders()"
               (remove)="removeEntry(e)"
               (analyze)="openAnalysis(e)"
+              (loadError)="onTileLoadError($event)"
+              (loadOk)="onTileLoadOk(e)"
             />
           }
         </section>
@@ -431,6 +452,19 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
         margin-left: auto;
       }
 
+      .load-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        padding: var(--space-2) var(--space-3);
+        border: 1px solid rgba(255, 59, 48, 0.35);
+        background: rgba(255, 59, 48, 0.06);
+        border-radius: var(--radius-md);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+
       /* ── Grid ───────────────────────────────────────────────── */
       .grid {
         display: grid;
@@ -511,6 +545,71 @@ export class WatchlistPageComponent implements OnInit {
   private readonly positionsService = inject(PositionsService);
   private readonly ordersService = inject(OrdersService);
   private readonly accountScope = inject(AccountScopeService);
+  private readonly tiles = viewChildren(MiniChartTileComponent);
+
+  // ── Candle-load failures ───────────────────────────────────────────
+  // Every tile fetches its own candles, so one engine outage used to raise
+  // one red toast per tile (23 for a full wall) on top of the tiles saying
+  // "No candles" as if the market were simply quiet. The tile now shows its
+  // own error + Retry; here the failures fold into one banner and one toast.
+  protected readonly failedTiles = signal<Set<string>>(new Set());
+  protected readonly lastFailureReason = signal<string>('');
+  private toastTimer: ReturnType<typeof setTimeout> | null = null;
+  private aggregatedToastId: number | null = null;
+
+  protected onTileLoadError(e: TileLoadError): void {
+    // Tiles fetch candles with `silent: true`, so no interceptor toast
+    // exists to withdraw; the page raises the single aggregated one below.
+    this.lastFailureReason.set(e.reason.toLowerCase());
+    this.failedTiles.update((s) => new Set(s).add(this.entryKey(e)));
+    // Tiles fail within the same tick or two; coalesce into one toast.
+    if (this.toastTimer) clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => {
+      this.toastTimer = null;
+      this.dismissAggregatedToast();
+      const n = this.failedTiles().size;
+      if (n === 0) return;
+      this.notifications.error(
+        `${n} watchlist tile${n === 1 ? '' : 's'} could not load ${this.globalTimeframe()} candles — ${this.lastFailureReason()}.`,
+      );
+      const latest = this.notifications.toasts().at(-1);
+      this.aggregatedToastId = latest?.id ?? null;
+    }, 400);
+  }
+
+  protected onTileLoadOk(e: WatchlistEntry): void {
+    const key = this.entryKey(e);
+    if (!this.failedTiles().has(key)) return;
+    this.failedTiles.update((s) => {
+      const next = new Set(s);
+      next.delete(key);
+      return next;
+    });
+  }
+
+  protected retryFailed(): void {
+    for (const t of this.tiles()) if (t.hasError()) t.retry();
+  }
+
+  private entryKey(e: { symbol: string; timeframe: string }): string {
+    return `${e.symbol}|${e.timeframe}`;
+  }
+
+  private clearLoadFailures(): void {
+    if (this.toastTimer) {
+      clearTimeout(this.toastTimer);
+      this.toastTimer = null;
+    }
+    this.dismissAggregatedToast();
+    this.failedTiles.set(new Set());
+  }
+
+  private dismissAggregatedToast(): void {
+    if (this.aggregatedToastId !== null) {
+      this.notifications.dismiss(this.aggregatedToastId);
+      this.aggregatedToastId = null;
+    }
+  }
 
   /** Chart-overlay toggles — show open positions / pending orders on every
    *  tile. Persisted so the operator's choice survives reloads. */
@@ -607,6 +706,7 @@ export class WatchlistPageComponent implements OnInit {
   });
 
   constructor() {
+    inject(DestroyRef).onDestroy(() => this.clearLoadFailures());
     // Persist on every change. effect() runs once on construction with
     // the default empty entries; gating on `hydrationComplete` keeps it
     // from blowing away the saved state on init OR blanking the storage
@@ -883,6 +983,7 @@ export class WatchlistPageComponent implements OnInit {
     this.entries.update((xs) =>
       xs.filter((e) => !(e.symbol === target.symbol && e.timeframe === target.timeframe)),
     );
+    this.onTileLoadOk(target);
   }
 
   /** The tile whose LLM analysis modal is open, or null. */
@@ -900,10 +1001,14 @@ export class WatchlistPageComponent implements OnInit {
     if (this.entries().length === 0) return;
     if (!confirm('Remove all symbols from the watchlist?')) return;
     this.entries.set([]);
+    this.clearLoadFailures();
   }
 
   protected setGlobalTimeframe(tf: string): void {
     if (this.globalTimeframe() === tf) return;
+    // Failures belong to the timeframe they happened on; the tiles re-key
+    // and re-fetch below, so start the new tab clean.
+    this.clearLoadFailures();
     this.globalTimeframe.set(tf);
     // Re-key every existing entry to the new TF. Drops any duplicates
     // that would arise from mixed-TF watchlists collapsing to one TF.

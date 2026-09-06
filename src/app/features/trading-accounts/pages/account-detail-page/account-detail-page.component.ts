@@ -26,13 +26,21 @@ import type {
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 @Component({
   selector: 'app-account-detail-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CurrencyPipe, DatePipe, PageHeaderComponent, MetricCardComponent, RelativeTimePipe],
+  imports: [
+    CurrencyPipe,
+    DatePipe,
+    PageHeaderComponent,
+    MetricCardComponent,
+    ErrorStateComponent,
+    RelativeTimePipe,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -47,6 +55,12 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
       @if (loading() && !account()) {
         <div class="empty-state"><span class="muted">Loading account…</span></div>
+      } @else if (!account() && loadError()) {
+        <app-error-state
+          title="Could not load this account"
+          [message]="loadError()"
+          (retry)="loadAll()"
+        />
       } @else if (!account()) {
         <div class="empty-state">
           <span class="muted">Account #{{ accountId() }} not found.</span>
@@ -74,29 +88,37 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           </div>
         }
 
-        <!-- ── Primary KPI strip — top-line money metrics ────────── -->
+        <!-- ── Primary KPI strip — top-line money metrics ──────────
+             One accent for plain figures; green / red / amber only where
+             the value carries a state (equity vs balance, floating P&L,
+             margin pressure, sync freshness). -->
         <div class="kpi-strip">
           <app-metric-card
             label="Balance"
             [value]="a.balance"
             format="currency"
-            dotColor="#0071E3"
+            [dotColor]="accent"
           />
           <app-metric-card
             label="Equity"
             [value]="a.equity"
             format="currency"
-            [dotColor]="a.equity >= a.balance ? '#34C759' : '#FF3B30'"
+            [dotColor]="a.equity === a.balance ? accent : a.equity > a.balance ? good : bad"
             [delta]="a.equity - a.balance"
           />
           <app-metric-card
             label="Floating P&L"
             [value]="a.profit"
             format="currency"
-            [dotColor]="a.profit >= 0 ? '#34C759' : '#FF3B30'"
+            [dotColor]="a.profit === 0 ? accent : a.profit > 0 ? good : bad"
             [colorByValue]="true"
           />
-          <app-metric-card label="Credit" [value]="a.credit" format="currency" dotColor="#AF52DE" />
+          <app-metric-card
+            label="Credit"
+            [value]="a.credit"
+            format="currency"
+            [dotColor]="accent"
+          />
         </div>
 
         <!-- ── Secondary KPI strip — margin / freshness ──────────── -->
@@ -105,13 +127,15 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             label="Margin used"
             [value]="a.marginUsed"
             format="currency"
-            [dotColor]="marginUtilizationPct() > 80 ? '#FF3B30' : '#FF9500'"
+            [dotColor]="
+              marginUtilizationPct() > 80 ? bad : marginUtilizationPct() > 50 ? warn : accent
+            "
           />
           <app-metric-card
             label="Free margin"
             [value]="a.marginAvailable"
             format="currency"
-            [dotColor]="a.marginAvailable > 0 ? '#34C759' : '#FF3B30'"
+            [dotColor]="a.marginAvailable > 0 ? accent : bad"
           />
           <app-metric-card
             label="Margin level"
@@ -123,7 +147,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             label="Sync age (s)"
             [value]="syncAgeSec()"
             format="number"
-            [dotColor]="syncAgeSec() !== null && syncAgeSec()! > 60 ? '#FF3B30' : '#34C759'"
+            [dotColor]="syncAgeSec() !== null && syncAgeSec()! > 60 ? bad : accent"
           />
         </div>
 
@@ -172,10 +196,16 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 <dd class="mono">{{ a.currency ?? '—' }}</dd>
               </div>
               <div>
-                <dt>Mode</dt>
+                <dt>Environment</dt>
                 <dd>
-                  <span class="mode-pill" [class.paper]="a.isPaper" [class.live]="!a.isPaper">
-                    {{ a.isPaper ? 'Paper' : 'Live' }}
+                  <span
+                    class="mode-pill"
+                    [class.paper]="environment() === 'Paper'"
+                    [class.live]="environment() === 'Live'"
+                    [class.demo]="environment() === 'Demo'"
+                    [title]="environmentTitle()"
+                  >
+                    {{ environmentLabel() }}
                   </span>
                 </dd>
               </div>
@@ -244,21 +274,14 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                   {{ a.marginAvailable | currency: a.currency ?? 'USD' : 'symbol' : '1.2-2' }}
                 </span>
               </div>
-              <div class="health-row">
-                <div class="health-stat">
-                  <span class="comp-label">Margin used</span>
-                  <span class="comp-value mono">
-                    {{ a.marginUsed | currency: a.currency ?? 'USD' : 'symbol' : '1.2-2' }}
-                  </span>
-                </div>
-                <div class="health-stat">
-                  <span class="comp-label">Utilization</span>
-                  <span class="comp-value mono" [class.loss]="marginUtilizationPct() > 80">
+              <div class="util-bar-wrap">
+                <span class="comp-label">
+                  Margin utilization ·
+                  <span class="mono" [class.loss]="marginUtilizationPct() > 80">
                     {{ marginUtilizationPct().toFixed(1) }}%
                   </span>
-                </div>
-              </div>
-              <div class="util-bar-wrap">
+                  of equity
+                </span>
                 <div class="util-bar">
                   <span
                     class="util-fill"
@@ -271,7 +294,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
               <div class="util-bar-wrap">
                 <span class="comp-label">
                   Margin level ·
-                  @if ((a.marginUsed ?? 0) > 0) {
+                  @if (a.marginUsed > 0) {
                     {{ marginLevelPct() > 999 ? '> 999%' : marginLevelPct().toFixed(1) + '%' }}
                   } @else {
                     no margin used
@@ -285,8 +308,13 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                     [style.width.%]="Math.min(100, marginLevelPct() / 5)"
                   ></span>
                 </div>
+                <!-- The broker's own thresholds, not a hard-coded 100 / 50 —
+                     the card above shows the real values and the two must agree. -->
                 <small class="hint">
-                  margin call &lt; 100% · stop-out &lt; 50% · scale shows 0–500% range
+                  margin call &lt;
+                  {{ a.marginSoCall > 0 ? a.marginSoCall + '%' : 'not reported' }} · stop-out &lt;
+                  {{ a.marginSoStopOut > 0 ? a.marginSoStopOut + '%' : 'not reported' }} · bar spans
+                  0–500%
                 </small>
               </div>
             </div>
@@ -342,7 +370,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                   }}
                 </dd>
               </div>
-              <div>
+              <div class="span-2">
                 <dt>Risk profile (per-account)</dt>
                 <dd>
                   <select
@@ -435,74 +463,76 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             </span>
           </header>
           @if (linkedEas().length > 0) {
-            <table class="grid-table">
-              <thead>
-                <tr>
-                  <th>Instance</th>
-                  <th>Status</th>
-                  <th>Version</th>
-                  <th>Role</th>
-                  <th>Chart</th>
-                  <th>Owned symbols</th>
-                  <th>Registered</th>
-                  <th>Last heartbeat</th>
-                  <th class="num">Heartbeat age</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (ea of linkedEas(); track ea.instanceId) {
+            <div class="grid-table-scroll">
+              <table class="grid-table">
+                <thead>
                   <tr>
-                    <td class="mono ea-instance">{{ ea.instanceId }}</td>
-                    <td>
-                      <span
-                        class="status-pill"
-                        [class.active]="ea.status === 'Active'"
-                        [class.idle]="ea.status === 'ShuttingDown'"
-                        [class.down]="ea.status === 'Disconnected'"
-                      >
-                        {{ ea.status }}
-                      </span>
-                    </td>
-                    <td class="mono muted">{{ ea.eaVersion || '—' }}</td>
-                    <td>
-                      @if (ea.isCoordinator) {
-                        <span class="status-pill active">coordinator</span>
-                      } @else {
-                        <span class="muted">worker</span>
-                      }
-                    </td>
-                    <td class="mono">
-                      @if (ea.chartSymbol) {
-                        {{ ea.chartSymbol }}
-                        <span class="muted">· {{ ea.chartTimeframe || '—' }}</span>
-                      } @else {
-                        <span class="muted">—</span>
-                      }
-                    </td>
-                    <td>
-                      @if (symbolsList(ea).length > 0) {
-                        <div class="symbol-chips">
-                          @for (s of symbolsList(ea); track s) {
-                            <span class="symbol-chip">{{ s }}</span>
-                          }
-                        </div>
-                      } @else {
-                        <span class="muted">—</span>
-                      }
-                    </td>
-                    <td class="muted">{{ ea.registeredAt | relativeTime }}</td>
-                    <td class="muted mono">{{ ea.lastHeartbeat | date: 'HH:mm:ss' }}</td>
-                    <td
-                      class="num mono"
-                      [class.profit]="heartbeatAgeSec(ea) !== null && heartbeatAgeSec(ea)! < 30"
-                      [class.loss]="heartbeatAgeSec(ea) !== null && heartbeatAgeSec(ea)! > 120"
-                    >
-                      {{ heartbeatAgeSec(ea) === null ? '—' : formatAge(heartbeatAgeSec(ea)!) }}
-                    </td>
+                    <th>Instance</th>
+                    <th>Status</th>
+                    <th>Version</th>
+                    <th>Role</th>
+                    <th>Chart</th>
+                    <th>Owned symbols</th>
+                    <th>Registered</th>
+                    <th>Last heartbeat</th>
+                    <th class="num">Heartbeat age</th>
                   </tr>
-                }
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  @for (ea of linkedEas(); track ea.instanceId) {
+                    <tr>
+                      <td class="mono ea-instance">{{ ea.instanceId }}</td>
+                      <td>
+                        <span
+                          class="status-pill"
+                          [class.active]="ea.status === 'Active'"
+                          [class.idle]="ea.status === 'ShuttingDown'"
+                          [class.down]="ea.status === 'Disconnected'"
+                        >
+                          {{ ea.status }}
+                        </span>
+                      </td>
+                      <td class="mono muted">{{ ea.eaVersion || '—' }}</td>
+                      <td>
+                        @if (ea.isCoordinator) {
+                          <span class="status-pill active">coordinator</span>
+                        } @else {
+                          <span class="muted">worker</span>
+                        }
+                      </td>
+                      <td class="mono">
+                        @if (ea.chartSymbol) {
+                          {{ ea.chartSymbol }}
+                          <span class="muted">· {{ ea.chartTimeframe || '—' }}</span>
+                        } @else {
+                          <span class="muted">—</span>
+                        }
+                      </td>
+                      <td>
+                        @if (symbolsList(ea).length > 0) {
+                          <div class="symbol-chips">
+                            @for (s of symbolsList(ea); track s) {
+                              <span class="symbol-chip">{{ s }}</span>
+                            }
+                          </div>
+                        } @else {
+                          <span class="muted">—</span>
+                        }
+                      </td>
+                      <td class="muted">{{ ea.registeredAt | relativeTime }}</td>
+                      <td class="muted mono">{{ ea.lastHeartbeat | date: 'HH:mm:ss' }}</td>
+                      <td
+                        class="num mono"
+                        [class.profit]="heartbeatAgeSec(ea) !== null && heartbeatAgeSec(ea)! < 30"
+                        [class.loss]="heartbeatAgeSec(ea) !== null && heartbeatAgeSec(ea)! > 120"
+                      >
+                        {{ heartbeatAgeSec(ea) === null ? '—' : formatAge(heartbeatAgeSec(ea)!) }}
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
           } @else {
             <div class="empty-state inline">
               <span class="muted">No EAs are bound to this account.</span>
@@ -553,10 +583,12 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       }
 
       /* ── Risk banner ──────────────────────────────────────────── */
+      /* Full card width: at half-page the 320 px cap clipped the option text. */
       .account-risk-select {
         appearance: auto;
         width: 100%;
-        max-width: 320px;
+        max-width: none;
+        text-overflow: ellipsis;
         margin-top: var(--space-1);
         padding: var(--space-2) var(--space-3);
         border: 1px solid var(--border-strong, var(--border, #c9ccd6));
@@ -675,25 +707,19 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       }
 
       /* ── Two-column row ──────────────────────────────────────── */
+      /* Cards size to their content — a three-row Symbol-exposure list should
+         not be stretched to the height of the Risk-thresholds form beside it. */
       .detail-row {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         gap: var(--space-3);
         margin-top: var(--space-3);
-        align-items: stretch;
+        align-items: start;
       }
       @media (max-width: 1100px) {
         .detail-row {
           grid-template-columns: 1fr;
         }
-      }
-      .detail-row > .detail-card {
-        display: flex;
-        flex-direction: column;
-      }
-      .detail-row > .detail-card > .composition,
-      .detail-row > .detail-card > .spec-grid {
-        flex: 1;
       }
 
       .detail-card {
@@ -740,6 +766,9 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         flex-direction: column;
         gap: 2px;
         min-width: 0;
+      }
+      .spec-grid > div.span-2 {
+        grid-column: 1 / -1;
       }
       .spec-grid dt {
         font-size: 9.5px;
@@ -788,24 +817,14 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         background: var(--border);
         margin: 4px 0;
       }
-      .health-row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: var(--space-3);
-        padding-top: 8px;
-        border-top: 1px solid var(--border);
-      }
-      .health-stat {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        font-size: var(--text-sm);
-      }
       .util-bar-wrap {
         display: flex;
         flex-direction: column;
         gap: 4px;
-        padding-top: 2px;
+        padding-top: 6px;
+      }
+      .util-bar-wrap .comp-label {
+        font-size: var(--text-xs);
       }
       .util-bar {
         position: relative;
@@ -853,6 +872,10 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         background: rgba(0, 113, 227, 0.14);
         color: #0040dd;
       }
+      .mode-pill.demo {
+        background: rgba(255, 149, 0, 0.14);
+        color: #c93400;
+      }
       .status-pill.idle {
         background: rgba(255, 149, 0, 0.14);
         color: #c93400;
@@ -885,6 +908,10 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         font-weight: var(--font-semibold);
         text-transform: uppercase;
         letter-spacing: 0.04em;
+        white-space: nowrap;
+      }
+      .grid-table-scroll {
+        overflow-x: auto;
       }
       .grid-table th.num,
       .grid-table td.num {
@@ -975,6 +1002,9 @@ export class AccountDetailPageComponent implements OnInit, OnDestroy {
   readonly riskProfiles = signal<RiskProfileDto[]>([]);
   readonly savingRiskProfile = signal(false);
   readonly loading = signal(true);
+  /** Transport / engine error from the last account fetch — distinct from
+   *  a genuine 404, which must not be dressed up as a retryable failure. */
+  readonly loadError = signal<string | null>(null);
   readonly nowMs = signal(Date.now());
 
   /** Set of active currency-pair symbols for the symbol-exposure card. */
@@ -1046,14 +1076,55 @@ export class AccountDetailPageComponent implements OnInit, OnDestroy {
     return lvl > 0 && lvl <= a.marginSoCall;
   });
 
+  // Metric-card dot colours: one accent for plain figures, state colours only
+  // where the number carries a judgement.
+  protected readonly accent = '#0071E3';
+  protected readonly good = '#34C759';
+  protected readonly bad = '#FF3B30';
+  protected readonly warn = '#FF9500';
+
+  /**
+   * Where the money lives. `isPaper` alone labelled a broker demo "Live"
+   * right next to "Account type: Demo"; the three-way split keeps the mode
+   * and the account type from contradicting each other.
+   */
+  readonly environment = computed<'Live' | 'Demo' | 'Paper'>(() => {
+    const a = this.account();
+    if (!a) return 'Demo';
+    if (a.isPaper) return 'Paper';
+    return a.accountType === 'Real' ? 'Live' : 'Demo';
+  });
+
+  readonly environmentLabel = computed(() => {
+    const a = this.account();
+    switch (this.environment()) {
+      case 'Live':
+        return 'Live';
+      case 'Paper':
+        return 'Paper';
+      default:
+        return a?.accountType === 'Contest' ? 'Contest (real broker)' : 'Demo (real broker)';
+    }
+  });
+
+  readonly environmentTitle = computed(() => {
+    switch (this.environment()) {
+      case 'Live':
+        return 'Real-money account at the broker';
+      case 'Paper':
+        return 'Simulated fills inside the engine — no broker account';
+      default:
+        return 'Connected to the real broker, but funded with demo money';
+    }
+  });
+
   readonly subtitle = computed(() => {
     const a = this.account();
     if (!a) return '';
     const broker = a.brokerName ?? 'Broker —';
     const server = a.brokerServer ? ` (${a.brokerServer})` : '';
-    const mode = a.isPaper ? 'Paper' : 'Live';
     const acct = a.accountId ?? '—';
-    return `${broker}${server} · ${mode} · ${acct} · ${a.currency ?? '—'}`;
+    return `${broker}${server} · ${this.environmentLabel()} · ${acct} · ${a.currency ?? '—'}`;
   });
 
   readonly unrealizedPnL = computed(() => {
@@ -1164,8 +1235,16 @@ export class AccountDetailPageComponent implements OnInit, OnDestroy {
     const id = this.accountId();
     if (id === null) return;
     this.loading.set(true);
+    this.loadError.set(null);
     forkJoin({
-      account: this.accountsService.getById(id).pipe(catchError(() => of(null))),
+      account: this.accountsService.getById(id).pipe(
+        catchError((err) => {
+          if (err?.status !== 404) {
+            this.loadError.set(err?.error?.message ?? err?.message ?? 'Engine returned an error.');
+          }
+          return of(null);
+        }),
+      ),
       eas: this.eaService.list().pipe(catchError(() => of(null))),
       pairs: this.pairsService
         .list({ currentPage: 1, itemCountPerPage: 200 })

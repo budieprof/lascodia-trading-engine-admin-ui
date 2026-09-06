@@ -179,6 +179,12 @@ export class EAStatePanelComponent {
    * envelope.
    */
   readonly loading = input(false);
+  /**
+   * Account currency for the money cells. The envelope carries bare numbers,
+   * so without this "Daily P&L −1296.50" sat next to "73,177.77 USD" on the
+   * account card with no unit and no separators.
+   */
+  readonly currency = input<string | null>(null);
 
   /** Six placeholder cells while the envelope is in flight. */
   protected readonly skeletonCells = computed(() => Array.from({ length: 6 }, (_, i) => i));
@@ -215,65 +221,68 @@ export class EAStatePanelComponent {
       cells.push({
         key: 'profitTarget',
         label: 'Daily profit target',
-        value: 'REACHED',
+        value: 'Reached',
         tone: 'ok',
       });
     }
 
+    // One casing for every state word — the tone dot and colour carry the
+    // alarm, so "ACTIVE" beside "off" only made the two read as different
+    // kinds of value.
     cells.push({
       key: 'killSwitch',
       label: 'Kill switch',
-      value: s.killSwitchActive == null ? '—' : s.killSwitchActive ? 'ACTIVE' : 'off',
+      value: s.killSwitchActive == null ? '—' : s.killSwitchActive ? 'Active' : 'Off',
       tone: s.killSwitchActive ? 'bad' : 'ok',
     });
 
     cells.push({
       key: 'globalStop',
       label: 'Global safety stop',
-      value: s.globalSafetyStop == null ? '—' : s.globalSafetyStop ? 'TRIPPED' : 'off',
+      value: s.globalSafetyStop == null ? '—' : s.globalSafetyStop ? 'Tripped' : 'Off',
       tone: s.globalSafetyStop ? 'bad' : 'ok',
     });
 
     cells.push({
       key: 'broker',
-      label: 'Broker conn.',
-      value: s.brokerConnected == null ? '—' : s.brokerConnected ? 'connected' : 'down',
+      label: 'Broker connection',
+      value: s.brokerConnected == null ? '—' : s.brokerConnected ? 'Connected' : 'Down',
       tone: s.brokerConnected ? 'ok' : 'bad',
     });
 
     cells.push({
       key: 'coordinator',
       label: 'Coordinator',
-      value: s.isCoordinator == null ? '—' : s.isCoordinator ? 'yes' : 'no',
+      value: s.isCoordinator == null ? '—' : s.isCoordinator ? 'Yes' : 'No',
       tone: 'info',
     });
 
     cells.push({
       key: 'httpCircuit',
       label: 'HTTP circuit',
-      value: s.httpCircuitOpen == null ? '—' : s.httpCircuitOpen ? 'OPEN' : 'closed',
+      value: s.httpCircuitOpen == null ? '—' : s.httpCircuitOpen ? 'Open' : 'Closed',
       tone: s.httpCircuitOpen ? 'bad' : 'ok',
     });
 
     cells.push({
       key: 'deadMan',
       label: "Dead-man's switch",
-      value: s.deadManSwitchArmed == null ? '—' : s.deadManSwitchArmed ? 'ARMED' : 'safe',
+      value: s.deadManSwitchArmed == null ? '—' : s.deadManSwitchArmed ? 'Armed' : 'Safe',
       tone: s.deadManSwitchArmed ? 'bad' : 'ok',
     });
 
     // ── Counters ──
     cells.push({
       key: 'engineFailures',
-      label: 'Engine fails (consec.)',
-      value: s.engineFailuresConsec == null ? '—' : String(s.engineFailuresConsec),
+      label: 'Consecutive engine failures',
+      value: s.engineFailuresConsec == null ? '—' : fmtInt(s.engineFailuresConsec),
       tone: countTone(s.engineFailuresConsec, 1, 5),
     });
 
     cells.push({
       key: 'reconDrift',
-      label: 'Recon drift (consec.)',
-      value: s.reconDriftConsecutive == null ? '—' : String(s.reconDriftConsecutive),
+      label: 'Consecutive recon drift',
+      value: s.reconDriftConsecutive == null ? '—' : fmtInt(s.reconDriftConsecutive),
       tone: countTone(s.reconDriftConsecutive, 3, 20),
     });
 
@@ -295,12 +304,12 @@ export class EAStatePanelComponent {
       label: 'Retry queue',
       value:
         s.retryQueueCount != null
-          ? String(s.retryQueueCount)
+          ? fmtInt(s.retryQueueCount)
           : s.retryQueuePending == null
             ? '—'
             : s.retryQueuePending
-              ? 'pending'
-              : 'empty',
+              ? 'Pending'
+              : 'Empty',
       tone: countTone(s.retryQueueCount, 1, 50),
     });
 
@@ -314,8 +323,11 @@ export class EAStatePanelComponent {
     // ── GVar pressure ──
     cells.push({
       key: 'gvar',
-      label: 'GVar (Lascodia/total)',
-      value: s.gvarLasc != null && s.gvarTotal != null ? `${s.gvarLasc} / ${s.gvarTotal}` : '—',
+      label: 'GVar usage',
+      value:
+        s.gvarLasc != null && s.gvarTotal != null
+          ? `${fmtInt(s.gvarLasc)} of ${fmtInt(s.gvarTotal)}`
+          : '—',
       tone: s.gvarUsageHigh ? 'bad' : 'ok',
     });
 
@@ -325,7 +337,7 @@ export class EAStatePanelComponent {
       cells.push({
         key: 'positionCount',
         label: 'Open positions',
-        value: String(s.positionCount),
+        value: fmtInt(s.positionCount),
         tone: 'info',
       });
     }
@@ -333,16 +345,18 @@ export class EAStatePanelComponent {
       cells.push({
         key: 'signalsProcessed',
         label: 'Signals processed',
-        value: String(s.signalsProcessed),
+        value: fmtInt(s.signalsProcessed),
         tone: 'info',
       });
     }
     if (s.dailyPnL != null) {
+      const ccy = this.currency();
       cells.push({
         key: 'dailyPnL',
         label: 'Daily P&L',
-        value: s.dailyPnL.toFixed(2),
-        tone: s.dailyPnL >= 0 ? 'ok' : 'bad',
+        value: `${fmtMoney(s.dailyPnL)}${ccy ? ` ${ccy}` : ''}`,
+        // Zero is neither a gain nor a loss.
+        tone: s.dailyPnL > 0 ? 'ok' : s.dailyPnL < 0 ? 'bad' : 'info',
       });
     }
     if (s.lastSignalAtUnix != null && s.lastSignalAtUnix > 0) {
@@ -360,7 +374,7 @@ export class EAStatePanelComponent {
       cells.push({
         key: 'engineReachable',
         label: 'Engine reachable',
-        value: s.engineReachable ? 'yes' : 'no',
+        value: s.engineReachable ? 'Yes' : 'No',
         tone: s.engineReachable ? 'ok' : 'bad',
       });
     }
@@ -377,7 +391,7 @@ export class EAStatePanelComponent {
       cells.push({
         key: 'transport',
         label: 'Transport',
-        value: `${s.transportMode} · ${s.transportConnected ? 'OK' : 'down'}`,
+        value: `${s.transportMode} · ${s.transportConnected ? 'Connected' : 'Down'}`,
         tone: s.transportConnected ? 'ok' : 'bad',
       });
     }
@@ -437,16 +451,28 @@ export class EAStatePanelComponent {
       }
     }
     if (s.latencyP99Ms != null) {
-      if (s.latencyP99Ms < 0) {
-        cells.push({ key: 'latencyPct', label: 'Latency p50/p95/p99', value: '—', tone: 'info' });
-      } else {
-        const p50 = s.latencyP50Ms ?? 0;
-        const p95 = s.latencyP95Ms ?? 0;
+      const p50 = s.latencyP50Ms ?? -1;
+      const p95 = s.latencyP95Ms ?? -1;
+      const p99 = s.latencyP99Ms;
+      // The percentile ring only fills once enough samples exist; until then
+      // the EA reports 0 for all three while the running average is already
+      // non-zero. "0 / 0 / 0 ms" beside "Avg latency 7 ms" read as a
+      // contradiction, so an empty ring says so instead.
+      const ringEmpty = p99 <= 0 && p95 <= 0 && p50 <= 0;
+      if (p99 < 0 || ringEmpty) {
         cells.push({
           key: 'latencyPct',
           label: 'Latency p50/p95/p99',
-          value: `${p50} / ${p95} / ${s.latencyP99Ms} ms`,
-          tone: s.latencyP99Ms <= 500 ? 'ok' : s.latencyP99Ms <= 1000 ? 'warn' : 'bad',
+          value: p99 < 0 ? '—' : 'not reported yet',
+          tone: 'info',
+        });
+      } else {
+        const each = (v: number) => (v > 0 ? fmtInt(v) : '—');
+        cells.push({
+          key: 'latencyPct',
+          label: 'Latency p50/p95/p99',
+          value: `${each(p50)} / ${each(p95)} / ${each(p99)} ms`,
+          tone: p99 <= 500 ? 'ok' : p99 <= 1000 ? 'warn' : 'bad',
         });
       }
     }
@@ -466,12 +492,11 @@ export class EAStatePanelComponent {
     if (s.onTimerP95Ms != null) {
       const target = s.onTimerP95TargetMs ?? 500;
       const budget = s.onTimerBudgetMs ?? 900;
-      const p50 = s.onTimerP50Ms ?? 0;
-      const p99 = s.onTimerP99Ms ?? 0;
+      const each = (v: number | null | undefined) => (v != null && v > 0 ? fmtInt(v) : '—');
       cells.push({
         key: 'onTimerPct',
         label: 'OnTimer p50/p95/p99',
-        value: `${p50} / ${s.onTimerP95Ms} / ${p99} ms`,
+        value: `${each(s.onTimerP50Ms)} / ${each(s.onTimerP95Ms)} / ${each(s.onTimerP99Ms)} ms`,
         // Past the hard budget the EA is actively shedding phases, so that is
         // 'bad'; between target and budget it is degraded but still complete.
         tone: s.onTimerP95Ms > budget ? 'bad' : s.onTimerP95Ms > target ? 'warn' : 'ok',
@@ -536,6 +561,20 @@ export class EAStatePanelComponent {
 }
 
 type Tone = 'ok' | 'warn' | 'bad' | 'info';
+
+// One number style for the panel: thousands separators, and two fixed
+// decimals on money — matching the account card beside it.
+const INT_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+const MONEY_FORMAT = new Intl.NumberFormat('en-US', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+function fmtInt(n: number): string {
+  return INT_FORMAT.format(n);
+}
+function fmtMoney(n: number): string {
+  return MONEY_FORMAT.format(n);
+}
 
 interface StateCell {
   key: string;

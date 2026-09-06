@@ -521,7 +521,11 @@ import {
               dotColor="#34C759"
             />
             <app-metric-card
-              label="Loosest total DD"
+              [label]="
+                rpStats().unlimited > 0
+                  ? 'Loosest bounded total DD (' + rpStats().unlimited + ' unlimited)'
+                  : 'Loosest total DD'
+              "
               [value]="rpStats().maxTotalDD"
               format="percent"
               dotColor="#FF3B30"
@@ -562,13 +566,18 @@ import {
           <div class="rp-charts">
             <app-chart-card
               title="Drawdown limits by profile"
-              subtitle="Daily DD vs total DD — green = today's cap, red = lifetime cap"
+              [subtitle]="
+                'Daily DD vs total DD — green = today\\'s cap, red = lifetime cap' +
+                (rpStats().unlimited > 0
+                  ? ' · ' + rpStats().unlimited + ' unlimited profile(s) omitted'
+                  : '')
+              "
               [options]="drawdownChartOptions()"
               height="280px"
             />
             <app-chart-card
               title="Sizing parameters by profile"
-              subtitle="Risk per trade · max symbol exposure · max lot · positions"
+              subtitle="Risk per trade · max symbol exposure · max lot · positions (unlimited values left blank)"
               [options]="sizingChartOptions()"
               height="280px"
             />
@@ -751,9 +760,9 @@ import {
                       <td class="num mono">{{ row.strategies }}</td>
                       <td class="num mono">{{ row.activeStrategies }}</td>
                       <td class="num mono">{{ row.openPositions }}</td>
-                      <td class="num mono">{{ row.maxRiskPerTradePct.toFixed(1) }}%</td>
-                      <td class="num mono">{{ row.maxDailyDrawdownPct.toFixed(1) }}%</td>
-                      <td class="num mono">{{ row.maxTotalDrawdownPct.toFixed(1) }}%</td>
+                      <td class="num mono">{{ fmtPct(row.maxRiskPerTradePct) }}</td>
+                      <td class="num mono">{{ fmtPct(row.maxDailyDrawdownPct) }}</td>
+                      <td class="num mono">{{ fmtPct(row.maxTotalDrawdownPct) }}</td>
                       <td>
                         <span class="rp-pill" [class.on]="row.strategies > 0">
                           {{ row.strategies > 0 ? 'Used' : 'Unused' }}
@@ -773,13 +782,15 @@ import {
             }
           </section>
 
-          <!-- Strategy ↔ profile assignment table -->
+          <!-- Strategy ↔ profile assignment table. Orphans (no profile) are
+               identical rows — three amber pills each — so they collapse into
+               one summary line with an expander instead of 50 repeats. -->
           <section class="rp-matrix">
             <header class="rp-matrix-head">
               <h3>Strategy assignment</h3>
               <span class="muted">
-                Showing first {{ assignmentRows().length }} strategies · orphans (no profile) row to
-                top
+                {{ boundAssignmentRows().length }} bound ·
+                {{ orphanAssignmentRows().length }} orphaned (no profile)
               </span>
             </header>
             @if (assignmentRows().length > 0) {
@@ -798,7 +809,49 @@ import {
                   </tr>
                 </thead>
                 <tbody>
-                  @for (row of assignmentRows(); track row.strategyId) {
+                  @if (orphanAssignmentRows().length > 0) {
+                    <tr class="rp-orphan-summary">
+                      <td colspan="3">
+                        <button
+                          type="button"
+                          class="rp-expander"
+                          (click)="showOrphans.set(!showOrphans())"
+                          [attr.aria-expanded]="showOrphans()"
+                        >
+                          {{ showOrphans() ? '▾' : '▸' }}
+                          {{ orphanAssignmentRows().length }} orphaned strateg{{
+                            orphanAssignmentRows().length === 1 ? 'y' : 'ies'
+                          }}
+                        </button>
+                        <span class="muted">{{ orphanStatusSummary() }}</span>
+                      </td>
+                      <td><span class="rp-pill warn">Orphan</span></td>
+                      <td class="num mono">—</td>
+                      <td class="num mono">—</td>
+                      <td class="num mono">—</td>
+                      <td class="num mono">—</td>
+                      <td><span class="rp-pill warn">Unguarded</span></td>
+                    </tr>
+                    @if (showOrphans()) {
+                      @for (row of orphanAssignmentRows(); track row.strategyId) {
+                        <tr class="rp-orphan-row">
+                          <td class="mono">{{ row.strategyName }}</td>
+                          <td class="mono">{{ row.symbol ?? '—' }}</td>
+                          <td>
+                            <span
+                              class="rp-pill"
+                              [class.on]="row.status === 'Active'"
+                              [class.warn]="row.status === 'Paused'"
+                            >
+                              {{ row.status }}
+                            </span>
+                          </td>
+                          <td colspan="6" class="muted">No risk profile bound</td>
+                        </tr>
+                      }
+                    }
+                  }
+                  @for (row of boundAssignmentRows(); track row.strategyId) {
                     <tr>
                       <td class="mono">{{ row.strategyName }}</td>
                       <td class="mono">{{ row.symbol ?? '—' }}</td>
@@ -811,37 +864,11 @@ import {
                           {{ row.status }}
                         </span>
                       </td>
-                      <td class="mono">
-                        @if (row.profileName) {
-                          {{ row.profileName }}
-                        } @else {
-                          <span class="rp-pill warn">Orphan</span>
-                        }
-                      </td>
-                      <td class="num mono">
-                        {{
-                          row.maxRiskPerTradePct !== null
-                            ? row.maxRiskPerTradePct.toFixed(1) + '%'
-                            : '—'
-                        }}
-                      </td>
-                      <td class="num mono">
-                        {{ row.maxOpenPositions ?? '—' }}
-                      </td>
-                      <td class="num mono">
-                        {{
-                          row.maxDailyDrawdownPct !== null
-                            ? row.maxDailyDrawdownPct.toFixed(1) + '%'
-                            : '—'
-                        }}
-                      </td>
-                      <td class="num mono">
-                        {{
-                          row.maxTotalDrawdownPct !== null
-                            ? row.maxTotalDrawdownPct.toFixed(1) + '%'
-                            : '—'
-                        }}
-                      </td>
+                      <td class="mono">{{ row.profileName }}</td>
+                      <td class="num mono">{{ fmtPct(row.maxRiskPerTradePct) }}</td>
+                      <td class="num mono">{{ fmtCount(row.maxOpenPositions) }}</td>
+                      <td class="num mono">{{ fmtPct(row.maxDailyDrawdownPct) }}</td>
+                      <td class="num mono">{{ fmtPct(row.maxTotalDrawdownPct) }}</td>
                       <td>
                         <span class="rp-pill" [class.on]="row.guarded" [class.warn]="!row.guarded">
                           {{ row.guarded ? 'Guarded' : 'Unguarded' }}
@@ -1214,21 +1241,30 @@ import {
       }
 
       /* Risk-profiles density additions */
+      /* auto-fit wraps the tile row instead of squeezing eight tiles past the
+         viewport; align-items:start keeps short tiles from stretching. */
       .rp-kpis {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
         gap: var(--space-2);
         margin-bottom: var(--space-4);
+        align-items: start;
       }
-      @media (max-width: 1400px) {
-        .rp-kpis {
-          grid-template-columns: repeat(4, 1fr);
-        }
+      .rp-orphan-summary td {
+        background: rgba(255, 149, 0, 0.06);
       }
-      @media (max-width: 720px) {
-        .rp-kpis {
-          grid-template-columns: repeat(2, 1fr);
-        }
+      .rp-orphan-row td {
+        color: var(--text-secondary);
+      }
+      .rp-expander {
+        background: transparent;
+        border: 0;
+        padding: 0;
+        margin-right: var(--space-2);
+        font: inherit;
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        cursor: pointer;
       }
 
       .rp-charts {
@@ -1471,11 +1507,36 @@ export class RiskProfilesPageComponent implements OnInit {
   // strip + chart row stay stable as the user pages or filters the grid.
   readonly profilesSample = signal<RiskProfileDto[]>([]);
 
+  /**
+   * "Unrestricted" profiles carry sentinel limits (100000% drawdown, 1,000,000
+   * positions). Those are "no limit", not a number, so they are rendered as
+   * Unlimited and excluded from every average / min / max / chart, otherwise
+   * the headline reads "Loosest total DD 100000%" and "Avg max positions 400,060".
+   */
+  isUnlimitedPct(v: number | null | undefined): boolean {
+    return v != null && v >= 1000;
+  }
+  isUnlimitedCount(v: number | null | undefined): boolean {
+    return v != null && v >= 100_000;
+  }
+  fmtPct(v: number | null | undefined, digits = 1): string {
+    if (v == null || !Number.isFinite(v)) return '—';
+    return this.isUnlimitedPct(v) ? 'Unlimited' : `${v.toFixed(digits)}%`;
+  }
+  fmtCount(v: number | null | undefined): string {
+    if (v == null || !Number.isFinite(v)) return '—';
+    return this.isUnlimitedCount(v) ? 'Unlimited' : new Intl.NumberFormat('en-US').format(v);
+  }
+  private avgOrNull(values: number[]): number | null {
+    return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
+  }
+
   rpStats = computed(() => {
     const rows = this.profilesSample();
     if (rows.length === 0) {
       return {
         total: 0,
+        unlimited: 0,
         minTotalDD: null as number | null,
         maxTotalDD: null as number | null,
         avgRiskPerTrade: null as number | null,
@@ -1485,37 +1546,61 @@ export class RiskProfilesPageComponent implements OnInit {
         withMinRR: 0,
       };
     }
-    const totalDDs = rows.map((r) => r.maxTotalDrawdownPct);
-    const risks = rows.map((r) => r.maxRiskPerTradePct);
-    const positions = rows.map((r) => r.maxOpenPositions);
+    const totalDDs = rows.map((r) => r.maxTotalDrawdownPct).filter((v) => !this.isUnlimitedPct(v));
+    const risks = rows.map((r) => r.maxRiskPerTradePct).filter((v) => !this.isUnlimitedPct(v));
+    const positions = rows.map((r) => r.maxOpenPositions).filter((v) => !this.isUnlimitedCount(v));
+    const avgRisk = this.avgOrNull(risks);
+    const avgPos = this.avgOrNull(positions);
     return {
       total: rows.length,
-      minTotalDD: +Math.min(...totalDDs).toFixed(2),
-      maxTotalDD: +Math.max(...totalDDs).toFixed(2),
-      avgRiskPerTrade: +(risks.reduce((a, b) => a + b, 0) / rows.length).toFixed(2),
-      avgMaxPositions: +(positions.reduce((a, b) => a + b, 0) / rows.length).toFixed(1),
+      unlimited: rows.filter(
+        (r) =>
+          this.isUnlimitedPct(r.maxTotalDrawdownPct) || this.isUnlimitedCount(r.maxOpenPositions),
+      ).length,
+      minTotalDD: totalDDs.length > 0 ? +Math.min(...totalDDs).toFixed(2) : null,
+      maxTotalDD: totalDDs.length > 0 ? +Math.max(...totalDDs).toFixed(2) : null,
+      avgRiskPerTrade: avgRisk === null ? null : +avgRisk.toFixed(2),
+      avgMaxPositions: avgPos === null ? null : +avgPos.toFixed(1),
       requireSL: rows.filter((r) => r.requireStopLoss).length,
       requireTP: rows.filter((r) => r.requireTakeProfit).length,
       withMinRR: rows.filter((r) => r.minRiskRewardRatio > 0).length,
     };
   });
 
+  /** Short y-axis label: "Conservative (Account 18)" → "Conservative (Acc…". */
+  private shortName(r: RiskProfileDto): string {
+    const n = r.name ?? `#${r.id}`;
+    return n.length > 18 ? `${n.slice(0, 17)}…` : n;
+  }
+
+  /** Profiles with real (non-sentinel) limits — the only ones a bar chart can show. */
+  readonly boundedProfiles = computed(() =>
+    this.profilesSample().filter(
+      (r) =>
+        !this.isUnlimitedPct(r.maxTotalDrawdownPct) && !this.isUnlimitedPct(r.maxDailyDrawdownPct),
+    ),
+  );
+
   drawdownChartOptions = computed<EChartsOption>(() => {
-    const rows = this.profilesSample();
+    const rows = this.boundedProfiles();
     if (rows.length === 0) return {};
     return {
-      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      legend: { top: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
-      grid: { top: 30, right: 30, bottom: 30, left: 110 },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        valueFormatter: (v) => `${Number(v).toFixed(1)}%`,
+      },
+      legend: { top: 0, textStyle: { fontSize: 10 } },
+      grid: { top: 30, right: 40, bottom: 30, left: 130 },
       xAxis: {
         type: 'value',
-        axisLabel: { fontSize: 10, color: '#6E6E73', formatter: '{value}%' },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+        max: 100,
+        axisLabel: { fontSize: 10, formatter: '{value}%' },
       },
       yAxis: {
         type: 'category',
-        data: rows.map((r) => r.name ?? `#${r.id}`).reverse(),
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        data: rows.map((r) => this.shortName(r)).reverse(),
+        axisLabel: { fontSize: 10 },
       },
       series: [
         {
@@ -1540,45 +1625,51 @@ export class RiskProfilesPageComponent implements OnInit {
   sizingChartOptions = computed<EChartsOption>(() => {
     const rows = this.profilesSample();
     if (rows.length === 0) return {};
-    const names = rows.map((r) => r.name ?? `#${r.id}`);
+    const names = rows.map((r) => this.shortName(r));
+    // Sentinel limits are dropped (null → gap) so one Unrestricted profile's
+    // 1,000,000 positions cannot flatten every real value to the baseline.
+    const pct = (v: number) => (this.isUnlimitedPct(v) ? null : +v.toFixed(2));
+    const count = (v: number) => (this.isUnlimitedCount(v) ? null : v);
     return {
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      legend: { top: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
-      grid: { top: 30, right: 30, bottom: 30, left: 60 },
+      legend: { top: 0, textStyle: { fontSize: 10 } },
+      grid: { top: 40, right: 56, bottom: 48, left: 56 },
       xAxis: {
         type: 'category',
         data: names,
-        axisLabel: { fontSize: 10, color: '#6E6E73', interval: 0, rotate: 20 },
+        axisLabel: { fontSize: 10, interval: 0, rotate: 30 },
       },
       yAxis: [
         {
           type: 'value',
           name: '%',
-          nameTextStyle: { fontSize: 10, color: '#6E6E73' },
-          axisLabel: { fontSize: 10, color: '#6E6E73' },
-          splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+          nameTextStyle: { fontSize: 10 },
+          axisLabel: { fontSize: 10 },
+          // 15% headroom so the topmost value label ("119.65") is not clipped.
+          max: (v: { max: number }) => Math.ceil(v.max * 1.15),
         },
         {
           type: 'value',
           name: 'count',
           position: 'right',
-          nameTextStyle: { fontSize: 10, color: '#6E6E73' },
-          axisLabel: { fontSize: 10, color: '#6E6E73' },
+          nameTextStyle: { fontSize: 10 },
+          axisLabel: { fontSize: 10 },
           splitLine: { show: false },
+          max: (v: { max: number }) => Math.ceil(v.max * 1.15),
         },
       ],
       series: [
         {
           name: 'Risk / trade %',
           type: 'bar',
-          data: rows.map((r) => +r.maxRiskPerTradePct.toFixed(2)),
+          data: rows.map((r) => pct(r.maxRiskPerTradePct)),
           itemStyle: { color: '#FF9500', borderRadius: [4, 4, 0, 0] },
           barWidth: 12,
         },
         {
           name: 'Max symbol exp. %',
           type: 'bar',
-          data: rows.map((r) => +r.maxSymbolExposurePct.toFixed(2)),
+          data: rows.map((r) => pct(r.maxSymbolExposurePct)),
           itemStyle: { color: '#AF52DE', borderRadius: [4, 4, 0, 0] },
           barWidth: 12,
         },
@@ -1586,7 +1677,8 @@ export class RiskProfilesPageComponent implements OnInit {
           name: 'Max positions',
           type: 'line',
           yAxisIndex: 1,
-          data: rows.map((r) => r.maxOpenPositions),
+          data: rows.map((r) => count(r.maxOpenPositions)),
+          connectNulls: false,
           symbol: 'circle',
           symbolSize: 8,
           lineStyle: { color: '#0071E3', width: 2 },
@@ -1596,7 +1688,8 @@ export class RiskProfilesPageComponent implements OnInit {
           name: 'Max lot',
           type: 'line',
           yAxisIndex: 1,
-          data: rows.map((r) => r.maxLotSizePerTrade),
+          data: rows.map((r) => count(r.maxLotSizePerTrade)),
+          connectNulls: false,
           symbol: 'rect',
           symbolSize: 8,
           lineStyle: { color: '#5AC8FA', width: 2, type: 'dashed' },
@@ -1754,14 +1847,23 @@ export class RiskProfilesPageComponent implements OnInit {
         guarded: !!profile && (profile.requireStopLoss || profile.requireTakeProfit),
       };
     });
-    // Float orphans to the top so missing risk-profile bindings are obvious.
-    return rows
-      .sort((a, b) => {
-        if (!a.profileName && b.profileName) return -1;
-        if (a.profileName && !b.profileName) return 1;
-        return a.strategyName.localeCompare(b.strategyName);
-      })
-      .slice(0, 50);
+    return rows.sort((a, b) => a.strategyName.localeCompare(b.strategyName));
+  });
+
+  readonly showOrphans = signal(false);
+  readonly orphanAssignmentRows = computed(() =>
+    this.assignmentRows().filter((r) => !r.profileName),
+  );
+  readonly boundAssignmentRows = computed(() =>
+    this.assignmentRows().filter((r) => !!r.profileName),
+  );
+  /** "all Paused" / "12 Active · 38 Paused" for the collapsed orphan row. */
+  readonly orphanStatusSummary = computed(() => {
+    const counts = new Map<string, number>();
+    for (const r of this.orphanAssignmentRows())
+      counts.set(r.status, (counts.get(r.status) ?? 0) + 1);
+    const parts = [...counts.entries()].map(([s, n]) => `${n} ${s}`);
+    return counts.size === 1 ? `— all ${[...counts.keys()][0]}` : `— ${parts.join(' · ')}`;
   });
 
   sortedOpenPositions = computed(() =>
@@ -2077,31 +2179,41 @@ export class RiskProfilesPageComponent implements OnInit {
       width: 100,
       valueFormatter: (p) => (p.value as number)?.toFixed(2) ?? '-',
     },
-    { headerName: 'Max Pos', field: 'maxOpenPositions', width: 100 },
-    { headerName: 'Daily Trd', field: 'maxDailyTrades', width: 100 },
+    {
+      headerName: 'Max Pos',
+      field: 'maxOpenPositions',
+      width: 100,
+      valueFormatter: (p) => this.fmtCount(p.value as number | null),
+    },
+    {
+      headerName: 'Daily Trd',
+      field: 'maxDailyTrades',
+      width: 100,
+      valueFormatter: (p) => this.fmtCount(p.value as number | null),
+    },
     {
       headerName: 'Risk/Trd',
       field: 'maxRiskPerTradePct',
       width: 100,
-      valueFormatter: (p) => (p.value != null ? `${(p.value as number).toFixed(1)}%` : '-'),
+      valueFormatter: (p) => this.fmtPct(p.value as number | null),
     },
     {
       headerName: 'Daily DD',
       field: 'maxDailyDrawdownPct',
       width: 100,
-      valueFormatter: (p) => (p.value != null ? `${(p.value as number).toFixed(1)}%` : '-'),
+      valueFormatter: (p) => this.fmtPct(p.value as number | null),
     },
     {
       headerName: 'Total DD',
       field: 'maxTotalDrawdownPct',
       width: 100,
-      valueFormatter: (p) => (p.value != null ? `${(p.value as number).toFixed(1)}%` : '-'),
+      valueFormatter: (p) => this.fmtPct(p.value as number | null),
     },
     {
       headerName: 'Sym exp.',
       field: 'maxSymbolExposurePct',
       width: 100,
-      valueFormatter: (p) => (p.value != null ? `${(p.value as number).toFixed(1)}%` : '-'),
+      valueFormatter: (p) => this.fmtPct(p.value as number | null),
     },
     {
       headerName: 'Recov. mult.',

@@ -53,9 +53,12 @@ import {
             </button>
           }
           @if (promptEnabled() !== null) {
+            <!-- A switch, not a status pill: it flips the prompt injection. -->
             <button
               type="button"
               class="pill-btn"
+              role="switch"
+              [attr.aria-checked]="promptEnabled()"
               [class.on]="promptEnabled()"
               [disabled]="saving()"
               [title]="
@@ -237,9 +240,8 @@ import {
                   } @else if (isThinEdge(leg)) {
                     <p class="conflict small">
                       Thin live edge — {{ (leg.liveShare ?? 0) * 100 | number: '1.0-0' }}% of this
-                      score rests on news still open, pointing
-                      {{ leg.liveSignedWeight >= 0 ? 'bullish' : 'bearish' }} at
-                      {{ leg.liveSignedWeight | number: '1.3-3' }}. Most of the move is behind us.
+                      score rests on news still open, {{ liveLeanText(leg) }}. Most of the move is
+                      behind us.
                     </p>
                   }
 
@@ -294,7 +296,7 @@ import {
                                   [class.echo]="item.marketResponse === 'Muted'"
                                   [class.rumor]="item.marketResponse === 'Contradicted'"
                                   [title]="responseHint(item)"
-                                  >{{ item.marketResponse }}</span
+                                  >{{ responseLabel(item.marketResponse) }}</span
                                 >
                               }
                               @if (item.novelty !== 'New') {
@@ -329,9 +331,11 @@ import {
                   >
                     {{ ctx.pairBias > 0 ? '+' : '' }}{{ ctx.pairBias | number: '1.3-3' }}
                   </span>
+                  <!-- The engine squashes the difference through tanh, so this is
+                       deliberately not the two leg scores subtracted by eye. -->
                   <span class="muted small">
-                    base − quote; positive favours a long {{ focusSymbol() }}. Context, not a
-                    signal.
+                    tanh(base − quote), squashed to ±1; positive favours a long
+                    {{ focusSymbol() }}. Context, not a signal.
                   </span>
                 } @else {
                   <span class="bias-value mono muted">n/a</span>
@@ -419,7 +423,7 @@ import {
                     </td>
                     <td class="num mono">{{ row.storyCount }} / {{ row.articleCount }}</td>
                     <td>{{ row.dominantCategory || '—' }}</td>
-                    <td class="num muted small">{{ row.asOfUtc | date: 'HH:mm' }}</td>
+                    <td class="num muted small">{{ row.asOfUtc | date: 'MMM d HH:mm' }}</td>
                   </tr>
                 }
               </tbody>
@@ -807,7 +811,7 @@ import {
         @if (articles.value(); as list) {
           @if (list.length) {
             <div class="feed">
-              @for (a of list; track a.id) {
+              @for (a of visibleArticles(); track a.id) {
                 <article class="feed-item">
                   <div class="feed-main">
                     @if (a.url) {
@@ -889,6 +893,22 @@ import {
                 </article>
               }
             </div>
+            @if (hiddenArticleCount() > 0 || showAllArticles()) {
+              <!-- Sixty articles inline made the page ~10,000px tall; the
+                   first twenty are the ones an operator scans, the rest are a click away. -->
+              <div class="feed-more">
+                <button type="button" class="btn subtle" (click)="toggleAllArticles()">
+                  {{
+                    showAllArticles()
+                      ? 'Show fewer'
+                      : 'Show ' +
+                        hiddenArticleCount() +
+                        ' more article' +
+                        (hiddenArticleCount() === 1 ? '' : 's')
+                  }}
+                </button>
+              </div>
+            }
           } @else {
             <p class="muted small">No articles in the window.</p>
           }
@@ -951,9 +971,15 @@ import {
 
         @for (group of configGroups(); track group.title) {
           <details class="cfg-group" [open]="group.title === 'Module'">
+            <!-- The native marker was hidden, so nine collapsed groups read as
+                 headings with no knobs; the chevron and count say what is inside. -->
             <summary>
+              <span class="chev" aria-hidden="true">›</span>
               <span class="cfg-title">{{ group.title }}</span>
-              <span class="muted small">{{ group.blurb }}</span>
+              <span class="cfg-count muted small">
+                {{ group.entries.length }} {{ group.entries.length === 1 ? 'knob' : 'knobs' }}
+              </span>
+              <span class="cfg-blurb muted small">{{ group.blurb }}</span>
             </summary>
             <div class="cfg-rows">
               @for (entry of group.entries; track entry.key) {
@@ -973,8 +999,8 @@ import {
                         [value]="currentValue(entry)"
                         (change)="onConfigChange(entry, $event)"
                       >
-                        <option value="true">true</option>
-                        <option value="false">false</option>
+                        <option value="true">Enabled</option>
+                        <option value="false">Disabled</option>
                       </select>
                     } @else if (entry.dataType === 'Json' || isLongValue(entry)) {
                       <textarea
@@ -1065,10 +1091,15 @@ import {
         cursor: pointer;
         font-size: var(--text-xs);
       }
+      /* When the module is running the button STOPS it — a destructive action,
+         so it wears the loss colour as an outline, never a solid "go" green. */
       .power-btn.on {
-        background: var(--profit);
-        border-color: var(--profit);
-        color: #fff;
+        background: transparent;
+        border-color: var(--loss);
+        color: var(--loss);
+      }
+      .power-btn.on:hover:not(:disabled) {
+        background: rgba(255, 59, 48, 0.08);
       }
       .pill-btn.on {
         background: rgba(0, 122, 255, 0.14);
@@ -1688,12 +1719,42 @@ import {
       .cfg-group summary {
         cursor: pointer;
         display: flex;
-        flex-direction: column;
-        gap: 2px;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 2px var(--space-2);
+        list-style: none;
+      }
+      .cfg-group summary::-webkit-details-marker {
+        display: none;
+      }
+      .cfg-group .chev {
+        display: inline-block;
+        width: 12px;
+        color: var(--text-tertiary);
+        font-size: var(--text-lg);
+        line-height: 1;
+        transition: transform 0.15s ease;
+      }
+      .cfg-group[open] > summary .chev {
+        transform: rotate(90deg);
       }
       .cfg-title {
         font-weight: var(--font-semibold);
         font-size: var(--text-sm);
+      }
+      .cfg-count {
+        padding: 1px 8px;
+        border-radius: var(--radius-full);
+        background: var(--bg-tertiary);
+      }
+      .cfg-blurb {
+        flex-basis: 100%;
+        padding-left: calc(12px + var(--space-2));
+      }
+      .feed-more {
+        display: flex;
+        justify-content: center;
+        padding: var(--space-3) 0 0;
       }
       .cfg-rows {
         display: flex;
@@ -2128,8 +2189,49 @@ export class NewsIntelPageComponent {
 
   /** Publishers shown before the "show more" cut. */
   private static readonly TOP_SOURCES = 15;
+  private static readonly FEED_PREVIEW = 20;
 
   readonly showAllSources = signal(false);
+  readonly showAllArticles = signal(false);
+
+  readonly visibleArticles = computed(() => {
+    const all = this.articles.value() ?? [];
+    return this.showAllArticles() ? all : all.slice(0, NewsIntelPageComponent.FEED_PREVIEW);
+  });
+
+  readonly hiddenArticleCount = computed(() =>
+    Math.max(0, (this.articles.value()?.length ?? 0) - this.visibleArticles().length),
+  );
+
+  toggleAllArticles(): void {
+    this.showAllArticles.update((v) => !v);
+  }
+
+  /**
+   * The certainty tag and the market-response tag both had a value spelled
+   * "Confirmed", which rendered as "Confirmed · Confirmed" on the same row.
+   * The response is about the tape, so its label says so.
+   */
+  responseLabel(response: string): string {
+    switch (response) {
+      case 'Confirmed':
+        return 'Tape agreed';
+      case 'Contradicted':
+        return 'Tape disagreed';
+      case 'Muted':
+        return 'Tape ignored';
+      default:
+        return response;
+    }
+  }
+
+  /** "pointing bullish at 0.000" is a contradiction; below the display precision there is no lean. */
+  liveLeanText(leg: NewsPressureLeg): string {
+    const w = leg.liveSignedWeight;
+    if (Math.abs(w) < 0.0005) return 'with no directional lean left';
+    const dir = w > 0 ? 'bullish' : 'bearish';
+    return `pointing ${dir} at ${w > 0 ? '+' : ''}${w.toFixed(3)}`;
+  }
 
   readonly visibleSources = computed(() => {
     const all = this.status.value()?.sourceBreakdown ?? [];

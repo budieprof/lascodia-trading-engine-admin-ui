@@ -114,11 +114,13 @@ const TIMEFRAMES: Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
   `,
   styles: [
     `
+      /* The layout shell provides the gutter; page-level padding pushed this
+         route's content 16px right of every other page. */
       .page {
-        padding: 1rem;
+        padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
-        gap: 1rem;
+        gap: var(--space-4);
       }
       .back-link {
         color: var(--accent, #4f8cff);

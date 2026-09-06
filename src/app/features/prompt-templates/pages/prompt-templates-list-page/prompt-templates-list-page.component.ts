@@ -105,13 +105,19 @@ const DEFAULT_PAGE_SIZE = 25;
                   >
                     <td class="mono">#{{ row.id }}</td>
                     <td class="mono">{{ row.name }}</td>
-                    <td class="mono">{{ row.version }}</td>
+                    <td class="mono version" [title]="row.version">{{ row.version }}</td>
                     <td>
                       <span
                         class="pill"
-                        [class.pill--active]="row.isActive"
+                        [class.pill--active]="row.isActive && !isNotLive(row)"
+                        [class.pill--not-live]="row.isActive && isNotLive(row)"
                         [class.pill--archived]="row.isArchived"
                         [class.pill--draft]="!row.isActive && !row.isArchived"
+                        [title]="
+                          isNotLive(row)
+                            ? 'Active in the DB, but not the live prompt while UseDbBackedPromptTemplate = false'
+                            : ''
+                        "
                       >
                         {{ statusLabel(row) }}
                       </span>
@@ -119,16 +125,16 @@ const DEFAULT_PAGE_SIZE = 25;
                     <td class="notes" [title]="row.notes ?? ''">
                       {{ row.notes ? truncate(row.notes, 80) : '—' }}
                     </td>
-                    <td>{{ row.createdBy }}</td>
-                    <td>{{ row.createdAt | date: 'short' }}</td>
-                    <td>
-                      {{ row.promotedAt ? (row.promotedAt | date: 'short') : '—' }}
+                    <td class="nowrap">{{ row.createdBy }}</td>
+                    <td class="nowrap">{{ row.createdAt | date: 'yyyy-MM-dd HH:mm' }}</td>
+                    <td class="nowrap">
+                      {{ row.promotedAt ? (row.promotedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}
                     </td>
-                    <td>
-                      {{ row.archivedAt ? (row.archivedAt | date: 'short') : '—' }}
+                    <td class="nowrap">
+                      {{ row.archivedAt ? (row.archivedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}
                     </td>
-                    <td class="num">
-                      {{ row.systemPromptLength }}
+                    <td class="num nowrap">
+                      {{ row.systemPromptLength | number }}
                       <button
                         type="button"
                         class="copy-btn"
@@ -207,9 +213,26 @@ const DEFAULT_PAGE_SIZE = 25;
       <!-- Fork modal ------------------------------------------------------- -->
       @if (forkTarget(); as src) {
         <div class="modal-scrim" (click)="closeForkModal()">
-          <div class="modal-card" (click)="$event.stopPropagation()">
+          <div
+            class="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="fork-title"
+            (click)="$event.stopPropagation()"
+          >
             <div class="modal-header">
-              <h2>Fork {{ src.name }} / {{ src.version }}</h2>
+              <h2 id="fork-title">
+                Fork <span class="mono">{{ src.name }}</span> /
+                <span class="mono">{{ src.version }}</span>
+              </h2>
+              <button
+                type="button"
+                class="modal-close"
+                (click)="closeForkModal()"
+                aria-label="Close"
+              >
+                ×
+              </button>
             </div>
             <div class="modal-body">
               <label class="field">
@@ -462,6 +485,18 @@ const DEFAULT_PAGE_SIZE = 25;
         letter-spacing: 0.04em;
         color: var(--text-secondary);
         font-weight: 600;
+        white-space: nowrap;
+      }
+      .data-table .nowrap {
+        white-space: nowrap;
+      }
+      /* Version slugs run long ("spot-analysis-v4-survivability-…"): one line,
+         ellipsis, full value in the title tooltip. */
+      .data-table .version {
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .data-table td.num,
       .data-table th.num {
@@ -517,6 +552,12 @@ const DEFAULT_PAGE_SIZE = 25;
         background: rgba(142, 142, 147, 0.2);
         color: var(--text-secondary);
       }
+      /* Active row whose notes flag it as not consulted by the live path:
+         neither the green of "live" nor the blue of "draft". */
+      .pill--not-live {
+        background: rgba(255, 149, 0, 0.16);
+        color: var(--warning, #b3640a);
+      }
       .copy-btn {
         background: transparent;
         border: none;
@@ -563,12 +604,30 @@ const DEFAULT_PAGE_SIZE = 25;
         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
       }
       .modal-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 0.75rem;
         padding: 1rem 1.25rem;
         border-bottom: 1px solid var(--border);
       }
       .modal-header h2 {
         margin: 0;
         font-size: 1.05rem;
+        overflow-wrap: anywhere;
+      }
+      .modal-close {
+        flex: none;
+        background: transparent;
+        border: 0;
+        font-size: 1.4rem;
+        line-height: 1;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 0 0.25rem;
+      }
+      .modal-close:hover {
+        color: var(--text-primary);
       }
       .modal-body {
         padding: 1rem 1.25rem;
@@ -686,8 +745,18 @@ export class PromptTemplatesListPageComponent implements OnInit {
     return !row.isActive && !row.isArchived;
   }
 
+  /**
+   * The engine only consults this table while `UseDbBackedPromptTemplate` is
+   * on; operators mark rows accordingly in the notes ("NOT LIVE — …"). An
+   * "Active" pill next to that note contradicts it, so the row is labelled
+   * "Active (not live)" instead.
+   */
+  isNotLive(row: PromptTemplateSummary): boolean {
+    return row.isActive && /^\s*NOT LIVE/i.test(row.notes ?? '');
+  }
+
   statusLabel(row: PromptTemplateSummary): string {
-    if (row.isActive) return 'Active';
+    if (row.isActive) return this.isNotLive(row) ? 'Active (not live)' : 'Active';
     if (row.isArchived) return 'Archived';
     return 'Draft';
   }

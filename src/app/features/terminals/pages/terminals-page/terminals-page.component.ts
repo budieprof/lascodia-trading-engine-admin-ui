@@ -56,7 +56,7 @@ import { AddBrokerTerminalWizardComponent } from '../../components/add-broker-te
     <div class="page">
       <app-page-header
         title="Terminals"
-        subtitle="Cross-broker MT5 lifecycle (Phase-12 sidecar daemon)."
+        subtitle="Launch, monitor and close MT5 terminals through the supervisor daemon running on each host."
       >
         <button
           type="button"
@@ -122,7 +122,10 @@ import { AddBrokerTerminalWizardComponent } from '../../components/add-broker-te
                     </dd>
                   </dl>
                   <details class="installs">
-                    <summary>{{ d.installs.length }} install(s) advertised</summary>
+                    <summary>
+                      {{ d.installs.length }} install{{ d.installs.length === 1 ? '' : 's' }}
+                      advertised
+                    </summary>
                     @for (i of d.installs; track i.installId) {
                       <div class="install-row">
                         <span class="mono small">{{ i.installId }}</span>
@@ -160,13 +163,18 @@ import { AddBrokerTerminalWizardComponent } from '../../components/add-broker-te
                   </details>
 
                   <form class="launch-form" (submit)="$event.preventDefault(); onLaunch(d)">
+                    <!-- The per-daemon value starts undefined, which left the
+                         select with nothing selected (a blank control) instead
+                         of the placeholder. Default it to '' on read. -->
                     <select
-                      [(ngModel)]="launchInstallByDaemon[d.id]"
+                      [ngModel]="launchInstallByDaemon[d.id] ?? ''"
+                      (ngModelChange)="launchInstallByDaemon[d.id] = $event"
                       name="install-{{ d.id }}"
                       class="input"
                       [disabled]="!d.isOnline || launchingForDaemon() === d.id"
+                      aria-label="Install to launch"
                     >
-                      <option value="">— pick install —</option>
+                      <option value="" disabled>Choose an install to launch…</option>
                       @for (i of d.installs; track i.installId) {
                         <option [value]="i.installId">{{ i.installId }} · {{ i.name }}</option>
                       }
@@ -790,7 +798,9 @@ export class TerminalsPageComponent {
 
   protected includeClosed = true;
   // launchInstallByDaemon[daemonId] holds the dropdown value per daemon card.
-  protected launchInstallByDaemon: Record<number, string> = {};
+  // A daemon the operator has not touched has no entry, hence `| undefined`
+  // — the template falls back to '' so the placeholder option is selected.
+  protected launchInstallByDaemon: Record<number, string | undefined> = {};
   protected readonly launchingForDaemon = signal<number | null>(null);
   protected readonly closingSessionId = signal<number | null>(null);
 

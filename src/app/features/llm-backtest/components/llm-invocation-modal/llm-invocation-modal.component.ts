@@ -538,6 +538,25 @@ export interface LlmInvocationModalContext {
         max-height: 360px;
         overflow: auto;
         white-space: pre;
+        /* macOS overlay scrollbars are invisible until the pane is scrolled,
+           so a 360px box that clips its last line looked like a truncated
+           prompt. Reserve the gutter and always paint the thumb; the extra
+           bottom padding keeps the final line clear of the horizontal bar. */
+        scrollbar-gutter: stable;
+        padding-bottom: 1rem;
+      }
+      .prompt-body::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+      .prompt-body::-webkit-scrollbar-thumb {
+        background: rgba(128, 128, 128, 0.45);
+        border-radius: 5px;
+        border: 2px solid transparent;
+        background-clip: padding-box;
+      }
+      .prompt-body::-webkit-scrollbar-track {
+        background: transparent;
       }
       .prompt-body.wrap {
         white-space: pre-wrap;
@@ -609,7 +628,13 @@ export class LlmInvocationModalComponent {
   readonly reqExpanded = signal(true);
   readonly resExpanded = signal(true);
   readonly chartExpanded = signal(true);
-  readonly wrapReq = signal(true);
+  /**
+   * The stored prompt is already hard-wrapped by the template renderer, so
+   * soft-wrapping it again broke every line a second time at the pane edge.
+   * Request opens unwrapped (horizontal scroll); the LLM's prose response
+   * has no fixed line width and still opens wrapped.
+   */
+  readonly wrapReq = signal(false);
   readonly wrapRes = signal(true);
 
   readonly candles = signal<CandleDto[]>([]);

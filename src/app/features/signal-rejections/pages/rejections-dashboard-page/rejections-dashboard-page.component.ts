@@ -157,9 +157,13 @@ const WINDOW_PRESETS = [1, 6, 24, 168] as const;
           (retry)="resource.refresh()"
         />
       } @else if (rows().length === 0) {
+        <!-- Empty state names the filters that produced it and offers the
+             one-click widening, instead of a bare sentence in 600px of space. -->
         <app-empty-state
           title="No rejections in this window"
-          message="Every EA in the fleet is processing every eligible signal — no local gate, engine check, or broker retcode has fired."
+          [description]="emptyStateDescription()"
+          [actionLabel]="windowHours() < 168 ? 'Try last 7 days' : null"
+          (actionClick)="windowHours.set(168)"
         />
       } @else {
         <!-- KPI strip — canonical metric-cards, always rendered -->
@@ -774,6 +778,20 @@ export class RejectionsDashboardPageComponent {
   readonly accountFilter = signal<string>('');
   readonly stageFilter = signal<string>('');
   readonly subStageFilter = signal<string>('');
+
+  /** Empty-state copy that restates the active filters so "nothing here" is verifiable. */
+  readonly emptyStateDescription = computed(() => {
+    const h = this.windowHours();
+    const window = h < 24 ? `${h}h` : `${h / 24}d`;
+    const active = [
+      this.symbolFilter().trim() ? `symbol ${this.symbolFilter().trim().toUpperCase()}` : '',
+      this.accountFilter().trim() ? `account ${this.accountFilter().trim()}` : '',
+      this.stageFilter() ? `stage ${this.stageFilter()}` : '',
+      this.subStageFilter() ? `sub-stage ${this.subStageFilter()}` : '',
+    ].filter(Boolean);
+    const scope = active.length > 0 ? ` with ${active.join(', ')}` : '';
+    return `No local gate, engine check or broker retcode fired in the last ${window}${scope}. Widen the window or clear a filter to check further back.`;
+  });
 
   protected readonly resource = createPolledResource(
     () => {

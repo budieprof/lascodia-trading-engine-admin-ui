@@ -260,14 +260,9 @@ import type { EAPendingSignalRevalConfig } from '@core/api/api.types';
         flex-wrap: wrap;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
-        border-left-width: 3px;
-        border-left-color: var(--border);
         border-radius: var(--radius-md);
         padding: var(--card-padding);
         height: 100%;
-      }
-      .psr-panel[data-arm='on'] {
-        border-left-color: #ff9500;
       }
       .psr-info {
         display: flex;

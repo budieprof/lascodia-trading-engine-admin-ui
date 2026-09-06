@@ -34,6 +34,85 @@ interface PendingAction {
   feature: SymbolicFeatureDto;
 }
 
+// ── Expression rendering ─────────────────────────────────────────────────────
+// The engine names features by their ROOT node only ("Multiply(…, …)"), so a
+// page of candidates is a page of identical names. The full tree is in
+// expressionJson — System.Text.Json polymorphic output: a lowercase `kind`
+// discriminator (field / const / ind / bin / una / win / xfield) and
+// PascalCase members with numeric enums, mirroring
+// LascodiaTradingEngine.Application/MLModels/SymbolicFeatures/Expressions/SymbolicExpression.cs.
+// Rendering it here gives every row a formula an operator can actually read.
+
+const CANDLE_FIELDS = ['Open', 'High', 'Low', 'Close', 'Volume'];
+const INDICATORS = ['SMA', 'RSI', 'ATR', 'Mom'];
+const BINARY_OPS = ['+', '−', '×', '÷', 'min', 'max'];
+const UNARY_OPS = ['neg', 'abs', 'ssqrt', 'slog', 'tanh'];
+const WINDOW_AGGS = ['mean', 'std', 'min', 'max', 'sum'];
+
+type ExprNode = Record<string, unknown>;
+
+function member(node: ExprNode, name: string): unknown {
+  return node[name] ?? node[name.charAt(0).toLowerCase() + name.slice(1)];
+}
+
+function num(node: ExprNode, name: string): number {
+  const v = member(node, name);
+  return typeof v === 'number' ? v : Number(v ?? NaN);
+}
+
+function lagSuffix(node: ExprNode): string {
+  const lag = num(node, 'Lag');
+  return lag > 0 ? `[-${lag}]` : '';
+}
+
+function renderNode(raw: unknown, depth: number): string {
+  if (!raw || typeof raw !== 'object') return '?';
+  const node = raw as ExprNode;
+  // The discriminator is always lowercase `kind`; IndicatorNode ALSO has a
+  // PascalCase `Kind` member (SMA/RSI/…), so the two must not be conflated.
+  switch (node['kind']) {
+    case 'field':
+      return `${CANDLE_FIELDS[num(node, 'Field')] ?? 'field'}${lagSuffix(node)}`;
+    case 'xfield':
+      return `${String(member(node, 'Symbol') ?? '?')}.${CANDLE_FIELDS[num(node, 'Field')] ?? 'field'}${lagSuffix(node)}`;
+    case 'const': {
+      const v = num(node, 'Value');
+      return Number.isFinite(v) ? (Number.isInteger(v) ? String(v) : v.toPrecision(3)) : '?';
+    }
+    case 'ind': {
+      const kind = typeof node['Kind'] === 'number' ? node['Kind'] : NaN;
+      return `${INDICATORS[kind] ?? 'ind'}(${num(node, 'Period')})${lagSuffix(node)}`;
+    }
+    case 'bin': {
+      const op = num(node, 'Op');
+      const left = renderNode(member(node, 'Left'), depth + 1);
+      const right = renderNode(member(node, 'Right'), depth + 1);
+      if (op >= 4) return `${BINARY_OPS[op]}(${left}, ${right})`;
+      const infix = `${left} ${BINARY_OPS[op] ?? '?'} ${right}`;
+      return depth === 0 ? infix : `(${infix})`;
+    }
+    case 'una': {
+      const op = num(node, 'Op');
+      const inner = renderNode(member(node, 'Operand'), depth + 1);
+      return op === 0 ? `−(${inner})` : `${UNARY_OPS[op] ?? 'f'}(${inner})`;
+    }
+    case 'win':
+      return `${WINDOW_AGGS[num(node, 'Agg')] ?? 'agg'}${num(node, 'Window')}(${renderNode(member(node, 'Operand'), depth + 1)})`;
+    default:
+      return '?';
+  }
+}
+
+/** Readable formula for a mined feature, or null when the JSON is not a tree we understand. */
+export function renderExpression(json: string): string | null {
+  try {
+    const text = renderNode(JSON.parse(json), 0);
+    return text.includes('?') ? null : text;
+  } catch {
+    return null;
+  }
+}
+
 @Component({
   selector: 'app-symbolic-features-page',
   standalone: true,
@@ -107,32 +186,42 @@ interface PendingAction {
           (retry)="resource.refresh()"
         />
       } @else {
+        <!-- Tiles read from an unfiltered census so a "Candidate" filter cannot
+             zero the Promoted / Retired counts. The census shares the page's
+             200-row cap, and the caption says so when the cap is hit. -->
         <section class="kpis">
           <app-metric-card
-            label="Loaded"
-            [value]="features().length"
+            label="Matching filter"
+            [value]="filteredFeatures().length"
             format="number"
             dotColor="#0071E3"
           />
           <app-metric-card
             label="Candidates"
-            [value]="statusCount('Candidate')"
+            [value]="censusCount('Candidate')"
             format="number"
             dotColor="#FF9500"
           />
           <app-metric-card
             label="Promoted"
-            [value]="statusCount('Promoted')"
+            [value]="censusCount('Promoted')"
             format="number"
-            dotColor="#34C759"
+            [dotColor]="censusCount('Promoted') > 0 ? '#34C759' : '#8E8E93'"
           />
           <app-metric-card
             label="Retired / Rejected"
-            [value]="statusCount('Retired') + statusCount('Rejected')"
+            [value]="censusCount('Retired') + censusCount('Rejected')"
             format="number"
             dotColor="#8E8E93"
           />
         </section>
+        @if (censusCapped()) {
+          <p class="muted small census-note">
+            Status counts cover the latest {{ CENSUS_LIMIT }} mined features{{
+              symbolFilter().trim() ? ' for ' + symbolFilter().trim().toUpperCase() : ''
+            }}; older rows are not counted.
+          </p>
+        }
 
         @if (filteredFeatures().length === 0) {
           <app-empty-state
@@ -146,12 +235,21 @@ interface PendingAction {
                 <tr>
                   <th>Feature</th>
                   <th>Pair</th>
-                  <th class="num">IC (train / val)</th>
-                  <th class="num">Tree</th>
-                  <th class="num">Coverage</th>
+                  <th
+                    class="num"
+                    title="Information coefficient on the training / validation split"
+                  >
+                    IC (train / val)
+                  </th>
+                  <th class="num" title="Expression tree size: node count · depth">
+                    Tree (nodes · depth)
+                  </th>
+                  <th class="num" title="Bars with a defined value: training / validation">
+                    Coverage (train / val)
+                  </th>
                   <th>Status</th>
                   <th>Mined</th>
-                  <th></th>
+                  <th class="actions-head">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -159,7 +257,9 @@ interface PendingAction {
                   <tr [class.expanded]="expandedId() === f.id">
                     <td>
                       <span class="feat-id mono small">#{{ f.id }}</span>
-                      <div class="feat-name mono">{{ f.name }}</div>
+                      <div class="feat-name mono" [title]="f.name">
+                        {{ formula(f) ?? f.name }}
+                      </div>
                     </td>
                     <td>
                       <span class="symbol mono">{{ f.symbol }}</span>
@@ -169,10 +269,10 @@ interface PendingAction {
                       {{ f.trainingIc | number: '1.0-3' }}
                       <span class="muted small">/ {{ f.validationIc | number: '1.0-3' }}</span>
                     </td>
-                    <td class="num mono small">{{ f.nodeCount }}n · {{ f.depth }}d</td>
+                    <td class="num mono small">{{ f.nodeCount }} · {{ f.depth }}</td>
                     <td class="num mono">
-                      {{ f.trainingCoverage }}
-                      <span class="muted small">/ {{ f.validationCoverage }}</span>
+                      {{ f.trainingCoverage | number }}
+                      <span class="muted small">/ {{ f.validationCoverage | number }}</span>
                     </td>
                     <td>
                       <span class="status-pill" [attr.data-status]="f.status">
@@ -182,20 +282,24 @@ interface PendingAction {
                     <td class="time" [title]="f.minedAt | date: 'yyyy-MM-dd HH:mm:ss UTC'">
                       {{ f.minedAt | relativeTime }}
                     </td>
-                    <td class="actions">
-                      <button type="button" class="link" (click)="toggleExpand(f.id)">
-                        {{ expandedId() === f.id ? 'Hide' : 'Inspect' }}
-                      </button>
-                      @if (f.status === 'Candidate') {
-                        <button type="button" class="action ok" (click)="ask('promote', f)">
-                          Promote
+                    <td class="actions-cell">
+                      <!-- flex lives on an inner div: a display:flex <td> drops
+                           out of the table's column grid and misaligns the row -->
+                      <div class="actions">
+                        <button type="button" class="link" (click)="toggleExpand(f.id)">
+                          {{ expandedId() === f.id ? 'Hide' : 'Inspect' }}
                         </button>
-                      }
-                      @if (f.status === 'Promoted') {
-                        <button type="button" class="action warn" (click)="ask('retire', f)">
-                          Retire
-                        </button>
-                      }
+                        @if (f.status === 'Candidate') {
+                          <button type="button" class="action ok" (click)="ask('promote', f)">
+                            Promote
+                          </button>
+                        }
+                        @if (f.status === 'Promoted') {
+                          <button type="button" class="action warn" (click)="ask('retire', f)">
+                            Retire
+                          </button>
+                        }
+                      </div>
                     </td>
                   </tr>
                   @if (expandedId() === f.id) {
@@ -203,8 +307,12 @@ interface PendingAction {
                       <td colspan="8">
                         <div class="detail-grid">
                           <div>
-                            <h4>Expression JSON</h4>
-                            <pre class="json">{{ formatJson(f.expressionJson) }}</pre>
+                            <h4>Expression</h4>
+                            <p class="formula mono">{{ formula(f) ?? f.name }}</p>
+                            <details class="json-details">
+                              <summary class="small">Raw expression JSON</summary>
+                              <pre class="json">{{ formatJson(f.expressionJson) }}</pre>
+                            </details>
                           </div>
                           <div>
                             <h4>Lifecycle</h4>
@@ -397,8 +505,45 @@ interface PendingAction {
       }
       .kpis {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(4, 1fr);
         gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 720px) {
+        .kpis {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      .census-note {
+        margin: calc(-1 * var(--space-2)) 0 0;
+      }
+      /* Pill buttons — same chrome as the Training Queue header so the three
+         ML sub-pages share one back-link + Refresh treatment. */
+      .btn {
+        height: 36px;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-full);
+        border: none;
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        line-height: 1;
+        text-decoration: none;
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .btn-secondary {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--bg-quaternary, var(--bg-tertiary));
       }
       .card {
         background: var(--bg-secondary);
@@ -444,9 +589,23 @@ interface PendingAction {
       }
       .feat-name {
         font-weight: var(--font-medium);
+        font-size: var(--text-xs);
         margin-top: 2px;
         word-break: break-word;
-        max-width: 360px;
+        max-width: 420px;
+        line-height: 1.45;
+      }
+      .formula {
+        margin: 0 0 var(--space-2);
+        font-size: var(--text-xs);
+        line-height: 1.5;
+        word-break: break-word;
+        color: var(--text-primary);
+      }
+      .json-details summary {
+        cursor: pointer;
+        color: var(--text-secondary);
+        margin-bottom: var(--space-2);
       }
       .mono {
         font-family: var(--font-mono);
@@ -486,11 +645,16 @@ interface PendingAction {
         color: var(--text-secondary);
         font-size: var(--text-xs);
       }
+      .actions-head,
+      .actions-cell {
+        text-align: right;
+        white-space: nowrap;
+      }
       .actions {
-        display: flex;
+        display: inline-flex;
         gap: 6px;
         align-items: center;
-        white-space: nowrap;
+        justify-content: flex-end;
       }
       .link {
         background: none;
@@ -655,18 +819,11 @@ interface PendingAction {
         gap: var(--space-3);
       }
       .btn-primary {
-        padding: 8px 18px;
-        border-radius: var(--radius-sm);
         background: var(--accent);
         color: #fff;
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        border: none;
-        cursor: pointer;
       }
-      .btn-primary:disabled {
-        background: var(--bg-tertiary, #d1d1d6);
-        cursor: not-allowed;
+      .btn-primary:hover:not(:disabled) {
+        background: var(--accent-hover);
       }
     `,
   ],
@@ -685,6 +842,7 @@ export class SymbolicFeaturesPageComponent {
 
   protected readonly statusFilter = signal<SymbolicFeatureStatus | 'All'>('Candidate');
   protected readonly symbolFilter = signal<string>('');
+  protected readonly CENSUS_LIMIT = 200;
 
   protected readonly resource = createPolledResource(
     () => {
@@ -693,7 +851,7 @@ export class SymbolicFeaturesPageComponent {
         .listSymbolicFeatures({
           status: status === 'All' ? null : status,
           symbol: this.symbolFilter().trim() || null,
-          limit: 200,
+          limit: this.CENSUS_LIMIT,
         })
         .pipe(
           map((res) => res.data ?? []),
@@ -703,11 +861,36 @@ export class SymbolicFeaturesPageComponent {
     { intervalMs: 60_000 },
   );
 
+  /**
+   * Status census, deliberately NOT filtered by status: the KPI tiles used to
+   * be computed from the filtered list, so with the default "Candidate" filter
+   * Promoted and Retired could only ever read 0. Follows the symbol filter so
+   * the tiles still describe the pair the operator is looking at.
+   */
+  protected readonly census = createPolledResource(
+    () =>
+      this.ml
+        .listSymbolicFeatures({
+          status: null,
+          symbol: this.symbolFilter().trim() || null,
+          limit: this.CENSUS_LIMIT,
+        })
+        .pipe(
+          map((res) => res.data ?? []),
+          catchError(() => of<SymbolicFeatureDto[]>([])),
+        ),
+    { intervalMs: 60_000 },
+  );
+
   constructor() {
     effect(() => {
       this.statusFilter();
       this.symbolFilter();
       this.resource.refresh();
+    });
+    effect(() => {
+      this.symbolFilter();
+      this.census.refresh();
     });
   }
 
@@ -716,9 +899,23 @@ export class SymbolicFeaturesPageComponent {
     () => this.resource.loading() && this.features().length === 0,
   );
   protected readonly filteredFeatures = computed(() => this.features());
+  protected readonly censusCapped = computed(
+    () => (this.census.value()?.length ?? 0) >= this.CENSUS_LIMIT,
+  );
 
-  protected statusCount(status: SymbolicFeatureStatus): number {
-    return this.features().filter((f) => f.status === status).length;
+  protected censusCount(status: SymbolicFeatureStatus): number {
+    return (this.census.value() ?? []).filter((f) => f.status === status).length;
+  }
+
+  private readonly formulaCache = new Map<number, string | null>();
+  /** Readable formula rendered from the expression tree; memoised per feature id. */
+  protected formula(f: SymbolicFeatureDto): string | null {
+    let text = this.formulaCache.get(f.id);
+    if (text === undefined) {
+      text = renderExpression(f.expressionJson);
+      this.formulaCache.set(f.id, text);
+    }
+    return text;
   }
 
   // Detail expansion + decay history --------------------------------------

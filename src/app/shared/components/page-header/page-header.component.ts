@@ -23,10 +23,10 @@ import { Component, input, ChangeDetectionStrategy } from '@angular/core';
   styles: [
     `
       /*
-       * A thin gradient accent sits beneath the title. Picks up the accent
-       * colour without being loud — PRD §3.1 "depth: layered surfaces with
-       * subtle shadows and colour". The bar scales in on mount courtesy of
-       * the global page-entry stagger animation in styles.scss.
+       * No accent underline here on purpose: the former 48×3px gradient bar
+       * under the subtitle read as a stalled progress indicator on every
+       * detail page. The title weight and the breadcrumb above carry the
+       * hierarchy on their own.
        */
       .page-header {
         display: flex;
@@ -35,18 +35,7 @@ import { Component, input, ChangeDetectionStrategy } from '@angular/core';
         gap: var(--space-4);
         margin-bottom: var(--space-6);
         position: relative;
-        padding-bottom: var(--space-4);
-      }
-
-      .page-header::after {
-        content: '';
-        position: absolute;
-        left: 0;
-        bottom: 0;
-        width: 48px;
-        height: 3px;
-        border-radius: 2px;
-        background: linear-gradient(90deg, var(--accent), rgba(10, 132, 255, 0));
+        padding-bottom: var(--space-2);
       }
 
       .title-row {

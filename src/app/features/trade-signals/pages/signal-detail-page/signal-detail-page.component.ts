@@ -6,9 +6,9 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { catchError, map, of } from 'rxjs';
 
 import { TradeSignalsService } from '@core/services/trade-signals.service';
@@ -19,6 +19,8 @@ import {
   SpotRecChartMarker,
   SpotRecChartRec,
 } from '@shared/components/spot-rec-chart/spot-rec-chart.component';
+import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 
 /**
  * Per-signal detail surface. Two panels:
@@ -41,32 +43,65 @@ import {
   selector: 'app-signal-detail-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, AccountAttemptsComponent, SpotRecChartComponent],
+  imports: [
+    DatePipe,
+    DecimalPipe,
+    RouterLink,
+    AccountAttemptsComponent,
+    SpotRecChartComponent,
+    PageHeaderComponent,
+    ErrorStateComponent,
+  ],
   template: `
     <div class="page">
-      <header class="page-head">
-        <h1 class="page-title">Signal #{{ signalId() ?? '—' }}</h1>
-        <p class="page-subtitle">
-          Cross-account attempts for this signal — every EA that polled it, every rejection it hit,
-          and every engine / broker outcome that followed.
-        </p>
-      </header>
+      <app-page-header
+        [title]="'Signal #' + (signalId() ?? '—')"
+        subtitle="Cross-account attempts for this signal — every EA that polled it, every rejection it hit, and every engine / broker outcome that followed."
+      >
+        <!-- Kept outside the @if: nodes inside a control-flow block do not
+             match ng-content selectors, so the slot wrapper is always
+             rendered and only its children are conditional. -->
+        <span slot="title-after" class="head-chips">
+          @if (signal(); as s) {
+            <span class="chip mono">{{ s.symbol }}</span>
+            <span
+              class="chip"
+              [class.chip--buy]="s.direction === 'Buy'"
+              [class.chip--sell]="s.direction === 'Sell'"
+            >
+              {{ s.direction === 'Buy' ? '↑ Buy' : '↓ Sell' }}
+            </span>
+            <span class="chip" [attr.data-status]="s.status">{{ s.status }}</span>
+            @if (s.orderId !== null) {
+              <a class="chip chip--link" [routerLink]="['/orders', s.orderId]"
+                >Order #{{ s.orderId }} ↗</a
+              >
+            }
+          }
+        </span>
+        <a class="btn btn-secondary" routerLink="/trade-signals">← All signals</a>
+      </app-page-header>
 
       @if (signalId() !== null) {
-        <!-- Chart pane — renders only when the signal has resolvable
-             symbol + actionable prices. Hold-only / malformed signals
-             skip the chart silently. -->
         @if (signal(); as s) {
+          <!-- Chart pane — renders only when the signal has resolvable
+               symbol + actionable prices. Hold-only / malformed signals
+               skip the chart silently. -->
           @if (canChart(s)) {
             <section class="chart-section">
               <header class="section-head">
                 <h2>Chart — Entry / SL / TP overlay</h2>
                 <div class="section-sub muted">
                   {{ s.symbol }} · {{ tfLabel() }} · generated
-                  {{ s.generatedAt | date: 'MMM d, HH:mm' }} UTC
-                  @if (terminalLabel(s); as t) {
+                  {{ s.generatedAt | date: 'MMM d, HH:mm' }} UTC · entry
+                  <span class="mono">{{ s.entryPrice | number: priceFormat(s) }}</span> · SL
+                  <span class="mono">{{ s.stopLoss | number: priceFormat(s) }}</span> · TP
+                  <span class="mono">{{ s.takeProfit | number: priceFormat(s) }}</span>
+                  @if (outcomeLabel(s); as t) {
                     ·
-                    <span [class.profit]="t === 'HitTP'" [class.loss]="t === 'HitSL'">{{ t }}</span>
+                    <span [class.warn]="t.tone === 'warn'" [class.ok]="t.tone === 'ok'">{{
+                      t.text
+                    }}</span>
                   }
                 </div>
               </header>
@@ -78,18 +113,16 @@ import {
                 [exitMarker]="exitMarker()"
               />
             </section>
-          } @else if (chartLoading()) {
-            <section class="chart-section">
-              <p class="muted">Loading signal…</p>
-            </section>
-          } @else if (chartError(); as e) {
-            <section class="chart-section">
-              <p class="error">{{ e }}</p>
-            </section>
           }
+        } @else if (chartLoading()) {
+          <section class="chart-section">
+            <p class="muted">Loading signal…</p>
+          </section>
+        } @else if (chartError(); as e) {
+          <app-error-state title="Could not load signal" [message]="e" (retry)="load()" />
         }
 
-        <app-account-attempts [signalId]="signalId()" />
+        <app-account-attempts [signalId]="signalId()" [signal]="signal()" />
       } @else {
         <p class="empty muted">Invalid signal id — route is missing the numeric segment.</p>
       }
@@ -99,25 +132,77 @@ import {
     `
       .page {
         padding: var(--space-2) 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
       }
-      .page-head {
-        margin-bottom: var(--space-3);
+      .head-chips {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-wrap: wrap;
       }
-      .page-title {
-        font-size: var(--text-xl);
+      .chip {
+        font-size: 11px;
         font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        margin: 0 0 var(--space-1);
-        letter-spacing: var(--tracking-tight);
-      }
-      .page-subtitle {
-        font-size: var(--text-sm);
+        padding: 3px 8px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
         color: var(--text-secondary);
-        margin: 0;
+        letter-spacing: 0.02em;
+        text-decoration: none;
+        line-height: 1.2;
+      }
+      .chip--buy {
+        background: rgba(52, 199, 89, 0.15);
+        color: var(--profit);
+      }
+      .chip--sell {
+        background: rgba(255, 59, 48, 0.15);
+        color: var(--loss);
+      }
+      .chip[data-status='Pending'] {
+        background: rgba(255, 149, 0, 0.15);
+        color: var(--warning);
+      }
+      .chip[data-status='Approved'],
+      .chip[data-status='Executed'] {
+        background: rgba(52, 199, 89, 0.15);
+        color: var(--profit);
+      }
+      .chip[data-status='Rejected'] {
+        background: rgba(255, 59, 48, 0.15);
+        color: var(--loss);
+      }
+      .chip--link {
+        color: var(--accent);
+        background: rgba(0, 113, 227, 0.12);
+      }
+      .chip--link:hover {
+        text-decoration: underline;
+      }
+      .btn {
+        height: 32px;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-sm);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        font-family: inherit;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        text-decoration: none;
+      }
+      .btn-secondary {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+      }
+      .btn-secondary:hover {
+        background: var(--bg-tertiary);
       }
       .chart-section {
-        margin-bottom: var(--space-3);
-        padding: var(--space-2);
+        padding: var(--space-4);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         background: var(--bg-secondary);
@@ -126,12 +211,17 @@ import {
         margin-bottom: var(--space-2);
       }
       .section-head h2 {
-        font-size: var(--text-md);
+        font-size: var(--text-base);
         font-weight: var(--font-semibold);
         margin: 0 0 var(--space-1);
+        color: var(--text-primary);
       }
       .section-sub {
         font-size: var(--text-sm);
+      }
+      .mono {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-variant-numeric: tabular-nums;
       }
       .muted {
         color: var(--text-secondary);
@@ -140,16 +230,12 @@ import {
         font-size: var(--text-sm);
         padding: var(--space-3) 0;
       }
-      .error {
-        font-size: var(--text-sm);
-        color: var(--color-danger, #c4290a);
-      }
-      .profit {
-        color: #1f8a3d;
+      .ok {
+        color: var(--profit);
         font-weight: var(--font-semibold);
       }
-      .loss {
-        color: #c4290a;
+      .warn {
+        color: var(--warning);
         font-weight: var(--font-semibold);
       }
     `,
@@ -207,6 +293,10 @@ export class SignalDetailPageComponent {
    * expose the literal exit timestamp on the TradeSignal DTO, so we use
    * `expiresAt` as the right-edge anchor and label the marker with the
    * status. When the lifecycle DTO grows a `closedAt` we'll switch.
+   *
+   * A signal whose linked order filled is not "expired" in any sense the
+   * chart should annotate — the signal row merely aged out of the poll
+   * window after execution — so the marker is suppressed in that case.
    */
   readonly exitMarker = computed<SpotRecChartMarker | null>(() => {
     const s = this.signal();
@@ -217,6 +307,7 @@ export class SignalDetailPageComponent {
         // necessarily that the trade has resolved. No exit marker.
         return null;
       case 'Expired':
+        if (s.orderId !== null) return null;
         return {
           time: s.expiresAt,
           price: s.entryPrice,
@@ -232,25 +323,34 @@ export class SignalDetailPageComponent {
     effect(() => {
       const id = this.signalId();
       if (id == null) return;
-      this.chartLoading.set(true);
-      this.chartError.set(null);
-      this.signalsService
-        .getById(id)
-        .pipe(
-          catchError((err) => {
-            this.chartError.set(err?.error?.message ?? err?.message ?? 'Failed to load signal.');
-            return of(null);
-          }),
-        )
-        .subscribe((res) => {
-          this.chartLoading.set(false);
-          if (res?.status && res.data) {
-            this.signal.set(res.data);
-          } else if (!this.chartError()) {
-            this.chartError.set(res?.message ?? 'Signal not found.');
-          }
-        });
+      this.fetch(id);
     });
+  }
+
+  load(): void {
+    const id = this.signalId();
+    if (id != null) this.fetch(id);
+  }
+
+  private fetch(id: number): void {
+    this.chartLoading.set(true);
+    this.chartError.set(null);
+    this.signalsService
+      .getById(id)
+      .pipe(
+        catchError((err) => {
+          this.chartError.set(err?.error?.message ?? err?.message ?? 'Failed to load signal.');
+          return of(null);
+        }),
+      )
+      .subscribe((res) => {
+        this.chartLoading.set(false);
+        if (res?.status && res.data) {
+          this.signal.set(res.data);
+        } else if (!this.chartError()) {
+          this.chartError.set(res?.message ?? 'Signal not found.');
+        }
+      });
   }
 
   /**
@@ -260,6 +360,14 @@ export class SignalDetailPageComponent {
    */
   canChart(s: TradeSignalDto): boolean {
     return !!s.symbol && s.entryPrice != null && s.stopLoss != null && s.takeProfit != null;
+  }
+
+  /** Price precision by instrument family — JPY crosses 3 dp, metals 2 dp, else 5 dp. */
+  priceFormat(s: TradeSignalDto): string {
+    const sym = (s.symbol ?? '').toUpperCase();
+    if (sym.startsWith('XAU') || sym.startsWith('XAG')) return '1.2-2';
+    if (sym.includes('JPY')) return '1.3-3';
+    return '1.5-5';
   }
 
   /**
@@ -273,14 +381,20 @@ export class SignalDetailPageComponent {
   }
 
   /**
-   * Terminal-status label rendered in the header sub-line. Returns null
-   * when the signal is still in a live status the chart can't pin an
-   * outcome to yet.
+   * Outcome label for the chart sub-line.  Distinguishes "the signal row
+   * expired" (nobody acted on it) from "the signal aged out after its
+   * order was placed" — the latter used to read as a plain "Expired"
+   * next to a filled order, which contradicted the Orders panel.
    */
-  terminalLabel(s: TradeSignalDto): string | null {
+  outcomeLabel(s: TradeSignalDto): { text: string; tone: 'ok' | 'warn' | 'neutral' } | null {
+    if (s.orderId !== null) {
+      return { text: `Executed — order #${s.orderId}`, tone: 'ok' };
+    }
     switch (s.status) {
       case 'Expired':
-        return 'Expired';
+        return { text: 'Expired unfilled', tone: 'warn' };
+      case 'Rejected':
+        return { text: 'Rejected', tone: 'warn' };
       default:
         return null;
     }

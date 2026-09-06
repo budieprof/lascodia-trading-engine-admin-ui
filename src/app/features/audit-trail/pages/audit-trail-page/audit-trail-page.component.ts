@@ -8,6 +8,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DatePipe, formatDate } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import type { ColDef } from 'ag-grid-community';
 import { catchError, map, of, switchMap, throttleTime } from 'rxjs';
@@ -58,69 +59,65 @@ const NEGATIVE_OUTCOMES = new Set([
     MetricCardComponent,
     ChartCardComponent,
     FormsModule,
+    DatePipe,
+    RelativeTimePipe,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <app-page-header title="Audit Trail" subtitle="Decision logs and system audit records" />
 
-      <!-- 8-card KPI strip — sample over the most recent 2000 decisions -->
+      <!-- KPI strip. "Total ever" is the whole table; every other tile is
+           computed over the most recent sample (capped at 2,000 rows), so the
+           scope is spelled out once under the strip rather than letting a
+           sample-bounded "Last 7d = 2,000" sit beside a global 236,590.
+           Colour is reserved for outcomes: green for approvals, red for
+           failures when there are any; the rest are neutral. -->
       <div class="kpis">
         <app-metric-card
           label="Total ever"
           [value]="totalEver()"
           format="number"
-          dotColor="#0071E3"
+          dotColor="#8E8E93"
         />
         <app-metric-card
           label="Last 24h"
-          [value]="last24hCount()"
+          [value]="last24hSaturated() ? null : last24hCount()"
           format="number"
-          dotColor="#5AC8FA"
-        />
-        <app-metric-card
-          label="Last 7d"
-          [value]="last7dCount()"
-          format="number"
-          dotColor="#5AC8FA"
+          dotColor="#8E8E93"
         />
         <app-metric-card
           label="Approved / Executed"
           [value]="positiveCount()"
           format="number"
-          dotColor="#34C759"
+          [dotColor]="positiveCount() > 0 ? '#34C759' : '#8E8E93'"
         />
         <app-metric-card
           label="Failed / Rejected"
           [value]="negativeCount()"
           format="number"
-          [dotColor]="negativeCount() > 0 ? '#FF3B30' : '#34C759'"
+          [dotColor]="negativeCount() > 0 ? '#FF3B30' : '#8E8E93'"
         />
         <app-metric-card
           label="Decision types"
           [value]="distinctDecisionTypes()"
           format="number"
-          dotColor="#AF52DE"
+          dotColor="#8E8E93"
         />
         <app-metric-card
           label="Sources"
           [value]="distinctSources()"
           format="number"
-          dotColor="#AF52DE"
-        />
-        <app-metric-card
-          label="Entity types"
-          [value]="distinctEntityTypes()"
-          format="number"
-          dotColor="#FF9500"
+          dotColor="#8E8E93"
         />
       </div>
+      <p class="kpi-scope">{{ sampleScopeNote() }}</p>
 
       <!-- 3-col chart row: outcome donut + top decision types + activity-per-hour -->
       <div class="chart-row">
         <app-chart-card
           title="Outcome distribution"
-          subtitle="From the {{ analyticsRows().length }}-row recent sample"
+          subtitle="Top 6 outcomes in the recent sample; the rest grouped as Other"
           [options]="outcomeDonutOptions()"
           height="220px"
         />
@@ -289,7 +286,10 @@ const NEGATIVE_OUTCOMES = new Set([
                 </div>
                 <div class="meta-item">
                   <span class="meta-label">Logged</span>
-                  <span class="meta-value">{{ expandedEntry()!.createdAt }}</span>
+                  <span class="meta-value">
+                    {{ expandedEntry()!.createdAt | date: 'MMM d, yyyy HH:mm:ss' }}
+                    <span class="meta-sub">({{ expandedEntry()!.createdAt | relativeTime }})</span>
+                  </span>
                 </div>
               </div>
               <div class="related-bar">
@@ -318,21 +318,31 @@ const NEGATIVE_OUTCOMES = new Set([
         gap: var(--space-3);
       }
 
-      /* 8-card KPI strip */
       .kpis {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(6, minmax(0, 1fr));
         gap: var(--space-2);
+        align-items: start;
       }
-      @media (max-width: 1400px) {
+      @media (max-width: 1100px) {
         .kpis {
-          grid-template-columns: repeat(4, 1fr);
+          grid-template-columns: repeat(3, minmax(0, 1fr));
         }
       }
       @media (max-width: 720px) {
         .kpis {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
+      }
+      .kpi-scope {
+        margin: calc(-1 * var(--space-1)) 0 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .meta-sub {
+        color: var(--text-tertiary);
+        font-weight: var(--font-regular, 400);
+        margin-left: var(--space-1);
       }
 
       .chart-row {
@@ -380,6 +390,8 @@ const NEGATIVE_OUTCOMES = new Set([
         color: var(--text-primary);
         box-shadow: var(--shadow-sm);
       }
+      /* Selects share the remaining width and shrink before wrapping, so the
+         last one no longer drops onto a second row on its own. */
       .input {
         height: 32px;
         padding: 0 var(--space-2);
@@ -389,7 +401,9 @@ const NEGATIVE_OUTCOMES = new Set([
         color: var(--text-primary);
         font-size: var(--text-xs);
         outline: none;
-        max-width: 240px;
+        flex: 1 1 140px;
+        min-width: 120px;
+        max-width: 220px;
       }
       .input:focus {
         border-color: var(--accent);
@@ -607,6 +621,45 @@ export class AuditTrailPageComponent {
   readonly analyticsRows = computed(() => this.analyticsResource.value()?.rows ?? []);
   readonly totalEver = computed(() => this.analyticsResource.value()?.total ?? 0);
 
+  /** Oldest timestamp in the sample, formatted — tells the operator how far the tiles reach. */
+  readonly sampleOldest = computed(() => {
+    const rows = this.analyticsRows();
+    if (rows.length === 0) return null;
+    let oldest = Infinity;
+    for (const r of rows) {
+      const t = new Date(r.createdAt).getTime();
+      if (t < oldest) oldest = t;
+    }
+    return Number.isFinite(oldest) ? formatDate(oldest, 'MMM d, yyyy HH:mm', 'en-US') : null;
+  });
+
+  /**
+   * True when every sampled row is newer than 24h: the sample hit its cap before reaching
+   * the window edge, so "Last 24h" would only be the cap (it read 2,000 = the cap on a
+   * 236,590-row table). The tile shows "-" and the caption explains why.
+   */
+  readonly last24hSaturated = computed(() => {
+    const rows = this.analyticsRows();
+    if (rows.length === 0) return false;
+    const total = this.totalEver();
+    if (rows.length >= total) return false;
+    return this.last24hCount() === rows.length;
+  });
+
+  readonly sampleScopeNote = computed(() => {
+    const n = this.analyticsRows().length;
+    if (n === 0) return 'Waiting for the recent-decisions sample.';
+    const count = new Intl.NumberFormat('en-US').format(n);
+    const oldest = this.sampleOldest();
+    let note = `Total ever counts the whole table. The other tiles and the charts are computed over the most recent ${count} decisions`;
+    if (oldest) note += ` (back to ${oldest})`;
+    note += '.';
+    if (this.last24hSaturated()) {
+      note += ' The sample does not reach back 24 hours, so the Last 24h count is not available.';
+    }
+    return note;
+  });
+
   constructor() {
     this.realtime
       .on('auditDecisionLogged')
@@ -638,11 +691,6 @@ export class AuditTrailPageComponent {
     return this.analyticsRows().filter((r) => new Date(r.createdAt).getTime() > cutoff).length;
   });
 
-  readonly last7dCount = computed(() => {
-    const cutoff = Date.now() - 7 * DAY_MS;
-    return this.analyticsRows().filter((r) => new Date(r.createdAt).getTime() > cutoff).length;
-  });
-
   readonly positiveCount = computed(
     () => this.analyticsRows().filter((r) => POSITIVE_OUTCOMES.has(r.outcome ?? '')).length,
   );
@@ -660,12 +708,6 @@ export class AuditTrailPageComponent {
   readonly distinctSources = computed(() => {
     const set = new Set<string>();
     for (const r of this.analyticsRows()) if (r.source) set.add(r.source);
-    return set.size;
-  });
-
-  readonly distinctEntityTypes = computed(() => {
-    const set = new Set<string>();
-    for (const r of this.analyticsRows()) if (r.entityType) set.add(r.entityType);
     return set.size;
   });
 
@@ -695,23 +737,31 @@ export class AuditTrailPageComponent {
       const k = r.outcome ?? 'Unknown';
       counts.set(k, (counts.get(k) ?? 0) + 1);
     }
-    const entries = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
-    if (entries.length === 0) return {};
+    const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+    if (sorted.length === 0) return {};
+    // The engine emits ~74 distinct outcome strings; a legend paged "1/74"
+    // is unreadable. Keep the six largest and fold the tail into "Other".
+    const TOP = 6;
+    const entries = sorted.slice(0, TOP);
+    const tail = sorted.slice(TOP);
+    if (tail.length > 0) {
+      entries.push([`Other (${tail.length} outcomes)`, tail.reduce((sum, [, v]) => sum + v, 0)]);
+    }
     const colorFor = (name: string): string => {
       if (POSITIVE_OUTCOMES.has(name)) return '#34C759';
       if (NEGATIVE_OUTCOMES.has(name)) return '#FF3B30';
       if (name === 'Detected') return '#FF9500';
-      if (name === 'Skipped') return '#8E8E93';
+      if (name === 'Skipped' || name.startsWith('Other')) return '#8E8E93';
       return '#0071E3';
     };
     return {
       tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, type: 'scroll', textStyle: { fontSize: 10, color: '#6E6E73' } },
+      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
       series: [
         {
           type: 'pie',
           radius: ['45%', '70%'],
-          center: ['50%', '45%'],
+          center: ['50%', '42%'],
           label: { show: false },
           data: entries.map(([name, value]) => ({
             name,
@@ -885,13 +935,16 @@ export class AuditTrailPageComponent {
     {
       headerName: 'Timestamp',
       field: 'createdAt',
-      width: 150,
+      width: 170,
       sortable: true,
-      valueFormatter: (params) => this.relativeTimePipe.transform(params.value),
+      // An audit trail needs the absolute time; the relative form is the tooltip.
+      valueFormatter: (params) =>
+        params.value ? formatDate(params.value, 'MMM d, yyyy HH:mm:ss', 'en-US') : '—',
+      tooltipValueGetter: (params) => this.relativeTimePipe.transform(params.value),
     },
-    { headerName: 'Decision Type', field: 'decisionType', flex: 1, minWidth: 140 },
-    { headerName: 'Entity Type', field: 'entityType', width: 120 },
-    { headerName: 'Entity ID', field: 'entityId', width: 90 },
+    { headerName: 'Decision Type', field: 'decisionType', flex: 1.2, minWidth: 150 },
+    { headerName: 'Entity Type', field: 'entityType', width: 130 },
+    { headerName: 'Entity ID', field: 'entityId', width: 95 },
     {
       headerName: 'Outcome',
       field: 'outcome',
@@ -911,11 +964,20 @@ export class AuditTrailPageComponent {
         return `<span style="background:${s.bg};color:${s.color};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${params.value}</span>`;
       },
     },
-    { headerName: 'Source', field: 'source', width: 130 },
+    {
+      headerName: 'Source',
+      field: 'source',
+      flex: 1,
+      minWidth: 150,
+      // Source names ("SignalOrderBridgeWorker") clipped at 130px with no
+      // ellipsis; the grid's own cell truncation applies once the cell is
+      // flex-sized, and the full value is the tooltip.
+      tooltipField: 'source',
+    },
     {
       headerName: '',
       field: 'id',
-      width: 80,
+      width: 90,
       sortable: false,
       cellRenderer: () => {
         return `<button data-action="expand" style="height:26px;padding:0 10px;border:none;border-radius:999px;font-size:11px;font-weight:600;cursor:pointer;background:rgba(0,113,227,0.1);color:#0040DD">Details</button>`;

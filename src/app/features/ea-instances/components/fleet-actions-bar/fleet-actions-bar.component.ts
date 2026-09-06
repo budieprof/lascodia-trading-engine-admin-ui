@@ -16,15 +16,22 @@ import { finalize, type Observable } from 'rxjs';
 import { EAAdminService } from '@core/services/ea-admin.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { AdminFleetCommandResult, ResponseData } from '@core/api/api.types';
+import {
+  DropdownMenuComponent,
+  type DropdownMenuItem,
+} from '@shared/components/ui/dropdown-menu/dropdown-menu.component';
 
 /**
- * Fleet-bulk operations bar for the EA-instances list page.  Renders seven
+ * Fleet-bulk operations bar for the EA-instances list page.  Exposes seven
  * actions that fan out across every live EA instance (same liveness filter
- * the engine uses: Active + heartbeat within 10 min).  Each action opens an
- * inline confirm dialog with a required reason on destructive variants and
- * an explicit "type FLEET" gate on the kill-switch + flatten + safety-stop
- * actions — the blast radius is the entire fleet, so accidental clicks
- * must be impossible.
+ * the engine uses: Active + heartbeat within 10 min).  Recovery / reset
+ * actions stay as visible buttons; the actions that halt, flatten or bounce
+ * the fleet live behind a single "Fleet actions" menu so a row of red
+ * buttons is not sitting one mis-click away from a fleet-wide flatten.
+ * Each action opens an inline confirm dialog with a required reason on
+ * destructive variants and an explicit "type FLEET" gate on the kill-switch
+ * + flatten actions — the blast radius is the entire fleet, so accidental
+ * clicks must be impossible.
  *
  * Mirrors the structure of EAControlPanelComponent but pointed at the
  * /admin/ea/all/... endpoints; result envelope reports targeted/queued
@@ -40,7 +47,7 @@ import type { AdminFleetCommandResult, ResponseData } from '@core/api/api.types'
   // scrim silently vanishes.  All our selectors are class-prefixed
   // (.modal-dialog, .modal, .action, …) so global leakage is contained.
   encapsulation: ViewEncapsulation.None,
-  imports: [FormsModule],
+  imports: [FormsModule, DropdownMenuComponent],
   template: `
     <section class="bar" aria-label="Fleet bulk operations">
       <div class="bar-head">
@@ -51,17 +58,23 @@ import type { AdminFleetCommandResult, ResponseData } from '@core/api/api.types'
       </div>
 
       <div class="actions">
-        @for (action of actions; track action.key) {
+        @for (action of visibleActions; track action.key) {
           <button
             type="button"
             class="action"
-            [attr.data-tone]="action.tone"
             (click)="openDialog(action.key)"
             [disabled]="submitting()"
           >
             {{ action.label }}
           </button>
         }
+
+        <ui-dropdown-menu [items]="menuItems" (itemClick)="onMenuAction($event)">
+          <span class="action action-menu" [class.is-disabled]="submitting()">
+            Fleet actions
+            <span class="chevron" aria-hidden="true">▾</span>
+          </span>
+        </ui-dropdown-menu>
       </div>
 
       <!--
@@ -237,32 +250,25 @@ import type { AdminFleetCommandResult, ResponseData } from '@core/api/api.types'
       .action:hover:not(:disabled) {
         background: var(--bg-tertiary, rgba(0, 113, 227, 0.06));
       }
-      .action[data-tone='warn'] {
-        color: #c93400;
-        border-color: rgba(255, 149, 0, 0.5);
-      }
-      .action[data-tone='warn']:hover:not(:disabled) {
-        background: #ff9500;
-        color: #fff;
-      }
-      .action[data-tone='bad'] {
-        color: #d70015;
-        border-color: rgba(255, 59, 48, 0.5);
-      }
-      .action[data-tone='bad']:hover:not(:disabled) {
-        background: #ff3b30;
-        color: #fff;
-      }
-      .action[data-tone='ok'] {
-        color: #248a3d;
-      }
-      .action[data-tone='ok']:hover:not(:disabled) {
-        background: #34c759;
-        color: #fff;
-      }
       .action:disabled {
         opacity: 0.55;
         cursor: not-allowed;
+      }
+      /* The menu trigger is projected into the dropdown's own role=button
+         wrapper, so it is a span styled like its sibling buttons. */
+      .action-menu {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-1);
+        line-height: 1.4;
+      }
+      .action-menu .chevron {
+        font-size: 10px;
+        color: var(--text-tertiary);
+      }
+      .action-menu.is-disabled {
+        opacity: 0.55;
+        pointer-events: none;
       }
       /*
         <dialog> + showModal() promotes the element into the browser's top
@@ -500,6 +506,27 @@ export class FleetActionsBarComponent {
       tone: 'warn',
     },
   ];
+
+  /**
+   * Recovery / reset actions (tone ok + info) are safe to leave one click
+   * away.  Everything that halts, closes or bounces the fleet (tone warn +
+   * bad) is collapsed into the menu; each still goes through openDialog()
+   * and the same confirm gates.
+   */
+  protected readonly visibleActions: readonly FleetAction[] = this.actions.filter(
+    (a) => a.tone === 'ok' || a.tone === 'info',
+  );
+
+  protected readonly menuItems: DropdownMenuItem[] = this.actions
+    .filter((a) => a.tone === 'warn' || a.tone === 'bad')
+    .map((a) => ({ label: a.label, action: a.key, destructive: true }));
+
+  protected onMenuAction(action: string): void {
+    // The menu emits a plain string; only accept keys we actually registered
+    // so a stale/foreign action can never reach dispatch().
+    const match = this.actions.find((a) => a.key === action);
+    if (match) this.openDialog(match.key);
+  }
 
   protected readonly open = signal(false);
   protected readonly currentKey = signal<FleetKey | null>(null);

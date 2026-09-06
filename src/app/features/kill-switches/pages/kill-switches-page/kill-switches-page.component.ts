@@ -26,11 +26,17 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { PresenceBadgeComponent } from '@shared/components/presence-badge/presence-badge.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 
 interface StrategySwitch {
   strategy: StrategyDto;
   status: KillSwitchStatusDto | null;
 }
+
+type SortKey = 'id' | 'status' | 'symbol' | 'timeframe' | 'switch' | 'changed';
+
+/** Rows per page on the per-strategy table. */
+const PAGE_SIZE = 25;
 
 @Component({
   selector: 'app-kill-switches-page',
@@ -41,6 +47,7 @@ interface StrategySwitch {
     PresenceBadgeComponent,
     CardSkeletonComponent,
     EmptyStateComponent,
+    ErrorStateComponent,
     ReactiveFormsModule,
     FormsModule,
     DatePipe,
@@ -78,12 +85,16 @@ interface StrategySwitch {
           <dl class="global-meta">
             <div>
               <dt>State</dt>
-              <dd>{{ g.enabled ? 'Engaged' : 'Disengaged' }}</dd>
+              <dd>
+                <span class="pill" [class.on]="g.enabled">
+                  {{ g.enabled ? 'Engaged' : 'Not engaged' }}
+                </span>
+              </dd>
             </div>
             @if (g.changedAt) {
               <div>
                 <dt>Changed</dt>
-                <dd>{{ g.changedAt | date: 'MMM d, yyyy HH:mm:ss' }}</dd>
+                <dd>{{ g.changedAt | date: 'MMM d, yyyy HH:mm' }}</dd>
               </div>
             }
             @if (g.changedBy) {
@@ -111,7 +122,8 @@ interface StrategySwitch {
                 <span class="engaged-count">{{ engagedCount() }} engaged</span>
                 ·
               }
-              {{ filteredRows().length }} of {{ rows().length }} shown
+              {{ filteredRows().length }} of {{ rows().length }} · engaged first, then by
+              {{ sortLabel() }}
             </span>
           </div>
           @if (rows().length > 0) {
@@ -144,50 +156,82 @@ interface StrategySwitch {
         </header>
         @if (loading()) {
           <app-card-skeleton [lines]="6" [showHeader]="false" />
+        } @else if (loadError(); as err) {
+          <app-error-state title="Could not load strategies" [message]="err" (retry)="reload()" />
         } @else if (rows().length === 0) {
           <app-empty-state
             title="No strategies found"
             description="Create a strategy before configuring per-strategy kill switches."
           />
         } @else if (filteredRows().length === 0) {
-          <p class="empty-line">No strategies match the current filter.</p>
+          <p class="empty-line">{{ emptyFilterMessage() }}</p>
         } @else {
-          <div class="table-scroll table-scroll--events">
+          <!-- Paged, not a fixed-height scroll box: the old container cut the twelfth row in
+               half with no scrollbar while the header claimed every row was shown. -->
+          <div class="table-scroll">
             <table class="table">
               <thead>
                 <tr>
-                  <th>Strategy</th>
-                  <th>Status</th>
-                  <th>Symbol</th>
-                  <th>Timeframe</th>
-                  <th>Kill Switch</th>
-                  <th>Last Change</th>
-                  <th></th>
+                  @for (col of columns; track col.key) {
+                    <th [class.sorted]="sortKey() === col.key">
+                      <button
+                        type="button"
+                        class="sort-btn"
+                        (click)="toggleSort(col.key)"
+                        [attr.aria-sort]="
+                          sortKey() === col.key
+                            ? sortDir() === 'asc'
+                              ? 'ascending'
+                              : 'descending'
+                            : 'none'
+                        "
+                      >
+                        {{ col.label }}
+                        @if (sortKey() === col.key) {
+                          <span aria-hidden="true">{{ sortDir() === 'asc' ? '▲' : '▼' }}</span>
+                        }
+                      </button>
+                    </th>
+                  }
+                  <th class="actions">Action</th>
                 </tr>
               </thead>
               <tbody>
-                @for (row of filteredRows(); track row.strategy.id) {
+                @for (row of pagedRows(); track row.strategy.id) {
                   <tr [class.row-engaged]="row.status?.enabled">
                     <td>
-                      <strong>#{{ row.strategy.id }}</strong> {{ row.strategy.name }}
+                      <strong>#{{ row.strategy.id }}</strong> {{ row.strategy.name ?? '—' }}
                     </td>
-                    <td>{{ row.strategy.status }}</td>
-                    <td>{{ row.strategy.symbol }}</td>
+                    <td>
+                      <span class="status-pill" [attr.data-status]="row.strategy.status">
+                        {{ row.strategy.status }}
+                      </span>
+                    </td>
+                    <td>{{ row.strategy.symbol ?? '—' }}</td>
                     <td>{{ row.strategy.timeframe }}</td>
                     <td>
-                      <span class="pill" [class.on]="row.status?.enabled">
-                        {{ row.status?.enabled ? 'Engaged' : 'Off' }}
-                      </span>
+                      @if (row.status === null) {
+                        <span class="pill unknown" title="Kill-switch status could not be read">
+                          Unknown
+                        </span>
+                      } @else {
+                        <span class="pill" [class.on]="row.status.enabled">
+                          {{ row.status.enabled ? 'Engaged' : 'Not engaged' }}
+                        </span>
+                      }
                     </td>
                     <td class="muted">
                       {{
-                        row.status?.changedAt ? (row.status!.changedAt | date: 'MMM d, HH:mm') : '—'
+                        row.status?.changedAt
+                          ? (row.status!.changedAt | date: 'MMM d, yyyy HH:mm')
+                          : '—'
                       }}
                     </td>
                     <td class="actions">
                       <button
                         type="button"
-                        class="link"
+                        class="btn-row"
+                        [class.danger]="!row.status?.enabled"
                         [disabled]="busyStrategyIds().has(row.strategy.id)"
                         (click)="requestStrategyToggle(row)"
                       >
@@ -199,6 +243,32 @@ interface StrategySwitch {
               </tbody>
             </table>
           </div>
+          @if (pageCount() > 1) {
+            <footer class="pager">
+              <span class="muted">
+                {{ pageStart() + 1 }}–{{ pageEnd() }} of {{ filteredRows().length }}
+              </span>
+              <div class="pager-controls">
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  [disabled]="page() === 0"
+                  (click)="page.set(page() - 1)"
+                >
+                  Previous
+                </button>
+                <span class="muted">Page {{ page() + 1 }} of {{ pageCount() }}</span>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  [disabled]="page() >= pageCount() - 1"
+                  (click)="page.set(page() + 1)"
+                >
+                  Next
+                </button>
+              </div>
+            </footer>
+          }
         }
       </section>
 
@@ -465,11 +535,47 @@ interface StrategySwitch {
         font-size: var(--text-sm);
       }
       .table-scroll {
-        overflow: auto;
-        max-height: 560px;
+        overflow-x: auto;
       }
-      .table-scroll--events {
-        max-height: 560px;
+      .pager {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        padding: var(--space-2) var(--space-5);
+        border-top: 1px solid var(--border);
+        font-size: var(--text-xs);
+        font-variant-numeric: tabular-nums;
+      }
+      .pager-controls {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .btn-sm {
+        height: 28px;
+        padding: 0 var(--space-3);
+        font-size: var(--text-xs);
+      }
+      .sort-btn {
+        background: none;
+        border: none;
+        padding: 0;
+        margin: 0;
+        font: inherit;
+        color: inherit;
+        text-transform: inherit;
+        letter-spacing: inherit;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .sort-btn:hover {
+        color: var(--text-primary);
+      }
+      .table th.sorted {
+        color: var(--text-primary);
       }
       .table {
         width: 100%;
@@ -499,43 +605,79 @@ interface StrategySwitch {
         font-weight: var(--font-semibold);
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        position: sticky;
-        top: 0;
-        z-index: 1;
       }
       .muted {
         color: var(--text-tertiary);
       }
+      /* "Not engaged" is the normal state — neutral grey, not green: green would make an
+         engaged row's red the only colour and the rest of the column a wall of "good". */
       .pill {
         display: inline-flex;
         padding: 2px 10px;
         border-radius: var(--radius-full);
         font-size: var(--text-xs);
         font-weight: var(--font-semibold);
-        background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        background: rgba(142, 142, 147, 0.16);
+        color: var(--text-secondary);
+        white-space: nowrap;
       }
       .pill.on {
         background: rgba(255, 59, 48, 0.12);
         color: #d70015;
       }
+      .pill.unknown {
+        background: rgba(255, 149, 0, 0.12);
+        color: #c93400;
+      }
+      .status-pill {
+        display: inline-flex;
+        padding: 2px 10px;
+        border-radius: var(--radius-full);
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        background: rgba(142, 142, 147, 0.16);
+        color: var(--text-secondary);
+        white-space: nowrap;
+      }
+      .status-pill[data-status='Active'] {
+        background: rgba(52, 199, 89, 0.12);
+        color: #248a3d;
+      }
+      .status-pill[data-status='Paused'] {
+        background: rgba(255, 149, 0, 0.12);
+        color: #c93400;
+      }
       .actions {
         text-align: right;
+        white-space: nowrap;
       }
-      .link {
+      /* Row action: small outlined button, red only when it would engage (the risky direction).
+         Matches the filled red global button in colour without competing with it in weight. */
+      .btn-row {
+        height: 28px;
+        padding: 0 var(--space-3);
+        border-radius: var(--radius-full);
+        border: 1px solid var(--border);
         background: transparent;
-        border: none;
-        color: var(--accent);
+        color: var(--text-primary);
+        font-family: inherit;
+        font-size: var(--text-xs);
         font-weight: var(--font-medium);
         cursor: pointer;
-        font-size: var(--text-sm);
       }
-      .link:disabled {
+      .btn-row:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+      }
+      .btn-row.danger {
+        color: var(--loss);
+        border-color: rgba(255, 59, 48, 0.4);
+      }
+      .btn-row.danger:hover:not(:disabled) {
+        background: rgba(255, 59, 48, 0.08);
+      }
+      .btn-row:disabled {
         opacity: 0.5;
         cursor: not-allowed;
-      }
-      .link:hover:not(:disabled) {
-        text-decoration: underline;
       }
 
       .btn {
@@ -701,6 +843,7 @@ export class KillSwitchesPageComponent implements OnInit {
 
   readonly rows = signal<StrategySwitch[]>([]);
   readonly loading = signal(true);
+  readonly loadError = signal<string | null>(null);
   readonly busyGlobal = signal(false);
   readonly busyStrategyIds = signal(new Set<number>());
 
@@ -716,10 +859,36 @@ export class KillSwitchesPageComponent implements OnInit {
     { label: 'Off', value: 'off' },
   ];
 
+  // ── Sort state ──────────────────────────────────────────────────────
+  // Default is by strategy id: with 200 near-identical generated names, sorting by name looked
+  // like no order at all.
+  protected readonly columns: ReadonlyArray<{ key: SortKey; label: string }> = [
+    { key: 'id', label: 'Strategy' },
+    { key: 'status', label: 'Status' },
+    { key: 'symbol', label: 'Symbol' },
+    { key: 'timeframe', label: 'Timeframe' },
+    { key: 'switch', label: 'Kill switch' },
+    { key: 'changed', label: 'Last change' },
+  ];
+  readonly sortKey = signal<SortKey>('id');
+  readonly sortDir = signal<'asc' | 'desc'>('asc');
+  readonly sortLabel = computed(
+    () => this.columns.find((c) => c.key === this.sortKey())?.label.toLowerCase() ?? 'strategy',
+  );
+
+  toggleSort(key: SortKey): void {
+    if (this.sortKey() === key) {
+      this.sortDir.update((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      this.sortKey.set(key);
+      this.sortDir.set('asc');
+    }
+  }
+
   /**
-   * Engaged kill switches float to the top so operators see what is
-   * actually blocking trading without scrolling — and to make it
-   * obvious when a strategy is silently held off the desk.
+   * Engaged kill switches stay pinned to the top regardless of the chosen sort — they are what
+   * is actually blocking trading, and an operator must not have to page to find them. Within
+   * each group the chosen column applies.
    */
   readonly filteredRows = computed<StrategySwitch[]>(() => {
     const term = this.searchTerm().trim().toLowerCase();
@@ -733,12 +902,59 @@ export class KillSwitchesPageComponent implements OnInit {
       const symbol = (r.strategy.symbol ?? '').toLowerCase();
       return idStr === term || idStr.includes(term) || name.includes(term) || symbol.includes(term);
     });
+    const key = this.sortKey();
+    const dir = this.sortDir() === 'asc' ? 1 : -1;
+    const value = (r: StrategySwitch): string | number => {
+      switch (key) {
+        case 'id':
+          return r.strategy.id;
+        case 'status':
+          return r.strategy.status ?? '';
+        case 'symbol':
+          return r.strategy.symbol ?? '';
+        case 'timeframe':
+          return r.strategy.timeframe ?? '';
+        case 'switch':
+          return r.status?.enabled ? 1 : 0;
+        case 'changed':
+          return r.status?.changedAt ? Date.parse(r.status.changedAt) : 0;
+      }
+    };
     return [...xs].sort((a, b) => {
       const ae = a.status?.enabled ? 1 : 0;
       const be = b.status?.enabled ? 1 : 0;
       if (ae !== be) return be - ae;
-      return (a.strategy.name ?? '').localeCompare(b.strategy.name ?? '');
+      const av = value(a);
+      const bv = value(b);
+      const cmp =
+        typeof av === 'number' && typeof bv === 'number'
+          ? av - bv
+          : String(av).localeCompare(String(bv));
+      return cmp !== 0 ? cmp * dir : a.strategy.id - b.strategy.id;
     });
+  });
+
+  // ── Pagination ──────────────────────────────────────────────────────
+  readonly page = signal(0);
+  readonly pageCount = computed(() =>
+    Math.max(1, Math.ceil(this.filteredRows().length / PAGE_SIZE)),
+  );
+  /** Clamped so a narrower filter never strands the operator on an empty page. */
+  private readonly safePage = computed(() => Math.min(this.page(), this.pageCount() - 1));
+  readonly pageStart = computed(() => this.safePage() * PAGE_SIZE);
+  readonly pageEnd = computed(() =>
+    Math.min(this.pageStart() + PAGE_SIZE, this.filteredRows().length),
+  );
+  readonly pagedRows = computed(() => this.filteredRows().slice(this.pageStart(), this.pageEnd()));
+
+  /** Filter-specific empty copy: "nothing engaged" is good news and should read like it. */
+  readonly emptyFilterMessage = computed(() => {
+    const term = this.searchTerm().trim();
+    if (this.statusFilter() === 'engaged' && !term) {
+      const n = this.rows().length;
+      return `No kill switches engaged — all ${n} ${n === 1 ? 'strategy is' : 'strategies are'} running normally.`;
+    }
+    return 'No strategies match the current filter.';
   });
 
   readonly engagedCount = computed(() => this.rows().filter((r) => r.status?.enabled).length);
@@ -814,6 +1030,10 @@ export class KillSwitchesPageComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    this.loadAll();
+  }
+
+  reload(): void {
     this.loadAll();
   }
 
@@ -935,6 +1155,7 @@ export class KillSwitchesPageComponent implements OnInit {
 
   private loadAll(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.service.getGlobal().subscribe({
       error: () => {
         /* allow UI to load even if global fails */
@@ -942,6 +1163,12 @@ export class KillSwitchesPageComponent implements OnInit {
     });
     this.strategiesService.list({ currentPage: 1, itemCountPerPage: 200 }).subscribe({
       next: (res) => {
+        // A rejected envelope must not render as "No strategies found".
+        if (res.status === false) {
+          this.loadError.set(res.message ?? 'The engine rejected the strategy list request.');
+          this.loading.set(false);
+          return;
+        }
         const strategies = res.data?.data ?? [];
         if (strategies.length === 0) {
           this.rows.set([]);
@@ -962,7 +1189,11 @@ export class KillSwitchesPageComponent implements OnInit {
           this.loading.set(false);
         });
       },
-      error: () => this.loading.set(false),
+      error: (err: { status?: number; error?: { message?: string } }) => {
+        const detail = err?.error?.message ?? (err?.status ? `HTTP ${err.status}` : null);
+        this.loadError.set(detail ? `${detail}.` : 'The engine could not be reached.');
+        this.loading.set(false);
+      },
     });
   }
 

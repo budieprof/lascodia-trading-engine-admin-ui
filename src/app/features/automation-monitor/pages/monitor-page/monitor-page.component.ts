@@ -25,6 +25,7 @@ import type {
 } from '@core/api/api.types';
 
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
+import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 
 type FeedKind = 'strategy' | 'opt' | 'bt' | 'ml';
 
@@ -35,162 +36,162 @@ interface FeedRow {
   title: string;
   status: string;
   detail: string;
+  /**
+   * How many identical events (same kind, subject, status and detail) this row stands for.
+   * The ml-train loop re-queues and re-cancels the same excluded D1 jobs every five minutes,
+   * so 25 of 40 feed rows were one repeating set; collapsing them keeps the feed readable
+   * without hiding that the loop is spinning.
+   */
+  repeats: number;
+  /** IDs folded into this row, newest first, for the tooltip. */
+  ids: number[];
 }
 
 @Component({
   selector: 'app-automation-monitor-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, MetricCardComponent],
+  imports: [DatePipe, MetricCardComponent, PageHeaderComponent],
   template: `
-    <header class="page-header">
-      <div>
-        <h1>Automation Monitor</h1>
-        <p class="subtitle">
-          Live activity from the strategy-hunt / strategy-reopt / ml-train launchd loops.
-          Auto-refresh
-          <span class="muted"
-            >every {{ pollSeconds }}s
-            @if (lastRefresh()) {
-              · last
-              {{ lastRefresh() | date: 'HH:mm:ss' }}
-            }
-          </span>
-        </p>
-      </div>
-      <div class="actions">
-        <button class="btn" (click)="togglePause()">
+    <div class="page">
+      <app-page-header
+        title="Automation Monitor"
+        [subtitle]="
+          'Live activity from the strategy-hunt / strategy-reopt / ml-train launchd loops. Auto-refresh every ' +
+          pollSeconds +
+          's' +
+          (lastRefresh() ? ' · last ' + (lastRefresh() | date: 'HH:mm:ss') : '')
+        "
+      >
+        <button type="button" class="btn btn-secondary" (click)="togglePause()">
           {{ paused() ? 'Resume' : 'Pause' }}
         </button>
-        <button class="btn btn-primary" (click)="refreshNow()" [disabled]="loading()">
-          Refresh now
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="refreshNow()"
+          [disabled]="loading()"
+        >
+          Refresh
         </button>
-      </div>
-    </header>
+      </app-page-header>
 
-    <section class="metrics" aria-label="In-flight counts">
-      <app-metric-card
-        label="Active opt runs"
-        [value]="activeOpt()"
-        format="number"
-        dotColor="#22c55e"
-      />
-      <app-metric-card
-        label="Active backtests"
-        [value]="activeBt()"
-        format="number"
-        dotColor="#3b82f6"
-      />
-      <app-metric-card
-        label="Active ML training"
-        [value]="activeMl()"
-        format="number"
-        dotColor="#8b5cf6"
-      />
-      <app-metric-card
-        label="Strategies · last 1h"
-        [value]="strategiesLastHour()"
-        format="number"
-        dotColor="#06b6d4"
-      />
-      <app-metric-card
-        label="Backtests completed · last 1h"
-        [value]="btCompletedLastHour()"
-        format="number"
-        dotColor="#10b981"
-      />
-    </section>
+      <section class="metrics" aria-label="In-flight counts">
+        <app-metric-card
+          label="Active opt runs"
+          [value]="activeOpt()"
+          format="number"
+          dotColor="#22c55e"
+        />
+        <app-metric-card
+          label="Active backtests"
+          [value]="activeBt()"
+          format="number"
+          dotColor="#3b82f6"
+        />
+        <app-metric-card
+          label="Active ML training"
+          [value]="activeMl()"
+          format="number"
+          dotColor="#8b5cf6"
+        />
+        <app-metric-card
+          label="Strategies · last 1h"
+          [value]="strategiesLastHour()"
+          format="number"
+          dotColor="#06b6d4"
+        />
+        <app-metric-card
+          label="Backtests completed · last 1h"
+          [value]="btCompletedLastHour()"
+          format="number"
+          dotColor="#10b981"
+        />
+      </section>
 
-    @if (errorMessage()) {
-      <div class="banner error">{{ errorMessage() }}</div>
-    }
-
-    <section class="feed" aria-label="Recent activity">
-      <div class="feed-header">
-        <h2>Recent activity</h2>
-        <span class="muted">{{ feed().length }} events</span>
-      </div>
-      @if (feed().length === 0 && !loading()) {
-        <div class="empty">No recent activity. The launchd loops fire every 7–60 minutes.</div>
-      } @else {
-        <table class="data">
-          <thead>
-            <tr>
-              <th class="t">Time</th>
-              <th class="k">Kind</th>
-              <th class="i">ID</th>
-              <th>Subject</th>
-              <th class="s">Status</th>
-              <th>Detail</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (row of feed(); track row.kind + ':' + row.id) {
-              <tr [class]="'row-' + row.kind">
-                <td class="t mono">{{ row.ts | date: 'HH:mm:ss' }}</td>
-                <td class="k">
-                  <span [class]="'badge badge-' + row.kind">{{ kindLabel(row.kind) }}</span>
-                </td>
-                <td class="i mono">#{{ row.id }}</td>
-                <td>{{ row.title }}</td>
-                <td class="s">
-                  <span [class]="'pill pill-' + statusClass(row.status)">{{ row.status }}</span>
-                </td>
-                <td class="muted">{{ row.detail }}</td>
-              </tr>
-            }
-          </tbody>
-        </table>
+      @if (errorMessage()) {
+        <div class="banner error">{{ errorMessage() }}</div>
       }
-    </section>
+
+      <section class="feed" aria-label="Recent activity">
+        <div class="feed-header">
+          <h2>Recent activity</h2>
+          <span class="muted">
+            {{ eventCount() }} event{{ eventCount() === 1 ? '' : 's' }}
+            @if (feed().length !== eventCount()) {
+              · {{ feed().length }} row{{ feed().length === 1 ? '' : 's' }} (repeats collapsed)
+            }
+          </span>
+        </div>
+        @if (feed().length === 0 && !loading()) {
+          <div class="empty">No recent activity. The launchd loops fire every 7–60 minutes.</div>
+        } @else {
+          <table class="data">
+            <thead>
+              <tr>
+                <th class="t">Time</th>
+                <th class="k">Kind</th>
+                <th class="i">ID</th>
+                <th>Subject</th>
+                <th class="s">Status</th>
+                <th>Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of feed(); track row.kind + ':' + row.id) {
+                <tr [class]="'row-' + row.kind">
+                  <td class="t mono">{{ row.ts | date: 'HH:mm:ss' }}</td>
+                  <td class="k">
+                    <span [class]="'badge badge-' + row.kind">{{ kindLabel(row.kind) }}</span>
+                  </td>
+                  <td class="i mono" [title]="row.repeats > 1 ? '#' + row.ids.join(', #') : ''">
+                    #{{ row.id }}
+                    @if (row.repeats > 1) {
+                      <span class="repeat">×{{ row.repeats }}</span>
+                    }
+                  </td>
+                  <td>{{ row.title }}</td>
+                  <td class="s">
+                    <span [class]="'pill pill-' + statusClass(row.status)">{{ row.status }}</span>
+                  </td>
+                  <td class="detail muted" [title]="row.detail">{{ row.detail }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        }
+      </section>
+    </div>
   `,
   styles: [
     `
-      :host {
-        display: block;
-        padding: var(--space-6);
-      }
-      .page-header {
+      /* The layout shell provides the gutter; the old :host padding put this
+         page 24px right of every other route. */
+      .page {
+        padding: var(--space-2) 0;
         display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
+        flex-direction: column;
         gap: var(--space-4);
-        margin-bottom: var(--space-6);
-      }
-      .page-header h1 {
-        margin: 0;
-        font-size: var(--text-2xl);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-      }
-      .subtitle {
-        margin: var(--space-1) 0 0;
-        color: var(--text-secondary);
-        font-size: var(--text-sm);
       }
       .muted {
         color: var(--text-secondary);
       }
-      .actions {
-        display: flex;
-        gap: var(--space-2);
-      }
       .btn {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        padding: var(--space-2) var(--space-4);
-        cursor: pointer;
+        height: 36px;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-full);
         font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .btn-secondary {
+        background: transparent;
+        border: 1px solid var(--border);
         color: var(--text-primary);
       }
-      .btn:hover {
+      .btn-secondary:hover:not(:disabled) {
         background: var(--bg-tertiary);
-      }
-      .btn-primary {
-        background: var(--accent);
-        color: var(--accent-fg);
-        border-color: var(--accent);
       }
       .btn[disabled] {
         opacity: 0.5;
@@ -198,20 +199,29 @@ interface FeedRow {
       }
       .metrics {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: var(--space-4);
-        margin-bottom: var(--space-6);
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: var(--space-2);
+        align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .metrics {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 720px) {
+        .metrics {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
       .banner {
         padding: var(--space-3) var(--space-4);
         border-radius: var(--radius-md);
-        margin-bottom: var(--space-4);
         font-size: var(--text-sm);
       }
       .banner.error {
-        background: var(--loss-bg, #fee);
-        color: var(--loss, #c00);
-        border: 1px solid var(--loss-border, #fcc);
+        background: rgba(255, 59, 48, 0.12);
+        color: var(--loss);
+        border: 1px solid rgba(255, 59, 48, 0.35);
       }
       .feed {
         background: var(--bg-secondary);
@@ -273,6 +283,25 @@ interface FeedRow {
       }
       .s {
         width: 110px;
+      }
+      /* Long error reasons ("Timeframe D1 is excluded from ML training…")
+         used to be hard-clipped by the cell; now they end in an ellipsis
+         and the full text is in the title. */
+      td.detail {
+        max-width: 420px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .repeat {
+        display: inline-block;
+        margin-left: 4px;
+        padding: 0 6px;
+        border-radius: var(--radius-full);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
       }
       .badge {
         display: inline-block;
@@ -374,8 +403,10 @@ export class AutomationMonitorPageComponent {
     }).length;
   });
 
-  readonly feed = computed<FeedRow[]>(() => {
+  /** Every event in the window, newest first, before repeats are collapsed. */
+  private readonly rawFeed = computed<FeedRow[]>(() => {
     const rows: FeedRow[] = [];
+    const one = (id: number) => ({ repeats: 1, ids: [id] });
 
     for (const s of this.recentStrategies()) {
       rows.push({
@@ -385,6 +416,7 @@ export class AutomationMonitorPageComponent {
         title: `${s.name ?? '(unnamed)'}`,
         status: 'Created',
         detail: `${s.symbol ?? '?'} · ${s.timeframe ?? '?'} · ${s.strategyType ?? '?'}`,
+        ...one(s.id),
       });
     }
 
@@ -395,7 +427,7 @@ export class AutomationMonitorPageComponent {
       const detail =
         baseline != null && best != null
           ? `health ${baseline.toFixed(3)} → ${best.toFixed(3)}`
-          : (r.errorMessage ?? '').substring(0, 80);
+          : (r.errorMessage ?? '');
       rows.push({
         kind: 'opt',
         ts,
@@ -403,6 +435,7 @@ export class AutomationMonitorPageComponent {
         title: `Opt run on strategy #${r.strategyId}`,
         status: r.status as string,
         detail,
+        ...one(r.id),
       });
     }
 
@@ -410,8 +443,8 @@ export class AutomationMonitorPageComponent {
       const ts = b.completedAt ?? b.startedAt ?? '';
       const detail =
         b.totalTrades != null
-          ? `${b.totalTrades} trades · WR ${((b.winRate ?? 0) * 100).toFixed(1)}% · DD ${((b.maxDrawdownPct ?? 0) * 100).toFixed(1)}%`
-          : (b.errorMessage ?? '').substring(0, 80);
+          ? `${b.totalTrades} trade${b.totalTrades === 1 ? '' : 's'} · WR ${((b.winRate ?? 0) * 100).toFixed(1)}% · DD ${((b.maxDrawdownPct ?? 0) * 100).toFixed(1)}%`
+          : (b.errorMessage ?? '');
       rows.push({
         kind: 'bt',
         ts,
@@ -419,6 +452,7 @@ export class AutomationMonitorPageComponent {
         title: `Backtest · strategy #${b.strategyId}`,
         status: b.status as string,
         detail,
+        ...one(b.id),
       });
     }
 
@@ -427,7 +461,7 @@ export class AutomationMonitorPageComponent {
       const detail =
         m.directionAccuracy != null
           ? `acc ${(m.directionAccuracy * 100).toFixed(1)}%`
-          : (m.errorMessage ?? '').substring(0, 80);
+          : (m.errorMessage ?? '');
       rows.push({
         kind: 'ml',
         ts,
@@ -435,6 +469,7 @@ export class AutomationMonitorPageComponent {
         title: `ML training · ${m.symbol ?? '?'} ${m.timeframe ?? '?'}`,
         status: m.status as string,
         detail,
+        ...one(m.id),
       });
     }
 
@@ -442,6 +477,32 @@ export class AutomationMonitorPageComponent {
       .filter((r) => !!r.ts)
       .sort((a, b) => parseTs(b.ts)! - parseTs(a.ts)!)
       .slice(0, 40);
+  });
+
+  readonly eventCount = computed(() => this.rawFeed().length);
+
+  /**
+   * The feed with identical events folded into one row each. Identity is
+   * (kind, subject, status, detail) — the same D1 training job cancelled
+   * for the same reason every five minutes is one thing to look at, not 25.
+   * The row keeps the newest timestamp and ID; every folded ID is in `ids`.
+   */
+  readonly feed = computed<FeedRow[]>(() => {
+    const out: FeedRow[] = [];
+    const index = new Map<string, FeedRow>();
+    for (const r of this.rawFeed()) {
+      const key = `${r.kind}|${r.title}|${r.status}|${r.detail}`;
+      const existing = index.get(key);
+      if (existing) {
+        existing.repeats++;
+        existing.ids.push(r.id);
+      } else {
+        const row = { ...r, ids: [r.id] };
+        index.set(key, row);
+        out.push(row);
+      }
+    }
+    return out;
   });
 
   constructor() {

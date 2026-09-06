@@ -151,7 +151,6 @@ import type { CandleStreamInstance, CandleStreamSource } from '@core/api/api.typ
         gap: var(--space-3);
         background: var(--bg-secondary);
         border: 1px solid var(--border);
-        border-left: 3px solid var(--accent);
         border-radius: var(--radius-md);
         padding: var(--card-padding);
         height: 100%;
@@ -236,12 +235,21 @@ import type { CandleStreamInstance, CandleStreamSource } from '@core/api/api.typ
         font-family: inherit;
         font-size: 12px;
       }
+      /* Instance labels are long ("acct · broker · LASC-MULTI-… · live") and
+         the native select paints its chevron over the last ~24px of the
+         box, so reserve that strip and clip the label with an ellipsis
+         instead of letting it run under the arrow. */
       .csp-select {
         flex: 1;
-        min-width: 260px;
+        min-width: 0;
+        max-width: 100%;
+        padding-right: 32px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .csp-select-sm {
-        min-width: 220px;
+        flex: 1 1 220px;
       }
       .csp-input {
         width: 180px;

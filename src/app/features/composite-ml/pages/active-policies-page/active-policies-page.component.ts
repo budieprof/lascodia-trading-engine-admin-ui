@@ -9,6 +9,7 @@ import type { ActivePolicyDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { OptionsHealthCardComponent } from '../../components/options-health-card/options-health-card.component';
+import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
@@ -33,6 +34,7 @@ type TierFilter = 'all' | 'live' | 'coldstart';
     EmptyStateComponent,
     ErrorStateComponent,
     OptionsHealthCardComponent,
+    CompositeMlNavComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -40,22 +42,12 @@ type TierFilter = 'all' | 'live' | 'coldstart';
       <app-page-header
         title="CompositeML — Active Policies"
         subtitle="One row per (Symbol, Timeframe, IsColdStart) partition tier"
-      >
-        <a routerLink="/composite-ml/diff" class="btn btn-secondary">Diff snapshots</a>
-        <a routerLink="/composite-ml/layer-skill" class="btn btn-secondary">Skill panels →</a>
-        <a routerLink="/composite-ml/drift" class="btn btn-secondary">Drift →</a>
-        <a routerLink="/composite-ml/gate-cutover" class="btn btn-secondary">Gate Cutover →</a>
-        <a routerLink="/composite-ml/cold-start" class="btn btn-secondary">Cold-Start →</a>
-        <a routerLink="/composite-ml/layer-health" class="btn btn-secondary">Layer Health →</a>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
-      </app-page-header>
+      />
+      <app-composite-ml-nav
+        [showRefresh]="true"
+        [refreshing]="resource.loading()"
+        (refresh)="resource.refresh()"
+      />
 
       <app-options-health-card />
 
@@ -88,10 +80,10 @@ type TierFilter = 'all' | 'live' | 'coldstart';
             dotColor="#34C759"
           />
           <app-metric-card
-            label="Most recent activation"
-            [value]="null"
+            label="Live tiers"
+            [value]="policies().length - coldStartCount()"
             format="number"
-            dotColor="#0071E3"
+            dotColor="#34C759"
           />
         </div>
 
@@ -128,6 +120,10 @@ type TierFilter = 'all' | 'live' | 'coldstart';
 
             <span class="result-count">
               {{ filteredPolicies().length }} of {{ policies().length }}
+              @if (latestActivation(); as at) {
+                · latest activation
+                <span [title]="at | date: 'yyyy-MM-dd HH:mm:ss UTC'">{{ at | relativeTime }}</span>
+              }
             </span>
           </header>
 
@@ -223,11 +219,8 @@ type TierFilter = 'all' | 'live' | 'coldstart';
         </section>
 
         <p class="footnote">
-          Walk a snapshot's ancestry chain via
-          <code class="mono">/composite-ml/policy-lineage/{{ '{id}' }}</code
-          >; diff two snapshots via
-          <code class="mono">/composite-ml/policy-snapshots/diff?fromId=&amp;toId=</code>. UI
-          surfaces for both ship later in Phase 1.
+          Click a snapshot id to walk its ancestry chain; use the <strong>Diff</strong> tab to
+          compare any two snapshots knob by knob.
         </p>
       }
     </div>
@@ -428,6 +421,15 @@ export class ActivePoliciesPageComponent {
   protected readonly coldStartCount = computed(
     () => this.policies().filter((p) => p.isColdStart).length,
   );
+
+  /** Newest activatedAtUtc across the active set, or null when none carry one. */
+  protected readonly latestActivation = computed<string | null>(() => {
+    let best: string | null = null;
+    for (const p of this.policies()) {
+      if (p.activatedAtUtc && (best === null || p.activatedAtUtc > best)) best = p.activatedAtUtc;
+    }
+    return best;
+  });
 
   protected readonly distinctTrainers = computed(() => {
     const set = new Set<string>();

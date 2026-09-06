@@ -53,11 +53,43 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { TabsComponent, type TabItem } from '@shared/components/ui/tabs/tabs.component';
-import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import {
   FormFieldComponent,
   FormFieldControlDirective,
 } from '@shared/components/form-field/form-field.component';
+
+/** Analytics samples are capped so a 30k-run fleet does not land in the browser. */
+const ANALYTICS_SAMPLE_CAP = 5000;
+
+/** Engine sentinel symbol for MAML / cross-symbol average-weight initialisers. */
+const CROSS_SYMBOL_SENTINEL = 'ALL';
+
+/**
+ * Human label + colour key for the engine's PromotionDecision enum. The enum
+ * is AutoPromoted / FlaggedForReview / Rejected and is null while an
+ * evaluation is still running — "Promoted" was never a value it could carry.
+ */
+function decisionMeta(decision: string | null | undefined): { key: string; label: string } {
+  switch (decision) {
+    case 'AutoPromoted':
+      return { key: 'promoted', label: 'Promoted' };
+    case 'FlaggedForReview':
+      return { key: 'flagged', label: 'Flagged for review' };
+    case 'Rejected':
+      return { key: 'rejected', label: 'Rejected' };
+    default:
+      return { key: 'pending', label: 'Pending' };
+  }
+}
+
+/** "Total runs" is only true when the sample holds every row; otherwise say what it holds. */
+function windowLabel(noun: string, sampleSize: number, total: number): string {
+  if (total > sampleSize && sampleSize > 0) {
+    return `${noun} (latest ${sampleSize.toLocaleString('en-US')} of ${total.toLocaleString('en-US')})`;
+  }
+  return `Total ${noun.toLowerCase()}`;
+}
 
 @Component({
   selector: 'app-ml-models-page',
@@ -71,11 +103,11 @@ import {
     MetricCardComponent,
     ChartCardComponent,
     TabsComponent,
+    EmptyStateComponent,
     FormFieldComponent,
     FormFieldControlDirective,
     DatePipe,
     DecimalPipe,
-    RelativeTimePipe,
   ],
   template: `
     <div class="page">
@@ -88,32 +120,34 @@ import {
         <!-- ========== MODEL REGISTRY TAB ========== -->
         @if (activeTab() === 'registry') {
           <div class="tab-content">
-            <!-- 8-card KPI strip — fleet-wide model registry roll-ups -->
+            <!-- KPI strip — fleet-wide model registry roll-ups. Zero is neutral:
+                 only a non-zero count earns a colour, so an empty Failed tile
+                 does not read as good news and an empty Active tile not as bad. -->
             <div class="ml-kpis">
               <div class="ml-kpi">
                 <span class="ml-kpi-label">Total models</span>
-                <span class="ml-kpi-value">{{ modelStats().total }}</span>
+                <span class="ml-kpi-value">{{ modelStats().total | number }}</span>
               </div>
               <div class="ml-kpi">
                 <span class="ml-kpi-label">Active</span>
-                <span class="ml-kpi-value good">{{ modelStats().active }}</span>
+                <span class="ml-kpi-value" [class.good]="modelStats().active > 0">
+                  {{ modelStats().active | number }}
+                </span>
               </div>
               <div class="ml-kpi">
                 <span class="ml-kpi-label">Training</span>
-                <span class="ml-kpi-value info">{{ modelStats().training }}</span>
+                <span class="ml-kpi-value" [class.info]="modelStats().training > 0">
+                  {{ modelStats().training | number }}
+                </span>
               </div>
               <div class="ml-kpi">
                 <span class="ml-kpi-label">Superseded</span>
-                <span class="ml-kpi-value muted-val">{{ modelStats().superseded }}</span>
+                <span class="ml-kpi-value muted-val">{{ modelStats().superseded | number }}</span>
               </div>
               <div class="ml-kpi">
                 <span class="ml-kpi-label">Failed</span>
-                <span
-                  class="ml-kpi-value"
-                  [class.bad]="modelStats().failed > 0"
-                  [class.good]="modelStats().failed === 0"
-                >
-                  {{ modelStats().failed }}
+                <span class="ml-kpi-value" [class.bad]="modelStats().failed > 0">
+                  {{ modelStats().failed | number }}
                 </span>
               </div>
               <div class="ml-kpi">
@@ -128,7 +162,7 @@ import {
               </div>
               <div class="ml-kpi">
                 <span class="ml-kpi-label">Best accuracy</span>
-                <span class="ml-kpi-value good">
+                <span class="ml-kpi-value" [class.good]="modelStats().bestAccuracy !== null">
                   {{
                     modelStats().bestAccuracy !== null
                       ? modelStats().bestAccuracy!.toFixed(1) + '%'
@@ -137,7 +171,7 @@ import {
                 </span>
               </div>
               <div class="ml-kpi">
-                <span class="ml-kpi-label">Symbols × TF</span>
+                <span class="ml-kpi-label">Symbols × timeframes</span>
                 <span class="ml-kpi-value">
                   {{ modelStats().symbolCount }} × {{ modelStats().timeframeCount }}
                 </span>
@@ -191,10 +225,10 @@ import {
                         <tr (click)="onModelSelect(m)">
                           <td class="mono">{{ m.symbol }}</td>
                           <td class="mono">{{ m.timeframe }}</td>
-                          <td class="mono trunc">{{ m.modelVersion }}</td>
-                          <td class="num mono profit">
-                            {{ (m.directionAccuracy ?? 0).toFixed(1) }}%
+                          <td class="mono trunc" [title]="m.modelVersion ?? ''">
+                            {{ m.modelVersion }}
                           </td>
+                          <td class="num mono profit">{{ pct(m.directionAccuracy) }}</td>
                           <td class="num mono">
                             {{ m.magnitudeRMSE !== null ? m.magnitudeRMSE.toFixed(2) : '—' }}
                           </td>
@@ -236,10 +270,10 @@ import {
                         <tr (click)="onModelSelect(m)">
                           <td class="mono">{{ m.symbol }}</td>
                           <td class="mono">{{ m.timeframe }}</td>
-                          <td class="mono trunc">{{ m.modelVersion }}</td>
-                          <td class="num mono loss">
-                            {{ (m.directionAccuracy ?? 0).toFixed(1) }}%
+                          <td class="mono trunc" [title]="m.modelVersion ?? ''">
+                            {{ m.modelVersion }}
                           </td>
+                          <td class="num mono loss">{{ pct(m.directionAccuracy) }}</td>
                           <td class="num mono">
                             {{ m.magnitudeRMSE !== null ? m.magnitudeRMSE.toFixed(2) : '—' }}
                           </td>
@@ -282,17 +316,22 @@ import {
                   <tbody>
                     @for (row of perSymbolBreakdown(); track row.symbol) {
                       <tr>
-                        <td class="mono">{{ row.symbol }}</td>
-                        <td class="num mono">{{ row.count }}</td>
-                        <td class="num mono">{{ row.active }}</td>
+                        <td class="mono">
+                          {{ row.symbol }}
+                          @if (row.isCrossSymbol) {
+                            <span class="muted"> · cross-symbol initialisers</span>
+                          }
+                        </td>
+                        <td class="num mono">{{ row.count | number }}</td>
+                        <td class="num mono">{{ row.active | number }}</td>
                         <td class="num mono" [class.loss]="row.failed > 0">{{ row.failed }}</td>
-                        <td class="num mono profit">
+                        <td class="num mono" [class.profit]="row.bestAccuracy !== null">
                           {{ row.bestAccuracy !== null ? row.bestAccuracy.toFixed(1) + '%' : '—' }}
                         </td>
                         <td class="num mono">
                           {{ row.avgAccuracy !== null ? row.avgAccuracy.toFixed(1) + '%' : '—' }}
                         </td>
-                        <td class="num mono">{{ row.totalSamples }}</td>
+                        <td class="num mono">{{ row.totalSamples | number }}</td>
                         <td>
                           <span
                             class="ml-pill"
@@ -316,13 +355,27 @@ import {
                 <h3>All models</h3>
                 <span class="muted">Server-paged registry — filters apply to this table only</span>
               </header>
+              <!-- One filter row owns every input that drives this table. The
+                   grid's built-in search box is switched off so there is a single
+                   place to type, and search/status/symbol all travel in the same
+                   server filter object. -->
               <div class="filter-bar">
+                <label class="fb-field">
+                  <span class="fb-label">Search</span>
+                  <input
+                    type="search"
+                    class="filter-input"
+                    placeholder="Version, path…"
+                    [ngModel]="filterSearch()"
+                    (ngModelChange)="onRegistrySearch($event)"
+                  />
+                </label>
                 <label class="fb-field">
                   <span class="fb-label">Status</span>
                   <select
                     class="filter-select"
                     [ngModel]="filterStatus()"
-                    (ngModelChange)="filterStatus.set($event); reloadRegistry()"
+                    (ngModelChange)="filterStatus.set($event); reloadRegistryTable()"
                   >
                     <option value="">All</option>
                     <option value="Training">Training</option>
@@ -338,14 +391,11 @@ import {
                     class="filter-input"
                     placeholder="e.g. EURUSD"
                     [ngModel]="filterSymbol()"
-                    (ngModelChange)="filterSymbol.set($event); reloadRegistry()"
+                    (ngModelChange)="onRegistrySymbol($event)"
                   />
                 </label>
-                @if (filterStatus() || filterSymbol()) {
-                  <button
-                    class="btn btn-ghost fb-clear"
-                    (click)="filterStatus.set(''); filterSymbol.set(''); reloadRegistry()"
-                  >
+                @if (filterStatus() || filterSymbol() || filterSearch()) {
+                  <button class="btn btn-ghost fb-clear" (click)="clearRegistryFilters()">
                     Clear filters
                   </button>
                 }
@@ -354,6 +404,7 @@ import {
                 #registryTable
                 [columnDefs]="registryColumns"
                 [fetchData]="fetchModels"
+                [searchable]="false"
                 (rowClick)="onModelSelect($event)"
               />
             </section>
@@ -466,13 +517,13 @@ import {
                 <div class="mm-cell">
                   <span class="mm-label">Trained at</span>
                   <span class="mm-value mono">
-                    {{ m.trainedAt ? (m.trainedAt | date: 'dd MMM yy HH:mm') : '—' }}
+                    {{ m.trainedAt ? (m.trainedAt | date: 'MMM d, yyyy HH:mm') : '—' }}
                   </span>
                 </div>
                 <div class="mm-cell">
                   <span class="mm-label">Activated at</span>
                   <span class="mm-value mono">
-                    {{ m.activatedAt ? (m.activatedAt | date: 'dd MMM yy HH:mm') : '—' }}
+                    {{ m.activatedAt ? (m.activatedAt | date: 'MMM d, yyyy HH:mm') : '—' }}
                   </span>
                 </div>
                 <div class="mm-cell wide">
@@ -584,7 +635,7 @@ import {
                               {{ v.isActive ? 'Yes' : 'No' }}
                             </span>
                           </td>
-                          <td class="mono">{{ v.trainedAt | date: 'dd MMM yy HH:mm' }}</td>
+                          <td class="mono">{{ v.trainedAt | date: 'MMM d, HH:mm' }}</td>
                         </tr>
                       }
                     </tbody>
@@ -611,32 +662,38 @@ import {
               </button>
             </div>
 
-            <!-- 8-card KPI strip — fleet-wide training-run roll-ups -->
+            <!-- KPI strip — roll-ups over the analytics sample. The first tile
+                 names the window honestly: the sample is capped at 5,000 most
+                 recent runs, so on a large fleet it is not the fleet total. -->
             <div class="ml-kpis">
               <div class="ml-kpi">
-                <span class="ml-kpi-label">Total runs</span>
-                <span class="ml-kpi-value">{{ trainingStats().total }}</span>
+                <span class="ml-kpi-label">{{ trainingWindowLabel() }}</span>
+                <span class="ml-kpi-value">{{ trainingStats().total | number }}</span>
               </div>
               <div class="ml-kpi">
                 <span class="ml-kpi-label">Completed</span>
-                <span class="ml-kpi-value good">{{ trainingStats().completed }}</span>
-              </div>
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">Failed</span>
-                <span
-                  class="ml-kpi-value"
-                  [class.bad]="trainingStats().failed > 0"
-                  [class.good]="trainingStats().failed === 0"
-                >
-                  {{ trainingStats().failed }}
+                <span class="ml-kpi-value" [class.good]="trainingStats().completed > 0">
+                  {{ trainingStats().completed | number }}
                 </span>
               </div>
               <div class="ml-kpi">
-                <span class="ml-kpi-label">In flight</span>
-                <span class="ml-kpi-value info">{{ trainingStats().inFlight }}</span>
+                <span class="ml-kpi-label">Failed</span>
+                <span class="ml-kpi-value" [class.bad]="trainingStats().failed > 0">
+                  {{ trainingStats().failed | number }}
+                </span>
               </div>
               <div class="ml-kpi">
-                <span class="ml-kpi-label">Success rate</span>
+                <span class="ml-kpi-label">Cancelled</span>
+                <span class="ml-kpi-value muted-val">{{ trainingStats().cancelled | number }}</span>
+              </div>
+              <div class="ml-kpi">
+                <span class="ml-kpi-label">In flight (queued + running)</span>
+                <span class="ml-kpi-value" [class.info]="trainingStats().inFlight > 0">
+                  {{ trainingStats().inFlight | number }}
+                </span>
+              </div>
+              <div class="ml-kpi">
+                <span class="ml-kpi-label">Success rate (of finished)</span>
                 <span
                   class="ml-kpi-value"
                   [class.good]="
@@ -667,15 +724,11 @@ import {
                 <span class="ml-kpi-label">Avg duration</span>
                 <span class="ml-kpi-value">
                   {{
-                    trainingStats().avgDurationMin !== null
-                      ? trainingStats().avgDurationMin!.toFixed(1) + 'm'
+                    trainingStats().avgDurationMs !== null
+                      ? formatDuration(trainingStats().avgDurationMs!)
                       : '—'
                   }}
                 </span>
-              </div>
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">Last 24h</span>
-                <span class="ml-kpi-value">{{ trainingStats().last24h }}</span>
               </div>
             </div>
 
@@ -683,7 +736,7 @@ import {
             <div class="ml-charts">
               <app-chart-card
                 title="Status distribution"
-                subtitle="Completed · Failed · Pending · Running"
+                subtitle="Share of runs by status in the window"
                 [options]="trainingStatusDonutOptions()"
                 height="240px"
               />
@@ -726,15 +779,15 @@ import {
                       @for (row of perTriggerBreakdown(); track row.trigger) {
                         <tr>
                           <td class="mono">{{ row.trigger }}</td>
-                          <td class="num mono">{{ row.runs }}</td>
-                          <td class="num mono">{{ row.completed }}</td>
+                          <td class="num mono">{{ row.runs | number }}</td>
+                          <td class="num mono">{{ row.completed | number }}</td>
                           <td class="num mono" [class.loss]="row.failed > 0">{{ row.failed }}</td>
                           <td
                             class="num mono"
-                            [class.profit]="row.successPct >= 50"
-                            [class.loss]="row.successPct < 50"
+                            [class.profit]="row.successPct !== null && row.successPct >= 50"
+                            [class.loss]="row.successPct !== null && row.successPct < 50"
                           >
-                            {{ row.successPct.toFixed(1) }}%
+                            {{ row.successPct !== null ? row.successPct.toFixed(1) + '%' : '—' }}
                           </td>
                           <td class="num mono">
                             {{ row.avgAccuracy !== null ? row.avgAccuracy.toFixed(1) + '%' : '—' }}
@@ -779,7 +832,7 @@ import {
                                 : '—'
                             }}
                           </td>
-                          <td class="mono">{{ r.startedAt | date: 'dd MMM HH:mm' }}</td>
+                          <td class="mono">{{ r.startedAt | date: 'MMM d, HH:mm' }}</td>
                         </tr>
                       }
                     </tbody>
@@ -1413,29 +1466,35 @@ import {
                 label="Active models"
                 [value]="archActiveTotal()"
                 format="number"
-                [dotColor]="archActiveTotal() > 0 ? '#34C759' : '#FF9500'"
+                [dotColor]="archActiveTotal() > 0 ? '#34C759' : '#8E8E93'"
               />
               <app-metric-card
-                [label]="'Top by count: ' + (archTopByCount()?.architecture ?? '—')"
-                [value]="archTopByCount()?.count ?? 0"
+                [label]="'Most models: ' + (archTopByCount()?.architecture ?? '—')"
+                [value]="archTopByCount()?.count ?? null"
                 format="number"
                 dotColor="#AF52DE"
               />
+              <!-- "Best" here is the best AVERAGE — the leaderboard's per-model
+                   best column is a different number and the label must say which. -->
               <app-metric-card
-                [label]="'Best accuracy: ' + (archTopByAccuracy()?.architecture ?? '—')"
-                [value]="(archTopByAccuracy()?.avgAccuracy ?? 0) * 100"
+                [label]="'Best avg accuracy: ' + (archTopByAccuracy()?.architecture ?? '—')"
+                [value]="archTopByAccuracy() ? (archTopByAccuracy()?.avgAccuracy ?? 0) * 100 : null"
                 format="percent"
                 [dotColor]="(archTopByAccuracy()?.avgAccuracy ?? 0) > 0.55 ? '#34C759' : '#FF9500'"
               />
               <app-metric-card
                 [label]="'Best activation: ' + (archTopByActivation()?.architecture ?? '—')"
-                [value]="(archTopByActivation()?.activationRate ?? 0) * 100"
+                [value]="
+                  archTopByActivation() ? (archTopByActivation()?.activationRate ?? 0) * 100 : null
+                "
                 format="percent"
-                dotColor="#34C759"
+                [dotColor]="
+                  (archTopByActivation()?.activationRate ?? 0) > 0 ? '#34C759' : '#8E8E93'
+                "
               />
               <app-metric-card
                 [label]="'Lowest RMSE: ' + (archTopByRmse()?.architecture ?? '—')"
-                [value]="archTopByRmse()?.avgRMSE ?? 0"
+                [value]="archTopByRmse()?.avgRMSE ?? null"
                 format="number"
                 dotColor="#5AC8FA"
               />
@@ -1443,7 +1502,7 @@ import {
                 label="Failed (fleet)"
                 [value]="archFailedTotal()"
                 format="number"
-                [dotColor]="archFailedTotal() > 0 ? '#FF3B30' : '#34C759'"
+                [dotColor]="archFailedTotal() > 0 ? '#FF3B30' : '#8E8E93'"
               />
             </div>
 
@@ -1473,7 +1532,7 @@ import {
               />
               <app-chart-card
                 title="RMSE × Accuracy scatter"
-                subtitle="Each model is one point — colored by architecture"
+                [subtitle]="archScatterSubtitle()"
                 [options]="archScatterOptions()"
                 height="340px"
               />
@@ -1513,41 +1572,39 @@ import {
                           <span class="arch-dot" [style.background]="row.color"></span>
                           {{ row.architecture }}
                         </td>
-                        <td class="num mono">{{ row.count }}</td>
-                        <td class="num mono good">{{ row.active }}</td>
+                        <td class="num mono">{{ row.count | number }}</td>
+                        <td class="num mono" [class.good]="row.active > 0">{{ row.active }}</td>
                         <td class="num mono">{{ row.training }}</td>
                         <td class="num mono muted">{{ row.superseded }}</td>
                         <td class="num mono" [class.bad]="row.failed > 0">
                           {{ row.failed }}
                         </td>
-                        <td
-                          class="num mono"
-                          [class.good]="row.activationRate >= 0.05"
-                          [class.bad]="row.activationRate === 0 && row.count > 0"
-                        >
+                        <td class="num mono" [class.good]="row.activationRate >= 0.05">
                           {{ formatPct(row.activationRate) }}
                         </td>
                         <td
                           class="num mono"
-                          [class.good]="row.avgAccuracy >= 0.55"
-                          [class.warn]="row.avgAccuracy < 0.52 && row.avgAccuracy > 0"
+                          [class.good]="row.accuracies.length > 0 && row.avgAccuracy >= 0.55"
+                          [class.warn]="row.accuracies.length > 0 && row.avgAccuracy < 0.52"
                         >
-                          {{ formatPct(row.avgAccuracy) }}
+                          {{ row.accuracies.length > 0 ? formatPct(row.avgAccuracy) : '—' }}
                         </td>
                         <td class="num mono">
-                          {{ formatPct(row.medianAccuracy) }}
+                          {{ row.accuracies.length > 0 ? formatPct(row.medianAccuracy) : '—' }}
                         </td>
-                        <td class="num mono good">
-                          {{ formatPct(row.bestAccuracy) }}
+                        <td class="num mono" [class.good]="row.accuracies.length > 0">
+                          {{ row.accuracies.length > 0 ? formatPct(row.bestAccuracy) : '—' }}
                         </td>
                         <td class="num mono">
                           {{ row.avgRMSE > 0 ? row.avgRMSE.toFixed(3) : '—' }}
                         </td>
                         <td class="num mono muted">
-                          {{ row.totalSamples.toLocaleString() }}
+                          {{ row.totalSamples | number }}
                         </td>
                         <td class="muted">
-                          {{ row.latestTrainedAt ? (row.latestTrainedAt | relativeTime) : '—' }}
+                          {{
+                            row.latestTrainedAt ? (row.latestTrainedAt | date: 'MMM d, HH:mm') : '—'
+                          }}
                         </td>
                       </tr>
                     }
@@ -1574,41 +1631,55 @@ import {
               </button>
             </div>
 
-            <!-- 8-card KPI strip — fleet-wide shadow-arena posture -->
+            <!-- KPI strip — fleet-wide shadow-arena posture. Decisions come
+                 from the engine's PromotionDecision enum (AutoPromoted /
+                 FlaggedForReview / Rejected, null while in flight); in-flight
+                 is counted from status, never inferred from a missing decision. -->
             <div class="ml-kpis">
               <div class="ml-kpi">
-                <span class="ml-kpi-label">Total evals</span>
-                <span class="ml-kpi-value">{{ shadowStats().total }}</span>
+                <span class="ml-kpi-label">{{ shadowWindowLabel() }}</span>
+                <span class="ml-kpi-value">{{ shadowStats().total | number }}</span>
               </div>
               <div class="ml-kpi">
                 <span class="ml-kpi-label">Running</span>
-                <span class="ml-kpi-value info">{{ shadowStats().running }}</span>
+                <span class="ml-kpi-value" [class.info]="shadowStats().running > 0">
+                  {{ shadowStats().running | number }}
+                </span>
               </div>
               <div class="ml-kpi">
                 <span class="ml-kpi-label">Processing</span>
-                <span class="ml-kpi-value">{{ shadowStats().processing }}</span>
+                <span class="ml-kpi-value">{{ shadowStats().processing | number }}</span>
               </div>
               <div class="ml-kpi">
                 <span class="ml-kpi-label">Completed</span>
-                <span class="ml-kpi-value good">{{ shadowStats().completed }}</span>
+                <span class="ml-kpi-value" [class.good]="shadowStats().completed > 0">
+                  {{ shadowStats().completed | number }}
+                </span>
               </div>
               <div class="ml-kpi">
-                <span class="ml-kpi-label">Promotions</span>
-                <span class="ml-kpi-value good">{{ shadowStats().promoted }}</span>
+                <span class="ml-kpi-label">Promoted</span>
+                <span class="ml-kpi-value" [class.good]="shadowStats().promoted > 0">
+                  {{ shadowStats().promoted | number }}
+                </span>
               </div>
               <div class="ml-kpi">
-                <span class="ml-kpi-label">Rejections</span>
-                <span class="ml-kpi-value bad">{{ shadowStats().rejected }}</span>
+                <span class="ml-kpi-label">Flagged for review</span>
+                <span class="ml-kpi-value" [class.warn-val]="shadowStats().flagged > 0">
+                  {{ shadowStats().flagged | number }}
+                </span>
               </div>
               <div class="ml-kpi">
-                <span class="ml-kpi-label">Promotion rate</span>
+                <span class="ml-kpi-label">Rejected</span>
+                <span class="ml-kpi-value" [class.bad]="shadowStats().rejected > 0">
+                  {{ shadowStats().rejected | number }}
+                </span>
+              </div>
+              <div class="ml-kpi">
+                <span class="ml-kpi-label">Promotion rate (of completed)</span>
                 <span
                   class="ml-kpi-value"
                   [class.good]="
-                    shadowStats().promotionRate !== null && shadowStats().promotionRate! >= 50
-                  "
-                  [class.bad]="
-                    shadowStats().promotionRate !== null && shadowStats().promotionRate! < 50
+                    shadowStats().promotionRate !== null && shadowStats().promotionRate! > 0
                   "
                 >
                   {{
@@ -1618,40 +1689,34 @@ import {
                   }}
                 </span>
               </div>
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">Avg lift</span>
-                <span
-                  class="ml-kpi-value"
-                  [class.good]="shadowStats().avgLift !== null && shadowStats().avgLift! > 0"
-                  [class.bad]="shadowStats().avgLift !== null && shadowStats().avgLift! < 0"
-                >
-                  @if (shadowStats().avgLift !== null) {
-                    {{ shadowStats().avgLift! >= 0 ? '+' : ''
-                    }}{{ shadowStats().avgLift!.toFixed(2) }}%
-                  } @else {
-                    —
-                  }
-                </span>
-              </div>
             </div>
+
+            @if (shadowStaleCount() > 0) {
+              <div class="notice warn" role="status">
+                <strong>{{ shadowStaleCount() | number }}</strong>
+                in-flight evaluation{{ shadowStaleCount() === 1 ? '' : 's' }} started more than a
+                day ago and {{ shadowStaleCount() === 1 ? 'has' : 'have' }} recorded no trades. The
+                arena is not progressing — check the shadow arbiter worker.
+              </div>
+            }
 
             <!-- 3-col chart row -->
             <div class="ml-charts">
               <app-chart-card
                 title="Status distribution"
-                subtitle="Running · Processing · Completed · Cancelled"
+                subtitle="Share of evaluations by status in the window"
                 [options]="shadowStatusDonutOptions()"
                 height="240px"
               />
               <app-chart-card
                 title="Promotion outcomes"
-                subtitle="Promoted · Rejected · Pending"
+                subtitle="Promoted · Flagged for review · Rejected · Pending (still running)"
                 [options]="shadowDecisionDonutOptions()"
                 height="240px"
               />
               <app-chart-card
                 title="Trade progress"
-                subtitle="Completed vs required trades — top 12 in-flight evals"
+                subtitle="Completed vs required trades — in-flight evaluations with trades"
                 [options]="shadowProgressOptions()"
                 height="240px"
               />
@@ -1681,49 +1746,40 @@ import {
                         <tr (click)="onShadowSelect(e)">
                           <td class="mono">{{ e.symbol }}</td>
                           <td class="mono">{{ e.timeframe }}</td>
-                          <td class="num mono">
-                            {{ (e.championDirectionAccuracy * 100).toFixed(1) }}%
-                          </td>
-                          <td class="num mono">
-                            {{ (e.challengerDirectionAccuracy * 100).toFixed(1) }}%
-                          </td>
+                          <td class="num mono">{{ pct(e.championDirectionAccuracy) }}</td>
+                          <td class="num mono">{{ pct(e.challengerDirectionAccuracy) }}</td>
                           <td
                             class="num mono"
-                            [class.profit]="
-                              e.challengerDirectionAccuracy > e.championDirectionAccuracy
-                            "
-                            [class.loss]="
-                              e.challengerDirectionAccuracy < e.championDirectionAccuracy
-                            "
+                            [class.profit]="shadowLift(e) > 0.05"
+                            [class.loss]="shadowLift(e) < -0.05"
                           >
-                            {{
-                              (e.challengerDirectionAccuracy - e.championDirectionAccuracy) * 100 >=
-                              0
-                                ? '+'
-                                : ''
-                            }}{{
-                              (
-                                (e.challengerDirectionAccuracy - e.championDirectionAccuracy) *
-                                100
-                              ).toFixed(1)
-                            }}%
+                            {{ shadowLift(e) >= 0 ? '+' : '' }}{{ shadowLift(e).toFixed(1) }}%
                           </td>
                           <td>
-                            <span class="ml-pill" [attr.data-decision]="e.promotionDecision">
-                              {{ e.promotionDecision }}
+                            <span class="ml-pill" [attr.data-decision]="decisionKey(e)">
+                              {{ decisionLabel(e) }}
                             </span>
                           </td>
                         </tr>
                       }
                     </tbody>
                   </table>
+                } @else if (shadowStats().completed > 0) {
+                  <p class="muted" style="padding: var(--space-4)">
+                    {{ shadowStats().completed | number }} completed evaluation{{
+                      shadowStats().completed === 1 ? '' : 's'
+                    }}, but none carries a recorded champion or challenger accuracy — the arbiter
+                    finalised them without metrics, so there is no lift to rank.
+                  </p>
+                } @else {
+                  <p class="muted" style="padding: var(--space-4)">No completed evaluations yet.</p>
                 }
               </section>
 
               <section class="ml-board">
                 <header class="ml-board-head">
                   <h3>Per-symbol breakdown</h3>
-                  <span class="muted">Promotion outcomes per symbol</span>
+                  <span class="muted">Decisions per symbol · in flight counted by status</span>
                 </header>
                 @if (shadowPerSymbol().length > 0) {
                   <table class="ml-board-table">
@@ -1732,6 +1788,7 @@ import {
                         <th>Symbol</th>
                         <th class="num">Evals</th>
                         <th class="num">Promoted</th>
+                        <th class="num">Flagged</th>
                         <th class="num">Rejected</th>
                         <th class="num">In flight</th>
                         <th class="num">Promote %</th>
@@ -1741,16 +1798,20 @@ import {
                       @for (row of shadowPerSymbol(); track row.symbol) {
                         <tr>
                           <td class="mono">{{ row.symbol }}</td>
-                          <td class="num mono">{{ row.evals }}</td>
-                          <td class="num mono profit">{{ row.promoted }}</td>
-                          <td class="num mono loss">{{ row.rejected }}</td>
+                          <td class="num mono">{{ row.evals | number }}</td>
+                          <td class="num mono" [class.profit]="row.promoted > 0">
+                            {{ row.promoted }}
+                          </td>
+                          <td class="num mono">{{ row.flagged }}</td>
+                          <td class="num mono" [class.loss]="row.rejected > 0">
+                            {{ row.rejected }}
+                          </td>
                           <td class="num mono">{{ row.inFlight }}</td>
                           <td
                             class="num mono"
-                            [class.profit]="row.promotePct >= 50"
-                            [class.loss]="row.promotePct < 50 && row.promotePct > 0"
+                            [class.profit]="row.promotePct !== null && row.promotePct > 0"
                           >
-                            {{ row.promotePct.toFixed(0) }}%
+                            {{ row.promotePct !== null ? row.promotePct.toFixed(0) + '%' : '—' }}
                           </td>
                         </tr>
                       }
@@ -1914,282 +1975,302 @@ import {
               <h3 class="section-title">Signal-Level A/B Tests</h3>
             </div>
 
-            <!-- 8-card KPI strip — fleet-wide A/B test posture -->
-            <div class="ml-kpis">
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">Total tests</span>
-                <span class="ml-kpi-value">{{ abStats().total }}</span>
+            @if (abLoaded() && abStats().total === 0) {
+              <!-- One empty state instead of eight zero tiles, three blank
+                   charts and an empty grid. Tests are engine-initiated (the
+                   arbiter starts one when a challenger is ready), so there is
+                   no Start button to offer here. -->
+              <app-empty-state
+                title="No signal A/B tests yet"
+                description="The engine starts a signal-level A/B test when a challenger model is ready to be measured against the champion on live signals. Nothing has been started so far."
+              />
+            } @else {
+              <div class="ml-kpis">
+                <div class="ml-kpi">
+                  <span class="ml-kpi-label">{{ abWindowLabel() }}</span>
+                  <span class="ml-kpi-value">{{ abStats().total | number }}</span>
+                </div>
+                <div class="ml-kpi">
+                  <span class="ml-kpi-label">Running</span>
+                  <span class="ml-kpi-value" [class.info]="abStats().running > 0">
+                    {{ abStats().running | number }}
+                  </span>
+                </div>
+                <div class="ml-kpi">
+                  <span class="ml-kpi-label">Completed</span>
+                  <span class="ml-kpi-value" [class.good]="abStats().completed > 0">
+                    {{ abStats().completed | number }}
+                  </span>
+                </div>
+                <div class="ml-kpi">
+                  <span class="ml-kpi-label">Champion wins</span>
+                  <span class="ml-kpi-value">{{ abStats().championWins | number }}</span>
+                </div>
+                <div class="ml-kpi">
+                  <span class="ml-kpi-label">Challenger wins</span>
+                  <span class="ml-kpi-value" [class.good]="abStats().challengerWins > 0">
+                    {{ abStats().challengerWins | number }}
+                  </span>
+                </div>
+                <div class="ml-kpi">
+                  <span class="ml-kpi-label">Inconclusive</span>
+                  <span class="ml-kpi-value muted-val">{{ abStats().inconclusive | number }}</span>
+                </div>
+                <div class="ml-kpi">
+                  <span class="ml-kpi-label">Avg P&L lift</span>
+                  <span
+                    class="ml-kpi-value"
+                    [class.good]="abStats().avgLift !== null && abStats().avgLift! > 0"
+                    [class.bad]="abStats().avgLift !== null && abStats().avgLift! < 0"
+                  >
+                    @if (abStats().avgLift !== null) {
+                      {{ abStats().avgLift! >= 0 ? '+' : ''
+                      }}{{ abStats().avgLift! | number: '1.2-2' }}
+                    } @else {
+                      —
+                    }
+                  </span>
+                </div>
+                <div class="ml-kpi">
+                  <span class="ml-kpi-label">Total samples</span>
+                  <span class="ml-kpi-value">{{ abStats().totalSamples | number }}</span>
+                </div>
               </div>
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">Running</span>
-                <span class="ml-kpi-value info">{{ abStats().running }}</span>
+
+              <!-- 3-col chart row -->
+              <div class="ml-charts">
+                <app-chart-card
+                  title="Status distribution"
+                  subtitle="Test lifecycle states across the fleet"
+                  [options]="abStatusDonutOptions()"
+                  height="240px"
+                />
+                <app-chart-card
+                  title="Outcome distribution"
+                  subtitle="Champion vs challenger decisions"
+                  [options]="abDecisionDonutOptions()"
+                  height="240px"
+                />
+                <app-chart-card
+                  title="P&L lift histogram"
+                  subtitle="Distribution of (challenger − champion) P&L across completed tests"
+                  [options]="abLiftHistogramOptions()"
+                  height="240px"
+                />
               </div>
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">Completed</span>
-                <span class="ml-kpi-value good">{{ abStats().completed }}</span>
-              </div>
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">Champion wins</span>
-                <span class="ml-kpi-value">{{ abStats().championWins }}</span>
-              </div>
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">Challenger wins</span>
-                <span class="ml-kpi-value good">{{ abStats().challengerWins }}</span>
-              </div>
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">Inconclusive</span>
-                <span class="ml-kpi-value muted-val">{{ abStats().inconclusive }}</span>
-              </div>
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">Avg P&L lift</span>
-                <span
-                  class="ml-kpi-value"
-                  [class.good]="abStats().avgLift !== null && abStats().avgLift! > 0"
-                  [class.bad]="abStats().avgLift !== null && abStats().avgLift! < 0"
-                >
-                  @if (abStats().avgLift !== null) {
-                    {{ abStats().avgLift! >= 0 ? '+' : ''
-                    }}{{ abStats().avgLift! | number: '1.2-2' }}
+
+              <!-- 2-col tables: top lifts + per-symbol breakdown -->
+              <div class="ml-board-row">
+                <section class="ml-board">
+                  <header class="ml-board-head">
+                    <h3>Biggest P&L lifts</h3>
+                    <span class="muted">Tests where the challenger beat the champion the most</span>
+                  </header>
+                  @if (abTopLifts().length > 0) {
+                    <table class="ml-board-table">
+                      <thead>
+                        <tr>
+                          <th>Symbol</th>
+                          <th>TF</th>
+                          <th class="num">Champion P&L</th>
+                          <th class="num">Challenger P&L</th>
+                          <th class="num">Δ</th>
+                          <th class="num">p-value</th>
+                          <th>Decision</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (t of abTopLifts(); track t.id) {
+                          <tr (click)="onAbSelect(t)">
+                            <td class="mono">{{ t.symbol }}</td>
+                            <td class="mono">{{ t.timeframe }}</td>
+                            <td
+                              class="num mono"
+                              [class.profit]="t.championPnl > 0"
+                              [class.loss]="t.championPnl < 0"
+                            >
+                              {{ t.championPnl | number: '1.2-2' }}
+                            </td>
+                            <td
+                              class="num mono"
+                              [class.profit]="t.challengerPnl > 0"
+                              [class.loss]="t.challengerPnl < 0"
+                            >
+                              {{ t.challengerPnl | number: '1.2-2' }}
+                            </td>
+                            <td
+                              class="num mono"
+                              [class.profit]="t.challengerPnl > t.championPnl"
+                              [class.loss]="t.challengerPnl < t.championPnl"
+                            >
+                              {{ t.challengerPnl - t.championPnl >= 0 ? '+' : ''
+                              }}{{ t.challengerPnl - t.championPnl | number: '1.2-2' }}
+                            </td>
+                            <td class="num mono">
+                              {{ t.pValue !== null ? (t.pValue | number: '1.4-4') : '—' }}
+                            </td>
+                            <td>
+                              <span class="ml-pill" [attr.data-decision]="t.decision">
+                                {{ t.decision ?? '—' }}
+                              </span>
+                            </td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
                   } @else {
-                    —
+                    <!-- Tests are started by the engine, not from this page, so the
+                       copy must not promise a Start button that is not here. -->
+                    <p class="muted" style="padding: var(--space-4)">
+                      No completed A/B tests yet — results appear here once a test finishes.
+                    </p>
                   }
-                </span>
-              </div>
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">Total samples</span>
-                <span class="ml-kpi-value">{{ abStats().totalSamples }}</span>
-              </div>
-            </div>
+                </section>
 
-            <!-- 3-col chart row -->
-            <div class="ml-charts">
-              <app-chart-card
-                title="Status distribution"
-                subtitle="Test lifecycle states across the fleet"
-                [options]="abStatusDonutOptions()"
-                height="240px"
-              />
-              <app-chart-card
-                title="Outcome distribution"
-                subtitle="Champion vs challenger decisions"
-                [options]="abDecisionDonutOptions()"
-                height="240px"
-              />
-              <app-chart-card
-                title="P&L lift histogram"
-                subtitle="Distribution of (challenger − champion) P&L across completed tests"
-                [options]="abLiftHistogramOptions()"
-                height="240px"
-              />
-            </div>
+                <section class="ml-board">
+                  <header class="ml-board-head">
+                    <h3>Per-symbol breakdown</h3>
+                    <span class="muted">Test outcomes grouped by symbol</span>
+                  </header>
+                  @if (abPerSymbol().length > 0) {
+                    <table class="ml-board-table">
+                      <thead>
+                        <tr>
+                          <th>Symbol</th>
+                          <th class="num">Tests</th>
+                          <th class="num">Champion wins</th>
+                          <th class="num">Challenger wins</th>
+                          <th class="num">Inconclusive</th>
+                          <th class="num">Avg lift</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (row of abPerSymbol(); track row.symbol) {
+                          <tr>
+                            <td class="mono">{{ row.symbol }}</td>
+                            <td class="num mono">{{ row.tests }}</td>
+                            <td class="num mono">{{ row.championWins }}</td>
+                            <td class="num mono" [class.profit]="row.challengerWins > 0">
+                              {{ row.challengerWins }}
+                            </td>
+                            <td class="num mono muted-val">{{ row.inconclusive }}</td>
+                            <td
+                              class="num mono"
+                              [class.profit]="row.avgLift > 0"
+                              [class.loss]="row.avgLift < 0"
+                            >
+                              {{ row.avgLift >= 0 ? '+' : '' }}{{ row.avgLift | number: '1.2-2' }}
+                            </td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  } @else {
+                    <p class="muted" style="padding: var(--space-4)">
+                      No A/B test data available yet.
+                    </p>
+                  }
+                </section>
+              </div>
 
-            <!-- 2-col tables: top lifts + per-symbol breakdown -->
-            <div class="ml-board-row">
               <section class="ml-board">
                 <header class="ml-board-head">
-                  <h3>Biggest P&L lifts</h3>
-                  <span class="muted">Tests where the challenger beat the champion the most</span>
+                  <h3>All A/B tests</h3>
+                  <span class="muted">
+                    Server-paged — click a row for SPRT progress and side-by-side stats
+                  </span>
                 </header>
-                @if (abTopLifts().length > 0) {
-                  <table class="ml-board-table">
-                    <thead>
-                      <tr>
-                        <th>Symbol</th>
-                        <th>TF</th>
-                        <th class="num">Champion P&L</th>
-                        <th class="num">Challenger P&L</th>
-                        <th class="num">Δ</th>
-                        <th class="num">p-value</th>
-                        <th>Decision</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (t of abTopLifts(); track t.id) {
-                        <tr (click)="onAbSelect(t)">
-                          <td class="mono">{{ t.symbol }}</td>
-                          <td class="mono">{{ t.timeframe }}</td>
-                          <td
-                            class="num mono"
+                <app-data-table
+                  [columnDefs]="abColumns"
+                  [fetchData]="fetchAbTests"
+                  (rowClick)="onAbSelect($event)"
+                />
+              </section>
+
+              @if (selectedAb(); as t) {
+                <div class="ab-detail mt-6">
+                  <header class="ab-head">
+                    <h4>Test #{{ t.id }} — {{ t.symbol }} / {{ t.timeframe }}</h4>
+                    <span class="pill" [attr.data-status]="t.status">{{ t.status }}</span>
+                  </header>
+                  <div class="ab-grid">
+                    <div class="ab-side champion">
+                      <h5>Champion (#{{ t.championModelId }})</h5>
+                      <dl>
+                        <div>
+                          <dt>P&L</dt>
+                          <dd
+                            class="mono"
                             [class.profit]="t.championPnl > 0"
                             [class.loss]="t.championPnl < 0"
                           >
                             {{ t.championPnl | number: '1.2-2' }}
-                          </td>
-                          <td
-                            class="num mono"
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Win Rate</dt>
+                          <dd class="mono">{{ t.championWinRate * 100 | number: '1.1-1' }}%</dd>
+                        </div>
+                      </dl>
+                    </div>
+                    <div class="ab-side challenger">
+                      <h5>Challenger (#{{ t.challengerModelId }})</h5>
+                      <dl>
+                        <div>
+                          <dt>P&L</dt>
+                          <dd
+                            class="mono"
                             [class.profit]="t.challengerPnl > 0"
                             [class.loss]="t.challengerPnl < 0"
                           >
                             {{ t.challengerPnl | number: '1.2-2' }}
-                          </td>
-                          <td
-                            class="num mono"
-                            [class.profit]="t.challengerPnl > t.championPnl"
-                            [class.loss]="t.challengerPnl < t.championPnl"
-                          >
-                            {{ t.challengerPnl - t.championPnl >= 0 ? '+' : ''
-                            }}{{ t.challengerPnl - t.championPnl | number: '1.2-2' }}
-                          </td>
-                          <td class="num mono">
-                            {{ t.pValue !== null ? (t.pValue | number: '1.4-4') : '—' }}
-                          </td>
-                          <td>
-                            <span class="ml-pill" [attr.data-decision]="t.decision">
-                              {{ t.decision ?? '—' }}
-                            </span>
-                          </td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
-                } @else {
-                  <p class="muted" style="padding: var(--space-4)">
-                    No completed A/B tests yet — start one to see results here.
-                  </p>
-                }
-              </section>
-
-              <section class="ml-board">
-                <header class="ml-board-head">
-                  <h3>Per-symbol breakdown</h3>
-                  <span class="muted">Test outcomes grouped by symbol</span>
-                </header>
-                @if (abPerSymbol().length > 0) {
-                  <table class="ml-board-table">
-                    <thead>
-                      <tr>
-                        <th>Symbol</th>
-                        <th class="num">Tests</th>
-                        <th class="num">Champion wins</th>
-                        <th class="num">Challenger wins</th>
-                        <th class="num">Inconclusive</th>
-                        <th class="num">Avg lift</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (row of abPerSymbol(); track row.symbol) {
-                        <tr>
-                          <td class="mono">{{ row.symbol }}</td>
-                          <td class="num mono">{{ row.tests }}</td>
-                          <td class="num mono">{{ row.championWins }}</td>
-                          <td class="num mono profit">{{ row.challengerWins }}</td>
-                          <td class="num mono muted-val">{{ row.inconclusive }}</td>
-                          <td
-                            class="num mono"
-                            [class.profit]="row.avgLift > 0"
-                            [class.loss]="row.avgLift < 0"
-                          >
-                            {{ row.avgLift >= 0 ? '+' : '' }}{{ row.avgLift | number: '1.2-2' }}
-                          </td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
-                } @else {
-                  <p class="muted" style="padding: var(--space-4)">
-                    No A/B test data available yet.
-                  </p>
-                }
-              </section>
-            </div>
-
-            <section class="ml-board">
-              <header class="ml-board-head">
-                <h3>All A/B tests</h3>
-                <span class="muted">
-                  Server-paged — click a row for SPRT progress and side-by-side stats
-                </span>
-              </header>
-              <app-data-table
-                [columnDefs]="abColumns"
-                [fetchData]="fetchAbTests"
-                (rowClick)="onAbSelect($event)"
-              />
-            </section>
-
-            @if (selectedAb(); as t) {
-              <div class="ab-detail mt-6">
-                <header class="ab-head">
-                  <h4>Test #{{ t.id }} — {{ t.symbol }} / {{ t.timeframe }}</h4>
-                  <span class="pill" [attr.data-status]="t.status">{{ t.status }}</span>
-                </header>
-                <div class="ab-grid">
-                  <div class="ab-side champion">
-                    <h5>Champion (#{{ t.championModelId }})</h5>
-                    <dl>
-                      <div>
-                        <dt>P&L</dt>
-                        <dd
-                          class="mono"
-                          [class.profit]="t.championPnl > 0"
-                          [class.loss]="t.championPnl < 0"
-                        >
-                          {{ t.championPnl | number: '1.2-2' }}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Win Rate</dt>
-                        <dd class="mono">{{ t.championWinRate * 100 | number: '1.1-1' }}%</dd>
-                      </div>
-                    </dl>
-                  </div>
-                  <div class="ab-side challenger">
-                    <h5>Challenger (#{{ t.challengerModelId }})</h5>
-                    <dl>
-                      <div>
-                        <dt>P&L</dt>
-                        <dd
-                          class="mono"
-                          [class.profit]="t.challengerPnl > 0"
-                          [class.loss]="t.challengerPnl < 0"
-                        >
-                          {{ t.challengerPnl | number: '1.2-2' }}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Win Rate</dt>
-                        <dd class="mono">{{ t.challengerWinRate * 100 | number: '1.1-1' }}%</dd>
-                      </div>
-                    </dl>
-                  </div>
-                </div>
-                <dl class="ab-stats">
-                  <div>
-                    <dt>Samples</dt>
-                    <dd class="mono">{{ t.sampleSize | number }}</dd>
-                  </div>
-                  <div>
-                    <dt>SPRT LLR</dt>
-                    <dd class="mono">
-                      {{
-                        t.sprtLogLikelihoodRatio !== null
-                          ? (t.sprtLogLikelihoodRatio | number: '1.3-3')
-                          : '—'
-                      }}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>p-value</dt>
-                    <dd class="mono">
-                      {{ t.pValue !== null ? (t.pValue | number: '1.4-4') : '—' }}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Started</dt>
-                    <dd>{{ t.startedAt | date: 'MMM d, HH:mm' }}</dd>
-                  </div>
-                  <div>
-                    <dt>Completed</dt>
-                    <dd>{{ t.completedAt ? (t.completedAt | date: 'MMM d, HH:mm') : '—' }}</dd>
-                  </div>
-                  @if (t.decision) {
-                    <div class="full">
-                      <dt>Decision</dt>
-                      <dd>{{ t.decision }}</dd>
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Win Rate</dt>
+                          <dd class="mono">{{ t.challengerWinRate * 100 | number: '1.1-1' }}%</dd>
+                        </div>
+                      </dl>
                     </div>
-                  }
-                </dl>
-              </div>
+                  </div>
+                  <dl class="ab-stats">
+                    <div>
+                      <dt>Samples</dt>
+                      <dd class="mono">{{ t.sampleSize | number }}</dd>
+                    </div>
+                    <div>
+                      <dt>SPRT LLR</dt>
+                      <dd class="mono">
+                        {{
+                          t.sprtLogLikelihoodRatio !== null
+                            ? (t.sprtLogLikelihoodRatio | number: '1.3-3')
+                            : '—'
+                        }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>p-value</dt>
+                      <dd class="mono">
+                        {{ t.pValue !== null ? (t.pValue | number: '1.4-4') : '—' }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Started</dt>
+                      <dd>{{ t.startedAt | date: 'MMM d, HH:mm' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Completed</dt>
+                      <dd>{{ t.completedAt ? (t.completedAt | date: 'MMM d, HH:mm') : '—' }}</dd>
+                    </div>
+                    @if (t.decision) {
+                      <div class="full">
+                        <dt>Decision</dt>
+                        <dd>{{ t.decision }}</dd>
+                      </div>
+                    }
+                  </dl>
+                </div>
+              }
             }
           </div>
         }
@@ -2474,15 +2555,12 @@ import {
       }
 
       /* ── Architecture tab ───────────────────────────────────────── */
+      /* Eight tiles in one row forced every label onto two or three lines;
+         two rows of four keeps labels on one line at every width ≥ 720px. */
       .arch-kpis {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: var(--space-2);
-      }
-      @media (max-width: 1400px) {
-        .arch-kpis {
-          grid-template-columns: repeat(4, 1fr);
-        }
       }
       @media (max-width: 720px) {
         .arch-kpis {
@@ -2493,6 +2571,7 @@ import {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: var(--space-3);
+        align-items: start;
       }
       @media (max-width: 1100px) {
         .arch-chart-row {
@@ -2519,10 +2598,14 @@ import {
       }
       .arch-board-scroll {
         max-height: 540px;
-        overflow: auto;
+        overflow-x: auto;
+        overflow-y: auto;
       }
+      /* Thirteen nowrap columns need ~1,100px; below that the wrapper scrolls
+         sideways instead of the card clipping the last columns. */
       table.arch-table {
         width: 100%;
+        min-width: 1120px;
         border-collapse: collapse;
       }
       table.arch-table th,
@@ -2593,13 +2676,8 @@ import {
       /* ML Models density additions — registry tab */
       .ml-kpis {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: var(--space-2);
-      }
-      @media (max-width: 1400px) {
-        .ml-kpis {
-          grid-template-columns: repeat(4, 1fr);
-        }
       }
       @media (max-width: 720px) {
         .ml-kpis {
@@ -2614,6 +2692,7 @@ import {
         display: flex;
         flex-direction: column;
         gap: 4px;
+        min-height: 68px;
       }
       .ml-kpi-label {
         font-size: 10px;
@@ -2621,8 +2700,13 @@ import {
         color: var(--text-tertiary);
         text-transform: uppercase;
         letter-spacing: 0.04em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
+      /* Values sit on a shared baseline across the row even if a label wraps. */
       .ml-kpi-value {
+        margin-top: auto;
         font-size: var(--text-xl);
         font-weight: var(--font-semibold);
         color: var(--text-primary);
@@ -2634,6 +2718,9 @@ import {
       .ml-kpi-value.bad {
         color: var(--loss);
       }
+      .ml-kpi-value.warn-val {
+        color: #c93400;
+      }
       .ml-kpi-value.info {
         color: var(--accent);
       }
@@ -2641,10 +2728,23 @@ import {
         color: var(--text-tertiary);
       }
 
+      .notice {
+        padding: var(--space-3) var(--space-4);
+        border-radius: var(--radius-md);
+        font-size: var(--text-sm);
+        line-height: 1.4;
+      }
+      .notice.warn {
+        background: rgba(255, 149, 0, 0.1);
+        border: 1px solid rgba(255, 149, 0, 0.36);
+        color: #c93400;
+      }
+
       .ml-charts {
         display: grid;
         grid-template-columns: 1fr 1.4fr 1.2fr;
         gap: var(--space-3);
+        align-items: start;
       }
       @media (max-width: 1100px) {
         .ml-charts {
@@ -2652,10 +2752,13 @@ import {
         }
       }
 
+      /* start-aligned so a one-sentence panel does not stretch to the height
+         of the table beside it */
       .ml-board-row {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: var(--space-3);
+        align-items: start;
       }
       @media (max-width: 1100px) {
         .ml-board-row {
@@ -2770,15 +2873,19 @@ import {
         background: rgba(52, 199, 89, 0.14);
         color: #248a3d;
       }
-      .ml-pill[data-decision='Promoted'] {
+      .ml-pill[data-decision='promoted'] {
         background: rgba(52, 199, 89, 0.14);
         color: #248a3d;
       }
-      .ml-pill[data-decision='Rejected'] {
+      .ml-pill[data-decision='flagged'] {
+        background: rgba(255, 149, 0, 0.14);
+        color: #c93400;
+      }
+      .ml-pill[data-decision='rejected'] {
         background: rgba(255, 59, 48, 0.14);
         color: #d70015;
       }
-      .ml-pill[data-decision='Pending'] {
+      .ml-pill[data-decision='pending'] {
         background: rgba(0, 113, 227, 0.12);
         color: #0040dd;
       }
@@ -3308,7 +3415,12 @@ export class MlModelsPageComponent implements OnInit {
   private readonly notifications = inject(NotificationService);
   private readonly router = inject(Router);
   private readonly realtime = inject(RealtimeService);
-  private readonly relativeTimePipe = new RelativeTimePipe();
+  // One absolute date format ("Sep 5, 23:09") for every timestamp on this page,
+  // including the ag-grid columns — relative times in the grid beside absolute
+  // times in the panels read as two different pages.
+  private readonly datePipe = new DatePipe('en-US');
+  private readonly formatGridDate = (p: { value: string | null }) =>
+    p.value ? (this.datePipe.transform(p.value, 'MMM d, HH:mm') ?? '—') : '—';
 
   private readonly registryTable = viewChild<DataTableComponent<MLModelDto>>('registryTable');
   private readonly trainingTable = viewChild<DataTableComponent<MLTrainingRunDto>>('trainingTable');
@@ -3328,6 +3440,38 @@ export class MlModelsPageComponent implements OnInit {
   reloadRegistry() {
     this.registryTable()?.loadData();
     this.loadModelAnalyticsSample();
+  }
+  /** Filter changes only affect the paged grid — the KPI sample is fleet-wide by design. */
+  reloadRegistryTable() {
+    this.registryTable()?.loadData();
+  }
+  private registryFilterTimer: ReturnType<typeof setTimeout> | null = null;
+  private scheduleRegistryReload(): void {
+    if (this.registryFilterTimer !== null) clearTimeout(this.registryFilterTimer);
+    this.registryFilterTimer = setTimeout(() => {
+      this.registryFilterTimer = null;
+      this.reloadRegistryTable();
+    }, 300);
+  }
+  onRegistrySearch(term: string): void {
+    this.filterSearch.set(term);
+    this.scheduleRegistryReload();
+  }
+  onRegistrySymbol(symbol: string): void {
+    this.filterSymbol.set(symbol);
+    this.scheduleRegistryReload();
+  }
+  clearRegistryFilters(): void {
+    this.filterStatus.set('');
+    this.filterSymbol.set('');
+    this.filterSearch.set('');
+    this.reloadRegistryTable();
+  }
+
+  /** Direction accuracy arrives as a 0–1 fraction; every surface shows it as a percent. */
+  pct(fraction: number | null | undefined, digits = 1): string {
+    if (fraction == null || !Number.isFinite(fraction)) return '—';
+    return `${(fraction * 100).toFixed(digits)}%`;
   }
   reloadTraining() {
     this.trainingTable()?.loadData();
@@ -3371,7 +3515,8 @@ export class MlModelsPageComponent implements OnInit {
     const symbols = new Set<string>();
     const timeframes = new Set<string>();
     for (const m of all) {
-      if (m.symbol) symbols.add(m.symbol);
+      // "ALL" is the engine's cross-symbol initialiser sentinel, not a pair.
+      if (m.symbol && m.symbol !== CROSS_SYMBOL_SENTINEL) symbols.add(m.symbol);
       if (m.timeframe) timeframes.add(String(m.timeframe));
       const status = String(m.status);
       if (status === 'Active') active++;
@@ -3384,14 +3529,15 @@ export class MlModelsPageComponent implements OnInit {
         if (m.directionAccuracy > bestAccuracy) bestAccuracy = m.directionAccuracy;
       }
     }
+    // directionAccuracy is a 0–1 fraction on the wire; the tiles show percent.
     return {
       total: all.length,
       active,
       training,
       superseded,
       failed,
-      avgAccuracy: accCount > 0 ? +(accSum / accCount).toFixed(2) : null,
-      bestAccuracy: accCount > 0 ? +bestAccuracy.toFixed(2) : null,
+      avgAccuracy: accCount > 0 ? +((accSum / accCount) * 100).toFixed(2) : null,
+      bestAccuracy: accCount > 0 ? +(bestAccuracy * 100).toFixed(2) : null,
       symbolCount: symbols.size,
       timeframeCount: timeframes.size,
     };
@@ -3431,7 +3577,9 @@ export class MlModelsPageComponent implements OnInit {
     const labels: string[] = [];
     for (let i = 0; i < bins; i++) labels.push(`${i * 10}–${(i + 1) * 10}%`);
     for (const a of accuracies) {
-      const idx = Math.min(Math.floor(a / 10), bins - 1);
+      // Fraction on the wire — bucket on the percent value, or everything
+      // lands in the 0–10% bin.
+      const idx = Math.min(Math.max(0, Math.floor((a * 100) / 10)), bins - 1);
       counts[idx]++;
     }
     return {
@@ -3463,6 +3611,7 @@ export class MlModelsPageComponent implements OnInit {
   bySymbolOptions = computed<EChartsOption>(() => {
     const counts: Record<string, number> = {};
     for (const m of this.modelsSample()) {
+      if (m.symbol === CROSS_SYMBOL_SENTINEL) continue; // not a tradeable symbol
       const k = m.symbol ?? 'unknown';
       counts[k] = (counts[k] ?? 0) + 1;
     }
@@ -3550,17 +3699,23 @@ export class MlModelsPageComponent implements OnInit {
           g.bestAccuracy = m.directionAccuracy;
       }
     }
-    return Object.values(groups)
-      .map((g) => ({
-        symbol: g.symbol,
-        count: g.count,
-        active: g.active,
-        failed: g.failed,
-        bestAccuracy: g.bestAccuracy != null ? +g.bestAccuracy.toFixed(2) : null,
-        avgAccuracy: g._count > 0 ? +(g._sum / g._count).toFixed(2) : null,
-        totalSamples: g.totalSamples,
-      }))
-      .sort((a, b) => b.count - a.count);
+    return (
+      Object.values(groups)
+        .map((g) => ({
+          symbol: g.symbol,
+          isCrossSymbol: g.symbol === CROSS_SYMBOL_SENTINEL,
+          count: g.count,
+          active: g.active,
+          failed: g.failed,
+          bestAccuracy: g.bestAccuracy != null ? +(g.bestAccuracy * 100).toFixed(2) : null,
+          avgAccuracy: g._count > 0 ? +((g._sum / g._count) * 100).toFixed(2) : null,
+          totalSamples: g.totalSamples,
+        }))
+        // Real pairs first by model count; the cross-symbol sentinel row last.
+        .sort((a, b) =>
+          a.isCrossSymbol !== b.isCrossSymbol ? (a.isCrossSymbol ? 1 : -1) : b.count - a.count,
+        )
+    );
   });
 
   // ─────────────────────────────────────────────────────────────────────
@@ -3568,6 +3723,11 @@ export class MlModelsPageComponent implements OnInit {
   // so KPIs reflect every run in the system, not just the visible page.
   // ─────────────────────────────────────────────────────────────────────
   readonly trainingsSample = signal<MLTrainingRunDto[]>([]);
+  /** Server-reported total, so the KPI label can say when the sample is a window. */
+  readonly trainingsTotal = signal(0);
+  readonly trainingWindowLabel = computed(() =>
+    windowLabel('Runs', this.trainingsSample().length, this.trainingsTotal()),
+  );
 
   trainingStats = computed(() => {
     const all = this.trainingsSample();
@@ -3576,47 +3736,51 @@ export class MlModelsPageComponent implements OnInit {
         total: 0,
         completed: 0,
         failed: 0,
+        cancelled: 0,
         inFlight: 0,
         successRate: null as number | null,
         avgAccuracy: null as number | null,
-        avgDurationMin: null as number | null,
-        last24h: 0,
+        avgDurationMs: null as number | null,
       };
     }
     let completed = 0;
     let failed = 0;
+    let cancelled = 0;
     let inFlight = 0;
     let accSum = 0;
     let accCount = 0;
     let durSum = 0;
     let durCount = 0;
-    let last24h = 0;
-    const dayAgo = Date.now() - 86400000;
     for (const r of all) {
       const status = String(r.status);
+      // "In flight" means a worker still owes an outcome — Queued or Running.
+      // Cancelled is terminal; the old else-branch counted 4,993 cancelled runs
+      // as in flight.
       if (status === 'Completed') completed++;
       else if (status === 'Failed') failed++;
-      else inFlight++;
+      else if (status === 'Cancelled') cancelled++;
+      else if (status === 'Queued' || status === 'Running') inFlight++;
       if (r.directionAccuracy != null) {
         accSum += r.directionAccuracy;
         accCount++;
       }
-      if (r.completedAt && r.startedAt) {
-        durSum += (new Date(r.completedAt).getTime() - new Date(r.startedAt).getTime()) / 60000;
+      if (status === 'Completed' && r.completedAt && r.startedAt) {
+        durSum += new Date(r.completedAt).getTime() - new Date(r.startedAt).getTime();
         durCount++;
       }
-      if (r.startedAt && new Date(r.startedAt).getTime() >= dayAgo) last24h++;
     }
     return {
       total: all.length,
       completed,
       failed,
+      cancelled,
       inFlight,
+      // Of runs that actually finished (completed + failed); cancelled runs
+      // never produced an outcome and the tile label says so.
       successRate:
         completed + failed > 0 ? +((completed / (completed + failed)) * 100).toFixed(1) : null,
       avgAccuracy: accCount > 0 ? +((accSum / accCount) * 100).toFixed(2) : null,
-      avgDurationMin: durCount > 0 ? +(durSum / durCount).toFixed(1) : null,
-      last24h,
+      avgDurationMs: durCount > 0 ? Math.round(durSum / durCount) : null,
     };
   });
 
@@ -3630,13 +3794,19 @@ export class MlModelsPageComponent implements OnInit {
     const colors: Record<string, string> = {
       Completed: '#34C759',
       Failed: '#FF3B30',
+      Queued: '#5AC8FA',
       Pending: '#5AC8FA',
       Running: '#0071E3',
       Cancelled: '#8E8E93',
     };
     return {
       tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
+      legend: {
+        bottom: 0,
+        itemWidth: 10,
+        itemGap: 8,
+        textStyle: { fontSize: 10, color: '#6E6E73' },
+      },
       series: [
         {
           type: 'pie',
@@ -3741,7 +3911,7 @@ export class MlModelsPageComponent implements OnInit {
       runs: number;
       completed: number;
       failed: number;
-      successPct: number;
+      successPct: number | null;
       avgAccuracy: number | null;
       _accSum: number;
       _accCount: number;
@@ -3755,7 +3925,7 @@ export class MlModelsPageComponent implements OnInit {
           runs: 0,
           completed: 0,
           failed: 0,
-          successPct: 0,
+          successPct: null,
           avgAccuracy: null,
           _accSum: 0,
           _accCount: 0,
@@ -3775,7 +3945,8 @@ export class MlModelsPageComponent implements OnInit {
         runs: g.runs,
         completed: g.completed,
         failed: g.failed,
-        successPct: g.completed + g.failed > 0 ? (g.completed / (g.completed + g.failed)) * 100 : 0,
+        successPct:
+          g.completed + g.failed > 0 ? (g.completed / (g.completed + g.failed)) * 100 : null,
         avgAccuracy: g._accCount > 0 ? +((g._accSum / g._accCount) * 100).toFixed(2) : null,
       }))
       .sort((a, b) => b.runs - a.runs);
@@ -3792,6 +3963,12 @@ export class MlModelsPageComponent implements OnInit {
   // Signal-A/B analytics — same probe-and-fetch pattern.
   // ─────────────────────────────────────────────────────────────────────
   readonly abSample = signal<MLSignalAbTestResultDto[]>([]);
+  readonly abTotal = signal(0);
+  /** Distinguishes "nothing loaded yet" from "the engine has no tests". */
+  readonly abLoaded = signal(false);
+  readonly abWindowLabel = computed(() =>
+    windowLabel('Tests', this.abSample().length, this.abTotal()),
+  );
 
   abStats = computed(() => {
     const all = this.abSample();
@@ -3847,7 +4024,8 @@ export class MlModelsPageComponent implements OnInit {
       const k = String(t.status);
       counts[k] = (counts[k] ?? 0) + 1;
     }
-    if (Object.keys(counts).length === 0) return {};
+    // An empty option object renders a bare 240px box; say why it is empty.
+    if (Object.keys(counts).length === 0) return emptyChart('No A/B tests yet');
     const colors: Record<string, string> = {
       Running: '#0071E3',
       Completed: '#34C759',
@@ -3879,7 +4057,7 @@ export class MlModelsPageComponent implements OnInit {
       const k = String(t.decision ?? 'Pending');
       counts[k] = (counts[k] ?? 0) + 1;
     }
-    if (Object.keys(counts).length === 0) return {};
+    if (Object.keys(counts).length === 0) return emptyChart('No A/B tests yet');
     const colors: Record<string, string> = {
       ChampionWon: '#0071E3',
       ChallengerWon: '#34C759',
@@ -3910,7 +4088,7 @@ export class MlModelsPageComponent implements OnInit {
     const lifts = this.abSample()
       .filter((t) => String(t.status) === 'Completed')
       .map((t) => t.challengerPnl - t.championPnl);
-    if (lifts.length === 0) return {};
+    if (lifts.length === 0) return emptyChart('No completed A/B tests yet');
     const min = Math.min(...lifts);
     const max = Math.max(...lifts);
     if (max === min) {
@@ -4023,36 +4201,36 @@ export class MlModelsPageComponent implements OnInit {
       .sort((a, b) => b.tests - a.tests);
   });
 
-  private abAnalyticsLoaded = false;
   private loadAbAnalyticsSample(): void {
     this.mlModelsService
       .listSignalAbTests({ currentPage: 1, itemCountPerPage: 1, filter: null })
       .subscribe({
         next: (probe) => {
           const total = probe?.data?.pager?.totalItemCount ?? 0;
+          this.abTotal.set(total);
           if (total === 0) {
             this.abSample.set([]);
-            this.abAnalyticsLoaded = true;
+            this.abLoaded.set(true);
             return;
           }
           this.mlModelsService
             .listSignalAbTests({
               currentPage: 1,
-              itemCountPerPage: Math.min(total, 5000),
+              itemCountPerPage: Math.min(total, ANALYTICS_SAMPLE_CAP),
               filter: null,
             })
             .subscribe({
               next: (full) => {
                 this.abSample.set(full?.data?.data ?? []);
-                this.abAnalyticsLoaded = true;
+                this.abLoaded.set(true);
               },
               error: () => {
-                this.abAnalyticsLoaded = false;
+                this.abLoaded.set(false);
               },
             });
         },
         error: () => {
-          this.abAnalyticsLoaded = false;
+          this.abLoaded.set(false);
         },
       });
   }
@@ -4098,6 +4276,32 @@ export class MlModelsPageComponent implements OnInit {
   // Shadow-arena analytics — same probe-and-fetch pattern.
   // ─────────────────────────────────────────────────────────────────────
   readonly shadowSample = signal<ShadowEvaluationDto[]>([]);
+  readonly shadowTotal = signal(0);
+  readonly shadowWindowLabel = computed(() =>
+    windowLabel('Evaluations', this.shadowSample().length, this.shadowTotal()),
+  );
+
+  /** Running / Processing — the engine still owes a decision. */
+  private static isShadowInFlight(e: ShadowEvaluationDto): boolean {
+    const s = String(e.status);
+    return s === 'Running' || s === 'Processing';
+  }
+
+  /** The arbiter finalised some evaluations with 0/0 metrics; those carry no lift to show. */
+  private static hasRecordedAccuracy(e: ShadowEvaluationDto): boolean {
+    return (e.championDirectionAccuracy ?? 0) > 0 || (e.challengerDirectionAccuracy ?? 0) > 0;
+  }
+
+  decisionKey(e: ShadowEvaluationDto): string {
+    return decisionMeta(e.promotionDecision).key;
+  }
+  decisionLabel(e: ShadowEvaluationDto): string {
+    return decisionMeta(e.promotionDecision).label;
+  }
+  /** Challenger − champion direction accuracy, in percentage points. */
+  shadowLift(e: ShadowEvaluationDto): number {
+    return ((e.challengerDirectionAccuracy ?? 0) - (e.championDirectionAccuracy ?? 0)) * 100;
+  }
 
   shadowStats = computed(() => {
     const all = this.shadowSample();
@@ -4108,29 +4312,32 @@ export class MlModelsPageComponent implements OnInit {
         processing: 0,
         completed: 0,
         promoted: 0,
+        flagged: 0,
         rejected: 0,
         promotionRate: null as number | null,
-        avgLift: null as number | null,
       };
     }
     let running = 0;
     let processing = 0;
     let completed = 0;
     let promoted = 0;
+    let flagged = 0;
     let rejected = 0;
-    let liftSum = 0;
-    let liftCount = 0;
     for (const e of all) {
       const status = String(e.status);
       if (status === 'Running') running++;
       else if (status === 'Processing') processing++;
       else if (status === 'Completed') completed++;
-      const decision = String(e.promotionDecision);
-      if (decision === 'Promoted') promoted++;
-      else if (decision === 'Rejected') rejected++;
-      if (status === 'Completed') {
-        liftSum += e.challengerDirectionAccuracy - e.championDirectionAccuracy;
-        liftCount++;
+      switch (decisionMeta(e.promotionDecision).key) {
+        case 'promoted':
+          promoted++;
+          break;
+        case 'flagged':
+          flagged++;
+          break;
+        case 'rejected':
+          rejected++;
+          break;
       }
     }
     return {
@@ -4139,11 +4346,23 @@ export class MlModelsPageComponent implements OnInit {
       processing,
       completed,
       promoted,
+      flagged,
       rejected,
-      promotionRate:
-        promoted + rejected > 0 ? +((promoted / (promoted + rejected)) * 100).toFixed(1) : null,
-      avgLift: liftCount > 0 ? +((liftSum / liftCount) * 100).toFixed(2) : null,
+      // Share of COMPLETED evaluations that promoted — 0 of 78 is 0%, not "—".
+      promotionRate: completed > 0 ? +((promoted / completed) * 100).toFixed(1) : null,
     };
+  });
+
+  /** In-flight evaluations older than a day with no trades: the arena is stalled, not busy. */
+  readonly shadowStaleCount = computed(() => {
+    const cutoff = Date.now() - 86_400_000;
+    return this.shadowSample().filter(
+      (e) =>
+        MlModelsPageComponent.isShadowInFlight(e) &&
+        (e.completedTrades ?? 0) === 0 &&
+        !!e.startedAt &&
+        new Date(e.startedAt).getTime() < cutoff,
+    ).length;
   });
 
   shadowStatusDonutOptions = computed<EChartsOption>(() => {
@@ -4182,15 +4401,17 @@ export class MlModelsPageComponent implements OnInit {
   shadowDecisionDonutOptions = computed<EChartsOption>(() => {
     const counts: Record<string, number> = {};
     for (const e of this.shadowSample()) {
-      const k = String(e.promotionDecision);
+      // Null decision = still running; String(null) used to put a literal
+      // "null" slice in the legend.
+      const k = decisionMeta(e.promotionDecision).label;
       counts[k] = (counts[k] ?? 0) + 1;
     }
     if (Object.keys(counts).length === 0) return {};
     const colors: Record<string, string> = {
       Promoted: '#34C759',
+      'Flagged for review': '#FF9500',
       Rejected: '#FF3B30',
       Pending: '#5AC8FA',
-      None: '#8E8E93',
     };
     return {
       tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
@@ -4213,12 +4434,18 @@ export class MlModelsPageComponent implements OnInit {
   });
 
   shadowProgressOptions = computed<EChartsOption>(() => {
-    const inflight = this.shadowSample()
-      .filter((e) => String(e.status) === 'Running' || String(e.status) === 'Processing')
-      .filter((e) => (e.requiredTrades ?? 0) > 0)
+    const inflightAll = this.shadowSample().filter(
+      (e) => MlModelsPageComponent.isShadowInFlight(e) && (e.requiredTrades ?? 0) > 0,
+    );
+    if (inflightAll.length === 0) return emptyChart('No in-flight evaluations');
+    // Twelve identical "0 of 50" bars carry no information; say what is true instead.
+    const inflight = inflightAll
+      .filter((e) => (e.completedTrades ?? 0) > 0)
       .sort((a, b) => b.completedTrades / b.requiredTrades - a.completedTrades / a.requiredTrades)
       .slice(0, 12);
-    if (inflight.length === 0) return {};
+    if (inflight.length === 0) {
+      return emptyChart(`${inflightAll.length} in flight — none has recorded a trade yet`);
+    }
     return {
       tooltip: {
         trigger: 'axis',
@@ -4260,13 +4487,10 @@ export class MlModelsPageComponent implements OnInit {
 
   topLifts = computed(() =>
     [...this.shadowSample()]
-      .filter((e) => String(e.status) === 'Completed')
-      .sort(
-        (a, b) =>
-          b.challengerDirectionAccuracy -
-          b.championDirectionAccuracy -
-          (a.challengerDirectionAccuracy - a.championDirectionAccuracy),
+      .filter(
+        (e) => String(e.status) === 'Completed' && MlModelsPageComponent.hasRecordedAccuracy(e),
       )
+      .sort((a, b) => this.shadowLift(b) - this.shadowLift(a))
       .slice(0, 8),
   );
 
@@ -4275,103 +4499,99 @@ export class MlModelsPageComponent implements OnInit {
       symbol: string;
       evals: number;
       promoted: number;
+      flagged: number;
       rejected: number;
       inFlight: number;
-      promotePct: number;
+      promotePct: number | null;
     };
     const groups: Record<string, Row> = {};
     for (const e of this.shadowSample()) {
       const k = e.symbol ?? 'unknown';
       if (!groups[k])
-        groups[k] = { symbol: k, evals: 0, promoted: 0, rejected: 0, inFlight: 0, promotePct: 0 };
+        groups[k] = {
+          symbol: k,
+          evals: 0,
+          promoted: 0,
+          flagged: 0,
+          rejected: 0,
+          inFlight: 0,
+          promotePct: null,
+        };
       const g = groups[k];
       g.evals++;
-      const decision = String(e.promotionDecision);
-      if (decision === 'Promoted') g.promoted++;
-      else if (decision === 'Rejected') g.rejected++;
-      else g.inFlight++;
+      // In flight is a STATUS, not "no decision yet" — a completed evaluation
+      // that was flagged for review has no promotion but is not in flight.
+      if (MlModelsPageComponent.isShadowInFlight(e)) g.inFlight++;
+      switch (decisionMeta(e.promotionDecision).key) {
+        case 'promoted':
+          g.promoted++;
+          break;
+        case 'flagged':
+          g.flagged++;
+          break;
+        case 'rejected':
+          g.rejected++;
+          break;
+      }
     }
     return Object.values(groups)
-      .map((g) => ({
-        ...g,
-        promotePct:
-          g.promoted + g.rejected > 0 ? (g.promoted / (g.promoted + g.rejected)) * 100 : 0,
-      }))
+      .map((g) => {
+        const decided = g.promoted + g.flagged + g.rejected;
+        return { ...g, promotePct: decided > 0 ? (g.promoted / decided) * 100 : null };
+      })
       .sort((a, b) => b.evals - a.evals);
   });
 
-  private shadowAnalyticsLoaded = false;
   private loadShadowAnalyticsSample(): void {
     this.mlEvaluationService
       .listShadow({ currentPage: 1, itemCountPerPage: 1, filter: null })
       .subscribe({
         next: (probe) => {
           const total = probe?.data?.pager?.totalItemCount ?? 0;
+          this.shadowTotal.set(total);
           if (total === 0) {
             this.shadowSample.set([]);
-            this.shadowAnalyticsLoaded = true;
             return;
           }
           this.mlEvaluationService
             .listShadow({
               currentPage: 1,
-              itemCountPerPage: Math.min(total, 5000),
+              itemCountPerPage: Math.min(total, ANALYTICS_SAMPLE_CAP),
               filter: null,
             })
             .subscribe({
-              next: (full) => {
-                this.shadowSample.set(full?.data?.data ?? []);
-                this.shadowAnalyticsLoaded = true;
-              },
-              error: () => {
-                this.shadowAnalyticsLoaded = false;
-              },
+              next: (full) => this.shadowSample.set(full?.data?.data ?? []),
             });
-        },
-        error: () => {
-          this.shadowAnalyticsLoaded = false;
         },
       });
   }
 
-  private trainingAnalyticsLoaded = false;
   private loadTrainingAnalyticsSample(): void {
     this.mlModelsService
       .listTrainingRuns({ currentPage: 1, itemCountPerPage: 1, filter: null })
       .subscribe({
         next: (probe) => {
           const total = probe?.data?.pager?.totalItemCount ?? 0;
+          this.trainingsTotal.set(total);
           if (total === 0) {
             this.trainingsSample.set([]);
-            this.trainingAnalyticsLoaded = true;
             return;
           }
-          // Cap large fleets at 5000 — pulling 50,000 training runs into the
-          // browser would tank the page. KPIs over the most-recent 5k stays
-          // representative, and the paged table below still shows everything.
+          // Cap large fleets — pulling 30,000 training runs into the browser
+          // would tank the page. The KPI label says when the sample is a window.
           this.mlModelsService
             .listTrainingRuns({
               currentPage: 1,
-              itemCountPerPage: Math.min(total, 5000),
+              itemCountPerPage: Math.min(total, ANALYTICS_SAMPLE_CAP),
               filter: null,
             })
             .subscribe({
-              next: (full) => {
-                this.trainingsSample.set(full?.data?.data ?? []);
-                this.trainingAnalyticsLoaded = true;
-              },
-              error: () => {
-                this.trainingAnalyticsLoaded = false;
-              },
+              next: (full) => this.trainingsSample.set(full?.data?.data ?? []),
             });
-        },
-        error: () => {
-          this.trainingAnalyticsLoaded = false;
         },
       });
   }
 
-  private analyticsLoaded = false;
   private loadModelAnalyticsSample(): void {
     // Adaptive probe-and-fetch: a 1-row request reveals the true server total
     // via pager.totalItemCount, then we fetch exactly that many rows so the
@@ -4383,23 +4603,11 @@ export class MlModelsPageComponent implements OnInit {
         const total = probe?.data?.pager?.totalItemCount ?? 0;
         if (total === 0) {
           this.modelsSample.set([]);
-          this.analyticsLoaded = true;
           return;
         }
         this.mlModelsService
           .list({ currentPage: 1, itemCountPerPage: total, filter: null })
-          .subscribe({
-            next: (full) => {
-              this.modelsSample.set(full?.data?.data ?? []);
-              this.analyticsLoaded = true;
-            },
-            error: () => {
-              this.analyticsLoaded = false;
-            },
-          });
-      },
-      error: () => {
-        this.analyticsLoaded = false;
+          .subscribe({ next: (full) => this.modelsSample.set(full?.data?.data ?? []) });
       },
     });
   }
@@ -4418,6 +4626,7 @@ export class MlModelsPageComponent implements OnInit {
   // ── Registry state ──
   filterStatus = signal('');
   filterSymbol = signal('');
+  filterSearch = signal('');
 
   // ── Monitor state ──
   monitorModels = signal<MLModelDto[]>([]);
@@ -4722,9 +4931,16 @@ export class MlModelsPageComponent implements OnInit {
   // ══════════════════════════════════════════════════════════════
 
   registryColumns: ColDef<MLModelDto>[] = [
-    { headerName: 'Symbol', field: 'symbol', flex: 1, minWidth: 100 },
+    { headerName: 'Symbol', field: 'symbol', width: 110, minWidth: 100 },
     { headerName: 'Timeframe', field: 'timeframe', width: 100 },
-    { headerName: 'Version', field: 'modelVersion', width: 90 },
+    // Versions look like "EURUSD_H1_20260905…" — 90px showed "EURUSD_H".
+    {
+      headerName: 'Version',
+      field: 'modelVersion',
+      flex: 1,
+      minWidth: 180,
+      tooltipField: 'modelVersion',
+    },
     {
       headerName: 'Status',
       field: 'status',
@@ -4775,9 +4991,8 @@ export class MlModelsPageComponent implements OnInit {
     {
       headerName: 'Trained At',
       field: 'trainedAt',
-      width: 130,
-      valueFormatter: (p: { value: string }) =>
-        p.value ? this.relativeTimePipe.transform(p.value) : '-',
+      width: 140,
+      valueFormatter: this.formatGridDate,
     },
   ];
 
@@ -4798,8 +5013,10 @@ export class MlModelsPageComponent implements OnInit {
           Running: { bg: 'rgba(0,113,227,0.12)', color: '#0040DD' },
           Completed: { bg: 'rgba(52,199,89,0.12)', color: '#248A3D' },
           Failed: { bg: 'rgba(255,59,48,0.12)', color: '#D70015' },
+          // Cancelled is an operator action, not a failure — grey, not red.
+          Cancelled: { bg: 'rgba(142,142,147,0.12)', color: '#636366' },
         };
-        const s = colorMap[params.value] ?? colorMap['Failed'];
+        const s = colorMap[params.value] ?? colorMap['Queued'];
         return `<span style="color:${s.color};background:${s.bg};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${params.value}</span>`;
       },
     },
@@ -4858,9 +5075,8 @@ export class MlModelsPageComponent implements OnInit {
     {
       headerName: 'Started',
       field: 'startedAt',
-      width: 130,
-      valueFormatter: (p: { value: string }) =>
-        p.value ? this.relativeTimePipe.transform(p.value) : '-',
+      width: 140,
+      valueFormatter: this.formatGridDate,
     },
   ];
 
@@ -4869,9 +5085,10 @@ export class MlModelsPageComponent implements OnInit {
   // ══════════════════════════════════════════════════════════════
 
   shadowColumns: ColDef<ShadowEvaluationDto>[] = [
-    { headerName: 'Champion Model', field: 'championModelId', width: 140 },
-    { headerName: 'Challenger Model', field: 'challengerModelId', width: 150 },
+    { headerName: 'Champion', field: 'championModelId', width: 110 },
+    { headerName: 'Challenger', field: 'challengerModelId', width: 110 },
     { headerName: 'Symbol', field: 'symbol', flex: 1, minWidth: 100 },
+    { headerName: 'TF', field: 'timeframe', width: 80 },
     {
       headerName: 'Status',
       field: 'status',
@@ -4889,25 +5106,49 @@ export class MlModelsPageComponent implements OnInit {
       },
     },
     {
+      headerName: 'Decision',
+      field: 'promotionDecision',
+      width: 150,
+      cellRenderer: (params: { value: string | null }) => {
+        const meta = decisionMeta(params.value);
+        const palette: Record<string, { bg: string; color: string }> = {
+          promoted: { bg: 'rgba(52,199,89,0.12)', color: '#248A3D' },
+          flagged: { bg: 'rgba(255,149,0,0.12)', color: '#C93400' },
+          rejected: { bg: 'rgba(255,59,48,0.12)', color: '#D70015' },
+          pending: { bg: 'rgba(142,142,147,0.12)', color: '#636366' },
+        };
+        const s = palette[meta.key];
+        return `<span style="color:${s.color};background:${s.bg};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap">${meta.label}</span>`;
+      },
+    },
+    {
+      headerName: 'Trades',
+      colId: 'trades',
+      width: 100,
+      valueGetter: (p) =>
+        p.data ? `${p.data.completedTrades ?? 0} / ${p.data.requiredTrades ?? 0}` : '',
+      cellStyle: { fontVariantNumeric: 'tabular-nums' },
+    },
+    {
       headerName: 'Champion Acc',
       field: 'championDirectionAccuracy',
-      width: 130,
+      width: 120,
+      // 0 on a completed evaluation means "never recorded", not 0.0%.
       valueFormatter: (p: { value: number | null }) =>
-        p.value != null ? `${(p.value * 100).toFixed(1)}%` : '-',
+        p.value != null && p.value > 0 ? `${(p.value * 100).toFixed(1)}%` : '—',
     },
     {
       headerName: 'Challenger Acc',
       field: 'challengerDirectionAccuracy',
-      width: 130,
+      width: 120,
       valueFormatter: (p: { value: number | null }) =>
-        p.value != null ? `${(p.value * 100).toFixed(1)}%` : '-',
+        p.value != null && p.value > 0 ? `${(p.value * 100).toFixed(1)}%` : '—',
     },
     {
       headerName: 'Started',
       field: 'startedAt',
-      width: 130,
-      valueFormatter: (p: { value: string }) =>
-        p.value ? this.relativeTimePipe.transform(p.value) : '-',
+      width: 140,
+      valueFormatter: this.formatGridDate,
     },
   ];
 
@@ -5028,7 +5269,12 @@ export class MlModelsPageComponent implements OnInit {
   });
 
   // Top-by-X helpers for the KPI strip.
-  readonly archTopByCount = computed(() => this.archLeaderboard()[0] ?? null);
+  // `rows[0] ?? null` infers a non-null row (no unchecked-index access), which
+  // makes the template's null guards look redundant while the board can be empty.
+  readonly archTopByCount = computed(() => {
+    const rows = this.archLeaderboard();
+    return rows.length > 0 ? rows[0] : null;
+  });
   readonly archTopByAccuracy = computed(() => {
     const rows = this.archLeaderboard().filter((r) => r.avgAccuracy > 0);
     return rows.length > 0
@@ -5229,14 +5475,38 @@ export class MlModelsPageComponent implements OnInit {
 
   // RMSE × Accuracy scatter, one point per model, coloured by architecture.
   // Each architecture gets its own series so the legend works as a filter.
+  /**
+   * RMSE ceiling for the scatter: the 99th percentile across the fleet. One
+   * model at RMSE ≈ 20 used to squash 876 points into the bottom 15% of the
+   * plot; points above the ceiling are pinned to it and the subtitle says so.
+   */
+  private readonly archScatterCeiling = computed(() => {
+    const rmses = this.archAnalyticsRows()
+      .map((m) => m.magnitudeRMSE)
+      .filter((v): v is number => v !== null && Number.isFinite(v))
+      .sort((a, b) => a - b);
+    if (rmses.length < 20) return { ceiling: Infinity, clipped: 0 };
+    const p99 = quantile(rmses, 0.99);
+    const clipped = rmses.filter((v) => v > p99).length;
+    return { ceiling: p99, clipped };
+  });
+
+  readonly archScatterSubtitle = computed(() => {
+    const { clipped, ceiling } = this.archScatterCeiling();
+    return clipped > 0
+      ? `Each model is one point — ${clipped} outlier${clipped === 1 ? '' : 's'} above RMSE ${ceiling.toFixed(2)} (P99) pinned to the top edge`
+      : 'Each model is one point — coloured by architecture';
+  });
+
   readonly archScatterOptions = computed<EChartsOption>(() => {
     const groups = new Map<string, [number, number][]>();
+    const { ceiling } = this.archScatterCeiling();
     for (const m of this.archAnalyticsRows()) {
       if (m.directionAccuracy === null || m.magnitudeRMSE === null) continue;
       if (!Number.isFinite(m.directionAccuracy) || !Number.isFinite(m.magnitudeRMSE)) continue;
       const arch = m.learnerArchitecture || 'Unknown';
       const list = groups.get(arch) ?? [];
-      list.push([m.directionAccuracy * 100, m.magnitudeRMSE]);
+      list.push([m.directionAccuracy * 100, Math.min(m.magnitudeRMSE, ceiling)]);
       groups.set(arch, list);
     }
     if (groups.size === 0) {
@@ -5292,8 +5562,9 @@ export class MlModelsPageComponent implements OnInit {
     };
   });
 
+  /** A measured zero is "0.0%"; only a non-number is a dash. Callers decide when there is no measurement. */
   formatPct(v: number): string {
-    if (!Number.isFinite(v) || v === 0) return '—';
+    if (!Number.isFinite(v)) return '—';
     return `${(v * 100).toFixed(1)}%`;
   }
 
@@ -5318,7 +5589,21 @@ export class MlModelsPageComponent implements OnInit {
   // ══════════════════════════════════════════════════════════════
 
   fetchModels = (params: PagerRequest) => {
-    return this.mlModelsService.list(params).pipe(map((res) => res.data as PagedData<MLModelDto>));
+    // The filter bar's inputs were never forwarded before — the grid reloaded
+    // but showed the same unfiltered page. Field names match the engine's
+    // MLModelQueryFilter (Symbol / Status) plus the generic search term.
+    const filter: Record<string, unknown> = { ...(params.filter ?? {}) };
+    const search = this.filterSearch().trim();
+    const status = this.filterStatus();
+    const symbol = this.filterSymbol().trim().toUpperCase();
+    if (search) filter['search'] = search;
+    if (status) filter['status'] = status;
+    if (symbol) filter['symbol'] = symbol;
+    const request: PagerRequest = {
+      ...params,
+      filter: Object.keys(filter).length > 0 ? filter : null,
+    };
+    return this.mlModelsService.list(request).pipe(map((res) => res.data as PagedData<MLModelDto>));
   };
 
   fetchTrainingRuns = (params: PagerRequest) => {
@@ -5566,7 +5851,8 @@ export class MlModelsPageComponent implements OnInit {
   }
 
   private isTerminalStatus(status: RunStatus): boolean {
-    return status === 'Completed' || status === 'Failed';
+    // Cancelled is terminal too — keep polling and the panel would refresh forever.
+    return status === 'Completed' || status === 'Failed' || String(status) === 'Cancelled';
   }
 
   formatDuration(ms: number): string {
@@ -5944,7 +6230,7 @@ export class MlModelsPageComponent implements OnInit {
     return {
       title: {
         text: `${completed} / ${required} trades`,
-        subtext: `Decision: ${shadow.promotionDecision}`,
+        subtext: `Decision: ${decisionMeta(shadow.promotionDecision).label}`,
         left: 'center',
         top: 10,
         textStyle: { fontSize: 14, color: '#1D1D1F' },

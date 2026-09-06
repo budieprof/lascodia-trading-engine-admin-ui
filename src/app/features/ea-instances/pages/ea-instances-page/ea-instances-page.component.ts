@@ -32,6 +32,15 @@ type StatusFilter = 'all' | EAInstanceStatus;
 type ViewMode = 'cards' | 'table';
 type CoverageFilter = 'all' | 'covered' | 'uncovered';
 
+/** Tile dot for a count that carries no signal (zero) — grey, not green. */
+const NEUTRAL_DOT = '#8E8E93';
+
+const STATUS_LABELS: Record<EAInstanceStatus, string> = {
+  Active: 'Active',
+  ShuttingDown: 'Shutting down',
+  Disconnected: 'Disconnected',
+};
+
 @Component({
   selector: 'app-ea-instances-page',
   standalone: true,
@@ -85,75 +94,60 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
       @if (loading()) {
         <app-card-skeleton [lines]="6" />
       } @else if (instances().length > 0) {
-        <!-- 8-card KPI strip — fleet status + symbol coverage -->
-        <div class="kpis">
-          <app-metric-card
-            label="Total"
-            [value]="instances().length"
-            format="number"
-            dotColor="#0071E3"
-          />
+        <!-- Fleet status as stat tiles.  With a handful of instances the
+             status split is usually one-sided (a single-slice donut says
+             nothing), so the counts are the chart.  Dots only colour a
+             non-zero count that means something; zero stays neutral. -->
+        <div class="tiles tiles-5" aria-label="Fleet status">
+          <app-metric-card label="Instances" [value]="instances().length" format="number" />
           <app-metric-card
             label="Active"
             [value]="activeCount()"
             format="number"
-            [dotColor]="activeCount() === 0 ? '#FF3B30' : '#34C759'"
+            [dotColor]="dotFor(activeCount(), '#34C759')"
           />
           <app-metric-card
-            label="Idle"
+            label="Shutting down"
             [value]="idleCount()"
             format="number"
-            [dotColor]="idleCount() > 0 ? '#FF9500' : '#34C759'"
+            [dotColor]="dotFor(idleCount(), '#FF9500')"
           />
           <app-metric-card
             label="Disconnected"
             [value]="disconnectedCount()"
             format="number"
-            [dotColor]="disconnectedCount() > 0 ? '#FF3B30' : '#34C759'"
+            [dotColor]="dotFor(disconnectedCount(), '#FF3B30')"
           />
-          <app-metric-card
-            label="Owned symbols"
-            [value]="totalOwnedSymbols()"
-            format="number"
-            dotColor="#5AC8FA"
-          />
+          <app-metric-card label="Accounts" [value]="uniqueAccounts().size" format="number" />
+        </div>
+
+        <div class="tiles tiles-4" aria-label="Symbol coverage">
+          <app-metric-card label="Owned symbols" [value]="totalOwnedSymbols()" format="number" />
           <app-metric-card
             label="Unique symbols"
             [value]="uniqueOwnedSymbols().size"
             format="number"
-            dotColor="#0071E3"
+          />
+          <app-metric-card
+            label="Uncovered pairs"
+            [value]="uncoveredSymbols().size"
+            format="number"
+            [dotColor]="dotFor(uncoveredSymbols().size, '#FF3B30')"
           />
           <app-metric-card
             label="Coverage"
             [value]="coveragePct()"
             format="percent"
-            [dotColor]="
-              coveragePct() >= 90 ? '#34C759' : coveragePct() >= 50 ? '#FF9500' : '#FF3B30'
-            "
-          />
-          <app-metric-card
-            label="Accounts"
-            [value]="uniqueAccounts().size"
-            format="number"
-            dotColor="#AF52DE"
+            [dotColor]="coverageDot()"
           />
         </div>
 
-        <!-- 2-col chart row: status donut + symbols-per-EA -->
-        <div class="chart-row">
-          <app-chart-card
-            title="Status distribution"
-            subtitle="Active · Idle · Disconnected"
-            [options]="statusDonutOptions()"
-            height="220px"
-          />
-          <app-chart-card
-            title="Symbols owned per EA"
-            subtitle="How the {{ uniqueOwnedSymbols().size }} unique symbols are distributed"
-            [options]="symbolsPerEAOptions()"
-            height="220px"
-          />
-        </div>
+        <app-chart-card
+          title="Symbols owned per EA"
+          subtitle="How the {{ uniqueOwnedSymbols().size }} unique symbols are distributed"
+          [options]="symbolsPerEAOptions()"
+          height="260px"
+        />
 
         <!-- Toolbar -->
         <div class="toolbar">
@@ -171,7 +165,7 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
           >
             <option value="all">All statuses</option>
             <option value="Active">Active ({{ activeCount() }})</option>
-            <option value="Idle">Idle ({{ idleCount() }})</option>
+            <option value="ShuttingDown">Shutting down ({{ idleCount() }})</option>
             <option value="Disconnected">Disconnected ({{ disconnectedCount() }})</option>
           </select>
           <div class="view-toggle" role="group" aria-label="View mode">
@@ -209,7 +203,9 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
                     <span class="status-dot" [attr.data-status]="i.status"></span>
                     <h4 [title]="i.instanceId">{{ i.instanceId }}</h4>
                   </div>
-                  <span class="pill" [attr.data-status]="i.status">{{ i.status }}</span>
+                  <span class="pill" [attr.data-status]="i.status">{{
+                    statusLabel(i.status)
+                  }}</span>
                 </header>
                 <dl class="info">
                   <div>
@@ -223,7 +219,7 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
                       [class.bad]="heartbeatTier(i) === 'dead'"
                       [class.warn]="heartbeatTier(i) === 'stale'"
                       [class.good]="heartbeatTier(i) === 'fresh'"
-                      [title]="i.lastHeartbeat ?? ''"
+                      [title]="i.lastHeartbeat"
                     >
                       {{ heartbeatLabel(i) }}
                     </dd>
@@ -318,7 +314,9 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
                     (keydown.enter)="$any($event.target).click()"
                   >
                     <td>
-                      <span class="pill" [attr.data-status]="i.status">{{ i.status }}</span>
+                      <span class="pill" [attr.data-status]="i.status">
+                        {{ statusLabel(i.status) }}
+                      </span>
                     </td>
                     <td class="mono name" [title]="i.instanceId">{{ i.instanceId }}</td>
                     <td class="mono">{{ i.tradingAccountId }}</td>
@@ -403,7 +401,7 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
                 </button>
               </div>
             </header>
-            <div class="cov-scroll">
+            <div class="cov-scroll" [class.expanded]="coverageExpanded()">
               <table class="dense sticky">
                 <thead>
                   <tr>
@@ -414,14 +412,14 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
                   </tr>
                 </thead>
                 <tbody>
-                  @for (row of coverageRowsFiltered(); track row.symbol) {
+                  @for (row of coverageRowsVisible(); track row.symbol) {
                     <tr>
                       <td class="mono">{{ row.symbol }}</td>
                       <td>
                         @if (row.isCovered) {
                           <span class="pill" data-status="Active">Covered</span>
                         } @else {
-                          <span class="pill" data-status="Disconnected">DATA_UNAVAILABLE</span>
+                          <span class="pill" data-status="Disconnected">Uncovered</span>
                         }
                       </td>
                       <td class="mono">
@@ -434,7 +432,7 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
                       <td>
                         @if (row.ownerStatus) {
                           <span class="pill" [attr.data-status]="row.ownerStatus">
-                            {{ row.ownerStatus }}
+                            {{ statusLabel(row.ownerStatus) }}
                           </span>
                         } @else {
                           <span class="muted">—</span>
@@ -445,6 +443,29 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
                 </tbody>
               </table>
             </div>
+            <!-- Always say how many rows the table holds — a max-height scroll
+                 box hides the count, and an operator scanning for a missing
+                 pair needs to know whether the list is complete. -->
+            <footer class="cov-foot">
+              <span class="muted">
+                @if (coverageHiddenCount() > 0) {
+                  Showing {{ coverageRowsVisible().length }} of
+                  {{ coverageRowsFiltered().length }} symbols
+                } @else {
+                  Showing {{ coverageRowsFiltered().length }}
+                  {{ coverageRowsFiltered().length === 1 ? 'symbol' : 'symbols' }}
+                }
+              </span>
+              @if (coverageRowsFiltered().length > coveragePreviewRows) {
+                <button type="button" class="link-btn" (click)="toggleCoverageExpanded()">
+                  {{
+                    coverageExpanded()
+                      ? 'Show fewer'
+                      : 'Show all (' + coverageRowsFiltered().length + ')'
+                  }}
+                </button>
+              }
+            </footer>
           </section>
         }
 
@@ -469,28 +490,29 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
         gap: var(--space-4);
       }
 
-      /* 8-card KPI strip */
-      .kpis {
+      /* Stat-tile rows: equal-width columns, never more than six per row. */
+      .tiles {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
         gap: var(--space-2);
+        align-items: start;
       }
-      @media (max-width: 1400px) {
-        .kpis {
-          grid-template-columns: repeat(4, 1fr);
+      .tiles-5 {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+      }
+      .tiles-4 {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+      @media (max-width: 1100px) {
+        .tiles-5,
+        .tiles-4 {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
         }
       }
       @media (max-width: 720px) {
-        .kpis {
-          grid-template-columns: repeat(2, 1fr);
+        .tiles-5,
+        .tiles-4 {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
-      }
-
-      /* 2-col chart row */
-      .chart-row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: var(--space-3);
       }
 
       /* Fleet config row: trading window + pending-signal re-validation
@@ -504,11 +526,6 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
       }
       .fleet-config-row > * {
         min-width: 0;
-      }
-      @media (max-width: 1100px) {
-        .chart-row {
-          grid-template-columns: 1fr;
-        }
       }
 
       .toolbar {
@@ -606,7 +623,7 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
       .card[data-status='Active'] {
         border-left: 3px solid var(--profit);
       }
-      .card[data-status='Idle'] {
+      .card[data-status='ShuttingDown'] {
         border-left: 3px solid var(--warning);
       }
       .card[data-status='Disconnected'] {
@@ -645,7 +662,7 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
       .status-dot[data-status='Active'] {
         background: var(--profit);
       }
-      .status-dot[data-status='Idle'] {
+      .status-dot[data-status='ShuttingDown'] {
         background: var(--warning);
       }
       .status-dot[data-status='Disconnected'] {
@@ -664,7 +681,7 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
         background: rgba(52, 199, 89, 0.12);
         color: #248a3d;
       }
-      .pill[data-status='Idle'] {
+      .pill[data-status='ShuttingDown'] {
         background: rgba(255, 149, 0, 0.12);
         color: #c93400;
       }
@@ -851,7 +868,10 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
         background: var(--bg-primary);
         color: var(--text-primary);
       }
-      .cov-scroll {
+      /* Collapsed: the preview rows fit without scrolling, so nothing is
+         clipped silently.  Expanded: cap the height and scroll — the footer
+         count tells the operator how many rows are in the box. */
+      .cov-scroll.expanded {
         max-height: 480px;
         overflow-y: auto;
       }
@@ -859,6 +879,26 @@ type CoverageFilter = 'all' | 'covered' | 'uncovered';
         position: sticky;
         top: 0;
         z-index: 1;
+      }
+      .cov-foot {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        padding: var(--space-2) var(--space-4);
+        border-top: 1px solid var(--border);
+      }
+      .link-btn {
+        background: none;
+        border: none;
+        padding: 0;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        color: var(--accent);
+        cursor: pointer;
+      }
+      .link-btn:hover {
+        text-decoration: underline;
       }
 
       .note {
@@ -1089,44 +1129,68 @@ export class EAInstancesPageComponent {
     return rows;
   });
 
-  readonly statusDonutOptions = computed<EChartsOption>(() => {
-    const total = this.instances().length;
-    if (total === 0) return {};
-    return {
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
-      series: [
-        {
-          type: 'pie',
-          radius: ['45%', '70%'],
-          center: ['50%', '45%'],
-          label: { show: false },
-          data: [
-            { value: this.activeCount(), name: 'Active', itemStyle: { color: '#34C759' } },
-            { value: this.idleCount(), name: 'Shutting down', itemStyle: { color: '#FF9500' } },
-            {
-              value: this.disconnectedCount(),
-              name: 'Disconnected',
-              itemStyle: { color: '#FF3B30' },
-            },
-          ].filter((d) => d.value > 0),
-        },
-      ],
-    };
+  /**
+   * The coverage table starts collapsed to a preview that fits without a
+   * scrollbar; the footer states the total and offers "Show all".  Ten rows
+   * is enough to surface every uncovered pair (they sort first) on a
+   * typical fleet without pushing the page note off-screen.
+   */
+  protected readonly coveragePreviewRows = 10;
+  readonly coverageExpanded = signal(false);
+
+  readonly coverageRowsVisible = computed(() => {
+    const rows = this.coverageRowsFiltered();
+    return this.coverageExpanded() ? rows : rows.slice(0, this.coveragePreviewRows);
   });
 
+  readonly coverageHiddenCount = computed(
+    () => this.coverageRowsFiltered().length - this.coverageRowsVisible().length,
+  );
+
+  protected toggleCoverageExpanded(): void {
+    this.coverageExpanded.update((v) => !v);
+  }
+
+  /** Dot colour for a count tile: meaning only when the count is non-zero. */
+  protected dotFor(count: number, color: string): string {
+    return count > 0 ? color : NEUTRAL_DOT;
+  }
+
+  readonly coverageDot = computed(() => {
+    if (this.activeSymbolSet().size === 0) return NEUTRAL_DOT;
+    const pct = this.coveragePct();
+    return pct >= 90 ? '#34C759' : pct >= 50 ? '#FF9500' : '#FF3B30';
+  });
+
+  /** Human label for the engine's status enum — the raw value never reaches copy. */
+  protected statusLabel(status: EAInstanceStatus): string {
+    return STATUS_LABELS[status] ?? status;
+  }
+
   readonly symbolsPerEAOptions = computed<EChartsOption>(() => {
+    // ECharts draws category rows bottom-up, so reverse once and share the
+    // ordering between the axis, the bars and the tooltip lookup.
     const rows = [...this.instances()]
-      .map((i) => ({
-        name: this.shortenInstanceId(i.instanceId),
-        value: this.symbolsOf(i).length,
-      }))
+      .map((i) => ({ id: i.instanceId, value: this.symbolsOf(i).length }))
       .sort((a, b) => b.value - a.value)
-      .slice(0, 12);
+      .slice(0, 12)
+      .reverse();
     if (rows.length === 0) return {};
     return {
-      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      grid: { top: 10, right: 50, bottom: 30, left: 130 },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (params: unknown) => {
+          const first = (Array.isArray(params) ? params[0] : params) as
+            | { dataIndex?: number; value?: unknown }
+            | undefined;
+          const row = first?.dataIndex != null ? rows[first.dataIndex] : undefined;
+          if (!row) return '';
+          const noun = row.value === 1 ? 'symbol' : 'symbols';
+          return `<span style="font-family:var(--font-mono,monospace)">${row.id}</span><br/>${row.value} ${noun}`;
+        },
+      },
+      grid: { top: 10, right: 50, bottom: 30, left: 176 },
       xAxis: {
         type: 'value',
         axisLabel: { fontSize: 10, color: '#6E6E73' },
@@ -1134,21 +1198,28 @@ export class EAInstancesPageComponent {
       },
       yAxis: {
         type: 'category',
-        data: rows.map((r) => r.name).reverse(),
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        data: rows.map((r) => this.shortenInstanceId(r.id)),
+        // Truncate from the right with an ellipsis if a label still does not
+        // fit, so the account/login prefix that tells instances apart stays.
+        axisLabel: {
+          fontSize: 10,
+          color: '#6E6E73',
+          width: 164,
+          overflow: 'truncate',
+          ellipsis: '…',
+          hideOverlap: true,
+        },
       },
       series: [
         {
           type: 'bar',
-          data: rows
-            .map((r) => ({
-              value: r.value,
-              itemStyle: {
-                color: r.value === 0 ? '#FF9500' : '#0071E3',
-                borderRadius: [0, 4, 4, 0],
-              },
-            }))
-            .reverse(),
+          data: rows.map((r) => ({
+            value: r.value,
+            itemStyle: {
+              color: r.value === 0 ? '#FF9500' : '#0071E3',
+              borderRadius: [0, 4, 4, 0],
+            },
+          })),
           barWidth: 12,
           label: { show: true, position: 'right', fontSize: 10, color: '#6E6E73' },
         },
@@ -1156,11 +1227,16 @@ export class EAInstancesPageComponent {
     };
   });
 
-  // EAs use a long ULID-ish id ("LASC-MULTI-10-9480-1342186910048494…"). The
-  // chart label runs out of room — keep just the trailing segment for the bar.
+  // Instance ids look like "LASC-MULTI-10-9480-134218691004849480": the
+  // middle segments (account, login) are what tell instances apart, the
+  // trailing chart id only separates siblings on the same login.  Keep the
+  // prefix intact and shrink any long numeric segment to its last 4 digits
+  // so the whole label fits on the axis.
   private shortenInstanceId(id: string): string {
-    const parts = id.split('-');
-    return parts.length > 2 ? `…${parts.slice(-2).join('-')}` : id;
+    return id
+      .split('-')
+      .map((part) => (/^\d{9,}$/.test(part) ? `…${part.slice(-4)}` : part))
+      .join('-');
   }
 
   heartbeatLabel(instance: EAInstanceDto): string {

@@ -44,11 +44,15 @@ const SOURCES = ['SpotAnalysis', 'Strategy', 'Manual', 'SyntheticAnalyser'] as c
 const WAT_OFFSET_MINUTES = 60;
 const WAT_OFFSET_ISO = '+01:00';
 
+/** `days: 0` is the "Custom range" sentinel — the From/To pickers become live. */
+const CUSTOM_WINDOW_DAYS = 0;
+const DEFAULT_WINDOW_DAYS = 30;
 const WINDOW_OPTIONS = [
   { label: '7d', days: 7 },
   { label: '30d', days: 30 },
   { label: '90d', days: 90 },
   { label: '180d', days: 180 },
+  { label: 'Custom range', days: CUSTOM_WINDOW_DAYS },
 ];
 
 /**
@@ -90,25 +94,29 @@ const WINDOW_OPTIONS = [
                 <small class="muted">(custom range overrides)</small>
               }
             </span>
-            <select [(ngModel)]="windowDays" name="windowDays" [disabled]="customRangeActive()">
+            <select [(ngModel)]="windowDays" name="windowDays">
               @for (w of windows; track w.days) {
                 <option [ngValue]="w.days">{{ w.label }}</option>
               }
             </select>
           </label>
-          <label class="field">
-            <span> From <small class="muted">(custom · WAT)</small> </span>
+          <!-- From/To only take effect when Window = "Custom range"; keeping
+               them disabled under a preset stops the two controls from looking
+               like they both apply at once. -->
+          <label class="field" [class.field--off]="!customWindowSelected()">
+            <span> From <small class="muted">(WAT)</small> </span>
             <input
               type="datetime-local"
               [ngModel]="customFromDate()"
               (ngModelChange)="customFromDate.set($event)"
               name="customFromDate"
+              [disabled]="!customWindowSelected()"
               [max]="customToDate() || nowWatDateTime()"
             />
           </label>
-          <label class="field">
+          <label class="field" [class.field--off]="!customWindowSelected()">
             <span>
-              To <small class="muted">(custom · WAT)</small>
+              To <small class="muted">(WAT)</small>
               @if (customRangeActive()) {
                 <button
                   type="button"
@@ -125,6 +133,7 @@ const WINDOW_OPTIONS = [
               [ngModel]="customToDate()"
               (ngModelChange)="customToDate.set($event)"
               name="customToDate"
+              [disabled]="!customWindowSelected()"
               [min]="customFromDate() || null"
               [max]="nowWatDateTime()"
             />
@@ -1446,6 +1455,12 @@ const WINDOW_OPTIONS = [
         gap: 6px;
         font-size: 0.85rem;
       }
+      .field--off {
+        opacity: 0.55;
+      }
+      .field--off input {
+        cursor: not-allowed;
+      }
       .field > span {
         font-size: 0.75rem;
         text-transform: uppercase;
@@ -2429,6 +2444,8 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly customFromDate = signal<string | null>(null);
   readonly customToDate = signal<string | null>(null);
   readonly customRangeActive = computed(() => !!this.customFromDate() && !!this.customToDate());
+  /** True when the Window select is on "Custom range" — the only time From/To apply. */
+  readonly customWindowSelected = computed(() => this.windowDays() === CUSTOM_WINDOW_DAYS);
   /** WAT (UTC+1) offset in the Angular `date` pipe's ±HHmm form, for the range echo. */
   readonly watOffset = '+0100';
   /** Symbols the operator has committed to filter on. Empty = all symbols. */
@@ -3147,12 +3164,15 @@ export class SignalSensitivityPageComponent implements OnInit {
     let toUtc: Date;
     const cf = this.customFromDate();
     const ct = this.customToDate();
-    if (cf && ct) {
+    if (this.customWindowSelected() && cf && ct) {
       fromUtc = new Date(cf + ':00' + WAT_OFFSET_ISO);
       toUtc = new Date(ct + ':00' + WAT_OFFSET_ISO);
     } else {
+      // "Custom range" with an incomplete picker pair falls back to the default
+      // preset rather than a zero-length window (fromUtc === now → no signals).
+      const days = this.customWindowSelected() ? DEFAULT_WINDOW_DAYS : this.windowDays();
       toUtc = now;
-      fromUtc = new Date(now.getTime() - this.windowDays() * 24 * 60 * 60 * 1000);
+      fromUtc = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
     }
 
     const sweep = this.sweepInput()

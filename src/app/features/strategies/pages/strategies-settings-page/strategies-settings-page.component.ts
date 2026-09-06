@@ -48,7 +48,16 @@ interface EditableEntry extends StrategyPromotionConfigEntryDto {
               <h3>{{ group.label }}</h3>
               <span class="muted small">{{ group.entries.length }} key(s)</span>
             </header>
+            <!-- Fixed column template shared by every section so the key
+                 column lines up across cards and never breaks mid-word. -->
             <table class="table">
+              <colgroup>
+                <col class="col-key" />
+                <col class="col-value" />
+                <col class="col-type" />
+                <col class="col-reload" />
+                <col class="col-updated" />
+              </colgroup>
               <thead>
                 <tr>
                   <th>Key</th>
@@ -61,7 +70,7 @@ interface EditableEntry extends StrategyPromotionConfigEntryDto {
               <tbody>
                 @for (e of group.entries; track e.key) {
                   <tr [class.dirty]="e.isDirty">
-                    <td class="mono key">{{ keyLabel(e.key) }}</td>
+                    <td class="mono key" [title]="e.key">{{ keyLabel(e.key) }}</td>
                     <td>
                       @if (e.dataType === 'Bool') {
                         <select
@@ -80,7 +89,15 @@ interface EditableEntry extends StrategyPromotionConfigEntryDto {
                           (ngModelChange)="markDirty(e)"
                         />
                       }
-                      @if (e.description) {
+                      @if (isAutoSeeded(e)) {
+                        <div class="description">
+                          <span
+                            class="badge default"
+                            title="Seeded from the code default by the engine; no operator has changed it yet."
+                            >code default</span
+                          >
+                        </div>
+                      } @else if (e.description) {
                         <div class="description">{{ e.description }}</div>
                       }
                     </td>
@@ -92,12 +109,17 @@ interface EditableEntry extends StrategyPromotionConfigEntryDto {
                         <span class="badge cold">restart</span>
                       }
                     </td>
+                    <!-- An auto-seeded row's timestamp is the seed time, not an
+                         operator edit — say so instead of pairing "not yet
+                         customised" with an edit date. -->
                     <td class="mono nowrap">
-                      {{
-                        e.lastUpdatedAt === '0001-01-01T00:00:00'
-                          ? 'never'
-                          : (e.lastUpdatedAt | date: 'MMM d, HH:mm')
-                      }}
+                      @if (e.lastUpdatedAt === '0001-01-01T00:00:00') {
+                        never
+                      } @else if (isAutoSeeded(e)) {
+                        seeded {{ e.lastUpdatedAt | date: 'MMM d, yyyy' }}
+                      } @else {
+                        {{ e.lastUpdatedAt | date: 'MMM d, yyyy HH:mm' }}
+                      }
                     </td>
                   </tr>
                 }
@@ -194,9 +216,33 @@ interface EditableEntry extends StrategyPromotionConfigEntryDto {
       .table tr.dirty {
         background: rgba(255, 149, 0, 0.06);
       }
+      .table {
+        table-layout: fixed;
+      }
+      .col-key {
+        width: 30%;
+      }
+      .col-value {
+        width: 34%;
+      }
+      .col-type {
+        width: 10%;
+      }
+      .col-reload {
+        width: 12%;
+      }
+      .col-updated {
+        width: 14%;
+      }
       .key {
-        max-width: 340px;
-        word-break: break-all;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .badge.default {
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        cursor: help;
       }
       .value-input {
         width: 100%;
@@ -292,7 +338,7 @@ export class StrategiesSettingsPageComponent implements OnInit {
         this.entries.set(
           rows.map((r) => ({
             ...r,
-            editedValue: r.value,
+            editedValue: displayValue(r),
             isDirty: false,
           })),
         );
@@ -300,7 +346,7 @@ export class StrategiesSettingsPageComponent implements OnInit {
   }
 
   markDirty(entry: EditableEntry): void {
-    entry.isDirty = entry.editedValue !== entry.value;
+    entry.isDirty = !sameValue(entry.dataType, entry.editedValue, entry.value);
     // Re-emit the array so the `dirtyCount` computed picks up the change
     // — mutating in place doesn't notify signals.
     this.entries.set([...this.entries()]);
@@ -332,9 +378,34 @@ export class StrategiesSettingsPageComponent implements OnInit {
     return t.toLowerCase();
   }
 
+  /** Rows the engine's self-seed worker wrote from the code default and nobody has edited. */
+  isAutoSeeded(e: EditableEntry): boolean {
+    return (e.description ?? '').trim() === AUTO_SEED_DESCRIPTION;
+  }
+
   /** Strip the StrategyPromotion: prefix on display since every key in
    *  this page shares it — keeps the key column readable. */
   keyLabel(key: string): string {
     return key.startsWith('StrategyPromotion:') ? key.substring('StrategyPromotion:'.length) : key;
   }
+}
+
+/** Description the engine's EngineConfigSelfSeedWorker stamps on auto-seeded rows. */
+const AUTO_SEED_DESCRIPTION = 'Code default — not yet customised.';
+
+/** Decimals render with two places so "0", "0.5" and "0.55" read as one format. */
+function displayValue(r: StrategyPromotionConfigEntryDto): string {
+  if (r.dataType !== 'Decimal') return r.value;
+  const n = Number(r.value);
+  return Number.isFinite(n) && r.value.trim() !== '' ? n.toFixed(2) : r.value;
+}
+
+/** Numeric types compare by value so "0.50" against a stored "0.5" is not a dirty edit. */
+function sameValue(type: ConfigDataType, a: string, b: string): boolean {
+  if (type === 'Decimal' || type === 'Int') {
+    const x = Number(a);
+    const y = Number(b);
+    if (Number.isFinite(x) && Number.isFinite(y)) return x === y;
+  }
+  return a === b;
 }

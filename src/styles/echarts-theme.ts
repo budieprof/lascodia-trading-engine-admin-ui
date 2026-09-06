@@ -1,3 +1,42 @@
+/**
+ * Value-axis tick formatter shared by both themes.
+ *
+ * Large magnitudes collapse to k / M / B so a P&L or volume axis reads "-100k … 20k" instead of
+ * seven-digit labels that overrun each other ("-100,000,000,000,000 0 20,000" was the literal
+ * rendering on the dashboard's P&L-by-symbol chart, the alerts rules-by-symbol chart and the
+ * audit-trail decision-type chart on 2026-09-05). Small magnitudes — prices, ratios, percentages
+ * under 10k — are left exactly as ECharts would print them, so a 1.16139 price axis is untouched.
+ */
+export function compactAxisNumber(value: number | string): string {
+  const v = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(v)) return String(value);
+  const abs = Math.abs(v);
+  if (abs < 10_000) return String(value);
+  const units: Array<[number, string]> = [
+    [1e9, 'B'],
+    [1e6, 'M'],
+    [1e3, 'k'],
+  ];
+  for (const [div, suffix] of units) {
+    if (abs >= div) {
+      const scaled = v / div;
+      const text =
+        Math.abs(scaled) >= 100 ? scaled.toFixed(0) : scaled.toFixed(1).replace(/\.0$/, '');
+      return `${text}${suffix}`;
+    }
+  }
+  return String(value);
+}
+
+/**
+ * Axis-label defaults applied through the theme so every chart inherits them without each page
+ * repeating the same three lines. `hideOverlap` drops a tick label rather than drawing it on top
+ * of its neighbour; the formatter keeps big numbers short enough that fewer collide to begin with.
+ * A page can still override either per axis.
+ */
+const categoryAxisLabelDefaults = { hideOverlap: true };
+const valueAxisLabelDefaults = { hideOverlap: true, formatter: compactAxisNumber };
+
 export const lascodiaTheme = {
   color: ['#0071E3', '#34C759', '#FF3B30', '#FF9500', '#AF52DE', '#5AC8FA', '#FF2D55', '#64D2FF'],
   backgroundColor: 'transparent',
@@ -53,6 +92,7 @@ export const lascodiaTheme = {
     axisLabel: {
       color: '#6E6E73',
       fontSize: 11,
+      ...categoryAxisLabelDefaults,
     },
     splitLine: {
       show: false,
@@ -68,6 +108,7 @@ export const lascodiaTheme = {
     axisLabel: {
       color: '#6E6E73',
       fontSize: 11,
+      ...valueAxisLabelDefaults,
     },
     splitLine: {
       show: true,
@@ -144,6 +185,7 @@ export const lascodiaDarkTheme = {
     axisLabel: {
       color: '#A1A1A6',
       fontSize: 11,
+      ...categoryAxisLabelDefaults,
     },
     splitLine: {
       show: false,
@@ -159,6 +201,7 @@ export const lascodiaDarkTheme = {
     axisLabel: {
       color: '#A1A1A6',
       fontSize: 11,
+      ...valueAxisLabelDefaults,
     },
     splitLine: {
       show: true,

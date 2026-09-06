@@ -457,6 +457,17 @@
   box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.1);
 }
 
+/* Cancelled / rejected / expired: reached, but not a success — must not
+   wear the same tick and colour as a fill. */
+.timeline-step.failed .timeline-dot {
+  border-color: var(--loss);
+  background: var(--loss);
+  color: white;
+}
+.timeline-step.failed .timeline-label {
+  color: var(--loss);
+}
+
 .dot-check {
   font-size: 12px;
   font-weight: bold;
@@ -537,6 +548,13 @@
 }
 .related-link:hover {
   text-decoration: underline;
+}
+.related-link.inline {
+  margin-left: var(--space-2);
+}
+.related-link .muted {
+  color: var(--text-tertiary);
+  font-weight: var(--font-regular, 400);
 }
 
 .link-arrow {

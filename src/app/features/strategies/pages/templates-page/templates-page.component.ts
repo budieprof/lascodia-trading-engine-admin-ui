@@ -76,12 +76,19 @@ const TIMEFRAMES: readonly Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] a
             format="number"
             dotColor="#34C759"
           />
-          <app-metric-card
-            label="Most-used"
-            [value]="maxApplied()"
-            format="number"
-            dotColor="#AF52DE"
-          />
+          <div class="tile tile--text">
+            <span class="tile-label">Most-used template</span>
+            <span class="tile-value" [title]="mostUsed()?.name ?? ''">
+              @if (mostUsed(); as m) {
+                {{ m.name || '#' + m.id }}
+                <span class="tile-sub"
+                  >{{ m.appliedCount }} application{{ m.appliedCount === 1 ? '' : 's' }}</span
+                >
+              } @else {
+                —
+              }
+            </span>
+          </div>
         </section>
 
         @if (templates().length === 0) {
@@ -227,6 +234,35 @@ const TIMEFRAMES: readonly Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] a
   `,
   styles: [
     `
+      /* Header actions were \`.btn btn-secondary\` with no matching rule on
+         this page, so they rendered as bare text links. */
+      .btn {
+        height: 36px;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-full);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        font-family: inherit;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-2);
+        text-decoration: none;
+        border: none;
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .btn-secondary {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+      }
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -235,8 +271,42 @@ const TIMEFRAMES: readonly Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] a
       }
       .kpis {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(3, 1fr);
         gap: var(--space-3);
+        align-items: start;
+      }
+      .tile--text {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        min-width: 0;
+      }
+      .tile-label {
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        font-weight: var(--font-medium);
+        line-height: 1.3;
+        min-height: 2.6em;
+      }
+      .tile-value {
+        font-size: var(--text-lg);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        line-height: 1.2;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .tile-sub {
+        display: block;
+        font-size: var(--text-xs);
+        font-weight: var(--font-regular);
+        color: var(--text-tertiary);
+        margin-top: 2px;
       }
       .card {
         background: var(--bg-secondary);
@@ -443,9 +513,14 @@ export class TemplatesPageComponent {
   protected readonly totalApplied = computed(() =>
     this.templates().reduce((s, t) => s + t.appliedCount, 0),
   );
-  protected readonly maxApplied = computed(() =>
-    this.templates().reduce((m, t) => (t.appliedCount > m ? t.appliedCount : m), 0),
-  );
+  /** The template applied most often — a name, not a count; null until one has been applied. */
+  protected readonly mostUsed = computed<StrategyTemplateDto | null>(() => {
+    const top = this.templates().reduce<StrategyTemplateDto | null>(
+      (m, t) => (t.appliedCount > 0 && (m === null || t.appliedCount > m.appliedCount) ? t : m),
+      null,
+    );
+    return top;
+  });
 
   // Apply modal -----------------------------------------------------------
   protected readonly pending = signal<StrategyTemplateDto | null>(null);

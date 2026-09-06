@@ -26,7 +26,6 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
-import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 
 /** Status filter chips, in the order an operator scans them. */
 const STATUS_FILTERS = [
@@ -76,7 +75,6 @@ const STATUS_FILTERS = [
     MetricCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
-    EmptyStateComponent,
   ],
   template: `
     <div class="page">
@@ -84,8 +82,15 @@ const STATUS_FILTERS = [
         title="Analysis monitors"
         subtitle="Live market watches created from the LLM chat — what is armed, what fired, and why"
       >
-        <a routerLink="/conversations" class="btn btn-secondary">💬 Conversations</a>
-        <button class="btn btn-secondary" (click)="board.refresh()">↻ Refresh</button>
+        <a routerLink="/conversations" class="btn btn-secondary">Conversations</a>
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="board.refresh()"
+          [disabled]="board.loading()"
+        >
+          Refresh
+        </button>
       </app-page-header>
 
       @if (counters(); as c) {
@@ -116,30 +121,37 @@ const STATUS_FILTERS = [
           (retry)="board.refresh()"
         />
       } @else if (data(); as d) {
-        <div class="kpi-strip">
-          <app-metric-card
-            label="Armed"
-            [value]="d.counters.active"
-            [dotColor]="d.counters.active > 0 ? 'var(--profit)' : undefined"
-          />
-          <app-metric-card label="Paused" [value]="d.counters.paused" />
-          <app-metric-card label="Fired (24h)" [value]="d.counters.firedLast24h" />
-          <app-metric-card
-            label="Expiring < 1h"
-            [value]="d.counters.expiringWithin1h"
-            [dotColor]="d.counters.expiringWithin1h > 0 ? 'var(--warning)' : undefined"
-          />
-          <app-metric-card
-            label="LLM-judged"
-            [value]="d.counters.activeLlmAssisted"
-            [dotColor]="d.counters.activeLlmAssisted > 0 ? 'var(--accent)' : undefined"
-          />
-          <app-metric-card
-            label="Errored"
-            [value]="d.counters.error"
-            [dotColor]="d.counters.error > 0 ? 'var(--loss)' : undefined"
-          />
-        </div>
+        <!-- Six zero tiles above a "No monitors match" block said nothing
+             and pushed the activity feed below the fold; when every counter
+             is zero the strip collapses to one line. -->
+        @if (hasAnyCounter(d.counters)) {
+          <div class="kpi-strip">
+            <app-metric-card
+              label="Armed"
+              [value]="d.counters.active"
+              [dotColor]="d.counters.active > 0 ? 'var(--profit)' : undefined"
+            />
+            <app-metric-card label="Paused" [value]="d.counters.paused" />
+            <app-metric-card label="Fired (24h)" [value]="d.counters.firedLast24h" />
+            <app-metric-card
+              label="Expiring < 1h"
+              [value]="d.counters.expiringWithin1h"
+              [dotColor]="d.counters.expiringWithin1h > 0 ? 'var(--warning)' : undefined"
+            />
+            <app-metric-card
+              label="LLM-judged"
+              [value]="d.counters.activeLlmAssisted"
+              [dotColor]="d.counters.activeLlmAssisted > 0 ? 'var(--accent)' : undefined"
+            />
+            <app-metric-card
+              label="Errored"
+              [value]="d.counters.error"
+              [dotColor]="d.counters.error > 0 ? 'var(--loss)' : undefined"
+            />
+          </div>
+        } @else {
+          <p class="quiet-strip">Nothing armed, paused, fired in the last 24 hours, or errored.</p>
+        }
 
         <div class="filter-row">
           <div class="chips">
@@ -173,10 +185,13 @@ const STATUS_FILTERS = [
         </div>
 
         @if (d.monitors.length === 0) {
-          <app-empty-state
-            title="No monitors match"
-            description="Adjust the filters, or ask the chat to watch something — monitors are created from a conversation."
-          />
+          <div class="data-table-card empty-card">
+            <p class="empty-title">No monitors match</p>
+            <p class="muted small">
+              Adjust the filters, or ask the chat to watch something — monitors are created from a
+              conversation.
+            </p>
+          </div>
         } @else {
           <div class="data-table-card">
             <table class="board-table">
@@ -347,10 +362,12 @@ const STATUS_FILTERS = [
                                     UTC
                                   </dd>
                                   <dt>Cooldown</dt>
-                                  <dd>{{ det.monitor.cooldownSeconds }}s</dd>
+                                  <dd>{{ formatAge(det.monitor.cooldownSeconds) }}</dd>
                                   @if (det.monitor.evaluationMode !== 'Deterministic') {
                                     <dt>LLM throttle</dt>
-                                    <dd>{{ det.monitor.minEvalIntervalSeconds }}s</dd>
+                                    <dd>
+                                      {{ formatAge(det.monitor.minEvalIntervalSeconds ?? 0) }}
+                                    </dd>
                                   }
                                   @if (hasObservedPrice(det.monitor)) {
                                     <dt>Last price seen</dt>
@@ -436,7 +453,7 @@ const STATUS_FILTERS = [
                                         <span class="tl-kind" [attr.data-kind]="e.kind">{{
                                           e.kind
                                         }}</span>
-                                        <span class="tl-note">{{ e.note }}</span>
+                                        <span class="tl-note">{{ humanizeNote(e.note) }}</span>
                                         @if (e.resultLlmInvocationId) {
                                           <a
                                             class="tl-link"
@@ -494,11 +511,13 @@ const STATUS_FILTERS = [
                 "checked, not met" heartbeats are excluded.
               </span>
             </header>
+            <!-- No scroll box: a fixed-height list cut the last visible row in
+                 half with no cue. Show a page's worth and expand on demand. -->
             <ul class="feed">
-              @for (a of d.activity; track a.id) {
+              @for (a of visibleActivity(d.activity); track a.id) {
                 <li>
                   <span class="tl-when mono">{{
-                    a.occurredAtUtc | date: 'MMM d HH:mm' : 'UTC'
+                    a.occurredAtUtc | date: 'MMM d, HH:mm' : 'UTC'
                   }}</span>
                   <span class="tl-kind" [attr.data-kind]="a.kind">{{ a.kind }}</span>
                   <button class="linkish mono" (click)="focusMonitor(a.monitorId)">
@@ -506,13 +525,26 @@ const STATUS_FILTERS = [
                   </button>
                   <span class="mono sym">{{ a.symbol }}</span>
                   <span class="tf">{{ a.timeframe }}</span>
-                  <span class="tl-note">{{ a.note }}</span>
+                  <span class="tl-note">{{ humanizeNote(a.note) }}</span>
                   @if (a.generatedSignalIds) {
                     <span class="tag ok">signals {{ a.generatedSignalIds }}</span>
                   }
                 </li>
               }
             </ul>
+            @if (d.activity.length > activityPreview) {
+              <div class="feed-more">
+                <button
+                  type="button"
+                  class="linkish"
+                  (click)="activityExpanded.set(!activityExpanded())"
+                >
+                  {{
+                    activityExpanded() ? 'Show fewer' : 'Show all ' + d.activity.length + ' events'
+                  }}
+                </button>
+              </div>
+            }
           </section>
         }
       }
@@ -520,11 +552,60 @@ const STATUS_FILTERS = [
   `,
   styles: [
     `
+      /* The layout shell provides the gutter; page-level padding put this
+         route's content 24px right of every other page. */
       .page {
-        padding: var(--space-6);
+        padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
-        gap: var(--space-5);
+        gap: var(--space-4);
+      }
+
+      .btn {
+        height: 36px;
+        display: inline-flex;
+        align-items: center;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-full);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        cursor: pointer;
+        font-family: inherit;
+        text-decoration: none;
+      }
+      .btn-secondary {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--text-primary);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .quiet-strip {
+        margin: 0;
+        padding: var(--space-3) var(--space-4);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+      }
+      .empty-card {
+        padding: var(--space-5) var(--space-4);
+      }
+      .empty-card p {
+        margin: 0;
+      }
+      .empty-title {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        margin-bottom: var(--space-1) !important;
       }
 
       .banner {
@@ -550,8 +631,19 @@ const STATUS_FILTERS = [
 
       .kpi-strip {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-        gap: var(--space-3);
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: var(--space-2);
+        align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .kpi-strip {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 720px) {
+        .kpi-strip {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
 
       .filter-row {
@@ -848,14 +940,23 @@ const STATUS_FILTERS = [
         gap: 4px;
         color: var(--text-tertiary);
       }
+      .timeline {
+        max-height: 420px;
+        overflow-y: auto;
+      }
       .timeline,
       .feed {
         list-style: none;
         margin: 0;
         padding: 0;
         font-size: var(--text-xs);
-        max-height: 420px;
-        overflow-y: auto;
+      }
+      .feed li:last-child {
+        border-bottom: none;
+      }
+      .feed-more {
+        padding-top: var(--space-2);
+        font-size: var(--text-xs);
       }
       .timeline li,
       .feed li {
@@ -980,6 +1081,35 @@ export class AnalysisMonitorsPageComponent {
 
   protected readonly data = this.board.value;
   protected readonly counters = computed(() => this.data()?.counters ?? null);
+
+  /** How many activity rows show before the "Show all" toggle. */
+  protected readonly activityPreview = 12;
+  protected readonly activityExpanded = signal(false);
+
+  protected visibleActivity<T>(activity: T[]): T[] {
+    return this.activityExpanded() ? activity : activity.slice(0, this.activityPreview);
+  }
+
+  protected hasAnyCounter(c: AnalysisMonitorBoardCounters): boolean {
+    return (
+      c.active > 0 ||
+      c.paused > 0 ||
+      c.firedLast24h > 0 ||
+      c.expiringWithin1h > 0 ||
+      c.activeLlmAssisted > 0 ||
+      c.error > 0
+    );
+  }
+
+  /**
+   * Event notes are written engine-side with C#/Python-style literals
+   * ("recurring False → True"). Operators read "off → on"; the literal
+   * casing is what gives it away as a debug dump.
+   */
+  protected humanizeNote(note: string | null | undefined): string {
+    if (!note) return '';
+    return note.replace(/\bTrue\b/g, 'on').replace(/\bFalse\b/g, 'off');
+  }
 
   constructor() {
     // Re-fetch whenever a filter changes.

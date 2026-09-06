@@ -8,7 +8,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
-import { catchError, forkJoin, interval, of, startWith } from 'rxjs';
+import { catchError, forkJoin, interval, of, startWith, type Observable } from 'rxjs';
 
 import { HealthService } from '@core/services/health.service';
 import { WorkersService } from '@core/services/workers.service';
@@ -102,7 +102,9 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           </div>
           <div class="kpi">
             <span class="label">Paper mode</span>
-            <span class="value">{{ status()?.paperMode ?? '—' }}</span>
+            <span class="value" [title]="paperMode() === null ? '' : paperModeHint()">
+              {{ paperModeLabel() }}
+            </span>
           </div>
           <div class="kpi">
             <span class="label">Total workers</span>
@@ -110,48 +112,119 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           </div>
           <div class="kpi">
             <span class="label">Healthy %</span>
+            <!-- Uncoloured until the fleet has reported: 0 workers is unknown, not 0% healthy. -->
             <span
               class="value"
-              [class.good]="healthyPct() >= 95"
-              [class.warn]="healthyPct() < 95 && healthyPct() >= 80"
-              [class.bad]="healthyPct() < 80"
+              [class.good]="workerSnapshots().length > 0 && healthyPct() >= 95"
+              [class.warn]="workerSnapshots().length > 0 && healthyPct() < 95 && healthyPct() >= 80"
+              [class.bad]="workerSnapshots().length > 0 && healthyPct() < 80"
             >
-              {{ healthyPct().toFixed(0) }}%
+              {{ workerSnapshots().length > 0 ? healthyPct().toFixed(0) + '%' : '—' }}
             </span>
           </div>
           <div class="kpi">
             <span class="label">Unresolved DLQ</span>
-            <span
-              class="value"
-              [class.bad]="deadLetters().length > 0"
-              [class.good]="deadLetters().length === 0"
-            >
+            <span class="value" [class.bad]="deadLetters().length > 0">
               {{ deadLetters().length }}
             </span>
           </div>
         </section>
 
-        <!-- 3-col chart row: worker status donut + DLQ event types donut + activity heatmap (placeholder) -->
+        <!-- 3-col chart row. Below three categories a donut is a single ring and a histogram a
+             lone bar — neither says more than the number, so those cases render as a compact
+             stat list in the same slot. -->
         @if (!wallMode()) {
           <section class="row charts-row">
-            <app-chart-card
-              title="Worker status"
-              subtitle="Healthy · Degraded · Failed · Idle distribution"
-              [options]="workerDonutOptions()"
-              height="240px"
-            />
-            <app-chart-card
-              title="DLQ by event type"
-              subtitle="Unresolved events grouped by type"
-              [options]="dlqEventTypeOptions()"
-              height="240px"
-            />
-            <app-chart-card
-              title="DLQ retry distribution"
-              subtitle="Histogram of attempt counts on unresolved rows"
-              [options]="dlqAttemptHistogram()"
-              height="240px"
-            />
+            @if (workerStatusEntries().length >= 3) {
+              <app-chart-card
+                title="Worker status"
+                subtitle="Healthy · Degraded · Failed · Idle distribution"
+                [options]="workerDonutOptions()"
+                height="240px"
+              />
+            } @else {
+              <div class="panel compact-stat">
+                <header class="panel-head">
+                  <h3>Worker status</h3>
+                  <span class="muted small">Healthy · Degraded · Failed · Idle</span>
+                </header>
+                @if (workerStatusEntries().length === 0) {
+                  <p class="muted small">No worker snapshots reported yet.</p>
+                } @else {
+                  <ul class="stat-list">
+                    @for (e of workerStatusEntries(); track e.name) {
+                      <li>
+                        <span class="stat-swatch" [style.background]="e.color"></span>
+                        <span class="stat-name">{{ e.name }}</span>
+                        <span class="stat-value">{{ e.value }}</span>
+                        <span class="stat-share muted">{{ e.share.toFixed(0) }}%</span>
+                      </li>
+                    }
+                  </ul>
+                }
+              </div>
+            }
+
+            @if (dlqTypeEntries().length >= 3) {
+              <app-chart-card
+                title="DLQ by event type"
+                subtitle="Unresolved events grouped by type"
+                [options]="dlqEventTypeOptions()"
+                height="240px"
+              />
+            } @else {
+              <div class="panel compact-stat">
+                <header class="panel-head">
+                  <h3>DLQ by event type</h3>
+                  <span class="muted small">Unresolved events grouped by type</span>
+                </header>
+                @if (dlqTypeEntries().length === 0) {
+                  <p class="muted small">No unresolved dead-letters.</p>
+                } @else {
+                  <ul class="stat-list">
+                    @for (e of dlqTypeEntries(); track e.name) {
+                      <li>
+                        <span class="stat-swatch" [style.background]="e.color"></span>
+                        <span class="stat-name mono">{{ e.name }}</span>
+                        <span class="stat-value">{{ e.value }}</span>
+                        <span class="stat-share muted">{{ e.share.toFixed(0) }}%</span>
+                      </li>
+                    }
+                  </ul>
+                }
+              </div>
+            }
+
+            @if (dlqAttemptEntries().length >= 3) {
+              <app-chart-card
+                title="DLQ retry distribution"
+                subtitle="Attempt counts on unresolved rows"
+                [options]="dlqAttemptHistogram()"
+                height="240px"
+              />
+            } @else {
+              <div class="panel compact-stat">
+                <header class="panel-head">
+                  <h3>DLQ retry distribution</h3>
+                  <span class="muted small">Attempt counts on unresolved rows</span>
+                </header>
+                @if (dlqAttemptEntries().length === 0) {
+                  <p class="muted small">No unresolved dead-letters.</p>
+                } @else {
+                  <ul class="stat-list no-swatch">
+                    @for (e of dlqAttemptEntries(); track e.name) {
+                      <li>
+                        <span class="stat-name">
+                          {{ e.name }} {{ e.name === '1' ? 'attempt' : 'attempts' }}
+                        </span>
+                        <span class="stat-value">{{ e.value }}</span>
+                        <span class="stat-share muted">{{ e.value === 1 ? 'row' : 'rows' }}</span>
+                      </li>
+                    }
+                  </ul>
+                }
+              </div>
+            }
           </section>
         }
 
@@ -162,25 +235,35 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
               <h3>Workers</h3>
               <button type="button" class="link" (click)="goWorkers()">View all →</button>
             </header>
+            <!-- A zero is neutral: "0 failed" painted red reads as a failure. -->
             <div class="worker-totals">
-              <div class="bucket" data-bucket="healthy">
+              <div class="bucket" data-bucket="healthy" [class.zero]="workerCounts().Healthy === 0">
                 <span class="bucket-count">{{ workerCounts().Healthy }}</span>
                 <span class="bucket-label">Healthy</span>
               </div>
-              <div class="bucket" data-bucket="degraded">
+              <div
+                class="bucket"
+                data-bucket="degraded"
+                [class.zero]="workerCounts().Degraded === 0"
+              >
                 <span class="bucket-count">{{ workerCounts().Degraded }}</span>
                 <span class="bucket-label">Degraded</span>
               </div>
-              <div class="bucket" data-bucket="failed">
+              <div class="bucket" data-bucket="failed" [class.zero]="workerCounts().Failed === 0">
                 <span class="bucket-count">{{ workerCounts().Failed }}</span>
                 <span class="bucket-label">Failed</span>
               </div>
-              <div class="bucket" data-bucket="idle">
+              <div class="bucket" data-bucket="idle" [class.zero]="workerCounts().Idle === 0">
                 <span class="bucket-count">{{ workerCounts().Idle }}</span>
                 <span class="bucket-label">Idle</span>
               </div>
             </div>
             @if (worstWorkers().length > 0) {
+              <p class="muted small list-caption">
+                Showing {{ worstWorkers().length }} of {{ nonHealthyCount() }} non-healthy
+                {{ nonHealthyCount() === 1 ? 'worker' : 'workers' }} — failed first, then degraded,
+                then idle.
+              </p>
               <ul class="worker-list">
                 @for (w of worstWorkers(); track w.name) {
                   <li class="worker-item" [attr.data-status]="w.status.toLowerCase()">
@@ -211,12 +294,47 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 description="No unresolved dead-letter rows in the last 25 events."
               />
             } @else {
+              <p class="muted small list-caption">
+                {{ deadLetters().length }} unresolved
+                {{ deadLetters().length === 1 ? 'row' : 'rows' }} — newest 25. Retry re-publishes
+                the event; Discard marks it resolved without replaying.
+              </p>
               <ul class="dlq-list">
                 @for (d of deadLetters(); track d.id) {
-                  <li class="dlq-item">
-                    <span class="dlq-type">{{ d.eventType ?? 'unknown' }}</span>
-                    <span class="dlq-attempts">×{{ d.attemptCount }}</span>
-                    <span class="muted small">{{ d.createdAt | relativeTime }}</span>
+                  <li class="dlq-item" [class.busy]="dlqBusy().has(d.id)">
+                    <div class="dlq-main">
+                      <span class="dlq-type" [title]="d.errorMessage ?? ''">
+                        {{ d.eventType ?? 'unknown' }}
+                      </span>
+                      <span class="dlq-meta muted small">
+                        <span class="dlq-attempts" [class.hot]="d.attemptCount >= 3">
+                          {{ d.attemptCount }}
+                          {{ d.attemptCount === 1 ? 'attempt' : 'attempts' }}
+                        </span>
+                        · {{ d.createdAt | relativeTime }}
+                        @if (d.errorMessage) {
+                          · <span class="dlq-err">{{ d.errorMessage }}</span>
+                        }
+                      </span>
+                    </div>
+                    <div class="dlq-actions">
+                      <button
+                        type="button"
+                        class="btn-mini"
+                        [disabled]="dlqBusy().has(d.id)"
+                        (click)="retryDeadLetter(d)"
+                      >
+                        Retry
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-mini danger"
+                        [disabled]="dlqBusy().has(d.id)"
+                        (click)="discardDeadLetter(d)"
+                      >
+                        Discard
+                      </button>
+                    </div>
                   </li>
                 }
               </ul>
@@ -536,6 +654,63 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       .bucket[data-bucket='idle'] {
         color: #636366;
       }
+      .bucket.zero {
+        color: var(--text-tertiary);
+      }
+      .list-caption {
+        margin: 0;
+      }
+
+      /* Compact stat list — the below-three-categories replacement for a chart card. */
+      .compact-stat {
+        min-height: 0;
+      }
+      .stat-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .stat-list li {
+        display: grid;
+        grid-template-columns: 10px 1fr auto auto;
+        align-items: center;
+        gap: var(--space-2);
+        padding: 8px 10px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        font-size: var(--text-sm);
+      }
+      .stat-list.no-swatch li {
+        grid-template-columns: 1fr auto auto;
+      }
+      .stat-swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+      }
+      .stat-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .stat-name.mono {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+      }
+      .stat-value {
+        font-size: var(--text-lg);
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+      }
+      .stat-share {
+        font-size: var(--text-xs);
+        font-variant-numeric: tabular-nums;
+        min-width: 3ch;
+        text-align: right;
+      }
       .bucket-count {
         font-size: var(--text-xl);
         font-weight: var(--font-semibold);
@@ -629,26 +804,73 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         background: var(--bg-primary);
         border-radius: var(--radius-sm);
       }
+      .dlq-item.busy {
+        opacity: 0.6;
+      }
       .page.wall .dlq-item {
         padding: 8px 12px;
         font-size: var(--text-base);
+      }
+      .dlq-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
       }
       .dlq-type {
         font-family: var(--font-mono);
         font-size: var(--text-xs);
         color: var(--text-primary);
-        flex: 1;
       }
       .page.wall .dlq-type {
         font-size: var(--text-sm);
       }
+      .dlq-meta {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
       .dlq-attempts {
-        font-size: var(--text-xs);
         font-weight: var(--font-semibold);
+      }
+      /* Escalation colour only once retries are actually piling up. */
+      .dlq-attempts.hot {
         color: #c93400;
       }
-      .page.wall .dlq-attempts {
-        font-size: var(--text-sm);
+      .dlq-err {
+        font-family: var(--font-mono);
+      }
+      .dlq-actions {
+        display: flex;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      .btn-mini {
+        height: 26px;
+        padding: 0 10px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .btn-mini:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+      }
+      .btn-mini.danger {
+        color: var(--loss);
+        border-color: rgba(255, 59, 48, 0.35);
+      }
+      .btn-mini.danger:hover:not(:disabled) {
+        background: rgba(255, 59, 48, 0.08);
+      }
+      .btn-mini:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
       }
     `,
   ],
@@ -750,17 +972,20 @@ export class EngineOverviewPageComponent {
     if (this.deadLetters().length === 0) return {};
     return {
       tooltip: { trigger: 'axis' },
-      grid: { top: 10, right: 20, bottom: 30, left: 40 },
+      grid: { top: 10, right: 20, bottom: 36, left: 40 },
       xAxis: {
         type: 'category',
         data: Object.keys(buckets),
         name: 'attempts',
         nameLocation: 'middle',
-        nameGap: 22,
+        nameGap: 24,
+        nameTextStyle: { fontSize: 11, color: '#8E8E93' },
         axisLabel: { fontSize: 10, color: '#6E6E73' },
       },
       yAxis: {
         type: 'value',
+        // Row counts are integers; a 0.2 / 0.4 tick ladder on a one-row queue is nonsense.
+        minInterval: 1,
         axisLabel: { fontSize: 10, color: '#6E6E73' },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
@@ -780,6 +1005,74 @@ export class EngineOverviewPageComponent {
       ],
     };
   });
+
+  // ── Compact fallbacks for the chart row ────────────────────────────
+  // Same numbers the charts use, as ranked lists, for the below-three-categories case.
+  readonly workerStatusEntries = computed(() => {
+    const c = this.workerCounts();
+    const total = this.workerSnapshots().length;
+    const palette = { Healthy: '#34C759', Degraded: '#FF9500', Failed: '#FF3B30', Idle: '#0071E3' };
+    return (Object.keys(c) as (keyof typeof c)[])
+      .filter((k) => c[k] > 0)
+      .map((k) => ({
+        name: k,
+        value: c[k],
+        color: palette[k],
+        share: total > 0 ? (c[k] / total) * 100 : 0,
+      }));
+  });
+
+  readonly dlqTypeEntries = computed(() => {
+    const counts: Record<string, number> = {};
+    for (const d of this.deadLetters()) {
+      const k = d.eventType ?? 'unknown';
+      counts[k] = (counts[k] ?? 0) + 1;
+    }
+    const total = this.deadLetters().length;
+    const palette = ['#FF3B30', '#FF9500', '#AF52DE', '#FFCC00', '#5AC8FA', '#0071E3', '#8E8E93'];
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, value], i) => ({
+        name,
+        value,
+        color: palette[i % palette.length],
+        share: total > 0 ? (value / total) * 100 : 0,
+      }));
+  });
+
+  readonly dlqAttemptEntries = computed(() => {
+    const buckets: Record<string, number> = { '1': 0, '2': 0, '3': 0, '4': 0, '5+': 0 };
+    for (const d of this.deadLetters()) {
+      const a = d.attemptCount ?? 0;
+      const k = a <= 1 ? '1' : a >= 5 ? '5+' : String(a);
+      buckets[k]++;
+    }
+    return Object.entries(buckets)
+      .filter(([, v]) => v > 0)
+      .map(([name, value]) => ({ name, value }));
+  });
+
+  // ── Paper mode ─────────────────────────────────────────────────────
+  // The engine reports paper mode as a string ("true" / "false"); the raw token is not copy.
+  readonly paperMode = computed<boolean | null>(() => {
+    const raw = this.status()?.paperMode;
+    if (raw === null || raw === undefined || raw === '') return null;
+    const v = String(raw).trim().toLowerCase();
+    if (v === 'true' || v === '1' || v === 'on' || v === 'yes') return true;
+    if (v === 'false' || v === '0' || v === 'off' || v === 'no') return false;
+    return null;
+  });
+  readonly paperModeLabel = computed(() => {
+    const on = this.paperMode();
+    return on === null ? '—' : on ? 'On' : 'Off';
+  });
+  readonly paperModeHint = computed(() =>
+    this.paperMode() ? 'Paper mode: orders are simulated' : 'Live trading: orders go to brokers',
+  );
+
+  readonly nonHealthyCount = computed(
+    () => this.workerSnapshots().filter((w) => w.status !== 'Healthy').length,
+  );
 
   readonly worstWorkers = computed(() => {
     const order: Record<string, number> = { Failed: 0, Degraded: 1, Idle: 2, Healthy: 3 };
@@ -805,6 +1098,31 @@ export class EngineOverviewPageComponent {
 
   protected goDeadLetters(): void {
     this.router.navigate(['/dead-letter']);
+  }
+
+  // ── Dead-letter actions ────────────────────────────────────────────
+  // The card used to show only an unlabeled "×N" per row; an operator scanning the wall had no
+  // way to act without leaving the page. Both actions refresh so the row disappears on success.
+  readonly dlqBusy = signal<ReadonlySet<number>>(new Set());
+
+  protected retryDeadLetter(d: DeadLetterDto): void {
+    this.runDlqAction(d.id, this.deadLetterSvc.replay(d.id));
+  }
+
+  protected discardDeadLetter(d: DeadLetterDto): void {
+    this.runDlqAction(d.id, this.deadLetterSvc.resolve(d.id));
+  }
+
+  private runDlqAction(id: number, call: Observable<unknown>): void {
+    this.dlqBusy.update((s) => new Set(s).add(id));
+    call.pipe(catchError(() => of(null))).subscribe(() => {
+      this.dlqBusy.update((s) => {
+        const next = new Set(s);
+        next.delete(id);
+        return next;
+      });
+      this.refresh();
+    });
   }
 
   /**

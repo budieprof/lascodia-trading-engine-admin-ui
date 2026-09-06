@@ -116,7 +116,11 @@ interface ActivityEntry {
         }
       </app-page-header>
 
-      <!-- Hero KPI strip — 12 dense tiles, two rows. -->
+      <!--
+        Hero: the four numbers an operator checks first get full tiles; the
+        rest sit in one compact strip beneath. Twelve equal tiles gave the
+        equity figure the same weight as the worker count.
+      -->
       <div class="hero-strip">
         <div class="kpi-grid">
           <app-metric-card
@@ -125,18 +129,6 @@ interface ActivityEntry {
             format="currency"
             dotColor="#0071E3"
           />
-          <app-metric-card
-            label="Unrealized P&L"
-            [value]="unrealizedPnl()"
-            format="currency"
-            [colorByValue]="true"
-          />
-          <app-metric-card
-            label="Today P&L"
-            [value]="todaysPnl()"
-            format="currency"
-            [colorByValue]="true"
-          />
           <!--
             Reads the fetched closed-position window (most recent 1000 in
             scope, closedAt desc), not all history — calling it "Lifetime"
@@ -144,28 +136,18 @@ interface ActivityEntry {
             page holds.
           -->
           <app-metric-card
-            label="Realized P&L"
+            label="Realized P&L (recent)"
             [value]="lifetimePnl()"
             format="currency"
             [colorByValue]="true"
-          />
-          <app-metric-card
-            label="Win Rate"
-            [value]="winRatePct()"
-            format="percent"
-            dotColor="#34C759"
-          />
-          <app-metric-card
-            label="Profit Factor"
-            [value]="profitFactor()"
-            format="number"
-            dotColor="#0071E3"
           />
           <app-metric-card
             label="Drawdown"
             [value]="drawdownPct()"
             format="percent"
             [colorByValue]="true"
+            [invertColor]="true"
+            [dotColor]="drawdownDot()"
           />
           <app-metric-card
             label="Open Positions"
@@ -173,30 +155,21 @@ interface ActivityEntry {
             format="number"
             dotColor="#5AC8FA"
           />
-          <app-metric-card
-            label="Active Strategies"
-            [value]="activeStrategyCount()"
-            format="number"
-            dotColor="#34C759"
-          />
-          <app-metric-card
-            label="Pending Signals"
-            [value]="pendingSignalCount()"
-            format="number"
-            dotColor="#FF9500"
-          />
-          <app-metric-card
-            label="EA Connections"
-            [value]="activeEaCount()"
-            format="number"
-            dotColor="#AF52DE"
-          />
-          <app-metric-card
-            label="Workers OK"
-            [value]="healthyWorkerCount()"
-            format="number"
-            [dotColor]="failedWorkerCount() > 0 ? '#FF3B30' : '#34C759'"
-          />
+        </div>
+        <div class="stat-strip">
+          @for (s of secondaryStats(); track s.label) {
+            <div class="strip-item" [title]="s.hint ?? ''">
+              <span class="strip-label">{{ s.label }}</span>
+              <span
+                class="strip-value"
+                [class.profit]="s.tone === 'good'"
+                [class.loss]="s.tone === 'bad'"
+                [class.warn]="s.tone === 'warn'"
+              >
+                {{ s.value }}
+              </span>
+            </div>
+          }
         </div>
       </div>
 
@@ -218,31 +191,50 @@ interface ActivityEntry {
         />
       </div>
 
-      <!-- 3-up: P&L by symbol attribution, exposure, allocation.
-           Height is 380px so P&L-by-Symbol's 30-day breakdown (often
-           15-20 symbols) gets ~22px per category slot — small enough to
-           fit, big enough for the bars to render at their full
-           barMaxWidth without ECharts auto-shrinking them. -->
+      <!--
+        3-up: P&L by symbol attribution, exposure, allocation. P&L sizes
+        itself to its row count (top 10 + "Other") so bars never collapse
+        into invisibility; exposure is a plain bar list because two or three
+        symbols in a 380px chart box was mostly empty canvas.
+      -->
       <div class="charts-3">
         <app-chart-card
           title="P&L by Symbol"
-          subtitle="Realized contribution last 30 days"
+          [subtitle]="pnlBySymbolSubtitle()"
           [options]="pnlBySymbolChart()"
-          height="380px"
+          [height]="pnlBySymbolHeight()"
           [loading]="loading()"
         />
-        <app-chart-card
-          title="Position Exposure"
-          subtitle="Open lots by symbol"
-          [options]="exposureChart()"
-          height="380px"
-          [loading]="loading()"
-        />
+        <section class="panel exposure-panel">
+          <header class="panel-head">
+            <h3>Position Exposure</h3>
+            <span class="muted">Open lots by symbol</span>
+          </header>
+          @if (exposureRows().length > 0) {
+            <ul class="xbar-list">
+              @for (r of exposureRows(); track r.symbol) {
+                <li class="xbar-row">
+                  <span class="mono xbar-symbol">{{ r.symbol }}</span>
+                  <span class="xbar-track">
+                    <span class="xbar-fill" [style.width.%]="r.pct"></span>
+                  </span>
+                  <span class="mono xbar-value">{{ r.lots | number: '1.2-2' }}</span>
+                </li>
+              }
+            </ul>
+            <div class="xbar-total muted">
+              {{ exposureTotalLots() | number: '1.2-2' }} lots across
+              {{ exposureRows().length }} symbol{{ exposureRows().length === 1 ? '' : 's' }}
+            </div>
+          } @else {
+            <div class="empty-panel">No open positions</div>
+          }
+        </section>
         <app-chart-card
           title="Strategy Allocation"
-          subtitle="Active ensemble weights"
+          [subtitle]="allocationSubtitle()"
           [options]="allocationChart()"
-          height="380px"
+          height="300px"
           [loading]="loading()"
         />
       </div>
@@ -281,10 +273,8 @@ interface ActivityEntry {
                       {{ p.direction === 'Long' ? '↑' : '↓' }}
                     </td>
                     <td class="num mono">{{ p.openLots | number: '1.2-2' }}</td>
-                    <td class="num mono">{{ p.averageEntryPrice | number: '1.4-5' }}</td>
-                    <td class="num mono">
-                      {{ p.currentPrice !== null ? (p.currentPrice | number: '1.4-5') : '—' }}
-                    </td>
+                    <td class="num mono">{{ fmtPrice(p.symbol, p.averageEntryPrice) }}</td>
+                    <td class="num mono">{{ fmtPrice(p.symbol, p.currentPrice) }}</td>
                     <td
                       class="num mono"
                       [class.profit]="p.unrealizedPnL > 0"
@@ -358,9 +348,13 @@ interface ActivityEntry {
         </section>
       </div>
 
-      <!-- Activity feed, worker health, and alerts row. -->
-      <div class="ops-3">
-        <section class="panel">
+      <!--
+        Activity feed + worker health on one row, alerts + overfit watchlist
+        on the next. Four panels in a three-column grid left the watchlist
+        alone on a half-empty row.
+      -->
+      <div class="ops-grid">
+        <section class="panel ops-activity">
           <header class="panel-head">
             <h3>Recent Activity</h3>
             <span class="muted">Last {{ activityFeed().length }} events</span>
@@ -375,7 +369,10 @@ interface ActivityEntry {
                   @if (e.detail) {
                     <span class="muted activity-detail">{{ e.detail }}</span>
                   }
-                  <span class="muted activity-time">{{ e.at | relativeTime }}</span>
+                  <!-- One absolute stamp per row; mixed "about 20 hours ago" / "1 day ago" read as two scales. -->
+                  <span class="muted activity-time" [title]="e.at | date: 'd MMM yyyy, HH:mm:ss'">
+                    {{ e.at | date: 'd MMM HH:mm' }}
+                  </span>
                 </li>
               }
             </ul>
@@ -384,7 +381,7 @@ interface ActivityEntry {
           }
         </section>
 
-        <section class="panel">
+        <section class="panel ops-workers">
           <header class="panel-head">
             <h3>Worker Health</h3>
             <a routerLink="/worker-health" class="link">All workers</a>
@@ -414,10 +411,10 @@ interface ActivityEntry {
           @if (problemWorkers().length > 0) {
             <ul class="worker-list">
               @for (w of problemWorkers(); track w.name) {
-                <li class="worker-row" [attr.data-status]="w.status">
-                  <span class="status-dot" [attr.data-status]="w.status"></span>
+                <li class="worker-row" [attr.data-status]="w.statusLabel">
+                  <span class="status-dot" [attr.data-status]="w.statusLabel"></span>
                   <span class="worker-name mono">{{ w.name }}</span>
-                  <span class="worker-meta muted">{{ w.status }}</span>
+                  <span class="worker-meta muted">{{ w.statusLabel }}</span>
                   @if (w.lastErrorMessage) {
                     <span class="worker-err" [title]="w.lastErrorMessage">
                       {{ w.lastErrorMessage }}
@@ -433,34 +430,41 @@ interface ActivityEntry {
           }
         </section>
 
-        <section class="panel">
+        <section class="panel ops-alerts">
           <header class="panel-head">
-            <h3>Active Alerts</h3>
+            <h3>Recent Alerts</h3>
             <a routerLink="/alerts" class="link">All alerts</a>
           </header>
           @if (recentAlerts().length > 0) {
             <ul class="alerts">
               @for (a of recentAlerts(); track a.id) {
                 <li class="alert-item">
-                  <span class="alert-pill" [attr.data-active]="a.isActive ? 'true' : 'false'">
+                  <span
+                    class="alert-pill"
+                    [attr.data-severity]="a.severity"
+                    [title]="a.isActive ? 'Rule enabled' : 'Rule disabled'"
+                  >
                     {{ a.alertType }}
                   </span>
-                  <span class="mono">{{ a.symbol ?? '—' }}</span>
-                  <span class="muted alert-channel">{{ a.severity }}</span>
-                  @if (a.lastTriggeredAt) {
-                    <span class="muted alert-time">
-                      {{ a.lastTriggeredAt | relativeTime }}
-                    </span>
-                  }
+                  <span class="mono">{{ a.symbol ?? 'fleet' }}</span>
+                  <span class="muted alert-channel">
+                    {{ a.severity }}{{ a.isActive ? '' : ' · rule disabled' }}
+                  </span>
+                  <span
+                    class="muted alert-time"
+                    [title]="a.lastTriggeredAt | date: 'd MMM yyyy, HH:mm'"
+                  >
+                    {{ a.lastTriggeredAt | relativeTime }}
+                  </span>
                 </li>
               }
             </ul>
           } @else {
-            <div class="empty-panel">No alerts configured</div>
+            <div class="empty-panel">No alert has fired yet</div>
           }
         </section>
 
-        <section class="panel">
+        <section class="panel ops-overfit">
           <header class="panel-head">
             <h3>Overfit Watchlist</h3>
             <a routerLink="/ml-models" class="link">All models</a>
@@ -508,48 +512,51 @@ interface ActivityEntry {
         </section>
       </div>
 
-      <!-- Compact status footer. -->
-      <div class="status-grid">
-        <section class="status-card">
-          <h4>Engine</h4>
-          @if (healthStatus()) {
-            <p class="pill healthy">Running</p>
-          } @else {
-            <p class="pill down">Stopped</p>
-          }
+      <!-- Compact status footer — same strip styling as the hero's secondary stats. -->
+      <div class="stat-strip status-strip">
+        <div class="strip-item">
+          <span class="strip-label">Engine</span>
+          <span class="strip-value" [class.profit]="healthStatus()" [class.loss]="!healthStatus()">
+            {{ healthStatus() ? 'Running' : 'Stopped' }}
+          </span>
           @if (engineStatus(); as s) {
-            <span class="muted">
-              {{ s.paperMode ?? 'live' }} · checked {{ s.checkedAt | relativeTime }}
+            <!--
+              paperMode is the raw EngineConfig string ("true" / "false"), not a mode name — the
+              card used to print a literal "false" under "Running".
+            -->
+            <span class="strip-sub">
+              {{ isPaperMode(s.paperMode) ? 'paper trading' : 'live trading' }} · checked
+              {{ s.checkedAt | relativeTime }}
             </span>
           }
-        </section>
-        <section class="status-card">
-          <h4>Drawdown</h4>
+        </div>
+        <div class="strip-item">
+          <span class="strip-label">Drawdown</span>
           @if (drawdown(); as d) {
-            <p class="mono" [class.profit]="d.drawdownPct === 0" [class.loss]="d.drawdownPct > 0">
-              {{ d.drawdownPct.toFixed(2) }}%
-            </p>
-            <span class="muted">{{ d.recoveryMode ?? 'Normal' }}</span>
+            <span class="strip-value" [class.loss]="d.drawdownPct > 0">
+              {{ d.drawdownPct | number: '1.2-2' }}%
+            </span>
+            <span class="strip-sub">{{ d.recoveryMode }} mode</span>
           } @else {
-            <p class="muted">—</p>
+            <span class="strip-value muted">—</span>
           }
-        </section>
-        <section class="status-card">
-          <h4>Account</h4>
+        </div>
+        <div class="strip-item">
+          <span class="strip-label">Account</span>
           @if (account(); as a) {
-            <p class="mono">{{ a.accountName ?? a.accountId }}</p>
-            <span class="muted">
+            <span class="strip-value">{{ a.accountName ?? a.accountId }}</span>
+            <span class="strip-sub">
               {{ a.currency ?? '' }} · margin {{ marginUsedPct() | number: '1.1-1' }}%
             </span>
           } @else {
-            <p class="muted">—</p>
+            <span class="strip-value muted">—</span>
           }
-        </section>
-        <section class="status-card">
-          <h4>ML Models</h4>
+        </div>
+        <div class="strip-item">
+          <span class="strip-label">ML Models</span>
           @if (activeMlModelCount() !== null) {
-            <p class="mono">{{ activeMlModelCount() }} active</p>
-            <span class="muted">
+            <span class="strip-value">{{ activeMlModelCount() | number }} active</span>
+            <span class="strip-sub">
               @if (mostRecentMlModel(); as m) {
                 latest {{ m.symbol }} {{ m.timeframe }} · {{ m.trainedAt | relativeTime }}
               } @else {
@@ -557,18 +564,18 @@ interface ActivityEntry {
               }
             </span>
           } @else {
-            <p class="muted">—</p>
+            <span class="strip-value muted">—</span>
           }
-        </section>
-        <section class="status-card">
-          <h4>Last Signal</h4>
+        </div>
+        <div class="strip-item">
+          <span class="strip-label">Last Signal</span>
           @if (lastSignalAt()) {
-            <p class="mono">{{ lastSignalAt() | relativeTime }}</p>
-            <span class="muted">{{ todaysSignalCount() }} today</span>
+            <span class="strip-value">{{ lastSignalAt() | relativeTime }}</span>
+            <span class="strip-sub">{{ todaysSignalCount() | number }} today</span>
           } @else {
-            <p class="muted">No signals yet</p>
+            <span class="strip-value muted">No signals yet</span>
           }
-        </section>
+        </div>
       </div>
     </div>
   `,
@@ -673,59 +680,162 @@ interface ActivityEntry {
           background: var(--bg-secondary);
         }
       }
+      /* minmax(0, 1fr) keeps every tile the same width — with plain 1fr a long
+         currency value widened its own column and squeezed its neighbours. */
       .kpi-grid {
         display: grid;
-        grid-template-columns: repeat(6, 1fr);
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: var(--space-3);
         position: relative;
         z-index: 1;
-      }
-      @media (max-width: 1400px) {
-        .kpi-grid {
-          grid-template-columns: repeat(4, 1fr);
-        }
+        align-items: start;
       }
       @media (max-width: 900px) {
         .kpi-grid {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
+      }
+
+      /* One strip style for the demoted hero stats and the status footer. */
+      .stat-strip {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: var(--space-2);
+        position: relative;
+        z-index: 1;
+        margin-top: var(--space-3);
+      }
+      .stat-strip.status-strip {
+        margin-top: 0;
+      }
+      .strip-item {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+        padding: var(--space-2) var(--space-3);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+      }
+      .strip-label {
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .strip-value {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .strip-value.warn {
+        color: var(--warning);
+      }
+      .strip-sub {
+        font-size: 10.5px;
+        color: var(--text-tertiary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       .charts-2-1 {
         display: grid;
         grid-template-columns: 2fr 1fr;
         gap: var(--space-4);
+        align-items: start;
       }
       .charts-3 {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: var(--space-4);
+        align-items: start;
       }
       .tables-2 {
         display: grid;
         grid-template-columns: 3fr 2fr;
         gap: var(--space-4);
+        align-items: start;
       }
-      .ops-3 {
+      .ops-grid {
         display: grid;
-        grid-template-columns: 2fr 1.2fr 1.2fr;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
         gap: var(--space-4);
+        align-items: start;
       }
-      .status-grid {
-        display: grid;
-        grid-template-columns: repeat(5, 1fr);
-        gap: var(--space-3);
+      .ops-activity {
+        grid-column: span 4;
+      }
+      .ops-workers {
+        grid-column: span 2;
+      }
+      .ops-alerts,
+      .ops-overfit {
+        grid-column: span 3;
       }
       @media (max-width: 1200px) {
         .charts-2-1,
         .charts-3,
-        .tables-2,
-        .ops-3 {
+        .tables-2 {
           grid-template-columns: 1fr;
         }
-        .status-grid {
-          grid-template-columns: repeat(2, 1fr);
+        .ops-grid {
+          grid-template-columns: 1fr;
         }
+        .ops-activity,
+        .ops-workers,
+        .ops-alerts,
+        .ops-overfit {
+          grid-column: auto;
+        }
+      }
+
+      /* Exposure bar list */
+      .xbar-list {
+        list-style: none;
+        margin: 0;
+        padding: var(--space-2) 0;
+      }
+      .xbar-row {
+        display: grid;
+        grid-template-columns: 72px 1fr 56px;
+        align-items: center;
+        gap: var(--space-3);
+        padding: 5px var(--space-4);
+        font-size: var(--text-xs);
+      }
+      .xbar-symbol {
+        font-weight: var(--font-semibold);
+      }
+      .xbar-track {
+        height: 8px;
+        border-radius: var(--radius-full);
+        background: var(--bg-tertiary);
+        overflow: hidden;
+      }
+      .xbar-fill {
+        display: block;
+        height: 100%;
+        background: #0071e3;
+        border-radius: var(--radius-full);
+      }
+      .xbar-value {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .xbar-total {
+        padding: var(--space-2) var(--space-4) var(--space-3);
+        font-size: 10.5px;
+        border-top: 1px solid var(--border);
       }
 
       .panel {
@@ -1036,6 +1146,9 @@ interface ActivityEntry {
       .status-dot[data-status='Failed'] {
         background: var(--loss);
       }
+      .status-dot[data-status='Stale'] {
+        background: var(--warning);
+      }
       .all-good {
         padding: var(--space-3) var(--space-4);
         text-align: center;
@@ -1071,13 +1184,22 @@ interface ActivityEntry {
         background: var(--bg-tertiary);
         color: var(--text-secondary);
       }
-      .alert-pill[data-active='true'] {
+      /* Colour carries severity, not whether the rule is switched on. */
+      .alert-pill[data-severity='High'],
+      .alert-pill[data-severity='Critical'] {
+        background: rgba(255, 59, 48, 0.12);
+        color: #d70015;
+      }
+      .alert-pill[data-severity='Medium'] {
         background: rgba(255, 149, 0, 0.12);
         color: #c93400;
       }
       .alert-channel,
       .alert-time {
         font-size: 10.5px;
+      }
+      .alert-time {
+        white-space: nowrap;
       }
 
       .overfit-list {
@@ -1144,50 +1266,8 @@ interface ActivityEntry {
         white-space: nowrap;
       }
 
-      .status-card {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        box-shadow: var(--shadow-sm);
-        padding: var(--space-3) var(--space-4);
-      }
-      .status-card h4 {
-        margin: 0 0 var(--space-1);
-        font-size: 10.5px;
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        font-weight: var(--font-medium);
-      }
-      .status-card p {
-        margin: 0;
-        font-size: var(--text-base);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-      }
-      .status-card .muted {
-        display: block;
-        margin-top: 2px;
-        color: var(--text-tertiary);
-        font-size: 10.5px;
-      }
       .mono {
         font-family: 'SF Mono', 'Fira Code', monospace;
-      }
-      .pill {
-        display: inline-flex;
-        padding: 2px 10px;
-        border-radius: var(--radius-full);
-        font-size: var(--text-xs);
-        font-weight: var(--font-semibold);
-      }
-      .pill.healthy {
-        background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
-      }
-      .pill.down {
-        background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
       }
       .muted {
         color: var(--text-tertiary);
@@ -1270,7 +1350,19 @@ export class DashboardPageComponent implements OnInit {
     return open.reduce((s, p) => s + p.unrealizedPnL, 0);
   });
   readonly openPositionCount = computed<number | null>(() => this.openPositions().length || null);
-  readonly activeStrategyCount = signal<number | null>(null);
+  readonly strategies = signal<StrategyDto[]>([]);
+  /**
+   * A strategy is "active" if its status says so OR the ensemble is giving it
+   * weight — the allocation donut draws the second set, so counting only the
+   * first showed "Active Strategies 0" beside a donut of six.
+   */
+  readonly activeStrategyCount = computed<number | null>(() => {
+    const ids = new Set<number>();
+    for (const s of this.strategies()) if (s.status === 'Active') ids.add(s.id);
+    for (const a of this.allocations()) if (a.weight > 0) ids.add(a.strategyId);
+    if (this.strategies().length === 0 && this.allocations().length === 0) return null;
+    return ids.size;
+  });
   readonly pendingSignalCount = signal<number | null>(null);
   readonly pendingSignals = signal<TradeSignalDto[]>([]);
   readonly allSignals = signal<TradeSignalDto[]>([]);
@@ -1448,18 +1540,103 @@ export class DashboardPageComponent implements OnInit {
     return (wins / closed.length) * 100;
   });
 
-  readonly profitFactor = computed(() => {
+  /** null when there is nothing to divide; Infinity when there were wins and no losses. */
+  readonly profitFactor = computed<number | null>(() => {
     const closed = this.closedPositions();
-    if (closed.length === 0) return 0;
+    if (closed.length === 0) return null;
     const grossWin = closed.filter((p) => p.realizedPnL > 0).reduce((s, p) => s + p.realizedPnL, 0);
     const grossLoss = Math.abs(
       closed.filter((p) => p.realizedPnL < 0).reduce((s, p) => s + p.realizedPnL, 0),
     );
-    if (grossLoss === 0) return grossWin > 0 ? 99 : 0;
+    if (grossLoss === 0) return grossWin > 0 ? Infinity : null;
     return grossWin / grossLoss;
   });
 
   readonly drawdownPct = computed(() => this.drawdown()?.drawdownPct ?? 0);
+
+  /** Engine defaults: Reduced from 10 %, Halted from 20 %. */
+  readonly drawdownDot = computed(() => {
+    const dd = this.drawdownPct();
+    if (dd >= 20) return '#FF3B30';
+    if (dd >= 10) return '#FF9500';
+    return '#34C759';
+  });
+
+  /**
+   * The demoted hero stats. Formatted here so the strip shows one number
+   * style (USD, thousands separators, fixed decimals) and colour only where
+   * the sign or a threshold means something — a 63 % win rate is not "good"
+   * next to a losing book, and a 0.7 profit factor is not.
+   */
+  readonly secondaryStats = computed<
+    { label: string; value: string; tone: 'good' | 'bad' | 'warn' | ''; hint?: string }[]
+  >(() => {
+    const money = (v: number | null) =>
+      v == null
+        ? '—'
+        : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v);
+    const signTone = (v: number | null): 'good' | 'bad' | '' =>
+      v == null || v === 0 ? '' : v > 0 ? 'good' : 'bad';
+    const pf = this.profitFactor();
+    const pfTone: 'good' | 'bad' | 'warn' | '' =
+      pf == null ? '' : pf >= 1.5 ? 'good' : pf >= 1 ? 'warn' : 'bad';
+    const closed = this.closedPositions().length;
+    const failed = this.failedWorkerCount();
+    const stale = this.staleWorkerCount();
+    return [
+      {
+        label: 'Unrealized P&L',
+        value: money(this.unrealizedPnl()),
+        tone: signTone(this.unrealizedPnl()),
+      },
+      { label: 'Today P&L', value: money(this.todaysPnl()), tone: signTone(this.todaysPnl()) },
+      {
+        label: 'Win rate',
+        value: closed === 0 ? '—' : `${this.winRatePct().toFixed(1)}%`,
+        tone: '',
+        hint: closed === 0 ? undefined : `${closed.toLocaleString('en-US')} recent closed trades`,
+      },
+      {
+        label: 'Profit factor',
+        value: pf == null ? '—' : pf === Infinity ? '∞' : pf.toFixed(2),
+        tone: pfTone,
+        hint: 'Gross wins ÷ gross losses over the recent closed window',
+      },
+      {
+        label: 'Active strategies',
+        value: this.activeStrategyCount() == null ? '—' : String(this.activeStrategyCount()),
+        tone: '',
+      },
+      {
+        label: 'Pending signals',
+        value: this.pendingSignalCount() == null ? '—' : String(this.pendingSignalCount()),
+        tone: (this.pendingSignalCount() ?? 0) > 0 ? 'warn' : '',
+      },
+      {
+        label: 'EA connections',
+        value: String(this.activeEaCount()),
+        tone: this.activeEaCount() === 0 && this.liveAccounts().length > 0 ? 'bad' : '',
+      },
+      {
+        label: 'Workers OK',
+        value: `${this.healthyWorkerCount()} / ${this.totalWorkerCount()}`,
+        tone: failed > 0 ? 'bad' : stale > 0 ? 'warn' : '',
+        hint: failed > 0 || stale > 0 ? `${failed} failed · ${stale} stale` : undefined,
+      },
+    ];
+  });
+
+  /**
+   * Price precision follows the instrument: 3 decimals for JPY crosses and
+   * metals-style quotes, 5 for everything else — and the same digits for entry
+   * and current so the two columns line up.
+   */
+  fmtPrice(symbol: string | null, price: number | null): string {
+    if (price == null || !Number.isFinite(price)) return '—';
+    const s = (symbol ?? '').toUpperCase();
+    const digits = s.includes('JPY') || s.startsWith('XAU') || s.startsWith('XAG') ? 3 : 5;
+    return price.toFixed(digits);
+  }
 
   readonly marginUsedPct = computed(() => {
     const a = this.account();
@@ -1491,22 +1668,50 @@ export class DashboardPageComponent implements OnInit {
   );
   readonly staleWorkerCount = computed(() => this.workers().filter((w) => w.isStale).length);
 
-  // Surface only the worth-investigating workers so the panel stays compact.
+  // Surface only the worth-investigating workers so the panel stays compact. Stale is a
+  // problem too: `isStale` is a flag that overlaps the status (a "Healthy" worker whose last
+  // heartbeat is old is stale), so the panel used to say "All 64 workers nominal" under a row
+  // reading 61 healthy · 3 idle · 2 stale — numbers that neither add up nor agree with the
+  // message.
   readonly problemWorkers = computed(() =>
     this.workers()
-      .filter((w) => w.status === 'Failed' || w.status === 'Degraded')
+      .filter((w) => w.status === 'Failed' || w.status === 'Degraded' || w.isStale)
+      .map((w) => ({
+        ...w,
+        // What the row SAYS. A stale worker keeps its engine status for filtering but is shown
+        // as stale, because that is the reason it is in this list.
+        statusLabel:
+          w.isStale && w.status !== 'Failed' && w.status !== 'Degraded' ? 'Stale' : w.status,
+      }))
       .slice(0, 5),
   );
+
+  /** The engine reports paper mode as the raw config string, "true" or "false". */
+  isPaperMode(raw: string | null | undefined): boolean {
+    return typeof raw === 'string' && raw.trim().toLowerCase() === 'true';
+  }
 
   readonly topOpenPositions = computed(() =>
     [...this.openPositions()].sort((a, b) => b.unrealizedPnL - a.unrealizedPnL).slice(0, 6),
   );
 
-  readonly recentAlerts = computed(() =>
-    [...this.alerts()]
+  /**
+   * Alerts that have actually fired, newest first, one row per (type, symbol).
+   * The engine keeps several rule rows for the same type+symbol (each with its
+   * own dedup key), so the raw list showed "MLMonitoringStale EURUSD" twice.
+   */
+  readonly recentAlerts = computed(() => {
+    const byKey = new Map<string, AlertDto>();
+    for (const a of this.alerts()) {
+      if (!a.lastTriggeredAt) continue;
+      const key = `${a.alertType}|${a.symbol ?? ''}`;
+      const prev = byKey.get(key);
+      if (!prev || (prev.lastTriggeredAt ?? '') < a.lastTriggeredAt) byKey.set(key, a);
+    }
+    return [...byKey.values()]
       .sort((a, b) => (b.lastTriggeredAt ?? '').localeCompare(a.lastTriggeredAt ?? ''))
-      .slice(0, 6),
-  );
+      .slice(0, 6);
+  });
 
   readonly activeMlModelCount = computed(() =>
     this.mlModels().length === 0 ? null : this.mlModels().filter((m) => m.isActive).length,
@@ -1669,9 +1874,14 @@ export class DashboardPageComponent implements OnInit {
     };
   });
 
-  readonly pnlBySymbolChart = computed<EChartsOption>(() => {
+  /**
+   * Realized P&L per symbol over 30 days, biggest winners first, losers last.
+   * Twenty symbols in a fixed box made most bars sub-pixel; the chart now
+   * keeps the ten largest contributors by magnitude, folds the rest into one
+   * "Other" bar, and sizes its own height from the row count.
+   */
+  private readonly pnlBySymbolRows = computed(() => {
     const closed = this.closedPositions();
-    if (closed.length === 0) return emptyChart('No closed trades yet');
     const buckets = new Map<string, number>();
     const cutoff = Date.now() - 30 * 24 * 3600_000;
     for (const p of closed) {
@@ -1679,60 +1889,93 @@ export class DashboardPageComponent implements OnInit {
       if (new Date(p.closedAt).getTime() < cutoff) continue;
       buckets.set(p.symbol, (buckets.get(p.symbol) ?? 0) + p.realizedPnL);
     }
-    const sorted = Array.from(buckets.entries()).sort((a, b) => b[1] - a[1]);
-    if (sorted.length === 0) return emptyChart('No trades in the last 30 days');
+    const byMagnitude = Array.from(buckets.entries()).sort(
+      (a, b) => Math.abs(b[1]) - Math.abs(a[1]),
+    );
+    const top = byMagnitude.slice(0, 10);
+    const rest = byMagnitude.slice(10);
+    const rows = top.sort((a, b) => b[1] - a[1]).map(([symbol, pnl]) => ({ symbol, pnl }));
+    if (rest.length > 0) {
+      rows.push({
+        symbol: `Other (${rest.length})`,
+        pnl: rest.reduce((s, [, v]) => s + v, 0),
+      });
+    }
+    return { rows, symbolCount: buckets.size };
+  });
+
+  readonly pnlBySymbolHeight = computed(
+    () => `${Math.max(220, 48 + 26 * this.pnlBySymbolRows().rows.length)}px`,
+  );
+
+  readonly pnlBySymbolSubtitle = computed(() => {
+    const { rows, symbolCount } = this.pnlBySymbolRows();
+    if (rows.length === 0) return 'Realized contribution, last 30 days';
+    return symbolCount > 10
+      ? `Realized, last 30 days · top 10 of ${symbolCount} symbols + other`
+      : `Realized, last 30 days · ${symbolCount} symbol${symbolCount === 1 ? '' : 's'}`;
+  });
+
+  readonly pnlBySymbolChart = computed<EChartsOption>(() => {
+    if (this.closedPositions().length === 0) return emptyChart('No closed trades yet');
+    const { rows } = this.pnlBySymbolRows();
+    if (rows.length === 0) return emptyChart('No trades in the last 30 days');
     return {
-      grid: { top: 10, right: 24, bottom: 28, left: 70 },
+      grid: { top: 8, right: 24, bottom: 28, left: 8, containLabel: true },
       xAxis: { type: 'value', axisLabel: { fontSize: 10 } },
-      yAxis: { type: 'category', data: sorted.map(([s]) => s), axisLabel: { fontSize: 10 } },
-      tooltip: { trigger: 'axis' },
+      yAxis: {
+        type: 'category',
+        data: rows.map((r) => r.symbol),
+        axisLabel: { fontSize: 10 },
+      },
+      tooltip: {
+        trigger: 'axis',
+        valueFormatter: (v) =>
+          new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(v)),
+      },
       series: [
         {
           type: 'bar',
-          data: sorted.map(([, v]) => ({
-            value: +v.toFixed(2),
+          data: rows.map((r) => ({
+            value: +r.pnl.toFixed(2),
             itemStyle: {
-              color: v >= 0 ? '#34C759' : '#FF3B30',
-              borderRadius: [0, 3, 3, 0],
+              color: r.pnl >= 0 ? '#34C759' : '#FF3B30',
+              borderRadius: r.pnl >= 0 ? [0, 3, 3, 0] : [3, 0, 0, 3],
             },
           })),
-          // barMaxWidth — bar grows up to 18px when there's vertical room;
-          // ECharts auto-shrinks below this when the category slot is
-          // narrower (lots of symbols).  Without it, a tall card with few
-          // symbols ends up with chunky 40-50px bars.
-          barMaxWidth: 18,
+          barMaxWidth: 16,
         },
       ],
     };
   });
 
-  readonly exposureChart = computed<EChartsOption>(() => {
-    const open = this.openPositions();
-    if (open.length === 0) return emptyChart('No open positions');
+  /** Open lots per symbol as a bar list — sized against the largest symbol. */
+  readonly exposureRows = computed(() => {
     const byBreakdown = new Map<string, number>();
-    for (const p of open) {
+    for (const p of this.openPositions()) {
       if (!p.symbol) continue;
       byBreakdown.set(p.symbol, (byBreakdown.get(p.symbol) ?? 0) + p.openLots);
     }
     const sorted = Array.from(byBreakdown.entries()).sort((a, b) => b[1] - a[1]);
-    return {
-      grid: { top: 10, right: 20, bottom: 28, left: 70 },
-      xAxis: { type: 'value', axisLabel: { fontSize: 10 } },
-      yAxis: { type: 'category', data: sorted.map(([s]) => s), axisLabel: { fontSize: 10 } },
-      tooltip: { trigger: 'axis' },
-      series: [
-        {
-          type: 'bar',
-          data: sorted.map(([, lots]) => +lots.toFixed(2)),
-          itemStyle: { color: '#0071E3', borderRadius: [0, 3, 3, 0] },
-          barMaxWidth: 18,
-        },
-      ],
-    };
+    const max = sorted[0]?.[1] ?? 0;
+    return sorted.map(([symbol, lots]) => ({
+      symbol,
+      lots,
+      pct: max > 0 ? (lots / max) * 100 : 0,
+    }));
+  });
+
+  readonly exposureTotalLots = computed(() => this.exposureRows().reduce((s, r) => s + r.lots, 0));
+
+  readonly allocationSubtitle = computed(() => {
+    const n = this.allocations().filter((a) => a.weight > 0).length;
+    return n === 0
+      ? 'Ensemble weights'
+      : `Ensemble weights · ${n} strateg${n === 1 ? 'y' : 'ies'} allocated`;
   });
 
   readonly allocationChart = computed<EChartsOption>(() => {
-    const allocs = this.allocations();
+    const allocs = this.allocations().filter((a) => a.weight > 0);
     if (allocs.length === 0) return emptyChart('No active allocations');
     const data = allocs
       .slice()
@@ -1742,18 +1985,28 @@ export class DashboardPageComponent implements OnInit {
         value: +(a.weight * 100).toFixed(2),
         itemStyle: { color: PALETTE[i % PALETTE.length] },
       }));
+    const pct = new Map(data.map((d) => [d.name, d.value]));
     return {
       tooltip: { trigger: 'item', formatter: '{b}: {d}%' },
+      // A vertical legend beside the ring lists every strategy with its
+      // weight; the scrolling bottom legend showed one truncated name at a time.
       legend: {
-        bottom: 4,
-        type: 'scroll',
-        textStyle: { fontSize: 10 },
+        orient: 'vertical',
+        right: 0,
+        top: 'middle',
+        type: 'plain',
+        icon: 'circle',
+        itemWidth: 8,
+        itemHeight: 8,
+        itemGap: 6,
+        textStyle: { fontSize: 10, width: 118, overflow: 'truncate' },
+        formatter: (name: string) => `${name}  ${(pct.get(name) ?? 0).toFixed(1)}%`,
       },
       series: [
         {
           type: 'pie',
-          radius: ['45%', '70%'],
-          center: ['50%', '42%'],
+          radius: ['46%', '72%'],
+          center: ['30%', '50%'],
           label: { show: false },
           data,
         },
@@ -1928,7 +2181,7 @@ export class DashboardPageComponent implements OnInit {
         this.rawClosedPositions.set(closedPositions.filter((p) => p.status === 'Closed'));
         this.rawRecentOrders.set(orders);
 
-        this.activeStrategyCount.set(strategies.filter((s) => s.status === 'Active').length);
+        this.strategies.set(strategies);
 
         // Signals are multi-account (engine-side fan-out via SignalAccountAttempt),
         // so the Pending Signals tile stays fleet-wide and is labelled

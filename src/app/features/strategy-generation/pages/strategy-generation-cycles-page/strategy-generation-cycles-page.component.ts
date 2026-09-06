@@ -19,8 +19,10 @@ import type { EChartsOption } from 'echarts';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { DatePipe } from '@angular/common';
 
 /**
  * Strategy-generation timeline. Renders the last N cycle runs as a vertical
@@ -35,8 +37,10 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     PageHeaderComponent,
     CardSkeletonComponent,
     EmptyStateComponent,
+    ErrorStateComponent,
     ChartCardComponent,
     RelativeTimePipe,
+    DatePipe,
   ],
   template: `
     <div class="page">
@@ -69,13 +73,26 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
       @if (loading() && cycles().length === 0) {
         <app-card-skeleton [lines]="6" />
+      } @else if (loadFailed()) {
+        <app-error-state
+          title="Could not load generation cycles"
+          message="The strategy-generation cycles endpoint returned an error."
+          (retry)="load()"
+        />
       } @else if (cycles().length === 0) {
         <app-empty-state
           title="No cycles yet"
           description="StrategyGenerationWorker hasn't run a cycle (or none match the current filter)."
         />
       } @else {
-        <!-- 8-card KPI strip — fleet-wide cycle posture -->
+        @if (idleState(); as idle) {
+          <div class="idle-banner" [attr.data-level]="idle.level">
+            <strong>Generation idle since {{ idle.since | date: 'MMM d, yyyy HH:mm' }} UTC</strong>
+            — the last cycle started {{ idle.label }}. Trigger a cycle or check that
+            StrategyGenerationWorker is enabled and scheduled.
+          </div>
+        }
+        <!-- KPI strip — fleet-wide cycle posture -->
         <div class="gen-kpis">
           <div class="gen-kpi">
             <span class="kpi-label">Cycles shown</span>
@@ -97,17 +114,29 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           </div>
           <div class="gen-kpi">
             <span class="kpi-label">Success rate</span>
+            <!-- "Completed" only means the cycle did not throw. A cycle that
+                 produced nothing is not a success worth painting green. -->
             <span
               class="kpi-value"
-              [class.good]="successRate() >= 95"
+              [class.good]="successRate() >= 95 && totalCandidates() > 0"
               [class.bad]="successRate() < 80"
+              [title]="
+                totalCandidates() === 0
+                  ? 'Cycles completed without errors but created no candidates'
+                  : ''
+              "
             >
               {{ successRate().toFixed(0) }}%
             </span>
           </div>
           <div class="gen-kpi">
             <span class="kpi-label">Candidates created</span>
-            <span class="kpi-value">{{ totalCandidates() }}</span>
+            <span class="kpi-value" [class.warn]="totalCandidates() === 0">{{
+              totalCandidates()
+            }}</span>
+            @if (totalCandidates() === 0) {
+              <span class="kpi-note">0 in {{ cycles().length }} cycles</span>
+            }
           </div>
           <div class="gen-kpi">
             <span class="kpi-label">Symbols processed</span>
@@ -119,7 +148,13 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           </div>
           <div class="gen-kpi">
             <span class="kpi-label">Last cycle</span>
-            <span class="kpi-value sm">{{ lastCycleLabel() }}</span>
+            <span
+              class="kpi-value sm"
+              [class.warn]="idleState()?.level === 'warn'"
+              [class.bad]="idleState()?.level === 'bad'"
+            >
+              {{ lastCycleLabel() }}
+            </span>
           </div>
         </div>
 
@@ -131,12 +166,23 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             [options]="funnelOptions()"
             height="240px"
           />
-          <app-chart-card
-            title="Cycle activity (last 24h)"
-            subtitle="Cycles per hour — gaps reveal idle periods"
-            [options]="activityOptions()"
-            height="240px"
-          />
+          @if (activityOptions(); as opts) {
+            <app-chart-card
+              title="Cycle activity (last 24h)"
+              subtitle="Cycles per hour — gaps reveal idle periods"
+              [options]="opts"
+              height="240px"
+            />
+          } @else {
+            <div class="gen-board stat-card">
+              <header class="gen-board-head">
+                <h3>Cycle activity (last 24h)</h3>
+              </header>
+              <p class="stat-line muted">
+                No cycles in the last 24h — last run {{ lastCycleLabel() }}.
+              </p>
+            </div>
+          }
         </div>
 
         <!-- 2-col chart row: durations over time + outcome breakdown -->
@@ -147,12 +193,25 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             [options]="durationOptions()"
             height="220px"
           />
-          <app-chart-card
-            title="Outcome distribution"
-            subtitle="Status breakdown across the visible cycles"
-            [options]="statusDonutOptions()"
-            height="220px"
-          />
+          @if (statusDonutOptions(); as opts) {
+            <app-chart-card
+              title="Outcome distribution"
+              subtitle="Status breakdown across the visible cycles"
+              [options]="opts"
+              height="220px"
+            />
+          } @else {
+            <div class="gen-board stat-card">
+              <header class="gen-board-head">
+                <h3>Outcome distribution</h3>
+              </header>
+              <p class="stat-line">
+                <span class="stat-value">{{ cycles().length }}</span>
+                cycle{{ cycles().length === 1 ? '' : 's' }}, all
+                <b>{{ singleStatusLabel() }}</b>
+              </p>
+            </div>
+          }
         </div>
 
         <!-- Failures-only summary (renders only when there are any) -->
@@ -176,10 +235,16 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
               <tbody>
                 @for (c of failedCycles(); track c.id) {
                   <tr>
-                    <td class="mono">{{ shortCycleId(c.cycleId) }}</td>
+                    <td class="mono">
+                      <span class="hash-chip" [title]="c.cycleId">{{ cycleHash(c.cycleId) }}</span>
+                    </td>
                     <td class="mono bad">{{ c.failureStage ?? '—' }}</td>
-                    <td class="failure-msg">{{ c.failureMessage ?? '—' }}</td>
-                    <td class="mono">{{ c.startedAtUtc | relativeTime }}</td>
+                    <td class="failure-msg" [title]="c.failureMessage ?? ''">
+                      {{ c.failureMessage ?? '—' }}
+                    </td>
+                    <td class="mono nowrap" [title]="c.startedAtUtc | date: 'medium'">
+                      {{ c.startedAtUtc | relativeTime }}
+                    </td>
                   </tr>
                 }
               </tbody>
@@ -201,36 +266,25 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                   <div class="dot"></div>
                   <div class="card">
                     <header class="card-head">
-                      <div>
-                        <span class="cycle-id" title="{{ c.cycleId }}">
-                          {{ shortCycleId(c.cycleId) }}
-                        </span>
+                      <div class="card-id">
+                        <span class="cycle-date">{{
+                          c.startedAtUtc | date: 'MMM d, yyyy HH:mm'
+                        }}</span>
+                        <span class="hash-chip" [title]="c.cycleId">{{
+                          cycleHash(c.cycleId)
+                        }}</span>
                         <span class="status">{{ c.status }}</span>
                       </div>
-                      <span class="muted">{{ c.startedAtUtc | relativeTime }}</span>
+                      <span class="muted" [title]="c.startedAtUtc | date: 'medium'">{{
+                        c.startedAtUtc | relativeTime
+                      }}</span>
                     </header>
                     <div class="metrics">
-                      <span
-                        ><strong>{{ c.candidatesCreated }}</strong> created</span
-                      >
-                      <span
-                        ><strong>{{ c.reserveCandidatesCreated }}</strong> reserve</span
-                      >
-                      <span
-                        ><strong>{{ c.candidatesScreened }}</strong> screened</span
-                      >
-                      <span
-                        ><strong>{{ c.symbolsProcessed }}</strong> symbols</span
-                      >
-                      <span
-                        ><strong>{{ c.symbolsSkipped }}</strong> skipped</span
-                      >
-                      <span
-                        ><strong>{{ c.strategiesPruned }}</strong> pruned</span
-                      >
-                      <span
-                        ><strong>{{ c.portfolioFilterRemoved }}</strong> filtered out</span
-                      >
+                      @for (m of cycleMetrics(c); track m.label) {
+                        <span [class.zero]="m.value === 0"
+                          ><strong>{{ m.value }}</strong> {{ m.label }}</span
+                        >
+                      }
                       @if (c.durationMs !== null) {
                         <span
                           ><strong>{{ formatDuration(c.durationMs) }}</strong> elapsed</span
@@ -460,13 +514,82 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       /* Generation density additions */
       .gen-kpis {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: var(--space-2);
+        align-items: start;
       }
-      @media (max-width: 1400px) {
-        .gen-kpis {
-          grid-template-columns: repeat(4, 1fr);
-        }
+      .idle-banner {
+        padding: var(--space-3) var(--space-4);
+        border-radius: var(--radius-md);
+        border: 1px solid rgba(255, 149, 0, 0.4);
+        border-left: 4px solid var(--warning);
+        background: rgba(255, 149, 0, 0.08);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+      .idle-banner[data-level='bad'] {
+        border-color: rgba(255, 59, 48, 0.4);
+        border-left-color: var(--loss);
+        background: rgba(255, 59, 48, 0.08);
+      }
+      .kpi-note {
+        font-size: 10px;
+        color: var(--text-tertiary);
+      }
+      .gen-kpi .kpi-value.warn {
+        color: var(--warning);
+      }
+      .stat-card {
+        display: flex;
+        flex-direction: column;
+        min-height: 220px;
+      }
+      .stat-line {
+        margin: 0;
+        padding: var(--space-4);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-wrap: wrap;
+      }
+      .stat-value {
+        font-size: var(--text-2xl);
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+      }
+      .card-id {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-wrap: wrap;
+      }
+      .cycle-date {
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+      }
+      .hash-chip {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: 10.5px;
+        padding: 1px 7px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        cursor: help;
+      }
+      .nowrap {
+        white-space: nowrap;
+      }
+      .metrics .zero {
+        color: var(--text-tertiary);
+      }
+      .metrics .zero strong {
+        color: var(--text-tertiary);
+        font-weight: var(--font-regular);
       }
       @media (max-width: 720px) {
         .gen-kpis {
@@ -510,7 +633,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         color: var(--loss);
       }
       .gen-kpi .kpi-value.sm {
-        font-size: var(--text-sm);
+        font-size: var(--text-base);
       }
 
       .gen-charts {
@@ -592,6 +715,7 @@ export class StrategyGenerationCyclesPageComponent {
 
   readonly cycles = signal<StrategyGenerationCycleRunDto[]>([]);
   readonly loading = signal(true);
+  readonly loadFailed = signal(false);
   readonly triggering = signal(false);
   readonly statusFilter = signal<string | null>(null);
 
@@ -638,13 +762,16 @@ export class StrategyGenerationCyclesPageComponent {
     return this.formatDuration(avg);
   });
 
-  readonly lastCycleLabel = computed(() => {
-    const cycles = this.cycles();
-    if (cycles.length === 0) return '—';
-    const newest = cycles
+  private readonly newestCycleStart = computed(() => {
+    const newest = this.cycles()
       .map((c) => new Date(c.startedAtUtc).getTime())
       .filter((t) => Number.isFinite(t))
       .sort((a, b) => b - a)[0];
+    return newest ?? null;
+  });
+
+  readonly lastCycleLabel = computed(() => {
+    const newest = this.newestCycleStart();
     if (!newest) return '—';
     const ageSec = Math.floor((Date.now() - newest) / 1000);
     if (ageSec < 60) return `${ageSec}s ago`;
@@ -652,6 +779,59 @@ export class StrategyGenerationCyclesPageComponent {
     if (ageSec < 86400) return `${Math.floor(ageSec / 3600)}h ago`;
     return `${Math.floor(ageSec / 86400)}d ago`;
   });
+
+  /**
+   * The worker's cadence is a server-side setting the page cannot read, so
+   * idleness is judged against the observed cadence: the median gap between
+   * the visible cycles (floored at one hour). Three cadences missed is amber,
+   * a week or more with no cycle is red.
+   */
+  readonly idleState = computed<{ level: 'warn' | 'bad'; since: string; label: string } | null>(
+    () => {
+      const newest = this.newestCycleStart();
+      if (!newest) return null;
+      const starts = this.cycles()
+        .map((c) => new Date(c.startedAtUtc).getTime())
+        .filter((t) => Number.isFinite(t))
+        .sort((a, b) => a - b);
+      const gaps = starts
+        .slice(1)
+        .map((t, i) => t - starts[i])
+        .filter((g) => g > 0);
+      const cadence =
+        gaps.length > 0 ? gaps.sort((a, b) => a - b)[Math.floor(gaps.length / 2)] : 3600_000;
+      const age = Date.now() - newest;
+      const threshold = Math.max(cadence * 3, 3600_000);
+      if (age < threshold) return null;
+      return {
+        level: age >= 7 * 86400_000 ? 'bad' : 'warn',
+        since: new Date(newest).toISOString(),
+        label: this.lastCycleLabel(),
+      };
+    },
+  );
+
+  /** Label for the outcome stat line when every visible cycle shares one status. */
+  readonly singleStatusLabel = computed(() => {
+    const c = this.statusCounts();
+    if (c.completed > 0) return 'completed';
+    if (c.failed > 0) return 'failed';
+    if (c.running > 0) return 'running';
+    return 'in an unknown state';
+  });
+
+  /** Timeline counters — kept in one place so zero stages can be de-emphasised. */
+  cycleMetrics(c: StrategyGenerationCycleRunDto): { label: string; value: number }[] {
+    return [
+      { label: 'created', value: c.candidatesCreated },
+      { label: 'reserve', value: c.reserveCandidatesCreated },
+      { label: 'screened', value: c.candidatesScreened },
+      { label: 'symbols', value: c.symbolsProcessed },
+      { label: 'skipped', value: c.symbolsSkipped },
+      { label: 'pruned', value: c.strategiesPruned },
+      { label: 'filtered out', value: c.portfolioFilterRemoved },
+    ];
+  }
 
   readonly failedCycles = computed(() =>
     this.cycles().filter((c) => (c.status ?? '').toLowerCase() === 'failed'),
@@ -692,12 +872,25 @@ export class StrategyGenerationCyclesPageComponent {
         value: cycles.reduce((s, c) => s + c.portfolioFilterRemoved, 0),
         color: '#AF52DE',
       },
-    ];
+    ].filter((st) => st.value > 0);
+    // Empty tracks for zero stages say nothing; list only the stages that
+    // carried volume, and say so when none did.
+    if (stages.length === 0) {
+      return {
+        title: {
+          text: 'No candidates moved through any stage',
+          left: 'center',
+          top: 'center',
+          textStyle: { fontSize: 12, color: '#8E8E93' },
+        },
+      };
+    }
     return {
       tooltip: { trigger: 'axis' },
-      grid: { top: 10, right: 30, bottom: 30, left: 100 },
+      grid: { top: 10, right: 40, bottom: 30, left: 100 },
       xAxis: {
         type: 'value',
+        minInterval: 1,
         axisLabel: { fontSize: 10, color: '#6E6E73' },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
@@ -722,7 +915,7 @@ export class StrategyGenerationCyclesPageComponent {
     };
   });
 
-  readonly activityOptions = computed<EChartsOption>(() => {
+  readonly activityOptions = computed<EChartsOption | null>(() => {
     // Bucket the last 24 hours into 1-hour bins.
     const buckets = new Map<string, number>();
     const now = new Date();
@@ -742,17 +935,18 @@ export class StrategyGenerationCyclesPageComponent {
       buckets.set(key, (buckets.get(key) ?? 0) + 1);
     }
     const entries = Array.from(buckets.entries());
-    if (entries.every(([, v]) => v === 0)) return {};
+    if (entries.every(([, v]) => v === 0)) return null;
     return {
       tooltip: { trigger: 'axis' },
       grid: { top: 10, right: 20, bottom: 30, left: 40 },
       xAxis: {
         type: 'category',
         data: entries.map(([k]) => k),
-        axisLabel: { fontSize: 9, color: '#6E6E73', rotate: 35 },
+        axisLabel: { fontSize: 10, color: '#6E6E73', hideOverlap: true },
       },
       yAxis: {
         type: 'value',
+        minInterval: 1,
         axisLabel: { fontSize: 10, color: '#6E6E73' },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
@@ -772,23 +966,43 @@ export class StrategyGenerationCyclesPageComponent {
   readonly durationOptions = computed<EChartsOption>(() => {
     const cycles = [...this.cycles()].reverse(); // oldest → newest
     if (cycles.length === 0) return {};
+    const fmt = (ms: number) => this.formatDuration(ms);
     return {
-      tooltip: { trigger: 'axis' },
-      grid: { top: 10, right: 20, bottom: 30, left: 50 },
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const p = Array.isArray(params) ? params[0] : params;
+          const c = cycles[p.dataIndex];
+          const started = new Date(c.startedAtUtc).toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+          });
+          return `${started}<br/>${c.status} · ${fmt(p.value)}`;
+        },
+      },
+      grid: { top: 28, right: 20, bottom: 30, left: 60 },
       xAxis: {
         type: 'category',
-        data: cycles.map((c) => this.shortCycleId(c.cycleId).slice(0, 8)),
-        axisLabel: {
-          fontSize: 9,
-          color: '#6E6E73',
-          rotate: 35,
-          interval: Math.max(0, Math.floor(cycles.length / 10) - 1),
-        },
+        // Dated labels — the cycle-id prefix is a timestamp with the
+        // separators stripped, unreadable as an axis.
+        data: cycles.map((c) =>
+          new Date(c.startedAtUtc).toLocaleDateString('en-CA', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+          }),
+        ),
+        axisLabel: { fontSize: 10, color: '#6E6E73', hideOverlap: true },
       },
       yAxis: {
         type: 'value',
-        name: 'ms',
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        name: 'duration',
+        nameGap: 12,
+        axisLabel: { fontSize: 10, color: '#6E6E73', formatter: (v: number) => fmt(v) },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
       series: [
@@ -812,9 +1026,11 @@ export class StrategyGenerationCyclesPageComponent {
     };
   });
 
-  readonly statusDonutOptions = computed<EChartsOption>(() => {
+  readonly statusDonutOptions = computed<EChartsOption | null>(() => {
     const c = this.statusCounts();
-    if (c.completed + c.failed + c.running + c.other === 0) return {};
+    const populated = [c.completed, c.failed, c.running, c.other].filter((v) => v > 0).length;
+    // One status = one full ring = no information; the stat line covers it.
+    if (populated < 2) return null;
     return {
       tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
       legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
@@ -874,9 +1090,14 @@ export class StrategyGenerationCyclesPageComponent {
     });
   }
 
-  protected shortCycleId(id: string): string {
+  /**
+   * Cycle ids are `<yyyyMMddHHmmss><guid-ish>`; the timestamp is already
+   * shown as a date beside the chip, so the chip carries only the hash tail.
+   */
+  protected cycleHash(id: string): string {
     if (!id) return '—';
-    return id.length > 24 ? `${id.slice(0, 12)}…${id.slice(-8)}` : id;
+    const tail = id.replace(/^\d{14}/, '').replace(/^[-_]/, '');
+    return tail.length > 8 ? tail.slice(-8) : tail || id.slice(-8);
   }
 
   protected formatDuration(ms: number): string {
@@ -885,8 +1106,9 @@ export class StrategyGenerationCyclesPageComponent {
     return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1_000)}s`;
   }
 
-  private load(): void {
+  protected load(): void {
     this.loading.set(true);
+    this.loadFailed.set(false);
     this.service
       .listCycles({
         currentPage: 1,
@@ -895,10 +1117,12 @@ export class StrategyGenerationCyclesPageComponent {
       })
       .subscribe({
         next: (res) => {
+          this.loadFailed.set(!res?.status);
           this.cycles.set(res?.data?.data ?? []);
           this.loading.set(false);
         },
         error: () => {
+          this.loadFailed.set(true);
           this.cycles.set([]);
           this.loading.set(false);
         },

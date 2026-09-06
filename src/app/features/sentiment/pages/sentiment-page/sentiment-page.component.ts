@@ -922,10 +922,20 @@ export class SentimentPageComponent {
             }))
             .reverse(),
           barWidth: 16,
+          // Labelled neutral reference line: the default markLine label is the
+          // bare axis value drawn over the tick text, which rendered as a smeared
+          // "50" glyph on the compass.
           markLine: {
             silent: true,
             symbol: 'none',
             lineStyle: { color: '#8E8E93', type: 'dashed' },
+            label: {
+              show: true,
+              position: 'insideEndTop',
+              formatter: 'Neutral (50)',
+              fontSize: 10,
+              color: '#8E8E93',
+            },
             data: [{ xAxis: 50 }],
           },
           label: { show: true, position: 'right', fontSize: 10, color: '#6E6E73' },

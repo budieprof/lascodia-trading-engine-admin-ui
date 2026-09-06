@@ -68,6 +68,22 @@ interface EditorFormValue {
         [title]="row()?.name ? row()!.name + ' / ' + row()!.version : 'Prompt template'"
         subtitle="Version-controlled LLM system prompt"
       >
+        <!-- Fork / Diff live in the header so they are reachable without
+             scrolling past a 40-row prompt body. -->
+        @if (row()) {
+          <button
+            type="button"
+            class="btn-secondary"
+            (click)="openForkModal()"
+            [disabled]="!canEdit()"
+            [title]="canEdit() ? 'Fork this version' : 'Requires prompttemplate.edit permission'"
+          >
+            Fork
+          </button>
+          <button type="button" class="btn-secondary" (click)="openDiffPicker()">
+            Diff vs other version
+          </button>
+        }
         <a routerLink="/prompt-templates" class="btn-secondary">‹ Back to list</a>
       </app-page-header>
 
@@ -77,7 +93,14 @@ interface EditorFormValue {
         <section class="card empty error">Template not found.</section>
       } @else if (row(); as r) {
         <!-- State banner ------------------------------------------------- -->
-        @if (r.isActive) {
+        @if (r.isActive && isNotLive(r)) {
+          <div class="banner banner--not-live">
+            <strong>Active (DB) — not the live prompt.</strong>
+            This row is the table's active version, but the engine only consults the table while
+            <code>UseDbBackedPromptTemplate = true</code>; the notes below flag it as not live. To
+            edit, <strong>fork</strong> it to a new version first.
+          </div>
+        } @else if (r.isActive) {
           <div class="banner banner--active">
             <strong>Active live template.</strong>
             To edit, <strong>fork</strong> it to a new version first; then promote the fork to
@@ -105,7 +128,8 @@ interface EditorFormValue {
               <span class="label">Status</span>
               <span
                 class="pill"
-                [class.pill--active]="r.isActive"
+                [class.pill--active]="r.isActive && !isNotLive(r)"
+                [class.pill--not-live]="r.isActive && isNotLive(r)"
                 [class.pill--archived]="r.isArchived"
                 [class.pill--draft]="isDraft(r)"
               >
@@ -147,7 +171,8 @@ interface EditorFormValue {
             <span>Notes</span>
             <textarea
               formControlName="notes"
-              rows="2"
+              class="notes-editor"
+              rows="4"
               [readonly]="!canEditBody()"
               placeholder="What was the goal of this version?"
             ></textarea>
@@ -156,21 +181,21 @@ interface EditorFormValue {
           <label class="field">
             <span>
               System prompt
-              <small class="muted">
-                ({{ promptLength() }} chars
-                @if (dirty()) {
-                  · <em>unsaved changes</em>
-                }
-                )
-              </small>
+              <small class="muted"
+                >({{ promptLength() | number }} chars{{
+                  dirty() ? ' · unsaved changes' : ''
+                }})</small
+              >
             </span>
+            <!-- Soft wrap: prompt bodies are prose paragraphs, and wrap="off"
+                 cut every line at the right edge with no horizontal cue. -->
             <textarea
               formControlName="systemPrompt"
               class="prompt-editor"
               rows="40"
               [readonly]="!canEditBody()"
               spellcheck="false"
-              wrap="off"
+              wrap="soft"
             ></textarea>
           </label>
         </form>
@@ -202,16 +227,6 @@ interface EditorFormValue {
             }
           }
 
-          <button
-            type="button"
-            class="btn-secondary"
-            (click)="openForkModal()"
-            [disabled]="!canEdit()"
-            [title]="canEdit() ? 'Fork this version' : 'Requires prompttemplate.edit permission'"
-          >
-            Fork
-          </button>
-
           @if (isDraft(r)) {
             <button
               type="button"
@@ -235,19 +250,32 @@ interface EditorFormValue {
               Archive
             </button>
           }
-
-          <button type="button" class="btn-secondary" (click)="openDiffPicker()">
-            Diff vs other version
-          </button>
         </section>
       }
 
       <!-- Fork modal ----------------------------------------------------- -->
       @if (forkOpen() && row(); as r) {
         <div class="modal-scrim" (click)="closeForkModal()">
-          <div class="modal-card" (click)="$event.stopPropagation()">
+          <div
+            class="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="fork-title"
+            (click)="$event.stopPropagation()"
+          >
             <div class="modal-header">
-              <h2>Fork {{ r.name }} / {{ r.version }}</h2>
+              <h2 id="fork-title">
+                Fork <span class="mono">{{ r.name }}</span> /
+                <span class="mono">{{ r.version }}</span>
+              </h2>
+              <button
+                type="button"
+                class="modal-close"
+                (click)="closeForkModal()"
+                aria-label="Close"
+              >
+                ×
+              </button>
             </div>
             <div class="modal-body">
               <label class="field">
@@ -486,6 +514,19 @@ interface EditorFormValue {
         color: var(--text-secondary);
         border-color: var(--border);
       }
+      .banner--not-live {
+        background: rgba(255, 149, 0, 0.12);
+        color: var(--warning, #b3640a);
+        border-color: rgba(255, 149, 0, 0.35);
+      }
+      .banner code {
+        font-family: var(--font-mono, monospace);
+        font-size: 0.85em;
+      }
+      .pill--not-live {
+        background: rgba(255, 149, 0, 0.16);
+        color: var(--warning, #b3640a);
+      }
       .meta-card {
         display: flex;
         flex-direction: column;
@@ -537,11 +578,16 @@ interface EditorFormValue {
         background: var(--bg-tertiary);
         cursor: not-allowed;
       }
+      .notes-editor {
+        min-height: 5.5em;
+        line-height: 1.4;
+      }
       .prompt-editor {
         font-family: var(--font-mono, monospace);
         font-size: 0.82rem;
         line-height: 1.45;
-        white-space: pre;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
         min-height: 480px;
       }
       .muted {
@@ -599,12 +645,30 @@ interface EditorFormValue {
         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
       }
       .modal-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 0.75rem;
         padding: 1rem 1.25rem;
         border-bottom: 1px solid var(--border);
       }
       .modal-header h2 {
         margin: 0;
         font-size: 1.05rem;
+        overflow-wrap: anywhere;
+      }
+      .modal-close {
+        flex: none;
+        background: transparent;
+        border: 0;
+        font-size: 1.4rem;
+        line-height: 1;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 0 0.25rem;
+      }
+      .modal-close:hover {
+        color: var(--text-primary);
       }
       .modal-body {
         padding: 1rem 1.25rem;
@@ -826,8 +890,17 @@ export class PromptTemplateEditorPageComponent implements OnInit {
     return !r.isActive && !r.isArchived;
   }
 
+  /**
+   * The engine only consults this table while `UseDbBackedPromptTemplate` is
+   * on; operators flag rows accordingly in the notes ("NOT LIVE — …"). An
+   * "Active live template" banner above that note contradicts it.
+   */
+  isNotLive(r: PromptTemplate): boolean {
+    return r.isActive && /^\s*NOT LIVE/i.test(r.notes ?? '');
+  }
+
   statusLabel(r: PromptTemplate): string {
-    if (r.isActive) return 'Active';
+    if (r.isActive) return this.isNotLive(r) ? 'Active (not live)' : 'Active';
     if (r.isArchived) return 'Archived';
     return 'Draft';
   }

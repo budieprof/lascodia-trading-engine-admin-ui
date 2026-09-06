@@ -6,12 +6,12 @@ import {
   linkedSignal,
   signal,
 } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
-import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { AnalysisChatComponent } from '@shared/components/analysis-chat/analysis-chat.component';
 import {
   SpotRecChartComponent,
@@ -64,282 +64,293 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     DatePipe,
+    DecimalPipe,
     FormsModule,
-    MarkdownPipe,
     RelativeTimePipe,
+    PageHeaderComponent,
     AnalysisChatComponent,
     SpotRecChartComponent,
   ],
   template: `
-    <div class="conv-page">
-      <!-- ── Left rail: conversation list ── -->
-      <aside class="conv-list">
-        <div class="conv-list-head">
-          @if (!newOpen()) {
-            <button type="button" class="new-btn" (click)="newOpen.set(true)">
-              + New analysis
-            </button>
-          } @else {
-            <form class="new-form" (submit)="runNew($event)">
-              <select class="new-mode" [(ngModel)]="newMode" name="mode" [disabled]="running()">
-                @for (m of analysisModes; track m.value) {
-                  <option [value]="m.value">{{ m.label }}</option>
-                }
-              </select>
-              @if (isAgentMode) {
-                <textarea
-                  class="new-instruction"
-                  [(ngModel)]="newInstruction"
-                  name="instr"
-                  rows="3"
-                  [disabled]="running()"
-                  [placeholder]="instructionPlaceholder"
-                ></textarea>
-              } @else {
-                <select
-                  class="new-symbol"
-                  [(ngModel)]="newSymbol"
-                  name="sym"
-                  [disabled]="running() || symbols().length === 0"
-                >
-                  @if (symbols().length === 0) {
-                    <option value="" disabled>Loading symbols…</option>
-                  } @else {
-                    <option value="" disabled>Symbol…</option>
-                    @for (s of symbols(); track s) {
-                      <option [value]="s">{{ s }}</option>
-                    }
+    <div class="page">
+      <app-page-header
+        title="Conversations"
+        subtitle="Every LLM analysis is a resumable thread — ask follow-ups, pull live data, set monitors, or file a signal"
+      >
+        <span class="conv-count muted">
+          {{ totalItems() | number }} conversation{{ totalItems() === 1 ? '' : 's' }}
+        </span>
+      </app-page-header>
+      <div class="conv-page">
+        <!-- ── Left rail: conversation list ── -->
+        <aside class="conv-list">
+          <div class="conv-list-head">
+            @if (!newOpen()) {
+              <button type="button" class="new-btn" (click)="newOpen.set(true)">
+                + New analysis
+              </button>
+            } @else {
+              <form class="new-form" (submit)="runNew($event)">
+                <select class="new-mode" [(ngModel)]="newMode" name="mode" [disabled]="running()">
+                  @for (m of analysisModes; track m.value) {
+                    <option [value]="m.value">{{ m.label }}</option>
                   }
                 </select>
-                <select
-                  class="new-tf"
-                  [(ngModel)]="newTimeframe"
-                  name="tf"
-                  [disabled]="running() || newMode === 'macro'"
-                  [title]="newMode === 'macro' ? 'Macro analysis always anchors on D1' : ''"
-                >
-                  @for (tf of timeframes; track tf) {
-                    <option [value]="tf">{{ tf }}</option>
-                  }
-                </select>
-              }
-              <div class="new-actions">
-                <button
-                  type="submit"
-                  class="new-run"
-                  [disabled]="
-                    running() ||
-                    (newMode === 'engineer' ? !newInstruction.trim() : !newSymbol.trim())
-                  "
-                >
-                  @if (newMode === 'engineer') {
-                    {{ running() ? 'Launching…' : 'Launch' }}
-                  } @else {
-                    {{ running() ? 'Running…' : 'Run' }}
-                  }
-                </button>
-                <button
-                  type="button"
-                  class="new-cancel"
-                  [disabled]="running()"
-                  (click)="closeNew()"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          }
-
-          <input
-            class="conv-search"
-            placeholder="Search symbol, #id, or signal:id…"
-            title="Symbol (EURUSD) · a number or #id matches both a conversation id and a signal id (labelled) · force one with signal:8566 or conv:19120"
-            [value]="search()"
-            (input)="onSearch($event)"
-          />
-
-          <div class="conv-kinds" role="group" aria-label="Filter by conversation type">
-            @for (k of kindFilters; track k.value) {
-              <button
-                type="button"
-                class="kind-chip"
-                [class.active]="kindFilter() === k.value"
-                [attr.data-kind]="k.value || null"
-                [title]="
-                  k.value
-                    ? 'Show only ' + k.label + ' conversations'
-                    : 'Show all conversation types'
-                "
-                (click)="setKind(k.value)"
-              >
-                {{ k.label }}
-              </button>
-            }
-          </div>
-        </div>
-
-        <div class="conv-items">
-          @for (c of conversations(); track c.llmInvocationId) {
-            <button
-              type="button"
-              class="conv-item"
-              [class.active]="selectedId() === c.llmInvocationId"
-              (click)="select(c)"
-            >
-              <div class="conv-item-top">
-                <span class="conv-kind" [attr.data-kind]="c.kind">{{ c.kind }}</span>
-                <span class="conv-sym">{{ c.symbol }} {{ c.timeframe }}</span>
-                <span class="conv-time">{{ c.lastActivityAtUtc | relativeTime }}</span>
-              </div>
-              @if (c.matchReason) {
-                <div class="conv-match">{{ c.matchReason }}</div>
-              }
-              <div class="conv-preview">{{ c.preview }}</div>
-              @if (c.followUpCount > 0 || c.activeMonitorCount > 0) {
-                <div class="conv-badges">
-                  @if (c.followUpCount > 0) {
-                    <span class="badge">💬 {{ c.followUpCount }}</span>
-                  }
-                  @if (c.activeMonitorCount > 0) {
-                    <span class="badge mon">👁 {{ c.activeMonitorCount }}</span>
-                  }
-                </div>
-              }
-            </button>
-          } @empty {
-            <div class="conv-empty">
-              {{ loading() ? 'Loading…' : 'No conversations yet — run a new analysis.' }}
-            </div>
-          }
-
-          @if (hasMore()) {
-            <button type="button" class="load-more" [disabled]="loading()" (click)="loadMore()">
-              {{ loading() ? 'Loading…' : 'Load more' }}
-            </button>
-          }
-        </div>
-      </aside>
-
-      <!-- ── Main pane: the conversation ── -->
-      <main class="conv-main">
-        @if (selectedId(); as id) {
-          @if (detail(); as d) {
-            <header class="conv-header">
-              <span class="conv-kind" [attr.data-kind]="d.kind">{{ d.kind }}</span>
-              <strong>{{ d.symbol }} {{ d.timeframe }}</strong>
-              <span class="muted">{{ d.model }} · {{ d.invokedAt | date: 'MMM d, HH:mm' }}</span>
-              <button
-                type="button"
-                class="conv-id"
-                (click)="copyId(id)"
-                [title]="copiedId() === id ? 'Copied' : 'Copy conversation ID'"
-              >
-                #{{ id }} <span class="conv-id-copy">{{ copiedId() === id ? '✓' : '⧉' }}</span>
-              </button>
-            </header>
-          } @else if (detailLoading()) {
-            <header class="conv-header"><span class="spinner"></span> Loading…</header>
-          }
-          @if (detail(); as d) {
-            @if (chartRecs().length > 0) {
-              <div class="conv-recs">
-                <div class="rec-controls">
-                  <div class="rec-seg">
-                    <span class="rec-lbl">TF</span>
-                    @for (tf of chartTimeframes; track tf) {
-                      <button
-                        type="button"
-                        [class.active]="chartTf() === tf"
-                        (click)="chartTf.set(tf)"
-                      >
-                        {{ tf }}
-                      </button>
-                    }
-                  </div>
-                  <div class="rec-seg">
-                    <span class="rec-lbl">Bars</span>
-                    @for (n of barCountOptions; track n) {
-                      <button
-                        type="button"
-                        [class.active]="chartBars() === n"
-                        (click)="chartBars.set(n)"
-                      >
-                        {{ n }}
-                      </button>
-                    }
-                  </div>
-                </div>
-                <app-spot-rec-chart
-                  [symbol]="d.symbol"
-                  [timeframe]="chartTf()"
-                  [asOfUtc]="d.chartAsOfUtc ?? d.invokedAt"
-                  [recommendations]="chartRecs()"
-                  [historyBars]="chartBars()"
-                  [fullWidthLevels]="true"
-                  [collapsible]="true"
-                  [live]="!d.chartAsOfUtc"
-                  [fillMarker]="chartFillMarker()"
-                  [exitMarker]="chartExitMarker()"
-                >
-                  <div legendActions class="rec-signals">
-                    @for (item of actionableRecs(); track item.index) {
-                      <span class="rs-conf" [title]="'Model confidence for this recommendation'"
-                        >{{ item.r.action }} · conf
-                        {{ confPct(item.r) === null ? '—' : confPct(item.r) + '%' }}</span
-                      >
-                      @if (filedFor(item.r); as f) {
-                        <span class="rs-filed" [attr.data-status]="f.status.toLowerCase()"
-                          >✓ Signal #{{ f.signalId }} · {{ f.status }}</span
-                        >
-                      } @else if (parkedFor(item.r); as p) {
-                        <span class="rs-parked" [attr.data-state]="p.state.toLowerCase()"
-                          >📥 Parked #{{ p.pendingRecId }} · {{ p.state }}
-                          @if (p.terminalReason) {
-                            · {{ p.terminalReason }}
-                          } @else {
-                            · until {{ p.parkExpiresAt | date: 'HH:mm' }}
-                          }
-                          @if (p.resultingTradeSignalId) {
-                            · → Signal #{{ p.resultingTradeSignalId }}
-                          }
-                        </span>
-                      } @else {
-                        <button
-                          type="button"
-                          class="rs-create"
-                          [disabled]="creatingIndex() !== null"
-                          (click)="createSignal(item.r, item.index)"
-                        >
-                          {{ creatingIndex() === item.index ? 'Creating…' : '⚡ Create signal' }}
-                        </button>
+                @if (isAgentMode) {
+                  <textarea
+                    class="new-instruction"
+                    [(ngModel)]="newInstruction"
+                    name="instr"
+                    rows="3"
+                    [disabled]="running()"
+                    [placeholder]="instructionPlaceholder"
+                  ></textarea>
+                } @else {
+                  <select
+                    class="new-symbol"
+                    [(ngModel)]="newSymbol"
+                    name="sym"
+                    [disabled]="running() || symbols().length === 0"
+                  >
+                    @if (symbols().length === 0) {
+                      <option value="" disabled>Loading symbols…</option>
+                    } @else {
+                      <option value="" disabled>Symbol…</option>
+                      @for (s of symbols(); track s) {
+                        <option [value]="s">{{ s }}</option>
                       }
                     }
-                  </div>
-                </app-spot-rec-chart>
-              </div>
+                  </select>
+                  <select
+                    class="new-tf"
+                    [(ngModel)]="newTimeframe"
+                    name="tf"
+                    [disabled]="running() || newMode === 'macro'"
+                    [title]="newMode === 'macro' ? 'Macro analysis always anchors on D1' : ''"
+                  >
+                    @for (tf of timeframes; track tf) {
+                      <option [value]="tf">{{ tf }}</option>
+                    }
+                  </select>
+                }
+                <div class="new-actions">
+                  <button
+                    type="submit"
+                    class="new-run"
+                    [disabled]="
+                      running() ||
+                      (newMode === 'engineer' ? !newInstruction.trim() : !newSymbol.trim())
+                    "
+                  >
+                    @if (newMode === 'engineer') {
+                      {{ running() ? 'Launching…' : 'Launch' }}
+                    } @else {
+                      {{ running() ? 'Running…' : 'Run' }}
+                    }
+                  </button>
+                  <button
+                    type="button"
+                    class="new-cancel"
+                    [disabled]="running()"
+                    (click)="closeNew()"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
             }
-          }
-          <div class="conv-chat">
-            <app-analysis-chat
-              [llmInvocationId]="id"
-              [opener]="openerText()"
-              [openerAt]="detail()?.invokedAt ?? null"
-              [fillHeight]="true"
+
+            <input
+              class="conv-search"
+              placeholder="Search symbol, #id, or signal:id…"
+              title="Symbol (EURUSD) · a number or #id matches both a conversation id and a signal id (labelled) · force one with signal:8566 or conv:19120"
+              [value]="search()"
+              (input)="onSearch($event)"
             />
-          </div>
-        } @else {
-          <div class="conv-placeholder">
-            <div class="placeholder-inner">
-              <div class="placeholder-emoji">💬</div>
-              <p>Select a conversation to resume it, or run a new analysis.</p>
-              <p class="muted">
-                Every LLM analysis is a conversation — ask follow-ups, pull live data, or set up
-                monitors, and pick it back up any time.
-              </p>
+
+            <div class="conv-kinds" role="group" aria-label="Filter by conversation type">
+              @for (k of kindFilters; track k.value) {
+                <button
+                  type="button"
+                  class="kind-chip"
+                  [class.active]="kindFilter() === k.value"
+                  [attr.data-kind]="k.value || null"
+                  [title]="
+                    k.value
+                      ? 'Show only ' + k.label + ' conversations'
+                      : 'Show all conversation types'
+                  "
+                  (click)="setKind(k.value)"
+                >
+                  {{ k.label }}
+                </button>
+              }
             </div>
           </div>
-        }
-      </main>
+
+          <div class="conv-items">
+            @for (c of conversations(); track c.llmInvocationId) {
+              <button
+                type="button"
+                class="conv-item"
+                [class.active]="selectedId() === c.llmInvocationId"
+                (click)="select(c)"
+              >
+                <div class="conv-item-top">
+                  <span class="conv-kind" [attr.data-kind]="c.kind">{{ c.kind }}</span>
+                  <span class="conv-sym">{{ conversationTitle(c) }}</span>
+                  <span class="conv-time">{{ c.lastActivityAtUtc | relativeTime }}</span>
+                </div>
+                @if (c.matchReason) {
+                  <div class="conv-match">{{ c.matchReason }}</div>
+                }
+                <div class="conv-preview">{{ c.preview }}</div>
+                @if (c.followUpCount > 0 || c.activeMonitorCount > 0) {
+                  <div class="conv-badges">
+                    @if (c.followUpCount > 0) {
+                      <span class="badge">💬 {{ c.followUpCount }}</span>
+                    }
+                    @if (c.activeMonitorCount > 0) {
+                      <span class="badge mon">👁 {{ c.activeMonitorCount }}</span>
+                    }
+                  </div>
+                }
+              </button>
+            } @empty {
+              <div class="conv-empty">
+                {{ loading() ? 'Loading…' : 'No conversations yet — run a new analysis.' }}
+              </div>
+            }
+
+            @if (hasMore()) {
+              <button type="button" class="load-more" [disabled]="loading()" (click)="loadMore()">
+                {{ loading() ? 'Loading…' : 'Load more' }}
+              </button>
+            }
+          </div>
+        </aside>
+
+        <!-- ── Main pane: the conversation ── -->
+        <main class="conv-main">
+          @if (selectedId(); as id) {
+            @if (detail(); as d) {
+              <header class="conv-header">
+                <span class="conv-kind" [attr.data-kind]="d.kind">{{ d.kind }}</span>
+                <strong>{{ conversationTitle(d) }}</strong>
+                <span class="muted">{{ d.model }} · {{ d.invokedAt | date: 'MMM d, HH:mm' }}</span>
+                <button
+                  type="button"
+                  class="conv-id"
+                  (click)="copyId(id)"
+                  [title]="copiedId() === id ? 'Copied' : 'Copy conversation ID'"
+                >
+                  #{{ id }} <span class="conv-id-copy">{{ copiedId() === id ? '✓' : '⧉' }}</span>
+                </button>
+              </header>
+            } @else if (detailLoading()) {
+              <header class="conv-header"><span class="spinner"></span> Loading…</header>
+            }
+            @if (detail(); as d) {
+              @if (chartRecs().length > 0) {
+                <div class="conv-recs">
+                  <div class="rec-controls">
+                    <div class="rec-seg">
+                      <span class="rec-lbl">TF</span>
+                      @for (tf of chartTimeframes; track tf) {
+                        <button
+                          type="button"
+                          [class.active]="chartTf() === tf"
+                          (click)="chartTf.set(tf)"
+                        >
+                          {{ tf }}
+                        </button>
+                      }
+                    </div>
+                    <div class="rec-seg">
+                      <span class="rec-lbl">Bars</span>
+                      @for (n of barCountOptions; track n) {
+                        <button
+                          type="button"
+                          [class.active]="chartBars() === n"
+                          (click)="chartBars.set(n)"
+                        >
+                          {{ n }}
+                        </button>
+                      }
+                    </div>
+                  </div>
+                  <app-spot-rec-chart
+                    [symbol]="d.symbol"
+                    [timeframe]="chartTf()"
+                    [asOfUtc]="d.chartAsOfUtc ?? d.invokedAt"
+                    [recommendations]="chartRecs()"
+                    [historyBars]="chartBars()"
+                    [fullWidthLevels]="true"
+                    [collapsible]="true"
+                    [live]="!d.chartAsOfUtc"
+                    [fillMarker]="chartFillMarker()"
+                    [exitMarker]="chartExitMarker()"
+                  >
+                    <div legendActions class="rec-signals">
+                      @for (item of actionableRecs(); track item.index) {
+                        <span class="rs-conf" [title]="'Model confidence for this recommendation'"
+                          >{{ item.r.action }} · conf
+                          {{ confPct(item.r) === null ? '—' : confPct(item.r) + '%' }}</span
+                        >
+                        @if (filedFor(item.r); as f) {
+                          <span class="rs-filed" [attr.data-status]="f.status.toLowerCase()"
+                            >✓ Signal #{{ f.signalId }} · {{ f.status }}</span
+                          >
+                        } @else if (parkedFor(item.r); as p) {
+                          <span class="rs-parked" [attr.data-state]="p.state.toLowerCase()"
+                            >📥 Parked #{{ p.pendingRecId }} · {{ p.state }}
+                            @if (p.terminalReason) {
+                              · {{ p.terminalReason }}
+                            } @else {
+                              · until {{ p.parkExpiresAt | date: 'HH:mm' }}
+                            }
+                            @if (p.resultingTradeSignalId) {
+                              · → Signal #{{ p.resultingTradeSignalId }}
+                            }
+                          </span>
+                        } @else {
+                          <button
+                            type="button"
+                            class="rs-create"
+                            [disabled]="creatingIndex() !== null"
+                            (click)="createSignal(item.r, item.index)"
+                          >
+                            {{ creatingIndex() === item.index ? 'Creating…' : '⚡ Create signal' }}
+                          </button>
+                        }
+                      }
+                    </div>
+                  </app-spot-rec-chart>
+                </div>
+              }
+            }
+            <div class="conv-chat">
+              <app-analysis-chat
+                [llmInvocationId]="id"
+                [opener]="openerText()"
+                [openerAt]="detail()?.invokedAt ?? null"
+                [fillHeight]="true"
+              />
+            </div>
+          } @else {
+            <div class="conv-placeholder">
+              <div class="placeholder-inner">
+                <div class="placeholder-emoji">💬</div>
+                <p>Select a conversation to resume it, or run a new analysis.</p>
+                <p class="muted">
+                  Every LLM analysis is a conversation — ask follow-ups, pull live data, or set up
+                  monitors, and pick it back up any time.
+                </p>
+              </div>
+            </div>
+          }
+        </main>
+      </div>
     </div>
   `,
   styles: [
@@ -347,10 +358,19 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
       :host {
         display: block;
       }
+      .page {
+        padding: var(--space-2) 0;
+      }
+      .conv-count {
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+      /* Header block (~100px) sits above the two panes; the panes still fill
+         the rest of the viewport so the thread scrolls inside, not the page. */
       .conv-page {
         display: flex;
         gap: var(--space-4);
-        height: calc(100vh - 160px);
+        height: calc(100vh - 250px);
         min-height: 480px;
       }
       .conv-list {
@@ -409,13 +429,23 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
         min-height: 60px;
         line-height: 1.4;
       }
+      /* One scrollable row: ten chips wrapped onto two ragged lines in a
+         320px rail. Horizontal scroll with the bar hidden keeps the rail
+         compact; the active chip is still reachable by scrolling. */
       .conv-kinds {
         display: flex;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         gap: 4px;
         margin-top: 6px;
+        overflow-x: auto;
+        scrollbar-width: none;
+        padding-bottom: 2px;
+      }
+      .conv-kinds::-webkit-scrollbar {
+        display: none;
       }
       .kind-chip {
+        flex-shrink: 0;
         font: inherit;
         font-size: var(--text-xs);
         line-height: 1;
@@ -841,6 +871,40 @@ export class ConversationsPageComponent {
 
   protected readonly hasMore = computed(() => this.conversations().length < this.totalItems());
   protected readonly openerText = computed(() => this.detail()?.analysis ?? null);
+
+  /**
+   * Row / pane title. Symbol + timeframe when the conversation has them; the
+   * engine sends "—" placeholders for the global kinds (Memory, Engineer,
+   * Wire), which rendered as "MEMORY — —" with no title at all.
+   */
+  protected conversationTitle(c: {
+    kind: string;
+    symbol: string | null;
+    timeframe: string | null;
+  }): string {
+    const real = (v: string | null | undefined) => {
+      const s = (v ?? '').trim();
+      return s && s !== '—' && s !== '-' && s !== '–' ? s : '';
+    };
+    const parts = [real(c.symbol), real(c.timeframe)].filter((p) => p.length > 0);
+    if (parts.length > 0) return parts.join(' ');
+    switch (c.kind) {
+      case 'Memory':
+        return 'Trading memory';
+      case 'Journal':
+        return 'Signal journal';
+      case 'Engineer':
+        return 'Work order';
+      case 'Wire':
+        return 'Wire briefing';
+      case 'Guard':
+        return 'Signal guard';
+      case 'Macro':
+        return 'Macro brief';
+      default:
+        return 'Untitled';
+    }
+  }
 
   // ── Recommendation chart ──
   protected readonly chartTimeframes = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];

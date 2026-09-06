@@ -7,14 +7,39 @@ import {
   effect,
   inject,
   input,
+  output,
   signal,
   OnDestroy,
   OnInit,
 } from '@angular/core';
 import { Router } from '@angular/router';
+import type { HttpErrorResponse } from '@angular/common/http';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import type { EChartsOption, LineSeriesOption } from 'echarts';
 import { Subject, takeUntil, timer, switchMap, catchError, of } from 'rxjs';
+
+/** Emitted when a tile's candle fetch fails; the page aggregates these. */
+export interface TileLoadError {
+  symbol: string;
+  timeframe: string;
+  /** HTTP status, or 0 for a network failure. */
+  status: number;
+  /** Short operator-facing reason ("Server error (500)"). */
+  reason: string;
+  error: HttpErrorResponse;
+}
+
+/** Bar length per timeframe, for judging whether the last closed bar is stale. */
+const TIMEFRAME_MS: Record<string, number> = {
+  M1: 60_000,
+  M5: 300_000,
+  M15: 900_000,
+  M30: 1_800_000,
+  H1: 3_600_000,
+  H4: 14_400_000,
+  D1: 86_400_000,
+  W1: 604_800_000,
+};
 import { animate, AnimationTriggerMetadata, style, transition, trigger } from '@angular/animations';
 
 import { MarketDataService } from '@core/services/market-data.service';
@@ -154,26 +179,61 @@ const PRICE_FLASH_TRIGGER: AnimationTriggerMetadata = trigger('priceFlash', [
         } @else if (loading() && candles().length === 0) {
           <span class="px-row muted">Loading…</span>
         } @else {
-          <span class="px-row muted">No feed</span>
+          <!-- Candles and the live quote are separate endpoints: a drawn
+               chart with no quote means the price poll is what is missing. -->
+          <span
+            class="px-row muted"
+            title="The live-price endpoint returned nothing for this symbol"
+          >
+            No live quote
+          </span>
         }
       </div>
 
       <div class="tile-chart">
         @if (candles().length > 0) {
           <div class="chart-host" echarts [options]="chartOptions()" [autoResize]="true"></div>
+        } @else if (candleError(); as err) {
+          <div class="chart-empty chart-error" role="alert">
+            <span class="chart-error-title">Failed to load candles</span>
+            <span class="muted small">{{ err }}</span>
+            <button type="button" class="retry-btn" (click)="onRetryClick($event)">Retry</button>
+          </div>
         } @else {
           <div class="chart-empty muted">
-            {{ loading() ? 'Loading candles…' : 'No candles' }}
+            {{ loading() ? 'Loading candles…' : 'No candles for this timeframe' }}
           </div>
         }
       </div>
 
       <footer class="tile-foot">
-        <span class="muted small">
-          {{ candles().length }} bar{{ candles().length === 1 ? '' : 's' }}
-        </span>
-        @if (lastBarAgeLabel(); as age) {
-          <span class="muted small">· {{ age }}</span>
+        @if (candleError() && candles().length === 0) {
+          <span class="small error-text">load failed</span>
+        } @else {
+          <span class="muted small">
+            {{ candles().length }} bar{{ candles().length === 1 ? '' : 's' }}
+          </span>
+          @if (barAge(); as age) {
+            <span
+              class="small"
+              [class.muted]="!age.stale"
+              [class.stale]="age.stale"
+              [title]="
+                age.stale
+                  ? 'Last closed bar is older than three ' +
+                    timeframe() +
+                    ' bars — the feed for this symbol looks stale'
+                  : 'Age of the last closed bar'
+              "
+            >
+              · {{ age.label }}{{ age.stale ? ' · stale' : '' }}
+            </span>
+          }
+          @if (candleError()) {
+            <span class="small error-text" title="Showing the last successful fetch">
+              · refresh failed
+            </span>
+          }
         }
         <span class="spacer"></span>
         <span class="open-hint muted small">Open ↗</span>
@@ -197,12 +257,18 @@ const PRICE_FLASH_TRIGGER: AnimationTriggerMetadata = trigger('priceFlash', [
           box-shadow 0.12s ease;
         min-height: 220px;
       }
-      .tile:hover,
-      .tile:focus-visible {
+      .tile:hover {
         border-color: var(--accent, #0071e3);
         background: var(--bg-elevated, var(--bg-secondary));
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+      }
+      /* Keyboard focus only — a mouse click must not leave a ring behind. */
+      .tile:focus {
         outline: none;
+      }
+      .tile:focus-visible {
+        outline: 2px solid var(--accent, #0071e3);
+        outline-offset: 2px;
       }
 
       .tile-head {
@@ -414,6 +480,40 @@ const PRICE_FLASH_TRIGGER: AnimationTriggerMetadata = trigger('priceFlash', [
         border: 1px dashed var(--border);
         border-radius: var(--radius-sm);
       }
+      .chart-error {
+        flex-direction: column;
+        gap: 4px;
+        border-color: rgba(255, 59, 48, 0.4);
+        background: rgba(255, 59, 48, 0.05);
+      }
+      .chart-error-title {
+        font-weight: var(--font-semibold);
+        color: var(--loss, #c93631);
+      }
+      .retry-btn {
+        appearance: none;
+        margin-top: 4px;
+        padding: 3px 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-family: inherit;
+        font-size: 11px;
+        font-weight: var(--font-semibold);
+        cursor: pointer;
+      }
+      .retry-btn:hover {
+        border-color: var(--accent, #0071e3);
+        color: var(--accent, #0071e3);
+      }
+      .error-text {
+        color: var(--loss, #c93631);
+      }
+      .stale {
+        color: var(--warning, #c93400);
+        font-weight: var(--font-semibold);
+      }
 
       .tile-foot {
         display: flex;
@@ -468,6 +568,10 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
   @Output() readonly remove = new EventEmitter<void>();
   /** Operator clicked the tile's ⚡ — parent opens the LLM analysis modal. */
   @Output() readonly analyze = new EventEmitter<void>();
+  /** A candle fetch failed — the page folds these into one notice. */
+  readonly loadError = output<TileLoadError>();
+  /** A candle fetch succeeded after (or without) a failure. */
+  readonly loadOk = output<void>();
 
   private readonly marketData = inject(MarketDataService);
   private readonly router = inject(Router);
@@ -476,6 +580,9 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
   protected readonly candles = signal<CandleDto[]>([]);
   protected readonly livePrice = signal<LivePriceDto | null>(null);
   protected readonly loading = signal(true);
+  /** Reason the last candle fetch failed, or null. Cleared on success. */
+  protected readonly candleError = signal<string | null>(null);
+  readonly hasError = computed(() => this.candleError() !== null);
   /**
    * Previous bid / ask, captured at the START of each live-price tick
    * so we can compute a direction arrow (up / down / flat) for the
@@ -609,19 +716,57 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
+  /** Re-run the candle fetch after a failure (tile Retry button / page "Retry all"). */
+  retry(): void {
+    if (this.candles().length === 0) this.loading.set(true);
+    this.fetchCandles(this.barCount());
+  }
+
+  protected onRetryClick(ev: MouseEvent): void {
+    ev.stopPropagation(); // the tile body opens the full chart
+    this.retry();
+  }
+
+  private describeError(err: HttpErrorResponse): string {
+    if (err.status === 0) return 'No connection to the engine';
+    if (err.status >= 500) return `Server error (${err.status})`;
+    const msg = (err.error as { message?: string } | null)?.message;
+    return msg ? msg : `Request failed (${err.status})`;
+  }
+
   private fetchCandles(n: number): void {
     this.marketData
-      .listCandles({
-        currentPage: 1,
-        itemCountPerPage: n,
-        filter: { symbol: this.symbol(), timeframe: this.timeframe() },
-      })
+      .listCandles(
+        {
+          currentPage: 1,
+          itemCountPerPage: n,
+          filter: { symbol: this.symbol(), timeframe: this.timeframe() },
+        },
+        // The tile and the page own the failure UI; no interceptor toast.
+        { silent: true },
+      )
       .pipe(
-        catchError(() => of(null)),
+        catchError((err: HttpErrorResponse) => {
+          // Keep whatever was drawn last; only the footer/empty state
+          // reports the failure. The page decides how loudly to say it.
+          const reason = this.describeError(err);
+          this.candleError.set(reason);
+          this.loadError.emit({
+            symbol: this.symbol(),
+            timeframe: this.timeframe(),
+            status: err.status ?? 0,
+            reason,
+            error: err,
+          });
+          return of(null);
+        }),
         takeUntil(this.destroy$),
       )
       .subscribe((res) => {
         this.loading.set(false);
+        if (res === null) return;
+        if (this.candleError() !== null) this.candleError.set(null);
+        this.loadOk.emit();
         const data = res?.data?.data ?? [];
         if (data.length > 0) {
           // Engine returns newest-first — ECharts wants oldest-first on
@@ -887,20 +1032,26 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
     };
   });
 
-  protected lastBarAgeLabel(): string | null {
+  /**
+   * Age of the last closed bar, flagged stale once it exceeds three bar
+   * lengths (min 15 min). "95d old" on an M30 tile used to render exactly
+   * like "3m old" — the number was there, the judgement was not.
+   */
+  protected barAge(): { label: string; stale: boolean } | null {
     const xs = this.candles();
     if (xs.length === 0) return null;
     const lastBarTs = xs[xs.length - 1].timestamp;
     const ms = Date.now() - new Date(lastBarTs).getTime();
     if (ms < 0) return null;
+    const barMs = TIMEFRAME_MS[this.timeframe()] ?? 3_600_000;
+    const stale = ms > Math.max(3 * barMs, 900_000);
     const sec = Math.floor(ms / 1000);
-    if (sec < 60) return `${sec}s old`;
-    const min = Math.floor(sec / 60);
-    if (min < 60) return `${min}m old`;
-    const hr = Math.floor(min / 60);
-    if (hr < 24) return `${hr}h old`;
-    const days = Math.floor(hr / 24);
-    return `${days}d old`;
+    let label: string;
+    if (sec < 60) label = `${sec}s old`;
+    else if (sec < 3600) label = `${Math.floor(sec / 60)}m old`;
+    else if (sec < 86_400) label = `${Math.floor(sec / 3600)}h old`;
+    else label = `${Math.floor(sec / 86_400)}d old`;
+    return { label, stale };
   }
 
   // ── Formatters ───────────────────────────────────────────────────

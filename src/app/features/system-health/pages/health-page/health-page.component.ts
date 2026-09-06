@@ -64,8 +64,8 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                   <span class="health-sub"
                     >Last checked {{ s.checkedAt | date: 'MMM d, HH:mm:ss' }}</span
                   >
-                  @if (s.paperMode) {
-                    <span class="mode-pill">{{ s.paperMode }} mode</span>
+                  @if (modeLabel(); as mode) {
+                    <span class="mode-pill" [class.live]="!isPaperMode()">{{ mode }}</span>
                   }
                 </div>
                 <div class="hero-meta">
@@ -157,12 +157,40 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                   [options]="workerDonutOptions()"
                   height="240px"
                 />
-                <app-chart-card
-                  title="Unresolved DLQ by event type"
-                  subtitle="Top event types in the last 25 unresolved rows"
-                  [options]="dlqEventTypeOptions()"
-                  height="240px"
-                />
+                <!-- A donut with one or two slices says nothing a number can't;
+                     below three event types the breakdown renders as a list. -->
+                @if (dlqEventTypeRows().length >= 3) {
+                  <app-chart-card
+                    title="Unresolved DLQ by event type"
+                    subtitle="Event types in the last 25 unresolved rows"
+                    [options]="dlqEventTypeOptions()"
+                    height="240px"
+                  />
+                } @else {
+                  <section class="hp-board hp-board-list">
+                    <header class="hp-board-head">
+                      <h3>Unresolved DLQ by event type</h3>
+                      <span class="muted">Event types in the last 25 unresolved rows</span>
+                    </header>
+                    @if (dlqEventTypeRows().length === 0) {
+                      <p class="hp-board-empty good">No unresolved dead-letter events.</p>
+                    } @else {
+                      <ul class="hp-type-list">
+                        @for (row of dlqEventTypeRows(); track row.name) {
+                          <li>
+                            <span class="mono type-name" [title]="row.name">{{ row.name }}</span>
+                            <span class="type-bar">
+                              <span class="type-fill" [style.width.%]="row.share"></span>
+                            </span>
+                            <span class="mono type-count">
+                              {{ row.value }} · {{ row.share.toFixed(0) }}%
+                            </span>
+                          </li>
+                        }
+                      </ul>
+                    }
+                  </section>
+                }
               </div>
 
               <!-- Recent issues table — surfaces the most-pressing things -->
@@ -258,13 +286,13 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 dotColor="#5AC8FA"
               />
               <app-metric-card
-                label="Avg P95 cycle (ms)"
+                label="Avg P95 (ms)"
                 [value]="infraStats().avgP95Cycle"
                 format="number"
                 [dotColor]="infraStats().avgP95Cycle > 1000 ? '#FF9500' : '#34C759'"
               />
               <app-metric-card
-                label="Max P99 cycle (ms)"
+                label="Max P99 (ms)"
                 [value]="infraStats().maxP99Cycle"
                 format="number"
                 [dotColor]="infraStats().maxP99Cycle > 5000 ? '#FF3B30' : '#34C759'"
@@ -298,15 +326,15 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             <div class="hp-charts">
               <app-chart-card
                 title="Workers by category"
-                subtitle="How the {{ workerSnapshots().length }}-worker fleet is composed"
+                [subtitle]="categoryChartSubtitle()"
                 [options]="workersByCategoryOptions()"
-                height="260px"
+                height="300px"
               />
               <app-chart-card
                 title="Workers by status"
                 subtitle="Status distribution across the fleet"
                 [options]="workerDonutOptions()"
-                height="260px"
+                height="300px"
               />
             </div>
 
@@ -314,15 +342,19 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             <div class="hp-charts">
               <app-chart-card
                 title="P95 cycle duration by category"
-                subtitle="Tail-latency view — long bars are the slow categories"
+                [subtitle]="
+                  'Average P95 per category, slowest ' +
+                  topCategoryLimit +
+                  ' shown — hover a bar for the value'
+                "
                 [options]="cycleDurationByCategoryOptions()"
-                height="260px"
+                height="300px"
               />
               <app-chart-card
                 title="Errors per hour by category"
                 subtitle="Hot-spots in the worker fleet"
                 [options]="errorsByCategoryOptions()"
-                height="260px"
+                height="300px"
               />
             </div>
 
@@ -330,8 +362,11 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
               <header class="hp-board-head">
                 <h3>Per-category breakdown</h3>
                 <span class="muted">
-                  {{ perCategoryBreakdown().length }} categories ·
+                  All {{ perCategoryBreakdown().length }} categories ·
                   {{ workerSnapshots().length }} workers
+                  @if (perCategoryBreakdown().length > 9) {
+                    · scroll the table for the rest
+                  }
                 </span>
               </header>
               <div class="hp-board-scroll">
@@ -400,14 +435,14 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
               <section class="hp-board">
                 <header class="hp-board-head">
                   <h3>Unresolved DLQ events</h3>
-                  <span class="muted">Last 25 with their retry counts</span>
+                  <span class="muted">Newest 25 with their delivery attempts</span>
                 </header>
                 <table class="hp-board-table">
                   <thead>
                     <tr>
                       <th>Event type</th>
                       <th class="num">Attempts</th>
-                      <th>First seen</th>
+                      <th>Dead-lettered</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -419,9 +454,16 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                           [class.bad]="d.attemptCount >= 3"
                           [class.warn]="d.attemptCount === 2"
                         >
-                          ×{{ d.attemptCount }}
+                          {{ d.attemptCount > 0 ? d.attemptCount : '—' }}
                         </td>
-                        <td class="mono">{{ d.createdAt | relativeTime }}</td>
+                        <td class="mono">
+                          @if (d.createdAt) {
+                            {{ d.createdAt | relativeTime }}
+                            <span class="muted">· {{ d.createdAt | date: 'MMM d, HH:mm' }}</span>
+                          } @else {
+                            —
+                          }
+                        </td>
                       </tr>
                     }
                   </tbody>
@@ -509,6 +551,10 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         color: #0040dd;
         width: fit-content;
       }
+      .mode-pill.live {
+        background: rgba(255, 149, 0, 0.14);
+        color: #c93400;
+      }
       .metrics {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -572,30 +618,79 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         color: #c93400;
       }
 
-      /* 8-card KPI strip */
+      /* KPI strip — 8 cards as 2 rows of 4. Eight across squeezed every label
+         onto two or three lines and made the columns unequal; minmax(0, 1fr)
+         keeps every column the same width regardless of value length. */
       .hp-kpis {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: var(--space-2);
         margin-bottom: var(--space-3);
       }
-      @media (max-width: 1400px) {
-        .hp-kpis {
-          grid-template-columns: repeat(4, 1fr);
-        }
-      }
       @media (max-width: 720px) {
         .hp-kpis {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
 
       /* 2-col chart row */
       .hp-charts {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         gap: var(--space-3);
         margin-bottom: var(--space-3);
+        align-items: start;
+      }
+      .hp-board-list {
+        margin-bottom: 0;
+        align-self: stretch;
+      }
+      .hp-board-empty {
+        margin: 0;
+        padding: var(--space-5) var(--space-4);
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
+      }
+      .hp-board-empty.good {
+        color: var(--profit);
+      }
+      .hp-type-list {
+        list-style: none;
+        margin: 0;
+        padding: var(--space-3) var(--space-4);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
+      .hp-type-list li {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 160px auto;
+        align-items: center;
+        gap: var(--space-3);
+        font-size: var(--text-xs);
+      }
+      .hp-type-list .type-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text-primary);
+      }
+      .hp-type-list .type-bar {
+        height: 6px;
+        background: rgba(142, 142, 147, 0.18);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      .hp-type-list .type-fill {
+        display: block;
+        height: 100%;
+        background: var(--loss);
+        border-radius: 3px;
+      }
+      .hp-type-list .type-count {
+        color: var(--text-secondary);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
       }
       @media (max-width: 1100px) {
         .hp-charts {
@@ -673,6 +768,12 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         font-variant-numeric: tabular-nums;
       }
       .hp-board-table .mono {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+      }
+      .hp-board-table .muted {
+        color: var(--text-tertiary);
+      }
+      .hp-board-list .mono {
         font-family: 'SF Mono', 'Fira Code', monospace;
       }
       .hp-board-table .good {
@@ -811,6 +912,57 @@ export class HealthPageComponent {
   readonly workerSnapshots = computed(() => this.workersResource.value() ?? []);
   readonly deadLetters = computed(() => this.dlqResource.value() ?? []);
 
+  /** Bars per category chart. Beyond this the axis labels overlap and ECharts
+   *  starts hiding every other one, which reads as bars being mislabelled. */
+  readonly topCategoryLimit = 12;
+
+  // `paperMode` is the raw EngineConfig string ("true"/"false"), not a mode
+  // name — rendering it verbatim produced a "false mode" pill.
+  readonly isPaperMode = computed(() => {
+    const raw = this.status()?.paperMode;
+    if (typeof raw !== 'string') return false;
+    const v = raw.trim().toLowerCase();
+    return v === 'true' || v === 'paper' || v === 'on' || v === '1';
+  });
+  readonly modeLabel = computed<string | null>(() => {
+    const raw = this.status()?.paperMode;
+    if (raw === null || raw === undefined || raw.trim() === '') return null;
+    return this.isPaperMode() ? 'Paper mode' : 'Live mode';
+  });
+
+  /**
+   * Worker category, merged case-insensitively. The service already folds
+   * acronyms, but a mixed-case pair from an older engine build would still
+   * split one subsystem into two rows here, so the page keys on lower-case
+   * and displays whichever spelling it saw first.
+   */
+  private readonly categoryLabels = computed(() => {
+    const labels = new Map<string, string>();
+    for (const w of this.workerSnapshots()) {
+      const raw = (w.category ?? 'Other').trim() || 'Other';
+      const key = raw.toLowerCase();
+      if (!labels.has(key)) labels.set(key, raw.length <= 3 ? raw.toUpperCase() : raw);
+    }
+    return labels;
+  });
+  private categoryOf(w: WorkerHealthDto): string {
+    const raw = (w.category ?? 'Other').trim() || 'Other';
+    return this.categoryLabels().get(raw.toLowerCase()) ?? raw;
+  }
+
+  /** Keep the N largest rows and fold the remainder into one "Other" bucket. */
+  private topWithOther<T extends { category: string }>(
+    rows: T[],
+    valueOf: (r: T) => number,
+    make: (label: string, value: number, count: number) => T,
+  ): T[] {
+    if (rows.length <= this.topCategoryLimit) return rows;
+    const head = rows.slice(0, this.topCategoryLimit - 1);
+    const tail = rows.slice(this.topCategoryLimit - 1);
+    const total = tail.reduce((s, r) => s + valueOf(r), 0);
+    return [...head, make(`Other (${tail.length} more)`, total, tail.length)];
+  }
+
   readonly workerCounts = computed(() => {
     const buckets = { Healthy: 0, Degraded: 0, Failed: 0, Idle: 0 };
     for (const w of this.workerSnapshots()) {
@@ -849,7 +1001,7 @@ export class HealthPageComponent {
     };
     const groups: Record<string, Row> = {};
     for (const w of this.workerSnapshots()) {
-      const cat = w.category ?? 'Other';
+      const cat = this.categoryOf(w);
       if (!groups[cat])
         groups[cat] = {
           category: cat,
@@ -896,21 +1048,50 @@ export class HealthPageComponent {
     };
   });
 
+  // Chart rows: the largest categories, with everything past the limit folded
+  // into "Other". With 41 categories on a 260 px axis ECharts hid two of every
+  // three labels, and the surviving ones no longer sat beside their own bar.
+  private readonly workersByCategoryRows = computed(() => {
+    const rows = this.perCategoryBreakdown().map((r) => ({ category: r.category, total: r.total }));
+    return this.topWithOther(
+      rows,
+      (r) => r.total,
+      (category, total) => ({ category, total }),
+    );
+  });
+
+  readonly categoryChartSubtitle = computed(() => {
+    const all = this.perCategoryBreakdown().length;
+    const shown = this.workersByCategoryRows().length;
+    const n = this.workerSnapshots().length;
+    if (all <= shown) return `How the ${n}-worker fleet is composed · ${all} categories`;
+    return `Largest ${shown - 1} of ${all} categories · remainder grouped as Other · ${n} workers`;
+  });
+
   readonly workersByCategoryOptions = computed<EChartsOption>(() => {
-    const rows = this.perCategoryBreakdown();
+    const rows = this.workersByCategoryRows();
     if (rows.length === 0) return {};
     return {
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      grid: { top: 10, right: 30, bottom: 30, left: 100 },
+      grid: { top: 10, right: 36, bottom: 30, left: 130 },
       xAxis: {
         type: 'value',
+        minInterval: 1,
         axisLabel: { fontSize: 10, color: '#6E6E73' },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
       yAxis: {
         type: 'category',
         data: rows.map((r) => r.category).reverse(),
-        axisLabel: { fontSize: 11, color: '#6E6E73' },
+        // Every row must keep its label; the whole point of capping the row
+        // count is that nothing has to be hidden.
+        axisLabel: {
+          fontSize: 11,
+          color: '#6E6E73',
+          interval: 0,
+          width: 120,
+          overflow: 'truncate',
+        },
       },
       series: [
         {
@@ -918,23 +1099,33 @@ export class HealthPageComponent {
           data: rows
             .map((r) => ({
               value: r.total,
-              itemStyle: { color: '#0071E3', borderRadius: [0, 4, 4, 0] },
+              itemStyle: {
+                color: r.category.startsWith('Other (') ? '#8E8E93' : '#0071E3',
+                borderRadius: [0, 4, 4, 0],
+              },
             }))
             .reverse(),
-          barWidth: 14,
+          barWidth: 12,
           label: { show: true, position: 'right', fontSize: 10, color: '#6E6E73' },
         },
       ],
     };
   });
 
-  readonly dlqEventTypeOptions = computed<EChartsOption>(() => {
+  readonly dlqEventTypeRows = computed(() => {
     const counts: Record<string, number> = {};
     for (const d of this.deadLetters()) {
       const k = d.eventType ?? 'unknown';
       counts[k] = (counts[k] ?? 0) + 1;
     }
-    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    const total = this.deadLetters().length;
+    return Object.entries(counts)
+      .map(([name, value]) => ({ name, value, share: total > 0 ? (value / total) * 100 : 0 }))
+      .sort((a, b) => b.value - a.value);
+  });
+
+  readonly dlqEventTypeOptions = computed<EChartsOption>(() => {
+    const entries = this.dlqEventTypeRows();
     if (entries.length === 0) return {};
     const palette = ['#FF3B30', '#FF9500', '#AF52DE', '#FFCC00', '#5AC8FA', '#0071E3', '#8E8E93'];
     return {
@@ -946,7 +1137,7 @@ export class HealthPageComponent {
           radius: ['45%', '70%'],
           center: ['50%', '45%'],
           label: { show: false },
-          data: entries.map(([name, value], i) => ({
+          data: entries.map(({ name, value }, i) => ({
             name,
             value,
             itemStyle: { color: palette[i % palette.length] },
@@ -995,14 +1186,18 @@ export class HealthPageComponent {
     const groups: Record<string, { sum: number; count: number }> = {};
     for (const w of this.workerSnapshots()) {
       if (!Number.isFinite(w.cycleDurationP95Ms)) continue;
-      const cat = w.category ?? 'Other';
+      const cat = this.categoryOf(w);
       if (!groups[cat]) groups[cat] = { sum: 0, count: 0 };
       groups[cat].sum += w.cycleDurationP95Ms;
       groups[cat].count++;
     }
+    // Slowest categories only — the tail (dozens of sub-100 ms categories)
+    // is what piled 40 value labels into a 40 px strip. The value now lives
+    // in the tooltip; the bar length and colour band carry the reading.
     const rows = Object.entries(groups)
       .map(([category, g]) => ({ category, avg: g.count > 0 ? g.sum / g.count : 0 }))
-      .sort((a, b) => b.avg - a.avg);
+      .sort((a, b) => b.avg - a.avg)
+      .slice(0, this.topCategoryLimit);
     if (rows.length === 0) return {};
     return {
       tooltip: {
@@ -1010,10 +1205,10 @@ export class HealthPageComponent {
         axisPointer: { type: 'shadow' },
         formatter: (params: any) => {
           const p = Array.isArray(params) ? params[0] : params;
-          return `${p.name}<br/>Avg P95: ${Math.round(p.value)} ms`;
+          return `${p.name}<br/>Avg P95: ${Math.round(p.value).toLocaleString()} ms`;
         },
       },
-      grid: { top: 10, right: 60, bottom: 30, left: 100 },
+      grid: { top: 10, right: 24, bottom: 30, left: 130 },
       xAxis: {
         type: 'value',
         name: 'ms',
@@ -1024,7 +1219,13 @@ export class HealthPageComponent {
       yAxis: {
         type: 'category',
         data: rows.map((r) => r.category).reverse(),
-        axisLabel: { fontSize: 11, color: '#6E6E73' },
+        axisLabel: {
+          fontSize: 11,
+          color: '#6E6E73',
+          interval: 0,
+          width: 120,
+          overflow: 'truncate',
+        },
       },
       series: [
         {
@@ -1038,14 +1239,8 @@ export class HealthPageComponent {
               },
             }))
             .reverse(),
-          barWidth: 14,
-          label: {
-            show: true,
-            position: 'right',
-            fontSize: 10,
-            color: '#6E6E73',
-            formatter: '{c} ms',
-          },
+          barWidth: 12,
+          label: { show: false },
         },
       ],
     };
@@ -1055,12 +1250,18 @@ export class HealthPageComponent {
   readonly errorsByCategoryOptions = computed<EChartsOption>(() => {
     const groups: Record<string, number> = {};
     for (const w of this.workerSnapshots()) {
-      const cat = w.category ?? 'Other';
+      const cat = this.categoryOf(w);
       groups[cat] = (groups[cat] ?? 0) + (w.errorsLastHour ?? 0);
     }
-    const rows = Object.entries(groups)
-      .map(([category, errors]) => ({ category, errors }))
-      .sort((a, b) => b.errors - a.errors);
+    // Only categories that actually errored — a bar of zero is not a hot-spot.
+    const rows = this.topWithOther(
+      Object.entries(groups)
+        .map(([category, errors]) => ({ category, errors }))
+        .filter((r) => r.errors > 0)
+        .sort((a, b) => b.errors - a.errors),
+      (r) => r.errors,
+      (category, errors) => ({ category, errors }),
+    );
     if (rows.length === 0 || rows.every((r) => r.errors === 0)) {
       return {
         title: {
@@ -1080,16 +1281,23 @@ export class HealthPageComponent {
           return `${p.name}<br/>Errors / hour: ${p.value}`;
         },
       },
-      grid: { top: 10, right: 50, bottom: 30, left: 100 },
+      grid: { top: 10, right: 50, bottom: 30, left: 130 },
       xAxis: {
         type: 'value',
+        minInterval: 1,
         axisLabel: { fontSize: 10, color: '#6E6E73' },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
       yAxis: {
         type: 'category',
         data: rows.map((r) => r.category).reverse(),
-        axisLabel: { fontSize: 11, color: '#6E6E73' },
+        axisLabel: {
+          fontSize: 11,
+          color: '#6E6E73',
+          interval: 0,
+          width: 120,
+          overflow: 'truncate',
+        },
       },
       series: [
         {
@@ -1103,7 +1311,7 @@ export class HealthPageComponent {
               },
             }))
             .reverse(),
-          barWidth: 14,
+          barWidth: 12,
           label: { show: true, position: 'right', fontSize: 10, color: '#6E6E73' },
         },
       ],

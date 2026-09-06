@@ -207,17 +207,15 @@ import {
                         <span class="muted">—</span>
                       }
                     </td>
-                    <td
-                      class="num mono"
-                      [class.delta-pos]="delta(r) > 0"
-                      [class.delta-neg]="delta(r) < 0"
-                    >
+                    <!-- Δ is coloured by what the move MEANS for the position
+                         (protection loosened = amber, tightened/restored =
+                         green), not by its arithmetic sign — a bump that widens
+                         a SHORT's SL is a negative number but still loosens it. -->
+                    <td [class]="'num mono ' + deltaClass(r)">
                       {{ deltaStr(r) }}
                     </td>
                     <td
-                      class="num mono"
-                      [class.delta-pos]="deltaVsInit(r) > 0"
-                      [class.delta-neg]="deltaVsInit(r) < 0"
+                      [class]="'num mono ' + deltaVsInitClass(r)"
                       [class.muted]="r.initialSl === null || r.newSl === null"
                     >
                       {{ deltaVsInitStr(r) }}
@@ -229,8 +227,10 @@ import {
                         —
                       }
                     </td>
-                    <td class="mono small">{{ actorOf(r) }}</td>
-                    <td class="small muted">{{ r.reason ?? '—' }}</td>
+                    <td class="mono small nowrap">{{ actorOf(r) }}</td>
+                    <td class="small muted reason" [title]="r.reason ?? ''">
+                      {{ r.reason ?? '—' }}
+                    </td>
                   </tr>
                 }
               </tbody>
@@ -306,6 +306,8 @@ import {
         border-radius: 4px;
         border: 1px solid var(--border, #ccc);
         background: var(--bg-primary, #fff);
+        color: var(--text-primary);
+        font: inherit;
       }
       .filter-actions {
         display: flex;
@@ -345,11 +347,15 @@ import {
         width: 100%;
         border-collapse: collapse;
       }
+      /* Every cell single-line: the timestamp was wrapping to three lines and
+         long reasons inflated some rows to 185px while others stayed at 36px. */
       th,
       td {
         padding: 6px 10px;
         border-bottom: 1px solid var(--border, #eee);
         text-align: left;
+        white-space: nowrap;
+        vertical-align: middle;
       }
       th {
         font-size: 12px;
@@ -362,11 +368,22 @@ import {
       .mono {
         font-family: var(--font-mono, ui-monospace, monospace);
       }
-      .delta-pos {
-        color: #1d8a3e;
+      .nowrap {
+        white-space: nowrap;
       }
-      .delta-neg {
-        color: #c93631;
+      td.reason {
+        max-width: 260px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .delta-tighten {
+        color: var(--profit, #1d8a3e);
+      }
+      .delta-loosen {
+        color: var(--warning, #c97700);
+      }
+      .delta-none {
+        color: var(--text-tertiary, #888);
       }
       .source-pill {
         padding: 2px 8px;
@@ -537,6 +554,27 @@ export class SlAuditPageComponent {
   protected deltaVsInit(r: PositionSlChangeLog): number {
     if (r.initialSl === null || r.newSl === null) return 0;
     return r.newSl - r.initialSl;
+  }
+
+  /**
+   * Meaning-based colour for an SL move. For a Long, a higher SL is tighter
+   * (more protection); for a Short the opposite. Tighter = green, looser =
+   * amber, no-op (Δ 0.00000 — the SPREADREVERTDRIFT audit noise) = muted.
+   */
+  private moveClass(r: PositionSlChangeLog, d: number): string {
+    if (d === 0) return 'delta-none';
+    const tighter = r.direction === 'Short' ? d < 0 : d > 0;
+    return tighter ? 'delta-tighten' : 'delta-loosen';
+  }
+
+  protected deltaClass(r: PositionSlChangeLog): string {
+    if (r.oldSl === null || r.newSl === null) return 'delta-none';
+    return this.moveClass(r, this.delta(r));
+  }
+
+  protected deltaVsInitClass(r: PositionSlChangeLog): string {
+    if (r.initialSl === null || r.newSl === null) return 'delta-none';
+    return this.moveClass(r, this.deltaVsInit(r));
   }
 
   protected deltaVsInitStr(r: PositionSlChangeLog): string {

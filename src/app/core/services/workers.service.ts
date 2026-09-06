@@ -22,6 +22,19 @@ export class WorkersService {
   }
 }
 
+/**
+ * Worker names are not consistent about acronym casing — `EAHealthMonitorWorker`
+ * yields "EA" while `EaFleetWorker` yields "Ea", and the category charts then
+ * showed two rows for one subsystem. Short segments (≤ 3 letters) are acronyms
+ * in this codebase (EA, ML, COT, TCP), so they are folded to upper-case; longer
+ * words keep their natural casing.
+ */
+export function canonicalCategory(raw: string): string {
+  const trimmed = (raw ?? '').trim();
+  if (!trimmed) return 'Other';
+  return trimmed.length <= 3 ? trimmed.toUpperCase() : trimmed;
+}
+
 function enrichSnapshot(s: WorkerHealthSnapshot): WorkerHealthDto {
   const successes = s.successesLastHour ?? 0;
   const errors = s.errorsLastHour ?? 0;
@@ -67,7 +80,7 @@ function enrichSnapshot(s: WorkerHealthSnapshot): WorkerHealthDto {
   // Category = first CamelCase segment of the worker name. e.g. "MLTrainingWorker"
   // → "ML", "StrategyHealthWorker" → "Strategy". Falls back to "Other".
   const match = s.workerName.match(/^[A-Z]+(?=[A-Z][a-z])|^[A-Z][a-z]+/);
-  const category = match ? match[0] : 'Other';
+  const category = canonicalCategory(match ? match[0] : 'Other');
 
   return {
     ...s,

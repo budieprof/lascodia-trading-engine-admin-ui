@@ -11,8 +11,9 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { CommonModule, DatePipe, DecimalPipe, SlicePipe } from '@angular/common';
+import { CommonModule, CurrencyPipe, DatePipe, DecimalPipe, SlicePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { catchError, of } from 'rxjs';
 
 import { LlmService } from '@core/services/llm.service';
@@ -35,10 +36,12 @@ import type { EChartsOption } from 'echarts';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     CommonModule,
+    CurrencyPipe,
     DatePipe,
     DecimalPipe,
     SlicePipe,
     FormsModule,
+    RouterLink,
     PageHeaderComponent,
     MetricCardComponent,
     ChartCardComponent,
@@ -49,7 +52,7 @@ import type { EChartsOption } from 'echarts';
         title="LLM Invocations"
         subtitle="Every model call the engine made — provider, model, tokens, cost, latency, outcome."
       >
-        <select class="window-select" [(ngModel)]="windowHours" (change)="reloadSummary()">
+        <select class="window-select" [(ngModel)]="windowHours" (change)="onWindowChange()">
           <option [ngValue]="1">Last 1h</option>
           <option [ngValue]="6">Last 6h</option>
           <option [ngValue]="24">Last 24h</option>
@@ -67,13 +70,19 @@ import type { EChartsOption } from 'echarts';
           format="number"
           dotColor="#0071E3"
         />
-        <app-metric-card
-          label="Total cost"
-          [value]="summary()?.totalCostUsd ?? 0"
-          format="currency"
-          [colorByValue]="false"
-          dotColor="#FF9500"
-        />
+        <!-- Local tile: the shared card cannot carry the "$0 because
+             subscription-billed" caption, and a bare $0.00 next to millions
+             of tokens reads as a broken cost pipeline. -->
+        <div class="kpi-tile">
+          <div class="kpi-tile-head">
+            <span class="dot" style="background: #ff9500"></span>
+            <span class="kpi-tile-label">Total cost</span>
+          </div>
+          <div class="kpi-tile-value">{{ summary()?.totalCostUsd ?? 0 | currency: 'USD' }}</div>
+          @if (zeroSpendWithCalls()) {
+            <div class="kpi-tile-sub">{{ zeroSpendReason() }}</div>
+          }
+        </div>
         <app-metric-card
           label="Input tokens"
           [value]="summary()?.totalTokensInput ?? 0"
@@ -86,17 +95,19 @@ import type { EChartsOption } from 'echarts';
           format="number"
           dotColor="#AF52DE"
         />
-        <app-metric-card
-          label="Avg latency (ms)"
-          [value]="summary()?.averageLatencyMs ?? 0"
-          format="number"
-          dotColor="#FFCC00"
-        />
+        <div class="kpi-tile">
+          <div class="kpi-tile-head">
+            <span class="dot" style="background: #ffcc00"></span>
+            <span class="kpi-tile-label">Avg latency</span>
+          </div>
+          <div class="kpi-tile-value">{{ latencyLabel(summary()?.averageLatencyMs ?? 0) }}</div>
+        </div>
         <app-metric-card
           label="Failure rate"
           [value]="failureRate()"
           format="percent"
           [colorByValue]="true"
+          [invertColor]="true"
         />
       </div>
 
@@ -123,27 +134,41 @@ import type { EChartsOption } from 'echarts';
         </div>
       }
 
-      <!-- ── Charts row ─────────────────────────────────────────────── -->
-      <div class="charts-grid">
-        <app-chart-card
-          title="Spend by provider"
-          subtitle="USD over the window, top providers by cost"
-          [options]="byProviderOptions()"
-          height="280px"
-        />
-        <app-chart-card
-          title="Spend by model"
-          subtitle="USD over the window, top models by cost"
-          [options]="byModelOptions()"
-          height="280px"
-        />
-        <app-chart-card
-          title="Spend by purpose"
-          subtitle="Which engine feature is driving cost"
-          [options]="byPurposeOptions()"
-          height="280px"
-        />
-      </div>
+      <!-- ── Charts row ─────────────────────────────────────────────────
+           Three empty $0–$1 axes carry no information; when nothing in the
+           window cost anything, say so once and show the call mix instead. -->
+      @if (summary(); as s) {
+        @if (zeroSpendWithCalls()) {
+          <div class="note quiet">
+            No spend in the last {{ windowLabel() }} — {{ s.totalCalls | number }} call(s),
+            {{ zeroSpendReason() }}. Call mix:
+            @for (b of s.byProvider; track b.label; let last = $last) {
+              <span class="mono">{{ b.label }}</span> {{ b.calls | number }}{{ last ? '' : ' · ' }}
+            }
+          </div>
+        } @else if (s.totalCalls > 0) {
+          <div class="charts-grid">
+            <app-chart-card
+              title="Spend by provider"
+              subtitle="USD over the window, top providers by cost"
+              [options]="byProviderOptions()"
+              height="280px"
+            />
+            <app-chart-card
+              title="Spend by model"
+              subtitle="USD over the window, top models by cost"
+              [options]="byModelOptions()"
+              height="280px"
+            />
+            <app-chart-card
+              title="Spend by purpose"
+              subtitle="Which engine feature is driving cost"
+              [options]="byPurposeOptions()"
+              height="280px"
+            />
+          </div>
+        }
+      }
 
       <!-- ── Ledger table ───────────────────────────────────────────── -->
       <section class="card">
@@ -185,9 +210,9 @@ import type { EChartsOption } from 'echarts';
           <div class="note">Loading invocations…</div>
         } @else if (invocations().length === 0) {
           <div class="note">
-            No invocations match the current filter. The engine logs every model call — if this is
-            empty you may need to widen the time window or check whether the LLM features are
-            enabled in <a routerLink="/llm/settings">Settings</a>.
+            No invocations in the last {{ windowLabel() }} match the current filter. The engine logs
+            every model call — widen the time window, clear the filters, or check whether the LLM
+            features are enabled in <a routerLink="/llm/settings">Settings</a>.
           </div>
         } @else {
           <div class="table-wrap">
@@ -219,7 +244,7 @@ import type { EChartsOption } from 'echarts';
                     <td class="mono purpose">{{ inv.purpose }}</td>
                     <td class="num mono">{{ inv.tokensInput | number: '1.0-0' }}</td>
                     <td class="num mono">{{ inv.tokensOutput | number: '1.0-0' }}</td>
-                    <td class="num mono">{{ inv.latencyMs | number: '1.0-0' }}ms</td>
+                    <td class="num mono">{{ latencyLabel(inv.latencyMs) }}</td>
                     <td class="num mono">\${{ inv.costUsd | number: '1.4-4' }}</td>
                     <td>
                       <span class="outcome-tag" [class]="outcomeClass(inv.outcome)">{{
@@ -288,7 +313,7 @@ import type { EChartsOption } from 'echarts';
                   <span class="muted">·</span>
                   <span class="muted">{{ d.tokensOutput | number }} out</span>
                   <span class="muted">·</span>
-                  <span class="muted">{{ d.latencyMs | number }}ms</span>
+                  <span class="muted">{{ latencyLabel(d.latencyMs) }}</span>
                   <span class="muted">·</span>
                   <span class="muted">\${{ d.costUsd | number: '1.4-4' }}</span>
                   <span class="muted">·</span>
@@ -366,8 +391,69 @@ import type { EChartsOption } from 'echarts';
       }
       .kpi-strip {
         display: grid;
-        grid-template-columns: repeat(6, 1fr);
+        grid-template-columns: repeat(6, minmax(0, 1fr));
         gap: var(--space-4);
+        align-items: stretch;
+      }
+      /* Mirrors app-metric-card so the local tiles sit flush with the shared ones. */
+      .kpi-tile {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+        box-shadow: var(--shadow-sm);
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+      .kpi-tile-head {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--space-2);
+        margin-bottom: var(--space-3);
+        min-height: 2.6em;
+      }
+      .kpi-tile-head .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        margin-top: 0.4em;
+      }
+      .kpi-tile-label {
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        font-weight: var(--font-medium);
+        line-height: 1.3;
+      }
+      .kpi-tile-value {
+        font-size: var(--text-2xl);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        letter-spacing: var(--tracking-tight);
+        font-variant-numeric: tabular-nums;
+        line-height: 1.2;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .kpi-tile-sub {
+        margin-top: var(--space-1);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        line-height: 1.35;
+      }
+      .note.quiet {
+        text-align: left;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
+        line-height: 1.6;
+      }
+      .note.quiet .mono {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        color: var(--text-primary);
       }
       .outcome-row {
         display: flex;
@@ -448,9 +534,10 @@ import type { EChartsOption } from 'echarts';
         color: var(--text-primary);
         min-width: 140px;
       }
+      /* No inner max-height: a 600px scroll box sliced the last visible row
+         under the pager. The page scrolls instead; the header stays sticky. */
       .table-wrap {
-        max-height: 600px;
-        overflow: auto;
+        overflow-x: auto;
       }
       .table {
         width: 100%;
@@ -761,6 +848,55 @@ export class LlmInvocationsPageComponent implements OnInit {
   );
   readonly pageEnd = computed(() => Math.min(this.currentPage() * this.pageSize, this.totalRows()));
 
+  /** Calls were made but nothing was billed — the charts would be three empty axes. */
+  readonly zeroSpendWithCalls = computed(() => {
+    const s = this.summary();
+    return !!s && s.totalCalls > 0 && s.totalCostUsd <= 0;
+  });
+
+  /**
+   * Why a non-empty window can cost $0. The claudecode provider runs on the
+   * operator's Claude Code subscription, so the engine attributes $0 to every
+   * call it makes; any other provider at $0 means pricing is not configured.
+   */
+  readonly zeroSpendReason = computed(() => {
+    const s = this.summary();
+    if (!s) return '';
+    const providers = s.byProvider.map((b) => b.label.toLowerCase());
+    const allClaudeCode = providers.length > 0 && providers.every((p) => p === 'claudecode');
+    if (allClaudeCode) return 'claudecode is subscription-billed at $0';
+    if (providers.includes('claudecode')) {
+      return 'claudecode is subscription-billed at $0; other providers have no price configured';
+    }
+    return 'no per-token price is configured for these providers';
+  });
+
+  windowLabel(): string {
+    const h = this.windowHours();
+    return h % 24 === 0 && h >= 48 ? `${h / 24}d` : `${h}h`;
+  }
+
+  /** "115,495 ms" is unreadable at a glance; ≥ 60 s reads as "1m 55s". */
+  latencyLabel(ms: number | null | undefined): string {
+    if (ms == null || !Number.isFinite(ms)) return '—';
+    if (ms < 1000) return `${Math.round(ms)} ms`;
+    const totalSec = ms / 1000;
+    if (totalSec < 60) return `${totalSec.toFixed(1)} s`;
+    const m = Math.floor(totalSec / 60);
+    const s = Math.round(totalSec - m * 60);
+    return s === 60 ? `${m + 1}m 0s` : `${m}m ${s}s`;
+  }
+
+  /** ISO lower bound for the ledger query — the same window the summary uses. */
+  private windowFromIso(): string {
+    return new Date(Date.now() - this.windowHours() * 3_600_000).toISOString();
+  }
+
+  onWindowChange(): void {
+    this.reloadSummary();
+    this.resetAndReload();
+  }
+
   // ── Chart options ──────────────────────────────────────────────────
   readonly byProviderOptions = computed<EChartsOption>(() =>
     this.barChart(this.summary()?.byProvider ?? [], '#0071E3'),
@@ -815,6 +951,9 @@ export class LlmInvocationsPageComponent implements OnInit {
           model: this.filterModel || null,
           purpose: this.filterPurpose || null,
           outcome: this.filterOutcome,
+          // The ledger used to ignore the window: "Last 24h" tiles sat above
+          // a footer of "1–50 of 27,244". Both halves now share the bound.
+          from: this.windowFromIso(),
         },
       })
       .pipe(
@@ -933,7 +1072,9 @@ export class LlmInvocationsPageComponent implements OnInit {
           fontSize: 10,
           color: '#6E6E73',
           rotate: buckets.length > 4 ? 25 : 0,
-          interval: 0,
+          // No forced `interval: 0` — that overrode the theme's overlap
+          // hiding and printed every purpose label on top of its neighbour.
+          hideOverlap: true,
         },
       },
       yAxis: {

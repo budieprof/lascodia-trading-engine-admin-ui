@@ -21,6 +21,26 @@ import { lascodiaTheme, lascodiaDarkTheme } from '../styles/echarts-theme';
 echarts.registerTheme('lascodia-light', lascodiaTheme);
 echarts.registerTheme('lascodia-dark', lascodiaDarkTheme);
 
+// Charts rendered through ChartCardComponent pass the theme name explicitly. Sixteen pages use
+// the `echarts` directive directly and passed none, so they got ECharts' stock look — and none
+// of the theme-level defaults (axis label overlap hiding, compact number formatting). Hand
+// ngx-echarts a module facade whose `init` defaults the theme from the same `data-theme`
+// attribute ThemeService writes, so every chart in the app is governed by one theme regardless
+// of how it was mounted. An explicit theme argument still wins.
+//
+// A facade, NOT `echarts.init = …`: an ES module namespace is read-only at runtime, and that
+// assignment threw "Cannot assign to import" during bootstrap and took the whole app down.
+const themedInit: typeof echarts.init = (dom, theme, opts) =>
+  echarts.init(
+    dom,
+    theme ??
+      (document.documentElement.getAttribute('data-theme') === 'dark'
+        ? 'lascodia-dark'
+        : 'lascodia-light'),
+    opts,
+  );
+const themedEcharts = { ...echarts, init: themedInit };
+
 export function buildAppConfig(runtimeConfig: RuntimeConfig): ApplicationConfig {
   return {
     providers: [
@@ -61,7 +81,7 @@ export function buildAppConfig(runtimeConfig: RuntimeConfig): ApplicationConfig 
       // Order matters: auth → retry (so retries carry the token) → error (final toast).
       provideHttpClient(withInterceptors([authInterceptor, retryInterceptor, errorInterceptor])),
       provideAnimations(),
-      provideEchartsCore({ echarts }),
+      provideEchartsCore({ echarts: themedEcharts }),
       { provide: ErrorHandler, useClass: GlobalErrorHandler },
       ...sentryProviders(),
       ...webVitalsProviders(),

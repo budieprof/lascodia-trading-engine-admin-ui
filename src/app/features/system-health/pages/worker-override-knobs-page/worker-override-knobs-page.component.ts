@@ -8,7 +8,7 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { catchError, map, of } from 'rxjs';
+import { map } from 'rxjs';
 
 import { HealthService } from '@core/services/health.service';
 import type { WorkerOverrideKnobsDto } from '@core/api/api.types';
@@ -37,7 +37,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
     <div class="page">
       <app-page-header
         title="System — Worker Override Knobs"
-        subtitle="The override-key allow-list per BackgroundService. Replaces the 'grep CLAUDE.md to find the right config key' workflow."
+        subtitle="Which Engine Config keys each background worker reads at runtime. Click a key to open it in Engine Config."
       >
         <a routerLink="/system-health" class="btn btn-secondary">← System Health</a>
         <a routerLink="/engine-config" class="btn btn-secondary">Engine Config →</a>
@@ -219,21 +219,27 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         flex-wrap: wrap;
         gap: 6px;
       }
+      /* Config keys read as identifiers, not as 155 primary-blue buttons.
+         They stay links (each opens the key in Engine Config) but look like
+         monospace tags; the hover state is where the affordance lives. */
       .knob-chip {
         display: inline-block;
-        padding: 4px 10px;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-full);
+        padding: 2px 8px;
+        background: var(--bg-tertiary);
+        border: 1px solid transparent;
+        border-radius: var(--radius-sm);
         font-size: var(--text-xs);
-        color: var(--accent);
+        color: var(--text-secondary);
         text-decoration: none;
-        font-weight: var(--font-medium);
+        white-space: nowrap;
       }
-      .knob-chip:hover {
-        background: var(--accent);
-        color: #fff;
+      .knob-chip:hover,
+      .knob-chip:focus-visible {
+        color: var(--accent);
         border-color: var(--accent);
+        background: rgba(0, 113, 227, 0.06);
+        text-decoration: underline;
+        outline: none;
       }
     `,
   ],
@@ -246,12 +252,11 @@ export class WorkerOverrideKnobsPageComponent {
   // Worker knob list is essentially immutable for the engine's process lifetime
   // (reflection-driven discovery happens once at startup). 10-minute poll is
   // generous; in practice the page just runs the initial fetch.
+  // No catchError here: the polled resource records failures in `.error()`
+  // and keeps polling. Swallowing them produced an empty list that rendered
+  // as "No workers match" instead of the error state with a retry.
   protected readonly resource = createPolledResource(
-    () =>
-      this.health.getWorkerOverrideKnobs().pipe(
-        map((res) => res.data ?? []),
-        catchError(() => of<WorkerOverrideKnobsDto[]>([])),
-      ),
+    () => this.health.getWorkerOverrideKnobs().pipe(map((res) => res.data ?? [])),
     { intervalMs: 600_000 },
   );
 

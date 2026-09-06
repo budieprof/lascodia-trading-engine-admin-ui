@@ -215,7 +215,11 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
             <dl class="grid">
               <div class="item">
                 <dt>Symbol</dt>
-                <dd>{{ p.symbol ?? '-' }}</dd>
+                <dd>{{ p.symbol ?? '—' }}</dd>
+              </div>
+              <div class="item">
+                <dt>Status</dt>
+                <dd>{{ p.status }}</dd>
               </div>
               <div class="item">
                 <dt>Direction</dt>
@@ -238,60 +242,62 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
                 <dd class="mono">{{ p.averageEntryPrice | number: '1.5-5' }}</dd>
               </div>
               <div class="item">
-                <dt>Current Price</dt>
+                <!-- A closed position has no "current" price — the last price
+                     on record is the close. -->
+                <dt>{{ p.status === 'Closed' ? 'Close price' : 'Current price' }}</dt>
                 <dd class="mono">
-                  {{ p.currentPrice !== null ? (p.currentPrice | number: '1.5-5') : '-' }}
+                  {{ p.currentPrice !== null ? (p.currentPrice | number: '1.5-5') : '—' }}
                 </dd>
               </div>
               <div class="item">
                 <dt>Unrealized P&amp;L</dt>
                 <dd
-                  class="mono"
+                  class="mono pnl"
                   [class.profit]="p.unrealizedPnL > 0"
                   [class.loss]="p.unrealizedPnL < 0"
                 >
-                  {{ p.unrealizedPnL | number: '1.2-2' }}
+                  {{ signedMoney(p.unrealizedPnL) }}
                 </dd>
               </div>
               <div class="item">
                 <dt>Realized P&amp;L</dt>
                 <dd
-                  class="mono"
+                  class="mono pnl"
                   [class.profit]="p.realizedPnL > 0"
                   [class.loss]="p.realizedPnL < 0"
                 >
-                  {{ p.realizedPnL | number: '1.2-2' }}
+                  {{ signedMoney(p.realizedPnL) }}
                 </dd>
               </div>
               <div class="item">
                 <dt>Stop Loss</dt>
                 <dd class="mono">
-                  {{ p.stopLoss !== null ? (p.stopLoss | number: '1.5-5') : '-' }}
+                  {{ p.stopLoss !== null ? (p.stopLoss | number: '1.5-5') : '—' }}
                 </dd>
               </div>
               <div class="item">
                 <dt>Take Profit</dt>
                 <dd class="mono">
-                  {{ p.takeProfit !== null ? (p.takeProfit | number: '1.5-5') : '-' }}
+                  {{ p.takeProfit !== null ? (p.takeProfit | number: '1.5-5') : '—' }}
                 </dd>
               </div>
               <div class="item">
                 <dt>Trailing Stop</dt>
                 <dd class="mono">
-                  {{ p.trailingStopLevel !== null ? (p.trailingStopLevel | number: '1.5-5') : '-' }}
+                  {{ p.trailingStopLevel !== null ? (p.trailingStopLevel | number: '1.5-5') : '—' }}
                 </dd>
               </div>
               <div class="item">
                 <dt>Broker ID</dt>
-                <dd class="mono">{{ p.brokerPositionId ?? '-' }}</dd>
+                <dd class="mono">{{ p.brokerPositionId ?? '—' }}</dd>
               </div>
               <div class="item">
                 <dt>Opened</dt>
-                <dd>{{ p.openedAt | date: 'MMM d, yyyy HH:mm:ss' }}</dd>
+                <dd>{{ p.openedAt | date: 'yyyy-MM-dd HH:mm:ss' }}</dd>
               </div>
               <div class="item">
                 <dt>Closed</dt>
-                <dd>{{ p.closedAt ? (p.closedAt | date: 'MMM d, yyyy HH:mm:ss') : '-' }}</dd>
+                <dd>{{ p.closedAt ? (p.closedAt | date: 'yyyy-MM-dd HH:mm:ss') : '—' }}</dd>
               </div>
             </dl>
           </section>
@@ -509,22 +515,26 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
         font-size: var(--text-base);
         font-weight: var(--font-semibold);
       }
+      /* Four columns so the 14 facts fill complete rows (3 left "Closed" on a
+         row by itself); the container clips the last-column right border. */
       .grid {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
         gap: 0;
         margin: 0;
+        overflow: hidden;
       }
       .item {
         padding: var(--space-3) var(--space-5);
         border-bottom: 1px solid var(--border);
         border-right: 1px solid var(--border);
+        margin-right: -1px;
         display: flex;
         flex-direction: column;
         gap: var(--space-1);
       }
-      .item:nth-child(3n) {
-        border-right: none;
+      .item dd.pnl {
+        font-weight: var(--font-semibold);
       }
       .item dt {
         font-size: var(--text-xs);
@@ -544,10 +554,14 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
         font-family: 'SF Mono', 'Fira Code', monospace;
         font-size: var(--text-xs);
       }
-      .profit {
+      /* ".item dd" (0,1,1) out-ranked the bare ".profit" / ".loss" (0,1,0)
+         rules, so P&L always rendered in the neutral text colour. */
+      .profit,
+      .item dd.profit {
         color: var(--profit);
       }
-      .loss {
+      .loss,
+      .item dd.loss {
         color: var(--loss);
       }
       .related {
@@ -595,6 +609,16 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
   ],
 })
 export class PositionDetailPageComponent implements OnInit {
+  /** "+1,234.56" / "−1,234.56" / "0.00" — one money format for both P&L facts. */
+  signedMoney(v: number | null | undefined): string {
+    if (v == null || !Number.isFinite(v)) return '—';
+    const abs = new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(Math.abs(v));
+    return `${v < 0 ? '−' : v > 0 ? '+' : ''}${abs}`;
+  }
+
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly positionsService = inject(PositionsService);

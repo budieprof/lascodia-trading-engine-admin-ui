@@ -8,8 +8,8 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ActivatedRoute, Router } from '@angular/router';
-import { DatePipe, DecimalPipe } from '@angular/common';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { CurrencyPipe, DatePipe, DecimalPipe } from '@angular/common';
 import { catchError, map, merge, of, throttleTime } from 'rxjs';
 
 import { WalkForwardService } from '@core/services/walk-forward.service';
@@ -79,6 +79,8 @@ interface WindowDerived extends WindowResult {
   imports: [
     DatePipe,
     DecimalPipe,
+    CurrencyPipe,
+    RouterLink,
     StatusBadgeComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
@@ -110,47 +112,45 @@ interface WindowDerived extends WindowResult {
       @if (loading() && !run()) {
         <app-card-skeleton [lines]="10" />
       } @else if (run(); as r) {
-        @if (r.errorMessage) {
+        <!-- The error message is rendered once: here when the run still
+             produced windows (partial failure), otherwise in the status note
+             below the KPI strip. -->
+        @if (r.errorMessage && windows().length > 0) {
           <div class="error"><strong>Error:</strong> {{ r.errorMessage }}</div>
         }
 
-        <!-- ── KPI strip ───────────────────────────────────────────────── -->
+        <!-- ── KPI strip — every OOS metric is "—" until at least one
+             window exists; a 0.00% win rate on a failed run reads as a
+             measured result, which it is not. ───────────────────────── -->
         <div class="kpi-strip">
+          <app-metric-card label="Windows" [value]="windows().length" format="number" />
           <app-metric-card
-            label="Windows"
-            [value]="windows().length"
-            format="number"
-            dotColor="#5AC8FA"
-          />
-          <app-metric-card
-            label="Avg OOS Score"
-            [value]="r.averageOutOfSampleScore"
+            label="Avg OOS Sharpe"
+            [value]="hasWindows() ? r.averageOutOfSampleScore : null"
             format="number"
             [colorByValue]="true"
           />
           <app-metric-card
             label="Consistency"
-            [value]="r.scoreConsistency"
+            [value]="hasWindows() ? r.scoreConsistency : null"
             format="number"
             [colorByValue]="true"
           />
           <app-metric-card
             label="Avg OOS Win Rate"
-            [value]="aggregates().avgWr"
+            [value]="hasWindows() ? aggregates().avgWr : null"
             format="percent"
-            dotColor="#34C759"
           />
           <app-metric-card
             label="Avg OOS PF"
-            [value]="aggregates().avgPf"
+            [value]="hasWindows() ? aggregates().avgPf : null"
             format="number"
             [colorByValue]="true"
           />
           <app-metric-card
             label="Total OOS Trades"
-            [value]="aggregates().totalTrades"
+            [value]="hasWindows() ? aggregates().totalTrades : null"
             format="number"
-            dotColor="#AF52DE"
           />
         </div>
 
@@ -457,11 +457,15 @@ interface WindowDerived extends WindowResult {
           <dl class="cfg-grid">
             <div class="cfg-item">
               <dt>Strategy</dt>
-              <dd>#{{ r.strategyId }}</dd>
+              <dd>
+                <a class="link" [routerLink]="['/strategies', r.strategyId]"
+                  >#{{ r.strategyId }} ↗</a
+                >
+              </dd>
             </div>
             <div class="cfg-item">
               <dt>Initial Balance</dt>
-              <dd class="mono">{{ r.initialBalance | number: '1.2-2' }}</dd>
+              <dd class="mono">{{ r.initialBalance | currency: 'USD' : 'symbol' : '1.2-2' }}</dd>
             </div>
             <div class="cfg-item">
               <dt>Period</dt>
@@ -549,6 +553,7 @@ interface WindowDerived extends WindowResult {
         display: grid;
         grid-template-columns: repeat(6, 1fr);
         gap: var(--space-4);
+        align-items: start;
       }
       .charts-grid {
         display: grid;
@@ -642,6 +647,13 @@ interface WindowDerived extends WindowResult {
       }
       .windows td.loss {
         color: var(--color-danger, #ff3b30);
+      }
+      .link {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .link:hover {
+        text-decoration: underline;
       }
       .error {
         padding: var(--space-4) var(--space-5);
@@ -1031,6 +1043,8 @@ export class WalkForwardDetailPageComponent implements OnInit {
     const n = Number(raw);
     return Number.isFinite(n) ? n : -1;
   }
+
+  readonly hasWindows = computed(() => this.windows().length > 0);
 
   readonly aggregates = computed(() => {
     const w = this.windows();

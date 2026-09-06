@@ -12,6 +12,7 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 
 /** Cap |deltaFraction| display at ±50% so a single outlier doesn't squash everything else. */
 const DELTA_BAR_CAP = 0.5;
@@ -31,6 +32,7 @@ type DiffResult =
     FormsModule,
     RouterLink,
     PageHeaderComponent,
+    CompositeMlNavComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
@@ -40,9 +42,8 @@ type DiffResult =
       <app-page-header
         title="CompositeML — Policy Diff"
         subtitle="Per-knob change between two snapshots"
-      >
-        <a routerLink="/composite-ml" class="btn btn-secondary">← Active Policies</a>
-      </app-page-header>
+      />
+      <app-composite-ml-nav />
 
       <section class="picker">
         <div class="picker-field">

@@ -12,6 +12,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 
 type LineageResult =
   | { state: 'loading' }
@@ -26,6 +27,7 @@ type LineageResult =
     DatePipe,
     RouterLink,
     PageHeaderComponent,
+    CompositeMlNavComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
@@ -36,20 +38,24 @@ type LineageResult =
       <app-page-header
         [title]="'CompositeML — Snapshot #' + (snapshotId() ?? '?')"
         subtitle="Ancestry chain — newest at top, walking back via priorSnapshotId"
-      >
-        <a routerLink="/composite-ml" class="btn btn-secondary">← Active Policies</a>
-      </app-page-header>
+      />
+      <app-composite-ml-nav backLink="/composite-ml" backLabel="Active Policies" />
 
-      @switch (result()?.state) {
+      @switch (result().state) {
         @case ('loading') {
           <app-card-skeleton [lines]="8" />
         }
         @case ('error') {
-          <app-error-state
-            title="Could not load lineage"
-            [message]="result()!.state === 'error' ? errorMessage() : ''"
-            (retry)="refresh()"
-          />
+          <!-- A missing snapshot id is a dead end without a way back: retrying
+               the same id never helps, so the way out is the policies list. -->
+          <section class="state-card">
+            <app-error-state
+              title="Could not load lineage"
+              [message]="result()!.state === 'error' ? errorMessage() : ''"
+              (retry)="refresh()"
+            />
+            <a class="state-back" routerLink="/composite-ml">← Back to Active Policies</a>
+          </section>
         }
         @case ('loaded') {
           @if (loadedData()) {
@@ -150,6 +156,8 @@ type LineageResult =
             <app-empty-state
               title="Snapshot not found"
               description="The snapshot id was not found, or its lineage is empty."
+              actionLabel="← Back to Active Policies"
+              (actionClick)="goToPolicies()"
             />
           }
         }
@@ -163,6 +171,21 @@ type LineageResult =
         display: flex;
         flex-direction: column;
         gap: var(--space-5);
+      }
+      .state-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding-bottom: var(--space-6);
+      }
+      .state-back {
+        margin-top: calc(-1 * var(--space-6));
+        font-size: var(--text-sm);
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .state-back:hover {
+        text-decoration: underline;
       }
       .meta-row {
         display: flex;
@@ -407,6 +430,10 @@ export class SnapshotDetailPageComponent {
     const r = this.result();
     return r?.state === 'error' ? r.message : '';
   });
+
+  goToPolicies(): void {
+    void this.router.navigate(['/composite-ml']);
+  }
 
   refresh(): void {
     this._refreshTick.update((n) => n + 1);

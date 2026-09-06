@@ -8,7 +8,6 @@ import {
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
 import { catchError, map, of } from 'rxjs';
 
 import { CompositeMLService } from '@core/services/composite-ml.service';
@@ -21,6 +20,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 
 type LookbackDays = 1 | 7 | 30;
 
@@ -32,8 +32,8 @@ type LookbackDays = 1 | 7 | 30;
     DatePipe,
     DecimalPipe,
     FormsModule,
-    RouterLink,
     PageHeaderComponent,
+    CompositeMlNavComponent,
     MetricCardComponent,
     CardSkeletonComponent,
     EmptyStateComponent,
@@ -45,17 +45,12 @@ type LookbackDays = 1 | 7 | 30;
       <app-page-header
         title="CompositeML — Layer Health"
         subtitle="Per-layer enabled fraction, cycle count, and config-hash churn"
-      >
-        <a routerLink="/composite-ml" class="btn btn-secondary">← Active Policies</a>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
-      </app-page-header>
+      />
+      <app-composite-ml-nav
+        [showRefresh]="true"
+        [refreshing]="resource.loading()"
+        (refresh)="resource.refresh()"
+      />
 
       <div class="controls">
         <span class="control-label">Lookback</span>

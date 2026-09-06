@@ -38,7 +38,7 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
         title="Lifecycle Rationales"
         subtitle="Why did the engine do that? 2–3 sentence LLM-authored explanations attached to every persisted lifecycle event."
       >
-        <select class="window-select" [(ngModel)]="windowHours" (change)="reloadCoverage()">
+        <select class="window-select" [(ngModel)]="windowHours" (change)="onWindowChange()">
           <option [ngValue]="24">Last 24h</option>
           <option [ngValue]="168">Last 7d</option>
           <option [ngValue]="720">Last 30d</option>
@@ -46,99 +46,114 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
         <button type="button" class="btn-refresh" (click)="reload()">↻ Refresh</button>
       </app-page-header>
 
-      <!-- ── KPI strip ──────────────────────────────────────────────── -->
-      <div class="kpi-strip">
-        <app-metric-card
-          label="Rationales"
-          [value]="coverage()?.totalRationales ?? 0"
-          format="number"
-          dotColor="#0071E3"
-        />
-        <app-metric-card
-          label="Avg confidence"
-          [value]="coverage() ? coverage()!.averageConfidence * 100 : 0"
-          format="percent"
-          [colorByValue]="true"
-        />
-        <app-metric-card
-          label="Low-confidence (<0.4)"
-          [value]="coverage()?.lowConfidenceCount ?? 0"
-          format="number"
-          [dotColor]="(coverage()?.lowConfidenceCount ?? 0) > 0 ? '#FF9500' : '#34C759'"
-        />
-        <app-metric-card
-          label="LLM cost (window)"
-          [value]="coverage()?.totalCostUsd ?? 0"
-          format="currency"
-          dotColor="#AF52DE"
-        />
-        <app-metric-card
-          label="Event types covered"
-          [value]="coverageTotalTypes()"
-          format="number"
-          dotColor="#5AC8FA"
-        />
-        <app-metric-card
-          label="Active types (≥1)"
-          [value]="coverageActiveTypes()"
-          format="number"
-          dotColor="#FF9500"
-        />
-      </div>
+      <!-- ── KPI strip ──────────────────────────────────────────────────
+           Collapsed to one line when nothing fired: six zero tiles and a
+           grid of dashed "0" cards say the same thing as one sentence. -->
+      @if (coverage(); as c) {
+        @if (c.totalRationales > 0) {
+          <div class="kpi-strip">
+            <app-metric-card
+              label="Rationales"
+              [value]="c.totalRationales"
+              format="number"
+              dotColor="#0071E3"
+            />
+            <app-metric-card
+              label="Avg confidence (0–1)"
+              [value]="c.averageConfidence"
+              format="number"
+              dotColor="#34C759"
+            />
+            <app-metric-card
+              label="Low-confidence (<0.4)"
+              [value]="c.lowConfidenceCount"
+              format="number"
+              [dotColor]="c.lowConfidenceCount > 0 ? '#FF9500' : '#34C759'"
+            />
+            <app-metric-card
+              label="LLM cost (window)"
+              [value]="c.totalCostUsd"
+              format="currency"
+              dotColor="#AF52DE"
+            />
+            <app-metric-card
+              label="Event types wired"
+              [value]="coverageTotalTypes()"
+              format="number"
+              dotColor="#5AC8FA"
+            />
+            <app-metric-card
+              label="Types that fired"
+              [value]="coverageActiveTypes()"
+              format="number"
+              dotColor="#FF9500"
+            />
+          </div>
+        } @else {
+          <div class="note quiet">
+            No rationale fired in the last {{ windowLabel() }} across
+            {{ c.byEventType.length }} wired event type(s). Widen the window to see older
+            rationales, or check the narrative layer is enabled in
+            <a routerLink="/llm/settings">Settings</a>.
+          </div>
+        }
+      }
 
       <!-- ── Coverage matrix ────────────────────────────────────────── -->
       @if (coverage(); as c) {
-        <section class="card">
-          <header class="card-head">
-            <h3>Event-Type Coverage</h3>
-            <span class="muted small"
-              >Window: last {{ windowHours }}h · {{ c.byEventType.length }} event type(s)
-              wired</span
-            >
-          </header>
-          <div class="coverage-grid">
-            @for (e of c.byEventType; track e.eventType) {
-              <article class="coverage-card" [class.empty]="e.count === 0">
-                <header class="cov-head">
-                  <span class="event-pill">{{ e.eventType }}</span>
-                  <span class="cov-count" [class.zero]="e.count === 0">
-                    {{ e.count }}
-                  </span>
-                </header>
-                <p class="cov-desc">{{ e.description }}</p>
-                <footer class="cov-foot">
-                  @if (e.count > 0) {
-                    <span class="cov-meta">
-                      avg conf
-                      <strong>{{ e.averageConfidence ?? 0 | number: '1.2-2' }}</strong>
+        @if (c.totalRationales > 0) {
+          <section class="card">
+            <header class="card-head">
+              <h3>Event-Type Coverage</h3>
+              <span class="muted small"
+                >Last {{ windowLabel() }} · {{ coverageActiveTypes() }} of
+                {{ c.byEventType.length }} event type(s) fired</span
+              >
+            </header>
+            <div class="coverage-grid">
+              @for (e of c.byEventType; track e.eventType) {
+                <article class="coverage-card" [class.empty]="e.count === 0">
+                  <header class="cov-head">
+                    <span class="event-pill">{{ e.eventType }}</span>
+                    <span class="cov-count" [class.zero]="e.count === 0">
+                      {{ e.count }}
                     </span>
-                    <span class="cov-meta">
-                      latest <strong>{{ e.latestAt | date: 'MMM d, HH:mm' }}</strong>
-                    </span>
-                    <button
-                      type="button"
-                      class="cov-filter-btn"
-                      (click)="filterToEventType(e.eventType)"
-                    >
-                      View →
-                    </button>
-                  } @else {
-                    <span class="cov-meta muted">No rationale fired in window.</span>
-                  }
-                </footer>
-              </article>
-            }
-          </div>
-        </section>
+                  </header>
+                  <p class="cov-desc">{{ e.description }}</p>
+                  <footer class="cov-foot">
+                    @if (e.count > 0) {
+                      <span class="cov-meta">
+                        avg conf
+                        <strong>{{ e.averageConfidence ?? 0 | number: '1.2-2' }}</strong>
+                      </span>
+                      <span class="cov-meta">
+                        latest <strong>{{ e.latestAt | date: 'MMM d, HH:mm' }}</strong>
+                      </span>
+                      <button
+                        type="button"
+                        class="cov-filter-btn"
+                        (click)="filterToEventType(e.eventType)"
+                      >
+                        View →
+                      </button>
+                    } @else {
+                      <span class="cov-meta muted">No rationale fired in window.</span>
+                    }
+                  </footer>
+                </article>
+              }
+            </div>
+          </section>
+        }
       }
 
       <!-- Filters -->
       <section class="card filters-card">
         <div class="filters">
           <input
-            class="filter-input"
+            class="filter-input filter-input--wide"
             type="text"
-            placeholder="Event type (e.g. StrategyActivated)"
+            placeholder="Event type, e.g. StrategyActivated"
             [(ngModel)]="filterEventType"
             (change)="resetAndReload()"
           />
@@ -169,9 +184,9 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
         <div class="note">Loading rationales…</div>
       } @else if (rationales().length === 0) {
         <div class="note">
-          No rationales match the filter. The narrative layer writes one row per persisted lifecycle
-          event — if this is empty either no qualifying events have fired in your window or the
-          layer is disabled in <a routerLink="/llm/settings">Settings</a>.
+          No rationales in the last {{ windowLabel() }} match the filter. The narrative layer writes
+          one row per persisted lifecycle event — widen the window, clear the filter, or check the
+          layer is enabled in <a routerLink="/llm/settings">Settings</a>.
         </div>
       } @else {
         <div class="feed">
@@ -380,6 +395,14 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
         color: var(--text-primary);
         min-width: 180px;
       }
+      .filter-input--wide {
+        min-width: 280px;
+      }
+      .note.quiet {
+        text-align: left;
+        border-style: solid;
+        padding: var(--space-3) var(--space-4);
+      }
       .confidence-filter {
         display: flex;
         align-items: center;
@@ -532,13 +555,31 @@ export class LlmRationalesPageComponent implements OnInit {
   readonly loading = signal(true);
   readonly coverage = signal<RationaleCoverageDto | null>(null);
 
-  /** Window for the coverage rollup. Independent from per-row filters
-   *  (those drive the paged list, this drives the KPI strip + matrix). */
+  /**
+   * Window for BOTH the coverage rollup and the paged list. The list used to
+   * ignore it, so "Last 7d" showed tiles of zero above a feed of months-old
+   * rows — the two halves of the page disagreed about what "window" meant.
+   */
   windowHours = 168;
 
   filterEventType = '';
   filterEventId: number | null = null;
   filterMinConfidence = 0;
+
+  windowLabel(): string {
+    const h = this.windowHours;
+    return h % 24 === 0 && h >= 48 ? `${h / 24}d` : `${h}h`;
+  }
+
+  /** ISO lower bound for the list query, derived from the selected window. */
+  private windowFromIso(): string {
+    return new Date(Date.now() - this.windowHours * 3_600_000).toISOString();
+  }
+
+  onWindowChange(): void {
+    this.reloadCoverage();
+    this.resetAndReload();
+  }
 
   readonly coverageTotalTypes = computed(() => this.coverage()?.byEventType.length ?? 0);
   readonly coverageActiveTypes = computed(
@@ -582,6 +623,7 @@ export class LlmRationalesPageComponent implements OnInit {
           eventType: this.filterEventType || null,
           eventId: this.filterEventId,
           minConfidence: this.filterMinConfidence > 0 ? this.filterMinConfidence : null,
+          from: this.windowFromIso(),
         },
       })
       .pipe(

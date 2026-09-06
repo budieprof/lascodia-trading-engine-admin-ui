@@ -54,9 +54,9 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 <th>Slot</th>
                 <th>Feature</th>
                 <th class="num">Above threshold</th>
-                <th class="num">Mean</th>
-                <th class="num">Max</th>
-                <th class="num">Frac</th>
+                <th class="num">Mean importance</th>
+                <th class="num">Max importance</th>
+                <th class="num">Share above threshold</th>
               </tr>
             </thead>
             <tbody>
@@ -70,15 +70,22 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                   <td class="num mono">{{ slot.meanImportance | number: '1.0-3' }}</td>
                   <td class="num mono">{{ slot.maxImportance | number: '1.0-3' }}</td>
                   <td class="num">
-                    <span
-                      class="bar-track"
-                      [title]="(slot.fractionAboveThreshold * 100 | number: '1.0-1') + '%'"
-                    >
+                    <!-- The number is always printed: an empty track alone
+                         reads as a full grey bar, i.e. the opposite of 0%. -->
+                    <span class="frac-cell">
+                      <span class="bar-track" aria-hidden="true">
+                        <span
+                          class="bar-fill"
+                          [style.width.%]="slot.fractionAboveThreshold * 100"
+                          [attr.data-tier]="fractionTier(slot.fractionAboveThreshold)"
+                        ></span>
+                      </span>
                       <span
-                        class="bar-fill"
-                        [style.width.%]="slot.fractionAboveThreshold * 100"
-                        [attr.data-tier]="fractionTier(slot.fractionAboveThreshold)"
-                      ></span>
+                        class="frac-value mono"
+                        [class.muted]="slot.fractionAboveThreshold === 0"
+                      >
+                        {{ slot.fractionAboveThreshold * 100 | number: '1.0-0' }}%
+                      </span>
                     </span>
                   </td>
                 </tr>
@@ -184,14 +191,32 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       .small {
         font-size: var(--text-xs);
       }
+      .frac-cell {
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .frac-value {
+        min-width: 3.2em;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .frac-value.muted {
+        color: var(--text-tertiary);
+      }
+      /* A thin, bordered track so the empty state reads as "empty track",
+         not as a solid grey bar. */
       .bar-track {
         display: inline-block;
-        width: 80px;
-        height: 8px;
-        background: var(--bg-primary);
+        width: 72px;
+        height: 6px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border);
         border-radius: var(--radius-full);
         overflow: hidden;
         vertical-align: middle;
+        box-sizing: border-box;
       }
       .bar-fill {
         display: block;

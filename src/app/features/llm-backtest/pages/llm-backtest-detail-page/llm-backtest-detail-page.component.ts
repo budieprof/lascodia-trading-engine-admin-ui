@@ -121,11 +121,11 @@ const OUTCOME_FILTERS = [
               <span class="label">Status</span>
               <span
                 class="status-pill"
-                [class.pill--pending]="r.status === BacktestStatus.Pending"
-                [class.pill--running]="r.status === BacktestStatus.Running"
-                [class.pill--completed]="r.status === BacktestStatus.Completed"
-                [class.pill--failed]="r.status === BacktestStatus.Failed"
-                [class.pill--cancelled]="r.status === BacktestStatus.Cancelled"
+                [class.pill--pending]="runStatus(r) === BacktestStatus.Pending"
+                [class.pill--running]="runStatus(r) === BacktestStatus.Running"
+                [class.pill--completed]="runStatus(r) === BacktestStatus.Completed"
+                [class.pill--failed]="runStatus(r) === BacktestStatus.Failed"
+                [class.pill--cancelled]="runStatus(r) === BacktestStatus.Cancelled"
               >
                 {{ statusLabel(r.status) }}
               </span>
@@ -143,17 +143,20 @@ const OUTCOME_FILTERS = [
               <!-- API serialises enum as string ("Spot"/"Macro"); TS enum is int-valued. Accept both shapes. -->
               <span>{{ modelTierLabel(r.modelTier) }}</span>
             </div>
+            <!-- One timestamp format on this page (and the index / compare
+                 pages): the header used 'medium' while the drill-down used
+                 'short', so the same run showed two date styles. -->
             <div class="kv">
               <span class="label">Created</span>
-              <span>{{ r.createdAt | date: 'medium' }}</span>
+              <span>{{ r.createdAt | date: 'yyyy-MM-dd HH:mm' }}</span>
             </div>
             <div class="kv">
               <span class="label">Started</span>
-              <span>{{ r.startedAt ? (r.startedAt | date: 'medium') : '—' }}</span>
+              <span>{{ r.startedAt ? (r.startedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}</span>
             </div>
             <div class="kv">
               <span class="label">Completed</span>
-              <span>{{ r.completedAt ? (r.completedAt | date: 'medium') : '—' }}</span>
+              <span>{{ r.completedAt ? (r.completedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}</span>
             </div>
           </div>
 
@@ -174,12 +177,19 @@ const OUTCOME_FILTERS = [
               <span>{{ cacheHitRatio(r) | percent: '1.0-1' }}</span>
             </div>
             <div class="kv">
-              <span class="label">Progress</span>
+              <span class="label">{{ isRunActive(r) ? 'Progress' : 'Points' }}</span>
               <span>
-                <div class="progress-bar inline">
-                  <div class="progress-fill" [style.width.%]="progressPct(r)"></div>
-                </div>
-                <small>{{ r.completedPoints }} / {{ r.totalPoints }}</small>
+                <!-- A bar only while the run can still move; a full bar on a
+                     finished run read as "still working". -->
+                @if (isRunActive(r)) {
+                  <div class="progress-bar inline">
+                    <div class="progress-fill" [style.width.%]="progressPct(r)"></div>
+                  </div>
+                }
+                <small>
+                  {{ r.completedPoints | number }} / {{ r.totalPoints | number }}
+                  {{ isRunActive(r) ? '' : 'walked' }}
+                </small>
               </span>
             </div>
           </div>
@@ -219,9 +229,13 @@ const OUTCOME_FILTERS = [
               <span class="stat-label">Rejected by gate</span>
               <span class="stat-value">{{ s.rejectedByGateCount }}</span>
             </div>
-            <div class="stat-card">
-              <span class="stat-label">Bypassed</span>
+            <div
+              class="stat-card"
+              title="Viable recommendations that only cleared a soft viability gate because the high-confidence bypass (Llm:SpotAnalysisHighConfidenceBypassThreshold) let them through. They are a subset of Viable, not an extra bucket — so Viable + Rejected = Total, and Bypassed is not part of that sum."
+            >
+              <span class="stat-label">Bypassed gate</span>
               <span class="stat-value">{{ s.bypassedCount }}</span>
+              <span class="stat-foot">of {{ s.viableCount }} viable · via confidence bypass</span>
             </div>
             <div class="stat-card stat-card--hl">
               <span class="stat-label">Hit rate</span>
@@ -406,7 +420,13 @@ const OUTCOME_FILTERS = [
                   <tbody>
                     @for (row of s.perRegime; track row.regime) {
                       <tr>
-                        <td>{{ row.regime || '—' }}</td>
+                        <td>
+                          @if (row.regime) {
+                            {{ row.regime }}
+                          } @else {
+                            <span class="muted-cell">Unclassified</span>
+                          }
+                        </td>
                         <td class="num">{{ row.count }}</td>
                         <td class="num">{{ row.hitRate | percent: '1.0-1' }}</td>
                         <td
@@ -924,7 +944,7 @@ const OUTCOME_FILTERS = [
               <table class="data-table">
                 <thead>
                   <tr>
-                    <th>asOfUtc</th>
+                    <th>As of (UTC)</th>
                     <th>Symbol</th>
                     <th>TF</th>
                     <th class="num">Viable</th>
@@ -946,7 +966,7 @@ const OUTCOME_FILTERS = [
                       "
                       (click)="openInvocation(p)"
                     >
-                      <td>{{ p.asOfUtc | date: 'short' }}</td>
+                      <td class="nowrap">{{ p.asOfUtc | date: 'yyyy-MM-dd HH:mm' : 'UTC' }}</td>
                       <td class="mono">{{ p.symbol }}</td>
                       <td>{{ p.timeframe }}</td>
                       <td class="num">
@@ -963,19 +983,27 @@ const OUTCOME_FILTERS = [
                       </td>
                       <td class="num">{{ p.rejected.length }}</td>
                       <td class="outcomes">
-                        @for (chip of outcomeSummary(p); track chip.label) {
-                          <span
-                            class="outcome-chip chip--small"
-                            [class.chip--tp]="chip.label === 'HitTP'"
-                            [class.chip--sl]="chip.label === 'HitSL'"
-                            [class.chip--exp]="chip.label.startsWith('Expired')"
-                            [class.chip--unfilled]="chip.label === 'EntryNotReached'"
-                          >
-                            {{ chip.count }}× {{ chip.label }}
-                          </span>
-                        } @empty {
-                          <span class="empty-sub">no walker outcomes</span>
-                        }
+                        <!-- The chips live in an inner flex box: display:flex
+                             on the td itself took the cell out of table
+                             layout, which is why rows with outcomes were
+                             taller and drew a shaded sub-cell. -->
+                        <div class="chip-row">
+                          @for (chip of outcomeSummary(p); track chip.label) {
+                            <span
+                              class="outcome-chip chip--small"
+                              [class.chip--tp]="chip.label === 'HitTP'"
+                              [class.chip--sl]="chip.label === 'HitSL'"
+                              [class.chip--exp]="chip.label.startsWith('Expired')"
+                              [class.chip--unfilled]="chip.label === 'EntryNotReached'"
+                              [class.chip--missing]="chip.missing"
+                              [title]="chip.title ?? ''"
+                            >
+                              {{ chip.count }}× {{ chip.label }}
+                            </span>
+                          } @empty {
+                            <span class="muted-cell">no walker outcomes</span>
+                          }
+                        </div>
                       </td>
                       <td class="row-action">
                         @if (hasViable(p)) {
@@ -998,27 +1026,34 @@ const OUTCOME_FILTERS = [
               </table>
             </div>
 
-            <div class="pager">
-              <button
-                type="button"
-                class="btn-secondary"
-                (click)="prevPointsPage()"
-                [disabled]="pointsPage() <= 1 || loadingPoints()"
-              >
-                ‹ Prev
-              </button>
-              <span class="pager-info">
-                Page {{ pointsPage() }} of {{ pointsTotalPages() }} — {{ pointsTotal() }} point(s)
-              </span>
-              <button
-                type="button"
-                class="btn-secondary"
-                (click)="nextPointsPage()"
-                [disabled]="pointsPage() >= pointsTotalPages() || loadingPoints()"
-              >
-                Next ›
-              </button>
-            </div>
+            @if (pointsTotalPages() > 1) {
+              <div class="pager">
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  (click)="prevPointsPage()"
+                  [disabled]="pointsPage() <= 1 || loadingPoints()"
+                >
+                  ‹ Prev
+                </button>
+                <span class="pager-info">
+                  Page {{ pointsPage() }} of {{ pointsTotalPages() }} —
+                  {{ pointsTotal() | number }} point(s)
+                </span>
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  (click)="nextPointsPage()"
+                  [disabled]="pointsPage() >= pointsTotalPages() || loadingPoints()"
+                >
+                  Next ›
+                </button>
+              </div>
+            } @else {
+              <div class="pager pager--single">
+                <span class="pager-info">{{ pointsTotal() | number }} point(s)</span>
+              </div>
+            }
           }
         </section>
       }
@@ -1426,10 +1461,29 @@ const OUTCOME_FILTERS = [
       .data-table tr.point-row--clickable:hover td {
         background: var(--bg-tertiary);
       }
-      .outcomes {
+      .data-table td {
+        vertical-align: middle;
+      }
+      .data-table td.nowrap {
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+      .outcomes .chip-row {
         display: flex;
         flex-wrap: wrap;
         gap: 0.25rem;
+        align-items: center;
+      }
+      .muted-cell {
+        color: var(--text-tertiary);
+        font-size: 0.78rem;
+      }
+      .chip--missing {
+        background: transparent;
+        border: 1px dashed var(--border);
+        color: var(--text-tertiary);
+        text-transform: none;
+        letter-spacing: 0;
       }
       .outcome-chip {
         font-size: 0.7rem;
@@ -1562,6 +1616,9 @@ const OUTCOME_FILTERS = [
         align-items: center;
         gap: 1rem;
         padding-top: var(--space-3);
+      }
+      .pager--single {
+        justify-content: flex-end;
       }
       .pager-info {
         font-size: 0.8rem;
@@ -1946,13 +2003,46 @@ export class LlmBacktestDetailPageComponent implements OnInit, OnDestroy {
 
   // ── Derived presentational helpers ──────────────────────────────────────
 
-  statusLabel(s: BacktestStatus): string {
-    return BacktestStatusName[s] ?? String(s);
+  /**
+   * The API serialises `status` as the enum NAME ("Completed") while the TS
+   * enum is numeric, so every `=== BacktestStatus.X` comparison in the
+   * template silently failed: the status pill never picked up its colour
+   * class, Cancel never showed for a running run, and the progress bar
+   * could not tell a finished run from a live one. Normalise once here.
+   */
+  runStatus(r: { status: BacktestStatus | string }): BacktestStatus {
+    const s = r.status;
+    if (typeof s === 'number') return s;
+    switch (String(s ?? '').toLowerCase()) {
+      case 'pending':
+        return BacktestStatus.Pending;
+      case 'running':
+        return BacktestStatus.Running;
+      case 'completed':
+        return BacktestStatus.Completed;
+      case 'failed':
+        return BacktestStatus.Failed;
+      case 'cancelled':
+      case 'canceled':
+        return BacktestStatus.Cancelled;
+      default:
+        return BacktestStatus.Pending;
+    }
+  }
+
+  statusLabel(s: BacktestStatus | string): string {
+    return BacktestStatusName[this.runStatus({ status: s })] ?? String(s);
+  }
+
+  /** Pending or Running — the only states in which the point count can still move. */
+  isRunActive(r: { status: BacktestStatus | string }): boolean {
+    const s = this.runStatus(r);
+    return s === BacktestStatus.Pending || s === BacktestStatus.Running;
   }
 
   canCancel(): boolean {
     const r = this.run();
-    return !!r && (r.status === BacktestStatus.Pending || r.status === BacktestStatus.Running);
+    return !!r && this.isRunActive(r);
   }
 
   cacheHitRatio(r: LlmBacktestRun): number {
@@ -2009,14 +2099,47 @@ export class LlmBacktestDetailPageComponent implements OnInit, OnDestroy {
     );
   }
 
-  /** Aggregate one point's walker outcomes into chip rows (label + count). */
-  outcomeSummary(p: LlmBacktestPoint): { label: string; count: number }[] {
-    const counts = new Map<string, number>();
+  /**
+   * Aggregate one point's walker outcomes into chip rows (label + count).
+   *
+   * The points endpoint currently returns `status: null` for every outcome:
+   * the walker persists the field as `Label` but `BacktestPointOutcomeDto`
+   * reads `Status`, so the label is lost in deserialisation (the summary
+   * donut is aggregated by a different path and is correct). Until that is
+   * fixed server-side the chip says what we do know — the sign of the
+   * walked P&L — and is explicit that the label itself was not recorded,
+   * instead of printing "UNKNOWN" as though the walker had no verdict.
+   */
+  outcomeSummary(
+    p: LlmBacktestPoint,
+  ): { label: string; count: number; missing: boolean; title?: string }[] {
+    const counts = new Map<string, { count: number; missing: boolean; title?: string }>();
     for (const o of p.outcomes) {
-      const lbl = o.status || 'Unknown';
-      counts.set(lbl, (counts.get(lbl) ?? 0) + 1);
+      let lbl = o.status ?? '';
+      let missing = false;
+      if (!lbl) {
+        missing = true;
+        lbl =
+          o.pnlPips == null
+            ? 'label not recorded'
+            : o.pnlPips > 0
+              ? `+${o.pnlPips.toFixed(1)} pips · label not recorded`
+              : o.pnlPips < 0
+                ? `${o.pnlPips.toFixed(1)} pips · label not recorded`
+                : 'flat · label not recorded';
+      }
+      const cur = counts.get(lbl);
+      if (cur) cur.count++;
+      else
+        counts.set(lbl, {
+          count: 1,
+          missing,
+          title: missing
+            ? 'The walker verdict (HitTP / HitSL / Expired…) is missing from the points API for this run; the Outcomes donut above is aggregated separately and is authoritative.'
+            : undefined,
+        });
     }
-    return [...counts.entries()].map(([label, count]) => ({ label, count }));
+    return [...counts.entries()].map(([label, v]) => ({ label, ...v }));
   }
 
   hasViable(p: LlmBacktestPoint): boolean {
@@ -2194,7 +2317,14 @@ export class LlmBacktestDetailPageComponent implements OnInit, OnDestroy {
           radius: ['45%', '70%'],
           center: ['50%', '45%'],
           avoidLabelOverlap: true,
-          label: { formatter: '{b}\n{c}', fontSize: 10 },
+          // The shared theme paints a thick white text-border on labels,
+          // which blurred these small two-line slice labels into a smear.
+          label: {
+            formatter: '{b}\n{c}',
+            fontSize: 10,
+            textBorderWidth: 0,
+            textShadowBlur: 0,
+          },
           data,
         },
       ],

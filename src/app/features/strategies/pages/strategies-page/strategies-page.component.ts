@@ -48,6 +48,8 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 import { DecimalPipe } from '@angular/common';
 import { StrategyFormComponent } from '../../components/strategy-form/strategy-form.component';
+import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 
 @Component({
   selector: 'app-strategies-page',
@@ -57,6 +59,8 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
     DataTableComponent,
     MetricCardComponent,
     ChartCardComponent,
+    EmptyStateComponent,
+    ErrorStateComponent,
     TabsComponent,
     StrategyFormComponent,
     DecimalPipe,
@@ -89,69 +93,88 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
               tabindex="-1"
               (click)="closeTemplatePanel()"
               (keydown.escape)="closeTemplatePanel()"
-              style="position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:50;display:flex;align-items:center;justify-content:center;"
             >
               <div
                 class="dialog"
                 role="dialog"
                 aria-modal="true"
+                aria-labelledby="apply-template-title"
                 tabindex="-1"
                 (click)="$event.stopPropagation()"
                 (keydown)="$event.stopPropagation()"
-                style="background:var(--bg-primary,#fff);border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,0.18);min-width:440px;max-width:560px;padding:24px;"
               >
-                <h3 style="margin:0 0 12px;font-size:16px;font-weight:600;">Apply Template</h3>
-                <p class="muted small" style="margin:0 0 16px;">
-                  Spawn one strategy per symbol from a saved configuration. Fastest way to roll out
-                  the same setup across a basket of pairs.
-                </p>
-
-                <div class="form-group" style="margin-bottom:12px;">
-                  <label class="form-label">Template <span class="required">*</span></label>
-                  <select
-                    class="form-input"
-                    [value]="bulkTemplateId() ?? ''"
-                    (change)="onBulkTemplateSelect($any($event.target).value)"
+                <header class="dialog-head">
+                  <div>
+                    <h3 id="apply-template-title" class="dialog-title">Apply Template</h3>
+                    <p class="dialog-sub">
+                      Spawn one strategy per symbol from a saved configuration — the fastest way to
+                      roll out the same setup across a basket of pairs.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    class="dialog-close"
+                    (click)="closeTemplatePanel()"
+                    aria-label="Close"
                   >
-                    <option value="">Select a template…</option>
-                    @for (t of templates(); track t.id) {
-                      <option [value]="t.id">{{ t.name }} · {{ t.strategyType }}</option>
-                    }
-                  </select>
+                    ×
+                  </button>
+                </header>
+
+                <div class="dialog-body">
+                  <div class="form-group">
+                    <label class="form-label" for="tpl-template"
+                      >Template <span class="required">*</span></label
+                    >
+                    <select
+                      id="tpl-template"
+                      class="form-input"
+                      [value]="bulkTemplateId() ?? ''"
+                      (change)="onBulkTemplateSelect($any($event.target).value)"
+                    >
+                      <option value="">Select a template…</option>
+                      @for (t of templates(); track t.id) {
+                        <option [value]="t.id">
+                          {{ t.name }} · {{ enumLabel.transform(t.strategyType) }}
+                        </option>
+                      }
+                    </select>
+                  </div>
+
+                  <div class="form-group">
+                    <label class="form-label" for="tpl-symbols"
+                      >Symbols <span class="required">*</span></label
+                    >
+                    <input
+                      id="tpl-symbols"
+                      type="text"
+                      class="form-input"
+                      [value]="bulkSymbols()"
+                      (input)="bulkSymbols.set($any($event.target).value)"
+                      placeholder="EURUSD, GBPUSD, USDJPY, AUDUSD"
+                    />
+                    <span class="form-hint">
+                      Comma-separated. Each symbol gets its own strategy named
+                      <code>&lt;Template&gt; &lt;Symbol&gt; &lt;Timeframe&gt;</code>.
+                    </span>
+                  </div>
+
+                  <div class="form-group">
+                    <label class="form-label" for="tpl-timeframe">Timeframe</label>
+                    <select
+                      id="tpl-timeframe"
+                      class="form-input"
+                      [value]="bulkTimeframe()"
+                      (change)="bulkTimeframe.set($any($event.target).value)"
+                    >
+                      @for (tf of bulkTimeframes; track tf) {
+                        <option [value]="tf">{{ tf }}</option>
+                      }
+                    </select>
+                  </div>
                 </div>
 
-                <div class="form-group" style="margin-bottom:12px;">
-                  <label class="form-label">Symbols <span class="required">*</span></label>
-                  <input
-                    type="text"
-                    class="form-input"
-                    [value]="bulkSymbols()"
-                    (input)="bulkSymbols.set($any($event.target).value)"
-                    placeholder="EURUSD, GBPUSD, USDJPY, AUDUSD"
-                  />
-                  <span
-                    class="form-hint"
-                    style="font-size:11px;color:var(--text-tertiary,#8e8e93);"
-                  >
-                    Comma-separated. Each symbol gets its own strategy named
-                    <code>"&lt;Template&gt; &lt;Symbol&gt; &lt;Timeframe&gt;"</code>.
-                  </span>
-                </div>
-
-                <div class="form-group" style="margin-bottom:16px;">
-                  <label class="form-label">Timeframe</label>
-                  <select
-                    class="form-input"
-                    [value]="bulkTimeframe()"
-                    (change)="bulkTimeframe.set($any($event.target).value)"
-                  >
-                    @for (tf of bulkTimeframes; track tf) {
-                      <option [value]="tf">{{ tf }}</option>
-                    }
-                  </select>
-                </div>
-
-                <div style="display:flex;justify-content:flex-end;gap:8px;">
+                <footer class="dialog-foot">
                   <button
                     type="button"
                     class="btn btn-secondary"
@@ -172,7 +195,7 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
                       Apply
                     }
                   </button>
-                </div>
+                </footer>
               </div>
             </div>
           }
@@ -185,7 +208,6 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
               (click)="closeRiskPicker()"
               (keydown.escape)="closeRiskPicker()"
               tabindex="-1"
-              style="position:fixed;inset:0;background:rgba(0,0,0,0.32);z-index:50;display:flex;align-items:center;justify-content:center;"
             >
               <div
                 class="dialog"
@@ -193,77 +215,97 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
                 aria-modal="true"
                 aria-labelledby="risk-picker-title"
                 (click)="$event.stopPropagation()"
-                style="background:#fff;border-radius:8px;max-width:560px;width:92%;padding:18px 20px;max-height:80vh;overflow:auto;"
               >
-                <h3 id="risk-picker-title" style="margin:0 0 12px;">Select risk profile</h3>
-                <p class="muted small" style="margin-bottom:12px;">
-                  Apply to {{ pickerSelectedRows().length }} strateg{{
-                    pickerSelectedRows().length === 1 ? 'y' : 'ies'
-                  }}.
-                </p>
-                @if (riskProfilesLoading()) {
-                  <p class="muted">Loading…</p>
-                } @else if (riskProfilesList().length === 0) {
-                  <p class="muted">No risk profiles configured.</p>
-                } @else {
-                  <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                    <thead>
-                      <tr style="border-bottom:1px solid var(--border,#eef0f3);">
-                        <th style="text-align:left;padding:6px 8px;">Name</th>
-                        <th style="text-align:right;padding:6px 8px;">Max DD</th>
-                        <th style="text-align:right;padding:6px 8px;">Max risk/trade</th>
-                        <th style="text-align:right;padding:6px 8px;">Max positions</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (p of riskProfilesList(); track p.id) {
-                        <tr style="border-bottom:1px solid var(--border-subtle,#eef0f3);">
-                          <td style="padding:6px 8px;">
-                            {{ p.name ?? '(unnamed)' }}
-                            @if (p.isDefault) {
-                              <span class="muted small"> · default</span>
-                            }
-                          </td>
-                          <td
-                            style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;"
-                          >
-                            {{ p.maxTotalDrawdownPct.toFixed(1) }}%
-                          </td>
-                          <td
-                            style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;"
-                          >
-                            {{ p.maxRiskPerTradePct.toFixed(2) }}%
-                          </td>
-                          <td
-                            style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;"
-                          >
-                            {{ p.maxOpenPositions }}
-                          </td>
-                          <td style="padding:6px 8px;text-align:right;">
-                            <button
-                              type="button"
-                              class="btn btn-link"
-                              (click)="onRiskPickerSelect(p.id)"
-                            >
-                              Apply
-                            </button>
-                          </td>
+                <header class="dialog-head">
+                  <div>
+                    <h3 id="risk-picker-title" class="dialog-title">Select risk profile</h3>
+                    <p class="dialog-sub">
+                      Apply to {{ pickerSelectedRows().length }} strateg{{
+                        pickerSelectedRows().length === 1 ? 'y' : 'ies'
+                      }}.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    class="dialog-close"
+                    (click)="closeRiskPicker()"
+                    aria-label="Close"
+                  >
+                    ×
+                  </button>
+                </header>
+                <div class="dialog-body">
+                  @if (riskProfilesLoading()) {
+                    <p class="muted">Loading…</p>
+                  } @else if (riskProfilesList().length === 0) {
+                    <p class="muted">No risk profiles configured.</p>
+                  } @else {
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                      <thead>
+                        <tr style="border-bottom:1px solid var(--border,#eef0f3);">
+                          <th style="text-align:left;padding:6px 8px;">Name</th>
+                          <th style="text-align:right;padding:6px 8px;">Max DD</th>
+                          <th style="text-align:right;padding:6px 8px;">Max risk/trade</th>
+                          <th style="text-align:right;padding:6px 8px;">Max positions</th>
+                          <th></th>
                         </tr>
-                      }
-                    </tbody>
-                  </table>
-                }
-                <div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px;">
+                      </thead>
+                      <tbody>
+                        @for (p of riskProfilesList(); track p.id) {
+                          <tr style="border-bottom:1px solid var(--border-subtle,#eef0f3);">
+                            <td style="padding:6px 8px;">
+                              {{ p.name ?? '(unnamed)' }}
+                              @if (p.isDefault) {
+                                <span class="muted small"> · default</span>
+                              }
+                            </td>
+                            <td
+                              style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;"
+                            >
+                              {{ p.maxTotalDrawdownPct.toFixed(1) }}%
+                            </td>
+                            <td
+                              style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;"
+                            >
+                              {{ p.maxRiskPerTradePct.toFixed(2) }}%
+                            </td>
+                            <td
+                              style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;"
+                            >
+                              {{ p.maxOpenPositions }}
+                            </td>
+                            <td style="padding:6px 8px;text-align:right;">
+                              <button
+                                type="button"
+                                class="btn btn-link"
+                                (click)="onRiskPickerSelect(p.id)"
+                              >
+                                Apply
+                              </button>
+                            </td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  }
+                </div>
+                <footer class="dialog-foot">
                   <button type="button" class="btn btn-secondary" (click)="closeRiskPicker()">
                     Cancel
                   </button>
-                </div>
+                </footer>
               </div>
             </div>
           }
 
-          <!-- 8-card KPI strip — derived from a fleet-wide analytics sample -->
+          @if (analyticsFailed()) {
+            <app-error-state
+              title="Could not load the fleet analytics sample"
+              message="The strategy list endpoint returned an error — the tiles and charts are unknown, not zero. The table below fetches independently."
+              (retry)="retryAnalytics()"
+            />
+          }
+          <!-- KPI strip — derived from a fleet-wide analytics sample -->
           <div class="strat-kpis">
             <app-metric-card
               label="Total"
@@ -354,43 +396,121 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
             </button>
           </div>
 
-          <!-- 3-col chart row: status donut + by symbol + by type -->
-          <div class="strat-chart-row three">
-            <app-chart-card
-              title="Status distribution"
-              subtitle="Active vs paused vs stopped"
-              [options]="statusDonutOptions()"
-              height="240px"
-            />
-            <app-chart-card
-              title="Strategies by symbol"
-              subtitle="Top 12 symbols by strategy count"
-              [options]="bySymbolOptions()"
-              height="240px"
-            />
-            <app-chart-card
-              title="Strategies by type"
-              subtitle="Distribution of strategy types in the fleet"
-              [options]="byTypeOptions()"
-              height="240px"
-            />
-          </div>
+          <!-- The table is the page; the five distribution charts are
+               reference material and fold away by default so the first
+               strategy row is above the fold. -->
+          <app-data-table
+            [columnDefs]="columns"
+            [fetchData]="fetchStrategies"
+            [selectable]="true"
+            (rowClick)="onRowClick($event)"
+          >
+            <ng-template #bulkActions let-rows let-clear="clear">
+              <button
+                type="button"
+                class="btn btn-link"
+                [disabled]="bulkBusy()"
+                (click)="bulkApply('Activate', rows, clear)"
+                title="Activate every selected strategy"
+              >
+                Activate
+              </button>
+              <button
+                type="button"
+                class="btn btn-link"
+                [disabled]="bulkBusy()"
+                (click)="bulkApply('Pause', rows, clear)"
+                title="Pause every selected strategy"
+              >
+                Pause
+              </button>
+              <button
+                type="button"
+                class="btn btn-link"
+                [disabled]="bulkBusy()"
+                (click)="bulkApplyRiskProfile(rows, clear)"
+                title="Set the same risk profile on every selected strategy"
+              >
+                Set risk profile…
+              </button>
+              <button
+                type="button"
+                class="btn btn-link"
+                [disabled]="bulkBusy()"
+                (click)="bulkApply('ClearRiskProfile', rows, clear)"
+                title="Detach the risk profile from every selected strategy"
+              >
+                Clear risk profile
+              </button>
+              <button
+                type="button"
+                class="btn btn-link"
+                [disabled]="bulkBusy()"
+                (click)="bulkRunOptimization(rows, clear)"
+                title="Queue a Manual optimization run for every selected strategy. The OptimizationWorker picks up queued runs and searches for improved parameters."
+              >
+                Run optimization
+              </button>
+              @if (bulkBusy()) {
+                <span class="muted small">Applying…</span>
+              }
+            </ng-template>
+          </app-data-table>
 
-          <!-- 2-col chart row: by timeframe + creation activity -->
-          <div class="strat-chart-row two">
-            <app-chart-card
-              title="Strategies by timeframe"
-              subtitle="Coverage across chart resolutions"
-              [options]="byTimeframeOptions()"
-              height="240px"
-            />
-            <app-chart-card
-              title="Creation activity"
-              subtitle="Strategies added over the last 30 days"
-              [options]="creationActivityOptions()"
-              height="240px"
-            />
-          </div>
+          <section class="analytics-fold">
+            <button
+              type="button"
+              class="fold-toggle"
+              (click)="showAnalytics.set(!showAnalytics())"
+              [attr.aria-expanded]="showAnalytics()"
+            >
+              <span class="fold-chev">{{ showAnalytics() ? '▾' : '▸' }}</span>
+              Fleet analytics
+              <span class="muted small"
+                >status · symbol · type · timeframe · creation activity</span
+              >
+            </button>
+          </section>
+
+          @if (showAnalytics()) {
+            <!-- 3-col chart row: status donut + by symbol + by type -->
+            <div class="strat-chart-row three">
+              <app-chart-card
+                title="Status distribution"
+                subtitle="Active vs paused vs stopped"
+                [options]="statusDonutOptions()"
+                height="240px"
+              />
+              <app-chart-card
+                title="Strategies by symbol"
+                subtitle="Top 12 symbols by strategy count"
+                [options]="bySymbolOptions()"
+                height="240px"
+              />
+              <app-chart-card
+                title="Strategies by type"
+                subtitle="Distribution of strategy types in the fleet"
+                [options]="byTypeOptions()"
+                height="240px"
+              />
+            </div>
+
+            <!-- 2-col chart row: by timeframe + creation activity -->
+            <div class="strat-chart-row two">
+              <app-chart-card
+                title="Strategies by timeframe"
+                subtitle="Coverage across chart resolutions"
+                [options]="byTimeframeOptions()"
+                height="240px"
+              />
+              <app-chart-card
+                title="Creation activity"
+                subtitle="Strategies added over the last 30 days"
+                [options]="creationActivityOptions()"
+                height="240px"
+              />
+            </div>
+          }
 
           <!-- Filtered Signals diagnostics — top rejection (strategy, stage, reason) tuples
                over the last 24h. Surfaces which gates are dropping the most signals so
@@ -464,64 +584,6 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
               </div>
             </section>
           }
-
-          <app-data-table
-            [columnDefs]="columns"
-            [fetchData]="fetchStrategies"
-            [selectable]="true"
-            (rowClick)="onRowClick($event)"
-          >
-            <ng-template #bulkActions let-rows let-clear="clear">
-              <button
-                type="button"
-                class="btn btn-link"
-                [disabled]="bulkBusy()"
-                (click)="bulkApply('Activate', rows, clear)"
-                title="Activate every selected strategy"
-              >
-                Activate
-              </button>
-              <button
-                type="button"
-                class="btn btn-link"
-                [disabled]="bulkBusy()"
-                (click)="bulkApply('Pause', rows, clear)"
-                title="Pause every selected strategy"
-              >
-                Pause
-              </button>
-              <button
-                type="button"
-                class="btn btn-link"
-                [disabled]="bulkBusy()"
-                (click)="bulkApplyRiskProfile(rows, clear)"
-                title="Set the same risk profile on every selected strategy"
-              >
-                Set risk profile…
-              </button>
-              <button
-                type="button"
-                class="btn btn-link"
-                [disabled]="bulkBusy()"
-                (click)="bulkApply('ClearRiskProfile', rows, clear)"
-                title="Detach the risk profile from every selected strategy"
-              >
-                Clear risk profile
-              </button>
-              <button
-                type="button"
-                class="btn btn-link"
-                [disabled]="bulkBusy()"
-                (click)="bulkRunOptimization(rows, clear)"
-                title="Queue a Manual optimization run for every selected strategy. The OptimizationWorker picks up queued runs and searches for improved parameters."
-              >
-                🔧 Run optimization
-              </button>
-              @if (bulkBusy()) {
-                <span class="muted small">Applying…</span>
-              }
-            </ng-template>
-          </app-data-table>
         }
 
         <!-- Strategy Monitor Tab -->
@@ -719,17 +781,15 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
               <p>Loading performance data…</p>
             </div>
           } @else if (selectedStrategyId()) {
-            <div class="empty-monitor">
-              <p><strong>No performance snapshot available</strong></p>
-              <p class="muted">
-                This strategy has no performance window evaluation yet. Snapshots are produced once
-                the strategy has accumulated trade history.
-              </p>
-            </div>
+            <app-empty-state
+              title="No performance snapshot yet"
+              description="This strategy has no performance-window evaluation. Snapshots are produced once it has accumulated trade history."
+            />
           } @else {
-            <div class="empty-monitor">
-              <p>Select a strategy to view performance metrics</p>
-            </div>
+            <app-empty-state
+              title="Pick a strategy to monitor"
+              description="Choose a strategy from the selector above to see its live performance window, trade outcomes and equity curve."
+            />
           }
         }
       </ui-tabs>
@@ -746,6 +806,149 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
     `
       .page {
         padding: var(--space-2) 0;
+      }
+      /* The global \`.page > *\` entry animation leaves a transform on every
+         direct child, which turns a fixed-position overlay into one that is
+         clipped to (and scrolls with) its parent. Overlays opt out. */
+      .page > .overlay {
+        animation: none;
+      }
+      .overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(3px);
+        -webkit-backdrop-filter: blur(3px);
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: var(--space-4);
+      }
+      .dialog {
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-lg);
+        width: min(560px, 96vw);
+        max-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .dialog-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: var(--space-3);
+        padding: var(--space-4) var(--space-5);
+        border-bottom: 1px solid var(--border);
+      }
+      .dialog-title {
+        margin: 0;
+        font-size: var(--text-lg);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      .dialog-sub {
+        margin: var(--space-1) 0 0;
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+      }
+      .dialog-close {
+        background: transparent;
+        border: none;
+        font-size: 1.5rem;
+        line-height: 1;
+        padding: 2px 8px;
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .dialog-close:hover {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+      .dialog-body {
+        padding: var(--space-4) var(--space-5);
+        overflow-y: auto;
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+      .dialog-foot {
+        display: flex;
+        justify-content: flex-end;
+        gap: var(--space-2);
+        padding: var(--space-3) var(--space-5);
+        border-top: 1px solid var(--border);
+        background: var(--bg-secondary);
+        position: sticky;
+        bottom: 0;
+      }
+      .form-group {
+        margin-bottom: var(--space-4);
+      }
+      .form-group:last-child {
+        margin-bottom: 0;
+      }
+      .form-label {
+        display: block;
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        color: var(--text-secondary);
+        margin-bottom: var(--space-1);
+      }
+      .required {
+        color: var(--loss);
+      }
+      .form-input {
+        width: 100%;
+        height: 36px;
+        padding: 0 var(--space-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        font-family: inherit;
+        box-sizing: border-box;
+      }
+      .form-input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .form-hint {
+        display: block;
+        margin-top: var(--space-1);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .form-hint code {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+      }
+      .analytics-fold {
+        margin: var(--space-3) 0;
+      }
+      .fold-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
+        padding: 6px 14px;
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        color: var(--text-primary);
+        font-family: inherit;
+        cursor: pointer;
+      }
+      .fold-toggle:hover {
+        background: var(--bg-tertiary);
+      }
+      .fold-chev {
+        color: var(--text-tertiary);
       }
 
       .btn {
@@ -837,14 +1040,10 @@ import { StrategyFormComponent } from '../../components/strategy-form/strategy-f
       /* List-tab analytics: KPI strip, filter chips, chart rows */
       .strat-kpis {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: var(--space-2);
         margin: var(--space-2) 0 var(--space-3);
-      }
-      @media (max-width: 1400px) {
-        .strat-kpis {
-          grid-template-columns: repeat(4, 1fr);
-        }
+        align-items: start;
       }
       @media (max-width: 720px) {
         .strat-kpis {
@@ -1126,6 +1325,14 @@ export class StrategiesPageComponent {
   // "Set risk profile…" bulk action; lists actual risk profiles from the
   // engine instead of forcing operators to memorise numeric ids.
   showRiskPicker = signal(false);
+  /** Distribution charts fold away by default so the table stays above the fold. */
+  showAnalytics = signal(false);
+  analyticsFailed = signal(false);
+
+  retryAnalytics(): void {
+    this.analyticsLoaded = false;
+    this.loadStrategyAnalyticsSample();
+  }
   riskProfilesLoading = signal(false);
   riskProfilesList = signal<RiskProfileDto[]>([]);
   pickerSelectedRows = signal<StrategyDto[]>([]);
@@ -1422,16 +1629,18 @@ export class StrategiesPageComponent {
     const entries = Object.entries(map).sort((a, b) => b[1] - a[1]);
     if (entries.length === 0) return {};
     return {
-      grid: { top: 10, right: 30, bottom: 30, left: 140 },
+      grid: { top: 10, right: 36, bottom: 30, left: 150 },
       xAxis: {
         type: 'value',
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        minInterval: 1,
+        splitNumber: 3,
+        axisLabel: { fontSize: 10, color: '#6E6E73', hideOverlap: true },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
       yAxis: {
         type: 'category',
         data: entries.map(([s]) => this.enumLabel.transform(s)).reverse(),
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        axisLabel: { fontSize: 10, color: '#6E6E73', width: 140, overflow: 'truncate' },
       },
       series: [
         {
@@ -1542,13 +1751,15 @@ export class StrategiesPageComponent {
     if (this.analyticsLoaded) return;
     this.analyticsLoaded = true;
     // One-shot HTTP — completes on its own, no teardown subscription needed.
+    this.analyticsFailed.set(false);
     this.strategiesService.list({ currentPage: 1, itemCountPerPage: 500, filter: null }).subscribe({
       next: (res) => {
         const rows = res?.data?.data ?? [];
+        this.analyticsFailed.set(!res?.status);
         this.analyticsSample.set(rows);
       },
       error: () => {
-        // Leave sample empty — KPIs and charts will render empty cards.
+        this.analyticsFailed.set(true);
         this.analyticsLoaded = false;
       },
     });
@@ -1620,20 +1831,23 @@ export class StrategiesPageComponent {
     },
     {
       colId: 'btReturn',
-      headerName: 'Last BT %',
+      headerName: 'Last BT return',
+      headerTooltip:
+        'Return of the most recent completed backtest, as a percentage of its initial balance',
       flex: 1,
-      minWidth: 90,
+      minWidth: 110,
       sortable: false,
       filter: false,
-      valueGetter: (p: any) => {
-        const ret = parseTotalReturn(p.data?.latestBt?.resultJson);
-        return ret != null ? ret * 100 : null;
-      },
+      valueGetter: (p: any) => backtestReturnPct(p.data?.latestBt),
       cellRenderer: (p: any) => {
         const v = p.value as number | null;
         if (v == null) return '<span style="color:var(--text-tertiary,#999)">—</span>';
-        const color = v >= 0 ? 'var(--profit,#1f8a4c)' : 'var(--loss,#c0392b)';
-        const sign = v >= 0 ? '+' : '';
+        if (isWipedOutReturnPct(v)) {
+          return `<span title="Backtest return of ${v.toFixed(1)}% — the equity was wiped out or the stored result is corrupt; excluded from scoring" style="color:var(--loss,#c0392b);background:rgba(255,59,48,0.12);padding:1px 8px;border-radius:999px;font-size:11px;font-weight:600">wiped out</span>`;
+        }
+        const color =
+          v > 0 ? 'var(--profit,#1f8a4c)' : v < 0 ? 'var(--loss,#c0392b)' : 'var(--text-secondary)';
+        const sign = v > 0 ? '+' : '';
         return `<span style="color:${color};font-variant-numeric:tabular-nums">${sign}${v.toFixed(2)}%</span>`;
       },
     },
@@ -2442,10 +2656,12 @@ function computeEligibility(row: StrategyDto, aug: StrategyRowAugment): Activati
   const bt = aug.latestBt;
   if (bt) {
     if (bt.status === 'Completed') {
-      const ret = parseTotalReturn(bt.resultJson);
-      if (ret != null) {
-        if (ret > 0) reasonsGreen.push(`BT +${(ret * 100).toFixed(1)}%`);
-        else reasonsRed.push(`BT ${(ret * 100).toFixed(1)}%`);
+      const ret = backtestReturnPct(bt);
+      if (ret != null && isWipedOutReturnPct(ret)) {
+        reasonsRed.push('BT wiped out');
+      } else if (ret != null) {
+        if (ret > 0) reasonsGreen.push(`BT +${ret.toFixed(1)}%`);
+        else reasonsRed.push(`BT ${ret.toFixed(1)}%`);
       } else {
         reasonsRed.push('BT no result');
       }
@@ -2482,14 +2698,36 @@ function computeEligibility(row: StrategyDto, aug: StrategyRowAugment): Activati
   };
 }
 
-function parseTotalReturn(resultJson: string | null | undefined): number | null {
-  if (!resultJson) return null;
-  try {
-    const v = JSON.parse(resultJson)?.TotalReturn;
-    return typeof v === 'number' ? v : null;
-  } catch {
-    return null;
+/**
+ * Return of a backtest in PERCENT of its initial balance.
+ *
+ * BacktestEngine computes \`totalReturn = (final − initial) / initial × 100\`
+ * and BacktestWorker stores that same percent in both the \`TotalReturn\`
+ * column and \`resultJson.TotalReturn\` — there is no fraction anywhere.
+ * The list used to multiply the JSON value by 100 again, so backtest #844
+ * (+$10.89 on $10,000 = 0.1089%) printed as "+10.89%". Prefer the column;
+ * fall back to the JSON; last resort recompute from the balances.
+ */
+function backtestReturnPct(bt: BacktestRunDto | null | undefined): number | null {
+  if (!bt) return null;
+  if (bt.totalReturn != null && Number.isFinite(bt.totalReturn)) return bt.totalReturn;
+  if (bt.resultJson) {
+    try {
+      const v = JSON.parse(bt.resultJson)?.TotalReturn;
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+    } catch {
+      /* fall through to the balance recompute */
+    }
   }
+  if (bt.finalBalance != null && bt.initialBalance > 0) {
+    return ((bt.finalBalance - bt.initialBalance) / bt.initialBalance) * 100;
+  }
+  return null;
+}
+
+/** Same sentinel rule as the backtests page: ≤ −100% or beyond ±1000% is a wiped-out / corrupt run. */
+function isWipedOutReturnPct(pct: number): boolean {
+  return pct <= -100 || Math.abs(pct) > 1000;
 }
 
 function lifecycleVariant(stage: string): { bg: string; color: string } {

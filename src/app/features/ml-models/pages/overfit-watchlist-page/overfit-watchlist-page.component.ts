@@ -58,8 +58,6 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         </button>
       </app-page-header>
 
-      <app-v6-orderbook-card />
-
       <section class="controls">
         <div class="control-group">
           <label for="ratio">Ratio threshold</label>
@@ -193,6 +191,11 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           </section>
         }
       }
+
+      <!-- Secondary diagnostic. It used to sit above the watchlist and
+           dominated a page whose own content is usually "No overfit flags";
+           the page's subject comes first, the related audit follows. -->
+      <app-v6-orderbook-card />
     </div>
   `,
   styles: [
@@ -240,8 +243,42 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       }
       .kpis {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(3, 1fr);
         gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 720px) {
+        .kpis {
+          grid-template-columns: 1fr;
+        }
+      }
+      /* Pill buttons — the same chrome the Training Queue header uses, so the
+         three ML sub-pages share one back-link + Refresh treatment. */
+      .btn {
+        height: 36px;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-full);
+        border: none;
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        line-height: 1;
+        text-decoration: none;
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .btn-secondary {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--bg-quaternary, var(--bg-tertiary));
       }
       .card {
         background: var(--bg-secondary);

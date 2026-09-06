@@ -3,7 +3,6 @@ import { RouterLink } from '@angular/router';
 
 import { AuthService } from '@core/auth/auth.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
-import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 
 type PermGroup = { category: string; keys: string[] };
 
@@ -11,7 +10,7 @@ type PermGroup = { category: string; keys: string[] };
   selector: 'app-profile-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, PageHeaderComponent, EmptyStateComponent],
+  imports: [RouterLink, PageHeaderComponent],
   template: `
     <div class="page">
       <app-page-header
@@ -62,10 +61,12 @@ type PermGroup = { category: string; keys: string[] };
           <span class="muted">{{ permissions().length }}</span>
         </header>
         @if (permissions().length === 0) {
-          <app-empty-state
-            title="No explicit permissions"
-            description="This account relies on role-based access or is a non-admin session."
-          />
+          <div class="chips pad">
+            <span class="muted small">
+              No explicit permissions — this account relies on role-based access or is a non-admin
+              session.
+            </span>
+          </div>
         } @else {
           <div class="perm-groups pad">
             @for (g of permissionGroups(); track g.category) {
@@ -110,7 +111,7 @@ type PermGroup = { category: string; keys: string[] };
         font-weight: var(--font-semibold);
       }
       .muted {
-        color: var(--text-tertiary);
+        color: var(--text-secondary);
       }
       .small {
         font-size: var(--text-xs);

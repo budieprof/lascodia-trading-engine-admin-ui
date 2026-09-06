@@ -213,6 +213,15 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         font-size: 0.8125rem;
         opacity: 0.65;
       }
+      /* Standard stat-tile grid: five numbers were rendering as five stacked
+         full-width cards (~650px) because this rule was missing. */
+      .kpi-strip {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+        gap: var(--space-2);
+        align-items: start;
+        margin-bottom: var(--space-3);
+      }
       .basis {
         font-size: 0.8125rem;
         line-height: 1.5;
@@ -292,10 +301,12 @@ export class EventExposurePageComponent {
 
   protected readonly resource = createPolledResource<EventExposureDto | null>(
     () =>
-      this.positions.getEventExposure(this.lookaheadHours(), this.includeMedium()).pipe(
-        map((res) => res.data ?? null),
-        catchError(() => of(null)),
-      ),
+      // No catchError: a swallowed failure left the last good snapshot (or
+      // nothing) on screen with no error surfaced. The polled resource records
+      // the error and the template renders the retry state.
+      this.positions
+        .getEventExposure(this.lookaheadHours(), this.includeMedium())
+        .pipe(map((res) => res.data ?? null)),
     // Matches the open-positions P&L cadence in PRD §10: the countdown ticks in minutes, and a
     // faster poll would add load without changing any decision this screen supports.
     { intervalMs: 15_000 },

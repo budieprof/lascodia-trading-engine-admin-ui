@@ -894,13 +894,20 @@ export class EARejectionsPanelComponent {
     const id = this.tradingAccountId();
     return id != null && id > 0;
   });
-  readonly emptyTitle = computed(() =>
-    this.allAccounts()
-      ? 'No rejections across any account.'
+  /** The window the filter actually applied, so the empty state never names a different one. */
+  private readonly rangeLabel = computed(() => {
+    const hrs = this.rangeHours();
+    const opt = this.rangeOptions.find((r) => r.hours === hrs);
+    return opt ? opt.label.replace(/^Last /, 'the last ') : 'the selected window';
+  });
+  readonly emptyTitle = computed(() => {
+    const window = this.rangeHours() === 0 ? 'ever' : `in ${this.rangeLabel()}`;
+    return this.allAccounts()
+      ? `No rejections across any account ${window}`
       : this.accountScoped()
-        ? 'No rejections for this account in the window.'
-        : 'No rejections in the last 24h',
-  );
+        ? `No rejections for this account ${window}`
+        : `No rejections ${window}`;
+  });
   readonly emptyMessage = computed(() =>
     this.allAccounts()
       ? 'Every account picked up its eligible signals — no local gate, engine check, or broker retcode has declined a signal.'

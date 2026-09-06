@@ -7,15 +7,16 @@ import {
   effect,
   OnInit,
 } from '@angular/core';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { StatusBadgeComponent } from '@shared/components/status-badge/status-badge.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { BacktestsService } from '@core/services/backtests.service';
 import { BacktestRunDto } from '@core/api/api.types';
-import type { EChartsOption } from 'echarts';
+import type { EChartsOption, LineSeriesOption } from 'echarts';
 import {
   TradeReplayDialogComponent,
   type ReplayTrade,
@@ -83,6 +84,21 @@ const EXIT_REASON_LABELS: Record<number, string> = {
   2: 'End of Data',
 };
 
+/**
+ * The engine writes 9999 for a profit factor with no losing trades — a
+ * sentinel for "undefined", not a measurement. Anything at or above it is
+ * treated as undefined here.
+ */
+const PF_SENTINEL = 9999;
+
+/**
+ * Below this many trades the sample-shaped charts (drawdown, distributions,
+ * day-of-week, exit mix, holding time) are noise: a two-trade run drew a flat
+ * 0% drawdown on a 0–1% axis, a single-slice donut and a spline through
+ * three points. Those charts are replaced by one note.
+ */
+const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
+
 @Component({
   selector: 'app-backtest-detail-page',
   standalone: true,
@@ -92,7 +108,9 @@ const EXIT_REASON_LABELS: Record<number, string> = {
     MetricCardComponent,
     ChartCardComponent,
     StatusBadgeComponent,
+    ErrorStateComponent,
     TradeReplayDialogComponent,
+    RouterLink,
     DatePipe,
     DecimalPipe,
   ],
@@ -113,44 +131,35 @@ const EXIT_REASON_LABELS: Record<number, string> = {
           </div>
         }
 
-        <!-- ── Primary KPI strip ──────────────────────────────────────── -->
+        <!-- ── Primary KPI strip. No decorative dots: colour is carried by
+             the value itself and only where sign has a meaning (return,
+             Sharpe, drawdown, expectancy). Ratios with a zero denominator
+             (profit factor with no losses, Calmar / recovery with no
+             drawdown, Sortino with no downside) are passed as null so the
+             tile reads "-" instead of the engine's 9999 sentinel. ─────── -->
         <div class="kpi-strip">
           <app-metric-card
-            label="Total Return"
+            label="Total return"
             [value]="primary().totalReturn"
             format="percent"
             [colorByValue]="true"
           />
+          <app-metric-card label="Win rate" [value]="primary().winRate" format="percent" />
+          <app-metric-card label="Profit factor" [value]="ratios().profitFactor" format="number" />
           <app-metric-card
-            label="Win Rate"
-            [value]="primary().winRate"
-            format="percent"
-            dotColor="#34C759"
-          />
-          <app-metric-card
-            label="Profit Factor"
-            [value]="primary().profitFactor"
-            format="number"
-            dotColor="#0071E3"
-          />
-          <app-metric-card
-            label="Sharpe Ratio"
+            label="Sharpe ratio"
             [value]="primary().sharpe"
             format="number"
             [colorByValue]="true"
           />
           <app-metric-card
-            label="Max Drawdown"
+            label="Max drawdown"
             [value]="primary().maxDrawdown"
             format="percent"
-            dotColor="#FF3B30"
+            [colorByValue]="true"
+            [invertColor]="true"
           />
-          <app-metric-card
-            label="Total Trades"
-            [value]="primary().totalTrades"
-            format="number"
-            dotColor="#5AC8FA"
-          />
+          <app-metric-card label="Total trades" [value]="primary().totalTrades" format="number" />
         </div>
 
         @if (parsed(); as p) {
@@ -158,13 +167,13 @@ const EXIT_REASON_LABELS: Record<number, string> = {
           <div class="kpi-strip">
             <app-metric-card
               label="Sortino"
-              [value]="p.SortinoRatio"
+              [value]="ratios().sortino"
               format="number"
               [colorByValue]="true"
             />
             <app-metric-card
               label="Calmar"
-              [value]="p.CalmarRatio"
+              [value]="ratios().calmar"
               format="number"
               [colorByValue]="true"
             />
@@ -175,147 +184,174 @@ const EXIT_REASON_LABELS: Record<number, string> = {
               [colorByValue]="true"
             />
             <app-metric-card
-              label="Recovery Factor"
-              [value]="p.RecoveryFactor"
+              label="Recovery factor"
+              [value]="ratios().recovery"
               format="number"
               [colorByValue]="true"
             />
+            <app-metric-card label="Exposure" [value]="p.ExposurePct" format="percent" />
             <app-metric-card
-              label="Exposure"
-              [value]="p.ExposurePct"
-              format="percent"
-              dotColor="#AF52DE"
-            />
-            <app-metric-card
-              label="Avg Duration (h)"
+              label="Avg holding time (h)"
               [value]="p.AverageTradeDurationHours"
               format="number"
-              dotColor="#FF9500"
             />
           </div>
+          @if (ratios().note) {
+            <p class="kpi-scope">{{ ratios().note }}</p>
+          }
         }
 
-        <!-- ── Equity + Drawdown row ───────────────────────────────────── -->
+        <!-- ── Equity (+ drawdown when there is a sample) ──────────────── -->
         <div class="charts-grid">
           <app-chart-card
-            title="Equity Curve"
-            subtitle="Account balance and high-water mark over trade timeline"
+            [class.span-2]="!hasSample()"
+            title="Equity curve"
+            [subtitle]="
+              hasSample()
+                ? 'Account balance and high-water mark over the trade timeline'
+                : 'Account balance over the trade timeline'
+            "
             [options]="equityCurveOptions()"
             height="340px"
           />
-          <app-chart-card
-            title="Drawdown"
-            subtitle="Underwater equity — distance below the high-water mark"
-            [options]="drawdownOptions()"
-            height="340px"
-          />
+          @if (hasSample()) {
+            <app-chart-card
+              title="Drawdown"
+              subtitle="Underwater equity — distance below the high-water mark"
+              [options]="drawdownOptions()"
+              height="340px"
+            />
+          }
         </div>
 
-        <!-- ── Distribution row ────────────────────────────────────────── -->
-        <div class="charts-grid">
-          <app-chart-card
-            title="Trade P&L Distribution"
-            subtitle="Histogram of per-trade realised P&L (net of costs)"
-            [options]="pnlDistOptions()"
-            height="300px"
-          />
-          <app-chart-card
-            title="Monthly Returns"
-            subtitle="Realised P&L grouped by trade exit month"
-            [options]="monthlyOptions()"
-            height="300px"
-          />
-        </div>
+        @if (hasSample()) {
+          <!-- ── Distribution row ──────────────────────────────────────── -->
+          <div class="charts-grid">
+            <app-chart-card
+              title="Trade P&L distribution"
+              subtitle="Histogram of per-trade realised P&L (net of costs)"
+              [options]="pnlDistOptions()"
+              height="300px"
+            />
+            <app-chart-card
+              title="Monthly returns"
+              subtitle="Realised P&L grouped by trade exit month"
+              [options]="monthlyOptions()"
+              height="300px"
+            />
+          </div>
 
-        <!-- ── Behaviour row ───────────────────────────────────────────── -->
-        <div class="charts-grid">
-          <app-chart-card
-            title="Day-of-Week P&L"
-            subtitle="Average and total realised P&L by weekday"
-            [options]="dowOptions()"
-            height="280px"
-          />
-          <app-chart-card
-            title="Exit Reason Mix"
-            subtitle="How each trade closed — SL / TP / end-of-data"
-            [options]="exitReasonOptions()"
-            height="280px"
-          />
-        </div>
+          <!-- ── Behaviour row ─────────────────────────────────────────── -->
+          <div class="charts-grid">
+            <app-chart-card
+              title="Day-of-week P&L"
+              subtitle="Average and total realised P&L by weekday"
+              [options]="dowOptions()"
+              height="280px"
+            />
+            <app-chart-card
+              title="Exit reason mix"
+              subtitle="How each trade closed — SL / TP / end-of-data"
+              [options]="exitReasonOptions()"
+              height="280px"
+            />
+          </div>
 
-        <div class="charts-grid">
-          <app-chart-card
-            title="Long vs Short"
-            subtitle="Trade count and realised P&L by direction"
-            [options]="longShortOptions()"
-            height="280px"
-          />
-          <app-chart-card
-            title="Trade Duration"
-            subtitle="Distribution of holding times in hours"
-            [options]="durationOptions()"
-            height="280px"
-          />
-        </div>
+          <div class="charts-grid">
+            <app-chart-card
+              title="Long vs short"
+              subtitle="Trade count and realised P&L by direction"
+              [options]="longShortOptions()"
+              height="280px"
+            />
+            <app-chart-card
+              title="Holding time"
+              subtitle="Distribution of time in market per trade"
+              [options]="durationOptions()"
+              height="280px"
+            />
+          </div>
+        } @else if (parsed()) {
+          <div class="note">
+            Drawdown, P&L distribution, monthly and day-of-week breakdowns, exit mix and holding
+            time are not shown — they need a sample, and this run closed only
+            {{ sortedTrades().length }} trade{{ sortedTrades().length === 1 ? '' : 's' }}.
+          </div>
+        }
 
-        <!-- ── Cost breakdown ──────────────────────────────────────────── -->
+        <!-- ── Cost breakdown. Money carries its currency; the loss-side
+             figures are blank (not "−0.00" in red) when there were no losing
+             trades, and counts are coloured only when they are above zero. -->
         @if (parsed(); as p) {
           <div class="cost-card">
             <header class="cost-head">
-              <h3>Cost Breakdown</h3>
+              <h3>Costs and trade extremes</h3>
               <span class="muted"
-                >Sum of slippage, commission, swap and TCA across all
-                {{ p.Trades.length }} trades</span
+                >Slippage, commission, swap and TCA summed across all {{ p.Trades.length }} trade{{
+                  p.Trades.length === 1 ? '' : 's'
+                }}, in account currency</span
               >
             </header>
             <div class="cost-grid">
               <div class="cost-item">
                 <span class="cost-label">Slippage</span>
-                <span class="cost-value">{{ p.TotalSlippage | number: '1.2-2' }}</span>
+                <span class="cost-value">{{ money(p.TotalSlippage) }}</span>
               </div>
               <div class="cost-item">
                 <span class="cost-label">Commission</span>
-                <span class="cost-value">{{ p.TotalCommission | number: '1.2-2' }}</span>
+                <span class="cost-value">{{ money(p.TotalCommission) }}</span>
               </div>
               <div class="cost-item">
                 <span class="cost-label">Swap</span>
-                <span class="cost-value">{{ p.TotalSwap | number: '1.2-2' }}</span>
+                <span class="cost-value">{{ money(p.TotalSwap) }}</span>
               </div>
               <div class="cost-item">
-                <span class="cost-label">TCA Cost</span>
-                <span class="cost-value">{{ p.TotalTcaCost | number: '1.2-2' }}</span>
+                <span class="cost-label">TCA cost</span>
+                <span class="cost-value">{{ money(p.TotalTcaCost) }}</span>
               </div>
               <div class="cost-item">
-                <span class="cost-label">Largest Win</span>
-                <span class="cost-value gain">+{{ p.LargestWin | number: '1.2-2' }}</span>
+                <span class="cost-label">Largest win</span>
+                <span class="cost-value" [class.gain]="p.WinningTrades > 0">
+                  {{ p.WinningTrades > 0 ? signedMoney(p.LargestWin) : '—' }}
+                </span>
               </div>
               <div class="cost-item">
-                <span class="cost-label">Largest Loss</span>
-                <span class="cost-value loss">−{{ p.LargestLoss | number: '1.2-2' }}</span>
+                <span class="cost-label">Largest loss</span>
+                <span class="cost-value" [class.loss]="p.LosingTrades > 0">
+                  {{ p.LosingTrades > 0 ? signedMoney(-abs(p.LargestLoss)) : '—' }}
+                </span>
               </div>
               <div class="cost-item">
-                <span class="cost-label">Avg Win</span>
-                <span class="cost-value gain">+{{ p.AverageWin | number: '1.2-2' }}</span>
+                <span class="cost-label">Avg win</span>
+                <span class="cost-value" [class.gain]="p.WinningTrades > 0">
+                  {{ p.WinningTrades > 0 ? signedMoney(p.AverageWin) : '—' }}
+                </span>
               </div>
               <div class="cost-item">
-                <span class="cost-label">Avg Loss</span>
-                <span class="cost-value loss">−{{ p.AverageLoss | number: '1.2-2' }}</span>
+                <span class="cost-label">Avg loss</span>
+                <span class="cost-value" [class.loss]="p.LosingTrades > 0">
+                  {{ p.LosingTrades > 0 ? signedMoney(-abs(p.AverageLoss)) : '—' }}
+                </span>
               </div>
               <div class="cost-item">
-                <span class="cost-label">Max Win Streak</span>
+                <span class="cost-label">Max win streak</span>
                 <span class="cost-value">{{ p.MaxConsecutiveWins }}</span>
               </div>
               <div class="cost-item">
-                <span class="cost-label">Max Loss Streak</span>
+                <span class="cost-label">Max loss streak</span>
                 <span class="cost-value">{{ p.MaxConsecutiveLosses }}</span>
               </div>
               <div class="cost-item">
-                <span class="cost-label">Winning Trades</span>
-                <span class="cost-value gain">{{ p.WinningTrades }}</span>
+                <span class="cost-label">Winning trades</span>
+                <span class="cost-value" [class.gain]="p.WinningTrades > 0">
+                  {{ p.WinningTrades }}
+                </span>
               </div>
               <div class="cost-item">
-                <span class="cost-label">Losing Trades</span>
-                <span class="cost-value loss">{{ p.LosingTrades }}</span>
+                <span class="cost-label">Losing trades</span>
+                <span class="cost-value" [class.loss]="p.LosingTrades > 0">
+                  {{ p.LosingTrades }}
+                </span>
               </div>
             </div>
           </div>
@@ -325,9 +361,13 @@ const EXIT_REASON_LABELS: Record<number, string> = {
         @if (sortedTrades().length > 0) {
           <section class="info-card">
             <header class="info-head">
-              <h3>Trade Log</h3>
+              <h3>Trade log</h3>
               <div class="trade-log-controls">
-                <span class="muted">{{ sortedTrades().length }} trades</span>
+                <span class="muted"
+                  >{{ sortedTrades().length }} trade{{
+                    sortedTrades().length === 1 ? '' : 's'
+                  }}</span
+                >
                 <div class="filter-pills">
                   <button
                     type="button"
@@ -394,8 +434,8 @@ const EXIT_REASON_LABELS: Record<number, string> = {
                   @for (t of pagedTrades(); track $index) {
                     <tr class="trade-row" (click)="openReplay(t.trade, t.idx)">
                       <td class="mono">#{{ t.idx }}</td>
-                      <td class="nowrap">{{ t.trade.EntryTime | date: 'MMM d HH:mm' }}</td>
-                      <td class="nowrap">{{ t.trade.ExitTime | date: 'MMM d HH:mm' }}</td>
+                      <td class="nowrap">{{ t.trade.EntryTime | date: 'MMM d, yyyy HH:mm' }}</td>
+                      <td class="nowrap">{{ t.trade.ExitTime | date: 'MMM d, yyyy HH:mm' }}</td>
                       <td>
                         <span
                           class="dir-pill"
@@ -441,41 +481,47 @@ const EXIT_REASON_LABELS: Record<number, string> = {
                 </tbody>
               </table>
             </div>
-            <footer class="trade-pager">
-              <span class="muted"
-                >Showing {{ pageStart() }}–{{ pageEnd() }} of {{ filteredTrades().length }}</span
-              >
-              <div class="pager-buttons">
-                <button
-                  type="button"
-                  class="pager-btn"
-                  [disabled]="tradePage() === 1"
-                  (click)="tradePage.set(tradePage() - 1)"
+            <!-- A pager for a list that fits on one page is noise. -->
+            @if (filteredTrades().length > tradesPerPage) {
+              <footer class="trade-pager">
+                <span class="muted"
+                  >Showing {{ pageStart() | number }}–{{ pageEnd() | number }} of
+                  {{ filteredTrades().length | number }}</span
                 >
-                  ← Prev
-                </button>
-                <button
-                  type="button"
-                  class="pager-btn"
-                  [disabled]="pageEnd() >= filteredTrades().length"
-                  (click)="tradePage.set(tradePage() + 1)"
-                >
-                  Next →
-                </button>
-              </div>
-            </footer>
+                <div class="pager-buttons">
+                  <button
+                    type="button"
+                    class="pager-btn"
+                    [disabled]="tradePage() === 1"
+                    (click)="tradePage.set(tradePage() - 1)"
+                  >
+                    ← Prev
+                  </button>
+                  <button
+                    type="button"
+                    class="pager-btn"
+                    [disabled]="pageEnd() >= filteredTrades().length"
+                    (click)="tradePage.set(tradePage() + 1)"
+                  >
+                    Next →
+                  </button>
+                </div>
+              </footer>
+            }
           </section>
         }
 
         <!-- ── Run config ──────────────────────────────────────────────── -->
         <div class="info-card">
           <header class="info-head">
-            <h3>Run Configuration</h3>
+            <h3>Run configuration</h3>
           </header>
           <div class="info-grid">
             <div class="info-item">
               <span class="info-label">Strategy</span>
-              <span class="info-value">#{{ bt.strategyId }}</span>
+              <a class="info-value link" [routerLink]="['/strategies', bt.strategyId]"
+                >#{{ bt.strategyId }}</a
+              >
             </div>
             <div class="info-item">
               <span class="info-label">Symbol</span>
@@ -486,33 +532,41 @@ const EXIT_REASON_LABELS: Record<number, string> = {
               <span class="info-value">{{ bt.timeframe }}</span>
             </div>
             <div class="info-item">
-              <span class="info-label">Initial Balance</span>
-              <span class="info-value">\${{ bt.initialBalance | number: '1.2-2' }}</span>
+              <span class="info-label">Initial balance</span>
+              <span class="info-value">{{ money(bt.initialBalance) }}</span>
             </div>
             <div class="info-item">
-              <span class="info-label">Final Balance</span>
-              <span class="info-value"
-                >\${{ parsed()?.FinalBalance ?? bt.finalBalance | number: '1.2-2' }}</span
-              >
+              <span class="info-label">Final balance</span>
+              <span class="info-value">{{ money(parsed()?.FinalBalance ?? bt.finalBalance) }}</span>
             </div>
             <div class="info-item">
               <span class="info-label">Period</span>
               <span class="info-value"
-                >{{ bt.fromDate | date: 'mediumDate' }} — {{ bt.toDate | date: 'mediumDate' }}</span
+                >{{ bt.fromDate | date: 'MMM d, yyyy' }} —
+                {{ bt.toDate | date: 'MMM d, yyyy' }}</span
               >
             </div>
             <div class="info-item">
               <span class="info-label">Started</span>
-              <span class="info-value">{{ bt.startedAt | date: 'medium' }}</span>
+              <span class="info-value">{{
+                bt.startedAt ? (bt.startedAt | date: 'MMM d, yyyy HH:mm') : '—'
+              }}</span>
             </div>
             <div class="info-item">
               <span class="info-label">Completed</span>
               <span class="info-value">{{
-                bt.completedAt ? (bt.completedAt | date: 'medium') : '—'
+                bt.completedAt ? (bt.completedAt | date: 'MMM d, yyyy HH:mm') : '—'
               }}</span>
             </div>
           </div>
         </div>
+      } @else if (loadError()) {
+        <!-- A failed fetch used to sit on "Loading…" forever. -->
+        <app-error-state
+          title="Could not load this backtest"
+          [message]="loadError()"
+          (retry)="load()"
+        />
       } @else {
         <div class="note">Loading backtest #{{ id() }}…</div>
       }
@@ -551,13 +605,23 @@ const EXIT_REASON_LABELS: Record<number, string> = {
       }
       .kpi-strip {
         display: grid;
-        grid-template-columns: repeat(6, 1fr);
-        gap: var(--space-4);
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: var(--space-2);
+        align-items: start;
+      }
+      .kpi-scope {
+        margin: calc(-1 * var(--space-2)) 0 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
       }
       .charts-grid {
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: var(--space-4);
+        align-items: start;
+      }
+      .charts-grid > .span-2 {
+        grid-column: 1 / -1;
       }
       .cost-card,
       .info-card {
@@ -644,6 +708,14 @@ const EXIT_REASON_LABELS: Record<number, string> = {
         color: var(--text-primary);
         font-weight: var(--font-medium);
       }
+      .info-value.link {
+        color: var(--accent);
+        text-decoration: none;
+        width: fit-content;
+      }
+      .info-value.link:hover {
+        text-decoration: underline;
+      }
       .note {
         padding: var(--space-4) var(--space-5);
         background: var(--bg-secondary);
@@ -659,7 +731,7 @@ const EXIT_REASON_LABELS: Record<number, string> = {
       @media (max-width: 1200px) {
         .kpi-strip,
         .cost-grid {
-          grid-template-columns: repeat(3, 1fr);
+          grid-template-columns: repeat(3, minmax(0, 1fr));
         }
         .info-grid {
           grid-template-columns: repeat(2, 1fr);
@@ -845,6 +917,8 @@ export class BacktestDetailPageComponent implements OnInit {
   readonly backtest = signal<BacktestRunDto | null>(null);
   readonly parsed = signal<BacktestResultData | null>(null);
   readonly parseError = signal<string | null>(null);
+  /** Set when the run itself could not be fetched (distinct from a payload that parsed badly). */
+  readonly loadError = signal<string | null>(null);
 
   // ── Trade log state ────────────────────────────────────────────────────
   readonly tradeFilter = signal<'all' | 'wins' | 'losses' | 'long' | 'short'>('all');
@@ -868,15 +942,83 @@ export class BacktestDetailPageComponent implements OnInit {
   readonly primary = computed(() => {
     const bt = this.backtest();
     const p = this.parsed();
+    // Both sources carry TotalReturn / MaxDrawdownPct already in percent
+    // (BacktestEngine multiplies by 100 before persisting; run 844 stores
+    // 0.1089 for +0.1089% and the DTO copies the column). Only the win rate
+    // is a fraction. Nothing here is rescaled, so the two pages agree.
+    const totalReturn = p != null ? p.TotalReturn : (bt?.totalReturn ?? 0);
+    const maxDrawdown = p != null ? p.MaxDrawdownPct : (bt?.maxDrawdownPct ?? 0);
     return {
-      totalReturn: p?.TotalReturn ?? bt?.totalReturn ?? 0,
+      totalReturn,
       winRate: (p?.WinRate ?? bt?.winRate ?? 0) * 100,
-      profitFactor: p?.ProfitFactor ?? bt?.profitFactor ?? 0,
       sharpe: p?.SharpeRatio ?? bt?.sharpeRatio ?? 0,
-      maxDrawdown: p?.MaxDrawdownPct ?? bt?.maxDrawdownPct ?? 0,
+      maxDrawdown,
       totalTrades: p?.TotalTrades ?? bt?.totalTrades ?? 0,
     };
   });
+
+  /**
+   * Ratios that are only meaningful with a non-zero denominator. The engine
+   * emits 9999 for a profit factor with no losing trades and a finite Calmar /
+   * recovery factor from a 0% drawdown; Sortino with no losing trade has no
+   * downside deviation to divide by. Each becomes null (the tile shows "-")
+   * and `note` says why, so a two-trade run no longer advertises "PF 9,999".
+   */
+  readonly ratios = computed(() => {
+    const bt = this.backtest();
+    const p = this.parsed();
+    const losing = p?.LosingTrades ?? null;
+    const noLosses = losing === 0;
+    const dd = p?.MaxDrawdownPct ?? bt?.maxDrawdownPct ?? null;
+    const noDrawdown = dd !== null && dd <= 0;
+
+    const pfRaw = p?.ProfitFactor ?? bt?.profitFactor ?? null;
+    const profitFactor =
+      pfRaw === null || noLosses || !Number.isFinite(pfRaw) || pfRaw >= PF_SENTINEL ? null : pfRaw;
+    const sortino =
+      p == null || noLosses || !Number.isFinite(p.SortinoRatio) ? null : p.SortinoRatio;
+    const calmar =
+      p == null || noDrawdown || !Number.isFinite(p.CalmarRatio) ? null : p.CalmarRatio;
+    const recovery =
+      p == null || noDrawdown || !Number.isFinite(p.RecoveryFactor) ? null : p.RecoveryFactor;
+
+    const undefinedBy: string[] = [];
+    if (noLosses) undefinedBy.push('profit factor and Sortino (no losing trades)');
+    if (noDrawdown) undefinedBy.push('Calmar and recovery factor (no drawdown)');
+    const note =
+      undefinedBy.length > 0
+        ? `Not defined for this run: ${undefinedBy.join('; ')}. The engine records a placeholder for these, which is not shown.`
+        : null;
+
+    return { profitFactor, sortino, calmar, recovery, note };
+  });
+
+  /** Enough closed trades for the sample-shaped charts to say something. */
+  readonly hasSample = computed(() => this.sortedTrades().length >= MIN_TRADES_FOR_SAMPLE_CHARTS);
+
+  /** "$1,234.56" — account currency, two decimals, thousands separators. */
+  money(v: number | null | undefined): string {
+    if (v == null || !Number.isFinite(v)) return '—';
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(v);
+  }
+
+  /** "+$12.34" / "−$12.34" — sign in front of the currency, never "+-$". */
+  signedMoney(v: number | null | undefined): string {
+    if (v == null || !Number.isFinite(v)) return '—';
+    const body = this.money(Math.abs(v));
+    if (v > 0) return `+${body}`;
+    if (v < 0) return `−${body}`;
+    return body;
+  }
+
+  abs(v: number): number {
+    return Math.abs(v);
+  }
 
   // ── Derived series (computed once per parsed payload) ──────────────────
 
@@ -982,6 +1124,45 @@ export class BacktestDetailPageComponent implements OnInit {
 
   equityCurveOptions = computed<EChartsOption>(() => {
     const w = this.equityWalk();
+    // With one or two trades the high-water mark sits on top of the equity
+    // line, so the legend promised a second series that was never visible.
+    const withHwm = this.hasSample();
+    const series: LineSeriesOption[] = [
+      {
+        name: 'Equity',
+        type: 'line',
+        data: w.dates.map((d, i) => [d, w.equity[i]]),
+        smooth: false,
+        symbol: withHwm ? 'none' : 'circle',
+        symbolSize: 6,
+        lineStyle: { color: '#0071E3', width: 2 },
+        areaStyle: {
+          color: {
+            type: 'linear',
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              { offset: 0, color: 'rgba(0,113,227,0.18)' },
+              { offset: 1, color: 'rgba(0,113,227,0)' },
+            ],
+          },
+        },
+        z: 2,
+      },
+    ];
+    if (withHwm) {
+      series.push({
+        name: 'High-water mark',
+        type: 'line',
+        data: w.dates.map((d, i) => [d, w.hwm[i]]),
+        smooth: false,
+        symbol: 'none',
+        lineStyle: { color: '#8E8E93', width: 1, type: 'dashed' },
+        z: 1,
+      });
+    }
     return {
       grid: { top: 20, right: 30, bottom: 40, left: 70 },
       tooltip: {
@@ -991,7 +1172,9 @@ export class BacktestDetailPageComponent implements OnInit {
             ? `$${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
             : '—',
       },
-      legend: { data: ['Equity', 'High-Water Mark'], bottom: 0, fontSize: 11 },
+      legend: withHwm
+        ? { data: ['Equity', 'High-water mark'], bottom: 0, fontSize: 11 }
+        : { show: false },
       xAxis: {
         type: 'time',
         data: w.dates,
@@ -1007,39 +1190,7 @@ export class BacktestDetailPageComponent implements OnInit {
         },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
-      series: [
-        {
-          name: 'Equity',
-          type: 'line',
-          data: w.dates.map((d, i) => [d, w.equity[i]]),
-          smooth: false,
-          symbol: 'none',
-          lineStyle: { color: '#0071E3', width: 2 },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: 'rgba(0,113,227,0.18)' },
-                { offset: 1, color: 'rgba(0,113,227,0)' },
-              ],
-            },
-          },
-          z: 2,
-        },
-        {
-          name: 'High-Water Mark',
-          type: 'line',
-          data: w.dates.map((d, i) => [d, w.hwm[i]]),
-          smooth: false,
-          symbol: 'none',
-          lineStyle: { color: '#8E8E93', width: 1, type: 'dashed' },
-          z: 1,
-        },
-      ],
+      series,
     };
   });
 
@@ -1112,6 +1263,10 @@ export class BacktestDetailPageComponent implements OnInit {
       },
       xAxis: {
         type: 'category',
+        name: 'P&L per trade ($)',
+        nameLocation: 'middle',
+        nameGap: 26,
+        nameTextStyle: { fontSize: 10, color: '#6E6E73' },
         data: labels,
         axisLabel: {
           fontSize: 10,
@@ -1121,6 +1276,9 @@ export class BacktestDetailPageComponent implements OnInit {
       },
       yAxis: {
         type: 'value',
+        name: 'Trades',
+        nameTextStyle: { fontSize: 10, color: '#6E6E73' },
+        minInterval: 1,
         axisLabel: { fontSize: 11, color: '#6E6E73' },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
@@ -1229,7 +1387,9 @@ export class BacktestDetailPageComponent implements OnInit {
           type: 'line',
           yAxisIndex: 1,
           data: data.map((d) => +d.avg.toFixed(2)),
-          smooth: true,
+          // Straight segments: a spline invents humps between weekdays that
+          // had no trades at all.
+          smooth: false,
           symbol: 'circle',
           symbolSize: 6,
           lineStyle: { color: '#0071E3', width: 2 },
@@ -1351,12 +1511,17 @@ export class BacktestDetailPageComponent implements OnInit {
         formatter: (params: any) => {
           const idx = Array.isArray(params) ? (params[0]?.dataIndex ?? 0) : 0;
           const b = bins[idx];
-          return `${b.from.toFixed(1)}–${b.to.toFixed(1)}h<br/>${b.count} trades`;
+          return `${b.from.toFixed(1)}–${b.to.toFixed(1)} h<br/>${b.count} trades`;
         },
       },
       xAxis: {
         type: 'category',
-        data: labels,
+        name: 'Holding time (h)',
+        nameLocation: 'middle',
+        nameGap: 26,
+        nameTextStyle: { fontSize: 10, color: '#6E6E73' },
+        // Ticks carry their unit ("7h", not "7").
+        data: labels.map((l) => `${l}h`),
         axisLabel: {
           fontSize: 10,
           color: '#6E6E73',
@@ -1365,6 +1530,9 @@ export class BacktestDetailPageComponent implements OnInit {
       },
       yAxis: {
         type: 'value',
+        name: 'Trades',
+        nameTextStyle: { fontSize: 10, color: '#6E6E73' },
+        minInterval: 1,
         axisLabel: { fontSize: 11, color: '#6E6E73' },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
@@ -1385,9 +1553,19 @@ export class BacktestDetailPageComponent implements OnInit {
     const id = Number(this.route.snapshot.paramMap.get('id'));
     if (!id) return;
     this.id.set(id);
+    this.load();
+  }
+
+  load(): void {
+    const id = this.id();
+    if (!id) return;
+    this.loadError.set(null);
     this.backtestsService.getById(id).subscribe({
       next: (res) => {
-        if (!res?.data) return;
+        if (!res?.data) {
+          this.loadError.set(`The engine returned no run with id ${id}.`);
+          return;
+        }
         const data = res.data as BacktestRunDto;
         this.backtest.set(data);
         if (data.resultJson) {
@@ -1403,8 +1581,13 @@ export class BacktestDetailPageComponent implements OnInit {
           }
         }
       },
-      error: () => {
-        this.parseError.set('Failed to load backtest run');
+      error: (err: unknown) => {
+        const msg = err instanceof Error ? err.message : null;
+        this.loadError.set(
+          msg
+            ? `Engine request failed: ${msg}`
+            : 'Engine request failed. The backtest endpoint may be unhealthy — check System Health.',
+        );
       },
     });
   }

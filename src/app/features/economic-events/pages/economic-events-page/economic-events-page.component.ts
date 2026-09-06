@@ -36,10 +36,24 @@ import {
 } from '@shared/components/form-field/form-field.component';
 
 type DateRange = 'all' | 'today' | 'week' | 'next24h' | 'past24h';
-type QuickFilter = 'all' | 'today' | 'week' | 'next24h' | 'high' | 'awaiting' | 'usd';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
+
+/**
+ * Analytics window cap. The calendar holds well over 10k rows; tiles and
+ * charts summarise only the latest-scheduled slice, and every label that
+ * derives from it says so rather than posing as a total.
+ */
+const ANALYTICS_WINDOW = 2000;
+const DENSITY_DAYS = 14;
+
+/** One date format for the whole page; every timestamp is rendered in UTC. */
+const DATE_FMT = 'd MMM yyyy, HH:mm';
+const DAY_FMT = 'd MMM yyyy';
+
+const numberFmt = new Intl.NumberFormat('en-US');
+const fmt = (n: number): string => numberFmt.format(n);
 
 @Component({
   selector: 'app-economic-events-page',
@@ -120,14 +134,14 @@ const DAY_MS = 24 * HOUR_MS;
               hint="Optional"
               [control]="createForm.controls.forecast"
             >
-              <input appFormFieldControl formControlName="forecast" placeholder="optional" />
+              <input appFormFieldControl formControlName="forecast" placeholder="e.g. 275K" />
             </app-form-field>
             <app-form-field
               label="Previous"
               hint="Optional"
               [control]="createForm.controls.previous"
             >
-              <input appFormFieldControl formControlName="previous" placeholder="optional" />
+              <input appFormFieldControl formControlName="previous" placeholder="e.g. 260K" />
             </app-form-field>
             <div class="actions">
               <button
@@ -176,7 +190,7 @@ const DAY_MS = 24 * HOUR_MS;
               <h2 class="drawer-title">{{ evt.title }}</h2>
               <p class="drawer-subtitle">
                 <span class="drawer-time">{{
-                  evt.scheduledAt | date: 'EEE, MMM d · HH:mm' : 'UTC'
+                  evt.scheduledAt | date: 'EEE ' + dateFmt : 'UTC'
                 }}</span>
                 <span class="drawer-time-suffix">UTC</span>
                 <span class="drawer-sep">·</span>
@@ -215,7 +229,7 @@ const DAY_MS = 24 * HOUR_MS;
                 <p class="explainer-prose">{{ desc }}</p>
                 <footer class="section-footer">
                   @if (currentDescriptionUpdatedAt(); as ts) {
-                    <span class="muted small">Updated {{ ts | date: 'medium' }}</span>
+                    <span class="muted small">Updated {{ ts | date: dateFmt : 'UTC' }} UTC</span>
                   }
                   <button
                     type="button"
@@ -266,9 +280,9 @@ const DAY_MS = 24 * HOUR_MS;
               <h3 class="section-title">Schedule &amp; metadata</h3>
               <dl class="kv-list">
                 <dt>Scheduled (UTC)</dt>
-                <dd>{{ evt.scheduledAt | date: 'yyyy-MM-dd HH:mm' : 'UTC' }}</dd>
+                <dd>{{ evt.scheduledAt | date: dateFmt : 'UTC' }}</dd>
                 <dt>Scheduled (Local)</dt>
-                <dd>{{ evt.scheduledAt | date: 'medium' }}</dd>
+                <dd>{{ evt.scheduledAt | date: dateFmt }}</dd>
                 <dt>External Key</dt>
                 <dd class="mono small">{{ evt.externalKey || '—' }}</dd>
               </dl>
@@ -309,7 +323,25 @@ const DAY_MS = 24 * HOUR_MS;
         </aside>
       }
 
-      <!-- 8-card KPI strip — calendar density at a glance -->
+      <!--
+        Feed status — where the calendar actually ends. A row of zeros in the
+        tiles cannot tell a quiet week from a dead feed; this line can.
+      -->
+      @if (calendarEnd(); as end) {
+        @if (hasUpcoming()) {
+          <p class="feed-status">
+            Calendar runs to {{ end | date: dateFmt : 'UTC' }} UTC ·
+            {{ fmt(upcomingCount()) }} upcoming events in the analytics window.
+          </p>
+        } @else {
+          <p class="feed-status stalled">
+            Calendar ends {{ end | date: dateFmt : 'UTC' }} UTC — no events are scheduled after that
+            date. The calendar feed may have stalled.
+          </p>
+        }
+      }
+
+      <!-- KPI strip — one row of six; everything except the total is scoped to the analytics window -->
       <div class="kpis">
         <app-metric-card
           label="Total events"
@@ -317,121 +349,62 @@ const DAY_MS = 24 * HOUR_MS;
           format="number"
           dotColor="#0071E3"
         />
-        <app-metric-card label="Today" [value]="todayCount()" format="number" dotColor="#5AC8FA" />
-        <app-metric-card
-          label="Next 24h"
-          [value]="next24hCount()"
-          format="number"
-          [dotColor]="next24hCount() > 0 ? '#FF9500' : '#34C759'"
-        />
-        <app-metric-card
-          label="This week"
-          [value]="weekCount()"
-          format="number"
-          dotColor="#5AC8FA"
-        />
+        <app-metric-card label="Next 24h" [value]="next24hCount()" format="number" />
+        <app-metric-card label="This week" [value]="weekCount()" format="number" />
         <app-metric-card
           label="High impact (window)"
           [value]="highImpactCount()"
           format="number"
-          [dotColor]="highImpactCount() > 0 ? '#FF3B30' : '#34C759'"
+          [dotColor]="highImpactCount() > 0 ? '#FF3B30' : undefined"
         />
         <app-metric-card
-          label="Awaiting actual"
+          label="Awaiting actual (window)"
           [value]="awaitingActualCount()"
           format="number"
-          [dotColor]="awaitingActualCount() > 0 ? '#FF9500' : '#34C759'"
+          [dotColor]="awaitingActualCount() > 0 ? '#FF9500' : undefined"
         />
         <app-metric-card
-          label="Currencies covered"
+          label="Currencies (window)"
           [value]="distinctCurrencies().length"
           format="number"
-          dotColor="#AF52DE"
-        />
-        <app-metric-card
-          label="Sources"
-          [value]="distinctSources().length"
-          format="number"
-          dotColor="#AF52DE"
         />
       </div>
 
-      <!-- 3-col chart row: impact donut + currency exposure + per-day timeline -->
+      <!-- 3-col chart row: impact donut + currency exposure + per-day density -->
       <div class="chart-row">
         <app-chart-card
           title="Impact distribution"
-          subtitle="Low · Medium · High in the analytics window"
+          [subtitle]="windowLabel()"
           [options]="impactDonutOptions()"
           height="220px"
         />
         <app-chart-card
           title="Currency exposure"
-          subtitle="Top currencies by event count"
+          [subtitle]="'Top currencies · ' + windowLabel()"
           [options]="currencyBarOptions()"
           height="220px"
         />
-        <app-chart-card
-          title="Calendar density (next 14d)"
-          subtitle="Scheduled releases per day · stacked by impact"
-          [options]="timelineByDayOptions()"
-          height="220px"
-        />
+        @if (density(); as d) {
+          <app-chart-card
+            [title]="
+              d.mode === 'upcoming'
+                ? 'Calendar density (next 14 days)'
+                : 'Calendar density (last 14 days of data)'
+            "
+            [subtitle]="d.rangeLabel + ' · per day, stacked by impact'"
+            [options]="densityOptions()"
+            height="220px"
+          />
+        } @else {
+          <div class="chart-empty">
+            <strong>Calendar density</strong>
+            <span>No events in the analytics window.</span>
+          </div>
+        }
       </div>
 
-      <!-- Quick filter chips + filter dropdowns -->
+      <!-- Filter dropdowns — one control set; counts are scoped to the analytics window -->
       <div class="filter-bar">
-        <div class="chips">
-          <button
-            type="button"
-            [class.active]="quickFilter() === 'all'"
-            (click)="setQuickFilter('all')"
-          >
-            All
-          </button>
-          <button
-            type="button"
-            [class.active]="quickFilter() === 'today'"
-            (click)="setQuickFilter('today')"
-          >
-            Today
-          </button>
-          <button
-            type="button"
-            [class.active]="quickFilter() === 'next24h'"
-            (click)="setQuickFilter('next24h')"
-          >
-            Next 24h
-          </button>
-          <button
-            type="button"
-            [class.active]="quickFilter() === 'week'"
-            (click)="setQuickFilter('week')"
-          >
-            This week
-          </button>
-          <button
-            type="button"
-            [class.active]="quickFilter() === 'high'"
-            (click)="setQuickFilter('high')"
-          >
-            High impact only
-          </button>
-          <button
-            type="button"
-            [class.active]="quickFilter() === 'awaiting'"
-            (click)="setQuickFilter('awaiting')"
-          >
-            Awaiting actual
-          </button>
-          <button
-            type="button"
-            [class.active]="quickFilter() === 'usd'"
-            (click)="setQuickFilter('usd')"
-          >
-            USD only
-          </button>
-        </div>
-
         <select
           class="input"
           [ngModel]="currencyFilter()"
@@ -439,7 +412,7 @@ const DAY_MS = 24 * HOUR_MS;
         >
           <option value="">All currencies</option>
           @for (c of currencyOptions(); track c.value) {
-            <option [value]="c.value">{{ c.value }} ({{ c.count }})</option>
+            <option [value]="c.value">{{ c.value }} ({{ fmt(c.count) }})</option>
           }
         </select>
         <select
@@ -448,9 +421,9 @@ const DAY_MS = 24 * HOUR_MS;
           (ngModelChange)="onFilterChange('impact', $event)"
         >
           <option value="">All impacts</option>
-          <option value="High">High ({{ impactCounts().High }})</option>
-          <option value="Medium">Medium ({{ impactCounts().Medium }})</option>
-          <option value="Low">Low ({{ impactCounts().Low }})</option>
+          <option value="High">High ({{ fmt(impactCounts().High) }})</option>
+          <option value="Medium">Medium ({{ fmt(impactCounts().Medium) }})</option>
+          <option value="Low">Low ({{ fmt(impactCounts().Low) }})</option>
         </select>
         <select
           class="input"
@@ -474,7 +447,8 @@ const DAY_MS = 24 * HOUR_MS;
           <header class="card-head">
             <h3>Next high-impact releases</h3>
             <span class="muted">
-              {{ upcomingHighImpact().length }} upcoming · the engine filters signals around these
+              {{ fmt(upcomingHighImpact().length) }} upcoming · the engine filters signals around
+              these
             </span>
           </header>
           <ul class="up-list">
@@ -494,6 +468,7 @@ const DAY_MS = 24 * HOUR_MS;
         </section>
       }
 
+      <p class="table-note">Times in UTC · {{ sortNote() }}</p>
       <app-data-table
         #table
         [columnDefs]="columns"
@@ -986,20 +961,31 @@ const DAY_MS = 24 * HOUR_MS;
         }
       }
 
-      /* 8-card KPI strip */
+      .feed-status {
+        margin: 0 0 calc(-1 * var(--space-3));
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .feed-status.stalled {
+        color: var(--warning);
+        font-weight: var(--font-medium);
+      }
+
+      /* KPI strip — six equal tiles */
       .kpis {
         display: grid;
-        grid-template-columns: repeat(8, 1fr);
+        grid-template-columns: repeat(6, minmax(0, 1fr));
         gap: var(--space-2);
+        align-items: start;
       }
-      @media (max-width: 1400px) {
+      @media (max-width: 1100px) {
         .kpis {
-          grid-template-columns: repeat(4, 1fr);
+          grid-template-columns: repeat(3, minmax(0, 1fr));
         }
       }
       @media (max-width: 720px) {
         .kpis {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
 
@@ -1008,11 +994,32 @@ const DAY_MS = 24 * HOUR_MS;
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         gap: var(--space-3);
+        align-items: start;
       }
       @media (max-width: 1100px) {
         .chart-row {
           grid-template-columns: 1fr;
         }
+      }
+      .chart-empty {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        padding: var(--space-4);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .chart-empty strong {
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+      .table-note {
+        margin: 0 0 calc(-1 * var(--space-3));
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
       }
 
       /* Filter bar */
@@ -1025,30 +1032,6 @@ const DAY_MS = 24 * HOUR_MS;
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         padding: var(--space-2) var(--space-3);
-      }
-      .chips {
-        display: inline-flex;
-        gap: 4px;
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-full);
-        padding: 2px;
-      }
-      .chips button {
-        height: 28px;
-        padding: 0 var(--space-3);
-        border: none;
-        background: transparent;
-        border-radius: var(--radius-full);
-        font-size: 11px;
-        font-weight: var(--font-medium);
-        color: var(--text-secondary);
-        cursor: pointer;
-      }
-      .chips button.active {
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        box-shadow: var(--shadow-sm);
       }
       .input {
         height: 32px;
@@ -1198,9 +1181,12 @@ export class EconomicEventsPageComponent {
     actual: ['', Validators.required],
   });
 
+  readonly dateFmt = DATE_FMT;
+  readonly fmt = fmt;
+
   readonly columns: ColDef<EconomicEventDto>[] = [
     { headerName: 'Title', field: 'title', flex: 2, minWidth: 240 },
-    { headerName: 'Currency', field: 'currency', width: 100 },
+    { headerName: 'Currency', field: 'currency', width: 110, minWidth: 110 },
     {
       headerName: 'Impact',
       field: 'impact',
@@ -1216,13 +1202,23 @@ export class EconomicEventsPageComponent {
         return `<span style="background:${s.bg};color:${s.color};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${v}</span>`;
       },
     },
-    { headerName: 'Forecast', field: 'forecast', width: 110 },
-    { headerName: 'Previous', field: 'previous', width: 110 },
+    {
+      headerName: 'Forecast',
+      field: 'forecast',
+      width: 110,
+      valueFormatter: (p) => blankDash(p.value),
+    },
+    {
+      headerName: 'Previous',
+      field: 'previous',
+      width: 110,
+      valueFormatter: (p) => blankDash(p.value),
+    },
     {
       headerName: 'Actual',
       field: 'actual',
       width: 110,
-      valueFormatter: (p) => (p.value as string) ?? '—',
+      valueFormatter: (p) => blankDash(p.value),
       cellStyle: (p) => (p.value ? { fontWeight: 600 } : null),
     },
     {
@@ -1243,10 +1239,10 @@ export class EconomicEventsPageComponent {
       },
     },
     {
-      headerName: 'Scheduled',
+      headerName: 'Scheduled (UTC)',
       field: 'scheduledAt',
-      width: 160,
-      valueFormatter: (p) => this.datePipe.transform(p.value as string, 'MMM d, HH:mm') ?? '-',
+      width: 170,
+      valueFormatter: (p) => this.datePipe.transform(p.value as string, DATE_FMT, 'UTC') ?? '—',
     },
     { headerName: 'Source', field: 'source', width: 120 },
   ];
@@ -1255,41 +1251,95 @@ export class EconomicEventsPageComponent {
   readonly currencyFilter = signal('');
   readonly impactFilter = signal('');
   readonly dateRangeFilter = signal<DateRange>('all');
-  readonly quickFilter = signal<QuickFilter>('all');
 
-  // ── Analytics resource — probe-and-fetch up to 2000 events ──────────────
-  // Used to power KPIs, charts, and the upcoming-high-impact panel without
-  // running a separate count query per metric. Polled every 2 minutes —
-  // calendars don't change often.
+  // ── Analytics resource — probe-and-fetch the latest-scheduled window ────
+  // Powers KPIs, charts, and the upcoming-high-impact panel without a count
+  // query per metric. The window is explicitly the latest-scheduled slice:
+  // the engine's default order is ScheduledAt ascending, so an unsorted
+  // fetch would summarise the OLDEST rows and report "nothing upcoming" for
+  // a perfectly healthy calendar. Polled every 2 minutes.
   private readonly analyticsResource = createPolledResource(
     () =>
-      this.service.list({ currentPage: 1, itemCountPerPage: 1, filter: null }).pipe(
-        switchMap((probe) => {
-          const total = probe.data?.pager?.totalItemCount ?? 0;
-          const limit = Math.min(total, 2000);
-          if (limit === 0) return of({ rows: [] as EconomicEventDto[], total });
-          return this.service
-            .list({ currentPage: 1, itemCountPerPage: limit, filter: null })
-            .pipe(map((r) => ({ rows: r.data?.data ?? [], total })));
-        }),
-        catchError(() => of({ rows: [] as EconomicEventDto[], total: 0 })),
-      ),
+      this.service
+        .list({
+          currentPage: 1,
+          itemCountPerPage: 1,
+          filter: null,
+          sortBy: 'scheduledAt',
+          sortDirection: 'desc',
+        })
+        .pipe(
+          switchMap((probe) => {
+            const total = probe.data?.pager?.totalItemCount ?? 0;
+            const limit = Math.min(total, ANALYTICS_WINDOW);
+            if (limit === 0) return of({ rows: [] as EconomicEventDto[], total });
+            return this.service
+              .list({
+                currentPage: 1,
+                itemCountPerPage: limit,
+                filter: null,
+                sortBy: 'scheduledAt',
+                sortDirection: 'desc',
+              })
+              .pipe(map((r) => ({ rows: r.data?.data ?? [], total })));
+          }),
+          catchError(() => of({ rows: [] as EconomicEventDto[], total: 0 })),
+        ),
     { intervalMs: 120_000 },
   );
 
   readonly analyticsRows = computed(() => this.analyticsResource.value()?.rows ?? []);
   readonly totalEver = computed(() => this.analyticsResource.value()?.total ?? 0);
 
-  // ── KPI computeds ───────────────────────────────────────────────────────
-  readonly todayCount = computed(() => {
-    const start = startOfDay(Date.now());
-    const end = start + DAY_MS;
-    return this.analyticsRows().filter((e) => {
+  // ── Window / feed-status computeds ──────────────────────────────────────
+  /** Latest scheduled timestamp on the calendar (ISO) — null until the window loads. */
+  readonly calendarEnd = computed<string | null>(() => {
+    let latest: string | null = null;
+    let latestMs = -Infinity;
+    for (const e of this.analyticsRows()) {
       const t = new Date(e.scheduledAt).getTime();
-      return t >= start && t < end;
-    }).length;
+      if (t > latestMs) {
+        latestMs = t;
+        latest = e.scheduledAt;
+      }
+    }
+    return latest;
   });
 
+  readonly upcomingCount = computed(() => {
+    const now = Date.now();
+    return this.analyticsRows().filter((e) => new Date(e.scheduledAt).getTime() >= now).length;
+  });
+
+  readonly hasUpcoming = computed(() => this.upcomingCount() > 0);
+
+  /** Honest scope label for every tile/chart that derives from the window. */
+  readonly windowLabel = computed(() => {
+    const rows = this.analyticsRows();
+    const total = this.totalEver();
+    if (rows.length === 0) return 'No events loaded';
+    let earliest = Infinity;
+    let latest = -Infinity;
+    for (const e of rows) {
+      const t = new Date(e.scheduledAt).getTime();
+      if (t < earliest) earliest = t;
+      if (t > latest) latest = t;
+    }
+    const span = `${this.datePipe.transform(earliest, DAY_FMT, 'UTC')} – ${this.datePipe.transform(latest, DAY_FMT, 'UTC')}`;
+    const scope =
+      rows.length < total
+        ? `Latest ${fmt(rows.length)} of ${fmt(total)} events`
+        : `All ${fmt(total)} events`;
+    return `${scope} (${span})`;
+  });
+
+  readonly sortNote = computed(() =>
+    this.hasUpcoming()
+      ? 'sorted upcoming first — pick a date range or sort the Scheduled column to browse past events'
+      : 'sorted latest first — nothing upcoming on the calendar',
+  );
+
+  // ── KPI computeds ───────────────────────────────────────────────────────
   readonly next24hCount = computed(() => {
     const now = Date.now();
     return this.analyticsRows().filter((e) => {
@@ -1299,7 +1349,7 @@ export class EconomicEventsPageComponent {
   });
 
   readonly weekCount = computed(() => {
-    const start = startOfDay(Date.now());
+    const start = startOfUtcDay(Date.now());
     const end = start + 7 * DAY_MS;
     return this.analyticsRows().filter((e) => {
       const t = new Date(e.scheduledAt).getTime();
@@ -1322,12 +1372,6 @@ export class EconomicEventsPageComponent {
   readonly distinctCurrencies = computed(() => {
     const set = new Set<string>();
     for (const e of this.analyticsRows()) if (e.currency) set.add(e.currency);
-    return Array.from(set).sort();
-  });
-
-  readonly distinctSources = computed(() => {
-    const set = new Set<string>();
-    for (const e of this.analyticsRows()) if (e.source) set.add(e.source);
     return Array.from(set).sort();
   });
 
@@ -1394,13 +1438,13 @@ export class EconomicEventsPageComponent {
       grid: { top: 10, right: 50, bottom: 30, left: 70 },
       xAxis: {
         type: 'value',
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        axisLabel: { fontSize: 10, color: '#6E6E73', hideOverlap: true },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
       yAxis: {
         type: 'category',
         data: rows.map((r) => r.value).reverse(),
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        axisLabel: { fontSize: 10, color: '#6E6E73', hideOverlap: true },
       },
       series: [
         {
@@ -1412,54 +1456,74 @@ export class EconomicEventsPageComponent {
             }))
             .reverse(),
           barWidth: 12,
-          label: { show: true, position: 'right', fontSize: 10, color: '#6E6E73' },
+          label: {
+            show: true,
+            position: 'right',
+            fontSize: 10,
+            color: '#6E6E73',
+            formatter: (p: any) => fmt(p.value),
+          },
         },
       ],
     };
   });
 
-  // Stacked bar — events per day (next 14 days), broken down by impact.
-  readonly timelineByDayOptions = computed<EChartsOption>(() => {
-    const startDay = startOfDay(Date.now());
-    const days = 14;
+  // Events per UTC day, stacked by impact. Prefers the next 14 days; when the
+  // calendar has nothing ahead it shows the last 14 days of data instead, so
+  // the card always carries real density rather than an empty box.
+  readonly density = computed(() => {
+    const rows = this.analyticsRows();
+    const end = this.calendarEnd();
+    if (rows.length === 0 || !end) return null;
+
+    const bucket = (startDay: number) => {
+      const high = new Array<number>(DENSITY_DAYS).fill(0);
+      const medium = new Array<number>(DENSITY_DAYS).fill(0);
+      const low = new Array<number>(DENSITY_DAYS).fill(0);
+      let any = false;
+      for (const e of rows) {
+        const idx = Math.floor((new Date(e.scheduledAt).getTime() - startDay) / DAY_MS);
+        if (idx < 0 || idx >= DENSITY_DAYS) continue;
+        any = true;
+        if (e.impact === 'High') high[idx]++;
+        else if (e.impact === 'Medium') medium[idx]++;
+        else low[idx]++;
+      }
+      return { high, medium, low, any };
+    };
+
+    const upcomingStart = startOfUtcDay(Date.now());
+    let mode: 'upcoming' | 'trailing' = 'upcoming';
+    let start = upcomingStart;
+    let counts = bucket(start);
+    if (!counts.any) {
+      mode = 'trailing';
+      start = startOfUtcDay(new Date(end).getTime()) - (DENSITY_DAYS - 1) * DAY_MS;
+      counts = bucket(start);
+    }
     const labels: string[] = [];
-    const high: number[] = new Array(days).fill(0);
-    const medium: number[] = new Array(days).fill(0);
-    const low: number[] = new Array(days).fill(0);
-    for (let i = 0; i < days; i++) {
-      const d = new Date(startDay + i * DAY_MS);
-      labels.push(`${d.getMonth() + 1}/${d.getDate()}`);
+    for (let i = 0; i < DENSITY_DAYS; i++) {
+      labels.push(this.datePipe.transform(start + i * DAY_MS, 'd MMM', 'UTC') ?? '');
     }
-    for (const e of this.analyticsRows()) {
-      const t = new Date(e.scheduledAt).getTime();
-      const idx = Math.floor((t - startDay) / DAY_MS);
-      if (idx < 0 || idx >= days) continue;
-      if (e.impact === 'High') high[idx]++;
-      else if (e.impact === 'Medium') medium[idx]++;
-      else low[idx]++;
-    }
-    if (high.every((v) => v === 0) && medium.every((v) => v === 0) && low.every((v) => v === 0)) {
-      return {
-        title: {
-          text: 'No upcoming events in the next 14 days',
-          left: 'center',
-          top: 'middle',
-          textStyle: { fontSize: 12, color: '#8E8E93', fontWeight: 'normal' },
-        },
-      };
-    }
+    const rangeLabel = `${this.datePipe.transform(start, DAY_FMT, 'UTC')} – ${this.datePipe.transform(start + (DENSITY_DAYS - 1) * DAY_MS, DAY_FMT, 'UTC')}`;
+    return { mode, labels, rangeLabel, ...counts };
+  });
+
+  readonly densityOptions = computed<EChartsOption>(() => {
+    const d = this.density();
+    if (!d) return {};
     return {
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
       legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
       grid: { top: 10, right: 16, bottom: 36, left: 32 },
       xAxis: {
         type: 'category',
-        data: labels,
-        axisLabel: { fontSize: 9, color: '#6E6E73', interval: 1 },
+        data: d.labels,
+        axisLabel: { fontSize: 9, color: '#6E6E73', hideOverlap: true },
       },
       yAxis: {
         type: 'value',
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        axisLabel: { fontSize: 10, color: '#6E6E73', hideOverlap: true },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
       series: [
@@ -1467,7 +1531,7 @@ export class EconomicEventsPageComponent {
           name: 'High',
           type: 'bar',
           stack: 'impact',
-          data: high,
+          data: d.high,
           itemStyle: { color: '#FF3B30' },
           barWidth: '70%',
         },
@@ -1475,14 +1539,14 @@ export class EconomicEventsPageComponent {
           name: 'Medium',
           type: 'bar',
           stack: 'impact',
-          data: medium,
+          data: d.medium,
           itemStyle: { color: '#FF9500' },
         },
         {
           name: 'Low',
           type: 'bar',
           stack: 'impact',
-          data: low,
+          data: d.low,
           itemStyle: { color: '#34C759' },
         },
       ],
@@ -1498,46 +1562,9 @@ export class EconomicEventsPageComponent {
     this.currencyFilter.set('');
     this.impactFilter.set('');
     this.dateRangeFilter.set('all');
-    this.quickFilter.set('all');
-  }
-
-  setQuickFilter(value: QuickFilter): void {
-    this.quickFilter.set(value);
-    if (value === 'all') {
-      this.currencyFilter.set('');
-      this.impactFilter.set('');
-      this.dateRangeFilter.set('all');
-    } else if (value === 'today') {
-      this.currencyFilter.set('');
-      this.impactFilter.set('');
-      this.dateRangeFilter.set('today');
-    } else if (value === 'next24h') {
-      this.currencyFilter.set('');
-      this.impactFilter.set('');
-      this.dateRangeFilter.set('next24h');
-    } else if (value === 'week') {
-      this.currencyFilter.set('');
-      this.impactFilter.set('');
-      this.dateRangeFilter.set('week');
-    } else if (value === 'high') {
-      this.currencyFilter.set('');
-      this.impactFilter.set('High');
-      this.dateRangeFilter.set('all');
-    } else if (value === 'awaiting') {
-      // Server-side filter doesn't have an "awaiting actual" predicate — fall
-      // back to "past 24h" as a useful approximation for the operator.
-      this.currencyFilter.set('');
-      this.impactFilter.set('');
-      this.dateRangeFilter.set('past24h');
-    } else if (value === 'usd') {
-      this.currencyFilter.set('USD');
-      this.impactFilter.set('');
-      this.dateRangeFilter.set('all');
-    }
   }
 
   onFilterChange(field: 'currency' | 'impact' | 'dateRange', value: string): void {
-    this.quickFilter.set('all');
     if (field === 'currency') this.currencyFilter.set(value);
     else if (field === 'impact') this.impactFilter.set(value);
     else if (field === 'dateRange') this.dateRangeFilter.set(value as DateRange);
@@ -1559,11 +1586,14 @@ export class EconomicEventsPageComponent {
   }
 
   constructor() {
-    // Refetch the table whenever a filter changes.
+    // Refetch the table whenever a filter changes — and once the analytics
+    // window settles whether anything is upcoming, since that decides the
+    // default sort direction of the table.
     effect(() => {
       this.currencyFilter();
       this.impactFilter();
       this.dateRangeFilter();
+      this.hasUpcoming();
       queueMicrotask(() => this.table?.loadData());
     });
   }
@@ -1576,7 +1606,7 @@ export class EconomicEventsPageComponent {
     const range = this.dateRangeFilter();
     const now = Date.now();
     if (range === 'today') {
-      const start = startOfDay(now);
+      const start = startOfUtcDay(now);
       merged['from'] = new Date(start).toISOString();
       merged['to'] = new Date(start + DAY_MS).toISOString();
     } else if (range === 'next24h') {
@@ -1586,12 +1616,35 @@ export class EconomicEventsPageComponent {
       merged['from'] = new Date(now - DAY_MS).toISOString();
       merged['to'] = new Date(now).toISOString();
     } else if (range === 'week') {
-      const start = startOfDay(now);
+      const start = startOfUtcDay(now);
       merged['from'] = new Date(start).toISOString();
       merged['to'] = new Date(start + 7 * DAY_MS).toISOString();
     }
+
+    // Default order when the operator has not sorted a column: upcoming
+    // first (ascending from now) while the calendar has anything ahead,
+    // otherwise latest first — an ascending "All time" list that opens on the
+    // oldest backfilled row is useless to a trader. An explicit column sort
+    // always wins and never gets the implicit "from now" bound.
+    let sortBy = params.sortBy;
+    let sortDirection = params.sortDirection;
+    if (!sortBy) {
+      sortBy = 'scheduledAt';
+      if (this.hasUpcoming()) {
+        sortDirection = 'asc';
+        if (range === 'all') merged['from'] = new Date(now).toISOString();
+      } else {
+        sortDirection = 'desc';
+      }
+    }
+
     return this.service
-      .list({ ...params, filter: Object.keys(merged).length > 0 ? merged : null })
+      .list({
+        ...params,
+        sortBy,
+        sortDirection,
+        filter: Object.keys(merged).length > 0 ? merged : null,
+      })
       .pipe(map((r) => r.data ?? { pager: emptyPager(), data: [] }));
   };
 
@@ -1796,10 +1849,19 @@ function emptyPager() {
   };
 }
 
-function startOfDay(ms: number): number {
+// Day buckets are UTC because every timestamp on the page is shown in UTC;
+// a local-midnight boundary would put events in a different day than the
+// one printed next to them.
+function startOfUtcDay(ms: number): number {
   const d = new Date(ms);
-  d.setHours(0, 0, 0, 0);
+  d.setUTCHours(0, 0, 0, 0);
   return d.getTime();
+}
+
+// AG Grid valueFormatters get `null` for missing values but `''` for blank
+// strings; both must read as "no value" so a row never mixes blanks and dashes.
+function blankDash(v: unknown): string {
+  return v == null || v === '' ? '—' : String(v);
 }
 
 // Parse strings like "275K", "1.9%", "<0.75%", "-42" as numbers so we can

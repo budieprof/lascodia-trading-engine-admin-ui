@@ -147,8 +147,10 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
               </div>
               <div class="item">
                 <dt>Magnitude RMSE</dt>
+                <!-- The model row often has no RMSE while the producing run's
+                     diagnostics do; both cards must show the same number. -->
                 <dd class="mono">
-                  {{ m.magnitudeRMSE !== null ? (m.magnitudeRMSE | number: '1.4-4') : '—' }}
+                  {{ modelRmse(m) !== null ? (modelRmse(m) | number: '1.4-4') : '—' }}
                 </dd>
               </div>
               <div class="item">
@@ -252,13 +254,7 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
                 </div>
                 <div class="item">
                   <dt>Training Duration</dt>
-                  <dd class="mono">
-                    {{
-                      d.trainingDurationMs !== null
-                        ? (d.trainingDurationMs / 1000 | number: '1.0-0') + 's'
-                        : '—'
-                    }}
-                  </dd>
+                  <dd class="mono">{{ formatDurationMs(d.trainingDurationMs) }}</dd>
                 </div>
                 <div class="item">
                   <dt>Total Samples</dt>
@@ -266,7 +262,9 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
                 </div>
                 <div class="item">
                   <dt>Attempts</dt>
-                  <dd class="mono">{{ d.attemptCount }}</dd>
+                  <dd class="mono" [class.muted]="d.attemptCount === 0">
+                    {{ attemptsLabel(d.attemptCount) }}
+                  </dd>
                 </div>
               </dl>
             } @else {
@@ -429,12 +427,14 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
                               </div>
                               <div class="diag-item">
                                 <dt>Attempts</dt>
-                                <dd class="mono">{{ d.attemptCount }}</dd>
+                                <dd class="mono" [class.muted]="d.attemptCount === 0">
+                                  {{ attemptsLabel(d.attemptCount) }}
+                                </dd>
                               </div>
                               @if (d.f1Score !== null) {
                                 <div class="diag-item">
                                   <dt>F1</dt>
-                                  <dd class="mono">{{ d.f1Score | number: '1.4-4' }}</dd>
+                                  <dd class="mono">{{ d.f1Score | number: '1.3-3' }}</dd>
                                 </div>
                               }
                               @if (d.brierScore !== null) {
@@ -538,17 +538,31 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
                   }
                 </div>
                 <div class="fi-bars">
+                  <!-- Diverging bars about a zero line: consensus importance can be
+                       zero or negative, and a one-sided track rendered those as
+                       empty grey bars that read as "no data". Non-zero values keep
+                       a minimum visible width so one dominant feature cannot hide
+                       the other twenty-four; the exact value is always printed. -->
                   @for (f of topFeatures(); track f.feature) {
                     <div class="fi-row" [title]="featureTooltip(f)">
                       <div class="fi-name mono">{{ f.feature }}</div>
-                      <div class="fi-bar-track">
-                        <div
-                          class="fi-bar-fill"
-                          [style.width.%]="(f.meanImportance / topFeatureMax()) * 100"
-                          [class.fi-low-agreement]="f.agreementScore < 0.5"
-                        ></div>
+                      <div class="fi-bar-track diverging">
+                        <span class="fi-zero" aria-hidden="true"></span>
+                        @if (f.meanImportance !== 0) {
+                          <div
+                            class="fi-bar-fill"
+                            [class.neg]="f.meanImportance < 0"
+                            [class.fi-low-agreement]="f.agreementScore < 0.5"
+                            [style.width.%]="barHalfWidth(f.meanImportance)"
+                            [style.left.%]="
+                              f.meanImportance < 0 ? 50 - barHalfWidth(f.meanImportance) : 50
+                            "
+                          ></div>
+                        }
                       </div>
-                      <div class="fi-value mono">{{ f.meanImportance | number: '1.4-4' }}</div>
+                      <div class="fi-value mono" [class.muted]="f.meanImportance === 0">
+                        {{ f.meanImportance | number: '1.4-4' }}
+                      </div>
                       <div class="fi-agree mono" [class.muted]="f.agreementScore < 0.5">
                         {{ (f.agreementScore * 100 | number: '1.0-0') + '%' }}
                       </div>
@@ -604,7 +618,10 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
                   <tr>
                     <th>Type</th>
                     <th>Severity</th>
-                    <th>Detector</th>
+                    <!-- The engine rarely records a detector; a column of dashes says nothing. -->
+                    @if (hasDetectorInfo()) {
+                      <th>Detector</th>
+                    }
                     <th>Last Triggered</th>
                     <th class="num">Count</th>
                     <th>Status</th>
@@ -617,15 +634,21 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
                       <td>
                         <span class="pill" [attr.data-sev]="a.severity">{{ a.severity }}</span>
                       </td>
-                      <td class="mono">{{ a.detectorType ?? '—' }}</td>
+                      @if (hasDetectorInfo()) {
+                        <td class="mono">{{ a.detectorType ?? '—' }}</td>
+                      }
                       <td>
                         {{ a.lastTriggeredAt ? (a.lastTriggeredAt | date: 'MMM d, HH:mm') : '—' }}
                       </td>
                       <td class="num mono">{{ a.count }}</td>
                       <td>
                         @if (a.activeCount > 0) {
-                          <span class="pill pill-active"
-                            >Active{{ a.activeCount > 1 ? ' (' + a.activeCount + ')' : '' }}</span
+                          <!-- Rows are grouped; the Count column already carries
+                               the multiplicity, so the pill just says "Active". -->
+                          <span
+                            class="pill pill-active"
+                            [title]="a.activeCount + ' of ' + a.count + ' still active'"
+                            >Active</span
                           >
                         } @else if (a.autoResolvedCount > 0) {
                           <span class="pill pill-resolved">Auto-resolved</span>
@@ -1114,14 +1137,40 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
         border-radius: var(--radius-full);
         overflow: hidden;
       }
+      .fi-bar-track.diverging {
+        position: relative;
+      }
+      .fi-zero {
+        position: absolute;
+        left: 50%;
+        top: -2px;
+        bottom: -2px;
+        width: 1px;
+        background: var(--text-tertiary);
+        opacity: 0.6;
+      }
       .fi-bar-fill {
         height: 100%;
         background: var(--accent);
         border-radius: var(--radius-full);
         transition: width 0.2s ease;
       }
+      .fi-bar-track.diverging .fi-bar-fill {
+        position: absolute;
+        top: 0;
+        min-width: 2px;
+        border-radius: 0 var(--radius-full) var(--radius-full) 0;
+      }
+      .fi-bar-track.diverging .fi-bar-fill.neg {
+        background: var(--loss);
+        border-radius: var(--radius-full) 0 0 var(--radius-full);
+      }
       .fi-bar-fill.fi-low-agreement {
         background: rgba(255, 149, 0, 0.7);
+      }
+      .fi-value.muted,
+      dd.muted {
+        color: var(--text-tertiary);
       }
       .fi-value {
         text-align: right;
@@ -1188,14 +1237,42 @@ export class MLModelDetailPageComponent implements OnInit {
   // the y-axis and the long tail is mostly low-signal noise.
   readonly topFeatures = computed(() => this.featureImportance()?.features.slice(0, 15) ?? []);
 
-  // Bar widths are normalised to the max of the *visible* slice (not the full
-  // distribution), so the operator's eye is drawn to relative differences
-  // among the features they can actually see.
+  // Bar widths are normalised to the largest |importance| of the *visible*
+  // slice (not the full distribution), so the operator's eye is drawn to
+  // relative differences among the features they can actually see.
   readonly topFeatureMax = computed(() => {
     const top = this.topFeatures();
     if (top.length === 0) return 1;
-    return Math.max(...top.map((f) => f.meanImportance), 1e-9);
+    return Math.max(...top.map((f) => Math.abs(f.meanImportance)), 1e-9);
   });
+
+  /** Half-track width (0–50%) for a diverging bar; the zero line sits at 50%. */
+  barHalfWidth(value: number): number {
+    return Math.min(50, (Math.abs(value) / this.topFeatureMax()) * 50);
+  }
+
+  /** Model-row RMSE, falling back to the producing run's diagnostics. */
+  modelRmse(m: MLModelDto): number | null {
+    return m.magnitudeRMSE ?? this.producingDiagnostics()?.magnitudeRMSE ?? null;
+  }
+
+  /** A run that finished with zero attempts was not counted, not attempt-free. */
+  attemptsLabel(count: number | null | undefined): string {
+    return count == null || count === 0 ? 'not recorded' : String(count);
+  }
+
+  /** One duration format for the page: unit always attached, one decimal past a second. */
+  formatDurationMs(ms: number | null | undefined): string {
+    if (ms == null || !Number.isFinite(ms) || ms < 0) return '—';
+    if (ms < 1000) return `${Math.round(ms)} ms`;
+    if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+    if (ms < 3_600_000) return `${(ms / 60_000).toFixed(1)} min`;
+    return `${(ms / 3_600_000).toFixed(1)} h`;
+  }
+
+  readonly hasDetectorInfo = computed(() =>
+    this.groupedDriftAlerts().some((a) => !!a.detectorType),
+  );
 
   readonly mrmrFallbackMax = computed(() => {
     const fb = this.featureImportance()?.mrmrFallback ?? [];
@@ -1406,11 +1483,7 @@ export class MLModelDetailPageComponent implements OnInit {
   runDuration(run: MLTrainingRunDto): string {
     if (!run.completedAt) return '—';
     const ms = new Date(run.completedAt).getTime() - new Date(run.startedAt).getTime();
-    if (!Number.isFinite(ms) || ms < 0) return '—';
-    if (ms < 1000) return `${ms}ms`;
-    if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-    if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
-    return `${(ms / 3_600_000).toFixed(1)}h`;
+    return this.formatDurationMs(ms);
   }
 
   private load(id: number): void {

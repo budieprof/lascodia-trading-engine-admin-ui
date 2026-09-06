@@ -8,7 +8,6 @@ import {
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
 import { catchError, map, of } from 'rxjs';
 
 import { CompositeMLService } from '@core/services/composite-ml.service';
@@ -26,6 +25,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 
 const TIMEFRAMES: readonly Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] as const;
 
@@ -44,8 +44,8 @@ const EMPTY_REPORT: ColdStartReportDto = {
     DatePipe,
     DecimalPipe,
     FormsModule,
-    RouterLink,
     PageHeaderComponent,
+    CompositeMlNavComponent,
     MetricCardComponent,
     CardSkeletonComponent,
     EmptyStateComponent,
@@ -57,17 +57,12 @@ const EMPTY_REPORT: ColdStartReportDto = {
       <app-page-header
         title="CompositeML — Cold-Start Diagnostics"
         subtitle="Per-floor warm/cold state + donor-warm-start forensic table"
-      >
-        <a routerLink="/composite-ml" class="btn btn-secondary">← Active Policies</a>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="reportResource.refresh(); donorResource.refresh()"
-          [disabled]="reportResource.loading() || donorResource.loading()"
-        >
-          Refresh
-        </button>
-      </app-page-header>
+      />
+      <app-composite-ml-nav
+        [showRefresh]="true"
+        [refreshing]="reportResource.loading() || donorResource.loading()"
+        (refresh)="reportResource.refresh(); donorResource.refresh()"
+      />
 
       <!-- ── Scope picker ── -->
       <section class="scope-row">
@@ -164,12 +159,16 @@ const EMPTY_REPORT: ColdStartReportDto = {
               format="number"
               [dotColor]="coldCount() > 0 ? '#FF9500' : '#34C759'"
             />
-            <app-metric-card
-              label="Outcome-cold (count-warm + NetPnL ≤ 0)"
-              [value]="outcomeColdCount()"
-              format="number"
-              [dotColor]="outcomeColdCount() > 0 ? '#FF3B30' : '#34C759'"
-            />
+            <div
+              title="Floors that have enough observations to count as warm but whose closed trades net to a loss"
+            >
+              <app-metric-card
+                label="Outcome-cold"
+                [value]="outcomeColdCount()"
+                format="number"
+                [dotColor]="outcomeColdCount() > 0 ? '#FF3B30' : '#34C759'"
+              />
+            </div>
           </div>
 
           <section class="card">
@@ -178,19 +177,19 @@ const EMPTY_REPORT: ColdStartReportDto = {
                 <tr>
                   <th>Layer key</th>
                   <th>Description</th>
-                  <th class="num">Observed / Threshold</th>
-                  <th>Status</th>
-                  <th class="num">Need</th>
-                  <th>Outcome (NetPnL × rows)</th>
+                  <th class="num">Observed / threshold</th>
+                  <th>State</th>
+                  <th class="num">Still needed</th>
+                  <th>Outcome</th>
                   <th>Detail</th>
                 </tr>
               </thead>
               <tbody>
                 @for (floor of floors(); track floor.layerKey) {
                   <tr [class.cold]="!floor.isWarm" [class.outcome-cold]="isOutcomeCold(floor)">
-                    <td class="mono">{{ floor.layerKey }}</td>
-                    <td class="desc">{{ floor.description }}</td>
-                    <td class="num mono">
+                    <td class="mono key-cell">{{ floor.layerKey }}</td>
+                    <td class="desc" [title]="floor.description">{{ floor.description }}</td>
+                    <td class="num mono nowrap">
                       <span [class.below]="floor.observed < floor.threshold">
                         {{ floor.observed | number: '1.0-0' }}
                       </span>
@@ -205,21 +204,32 @@ const EMPTY_REPORT: ColdStartReportDto = {
                     </td>
                     <td class="num mono">
                       @if (floor.observationsNeeded > 0) {
-                        +{{ floor.observationsNeeded }}
+                        {{ floor.observationsNeeded | number: '1.0-0' }}
                       } @else {
                         <span class="muted">—</span>
                       }
                     </td>
-                    <td class="outcome">
-                      @if (floor.outcomeRowCount !== null && floor.outcomeNetPnL !== null) {
+                    <!-- Zero closed trades is "no data", not a loss: the old
+                         cell painted every empty floor as a red "+0 × 0
+                         unprofitable" — 24 of 28 rows on the global scope. -->
+                    <td class="outcome nowrap">
+                      @if (
+                        floor.outcomeRowCount !== null &&
+                        floor.outcomeNetPnL !== null &&
+                        floor.outcomeRowCount > 0
+                      ) {
                         <span
                           class="outcome-cell mono"
-                          [class.positive]="(floor.outcomeNetPnL ?? 0) > 0"
-                          [class.negative]="(floor.outcomeNetPnL ?? 0) <= 0"
+                          [class.positive]="floor.outcomeNetPnL > 0"
+                          [class.negative]="floor.outcomeNetPnL < 0"
                         >
-                          {{ (floor.outcomeNetPnL ?? 0) >= 0 ? '+' : ''
-                          }}{{ floor.outcomeNetPnL | number: '1.0-2' }}
-                          <span class="muted small"> × {{ floor.outcomeRowCount }}</span>
+                          {{ floor.outcomeNetPnL > 0 ? '+' : ''
+                          }}{{ floor.outcomeNetPnL | number: '1.2-2' }}
+                          <span class="muted small">
+                            over {{ floor.outcomeRowCount | number }} trade{{
+                              floor.outcomeRowCount === 1 ? '' : 's'
+                            }}
+                          </span>
                         </span>
                         @if (floor.isOutcomeWarm) {
                           <span class="warm-tag">profitable</span>
@@ -227,10 +237,10 @@ const EMPTY_REPORT: ColdStartReportDto = {
                           <span class="cold-tag">unprofitable</span>
                         }
                       } @else {
-                        <span class="muted small">n/a</span>
+                        <span class="muted small">no closed trades</span>
                       }
                     </td>
-                    <td class="detail small mono muted">
+                    <td class="detail small mono muted" [title]="floor.groupingDetail ?? ''">
                       @if (floor.groupingDetail) {
                         {{ floor.groupingDetail }}
                       }
@@ -259,10 +269,12 @@ const EMPTY_REPORT: ColdStartReportDto = {
             (retry)="donorResource.refresh()"
           />
         } @else if (donors().length === 0) {
-          <app-empty-state
-            title="No Active CompositeML pairs"
-            description="The donor selector needs at least one Active CompositeML pair to produce a candidate set."
-          />
+          <section class="card">
+            <app-empty-state
+              title="No Active CompositeML pairs"
+              description="The donor selector needs at least one Active CompositeML pair to produce a candidate set."
+            />
+          </section>
         } @else {
           <div class="kpis">
             <app-metric-card
@@ -428,6 +440,7 @@ const EMPTY_REPORT: ColdStartReportDto = {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
         gap: var(--space-3);
+        align-items: start;
       }
       .card {
         background: var(--bg-secondary);
@@ -437,11 +450,43 @@ const EMPTY_REPORT: ColdStartReportDto = {
         box-shadow: var(--shadow-sm);
         overflow-x: auto;
       }
+      /* Description is the one elastic column and is clipped to a single
+         line (full text on hover): 28 rows of 3–5-line prose made the table
+         1,400px tall and buried the warm/cold column it exists to show. */
+      .floors-table {
+        table-layout: fixed;
+        min-width: 960px;
+      }
+      .floors-table th:nth-child(1) {
+        width: 20%;
+      }
+      .floors-table th:nth-child(3) {
+        width: 150px;
+      }
+      .floors-table th:nth-child(4) {
+        width: 80px;
+      }
+      .floors-table th:nth-child(5) {
+        width: 100px;
+      }
+      .floors-table th:nth-child(6) {
+        width: 240px;
+      }
+      .floors-table th:nth-child(7) {
+        width: 160px;
+      }
       .floors-table,
       .donors-table {
         width: 100%;
         border-collapse: collapse;
         font-size: var(--text-sm);
+      }
+      .key-cell {
+        overflow-wrap: anywhere;
+        line-height: 1.35;
+      }
+      .nowrap {
+        white-space: nowrap;
       }
       .floors-table th,
       .floors-table td,
@@ -494,6 +539,9 @@ const EMPTY_REPORT: ColdStartReportDto = {
       }
       .desc {
         color: var(--text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .state-pill {
         font-size: var(--text-xs);
@@ -538,8 +586,9 @@ const EMPTY_REPORT: ColdStartReportDto = {
         color: #d70015;
       }
       .detail {
-        max-width: 220px;
-        word-break: break-word;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .bucket-pill {
         font-size: var(--text-xs);

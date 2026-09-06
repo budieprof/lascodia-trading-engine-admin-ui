@@ -77,8 +77,11 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
           <h3>
             Pick strategies
             <span class="muted small"
-              >{{ filteredStrategies().length }} shown · {{ allStrategies().length }} total</span
-            >
+              >{{ filteredStrategies().length }} match · {{ allStrategies().length }} total
+              @if (pickerExpanded() && filteredStrategies().length > 0) {
+                · scroll the list for more
+              }
+            </span>
           </h3>
           <div class="picker-controls">
             <input
@@ -650,10 +653,11 @@ export class StrategiesComparePageComponent {
       const sym = s.symbol ?? 'unknown';
       counts.set(sym, (counts.get(sym) ?? 0) + 1);
     }
+    // Every symbol, not the top twelve: a chip row that silently drops nine
+    // symbols cannot be used to find them.
     return Array.from(counts.entries())
       .map(([symbol, count]) => ({ symbol, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 12);
+      .sort((a, b) => b.count - a.count || a.symbol.localeCompare(b.symbol));
   });
 
   readonly filteredStrategies = computed(() => {

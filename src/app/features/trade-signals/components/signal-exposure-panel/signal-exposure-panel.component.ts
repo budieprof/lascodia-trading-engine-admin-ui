@@ -1,5 +1,6 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { catchError, map, of } from 'rxjs';
 
 import { MarketDataService } from '@core/services/market-data.service';
@@ -8,6 +9,7 @@ import { createPolledResource } from '@core/polling/polled-resource';
 
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { ProgressBarComponent } from '@shared/components/ui/progress-bar/progress-bar.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
@@ -33,8 +35,10 @@ const EMPTY: LiveExposureDto = {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     DecimalPipe,
+    RouterLink,
     CardSkeletonComponent,
     EmptyStateComponent,
+    ErrorStateComponent,
     ProgressBarComponent,
     RelativeTimePipe,
   ],
@@ -43,8 +47,11 @@ const EMPTY: LiveExposureDto = {
       <header class="panel-head">
         <div class="panel-title">
           <h3>Live signal book</h3>
-          <span class="muted small">
-            {{ book().openCount }} open · {{ book().pendingCount }} armed
+          <span
+            class="muted small"
+            title="Walk status, not queue status: 'in play' = entry triggered and neither SL nor TP hit yet; 'armed' = waiting for the entry to trigger. Independent of the Pending / Approved counts below."
+          >
+            {{ book().openCount }} in play · {{ book().pendingCount }} armed
             @if (book().asOfUtc) {
               · updated {{ book().asOfUtc | relativeTime }}
             }
@@ -65,10 +72,16 @@ const EMPTY: LiveExposureDto = {
 
       @if (loading()) {
         <app-card-skeleton [lines]="4" />
+      } @else if (failed()) {
+        <app-error-state
+          title="Could not load the signal book"
+          message="The exposure walk failed — the book is unknown, not flat."
+          (retry)="resource.refresh()"
+        />
       } @else if (currencies().length === 0) {
         <app-empty-state
           title="Book is flat"
-          description="No open or armed signals — no net currency exposure right now."
+          description="No in-play or armed signals — no net currency exposure right now."
         />
       } @else {
         <p class="hint muted small">
@@ -123,7 +136,9 @@ const EMPTY: LiveExposureDto = {
               <tbody>
                 @for (s of book().signals; track s.signalId) {
                   <tr>
-                    <td>#{{ s.signalId }}</td>
+                    <td>
+                      <a [routerLink]="['/trade-signals', s.signalId]">#{{ s.signalId }}</a>
+                    </td>
                     <td>{{ s.symbol }}</td>
                     <td [class.buy]="s.direction === 'Buy'" [class.sell]="s.direction === 'Sell'">
                       {{ s.direction }}
@@ -146,36 +161,45 @@ const EMPTY: LiveExposureDto = {
   `,
   styles: [
     `
+      /* Only app tokens here — the previous \`var(--surface, #fff)\` /
+         \`var(--border-color, …)\` names do not exist in _tokens.scss, so the
+         white fallbacks won and the card rendered white-on-white in the
+         dark theme. */
       .panel {
-        border: 1px solid var(--border-color, #e5e5ea);
-        border-radius: 12px;
-        padding: 1rem 1.15rem;
-        background: var(--surface, #fff);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-4);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
       }
       .panel-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 1rem;
-        margin-bottom: 0.35rem;
+        gap: var(--space-3);
+        margin-bottom: var(--space-1);
       }
       .panel-title {
         display: flex;
         align-items: baseline;
-        gap: 0.6rem;
+        gap: var(--space-2);
+        flex-wrap: wrap;
       }
       .panel-title h3 {
         margin: 0;
-        font-size: 1rem;
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
       }
       .muted {
-        color: var(--text-muted, #8e8e93);
+        color: var(--text-tertiary);
       }
       .small {
-        font-size: 0.8rem;
+        font-size: var(--text-xs);
       }
       .hint {
-        margin: 0.3rem 0 0.7rem;
+        margin: var(--space-1) 0 var(--space-3);
+        color: var(--text-secondary);
       }
       .ccy-list {
         list-style: none;
@@ -183,42 +207,43 @@ const EMPTY: LiveExposureDto = {
         padding: 0;
         display: flex;
         flex-direction: column;
-        gap: 0.35rem;
+        gap: var(--space-1);
       }
       .ccy-row {
         display: grid;
         grid-template-columns: 3rem 2.6rem 1fr auto auto;
         align-items: center;
-        gap: 0.6rem;
-        padding: 0.2rem 0.4rem;
-        border-radius: 8px;
+        gap: var(--space-3);
+        padding: var(--space-1) var(--space-2);
+        border-radius: var(--radius-sm);
       }
       .ccy-row.crowded {
-        background: rgba(255, 149, 0, 0.08);
+        background: rgba(255, 149, 0, 0.1);
       }
       .ccy {
-        font-weight: 600;
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
       }
       .net {
         font-variant-numeric: tabular-nums;
-        font-weight: 600;
+        font-weight: var(--font-semibold);
         text-align: right;
       }
       .net.long,
       .pos {
-        color: #34c759;
+        color: var(--profit);
       }
       .net.short,
       .neg {
-        color: #ff3b30;
+        color: var(--loss);
       }
       .net.flat {
-        color: #8e8e93;
+        color: var(--text-tertiary);
       }
       .bar-track {
         position: relative;
         height: 8px;
-        background: rgba(142, 142, 147, 0.15);
+        background: var(--bg-tertiary);
         border-radius: 4px;
         overflow: hidden;
       }
@@ -230,67 +255,95 @@ const EMPTY: LiveExposureDto = {
         border-radius: 4px;
       }
       .bar.long {
-        background: #34c759;
+        background: var(--profit);
         transform: translateX(0);
       }
       .bar.short {
-        background: #ff3b30;
+        background: var(--loss);
         transform: translateX(-100%);
       }
+      .legs {
+        white-space: nowrap;
+      }
       .badge-crowded {
-        font-size: 0.66rem;
-        font-weight: 700;
-        letter-spacing: 0.03em;
+        font-size: 10px;
+        font-weight: var(--font-bold);
+        letter-spacing: 0.04em;
         color: #fff;
-        background: #ff9500;
-        padding: 0.1rem 0.4rem;
-        border-radius: 999px;
+        background: var(--warning);
+        padding: 1px 7px;
+        border-radius: var(--radius-full);
       }
       .signals {
-        margin-top: 0.8rem;
+        margin-top: var(--space-3);
       }
       .signals summary {
         cursor: pointer;
+        color: var(--text-secondary);
       }
       .sig-table {
         width: 100%;
         border-collapse: collapse;
-        margin-top: 0.5rem;
-        font-size: 0.82rem;
+        margin-top: var(--space-2);
+        font-size: var(--text-xs);
+        color: var(--text-primary);
       }
       .sig-table th,
       .sig-table td {
         text-align: left;
-        padding: 0.25rem 0.4rem;
-        border-bottom: 1px solid var(--border-color, #f0f0f2);
+        padding: var(--space-1) var(--space-2);
+        border-bottom: 1px solid var(--border);
+      }
+      .sig-table th {
+        color: var(--text-tertiary);
+        font-weight: var(--font-medium);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-size: 10px;
       }
       .sig-table .num {
         text-align: right;
         font-variant-numeric: tabular-nums;
       }
+      .sig-table a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .sig-table a:hover {
+        text-decoration: underline;
+      }
       .buy {
-        color: #34c759;
+        color: var(--profit);
       }
       .sell {
-        color: #ff3b30;
+        color: var(--loss);
       }
       .pill {
-        font-size: 0.7rem;
-        padding: 0.05rem 0.4rem;
-        border-radius: 999px;
-        background: rgba(142, 142, 147, 0.15);
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        padding: 1px 7px;
+        border-radius: var(--radius-full);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
       }
       .pill.open {
         background: rgba(52, 199, 89, 0.15);
-        color: #248a3d;
+        color: var(--profit);
       }
       .btn {
-        border: 1px solid var(--border-color, #e5e5ea);
+        height: 28px;
+        border: 1px solid var(--border);
         background: transparent;
-        border-radius: 8px;
-        padding: 0.3rem 0.7rem;
+        color: var(--text-secondary);
+        border-radius: var(--radius-sm);
+        padding: 0 var(--space-3);
         cursor: pointer;
-        font-size: 0.85rem;
+        font-size: var(--text-xs);
+        font-family: inherit;
+      }
+      .btn:hover:not(:disabled) {
+        color: var(--text-primary);
+        background: var(--bg-tertiary);
       }
       .btn:disabled {
         opacity: 0.5;
@@ -304,11 +357,19 @@ export class SignalExposurePanelComponent {
 
   protected readonly abs = Math.abs;
 
+  readonly failed = signal(false);
+
   protected readonly resource = createPolledResource<LiveExposureDto>(
     () =>
       this.marketData.getSignalExposure(false).pipe(
-        map((res) => res.data ?? EMPTY),
-        catchError(() => of(EMPTY)),
+        map((res) => {
+          this.failed.set(!res.status);
+          return res.data ?? EMPTY;
+        }),
+        catchError(() => {
+          this.failed.set(true);
+          return of(EMPTY);
+        }),
       ),
     { intervalMs: 20_000 },
   );

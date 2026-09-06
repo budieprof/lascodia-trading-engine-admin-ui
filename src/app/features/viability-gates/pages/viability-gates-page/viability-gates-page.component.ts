@@ -5,6 +5,7 @@ import { catchError, of } from 'rxjs';
 
 import { ViabilityGatesService } from '@core/services/viability-gates.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import {
   GateThresholdKind,
   GhostOutcomeConfig,
@@ -32,7 +33,7 @@ import {
 @Component({
   selector: 'app-viability-gates-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, DecimalPipe, PageHeaderComponent],
+  imports: [CommonModule, FormsModule, DecimalPipe, PageHeaderComponent, ErrorStateComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="page">
@@ -229,13 +230,23 @@ import {
       @if (loading()) {
         <div class="state-row muted">Loading gate config…</div>
       } @else if (error()) {
-        <div class="state-row error">{{ error() }}</div>
+        <app-error-state
+          title="Could not load the viability gates"
+          [message]="error()"
+          (retry)="reload()"
+        />
       } @else if (gates().length === 0) {
         <div class="state-row muted">No gates returned by the engine.</div>
       } @else {
         <p class="window-note muted">
-          Firing/ghost stats cover the trailing 24h (window starts
-          {{ windowStartUtc() }} UTC).
+          Firing and ghost stats cover the trailing 24h — window starts
+          {{ windowStartUtc() }} UTC.
+          @if (windowStaleHours(); as h) {
+            <span class="window-stale">
+              That start is {{ h }} h ago: the engine's cached stats window has not rolled, so these
+              counts may be stale.
+            </span>
+          }
         </p>
 
         <div class="gate-grid">
@@ -252,44 +263,63 @@ import {
               </header>
 
               <!-- Stats strip ------------------------------------------------ -->
+              <!-- Fixed three-column strip so every label stays on one line
+                   and the values share a baseline. Zero is neutral; green /
+                   red only once a ghost outcome actually exists. -->
               <div class="stats">
                 <div class="stat">
-                  <span class="stat-label">24h rejected</span>
+                  <span class="stat-label" title="Signals this gate rejected in the window">
+                    Rejected 24h
+                  </span>
                   <span class="stat-value">{{ gate.stats.todayRejectionCount }}</span>
                 </div>
                 <div class="stat">
-                  <span class="stat-label">24h advisory</span>
+                  <span class="stat-label" title="Signals flagged in Advisory mode">
+                    Advisory 24h
+                  </span>
                   <span class="stat-value">{{ gate.stats.todayAdvisoryCount }}</span>
                 </div>
                 <div class="stat">
-                  <span class="stat-label">Ghost: would-win</span>
-                  <span class="stat-value pos">{{ gate.stats.ghostWouldHaveWon }}</span>
+                  <span class="stat-label" title="Rejected signals that went on to hit TP">
+                    Ghost wins
+                  </span>
+                  <span class="stat-value" [class.pos]="gate.stats.ghostWouldHaveWon > 0">
+                    {{ gate.stats.ghostWouldHaveWon }}
+                  </span>
                 </div>
                 <div class="stat">
-                  <span class="stat-label">Ghost: would-lose</span>
-                  <span class="stat-value neg">{{ gate.stats.ghostWouldHaveLost }}</span>
+                  <span class="stat-label" title="Rejected signals that went on to hit SL">
+                    Ghost losses
+                  </span>
+                  <span class="stat-value" [class.neg]="gate.stats.ghostWouldHaveLost > 0">
+                    {{ gate.stats.ghostWouldHaveLost }}
+                  </span>
                 </div>
                 <div class="stat">
-                  <span class="stat-label">Ghost: no fill</span>
+                  <span class="stat-label" title="Entry price was never reached">
+                    Ghost no-fill
+                  </span>
                   <span class="stat-value">{{ gate.stats.ghostEntryNotReached }}</span>
                 </div>
                 <div class="stat">
-                  <span class="stat-label">Ghost: expired</span>
+                  <span class="stat-label" title="Walk window ended with neither TP nor SL hit">
+                    Ghost expired
+                  </span>
                   <span class="stat-value">{{ gate.stats.ghostWouldHaveExpired }}</span>
                 </div>
                 @if (gate.stats.avgWinPips !== null) {
                   <div class="stat">
-                    <span class="stat-label">Avg win pips</span>
+                    <span class="stat-label">Avg win</span>
                     <span class="stat-value pos">
-                      +{{ gate.stats.avgWinPips | number: '1.1-1' }}
+                      +{{ gate.stats.avgWinPips | number: '1.1-1' }} pips
                     </span>
                   </div>
                 }
                 @if (gate.stats.avgLossPips !== null) {
                   <div class="stat">
-                    <span class="stat-label">Avg loss pips</span>
+                    <span class="stat-label">Avg loss</span>
                     <span class="stat-value neg">
-                      {{ gate.stats.avgLossPips | number: '1.1-1' }}
+                      {{ gate.stats.avgLossPips | number: '1.1-1' }} pips
                     </span>
                   </div>
                 }
@@ -336,28 +366,54 @@ import {
                 }
 
                 @for (t of gate.thresholds; track t.key) {
-                  <label class="field">
-                    <span class="field-label">
-                      {{ t.label }}
-                      <span class="kind-tag">{{ kindSuffix(t.kind) }}</span>
-                    </span>
-                    <input
-                      class="control"
-                      type="number"
-                      [ngModel]="draftThreshold(gate.name, t.key)"
-                      (ngModelChange)="setDraftThreshold(gate.name, t.key, $event)"
-                      [min]="t.minValue"
-                      [max]="t.maxValue"
-                      [step]="stepFor(t.kind)"
-                    />
-                    @if (t.helpText) {
-                      <span class="field-help muted">{{ t.helpText }}</span>
-                    }
-                    <span class="field-default muted">
-                      default {{ t.defaultValue | number: '1.0-4' }} · range [{{ t.minValue }},
-                      {{ t.maxValue }}]
-                    </span>
-                  </label>
+                  @if (isBooleanThreshold(t)) {
+                    <!-- An Integer knob bounded to [0, 1] is a flag; the engine
+                         still stores 0/1 but the operator sees a switch, not
+                         "(0=no, 1=yes) INT = 1". -->
+                    <div class="field switch-field">
+                      <label class="switch-row">
+                        <input
+                          type="checkbox"
+                          role="switch"
+                          [ngModel]="draftThreshold(gate.name, t.key) === 1"
+                          (ngModelChange)="setDraftThreshold(gate.name, t.key, $event ? 1 : 0)"
+                        />
+                        <span class="field-label">{{ flagLabel(t.label) }}</span>
+                        <span class="switch-state muted">
+                          {{ draftThreshold(gate.name, t.key) === 1 ? 'On' : 'Off' }}
+                        </span>
+                      </label>
+                      @if (t.helpText) {
+                        <span class="field-help muted">{{ t.helpText }}</span>
+                      }
+                      <span class="field-default muted">
+                        default {{ t.defaultValue === 1 ? 'on' : 'off' }}
+                      </span>
+                    </div>
+                  } @else {
+                    <label class="field">
+                      <span class="field-label">
+                        {{ t.label }}
+                        <span class="kind-tag">{{ kindSuffix(t.kind) }}</span>
+                      </span>
+                      <input
+                        class="control"
+                        type="number"
+                        [ngModel]="draftThreshold(gate.name, t.key)"
+                        (ngModelChange)="setDraftThreshold(gate.name, t.key, $event)"
+                        [min]="t.minValue"
+                        [max]="t.maxValue"
+                        [step]="stepFor(t.kind)"
+                      />
+                      @if (t.helpText) {
+                        <span class="field-help muted">{{ t.helpText }}</span>
+                      }
+                      <span class="field-default muted">
+                        default {{ t.defaultValue | number: '1.0-4' }} · range [{{ t.minValue }},
+                        {{ t.maxValue }}]
+                      </span>
+                    </label>
+                  }
                 }
               </div>
 
@@ -409,22 +465,25 @@ import {
   styles: [
     `
       .page {
-        padding: var(--space-6);
+        padding: var(--space-2) 0;
+      }
+      .window-stale {
+        color: var(--warning);
       }
       .state-row {
         padding: var(--space-4);
         border-radius: 8px;
-        background: var(--surface-2);
+        background: var(--bg-tertiary);
       }
       .state-row.error {
-        color: var(--danger);
+        color: var(--loss);
         background: rgba(255, 80, 80, 0.08);
       }
       .window-note {
         margin: 0 0 var(--space-4);
       }
       .ghost-config {
-        background: var(--surface-1);
+        background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: 10px;
         padding: var(--space-4);
@@ -461,13 +520,16 @@ import {
         grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
         gap: var(--space-3);
       }
+      /* Cards keep their own height; stretching short ones to the tallest
+         card in the row left hundreds of pixels of empty card. */
       .gate-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
         gap: var(--space-4);
+        align-items: start;
       }
       .gate-card {
-        background: var(--surface-1);
+        background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: 10px;
         padding: var(--space-4);
@@ -513,31 +575,52 @@ import {
       }
       .stats {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-        gap: var(--space-2);
-        padding: var(--space-2);
-        background: var(--surface-2);
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--space-2) var(--space-3);
+        padding: var(--space-2) var(--space-3);
+        background: var(--bg-tertiary);
         border-radius: 6px;
       }
       .stat {
         display: flex;
         flex-direction: column;
+        min-width: 0;
       }
       .stat-label {
         font-size: 10px;
         text-transform: uppercase;
         letter-spacing: 0.05em;
         color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .stat-value {
         font-size: var(--text-md);
         font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .switch-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+      }
+      .switch-row input {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+        accent-color: var(--accent);
+      }
+      .switch-state {
+        font-size: var(--text-xs);
       }
       .stat-value.pos {
-        color: var(--success, #2e8d4a);
+        color: var(--profit);
       }
       .stat-value.neg {
-        color: var(--danger, #cc3a3a);
+        color: var(--loss);
       }
       .editor {
         display: grid;
@@ -562,7 +645,7 @@ import {
         text-transform: uppercase;
         letter-spacing: 0.05em;
         color: var(--text-secondary);
-        background: var(--surface-2);
+        background: var(--bg-tertiary);
         border-radius: 4px;
         padding: 1px 6px;
       }
@@ -576,7 +659,7 @@ import {
         padding: 6px 8px;
         border-radius: 6px;
         border: 1px solid var(--border);
-        background: var(--surface-2);
+        background: var(--bg-tertiary);
         color: var(--text-primary);
         font-size: var(--text-sm);
       }
@@ -605,10 +688,10 @@ import {
         gap: 8px;
       }
       .ok {
-        color: var(--success, #2e8d4a);
+        color: var(--profit);
       }
       .err {
-        color: var(--danger, #cc3a3a);
+        color: var(--loss);
       }
       .btn {
         padding: 6px 12px;
@@ -652,6 +735,18 @@ export class ViabilityGatesPageComponent {
    */
   private readonly saveNotices = signal<Record<string, string>>({});
   readonly windowStartUtc = signal<string>('');
+  private readonly windowStartMs = signal<number | null>(null);
+  /**
+   * Hours since the stats window opened when that is more than an hour past
+   * the 24h it claims to cover — i.e. the engine served a cached window it
+   * never rolled. Null when the window is current.
+   */
+  readonly windowStaleHours = computed<number | null>(() => {
+    const start = this.windowStartMs();
+    if (start === null) return null;
+    const hours = (Date.now() - start) / 3_600_000;
+    return hours > 25 ? Math.round(hours) : null;
+  });
 
   readonly ghostRunning = signal<boolean>(false);
   readonly ghostResultMessage = signal<string | null>(null);
@@ -853,6 +948,8 @@ export class ViabilityGatesPageComponent {
         if (!res) return;
         this.serverGates.set(res.gates);
         this.windowStartUtc.set(this.formatWindowStart(res.statsWindowStartUtc));
+        const startMs = new Date(res.statsWindowStartUtc).getTime();
+        this.windowStartMs.set(Number.isNaN(startMs) ? null : startMs);
         this.drafts.set(this.buildDrafts(res.gates));
       });
   }
@@ -1033,6 +1130,16 @@ export class ViabilityGatesPageComponent {
         // surface immediately, instead of waiting for a manual reload.
         this.reload();
       });
+  }
+
+  /** An integer knob bounded to [0, 1] is a flag and gets a switch. */
+  isBooleanThreshold(t: ViabilityGateThreshold): boolean {
+    return t.kind === 'Integer' && t.minValue === 0 && t.maxValue === 1;
+  }
+
+  /** Strip the "(0=no, 1=yes)" hint the engine bakes into flag labels. */
+  flagLabel(label: string): string {
+    return label.replace(/\s*\(\s*0\s*=\s*no,?\s*1\s*=\s*yes\s*\)/i, '').trim();
   }
 
   kindSuffix(kind: GateThresholdKind): string {
