@@ -32,6 +32,7 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { PageContextService } from '@core/assistant/page-context.service';
 import { CreateSignalDialogComponent } from '../../components/create-signal-dialog/create-signal-dialog.component';
 import {
   SpotRecChartComponent,
@@ -1337,7 +1338,14 @@ export class SignalsPageComponent {
   });
 
   // ── Lifecycle ────────────────────────────────────────────────────────
+  private readonly pageContext = inject(PageContextService);
+
   constructor() {
+    this.pageContext.publish(() => ({
+      headline: 'Trade signals for the selected account scope',
+      filters: { status: this.statusFilter(), symbol: this.symbolFilter() || null },
+    }));
+
     this.loadRecent();
     // Realtime push — coalesce bursts so generation storms don't trigger 50
     // refetches in 2 seconds. 1s leading+trailing keeps the feed live without

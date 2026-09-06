@@ -44,6 +44,7 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
 import { EnumLabelPipe } from '@shared/pipes/enum-label.pipe';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { StatusPillCellComponent } from '@shared/components/data-table/cell-renderers/status-pill-cell.component';
+import { PageContextService } from '@core/assistant/page-context.service';
 
 import { StrategyFormComponent } from '../../components/strategy-form/strategy-form.component';
 import { PromotionReadinessCardComponent } from '../../components/promotion-readiness-card/promotion-readiness-card.component';
@@ -1153,6 +1154,28 @@ export class StrategyDetailPageComponent implements OnInit {
   ];
 
   @ViewChild('optimizationTable') optimizationTable?: DataTableComponent<OptimizationRunDto>;
+
+  private readonly pageContext = inject(PageContextService);
+
+  constructor() {
+    this.pageContext.publish(() => {
+      const st = this.strategy();
+      return {
+        headline: st
+          ? `Strategy #${st.id} — ${st.name} (${st.symbol} ${st.timeframe}), ${st.status}`
+          : 'Strategy detail (loading)',
+        record: { kind: 'strategy', id: st?.id ?? 0, label: st?.name ?? undefined },
+        filters: { tab: this.activeTab() },
+        figures: {
+          status: st?.status ?? null,
+          symbol: st?.symbol ?? null,
+          timeframe: st?.timeframe ?? null,
+          strategyType: st?.strategyType ?? null,
+          riskProfileId: st?.riskProfileId ?? null,
+        },
+      };
+    });
+  }
 
   strategy = signal<StrategyDto | null>(null);
   loadError = signal(false);

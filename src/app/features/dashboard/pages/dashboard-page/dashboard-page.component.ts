@@ -35,6 +35,7 @@ import { MLModelsService } from '@core/services/ml-models.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import { createPolledResource } from '@core/polling/polled-resource';
+import { PageContextService } from '@core/assistant/page-context.service';
 
 import type {
   AlertDto,
@@ -1291,7 +1292,20 @@ export class DashboardPageComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly realtime = inject(RealtimeService);
 
+  private readonly pageContext = inject(PageContextService);
+
   constructor() {
+    this.pageContext.publish(() => ({
+      headline: 'Live engine overview for the selected account scope',
+      figures: {
+        accountEquity: this.equity(),
+        drawdownPct: this.drawdownPct(),
+        openPositions: this.openPositionCount(),
+        activeStrategies: this.activeStrategyCount(),
+        engineRunning: this.healthStatus() ? 'running' : 'not running',
+      },
+    }));
+
     // Aggressive throttle (3s): a flurry of fills + flips would otherwise
     // restart every fetch on the page.
     merge(

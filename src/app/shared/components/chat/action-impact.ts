@@ -71,7 +71,14 @@ const KNOWN: ReadonlyArray<{
     severity: 'warn',
   },
   {
-    match: /\/strategy\/.*\/(activate|pause|status)|\/strategy\b/i,
+    match:
+      /\/strategy\/.*(bulk-action|activate|pause|status)|Strategy\s*·\s*(Bulk|Update|Activate|Pause)/i,
+    verb: 'Change strategy status',
+    subject: 'affects whether and how those strategies generate signals',
+    severity: 'warn',
+  },
+  {
+    match: /\/strategy\b|Strategy\s*·/i,
     methods: ['POST', 'PUT', 'PATCH'],
     verb: 'Change a strategy',
     subject: 'affects whether and how it generates signals',

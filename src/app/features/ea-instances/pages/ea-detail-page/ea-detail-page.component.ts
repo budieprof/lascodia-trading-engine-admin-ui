@@ -31,6 +31,7 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ProgressBarComponent } from '@shared/components/ui/progress-bar/progress-bar.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { PageContextService } from '@core/assistant/page-context.service';
 
 import { EAStatePanelComponent } from '../../components/ea-state-panel/ea-state-panel.component';
 import { EAAuditTimelineComponent } from '../../components/ea-audit-timeline/ea-audit-timeline.component';
@@ -2063,6 +2064,15 @@ export class EaDetailPageComponent {
     this.route.paramMap.pipe(map((p) => Number(p.get('id')) || null)),
     { initialValue: null },
   );
+
+  private readonly pageContext = inject(PageContextService);
+
+  constructor() {
+    this.pageContext.publish(() => ({
+      headline: `EA instance #${this.id() ?? '?'} detail`,
+      record: { kind: 'eaInstance', id: this.id() ?? 0 },
+    }));
+  }
 
   protected readonly resource = createPolledResource(
     () =>
