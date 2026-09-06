@@ -84,7 +84,7 @@ import { Component, input, computed, ChangeDetectionStrategy } from '@angular/co
            "$2,093,491.05"; at the fixed 2xl size it clipped mid-digit
            ("$2,093,491.("). The size follows the viewport between lg and
            2xl, and a value that still does not fit wraps rather than clips. */
-        font-size: clamp(var(--text-lg), 1.55vw, var(--text-2xl));
+        font-size: clamp(var(--text-base), 1.3vw, var(--text-2xl));
         font-weight: var(--font-semibold);
         color: var(--text-primary);
         letter-spacing: var(--tracking-tight);
