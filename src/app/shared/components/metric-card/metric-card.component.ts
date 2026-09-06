@@ -80,12 +80,18 @@ import { Component, input, computed, ChangeDetectionStrategy } from '@angular/co
       }
 
       .metric-value {
-        font-size: var(--text-2xl);
+        /* Six tiles across a 1440px page leave ~150px for a value like
+           "$2,093,491.05"; at the fixed 2xl size it clipped mid-digit
+           ("$2,093,491.("). The size follows the viewport between lg and
+           2xl, and a value that still does not fit wraps rather than clips. */
+        font-size: clamp(var(--text-lg), 1.55vw, var(--text-2xl));
         font-weight: var(--font-semibold);
         color: var(--text-primary);
         letter-spacing: var(--tracking-tight);
         font-variant-numeric: tabular-nums;
         line-height: 1.2;
+        min-width: 0;
+        overflow-wrap: anywhere;
       }
 
       .metric-value.profit {
