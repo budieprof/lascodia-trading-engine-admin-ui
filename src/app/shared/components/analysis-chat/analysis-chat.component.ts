@@ -11,6 +11,11 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe } from '@angular/common';
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
+import {
+  describeAction,
+  humaniseBody,
+  type ActionImpact,
+} from '@shared/components/chat/action-impact';
 import { MarkdownCopyDirective } from '@shared/directives/markdown-copy.directive';
 import { MarketDataService } from '@core/services/market-data.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
@@ -299,13 +304,32 @@ interface ParsedChatRec {
                     <div class="action-body md" [innerHTML]="m.content | markdown"></div>
                   }
                   @if (parseAction(m); as pa) {
+                    @if (impactOf(pa); as impact) {
+                      <div class="impact" [attr.data-severity]="impact.severity">
+                        <strong>{{ impact.verb }}</strong>
+                        <span> — {{ impact.subject }}</span>
+                      </div>
+                    }
                     @if (pa.summary) {
                       <div class="action-summary md" [innerHTML]="pa.summary | markdown"></div>
                     }
-                    <code class="action-call">{{ pa.method }} {{ pa.path }}</code>
-                    @if (pa.body) {
-                      <pre class="tool-pre">{{ pa.body }}</pre>
+                    @if (bodyRows(pa); as rows) {
+                      @if (rows.length > 0) {
+                        <dl class="impact-rows">
+                          @for (row of rows; track row.label) {
+                            <dt>{{ row.label }}</dt>
+                            <dd>{{ row.value }}</dd>
+                          }
+                        </dl>
+                      }
                     }
+                    <details class="raw-call">
+                      <summary>Raw call</summary>
+                      <code class="action-call">{{ pa.method }} {{ pa.path }}</code>
+                      @if (pa.body) {
+                        <pre class="tool-pre">{{ pa.body }}</pre>
+                      }
+                    </details>
                   }
                   @if (m.actionStatus === 'Pending') {
                     <div class="action-actions">
@@ -712,6 +736,50 @@ interface ParsedChatRec {
         margin: 0 0 6px;
         font-size: var(--text-sm);
         line-height: 1.45;
+      }
+      /* Severity is the first thing read, so it carries colour and weight; the raw call
+         is one disclosure away rather than the headline. */
+      .impact {
+        font-size: var(--text-sm);
+        line-height: 1.5;
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-sm);
+        border-left: 3px solid var(--text-tertiary);
+        background: var(--bg-tertiary);
+        margin-bottom: var(--space-2);
+      }
+      .impact[data-severity='danger'] {
+        border-left-color: var(--loss, #ff3b30);
+        background: rgba(255, 59, 48, 0.08);
+      }
+      .impact[data-severity='warn'] {
+        border-left-color: var(--warning, #ff9500);
+        background: rgba(255, 149, 0, 0.08);
+      }
+      .impact[data-severity='unknown'] {
+        border-left-color: var(--warning, #ff9500);
+        border-left-style: dashed;
+      }
+      .impact-rows {
+        display: grid;
+        grid-template-columns: minmax(90px, auto) 1fr;
+        gap: 2px var(--space-3);
+        margin: 0 0 var(--space-2);
+        font-size: var(--text-xs);
+      }
+      .impact-rows dt {
+        color: var(--text-tertiary);
+      }
+      .impact-rows dd {
+        margin: 0;
+        color: var(--text-primary);
+        overflow-wrap: anywhere;
+      }
+      .raw-call > summary {
+        cursor: pointer;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        margin-bottom: var(--space-1);
       }
       .action-call {
         display: block;
@@ -1156,6 +1224,21 @@ export class AnalysisChatComponent {
   }
 
   /** Parse an ActionProposal's args JSON into a display-friendly call spec. */
+  /** What this proposal will do, in the operator's terms. */
+  protected impactOf(pa: { method: string; path: string }): ActionImpact {
+    return describeAction(pa.method, pa.path);
+  }
+
+  /** The request body as label/value rows, so the card shows what changes rather than JSON. */
+  protected bodyRows(pa: { body: string | null }): Array<{ label: string; value: string }> {
+    if (!pa.body) return [];
+    try {
+      return humaniseBody(JSON.parse(pa.body));
+    } catch {
+      return [];
+    }
+  }
+
   protected parseAction(
     m: SpotAnalysisFollowUpTurnDto,
   ): { method: string; path: string; body: string | null; summary: string } | null {
@@ -1167,9 +1250,13 @@ export class AnalysisChatComponent {
         summary?: string;
         body?: unknown;
       };
+      // The assistant addresses operations by operationId; the spot chat's http_action
+      // carries a literal method + path. Render either.
+      const withOp = a as typeof a & { operationId?: string; route?: Record<string, unknown> };
+      const opPath = withOp.operationId ? String(withOp.operationId).replace(/_/g, ' · ') : '';
       return {
-        method: (a.method || 'POST').toUpperCase(),
-        path: a.path || '',
+        method: (a.method || (withOp.operationId ? '' : 'POST')).toUpperCase(),
+        path: a.path || opPath,
         summary: a.summary || '',
         body:
           a.body == null
