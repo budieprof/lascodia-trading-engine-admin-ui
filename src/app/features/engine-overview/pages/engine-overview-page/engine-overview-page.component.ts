@@ -418,7 +418,9 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         grid-template-columns: minmax(220px, 1.4fr) repeat(7, 1fr);
       }
       .row:not(.status-row):not(.charts-row) {
-        grid-template-columns: 1fr 1fr;
+        /* minmax(0, …): a bare 1fr track is minmax(auto, 1fr) and grows to
+           fit an unbreakable child instead of letting it clip. */
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       }
       @media (max-width: 1400px) {
         .status-row {
@@ -827,6 +829,10 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         font-size: var(--text-sm);
       }
       .dlq-meta {
+        /* As a flex item its min-width defaulted to the full unbroken error
+           text, which pushed the card and the page to 2,729px wide. */
+        display: block;
+        min-width: 0;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
