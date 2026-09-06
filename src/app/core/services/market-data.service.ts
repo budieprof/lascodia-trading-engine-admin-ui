@@ -231,8 +231,13 @@ export class MarketDataService {
   askAnalysisFollowUp(
     llmInvocationId: number,
     question: string,
+    /** Admin-assistant threads only: what the operator is looking at right now. */
+    pageContext?: unknown,
   ): Observable<ResponseData<SpotAnalysisFollowUpTurnDto>> {
-    return this.api.post(`/market-data/analyze/${llmInvocationId}/follow-up`, { question });
+    return this.api.post(`/market-data/analyze/${llmInvocationId}/follow-up`, {
+      question,
+      ...(pageContext ? { pageContext } : {}),
+    });
   }
 
   /**

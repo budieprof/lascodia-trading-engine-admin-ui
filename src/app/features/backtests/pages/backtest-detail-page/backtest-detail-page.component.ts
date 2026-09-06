@@ -16,6 +16,7 @@ import { StatusBadgeComponent } from '@shared/components/status-badge/status-bad
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { BacktestsService } from '@core/services/backtests.service';
 import { BacktestRunDto } from '@core/api/api.types';
+import { PageContextService } from '@core/assistant/page-context.service';
 import type { EChartsOption, LineSeriesOption } from 'echarts';
 import {
   TradeReplayDialogComponent,
@@ -928,7 +929,32 @@ export class BacktestDetailPageComponent implements OnInit {
    *  closed; setting a value drives the dialog's open effect. */
   readonly replayTrade = signal<ReplayTrade | null>(null);
 
+  private readonly pageContext = inject(PageContextService);
+
   constructor() {
+    // Tell the assistant what this page is showing, so "why did trade 4 have no
+    // candles?" resolves without the operator repeating the run id.
+    this.pageContext.publish(() => {
+      const bt = this.backtest();
+      const p = this.primary();
+      return {
+        headline: bt
+          ? `Backtest #${bt.id} — ${bt.symbol} ${bt.timeframe}, ${bt.status}`
+          : 'Backtest detail (loading)',
+        record: { kind: 'backtest', id: this.id() ?? 0, label: bt?.symbol ?? undefined },
+        figures: {
+          symbol: bt?.symbol ?? null,
+          timeframe: bt?.timeframe ?? null,
+          status: bt?.status ?? null,
+          fromDate: bt?.fromDate ?? null,
+          toDate: bt?.toDate ?? null,
+          totalReturnPct: p?.totalReturn ?? null,
+          totalTrades: p?.totalTrades ?? null,
+          strategyId: bt?.strategyId ?? null,
+        },
+      };
+    });
+
     // Reset to page 1 whenever the filter chip changes — otherwise switching
     // from "All" page 12 to "Wins" leaves the operator past the last page.
     effect(() => {

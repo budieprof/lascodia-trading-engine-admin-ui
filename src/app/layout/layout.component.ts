@@ -12,6 +12,7 @@ import { CommandPaletteComponent } from '@shared/components/command-palette/comm
 import { KeyboardHelpComponent } from '@shared/components/keyboard-help/keyboard-help.component';
 import { KeyboardShortcutsService } from '@core/keyboard/keyboard-shortcuts.service';
 import { WallModeService } from '@core/wall-mode/wall-mode.service';
+import { AssistantDockComponent } from '@shared/components/assistant-dock/assistant-dock.component';
 import { FooterVersionPillComponent } from './footer-version-pill/footer-version-pill.component';
 
 @Component({
@@ -28,6 +29,7 @@ import { FooterVersionPillComponent } from './footer-version-pill/footer-version
     KillSwitchBannerComponent,
     CommandPaletteComponent,
     KeyboardHelpComponent,
+    AssistantDockComponent,
     FooterVersionPillComponent,
   ],
   template: `
@@ -64,6 +66,7 @@ import { FooterVersionPillComponent } from './footer-version-pill/footer-version
       </div>
       <app-command-palette />
       <app-keyboard-help />
+      <app-assistant-dock />
     </div>
   `,
   styles: [

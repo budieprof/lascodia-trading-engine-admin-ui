@@ -923,6 +923,19 @@ export class AnalysisChatComponent {
    *  the default capped log height (embedded-in-modal use). */
   readonly fillHeight = input<boolean>(false);
 
+  /**
+   * Optional: called at send time to describe what the operator is looking at, and passed
+   * with the question. The admin assistant supplies it; a spot-analysis thread has no page
+   * beyond the analysis itself and leaves it null.
+   */
+  readonly contextProvider = input<(() => unknown | null) | null>(null);
+
+  /**
+   * Chat-created live monitors belong to a spot analysis. An assistant thread has none, so
+   * it opts out rather than firing a request that can only ever return an empty list.
+   */
+  readonly showMonitors = input<boolean>(true);
+
   protected readonly messages = signal<SpotAnalysisFollowUpTurnDto[]>([]);
   protected readonly question = signal('');
   protected readonly loading = signal(false);
@@ -1098,7 +1111,14 @@ export class AnalysisChatComponent {
     this.sending.set(true);
     this.error.set(null);
 
-    this.marketData.askAnalysisFollowUp(id, q).subscribe({
+    let pageContext: unknown | null = null;
+    try {
+      pageContext = this.contextProvider()?.() ?? null;
+    } catch {
+      /* describing the page must never block the question */
+    }
+
+    this.marketData.askAnalysisFollowUp(id, q, pageContext ?? undefined).subscribe({
       next: (res) => {
         if (this.llmInvocationId() !== id) {
           this.sending.set(false);
@@ -1278,6 +1298,10 @@ export class AnalysisChatComponent {
   /** Load the active monitors created from this analysis. */
   private loadMonitors(llmInvocationId: number): void {
     if (!llmInvocationId) {
+      this.monitors.set([]);
+      return;
+    }
+    if (!this.showMonitors()) {
       this.monitors.set([]);
       return;
     }

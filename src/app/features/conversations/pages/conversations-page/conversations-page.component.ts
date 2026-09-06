@@ -827,6 +827,7 @@ export class ConversationsPageComponent {
     { value: 'Limit', label: 'Limit' },
     { value: 'Engineer', label: 'Engineer' },
     { value: 'Wire', label: 'Wire' },
+    { value: 'Assistant', label: 'Assistant' },
   ];
 
   protected readonly selectedId = signal<number | null>(null);
@@ -889,6 +890,8 @@ export class ConversationsPageComponent {
     const parts = [real(c.symbol), real(c.timeframe)].filter((p) => p.length > 0);
     if (parts.length > 0) return parts.join(' ');
     switch (c.kind) {
+      case 'Assistant':
+        return 'Assistant session';
       case 'Memory':
         return 'Trading memory';
       case 'Journal':

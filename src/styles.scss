@@ -493,3 +493,13 @@ html[data-view-transition='slide-left']::view-transition-new(root) {
     background: var(--bg-secondary);
   }
 }
+
+// The assistant dock is fixed chrome, not page content: the root view transition snapshots
+// the whole page, so without its own transition name the drawer crossfades on every
+// navigation while the operator is mid-sentence.
+::view-transition-group(assistant-dock),
+::view-transition-old(assistant-dock),
+::view-transition-new(assistant-dock) {
+  animation: none;
+  mix-blend-mode: normal;
+}

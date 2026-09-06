@@ -31,6 +31,7 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
 import { DirectionCellComponent } from '@shared/components/data-table/cell-renderers/direction-cell.component';
 import { CurrencyFormatPipe } from '@shared/pipes/currency-format.pipe';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { PageContextService } from '@core/assistant/page-context.service';
 import {
   EATradeChartModalComponent,
   type TradeChartSelection,
@@ -920,7 +921,14 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       });
   }
 
+  private readonly pageContext = inject(PageContextService);
+
   constructor() {
+    this.pageContext.publish(() => ({
+      headline: 'Open and closed positions for the selected account scope',
+      filters: { tab: this.activeTab?.() ?? null },
+    }));
+
     // Refresh positions whenever the engine pushes open/close events so the
     // UI reflects broker-confirmed state without waiting on the 15s poll.
     // Throttle 2s — bursts of fills on a single position get batched.
