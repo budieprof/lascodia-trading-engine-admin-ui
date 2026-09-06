@@ -1,7 +1,6 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  DestroyRef,
   OnInit,
   computed,
   effect,
@@ -1325,21 +1324,12 @@ export class DashboardPageComponent implements OnInit {
     effect(() => {
       const key = this.accountScope.accountIdsKey();
       if (key.length === 0) return;
-      const ids = key.split(',').map(Number);
-      this.drawdownService
-        .getLatest(ids)
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe({
-          next: (r) => this.drawdown.set(r.data ?? null),
-          // Leave the previous value in place on transient errors —
-          // better than flashing the tile blank.
-          error: () => {},
-        });
+      // refresh() issues the drawdown fetch scoped to the same id set, so
+      // a second dedicated call here would only race it — and the loser
+      // was the one that decided what the tile showed.
       untracked(() => this.refresh());
     });
   }
-
-  private readonly destroyRef = inject(DestroyRef);
 
   // ── Data signals ──────────────────────────────────────────────────────
   readonly loading = signal(true);
@@ -1552,11 +1542,18 @@ export class DashboardPageComponent implements OnInit {
     return grossWin / grossLoss;
   });
 
-  readonly drawdownPct = computed(() => this.drawdown()?.drawdownPct ?? 0);
+  /**
+   * Null until a snapshot for the CURRENT scope has arrived — the tile then
+   * shows "—" rather than a hard 0.00%, which would be a measurement the
+   * page does not have. (An account genuinely at its high-water mark does
+   * report 0.00%, and that reads as the measurement it is.)
+   */
+  readonly drawdownPct = computed(() => this.drawdown()?.drawdownPct ?? null);
 
   /** Engine defaults: Reduced from 10 %, Halted from 20 %. */
   readonly drawdownDot = computed(() => {
     const dd = this.drawdownPct();
+    if (dd == null) return 'var(--text-tertiary)';
     if (dd >= 20) return '#FF3B30';
     if (dd >= 10) return '#FF9500';
     return '#34C759';
@@ -2054,7 +2051,20 @@ export class DashboardPageComponent implements OnInit {
 
   // Single-shot refresh — tolerant: every leaf catchError returns an empty
   // shape so a flaky ML endpoint doesn't blank the rest of the dashboard.
+  /**
+   * Monotonic token for in-flight refreshes. Every query in the forkJoin is
+   * scoped to the account set as it stood when the refresh STARTED, so a
+   * response that arrives after a newer refresh began describes the wrong
+   * scope. The first load proves it: the initial refresh runs before the
+   * account list resolves, so it asks for the fleet, and the scoped refresh
+   * that follows finished FIRST — leaving a brand-new account showing the
+   * fleet's 7.62% drawdown and "Reduced mode". Results from a superseded
+   * refresh are now dropped rather than written over the current scope.
+   */
+  private refreshGeneration = 0;
+
   private refresh(): void {
+    const generation = ++this.refreshGeneration;
     forkJoin({
       // Open and closed are fetched as SEPARATE status-scoped queries, the
       // same way the Positions page loads its KPI window, and for the same
@@ -2120,7 +2130,13 @@ export class DashboardPageComponent implements OnInit {
         map((r) => r.data ?? null),
         catchError(() => of(null as EngineStatusDto | null)),
       ),
-      drawdown: this.drawdownService.getLatest().pipe(
+      // Scoped like every other account-aware query on this page. Fetching
+      // it unscoped here overwrote the per-account value on every poll, so
+      // a brand-new account with a flat equity curve reported the FLEET's
+      // drawdown (7.62% and "Reduced mode" on an account whose own
+      // snapshot said 0.0% / Normal). The tile and the footer strip read
+      // the same signal, so both were wrong together.
+      drawdown: this.drawdownService.getLatest(this.accountScope.accountIds()).pipe(
         map((r) => r.data ?? null),
         catchError(() => of(null as DrawdownSnapshotDto | null)),
       ),
@@ -2165,6 +2181,10 @@ export class DashboardPageComponent implements OnInit {
         workers,
         mlModels,
       }) => {
+        // A newer refresh (usually an account-scope change) started while
+        // this one was in flight — its scope is the current truth.
+        if (generation !== this.refreshGeneration) return;
+
         // Set RAW position/order buckets — derived signals
         // (openPositions/closedPositions/recentOrders/unrealizedPnl/
         // openPositionCount/topOpenPositions/recentActivity/equityCurve/
