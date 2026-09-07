@@ -21,6 +21,7 @@ import {
   concatMap,
   first,
   switchMap,
+  finalize,
 } from 'rxjs';
 import { DatePipe } from '@angular/common';
 import { NgxEchartsDirective } from 'ngx-echarts';
@@ -773,6 +774,8 @@ interface PriceEntry extends LivePriceDto {
                       width="100%"
                       height="22px"
                     />
+                  } @else if (card.live) {
+                    <span class="watch-spark-empty">no bars yet</span>
                   }
                 </span>
               </div>
@@ -2731,6 +2734,8 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   // closes: seeded on TF change, and extended by exactly one point each
   // time a candle of the selected timeframe closes. Static between closes.
   private sparkSeries: Record<string, number[]> = {};
+  /** Guards against overlapping seed passes once the 3s retry is in play. */
+  private sparkSeedInFlight = false;
   // Candle-boundary index (floor(now / tfMs)) at the last close check.
   // Reset to null on TF change so the baseline re-establishes for the new
   // period without a spurious immediate re-seed.
@@ -3373,7 +3378,11 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
       // rangePips stays on the live-tick buffer (it's a live range read);
       // the spark uses the timeframe-aligned series so it doesn't churn.
       const hist = this.priceHistory[apiSym] ?? [];
-      const sparkHist = this.sparkSeries[apiSym] ?? hist;
+      // Candle closes only — no tick-buffer fallback, for the same reason as the
+      // watch ribbon: a quiet pair's tick slice draws a flat line that reads as
+      // real, unmoving history. rangePips below still uses `hist`; that one IS a
+      // live-tick read and is labelled as such.
+      const sparkHist = this.sparkSeries[apiSym] ?? [];
       const liveEntry = live.find((p) => p.symbol === sym) ?? null;
       const pipFactor = this.pipFactorFor(sym);
       const rangePips =
@@ -4310,7 +4319,16 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     if (boundary > this.lastSparkBoundary) {
       this.lastSparkBoundary = boundary;
       this.seedSparkHistory(tf);
+      return;
     }
+
+    // Retry only the symbols that still have no candle history. Without this a
+    // symbol whose seed request missed — the catalogue grew mid-flight, the
+    // engine was briefly slow, that pair's candles had not been ingested yet —
+    // stayed on the tick fallback until the NEXT candle close, a full hour on
+    // H1. That is what a permanently flat watch-card sparkline looks like.
+    const missing = this.watchedSymbols().filter((sym) => !this.sparkSeries[sym]);
+    if (missing.length > 0) this.seedSparkHistory(tf, missing);
   }
 
   ngOnInit() {
@@ -4370,10 +4388,16 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
    * first TF that returns data (`first(...)` unsubscribes upstream), so the
    * common case is exactly one light request per symbol.
    */
-  private seedSparkHistory(preferredTf: string): void {
+  private seedSparkHistory(preferredTf: string, only?: readonly string[]): void {
     const FALLBACK = ['M15', 'H1', 'H4', 'M5', 'D1'];
     const TF_PRIORITY = [preferredTf, ...FALLBACK.filter((t) => t !== preferredTf)];
     const BARS = 60;
+    const targets = only ?? this.watchedSymbols();
+    if (targets.length === 0) return;
+    // One seed pass at a time. The retry below runs on the 3s poll, and without
+    // this a slow pass would stack a fresh forkJoin over every symbol each tick.
+    if (this.sparkSeedInFlight) return;
+    this.sparkSeedInFlight = true;
 
     const seedOne = (sym: string) =>
       from(TF_PRIORITY).pipe(
@@ -4395,8 +4419,11 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
         map((candles) => ({ sym, candles })),
       );
 
-    forkJoin(this.watchedSymbols().map(seedOne))
-      .pipe(takeUntil(this.destroy$))
+    forkJoin(targets.map(seedOne))
+      .pipe(
+        finalize(() => (this.sparkSeedInFlight = false)),
+        takeUntil(this.destroy$),
+      )
       .subscribe((results) => {
         let seeded = 0;
         for (const { sym, candles } of results) {
@@ -4414,10 +4441,10 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
           this.sparkSeries[sym] = closes.slice(-60);
           seeded++;
         }
-        if (seeded === 0) {
+        if (seeded === 0 && !only) {
           console.warn(
             '[market-data] spark seed got no candles for any watched symbol — ' +
-              'watch-card sparklines will stay flat until live ticks accrue.',
+              'watch-card sparklines will stay empty until a later retry lands.',
           );
         }
         // Repaint the cards now that the buffers carry real structure,
@@ -4529,11 +4556,16 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
               }
             }
 
-            // Timeframe-aligned candle closes — NOT the live-tick buffer.
-            // Stays put between candle closes so the spark doesn't churn
-            // every poll. Falls back to the live slice only until the first
-            // seed lands (avoids an empty spark on the very first paint).
-            const sparkData = this.sparkSeries[sym] ?? this.priceHistory[sym].slice(-30);
+            // Timeframe-aligned candle closes — NOT the live-tick buffer. Stays put
+            // between candle closes so the spark doesn't churn every poll.
+            //
+            // There is deliberately NO tick-buffer fallback. It used to slice the last
+            // 30 live bids in here, which on a quiet pair is thirty near-identical
+            // numbers — a flat line that is indistinguishable from real candle history
+            // and reads as "this pair has not moved in 60 bars". An empty series draws
+            // nothing and the card says so, which is honest; the retry above fills it
+            // within a poll or two.
+            const sparkData = this.sparkSeries[sym] ?? [];
 
             return {
               ...data,

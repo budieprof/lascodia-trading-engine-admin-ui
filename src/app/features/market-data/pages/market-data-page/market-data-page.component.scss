@@ -698,6 +698,15 @@
 }
 .watch-spark {
   flex: 1;
+  text-align: right;
+}
+/* Shown while a pair still has no timeframe-aligned candle history. Saying so
+   beats drawing the live-tick buffer, which on a quiet pair is a flat line that
+   looks exactly like 60 unmoving bars. */
+.watch-spark-empty {
+  font-size: 9px;
+  color: var(--text-tertiary);
+  opacity: 0.7;
 }
 
 /* Movers + recent ticks row */
