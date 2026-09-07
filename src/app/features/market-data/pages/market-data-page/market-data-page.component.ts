@@ -35,6 +35,7 @@ import { MarketDataService } from '@core/services/market-data.service';
 import { MarketRegimeService } from '@core/services/market-regime.service';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import { PositionsService } from '@core/services/positions.service';
+import { AccountScopeService } from '@core/scope/account-scope.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import {
   LivePriceDto,
@@ -1981,6 +1982,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   private regimeService = inject(MarketRegimeService);
   private tradeSignalsService = inject(TradeSignalsService);
   private positionsService = inject(PositionsService);
+  private accountScope = inject(AccountScopeService);
   private currencyPairsService = inject(CurrencyPairsService);
   private destroy$ = new Subject<void>();
 
@@ -4261,6 +4263,10 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     effect(() => {
       this.chartSymbol();
       this.chartTimeframe();
+      // Switching account must move the position overlay at once, not on the next 5s
+      // poll. Read the KEY, never accountIds() — that array's identity is rebuilt by the
+      // scope service's 30s account refresh, which would re-trigger this effect forever.
+      this.accountScope.accountIdsKey();
       this.loadInsights();
     });
 
@@ -4632,22 +4638,40 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     // concurrent-position count for one pair — the engine's GetPaged
     // handler maxes out at one open position per (StrategyId, Symbol)
     // for risk-checked flows, so 50 is a generous upper bound.
-    this.positionsLoading.set(true);
-    this.positionsService
-      .list({
-        currentPage: 1,
-        itemCountPerPage: 50,
-        filter: { symbol: symJoined, status: 'Open' },
-      })
-      .pipe(
-        catchError(() => of(null)),
-        takeUntil(this.destroy$),
-      )
-      .subscribe((res) => {
-        this.positionsLoading.set(false);
-        const rows = res?.data?.data ?? [];
-        this.chartOpenPositions.set(rows);
-      });
+    // Scoped to the account picker in the header. The overlay draws an entry, an SL and a
+    // TP line per position, and the chart's P&L badge sums them — unscoped, an operator
+    // looking at one account saw the whole fleet's lines on their chart and a P&L total
+    // that could not be reconciled against any account they had selected.
+    //
+    // An empty scope means "no live accounts", NOT "every account" (see
+    // AccountScopeService.accountIds) — so clear the overlay rather than falling back to
+    // fleet-wide, which is the failure mode being fixed here.
+    const scopedIds = this.accountScope.accountIds();
+    if (scopedIds.length === 0) {
+      this.positionsLoading.set(false);
+      this.chartOpenPositions.set([]);
+    } else {
+      this.positionsLoading.set(true);
+      this.positionsService
+        .list({
+          currentPage: 1,
+          itemCountPerPage: 50,
+          filter: {
+            symbol: symJoined,
+            status: 'Open',
+            tradingAccountIds: Array.from(scopedIds),
+          },
+        })
+        .pipe(
+          catchError(() => of(null)),
+          takeUntil(this.destroy$),
+        )
+        .subscribe((res) => {
+          this.positionsLoading.set(false);
+          const rows = res?.data?.data ?? [];
+          this.chartOpenPositions.set(rows);
+        });
+    }
 
     // Depth-of-book + recent snapshots for the advanced analysis cards.
     // -14 means the EA hasn't streamed a MarketBook frame for this pair
