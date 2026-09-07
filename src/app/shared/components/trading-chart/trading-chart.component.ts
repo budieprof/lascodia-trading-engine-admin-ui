@@ -20,6 +20,11 @@ import { NgxEchartsDirective } from 'ngx-echarts';
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import { MarkdownCopyDirective } from '@shared/directives/markdown-copy.directive';
 import { AnalysisChatComponent } from '@shared/components/analysis-chat/analysis-chat.component';
+import {
+  RecFileEditorComponent,
+  type RecFileOverrides,
+  type RecFileSeed,
+} from '@shared/components/rec-file-editor/rec-file-editor.component';
 import type { EChartsOption } from 'echarts';
 import { Subject, timer, switchMap, takeUntil, catchError, of } from 'rxjs';
 import { MarketDataService } from '@core/services/market-data.service';
@@ -325,6 +330,7 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
     RouterLink,
     MarkdownPipe,
     AnalysisChatComponent,
+    RecFileEditorComponent,
     MarkdownCopyDirective,
   ],
   template: `
@@ -880,14 +886,22 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
                           >
                         }
                       </span>
+                    } @else if (editingRec() && recSeed(rec); as seed) {
+                      <app-rec-file-editor
+                        [seed]="seed"
+                        [busy]="creatingSignal()"
+                        [error]="createSignalError()"
+                        (filed)="createSignalFromAnalysis(ar, $event)"
+                        (cancelled)="editingRec.set(false)"
+                      />
                     } @else {
                       <button
                         type="button"
                         class="rec-create-signal"
                         [class.busy]="creatingSignal()"
                         [disabled]="creatingSignal()"
-                        (click)="createSignalFromAnalysis(ar)"
-                        [title]="'Promote this recommendation to a manual trade signal'"
+                        (click)="openRecEditor()"
+                        [title]="'Review or adjust this recommendation, then file it as a signal'"
                       >
                         @if (creatingSignal()) {
                           Creating…
@@ -2471,6 +2485,10 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   /** True while a /market-data/analyze/{id}/persist-signal call is in
    *  flight. Used to spin / disable the "Create signal" CTA on the modal. */
   readonly creatingSignal = signal(false);
+  /** True while the pre-file editor is open on the primary recommendation. */
+  readonly editingRec = signal(false);
+  /** Server error from the last create attempt — rendered inside the editor. */
+  readonly createSignalError = signal<string | null>(null);
   /** Non-null while a /market-data/propose-limit call is in flight; the
    *  value is the requested direction so the corresponding Buy/Sell button
    *  can show its own spinner without locking out the other one's hover
@@ -3465,50 +3483,77 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     return ids.length > 0 ? ids : null;
   }
 
+  /** Seed the pre-file editor from a recommendation, or null when it carries no
+   *  actionable direction/entry (the caller falls back to the plain button). */
+  recSeed(rec: MarketAnalysisRecommendationDto): RecFileSeed | null {
+    if (rec.action !== 'Buy' && rec.action !== 'Sell') return null;
+    if (rec.entryPrice == null) return null;
+    return {
+      // The toolbar holds the display form ("EUR/USD"); the editor wants the
+      // engine form for its pip-size lookup and its heading.
+      symbol: this.selectedSymbol().replace(/\//g, '').toUpperCase(),
+      action: rec.action,
+      entryPrice: rec.entryPrice,
+      stopLoss: rec.stopLoss ?? null,
+      takeProfit: rec.takeProfit ?? null,
+      confidence: typeof rec.confidence === 'number' ? rec.confidence : null,
+    };
+  }
+
+  openRecEditor(): void {
+    if (this.creatingSignal()) return;
+    this.createSignalError.set(null);
+    this.editingRec.set(true);
+  }
+
   /**
    * Promote the primary recommendation on the open spot analysis into a
    * live TradeSignal via the engine's persist-signal endpoint. Mirrors
    * the auto-gen path server-side (sentinel strategy, SpotAnalysis
    * source, LlmInvocationId provenance, 3-bar TTL) but flagged
    * IsManual=true. The CTA only renders when the rec is Buy/Sell with
-   * full prices and no signal was already persisted for this analysis,
-   * so we don't need to re-validate here.
+   * full prices and no signal was already persisted for this analysis.
+   * `overrides` carries whatever the operator changed in the editor; the
+   * engine re-validates the filed geometry either way.
    *
    * On success we stash the new signal id locally so the modal flips to
    * a "Signal #N created" link — preventing accidental double-creates
    * from a stale modal and giving a one-click path to the signal detail.
    */
-  createSignalFromAnalysis(ar: MarketAnalysisResultDto): void {
+  createSignalFromAnalysis(ar: MarketAnalysisResultDto, overrides: RecFileOverrides): void {
     if (this.creatingSignal()) return;
     this.creatingSignal.set(true);
+    this.createSignalError.set(null);
     // Pass the displayed (derived) geometry of the primary rec — thin-framework
     // recs carry a null entry in the raw LLM response, so the server can't
-    // reconstruct it from the audit alone.
+    // reconstruct it from the audit alone — with the operator's edits over it.
     const rec = ar.recommendations?.[0];
     this.marketData
       .persistSignalFromAnalysis(ar.llmInvocationId, 0, {
         entryPrice: rec?.entryPrice,
         stopLoss: rec?.stopLoss,
         takeProfit: rec?.takeProfit,
+        ...overrides,
       })
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (res) => {
           this.creatingSignal.set(false);
           if (res?.status && res.data && res.data > 0) {
+            this.editingRec.set(false);
             this.manualSignalId.set(res.data);
             this.notifications.success(`Trade signal #${res.data} created from analysis.`);
           } else {
-            this.notifications.error(
-              res?.message ?? 'Could not create a signal from this analysis.',
-            );
+            const msg = res?.message ?? 'Could not create a signal from this analysis.';
+            this.createSignalError.set(msg);
+            this.notifications.error(msg);
           }
         },
         error: () => {
+          const msg = 'Could not create a signal from this analysis — engine returned an error.';
           this.creatingSignal.set(false);
-          this.notifications.error(
-            'Could not create a signal from this analysis — engine returned an error.',
-          );
+          this.createSignalError.set(msg);
+          this.notifications.error(msg);
         },
       });
   }

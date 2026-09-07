@@ -14,6 +14,11 @@ import { catchError, of } from 'rxjs';
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import { MarkdownCopyDirective } from '@shared/directives/markdown-copy.directive';
 import { AnalysisChatComponent } from '@shared/components/analysis-chat/analysis-chat.component';
+import {
+  RecFileEditorComponent,
+  type RecFileOverrides,
+  type RecFileSeed,
+} from '@shared/components/rec-file-editor/rec-file-editor.component';
 import { MarketDataService } from '@core/services/market-data.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type {
@@ -35,7 +40,13 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
   selector: 'app-spot-analysis-modal',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgxEchartsDirective, MarkdownPipe, AnalysisChatComponent, MarkdownCopyDirective],
+  imports: [
+    NgxEchartsDirective,
+    MarkdownPipe,
+    AnalysisChatComponent,
+    RecFileEditorComponent,
+    MarkdownCopyDirective,
+  ],
   template: `
     <div class="backdrop" (click)="closed.emit()">
       <div class="modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true">
@@ -180,20 +191,30 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
                     <p class="rationale">{{ rec.rationale }}</p>
 
                     @if (rec.action !== 'Hold') {
-                      <div class="rec-actions">
-                        @if (createdSignal($index); as sigId) {
+                      @if (createdSignal($index); as sigId) {
+                        <div class="rec-actions">
                           <span class="signal-banner ok">Signal #{{ sigId }} created ✓</span>
-                        } @else {
+                        </div>
+                      } @else if (editingIndex() === $index && recSeed(rec); as seed) {
+                        <app-rec-file-editor
+                          [seed]="seed"
+                          [busy]="creatingIndex() === $index"
+                          [error]="createError()"
+                          (filed)="createSignal(r, $index, $event)"
+                          (cancelled)="closeRecEditor()"
+                        />
+                      } @else {
+                        <div class="rec-actions">
                           <button
                             type="button"
                             class="create-btn"
                             [disabled]="creatingIndex() !== null || autoCreating()"
-                            (click)="createSignal(r, $index)"
+                            (click)="openRecEditor($index)"
                           >
                             {{ creatingIndex() === $index ? 'Creating…' : 'Create signal' }}
                           </button>
-                        }
-                      </div>
+                        </div>
+                      }
                     }
                   </div>
                 }
@@ -645,6 +666,10 @@ export class SpotAnalysisModalComponent {
   protected readonly autoGenerate = signal(false);
   /** Recommendation index currently being persisted, or null. */
   protected readonly creatingIndex = signal<number | null>(null);
+  /** Recommendation index whose pre-file editor is open, or null. */
+  protected readonly editingIndex = signal<number | null>(null);
+  /** Server error from the last create attempt — rendered inside the editor. */
+  protected readonly createError = signal<string | null>(null);
   /** True while an auto-create pass (limit/stop modes) is persisting recommendations. */
   protected readonly autoCreating = signal(false);
   /** Map of recommendation index → created TradeSignal id (manual or shown after create). */
@@ -779,29 +804,69 @@ export class SpotAnalysisModalComponent {
     }
   }
 
-  /** Manually promote one recommendation to a live TradeSignal (persist-signal endpoint). */
-  protected createSignal(r: MarketAnalysisResultDto, index: number): void {
+  /** Seed the pre-file editor from one recommendation. Null for a rec that has
+   *  no actionable direction — the caller renders the plain button instead. */
+  protected recSeed(rec: MarketAnalysisRecommendationDto): RecFileSeed | null {
+    if (rec.action !== 'Buy' && rec.action !== 'Sell') return null;
+    if (rec.entryPrice == null) return null;
+    return {
+      symbol: this.symbol(),
+      action: rec.action,
+      entryPrice: rec.entryPrice,
+      stopLoss: rec.stopLoss ?? null,
+      takeProfit: rec.takeProfit ?? null,
+      confidence: typeof rec.confidence === 'number' ? rec.confidence : null,
+    };
+  }
+
+  protected openRecEditor(index: number): void {
+    if (this.creatingIndex() !== null || this.autoCreating()) return;
+    this.createError.set(null);
+    this.editingIndex.set(index);
+  }
+
+  protected closeRecEditor(): void {
+    if (this.creatingIndex() !== null) return;
+    this.editingIndex.set(null);
+    this.createError.set(null);
+  }
+
+  /** Manually promote one recommendation to a live TradeSignal (persist-signal
+   *  endpoint), carrying whatever the operator adjusted in the editor. The
+   *  displayed geometry is always sent — a thin-framework rec's derived levels
+   *  can't be reconstructed server-side — with the edits layered over it. */
+  protected createSignal(
+    r: MarketAnalysisResultDto,
+    index: number,
+    overrides: RecFileOverrides,
+  ): void {
     if (this.creatingIndex() !== null || this.createdSignal(index) !== null) return;
     this.creatingIndex.set(index);
+    this.createError.set(null);
     const rec = this.recommendations(r)[index];
     this.marketData
       .persistSignalFromAnalysis(r.llmInvocationId, index, {
         entryPrice: rec?.entryPrice,
         stopLoss: rec?.stopLoss,
         takeProfit: rec?.takeProfit,
+        ...overrides,
       })
       .subscribe({
         next: (res) => {
           this.creatingIndex.set(null);
           if (res?.status && res.data != null) {
+            this.editingIndex.set(null);
             this.createdByIndex.update((m) => ({ ...m, [index]: res.data as number }));
             this.notify.success(`Signal #${res.data} created`);
           } else {
-            this.notify.error(res?.message || 'Could not create signal from this recommendation.');
+            const msg = res?.message || 'Could not create signal from this recommendation.';
+            this.createError.set(msg);
+            this.notify.error(msg);
           }
         },
         error: (err) => {
           this.creatingIndex.set(null);
+          this.createError.set(err?.message ?? 'Failed to create signal.');
           this.notify.error(err?.message ?? 'Failed to create signal.');
         },
       });

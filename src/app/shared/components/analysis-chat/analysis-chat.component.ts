@@ -24,6 +24,11 @@ import {
   SpotRecChartComponent,
   type SpotRecChartRec,
 } from '@shared/components/spot-rec-chart/spot-rec-chart.component';
+import {
+  RecFileEditorComponent,
+  type RecFileOverrides,
+  type RecFileSeed,
+} from '@shared/components/rec-file-editor/rec-file-editor.component';
 
 /**
  * Whether a turn opens a new calendar day and so needs a date divider above it.
@@ -44,6 +49,29 @@ export function startsNewLocalDay(
   return new Date(currentIso).toDateString() !== new Date(previousIso).toDateString();
 }
 
+/**
+ * One-line rendering of the model's original proposal, for a rec the operator
+ * edited on the way to filing. Null when the rec was filed unchanged (the engine
+ * writes the block only for an edited rec) or the payload is unusable.
+ */
+function describeModelOriginal(
+  o:
+    | {
+        action?: string;
+        entryPrice?: number;
+        stopLoss?: number | null;
+        takeProfit?: number | null;
+        confidence?: number;
+      }
+    | null
+    | undefined,
+): string | null {
+  if (!o || typeof o.entryPrice !== 'number' || !o.action) return null;
+  const fmt = (n: number | null | undefined) => (typeof n === 'number' ? String(n) : '—');
+  const conf = typeof o.confidence === 'number' ? `, conf ${Math.round(o.confidence * 100)}%` : '';
+  return `${o.action} @ ${fmt(o.entryPrice)}, SL ${fmt(o.stopLoss)}, TP ${fmt(o.takeProfit)}${conf}`;
+}
+
 /** A chat-generated recommendation parsed from a "recommend" tool turn. */
 interface ParsedChatRec {
   symbol: string;
@@ -57,6 +85,17 @@ interface ParsedChatRec {
   riskRewardRatio: number | null;
   rationale: string;
   filedSignalId: number | null;
+  /** True when the operator edited the proposal before filing it. */
+  operatorModified: boolean;
+  /** The operator's stated reason for the edit, when they gave one. */
+  operatorNote: string | null;
+  /**
+   * What the model originally proposed, present only on an edited rec. The
+   * top-level fields above describe what was actually FILED — a filed card must
+   * show the signal that exists, not the one the model wrote — so this is what
+   * keeps the model's own output visible next to it.
+   */
+  modelOriginal: string | null;
   chartRecs: SpotRecChartRec[];
 }
 
@@ -78,7 +117,13 @@ interface ParsedChatRec {
   selector: 'app-analysis-chat',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MarkdownPipe, SpotRecChartComponent, MarkdownCopyDirective, DatePipe],
+  imports: [
+    MarkdownPipe,
+    SpotRecChartComponent,
+    RecFileEditorComponent,
+    MarkdownCopyDirective,
+    DatePipe,
+  ],
   template: `
     <section
       class="chat"
@@ -240,18 +285,39 @@ interface ParsedChatRec {
                       <div class="rec-rationale md" [innerHTML]="rec.rationale | markdown"></div>
                     }
                     @if (rec.filedSignalId !== null) {
-                      <div class="rec-filed">✓ Filed as signal #{{ rec.filedSignalId }}</div>
+                      <div class="rec-filed">
+                        ✓ Filed as signal #{{ rec.filedSignalId }}
+                        @if (rec.operatorModified) {
+                          <span class="rec-edited">· edited before filing</span>
+                        }
+                      </div>
+                      @if (rec.modelOriginal; as orig) {
+                        <div class="rec-original">
+                          Model proposed: <span class="mono">{{ orig }}</span>
+                          @if (rec.operatorNote) {
+                            <span class="rec-note">— {{ rec.operatorNote }}</span>
+                          }
+                        </div>
+                      }
+                    } @else if (editingId() === m.id) {
+                      <app-rec-file-editor
+                        [seed]="recSeed(rec)"
+                        [busy]="filingId() === m.id"
+                        [error]="fileError()"
+                        (filed)="fileSignal(m, $event)"
+                        (cancelled)="closeEditor()"
+                      />
                     } @else {
                       <div class="rec-actions">
                         <button
                           type="button"
                           class="file-signal"
                           [disabled]="filingId() !== null"
-                          (click)="fileSignal(m)"
+                          (click)="openEditor(m)"
                         >
-                          {{ filingId() === m.id ? 'Filing…' : '⚡ File as signal' }}
+                          ⚡ File as signal
                         </button>
-                        <span class="rec-hint">passes through the risk gates</span>
+                        <span class="rec-hint">review or adjust the levels, then file</span>
                       </div>
                     }
                   </div>
@@ -902,6 +968,26 @@ interface ParsedChatRec {
         font-weight: var(--font-medium);
         color: var(--success, #16a34a);
       }
+      .rec-edited {
+        font-weight: var(--font-normal, 400);
+        color: var(--warning, #b45309);
+      }
+      .rec-original {
+        margin-top: 4px;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary, var(--text-secondary));
+      }
+      .rec-original .mono {
+        font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+      }
+      .rec-original .rec-note {
+        font-style: italic;
+      }
+      /* The pre-file editor replaces the action row, so it owns the same gap. */
+      app-rec-file-editor {
+        display: block;
+        margin-top: 10px;
+      }
       /* Markdown children are rendered via [innerHTML]; emulated encapsulation
          can't reach them, so keep only container-level rules here — the global
          .md styles in styles.scss handle headings/lists/etc. */
@@ -1025,6 +1111,10 @@ export class AnalysisChatComponent {
   protected readonly cancellingId = signal<number | null>(null);
   /** Id of the recommendation turn currently being filed as a signal, or null. */
   protected readonly filingId = signal<number | null>(null);
+  /** Id of the recommendation turn whose pre-file editor is open, or null. */
+  protected readonly editingId = signal<number | null>(null);
+  /** Server error from the last filing attempt — rendered inside the editor. */
+  protected readonly fileError = signal<string | null>(null);
   /** Brief "copied" confirmation after the operator copies the conversation id. */
   protected readonly copied = signal(false);
 
@@ -1316,6 +1406,16 @@ export class AnalysisChatComponent {
         riskRewardRatio?: number | null;
         rationale?: string;
         filedSignalId?: number | null;
+        operatorModified?: boolean;
+        operatorNote?: string | null;
+        modelOriginal?: {
+          action?: string;
+          entryPrice?: number;
+          stopLoss?: number | null;
+          takeProfit?: number | null;
+          confidence?: number;
+          riskRewardRatio?: number | null;
+        } | null;
       };
       const action = r.action === 'Buy' || r.action === 'Sell' ? r.action : null;
       if (
@@ -1340,6 +1440,9 @@ export class AnalysisChatComponent {
           riskRewardRatio: r.riskRewardRatio ?? null,
           rationale: r.rationale || '',
           filedSignalId: r.filedSignalId ?? null,
+          operatorModified: r.operatorModified === true,
+          operatorNote: r.operatorNote || null,
+          modelOriginal: describeModelOriginal(r.modelOriginal),
           chartRecs: [
             {
               label: `${action} ${r.symbol}`,
@@ -1358,34 +1461,62 @@ export class AnalysisChatComponent {
     return parsed;
   }
 
-  /** File a chat-generated recommendation as a live signal through the risk
-   *  gates. Operator-gated by an explicit confirm; the engine returns the full
-   *  refreshed thread (the rec turn comes back stamped "Filed"). */
-  protected fileSignal(m: SpotAnalysisFollowUpTurnDto): void {
+  /** Seed the inline editor from a parsed rec. */
+  protected recSeed(rec: ParsedChatRec): RecFileSeed {
+    return {
+      symbol: rec.symbol,
+      action: rec.action,
+      entryPrice: rec.entryPrice,
+      stopLoss: rec.stopLoss,
+      takeProfit: rec.takeProfit,
+      confidence: rec.confidencePct === null ? null : rec.confidencePct / 100,
+    };
+  }
+
+  /** Open the pre-filled editor on one rec card. */
+  protected openEditor(m: SpotAnalysisFollowUpTurnDto): void {
     if (this.filingId() !== null) return;
-    if (
-      !confirm(
-        'File this recommendation as a live trade signal?\nIt will pass through the engine risk gates and can be executed by an EA.',
-      )
-    )
-      return;
+    this.fileError.set(null);
+    this.editingId.set(m.id);
+  }
+
+  protected closeEditor(): void {
+    if (this.filingId() !== null) return;
+    this.editingId.set(null);
+    this.fileError.set(null);
+  }
+
+  /** File a chat-generated recommendation as a live signal through the risk
+   *  gates. `overrides` carries the operator's edits and is empty when they
+   *  filed the model's values untouched; the engine returns the full refreshed
+   *  thread (the rec turn comes back stamped "Filed").
+   *
+   *  The blind `confirm()` this used to open is gone — the editor itself is the
+   *  deliberate step, and it shows the operator the exact geometry they are
+   *  about to commit instead of asking them to trust a sentence. */
+  protected fileSignal(m: SpotAnalysisFollowUpTurnDto, overrides: RecFileOverrides): void {
+    if (this.filingId() !== null) return;
     const id = this.llmInvocationId();
     this.filingId.set(m.id);
     this.error.set(null);
-    this.marketData.fileFollowUpSignal(m.id).subscribe({
+    this.fileError.set(null);
+    this.marketData.fileFollowUpSignal(m.id, overrides).subscribe({
       next: (res) => {
         this.filingId.set(null);
         if (this.llmInvocationId() !== id) return;
         if (res?.status && res.data) {
           this.recCache.clear(); // filed turn re-parses with its new filedSignalId
+          this.editingId.set(null);
           this.messages.set(res.data);
         } else {
-          this.error.set(res?.message || 'Could not file the signal.');
+          // Kept on the editor, not the thread-level error strip: a rejected
+          // level is something the operator fixes right here in the form.
+          this.fileError.set(res?.message || 'Could not file the signal.');
         }
       },
       error: (err) => {
         this.filingId.set(null);
-        this.error.set(err?.message ?? 'Filing failed. Is the engine reachable?');
+        this.fileError.set(err?.message ?? 'Filing failed. Is the engine reachable?');
       },
     });
   }

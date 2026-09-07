@@ -18,6 +18,11 @@ import {
   type SpotRecChartRec,
   type SpotRecChartMarker,
 } from '@shared/components/spot-rec-chart/spot-rec-chart.component';
+import {
+  RecFileEditorComponent,
+  type RecFileOverrides,
+  type RecFileSeed,
+} from '@shared/components/rec-file-editor/rec-file-editor.component';
 import { MarketDataService } from '@core/services/market-data.service';
 import { AlgoEngineerService } from '@core/services/algo-engineer.service';
 import { WireService } from '@core/services/wire.service';
@@ -70,6 +75,7 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
     PageHeaderComponent,
     AnalysisChatComponent,
     SpotRecChartComponent,
+    RecFileEditorComponent,
   ],
   template: `
     <div class="page">
@@ -317,8 +323,9 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
                           <button
                             type="button"
                             class="rs-create"
+                            [class.active]="editingIndex() === item.index"
                             [disabled]="creatingIndex() !== null"
-                            (click)="createSignal(item.r, item.index)"
+                            (click)="toggleRecEditor(item.index)"
                           >
                             {{ creatingIndex() === item.index ? 'Creating…' : '⚡ Create signal' }}
                           </button>
@@ -326,6 +333,19 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
                       }
                     </div>
                   </app-spot-rec-chart>
+
+                  <!-- The editor sits below the chart rather than inside the
+                       legend strip: the legend is a one-line summary, and a form
+                       crammed into it would push the chart controls off-screen. -->
+                  @if (editingRec(); as er) {
+                    <app-rec-file-editor
+                      [seed]="er.seed"
+                      [busy]="creatingIndex() === er.index"
+                      [error]="createError()"
+                      (filed)="createSignal(er.index, $event)"
+                      (cancelled)="closeRecEditor()"
+                    />
+                  }
                 </div>
               }
             }
@@ -962,6 +982,44 @@ export class ConversationsPageComponent {
 
   /** Recommendation index currently being filed as a signal, or null. */
   protected readonly creatingIndex = signal<number | null>(null);
+  /** Recommendation index whose pre-file editor is open, or null. */
+  protected readonly editingIndex = signal<number | null>(null);
+  /** Server error from the last create attempt — rendered inside the editor. */
+  protected readonly createError = signal<string | null>(null);
+
+  /** The open editor's seed, or null when no editor is open. Recomputes if the
+   *  detail refetches under it, so the form never outlives its recommendation. */
+  protected readonly editingRec = computed<{ index: number; seed: RecFileSeed } | null>(() => {
+    const idx = this.editingIndex();
+    if (idx === null) return null;
+    const d = this.detail();
+    const rec = d?.recommendations?.[idx];
+    if (!rec || rec.entryPrice == null) return null;
+    if (rec.action !== 'Buy' && rec.action !== 'Sell') return null;
+    return {
+      index: idx,
+      seed: {
+        symbol: d!.symbol,
+        action: rec.action,
+        entryPrice: rec.entryPrice,
+        stopLoss: rec.stopLoss ?? null,
+        takeProfit: rec.takeProfit ?? null,
+        confidence: typeof rec.confidence === 'number' ? rec.confidence : null,
+      },
+    };
+  });
+
+  protected toggleRecEditor(index: number): void {
+    if (this.creatingIndex() !== null) return;
+    this.createError.set(null);
+    this.editingIndex.update((cur) => (cur === index ? null : index));
+  }
+
+  protected closeRecEditor(): void {
+    if (this.creatingIndex() !== null) return;
+    this.editingIndex.set(null);
+    this.createError.set(null);
+  }
 
   /** The signal already filed for a recommendation (matched by direction +
    *  entry, the same keys the create path dedupes on), or null. */
@@ -1001,22 +1059,32 @@ export class ConversationsPageComponent {
   }
 
   /** File one analysis recommendation as a live signal through the risk gates,
-   *  then refetch the detail so the "Signal #N" badge replaces the button. */
-  protected createSignal(rec: MarketAnalysisRecommendationDto, index: number): void {
+   *  then refetch the detail so the "Signal #N" badge replaces the button.
+   *
+   *  `overrides` is what the editor emitted. It always carries the geometry the
+   *  operator is looking at — derived levels for a thin-framework rec, which the
+   *  server cannot reconstruct, or their own edits — so it is sent whole rather
+   *  than diffed against the stored rec. */
+  protected createSignal(index: number, overrides: RecFileOverrides): void {
     if (this.creatingIndex() !== null) return;
-    const id = this.detail()?.llmInvocationId;
-    if (!id) return;
+    const d = this.detail();
+    const id = d?.llmInvocationId;
+    const seed = this.editingRec()?.seed;
+    if (!id || !seed) return;
     this.creatingIndex.set(index);
+    this.createError.set(null);
     this.marketData
       .persistSignalFromAnalysis(id, index, {
-        entryPrice: rec.entryPrice,
-        stopLoss: rec.stopLoss,
-        takeProfit: rec.takeProfit,
+        entryPrice: seed.entryPrice,
+        stopLoss: seed.stopLoss,
+        takeProfit: seed.takeProfit,
+        ...overrides,
       })
       .subscribe({
         next: (res) => {
           this.creatingIndex.set(null);
           if (res?.status && res.data != null) {
+            this.editingIndex.set(null);
             this.notify.success(`Signal #${res.data} created`);
             // Refetch so filedSignals + status reflect the new signal.
             this.marketData.getAnalysisConversation(id).subscribe({
@@ -1026,11 +1094,17 @@ export class ConversationsPageComponent {
               },
             });
           } else {
+            // Kept on the editor as well as the toast: a rejected level is
+            // something the operator fixes in the form that is still open.
+            this.createError.set(
+              res?.message || 'Could not create signal from this recommendation.',
+            );
             this.notify.error(res?.message || 'Could not create signal from this recommendation.');
           }
         },
         error: (err) => {
           this.creatingIndex.set(null);
+          this.createError.set(err?.message ?? 'Failed to create signal.');
           this.notify.error(err?.message ?? 'Failed to create signal.');
         },
       });

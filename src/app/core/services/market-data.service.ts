@@ -20,6 +20,25 @@ import {
   SignalExposureConfigDto,
   UpdateSignalExposureConfigRequest,
 } from '@core/api/api.types';
+import type { RecFileOverrides } from '@shared/components/rec-file-editor/rec-file-editor.component';
+
+/**
+ * Shape the operator's recommendation edits for the wire. Both promote endpoints
+ * take the same body, and both read a MISSING field as "keep the model's value"
+ * — so an untouched field is omitted rather than sent as null, which would be
+ * indistinguishable from an edit that cleared it.
+ */
+function recOverrideBody(o: RecFileOverrides): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (o.entryPrice !== undefined) body['entryPrice'] = o.entryPrice;
+  if (o.stopLoss !== undefined) body['stopLoss'] = o.stopLoss;
+  if (o.takeProfit !== undefined) body['takeProfit'] = o.takeProfit;
+  if (o.direction !== undefined) body['direction'] = o.direction;
+  if (o.confidence !== undefined) body['confidence'] = o.confidence;
+  if (o.expiryMinutes !== undefined) body['expiryMinutes'] = o.expiryMinutes;
+  if (o.note !== undefined) body['note'] = o.note;
+  return body;
+}
 
 @Injectable({ providedIn: 'root' })
 export class MarketDataService {
@@ -191,20 +210,18 @@ export class MarketDataService {
   persistSignalFromAnalysis(
     llmInvocationId: number,
     recommendationIndex = 0,
-    geometry?: { entryPrice?: number | null; stopLoss?: number | null; takeProfit?: number | null },
+    geometry?: RecFileOverrides,
   ): Observable<ResponseData<number>> {
     const qs = new URLSearchParams({ recommendationIndex: String(recommendationIndex) }).toString();
     // Send the modal-displayed (derived) entry/SL/TP so thin-framework recs —
     // whose raw LLM response carries a null entry — persist exactly what the
-    // operator saw. The server falls back to its re-parse when omitted.
-    const body = geometry
-      ? {
-          entryPrice: geometry.entryPrice ?? null,
-          stopLoss: geometry.stopLoss ?? null,
-          takeProfit: geometry.takeProfit ?? null,
-        }
-      : {};
-    return this.api.post(`/market-data/analyze/${llmInvocationId}/persist-signal?${qs}`, body);
+    // operator saw. The same three fields carry the operator's edits when the
+    // rec was adjusted before filing; the server falls back to its re-parse for
+    // anything omitted.
+    return this.api.post(
+      `/market-data/analyze/${llmInvocationId}/persist-signal?${qs}`,
+      geometry ? recOverrideBody(geometry) : {},
+    );
   }
 
   /**
@@ -259,9 +276,18 @@ export class MarketDataService {
   }
 
   /** File a chat-generated "recommend" turn as a live trade signal through the
-   *  risk gates. Operator-gated. Returns the full refreshed thread. */
-  fileFollowUpSignal(followUpId: number): Observable<ResponseData<SpotAnalysisFollowUpTurnDto[]>> {
-    return this.api.post(`/market-data/analyze/follow-up/${followUpId}/file-signal`, {});
+   *  risk gates. Operator-gated. Returns the full refreshed thread.
+   *
+   *  `overrides` carries the operator's edits to the model's proposal — omit it
+   *  (or pass an empty object) to file the recommendation exactly as written. */
+  fileFollowUpSignal(
+    followUpId: number,
+    overrides?: RecFileOverrides,
+  ): Observable<ResponseData<SpotAnalysisFollowUpTurnDto[]>> {
+    return this.api.post(
+      `/market-data/analyze/follow-up/${followUpId}/file-signal`,
+      overrides ? recOverrideBody(overrides) : {},
+    );
   }
 
   /**
