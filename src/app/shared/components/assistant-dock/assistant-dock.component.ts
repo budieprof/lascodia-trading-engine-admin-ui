@@ -16,7 +16,6 @@ import { AnalysisChatComponent } from '@shared/components/analysis-chat/analysis
 import { AssistantDockService } from '@core/assistant/assistant-dock.service';
 import { AssistantService } from '@core/assistant/assistant.service';
 import { PageContextService } from '@core/assistant/page-context.service';
-import { WallModeService } from '@core/wall-mode/wall-mode.service';
 
 /**
  * The console's assistant: a bubble on every page that opens a chat which knows where you
@@ -28,6 +27,14 @@ import { WallModeService } from '@core/wall-mode/wall-mode.service';
  * sidebar and every modal, so it never floats over a focused task; the open drawer sits at
  * 1250, above modals because the operator opened it deliberately, and below toasts so an
  * error still reaches them.</p>
+ *
+ * <p>Shown in wall mode too — do not re-add a `wallMode` guard here. It was hidden there on
+ * the assumption that wall mode is a non-interactive kiosk view, and that assumption was
+ * simply wrong: wall mode requests fullscreen and collapses the sidebar, nothing more, so
+ * the operator is still working normally. The bubble was therefore the one control that
+ * vanished, which read as the assistant being missing rather than suppressed — and it cost
+ * an operator, then a debugging session, to find. If a genuinely non-interactive display
+ * mode ever lands, gate on that, not on wall mode.</p>
  */
 @Component({
   selector: 'app-assistant-dock',
@@ -35,110 +42,108 @@ import { WallModeService } from '@core/wall-mode/wall-mode.service';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [AnalysisChatComponent],
   template: `
-    @if (!wallMode.enabled()) {
-      @if (!dock.open()) {
-        <button
-          type="button"
-          class="fab"
-          (click)="openDock()"
-          aria-label="Open assistant"
-          [attr.aria-expanded]="false"
-          title="Ask the assistant about this page (⌘/)"
-        >
-          <span class="fab-glyph" aria-hidden="true">✦</span>
-          <span class="fab-label">Ask</span>
-        </button>
-      } @else {
-        <aside
-          class="dock"
-          role="dialog"
-          aria-modal="false"
-          aria-label="Assistant"
-          [class.maximised]="dock.maximised()"
-          [style.width.px]="dock.maximised() ? null : dock.width()"
-          #dockEl
-        >
-          <div
-            class="resize-handle"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize assistant"
-            (mousedown)="startResize($event)"
-          ></div>
+    @if (!dock.open()) {
+      <button
+        type="button"
+        class="fab"
+        (click)="openDock()"
+        aria-label="Open assistant"
+        [attr.aria-expanded]="false"
+        title="Ask the assistant about this page (⌘/)"
+      >
+        <span class="fab-glyph" aria-hidden="true">✦</span>
+        <span class="fab-label">Ask</span>
+      </button>
+    } @else {
+      <aside
+        class="dock"
+        role="dialog"
+        aria-modal="false"
+        aria-label="Assistant"
+        [class.maximised]="dock.maximised()"
+        [style.width.px]="dock.maximised() ? null : dock.width()"
+        #dockEl
+      >
+        <div
+          class="resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize assistant"
+          (mousedown)="startResize($event)"
+        ></div>
 
-          <header class="dock-head">
-            <div class="dock-title">
-              <span class="dock-glyph" aria-hidden="true">✦</span>
-              <span>Assistant</span>
-              @if (contextLabel(); as label) {
-                <span class="ctx" [title]="'The assistant can see this page'">{{ label }}</span>
-              }
-            </div>
-            <div class="dock-actions">
-              <button
-                type="button"
-                class="icon"
-                (click)="newChat()"
-                title="New chat"
-                aria-label="New chat"
-              >
-                ✚
-              </button>
-              @if (dock.conversationId(); as id) {
-                <button
-                  type="button"
-                  class="icon"
-                  (click)="openInConversations(id)"
-                  title="Open in Conversations"
-                  aria-label="Open in Conversations"
-                >
-                  ↗
-                </button>
-              }
-              <button
-                type="button"
-                class="icon"
-                (click)="dock.toggleMaximised()"
-                [title]="dock.maximised() ? 'Restore' : 'Maximise'"
-                [attr.aria-label]="dock.maximised() ? 'Restore' : 'Maximise'"
-              >
-                {{ dock.maximised() ? '❐' : '⛶' }}
-              </button>
-              <button
-                type="button"
-                class="icon"
-                (click)="dock.close()"
-                title="Close (Esc)"
-                aria-label="Close"
-              >
-                ✕
-              </button>
-            </div>
-          </header>
-
-          <div class="dock-body">
-            @if (starting()) {
-              <div class="dock-state">Opening a session…</div>
-            } @else if (startError()) {
-              <div class="dock-state error">
-                {{ startError() }}
-                <button type="button" class="retry" (click)="newChat()">Try again</button>
-              </div>
-            } @else if (dock.conversationId(); as id) {
-              <app-analysis-chat
-                class="dock-chat"
-                [llmInvocationId]="id"
-                [fillHeight]="true"
-                [showMonitors]="false"
-                [showIdBar]="false"
-                [placeholder]="'Ask about this page, or anything in the console…'"
-                [emptyHint]="emptyHint()"
-                [contextProvider]="contextProvider"
-              />
+        <header class="dock-head">
+          <div class="dock-title">
+            <span class="dock-glyph" aria-hidden="true">✦</span>
+            <span>Assistant</span>
+            @if (contextLabel(); as label) {
+              <span class="ctx" [title]="'The assistant can see this page'">{{ label }}</span>
             }
           </div>
-        </aside>
-      }
+          <div class="dock-actions">
+            <button
+              type="button"
+              class="icon"
+              (click)="newChat()"
+              title="New chat"
+              aria-label="New chat"
+            >
+              ✚
+            </button>
+            @if (dock.conversationId(); as id) {
+              <button
+                type="button"
+                class="icon"
+                (click)="openInConversations(id)"
+                title="Open in Conversations"
+                aria-label="Open in Conversations"
+              >
+                ↗
+              </button>
+            }
+            <button
+              type="button"
+              class="icon"
+              (click)="dock.toggleMaximised()"
+              [title]="dock.maximised() ? 'Restore' : 'Maximise'"
+              [attr.aria-label]="dock.maximised() ? 'Restore' : 'Maximise'"
+            >
+              {{ dock.maximised() ? '❐' : '⛶' }}
+            </button>
+            <button
+              type="button"
+              class="icon"
+              (click)="dock.close()"
+              title="Close (Esc)"
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
+        </header>
+
+        <div class="dock-body">
+          @if (starting()) {
+            <div class="dock-state">Opening a session…</div>
+          } @else if (startError()) {
+            <div class="dock-state error">
+              {{ startError() }}
+              <button type="button" class="retry" (click)="newChat()">Try again</button>
+            </div>
+          } @else if (dock.conversationId(); as id) {
+            <app-analysis-chat
+              class="dock-chat"
+              [llmInvocationId]="id"
+              [fillHeight]="true"
+              [showMonitors]="false"
+              [showIdBar]="false"
+              [placeholder]="'Ask about this page, or anything in the console…'"
+              [emptyHint]="emptyHint()"
+              [contextProvider]="contextProvider"
+            />
+          }
+        </div>
+      </aside>
     }
   `,
   styles: [
@@ -334,7 +339,6 @@ import { WallModeService } from '@core/wall-mode/wall-mode.service';
 })
 export class AssistantDockComponent {
   protected readonly dock = inject(AssistantDockService);
-  protected readonly wallMode = inject(WallModeService);
   private readonly assistant = inject(AssistantService);
   private readonly pageContext = inject(PageContextService);
   private readonly router = inject(Router);

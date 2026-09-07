@@ -12,6 +12,7 @@ import { CommandPaletteComponent } from '@shared/components/command-palette/comm
 import { KeyboardHelpComponent } from '@shared/components/keyboard-help/keyboard-help.component';
 import { KeyboardShortcutsService } from '@core/keyboard/keyboard-shortcuts.service';
 import { WallModeService } from '@core/wall-mode/wall-mode.service';
+import { AssistantDockService } from '@core/assistant/assistant-dock.service';
 import { AssistantDockComponent } from '@shared/components/assistant-dock/assistant-dock.component';
 import { FooterVersionPillComponent } from './footer-version-pill/footer-version-pill.component';
 
@@ -178,6 +179,7 @@ export class LayoutComponent {
   sidebarCollapsed = signal(false);
   mobileNavOpen = signal(false);
   readonly wallMode = inject(WallModeService);
+  private readonly assistantDock = inject(AssistantDockService);
   // Inject eagerly so the global keydown listener starts on layout init.
   private readonly _shortcuts = inject(KeyboardShortcutsService);
   private readonly router = inject(Router);
@@ -218,6 +220,11 @@ export class LayoutComponent {
    */
   @HostListener('document:keydown.escape')
   onEscape(): void {
+    // Esc belongs to the innermost surface the operator has open. The assistant drawer is
+    // a document-level listener too, and this handler is registered first (parent before
+    // child), so without this guard one Esc both closed the drawer AND dropped the screen
+    // out of wall mode.
+    if (this.assistantDock.open()) return;
     if (this.wallMode.enabled()) this.wallMode.disable();
   }
 }

@@ -1,9 +1,14 @@
 import { Injectable, signal } from '@angular/core';
 
 /**
- * Toggles a kiosk-style "wall mode" — hides the sidebar, header, and
- * breadcrumbs so the active page fills the screen for display on a
- * trading floor wall / control-room monitor.
+ * Toggles "wall mode" for display on a trading floor wall / control-room monitor.
+ *
+ * <p>NOTE ON SCOPE — this hides nothing. It requests browser fullscreen and auto-collapses
+ * the sidebar (see `LayoutComponent`); the header, breadcrumbs and the collapsed sidebar all
+ * stay on screen so the operator keeps navigation. It once hid that chrome, and this comment
+ * outlived the change: it later cost a debugging session, because a screenshot showing the
+ * header was read as proof that wall mode was OFF. If you narrow or widen what wall mode
+ * does, correct this paragraph in the same commit.</p>
  *
  * Persisted to localStorage so a planned refresh (or accidental F5)
  * doesn't kick the screen back into windowed-app mode.
