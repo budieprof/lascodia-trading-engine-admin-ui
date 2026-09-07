@@ -79,8 +79,10 @@ interface ParsedChatRec {
   asOfUtc: string;
   action: 'Buy' | 'Sell';
   entryPrice: number;
-  stopLoss: number;
-  takeProfit: number;
+  /* Nullable: the engine allows a filed rec to carry no target (Tier-2 can
+     supply one), and a card must still render the trade that exists. */
+  stopLoss: number | null;
+  takeProfit: number | null;
   confidencePct: number | null;
   riskRewardRatio: number | null;
   rationale: string;
@@ -270,8 +272,8 @@ interface ParsedChatRec {
                     </div>
                     <div class="rec-levels">
                       <span class="lvl entry">Entry {{ rec.entryPrice }}</span>
-                      <span class="lvl sl">SL {{ rec.stopLoss }}</span>
-                      <span class="lvl tp">TP {{ rec.takeProfit }}</span>
+                      <span class="lvl sl">SL {{ rec.stopLoss ?? '—' }}</span>
+                      <span class="lvl tp">TP {{ rec.takeProfit ?? '—' }}</span>
                     </div>
                     <app-spot-rec-chart
                       [symbol]="rec.symbol"
@@ -1400,8 +1402,8 @@ export class AnalysisChatComponent {
         asOfUtc?: string;
         action?: string;
         entryPrice?: number;
-        stopLoss?: number;
-        takeProfit?: number;
+        stopLoss?: number | null;
+        takeProfit?: number | null;
         confidence?: number;
         riskRewardRatio?: number | null;
         rationale?: string;
@@ -1418,21 +1420,18 @@ export class AnalysisChatComponent {
         } | null;
       };
       const action = r.action === 'Buy' || r.action === 'Sell' ? r.action : null;
-      if (
-        action &&
-        r.symbol &&
-        typeof r.entryPrice === 'number' &&
-        typeof r.stopLoss === 'number' &&
-        typeof r.takeProfit === 'number'
-      ) {
+      // Entry is the only level a card cannot be drawn without. Requiring SL and
+      // TP too meant a filed rec whose target the operator cleared fell back to
+      // a raw-JSON blob — the card vanished at exactly the moment it mattered.
+      if (action && r.symbol && typeof r.entryPrice === 'number') {
         parsed = {
           symbol: r.symbol,
           timeframe: r.timeframe || 'H1',
           asOfUtc: r.asOfUtc || new Date().toISOString(),
           action,
           entryPrice: r.entryPrice,
-          stopLoss: r.stopLoss,
-          takeProfit: r.takeProfit,
+          stopLoss: typeof r.stopLoss === 'number' ? r.stopLoss : null,
+          takeProfit: typeof r.takeProfit === 'number' ? r.takeProfit : null,
           // `?? 0` printed "conf 0%" for a rec that simply carried no confidence —
           // a fabricated value indistinguishable from a genuine zero. Null means unknown
           // and renders as "conf —".
@@ -1448,8 +1447,8 @@ export class AnalysisChatComponent {
               label: `${action} ${r.symbol}`,
               action,
               entryPrice: r.entryPrice,
-              stopLoss: r.stopLoss,
-              takeProfit: r.takeProfit,
+              stopLoss: typeof r.stopLoss === 'number' ? r.stopLoss : null,
+              takeProfit: typeof r.takeProfit === 'number' ? r.takeProfit : null,
             },
           ],
         };
