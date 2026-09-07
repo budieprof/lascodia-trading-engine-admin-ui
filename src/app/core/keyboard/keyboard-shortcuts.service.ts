@@ -89,6 +89,14 @@ export class KeyboardShortcutsService implements OnDestroy {
         group: 'Global',
       },
       {
+        keys: '⌘/ / Ctrl+/',
+        label: 'Ask the assistant about this page',
+        action: () => {
+          /* the assistant dock owns this */
+        },
+        group: 'Global',
+      },
+      {
         keys: '?',
         label: 'Show keyboard shortcuts',
         action: () => this.toggleHelp(),

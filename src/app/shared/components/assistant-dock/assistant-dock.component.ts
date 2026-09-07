@@ -43,9 +43,10 @@ import { WallModeService } from '@core/wall-mode/wall-mode.service';
           (click)="openDock()"
           aria-label="Open assistant"
           [attr.aria-expanded]="false"
-          title="Assistant (⌘/)"
+          title="Ask the assistant about this page (⌘/)"
         >
           <span class="fab-glyph" aria-hidden="true">✦</span>
+          <span class="fab-label">Ask</span>
         </button>
       } @else {
         <aside
@@ -145,21 +146,28 @@ import { WallModeService } from '@core/wall-mode/wall-mode.service';
       /* ── Collapsed bubble ────────────────────────────────────────────────
          90 keeps it under the sidebar (100) and every modal (998+): a bubble
          hovering over a modal backdrop is noise during a focused task. */
+      /* A labelled pill rather than a bare glyph. An unlabelled 52px circle in the
+         corner of a console this dense is genuinely easy to miss — the first
+         operator to use it could not find it. */
       .fab {
         position: fixed;
         right: var(--space-5);
         bottom: calc(var(--space-5) + env(safe-area-inset-bottom, 0px));
         z-index: 90;
-        width: 52px;
-        height: 52px;
-        border-radius: 50%;
+        height: 48px;
+        padding: 0 var(--space-4) 0 var(--space-3);
+        border-radius: 24px;
         border: 1px solid var(--border);
         background: var(--accent);
         color: #fff;
         cursor: pointer;
         box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
-        display: grid;
-        place-items: center;
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        font: inherit;
+        font-weight: var(--font-semibold);
+        font-size: var(--text-sm);
         transition:
           transform var(--dur-base, 0.2s) var(--ease-out-soft, ease),
           box-shadow var(--dur-base, 0.2s) var(--ease-out-soft, ease);
@@ -169,8 +177,23 @@ import { WallModeService } from '@core/wall-mode/wall-mode.service';
         box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
       }
       .fab-glyph {
-        font-size: 20px;
+        font-size: 18px;
         line-height: 1;
+      }
+      .fab-label {
+        white-space: nowrap;
+      }
+      /* On a phone the label costs more than it earns; the icon alone returns. */
+      @media (max-width: 560px) {
+        .fab {
+          width: 48px;
+          padding: 0;
+          border-radius: 50%;
+          justify-content: center;
+        }
+        .fab-label {
+          display: none;
+        }
       }
 
       /* ── Expanded drawer ─────────────────────────────────────────────────
