@@ -24,7 +24,13 @@ export class SparklineComponent {
   height = input('24px');
 
   chartOptions = computed<EChartsOption>(() => ({
-    grid: { top: 0, right: 0, bottom: 0, left: 0 },
+    // containLabel MUST be false. ECharts 6 flipped its default to true, and it
+    // then reserves room for axis labels even though both axes are show:false —
+    // measured live at 36px on the left and 19px at the bottom, which left an
+    // 88x3 plot area inside a 124x22 canvas. Every sparkline in the console
+    // collapsed into a 3px horizontal smear at the top, at any data range.
+    // With it off the plot area is the full canvas and the line uses ~92% of it.
+    grid: { top: 0, right: 0, bottom: 0, left: 0, containLabel: false },
     xAxis: { type: 'category', show: false, data: this.data().map((_, i) => i) },
     // scale:true is essential — ECharts' value axis defaults to scale:false,
     // which forces 0 onto the axis. For FX prices (~1.16) a real 20-pip move
