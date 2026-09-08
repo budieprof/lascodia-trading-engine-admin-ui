@@ -441,6 +441,21 @@ import { ToggleComponent } from '@shared/components/ui/toggle/toggle.component';
                           />
                         </label>
 
+                        <label
+                          class="fld"
+                          title="Round-trip broker cost per lot, in account currency. Subtracted from a rung's reward so a win recovers the deficit net of the commission the rung itself pays. Measure it from recent closes; blank models no cost."
+                        >
+                          <span>Cost /lot</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max="10000"
+                            step="0.5"
+                            [(ngModel)]="ef.rungCostPerLotOverride"
+                            placeholder="0"
+                          />
+                        </label>
+
                         <div class="edit-actions">
                           <button type="button" (click)="saveOverrides(s)" [disabled]="saving()">
                             Save
@@ -917,11 +932,13 @@ export class MartingalePageComponent {
     targetProfitROverride: number | string | null;
     maxStakePctEquityOverride: number | string | null;
     maxChainAgeHoursOverride: number | string | null;
+    rungCostPerLotOverride: number | string | null;
   } = {
     maxDepthOverride: '',
     targetProfitROverride: '',
     maxStakePctEquityOverride: '',
     maxChainAgeHoursOverride: '',
+    rungCostPerLotOverride: '',
   };
 
   /** Mirrors pf.maxDepth so the projection recomputes as the operator types. */
@@ -1116,7 +1133,8 @@ export class MartingalePageComponent {
       s.maxDepthOverride != null ||
       s.targetProfitROverride != null ||
       s.maxStakePctEquityOverride != null ||
-      s.maxChainAgeHoursOverride != null
+      s.maxChainAgeHoursOverride != null ||
+      s.rungCostPerLot != null
     );
   }
 
@@ -1129,6 +1147,7 @@ export class MartingalePageComponent {
       targetProfitROverride: s.targetProfitROverride ?? '',
       maxStakePctEquityOverride: s.maxStakePctEquityOverride ?? '',
       maxChainAgeHoursOverride: s.maxChainAgeHoursOverride ?? '',
+      rungCostPerLotOverride: s.rungCostPerLot ?? '',
     };
   }
 
@@ -1142,6 +1161,7 @@ export class MartingalePageComponent {
       targetProfitROverride: toNullableNumber(this.ef.targetProfitROverride),
       maxStakePctEquityOverride: toNullableNumber(this.ef.maxStakePctEquityOverride),
       maxChainAgeHoursOverride: toNullableNumber(this.ef.maxChainAgeHoursOverride),
+      rungCostPerLotOverride: toNullableNumber(this.ef.rungCostPerLotOverride),
     });
   }
 
@@ -1151,6 +1171,7 @@ export class MartingalePageComponent {
       targetProfitROverride: null,
       maxStakePctEquityOverride: null,
       maxChainAgeHoursOverride: null,
+      rungCostPerLotOverride: null,
     });
   }
 
@@ -1165,6 +1186,7 @@ export class MartingalePageComponent {
       targetProfitROverride: number | null;
       maxStakePctEquityOverride: number | null;
       maxChainAgeHoursOverride: number | null;
+      rungCostPerLotOverride: number | null;
     },
   ): void {
     const id = this.accountId();
@@ -1216,17 +1238,30 @@ export class MartingalePageComponent {
 
     this.saving.set(true);
     this.error.set(null);
-    this.martingale.setSymbol(id, symbol.symbol, { enabled, reason }).subscribe({
-      next: () => {
-        this.saving.set(false);
-        this.load();
-      },
-      error: (e: { message?: string }) => {
-        this.error.set(e?.message ?? 'Could not update the ladder.');
-        this.saving.set(false);
-        this.load();
-      },
-    });
+    // The PUT is a full replace, so every override has to be re-sent or the toggle silently
+    // wipes them. Flipping a ladder off and on again used to reset the depth cap, stake ceiling
+    // and age cap to the profile defaults without saying so.
+    this.martingale
+      .setSymbol(id, symbol.symbol, {
+        enabled,
+        reason,
+        maxDepthOverride: symbol.maxDepthOverride,
+        targetProfitROverride: symbol.targetProfitROverride,
+        maxStakePctEquityOverride: symbol.maxStakePctEquityOverride,
+        maxChainAgeHoursOverride: symbol.maxChainAgeHoursOverride,
+        rungCostPerLotOverride: symbol.rungCostPerLot,
+      })
+      .subscribe({
+        next: () => {
+          this.saving.set(false);
+          this.load();
+        },
+        error: (e: { message?: string }) => {
+          this.error.set(e?.message ?? 'Could not update the ladder.');
+          this.saving.set(false);
+          this.load();
+        },
+      });
   }
 }
 

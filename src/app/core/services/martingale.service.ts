@@ -15,6 +15,13 @@ export interface MartingaleSymbolDto {
   maxStakePctEquityOverride: number | null;
   maxChainAgeHoursOverride: number | null;
 
+  /**
+   * Round-trip broker cost per lot, in account currency. Not an override of a profile default —
+   * there is no profile field for it, because it is a property of the broker rather than of the
+   * risk policy. Null means no cost is modelled.
+   */
+  rungCostPerLot: number | null;
+
   effectiveMaxDepth: number;
   effectiveTargetProfitR: number;
   effectiveMaxStakePctEquity: number;
@@ -101,6 +108,8 @@ export interface SetMartingaleSymbolRequest {
   targetProfitROverride?: number | null;
   maxStakePctEquityOverride?: number | null;
   maxChainAgeHoursOverride?: number | null;
+  /** Round-trip broker cost per lot, account currency. Null clears it. */
+  rungCostPerLotOverride?: number | null;
   /** Required when enabling. */
   reason?: string | null;
 }
