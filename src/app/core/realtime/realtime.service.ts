@@ -73,6 +73,9 @@ export const REALTIME_EVENTS = [
   'analysisMonitorFired',
   'analysisMonitorInvalidated',
   'analysisMonitorChanged',
+  // A fire nobody acknowledged in time. Without this in the allowlist the client
+  // silently drops it, which is the one event where silence is the failure.
+  'analysisMonitorEscalated',
   // ── Live price stream, room-scoped to `price:{SYMBOL}` (PriceUpdatedRealtimeRelay,
   //    throttled ~1 Hz). Only reaches clients that called SubscribePrice — used by
   //    the spot-rec chart's live-price marker. ──

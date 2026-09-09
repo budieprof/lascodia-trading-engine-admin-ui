@@ -3685,7 +3685,8 @@ export interface AnalysisFiledSignalDto {
  *  /market-data/analysis-monitors endpoints. */
 export interface AnalysisMonitorDto {
   id: number;
-  anchorLlmInvocationId: number;
+  /** Null for a cockpit-created monitor, which belongs to no conversation. */
+  anchorLlmInvocationId?: number | null;
   symbol: string;
   timeframe: string;
   /** The operator's request, verbatim. */
@@ -3746,6 +3747,57 @@ export interface AnalysisMonitorDto {
   eventCount?: number;
   /** Trade signals filed by this monitor's fires. */
   filedSignalCount?: number;
+
+  // ── Subject: what this monitor watches ──
+  /** 'Symbol' | 'Account' | 'Portfolio' | 'Strategy' | 'Signal' | 'Position' | 'Sweep' | 'Fleet' | 'Engine'. */
+  subjectKind?: string;
+  /** Identifier within the kind — a symbol, an entity id, or empty for singletons. */
+  subjectRef?: string;
+  /** Wire form: 'symbol:EURUSD', 'account:17', 'portfolio'. */
+  subject?: string;
+  /** Human label: 'EURUSD', 'account 17', 'portfolio'. */
+  subjectLabel?: string;
+
+  // ── Grouping ──
+  /** Set when this monitor was created as one of a template fan-out. */
+  monitorGroupId?: string | null;
+  templateId?: number | null;
+
+  // ── Delivery and acknowledgement ──
+  /** Channels this monitor's fires reach: 'chat', 'bell', 'push', 'webhook:{name}'. */
+  deliverTo?: string[];
+  requiresAck?: boolean;
+  ackEscalateAfterSeconds?: number;
+  /** Set while a fire is waiting to be acknowledged. */
+  awaitingAckSinceUtc?: string | null;
+  lastAckedAtUtc?: string | null;
+  lastAckedBy?: string | null;
+
+  // ── Actions ──
+  /** Highest action tier permitted: 0 notify, 1 propose, 2 state-changing. */
+  maxActionTier?: number;
+  /** Who authorised tier-2 actions and why; null when it has none. */
+  actionAuthorizationJson?: string | null;
+  /** True when state-changing actions report intent instead of applying it. */
+  dryRunActions?: boolean;
+
+  // ── Evaluation tuning + cost ──
+  /** How stale a tick may be before price metrics report unavailable. */
+  maxPriceAgeSeconds?: number;
+  llmSpendUsd?: number;
+  /** Spend ceiling; past it the monitor stops rather than billing indefinitely. */
+  llmSpendCapUsd?: number;
+
+  /** Terminal outcome assessment, written when the monitor ends. */
+  outcomeJson?: string | null;
+
+  // ── Server-rendered explanation (never parse the spec JSON client-side) ──
+  /** The trigger in English, with each metric's current value inline. */
+  triggerExplanation?: string | null;
+  /** The invalidation condition in English, when there is one. */
+  invalidationExplanation?: string | null;
+  /** Non-fatal warnings the spec produced at create time. */
+  specWarnings?: string[];
 }
 
 /** Structured multi-week → multi-month posture parsed from the macro

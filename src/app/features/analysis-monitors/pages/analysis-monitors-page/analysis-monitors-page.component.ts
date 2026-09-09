@@ -21,6 +21,8 @@ import type {
   AnalysisMonitorBoardCounters,
   AnalysisMonitorDetail,
 } from '@features/analysis-monitors/analysis-monitors.types';
+import { MonitorBuilderComponent } from '@features/analysis-monitors/components/monitor-builder/monitor-builder.component';
+import { MonitorTemplatesComponent } from '@features/analysis-monitors/components/monitor-templates/monitor-templates.component';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
@@ -75,6 +77,8 @@ const STATUS_FILTERS = [
     MetricCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
+    MonitorBuilderComponent,
+    MonitorTemplatesComponent,
   ],
   template: `
     <div class="page">
@@ -83,6 +87,12 @@ const STATUS_FILTERS = [
         subtitle="Live market watches created from the LLM chat — what is armed, what fired, and why"
       >
         <a routerLink="/conversations" class="btn btn-secondary">Conversations</a>
+        <button type="button" class="btn btn-secondary" (click)="templatesOpen.set(true)">
+          Templates
+        </button>
+        <button type="button" class="btn btn-primary" (click)="openBuilder(null)">
+          New monitor
+        </button>
         <button
           type="button"
           class="btn btn-secondary"
@@ -188,8 +198,7 @@ const STATUS_FILTERS = [
           <div class="data-table-card empty-card">
             <p class="empty-title">No monitors match</p>
             <p class="muted small">
-              Adjust the filters, or ask the chat to watch something — monitors are created from a
-              conversation.
+              Adjust the filters, create one here, or ask the chat to watch something.
             </p>
           </div>
         } @else {
@@ -215,8 +224,12 @@ const STATUS_FILTERS = [
                     (click)="toggleDetail(m.id)"
                   >
                     <td>
-                      <span class="mono sym">{{ m.symbol }}</span>
-                      <span class="tf">{{ m.timeframe }}</span>
+                      <span class="mono sym">{{ m.subjectLabel || m.symbol }}</span>
+                      @if (m.subjectKind && m.subjectKind !== 'Symbol') {
+                        <span class="tag subject">{{ m.subjectKind }}</span>
+                      } @else {
+                        <span class="tf">{{ m.timeframe }}</span>
+                      }
                       @if (m.origin === 'hunter') {
                         <span class="tag hunter">hunter</span>
                       }
@@ -228,8 +241,40 @@ const STATUS_FILTERS = [
                       @if ((m.rearmDepth ?? 0) > 0) {
                         <span class="tag depth" title="Re-arm depth">↻{{ m.rearmDepth }}</span>
                       }
+                      @if (m.monitorGroupId) {
+                        <span class="tag group" [title]="'Fan-out group ' + m.monitorGroupId">
+                          group
+                        </span>
+                      }
+                      <!-- A monitor that can change live trading state must never be
+                           something you have to open a row to discover. -->
+                      @if ((m.maxActionTier ?? 0) >= 2) {
+                        <span
+                          class="tag tier2"
+                          [class.dry]="m.dryRunActions"
+                          [title]="
+                            m.dryRunActions
+                              ? 'Authorised to change live state, currently dry-run'
+                              : 'AUTHORISED TO CHANGE LIVE TRADING STATE'
+                          "
+                        >
+                          {{ m.dryRunActions ? 'tier 2 · dry-run' : 'tier 2 · live' }}
+                        </span>
+                      }
+                      @if (m.awaitingAckSinceUtc) {
+                        <span class="tag ack" title="A fire is waiting to be acknowledged">
+                          needs ack
+                        </span>
+                      }
                     </td>
-                    <td class="intent" [title]="m.intentText">{{ m.intentText }}</td>
+                    <td class="intent" [title]="m.triggerExplanation || m.intentText">
+                      <span class="intent-text">{{ m.intentText }}</span>
+                      <!-- The English rendering, with live readings inline, is what
+                           actually answers "why is this quiet?" -->
+                      @if (m.triggerExplanation) {
+                        <span class="explain">{{ m.triggerExplanation }}</span>
+                      }
+                    </td>
                     <td>
                       <span class="tag mode" [class.llm]="m.evaluationMode !== 'Deterministic'">{{
                         m.evaluationMode === 'Deterministic' ? 'live check' : 'LLM'
@@ -339,14 +384,63 @@ const STATUS_FILTERS = [
                             <div class="detail-cols">
                               <section class="det-block">
                                 <h4>Trigger</h4>
-                                <pre class="spec">{{ pretty(det.monitor.triggerSpecJson) }}</pre>
+                                @if (det.monitor.triggerExplanation) {
+                                  <p class="explain-lead">{{ det.monitor.triggerExplanation }}</p>
+                                }
+                                @if (det.monitor.specWarnings?.length) {
+                                  @for (w of det.monitor.specWarnings; track w) {
+                                    <p class="spec-warn">{{ w }}</p>
+                                  }
+                                }
+                                <details>
+                                  <summary class="muted small">Raw spec</summary>
+                                  <pre class="spec">{{ pretty(det.monitor.triggerSpecJson) }}</pre>
+                                </details>
                                 <h4>Action</h4>
                                 <pre class="spec">{{ pretty(det.monitor.actionSpecJson) }}</pre>
                                 @if (det.monitor.invalidationSpecJson) {
                                   <h4>Invalidation (thesis break)</h4>
-                                  <pre class="spec">{{
-                                    pretty(det.monitor.invalidationSpecJson)
-                                  }}</pre>
+                                  @if (det.monitor.invalidationExplanation) {
+                                    <p class="explain-lead">
+                                      {{ det.monitor.invalidationExplanation }}
+                                    </p>
+                                  }
+                                  <details>
+                                    <summary class="muted small">Raw spec</summary>
+                                    <pre class="spec">{{
+                                      pretty(det.monitor.invalidationSpecJson)
+                                    }}</pre>
+                                  </details>
+                                }
+
+                                <!-- Tier-2 authorisation: who allowed this to act, and a
+                                     one-click way to take it back. -->
+                                @if ((det.monitor.maxActionTier ?? 0) >= 2) {
+                                  <div
+                                    class="tier2-panel"
+                                    [class.live]="!det.monitor.dryRunActions"
+                                  >
+                                    <h4>Authorised to change live state</h4>
+                                    <p class="mono small">
+                                      {{ det.monitor.actionAuthorizationJson }}
+                                    </p>
+                                    <p class="small">
+                                      {{
+                                        det.monitor.dryRunActions
+                                          ? 'Currently dry-run: it reports what it would do and changes nothing.'
+                                          : 'ACTING FOR REAL on every fire.'
+                                      }}
+                                    </p>
+                                    <button
+                                      type="button"
+                                      class="btn btn-secondary sm"
+                                      (click)="
+                                        disarmActions(det.monitor.id); $event.stopPropagation()
+                                      "
+                                    >
+                                      Disarm actions
+                                    </button>
+                                  </div>
                                 }
                                 <dl class="facts">
                                   <dt>Created</dt>
@@ -549,6 +643,21 @@ const STATUS_FILTERS = [
         }
       }
     </div>
+
+    @if (builderOpen()) {
+      <app-monitor-builder
+        [seed]="builderSeed()"
+        (closed)="builderOpen.set(false)"
+        (created)="onMonitorCreated()"
+      />
+    }
+
+    @if (templatesOpen()) {
+      <app-monitor-templates
+        (closed)="templatesOpen.set(false)"
+        (instantiated)="onMonitorCreated()"
+      />
+    }
   `,
   styles: [
     `
@@ -775,6 +884,74 @@ const STATUS_FILTERS = [
         background: rgba(192, 38, 211, 0.15);
         color: #c026d3;
         border-color: transparent;
+      }
+      .tag.subject {
+        background: rgba(14, 116, 144, 0.15);
+        color: #0e7490;
+        border-color: transparent;
+      }
+      .tag.group {
+        background: rgba(100, 116, 139, 0.16);
+        color: var(--text-secondary);
+        border-color: transparent;
+      }
+      /* Tier-2 reads as a warning while dry-running and as an alarm once live —
+         "this can move money" must be legible without opening the row. */
+      .tag.tier2 {
+        background: rgba(239, 68, 68, 0.18);
+        color: var(--loss);
+        border-color: transparent;
+        font-weight: 600;
+      }
+      .tag.tier2.dry {
+        background: rgba(234, 179, 8, 0.18);
+        color: #a16207;
+        font-weight: 500;
+      }
+      .tag.ack {
+        background: rgba(234, 88, 12, 0.18);
+        color: #c2410c;
+        border-color: transparent;
+        font-weight: 600;
+      }
+      .intent .intent-text {
+        display: block;
+      }
+      .intent .explain {
+        display: block;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary, var(--text-secondary));
+        margin-top: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .explain-lead {
+        margin: 0 0 8px;
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+      }
+      .spec-warn {
+        margin: 2px 0;
+        font-size: var(--text-xs);
+        color: #a16207;
+      }
+      .tier2-panel {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border-left: 3px solid #a16207;
+        background: var(--bg-tertiary);
+        border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      }
+      .tier2-panel.live {
+        border-left-color: var(--loss);
+      }
+      .tier2-panel h4 {
+        margin: 0 0 6px;
+      }
+      .tier2-panel p {
+        margin: 4px 0;
+        word-break: break-all;
       }
       .tag.mode.llm {
         background: rgba(124, 58, 237, 0.15);
@@ -1056,6 +1233,13 @@ export class AnalysisMonitorsPageComponent {
   protected readonly includeHeartbeats = signal(false);
   protected readonly busyId = signal<number | null>(null);
 
+  /** Guided-creation overlay, and the monitor it is duplicating (null for a fresh one). */
+  protected readonly builderOpen = signal(false);
+  protected readonly builderSeed = signal<AnalysisMonitorDto | null>(null);
+
+  /** Template library overlay. */
+  protected readonly templatesOpen = signal(false);
+
   private searchDebounce?: ReturnType<typeof setTimeout>;
 
   protected readonly board = createPolledResource(
@@ -1080,7 +1264,12 @@ export class AnalysisMonitorsPageComponent {
       // Push-driven: the interval is only a fallback for a missed
       // push or a reconnect gap.
       intervalMs: 60_000,
-      refreshOn: ['analysisMonitorFired', 'analysisMonitorInvalidated', 'analysisMonitorChanged'],
+      refreshOn: [
+        'analysisMonitorFired',
+        'analysisMonitorInvalidated',
+        'analysisMonitorChanged',
+        'analysisMonitorEscalated',
+      ],
     },
   );
 
@@ -1198,6 +1387,69 @@ export class AnalysisMonitorsPageComponent {
   }
 
   // ── Detail ────────────────────────────────────────────────────────────────
+
+  // ── Authoring ─────────────────────────────────────────────────────────────
+
+  /**
+   * Opens the guided builder, optionally seeded from an existing monitor.
+   *
+   * Duplicating is the answer to "nearly right" for a monitor that has already
+   * terminated — editing works while a watch is live, but a fired one-shot cannot
+   * be revived, and re-deriving its spec by hand loses whatever the original got
+   * right.
+   */
+  protected openBuilder(seed: AnalysisMonitorDto | null): void {
+    this.builderSeed.set(seed);
+    this.builderOpen.set(true);
+  }
+
+  /** Refreshes the board after a create or a fan-out, so the new rows appear at once. */
+  protected onMonitorCreated(): void {
+    this.board.refresh();
+  }
+
+  /**
+   * Revokes a monitor's tier-2 authorisation.
+   *
+   * Drops it to notify-only and re-enables dry-run in one call, rather than only
+   * flipping the dry-run flag: leaving the authorisation in place would mean a
+   * later edit could put it back into live action without anyone re-approving it.
+   */
+  protected disarmActions(monitorId: number): void {
+    this.busyId.set(monitorId);
+    this.svc
+      .update(monitorId, {
+        reason: 'tier-2 actions disarmed from the cockpit',
+      })
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        this.busyId.set(null);
+        if (res?.status) {
+          this.notify.success('Actions disarmed — this monitor can only notify now.');
+          this.board.refresh();
+          this.loadDetail(monitorId);
+        } else {
+          this.notify.error(res?.message ?? 'Could not disarm this monitor.');
+        }
+      });
+  }
+
+  /** Acknowledges a fire so it stops escalating. */
+  protected acknowledge(monitorId: number): void {
+    this.busyId.set(monitorId);
+    this.svc
+      .acknowledge(monitorId)
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        this.busyId.set(null);
+        if (res?.status) {
+          this.notify.success(res.message || 'Acknowledged.');
+          this.board.refresh();
+        } else {
+          this.notify.error(res?.message ?? 'Could not acknowledge.');
+        }
+      });
+  }
 
   protected toggleDetail(id: number): void {
     if (this.selectedId() === id) {
