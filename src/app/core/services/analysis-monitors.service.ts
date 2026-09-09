@@ -6,6 +6,13 @@ import {
   AnalysisMonitorBoard,
   AnalysisMonitorBoardFilter,
   AnalysisMonitorDetail,
+  CreateMonitorRequest,
+  InstantiateTemplateRequest,
+  MonitorInstantiationResult,
+  MonitorMetricCatalogue,
+  MonitorPreviewRequest,
+  MonitorPreviewResult,
+  MonitorTemplate,
   UpdateAnalysisMonitorRequest,
 } from '@features/analysis-monitors/analysis-monitors.types';
 
@@ -107,5 +114,100 @@ export class AnalysisMonitorsService {
   /** POST .../{id}/cancel — terminal stop, with an optional recorded reason. */
   cancel(monitorId: number, reason?: string): Observable<ResponseData<AnalysisMonitorDto>> {
     return this.api.post(`/market-data/analysis-monitors/${monitorId}/cancel`, { reason });
+  }
+
+  // ── Authoring ────────────────────────────────────────────────────────────
+
+  /**
+   * POST /market-data/analysis-monitors — create a monitor from the cockpit.
+   *
+   * The anchor is optional here: a monitor created on this page belongs to no
+   * conversation and delivers through its own channels instead. Until this
+   * existed, monitors could only be born inside an analysis chat.
+   */
+  create(body: CreateMonitorRequest): Observable<ResponseData<AnalysisMonitorDto>> {
+    return this.api.post('/market-data/analysis-monitors', body);
+  }
+
+  /**
+   * POST .../preview — replay a candidate trigger over stored history.
+   *
+   * The check that turns an authored spec into something observed. Run it
+   * before arming: a zero-fire result on a watch you expected to be busy means
+   * the condition cannot work.
+   */
+  preview(body: MonitorPreviewRequest): Observable<ResponseData<MonitorPreviewResult>> {
+    return this.api.post('/market-data/analysis-monitors/preview', body);
+  }
+
+  /**
+   * GET .../metrics — everything askable about a subject, with live readings,
+   * plus the action catalogue and its tiers.
+   */
+  getMetrics(
+    subjectKind: string,
+    subjectRef?: string | null,
+    timeframe?: string | null,
+    includeValues = true,
+  ): Observable<ResponseData<MonitorMetricCatalogue>> {
+    const p = new URLSearchParams({ subjectKind, includeValues: String(includeValues) });
+    if (subjectRef) p.set('subjectRef', subjectRef);
+    if (timeframe) p.set('timeframe', timeframe);
+    return this.api.get(`/market-data/analysis-monitors/metrics?${p.toString()}`);
+  }
+
+  /** POST .../{id}/ack — confirm a fire so it stops escalating. */
+  acknowledge(monitorId: number, note?: string): Observable<ResponseData<AnalysisMonitorDto>> {
+    return this.api.post(`/market-data/analysis-monitors/${monitorId}/ack`, { reason: note });
+  }
+
+  // ── Groups ───────────────────────────────────────────────────────────────
+
+  /**
+   * POST .../groups/{groupId}/{action} — pause, resume, cancel or extend every
+   * monitor a template fan-out created, as the one thing the operator meant.
+   */
+  groupAction(
+    groupId: string,
+    action: 'pause' | 'resume' | 'cancel' | 'extend',
+    body?: { reason?: string; extendHours?: number },
+  ): Observable<ResponseData<number>> {
+    return this.api.post(`/market-data/analysis-monitors/groups/${groupId}/${action}`, body ?? {});
+  }
+
+  // ── Templates ────────────────────────────────────────────────────────────
+
+  /** GET /market-data/monitor-templates — the library, built-ins first. */
+  getTemplates(subjectKind?: string | null): Observable<ResponseData<MonitorTemplate[]>> {
+    const p = new URLSearchParams();
+    if (subjectKind) p.set('subjectKind', subjectKind);
+    const qs = p.toString();
+    return this.api.get(`/market-data/monitor-templates${qs ? `?${qs}` : ''}`);
+  }
+
+  /** POST /market-data/monitor-templates — create or update one. Built-ins are read-only. */
+  upsertTemplate(
+    body: Partial<MonitorTemplate> & { name: string },
+  ): Observable<ResponseData<MonitorTemplate>> {
+    return this.api.post('/market-data/monitor-templates', body);
+  }
+
+  /** DELETE /market-data/monitor-templates/{id}. Built-ins cannot be deleted. */
+  deleteTemplate(templateId: number): Observable<ResponseData<boolean>> {
+    return this.api.delete(`/market-data/monitor-templates/${templateId}`);
+  }
+
+  /**
+   * POST /market-data/monitor-templates/{id}/instantiate — one monitor per
+   * subject, grouped so they can be managed as a unit.
+   *
+   * Partial success is normal: six of eight arming is more useful than nothing,
+   * and the result names the two that failed.
+   */
+  instantiateTemplate(
+    templateId: number,
+    body: InstantiateTemplateRequest,
+  ): Observable<ResponseData<MonitorInstantiationResult>> {
+    return this.api.post(`/market-data/monitor-templates/${templateId}/instantiate`, body);
   }
 }
