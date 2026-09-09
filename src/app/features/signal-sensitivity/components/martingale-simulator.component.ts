@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
-import { DecimalPipe, PercentPipe } from '@angular/common';
+import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import type { EChartsOption } from 'echarts';
@@ -93,7 +93,7 @@ export interface SkipInfo {
   selector: 'app-martingale-simulator',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DecimalPipe, PercentPipe, FormsModule, NgxEchartsDirective],
+  imports: [DecimalPipe, FormsModule, NgxEchartsDirective],
   template: `
     <section class="mg" aria-labelledby="mg-h">
       <header class="mg-head">

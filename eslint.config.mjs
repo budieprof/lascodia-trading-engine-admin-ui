@@ -23,6 +23,12 @@ export default tseslint.config(
       '.angular/**',
       'public/**',
       '*.config.{js,cjs,mjs,ts,mts}',
+      // Build output and scratch scripts, not source. Linting them was the
+      // sole reason `npm run lint` exited non-zero: 21 "errors" that are all
+      // bundled vendor code (`storybook-static/sb-manager/globals-runtime.js`
+      // alone accounted for 12) or one-off workflow scripts.
+      'storybook-static/**',
+      '.tmp-workflows/**',
     ],
   },
   {

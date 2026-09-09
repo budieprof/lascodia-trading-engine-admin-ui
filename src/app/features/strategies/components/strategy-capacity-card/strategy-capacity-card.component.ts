@@ -12,6 +12,7 @@ import { catchError, finalize, map, of } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
 import { StrategiesService } from '@core/services/strategies.service';
+import { ResponseCode } from '@core/api/api.types';
 import type { StrategyCapacityProfileDto } from '@core/api/api.types';
 
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
@@ -62,10 +63,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           (retry)="load()"
         />
       } @else if (!profile() || profile()!.tiers.length === 0) {
-        <app-empty-state
-          title="No capacity profile yet"
-          description="The engine's capacity-sweep worker hasn't produced an AUM-vs-Sharpe profile for this strategy. It runs periodically once the strategy has enough live evidence."
-        />
+        <app-empty-state title="No capacity profile yet" [description]="emptyDescription()" />
       } @else {
         <div class="meta-strip">
           <span class="meta">
@@ -260,6 +258,17 @@ export class StrategyCapacityCardComponent {
   protected readonly loading = signal(false);
   protected readonly error = signal(false);
   protected readonly profile = signal<StrategyCapacityProfileDto | null>(null);
+  /** Engine's explanation when it reports no profile exists — shown in the empty state. */
+  protected readonly absentReason = signal<string | null>(null);
+
+  private static readonly DEFAULT_EMPTY_DESCRIPTION =
+    "The engine's capacity-sweep worker hasn't produced an AUM-vs-Sharpe profile for this " +
+    'strategy. It runs periodically once the strategy has enough live evidence.';
+
+  /** Prefer the engine's own reason (it names the disabled flag) over the generic blurb. */
+  protected readonly emptyDescription = computed(
+    () => this.absentReason() ?? StrategyCapacityCardComponent.DEFAULT_EMPTY_DESCRIPTION,
+  );
 
   protected readonly passingCount = computed(
     () => this.profile()?.tiers.filter((t) => t.meetsFloor).length ?? 0,
@@ -277,20 +286,35 @@ export class StrategyCapacityCardComponent {
     if (!id) return;
     this.loading.set(true);
     this.error.set(false);
+    this.absentReason.set(null);
     // A successful response with no payload means the sweep has not
     // profiled this strategy yet — that is the empty state, not an error.
     // Only a failed response / transport error shows the error state; the
     // analytics page already made this distinction and the two disagreed.
+    //
+    // The engine also reports "no profile for this strategy" as a FAILED
+    // envelope (status:false, responseCode '-14') carrying a message that
+    // says WHY — CapacitySweep:Enabled is off, or the strategy has not been
+    // re-validated since it was turned on. Mapping that to the error state
+    // threw the actionable half away and told the operator the engine broke.
+    // Treat it as the empty state and show the engine's own explanation.
     this.strategies
       .getCapacityProfile(id)
       .pipe(
-        map((res) => ({ ok: !!res.status, data: res.status ? (res.data ?? null) : null })),
-        catchError(() => of({ ok: false, data: null })),
+        map((res) => ({
+          ok: !!res.status || res.responseCode === ResponseCode.NotFound,
+          data: res.status ? (res.data ?? null) : null,
+          absent: !res.status ? (res.message ?? null) : null,
+        })),
+        catchError(() => of({ ok: false, data: null, absent: null })),
         finalize(() => this.loading.set(false)),
       )
-      .subscribe(({ ok, data }) => {
+      .subscribe(({ ok, data, absent }) => {
         if (!ok) this.error.set(true);
-        else this.profile.set(data);
+        else {
+          this.profile.set(data);
+          this.absentReason.set(absent);
+        }
       });
   }
 

@@ -9,7 +9,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { CurrencyPipe, DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
+import { CurrencyPipe, DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { catchError, of } from 'rxjs';
@@ -72,7 +72,6 @@ const WINDOW_OPTIONS = [
     CurrencyPipe,
     DatePipe,
     DecimalPipe,
-    PercentPipe,
     FormsModule,
     NgxEchartsDirective,
     PageHeaderComponent,

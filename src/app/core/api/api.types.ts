@@ -530,7 +530,12 @@ export interface TradeSignalDto {
   originalTakeProfit: number | null;
   suggestedLotSize: number;
   confidence: number;
-  mlPredictedDirection: TradeDirection;
+  /** Null when no ML model scored this signal. The engine declares it
+   *  `TradeDirection?` and the generated schema agrees; this type claimed
+   *  non-null, which made the templates' `?? '—'` guards look redundant to
+   *  the compiler (NG8102) — acting on that warning would have printed a
+   *  bare "null" for every unscored signal. */
+  mlPredictedDirection: TradeDirection | null;
   mlPredictedMagnitude: number | null;
   mlConfidenceScore: number | null;
   mlModelId: number | null;

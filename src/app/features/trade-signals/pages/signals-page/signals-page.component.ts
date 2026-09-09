@@ -59,7 +59,6 @@ type DirectionChip = 'all' | TradeDirection;
     ChartCardComponent,
     ConfirmDialogComponent,
     CreateSignalDialogComponent,
-    RelativeTimePipe,
     SpotRecChartComponent,
     ParkedRecsCockpitComponent,
     EARejectionsPanelComponent,
