@@ -245,7 +245,12 @@ export class V6OrderBookCardComponent {
         catchError(() => of<V6OrderBookFeatureUtilizationDto | null>(null)),
       ),
     // 5 minutes — verdict barely moves cycle-to-cycle; this is a passive audit.
-    { intervalMs: 300_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['mlModelActivated', 'mlModelRetired', 'mlDriftRecoveryTriggered'],
+    },
   );
 
   protected readonly data = computed(() => this.resource.value());

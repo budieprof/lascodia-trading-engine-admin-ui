@@ -371,7 +371,12 @@ export class SignalExposurePanelComponent {
           return of(EMPTY);
         }),
       ),
-    { intervalMs: 20_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 60_000,
+      refreshOn: ['tradeSignalCreated', 'orderCreated', 'orderFilled'],
+    },
   );
 
   readonly book = computed(() => this.resource.value() ?? EMPTY);

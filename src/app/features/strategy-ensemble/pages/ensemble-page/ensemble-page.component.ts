@@ -818,7 +818,12 @@ export class EnsemblePageComponent {
           return of([] as StrategyAllocationDto[]);
         }),
       ),
-    { intervalMs: 60_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['strategyAllocationRebalanced', 'strategyUpdated'],
+    },
   );
 
   /** Every allocation row the engine returned, including stale epochs. */
@@ -1414,7 +1419,12 @@ export class EnsemblePageComponent {
           return of([] as StrategyAllocationDto[]);
         }),
       ),
-    { intervalMs: 300_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['strategyAllocationRebalanced', 'strategyUpdated'],
+    },
   );
 
   readonly historyLoading = computed(

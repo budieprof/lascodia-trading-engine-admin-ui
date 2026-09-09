@@ -353,8 +353,14 @@ export class LayerHealthPageComponent {
         map((res) => res.data ?? []),
         catchError(() => of([] as CompositeMLLayerHealthDto[])),
       ),
-    // 30s — health rolls forward continuously; matches Worker Health cadence.
-    { intervalMs: 30_000 },
+    // Health rolls forward continuously, so a model activation/retirement push
+    // is what makes this move; the interval only heals a missed push.
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['compositeMLCatalogueDriftDropAlert', 'mlModelActivated', 'mlModelRetired'],
+    },
   );
 
   constructor() {

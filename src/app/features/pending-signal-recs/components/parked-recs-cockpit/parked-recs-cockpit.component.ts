@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   OnDestroy,
   OnInit,
   computed,
@@ -9,7 +10,9 @@ import {
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
-import { catchError, finalize, of } from 'rxjs';
+import { RealtimeService } from '@core/realtime/realtime.service';
+import { auditTime, catchError, finalize, merge, of } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { PendingSignalRecsService } from '@core/services/pending-signal-recs.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { PendingSignalRecDto } from '@core/api/api.types';
@@ -31,9 +34,9 @@ interface AuditEntry {
 
 /**
  * Embeddable parked-recs cockpit: filters + table + per-row audit
- * drilldown.  Polls every 5 s while alive.  Used by the standalone
- * `/pending-signal-recs` page AND by the "Parked recs" tab on the
- * Trade Signals page.
+ * drilldown.  Redraws on signal/order pushes, with a slow fallback sweep.
+ * Used by the standalone `/pending-signal-recs` page AND by the
+ * "Parked recs" tab on the Trade Signals page.
  */
 @Component({
   selector: 'app-parked-recs-cockpit',
@@ -1203,15 +1206,32 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
     return rows.reduce((acc, r) => acc + (r.revalAttempts ?? 0), 0) / rows.length;
   });
 
+  private readonly realtime = inject(RealtimeService);
+  private readonly destroyRef = inject(DestroyRef);
+
   private pollHandle: ReturnType<typeof setInterval> | null = null;
   private metricsHandle: ReturnType<typeof setInterval> | null = null;
-  private static readonly POLL_INTERVAL_MS = 5_000;
-  private static readonly METRICS_INTERVAL_MS = 20_000;
+  // Fallback cadences. The cockpit is driven by signal/order pushes below; these
+  // only heal a dropped push. The reload used to run every 5 s regardless.
+  private static readonly POLL_INTERVAL_MS = 60_000;
+  private static readonly METRICS_INTERVAL_MS = 120_000;
 
   ngOnInit(): void {
     this.reload();
     this.loadMetrics();
     this.loadConversion();
+
+    // A rec is parked or converted in response to signal/order activity, so
+    // that is what should redraw the cockpit. Coalesced: a burst of fills on
+    // one signal costs a single reload.
+    merge(
+      this.realtime.on('tradeSignalCreated'),
+      this.realtime.on('orderCreated'),
+      this.realtime.on('orderFilled'),
+    )
+      .pipe(auditTime(1_000), takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.reload());
+
     this.pollHandle = setInterval(() => this.reload(), ParkedRecsCockpitComponent.POLL_INTERVAL_MS);
     // Metrics change slowly + scan the whole table — poll them less often.
     this.metricsHandle = setInterval(

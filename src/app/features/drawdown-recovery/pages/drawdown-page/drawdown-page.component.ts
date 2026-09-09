@@ -1439,7 +1439,12 @@ export class DrawdownPageComponent {
         map((r) => r.data ?? []),
         catchError(() => of([] as AccountRecoveryStateDto[])),
       ),
-    { intervalMs: 15_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 60_000,
+      refreshOn: ['positionClosed', 'vaRBreach', 'emergencyFlatten'],
+    },
   );
 
   readonly allAccounts = computed(() => this.accountsResource.value() ?? []);
@@ -1549,7 +1554,12 @@ export class DrawdownPageComponent {
       const id = this.liveAccountId();
       return this.service.getLatest(id === null ? undefined : [id]).pipe(map((r) => r.data));
     },
-    { intervalMs: 15_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 60_000,
+      refreshOn: ['positionClosed', 'vaRBreach', 'emergencyFlatten'],
+    },
   );
 
   readonly snapshot = computed(() => this.resource.value());
@@ -1596,7 +1606,12 @@ export class DrawdownPageComponent {
           catchError(() => of([] as SnapshotRow[])),
         );
     },
-    { intervalMs: 60_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 60_000,
+      refreshOn: ['positionClosed', 'vaRBreach', 'emergencyFlatten'],
+    },
   );
 
   /** Every loaded row, oldest first, all accounts interleaved. */

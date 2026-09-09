@@ -846,7 +846,12 @@ export class EARejectionsPanelComponent {
           catchError(() => of({ rows: [] as SignalRejectionEventDto[], total: 0 })),
         );
     },
-    { intervalMs: 15_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 30_000,
+      refreshOn: ['positionOpened', 'positionClosed', 'orderFilled', 'emergencyFlatten'],
+    },
   );
 
   readonly rows = computed(() => this.resource.value()?.rows ?? []);

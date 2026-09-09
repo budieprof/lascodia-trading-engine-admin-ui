@@ -5175,7 +5175,12 @@ export class MlModelsPageComponent implements OnInit {
         }),
         catchError(() => of({ rows: [] as MLModelDto[], total: 0 })),
       ),
-    { intervalMs: 120_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['mlModelActivated', 'mlModelRetired', 'mlDriftRecoveryTriggered'],
+    },
   );
 
   readonly archAnalyticsRows = computed(() => this.archAnalyticsResource.value()?.rows ?? []);

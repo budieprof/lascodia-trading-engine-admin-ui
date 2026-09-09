@@ -667,7 +667,12 @@ export class AutoTuneProposalsPageComponent {
         })
         .pipe(map((res) => res.data ?? []));
     },
-    { intervalMs: 60_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['optimizationApproved', 'optimizationCompleted'],
+    },
   );
 
   /**
@@ -679,7 +684,12 @@ export class AutoTuneProposalsPageComponent {
       this.autoTune
         .listProposals({ status: null, proposalKey: null, limit: SUMMARY_WINDOW })
         .pipe(map((res) => res.data ?? [])),
-    { intervalMs: 60_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['optimizationApproved', 'optimizationCompleted'],
+    },
   );
 
   constructor() {

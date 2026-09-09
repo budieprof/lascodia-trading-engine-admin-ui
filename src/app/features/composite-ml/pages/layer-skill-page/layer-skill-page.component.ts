@@ -212,7 +212,12 @@ export class LayerSkillPageComponent {
         map((res) => res.data ?? []),
         catchError(() => of([] as LayerSkillSnapshotDto[])),
       ),
-    { intervalMs: 30_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['compositeMLCatalogueDriftDropAlert', 'mlModelActivated', 'mlModelRetired'],
+    },
   );
 
   protected readonly snapshots = computed(() => this.resource.value() ?? []);

@@ -554,7 +554,12 @@ export class SignalPickupsPanelComponent {
           catchError(() => of<PickupsPage>({ rows: [], total: 0 })),
         );
     },
-    { intervalMs: 15_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 60_000,
+      refreshOn: ['tradeSignalCreated', 'orderCreated', 'orderFilled'],
+    },
   );
 
   readonly rows = computed(() => this.resource.value()?.rows ?? []);
@@ -610,7 +615,12 @@ export class SignalPickupsPanelComponent {
           catchError(() => of({ rows: [] as OrderDto[], total: 0 })),
         );
     },
-    { intervalMs: 30_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 60_000,
+      refreshOn: ['tradeSignalCreated', 'orderCreated', 'orderFilled'],
+    },
   );
   private readonly metricsRows = computed(() => this.metricsResource.value()?.rows ?? []);
   private countTones(tone: 'good' | 'bad' | 'neutral'): number {

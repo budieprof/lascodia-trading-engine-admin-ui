@@ -30,6 +30,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { Observable, Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
 import type { PagedData, PagerRequest } from '@core/api/api.types';
+import { structuralEqual } from '@core/signals/structural-equal';
 import { TableStateService } from './table-state.service';
 
 type SortDir = 'asc' | 'desc';
@@ -455,8 +456,19 @@ export class DataTableComponent<T> implements OnInit, OnDestroy {
   /** Template projected via `<ng-template #bulkActions let-rows let-clear="clear">…</ng-template>`. */
   bulkActionsTpl = contentChild<TemplateRef<{ $implicit: T[]; clear: () => void }>>('bulkActions');
 
-  rowData = signal<T[]>([]);
+  // Structural equality: a refetch always returns a fresh array, and binding a
+  // new array into ag-grid replaces every row. On a background refresh that is a
+  // full-table repaint for data that did not change — the flicker on any live
+  // table. Identical rows now end the update here and the grid is not touched.
+  rowData = signal<T[]>([], { equal: structuralEqual });
+  /**
+   * True only until the first fetch settles. It drives ag-grid's `[loading]`
+   * overlay, so raising it on every background refresh dimmed the grid on every
+   * poll. `refreshing` is the quiet flag for background work.
+   */
   loading = signal(true);
+  refreshing = signal(false);
+  private hasLoadedOnce = false;
   totalItems = signal(0);
   currentPage = signal(1);
   pageSize = signal(25);
@@ -544,7 +556,9 @@ export class DataTableComponent<T> implements OnInit, OnDestroy {
   }
 
   loadData() {
-    this.loading.set(true);
+    // Only the very first load blanks the grid; later fetches refresh in place.
+    if (!this.hasLoadedOnce) this.loading.set(true);
+    this.refreshing.set(true);
     // Engine's PagerRequestWithFilterType<TFilter,...> setter typechecks the
     // body's `filter` as a TFilter object, so a bare string fails STJ binding
     // with a 400. Wrap as `{ search }` — every TFilter that supports search
@@ -581,7 +595,12 @@ export class DataTableComponent<T> implements OnInit, OnDestroy {
             this.loadData();
             return;
           }
+          const previousRows = this.rowData();
           this.rowData.set(result.data);
+          // Reference-identical means structuralEqual rejected the write: same
+          // rows, nothing repainted.
+          const rowsChanged = this.rowData() !== previousRows;
+
           this.totalItems.set(result.pager.totalItemCount);
           this.totalPages.set(totalPages);
           this.startItem.set((this.currentPage() - 1) * this.pageSize() + 1);
@@ -589,12 +608,20 @@ export class DataTableComponent<T> implements OnInit, OnDestroy {
             Math.min(this.currentPage() * this.pageSize(), result.pager.totalItemCount),
           );
           this.updateVisiblePages();
-          // Loading a fresh page invalidates previously-selected rows.
-          this.clearSelection();
+          // Loading a genuinely different page invalidates previously-selected
+          // rows. A background refresh that returned the same rows must NOT —
+          // that silently wiped the operator's selection every poll.
+          if (rowsChanged) this.clearSelection();
+          this.hasLoadedOnce = true;
           this.loading.set(false);
+          this.refreshing.set(false);
         },
         error: () => {
+          // Settle both flags, and keep whatever rows are already on screen —
+          // a failed refresh must not blank a table the operator is reading.
+          this.hasLoadedOnce = true;
           this.loading.set(false);
+          this.refreshing.set(false);
         },
       });
   }

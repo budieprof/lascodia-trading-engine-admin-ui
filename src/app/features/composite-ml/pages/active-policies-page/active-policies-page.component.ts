@@ -404,8 +404,14 @@ export class ActivePoliciesPageComponent {
         map((res) => res.data ?? []),
         catchError(() => of([] as ActivePolicyDto[])),
       ),
-    // 60s — operators don't make rapid-fire activations; reduce engine load.
-    { intervalMs: 60_000 },
+    // Activations arrive as pushes; the fallback stays slow because operators
+    // don't make rapid-fire activations and the engine load is not worth it.
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['compositeMLCatalogueDriftDropAlert', 'mlModelActivated', 'mlModelRetired'],
+    },
   );
 
   protected readonly tierFilter = signal<TierFilter>('all');

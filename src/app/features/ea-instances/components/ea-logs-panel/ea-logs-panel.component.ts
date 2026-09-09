@@ -318,7 +318,12 @@ export class EALogsPanelComponent {
           catchError(() => of<EALogTimelineItem[]>([])),
         );
     },
-    { intervalMs: 15_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 30_000,
+      refreshOn: ['positionOpened', 'positionClosed', 'orderFilled', 'emergencyFlatten'],
+    },
   );
 
   protected readonly filtered = computed(() => {

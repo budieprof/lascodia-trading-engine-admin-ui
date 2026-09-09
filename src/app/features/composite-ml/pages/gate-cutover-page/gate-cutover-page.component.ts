@@ -437,7 +437,12 @@ export class GateCutoverPageComponent {
         map((res) => res.data ?? EMPTY_STATUS),
         catchError(() => of(EMPTY_STATUS)),
       ),
-    { intervalMs: 60_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['compositeMLCatalogueDriftDropAlert', 'mlModelActivated', 'mlModelRetired'],
+    },
   );
 
   protected readonly rows = computed(() => this.resource.value()?.rows ?? []);

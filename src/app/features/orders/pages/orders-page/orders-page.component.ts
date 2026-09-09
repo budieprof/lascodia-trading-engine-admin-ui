@@ -5,6 +5,7 @@ import {
   inject,
   signal,
   computed,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
@@ -1480,11 +1481,24 @@ export class OrdersPageComponent {
     // Re-fetch whenever the operator changes the global account scope
     // from the header dropdown.  Effect runs in injection context so
     // teardown is handled automatically.
+    //
+    // Depend on the KEY, never on accountIds(): that array is rebuilt by the
+    // scope service's own 30 s refresh, so a reference-equality signal reports
+    // a "change" every tick even when the account set is identical — turning
+    // this into a refetch loop (measured: 4 extra /order/list calls every 30 s
+    // on top of the page's own polling).
+    //
+    // The body must be untracked as well: reloadTable() and loadRecent() read
+    // accountIds() themselves, and a read inside the effect is a dependency no
+    // matter what we touched at the top — swapping the top line alone changed
+    // nothing. Same shape as the dashboard's scope effect.
     effect(() => {
       // Touch the signal to register the dependency, then reload.
-      this.accountScope.accountIds();
-      this.reloadTable();
-      this.loadRecent();
+      this.accountScope.accountIdsKey();
+      untracked(() => {
+        this.reloadTable();
+        this.loadRecent();
+      });
     });
 
     this.loadRecent();

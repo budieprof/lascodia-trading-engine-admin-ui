@@ -858,7 +858,12 @@ export class SymbolicFeaturesPageComponent {
           catchError(() => of<SymbolicFeatureDto[]>([])),
         );
     },
-    { intervalMs: 60_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['mlModelActivated', 'mlModelRetired', 'mlDriftRecoveryTriggered'],
+    },
   );
 
   /**
@@ -879,7 +884,12 @@ export class SymbolicFeaturesPageComponent {
           map((res) => res.data ?? []),
           catchError(() => of<SymbolicFeatureDto[]>([])),
         ),
-    { intervalMs: 60_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['mlModelActivated', 'mlModelRetired', 'mlDriftRecoveryTriggered'],
+    },
   );
 
   constructor() {

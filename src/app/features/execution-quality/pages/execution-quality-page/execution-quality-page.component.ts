@@ -812,7 +812,12 @@ export class ExecutionQualityPageComponent {
       this.service
         .list({ currentPage: 1, itemCountPerPage: SAMPLE_SIZE })
         .pipe(map((r) => r.data?.data ?? [])),
-    { intervalMs: 60_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['orderFilled', 'positionClosed'],
+    },
   );
 
   readonly recent = computed(() => this.analyticsResource.value() ?? []);

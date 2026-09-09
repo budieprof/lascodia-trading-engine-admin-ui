@@ -458,7 +458,12 @@ export class TrainingQueuePageComponent {
         map((res) => res.data ?? []),
         catchError(() => of<ActiveMLTrainingRunDto[]>([])),
       ),
-    { intervalMs: 15_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['mlModelActivated', 'mlModelRetired', 'mlDriftRecoveryTriggered'],
+    },
   );
 
   protected readonly runs = computed(() => this.resource.value() ?? []);

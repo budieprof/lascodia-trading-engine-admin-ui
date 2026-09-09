@@ -1017,7 +1017,12 @@ export class SignalFeedbackPageComponent {
           }),
         );
     },
-    { intervalMs: 30_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 60_000,
+      refreshOn: ['tradeSignalCreated', 'orderCreated', 'orderFilled'],
+    },
   );
 
   constructor() {

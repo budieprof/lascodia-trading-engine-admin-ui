@@ -32,6 +32,21 @@ export const REALTIME_EVENTS = [
   'strategyCapacityProfileUpdated',
   'strategyVariantPromoted',
   'optimizationApproved',
+  // ── Emitted by the engine all along, but absent from this allowlist until
+  //    2026-09-09 — and the allowlist is what `connection.on(...)` is built
+  //    from, so every one of these was pushed by the engine and dropped on the
+  //    floor by the client. Verified against the `NotifyAsync` call sites in
+  //    the API project. ──
+  'strategyUpdated',
+  'strategyRetired',
+  'mlModelRetired',
+  'mlDriftRecoveryTriggered',
+  'compositeMLCatalogueDriftDropAlert',
+  'lifecycleRationaleEmitted',
+  'promotionReviewCompleted',
+  'governanceDwellAlarm',
+  'reflectionEntryResolved',
+  'spotSweepProgress',
   // ── Position lifecycle (PRD-V2 FR-5.8) ──
   // Pushed directly by the 5 position-management command handlers
   // (Open / Close / ReceivePositionDelta / ReceivePositionSnapshot /

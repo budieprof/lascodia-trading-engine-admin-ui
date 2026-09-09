@@ -615,7 +615,12 @@ export class AuditTrailPageComponent {
         }),
         catchError(() => of({ rows: [] as DecisionLogDto[], total: 0 })),
       ),
-    { intervalMs: 60_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['auditDecisionLogged'],
+    },
   );
 
   readonly analyticsRows = computed(() => this.analyticsResource.value()?.rows ?? []);

@@ -1074,9 +1074,14 @@ export class AnalysisMonitorsPageComponent {
           map((r) => (r?.status && r.data ? r.data : null)),
           catchError(() => of(null)),
         ),
-    // 15s: monitors change on the worker's 20s cadence, and realtime pushes
-    // cover anything that happens in between.
-    { intervalMs: 15_000 },
+    // Monitor transitions are all pushed (fired / invalidated / changed), so the
+    // board redraws on the event rather than on a timer.
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 60_000,
+      refreshOn: ['analysisMonitorFired', 'analysisMonitorInvalidated', 'analysisMonitorChanged'],
+    },
   );
 
   protected readonly data = this.board.value;

@@ -1645,13 +1645,17 @@ export class SpotSweepPageComponent implements OnDestroy {
   readonly feed = signal<SweepLastResult[]>([]);
   private lastSeenSignalId: number | null = null;
 
+  // Sweep progress is pushed (`spotSweepProgress`), so the interval here is a
+  // safety net for a missed push or a reconnect gap — not the mechanism.
   private readonly statusResource = createPolledResource(() => this.svc.getStatus(), {
-    intervalMs: 5000,
+    intervalMs: 60_000,
+    refreshOn: ['spotSweepProgress'],
   });
   readonly status = this.statusResource.value;
 
   private readonly historyResource = createPolledResource(() => this.svc.getHistory(20), {
-    intervalMs: 10000,
+    intervalMs: 120_000,
+    refreshOn: ['spotSweepProgress', 'tradeSignalCreated'],
   });
   readonly history = this.historyResource.value;
 

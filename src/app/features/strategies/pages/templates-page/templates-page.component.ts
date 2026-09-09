@@ -503,7 +503,17 @@ export class TemplatesPageComponent {
         map((res) => res.data ?? []),
         catchError(() => of<StrategyTemplateDto[]>([])),
       ),
-    { intervalMs: 120_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: [
+        'strategyUpdated',
+        'strategyActivated',
+        'strategyRetired',
+        'strategyVariantPromoted',
+      ],
+    },
   );
 
   protected readonly templates = computed(() => this.resource.value() ?? []);

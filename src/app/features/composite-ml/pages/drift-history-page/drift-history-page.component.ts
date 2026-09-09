@@ -364,7 +364,12 @@ export class DriftHistoryPageComponent {
           catchError(() => of<CatalogueDriftHistoryDto | null>(null)),
         );
     },
-    { intervalMs: 60_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['compositeMLCatalogueDriftDropAlert', 'mlModelActivated', 'mlModelRetired'],
+    },
   );
 
   constructor() {

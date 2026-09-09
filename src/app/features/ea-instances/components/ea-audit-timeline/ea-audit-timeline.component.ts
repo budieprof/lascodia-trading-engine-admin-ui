@@ -360,7 +360,12 @@ export class EAAuditTimelineComponent {
           catchError(() => of<EAAuditTimelineItem[]>([])),
         );
     },
-    { intervalMs: 20_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 30_000,
+      refreshOn: ['positionOpened', 'positionClosed', 'orderFilled', 'emergencyFlatten'],
+    },
   );
 
   protected readonly loading = computed(

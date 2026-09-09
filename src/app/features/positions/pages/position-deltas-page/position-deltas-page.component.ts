@@ -999,7 +999,12 @@ export class PositionDeltasPageComponent {
           .pipe(map((res) => res.data?.data ?? []))
       );
     },
-    { intervalMs: 30_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 60_000,
+      refreshOn: ['positionOpened', 'positionClosed', 'positionLifecycleEvent', 'orderFilled'],
+    },
   );
 
   constructor() {

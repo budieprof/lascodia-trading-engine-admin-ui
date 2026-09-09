@@ -142,7 +142,12 @@ export class OptionsHealthCardComponent {
         catchError(() => of<CompositeMLOptionsDiagnosticDto[]>([])),
       ),
     // 5 minutes — config edits are rare; this is a passive audit, not a feed.
-    { intervalMs: 300_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['compositeMLCatalogueDriftDropAlert', 'mlModelActivated', 'mlModelRetired'],
+    },
   );
 
   protected readonly findings = computed(() => this.resource.value() ?? []);

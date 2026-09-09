@@ -932,7 +932,12 @@ export class EAInstancesPageComponent {
         map((r) => r.data ?? []),
         catchError(() => of([] as EAInstanceDto[])),
       ),
-    { intervalMs: 15_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 30_000,
+      refreshOn: ['positionOpened', 'positionClosed', 'orderFilled', 'emergencyFlatten'],
+    },
   );
 
   /**
@@ -965,7 +970,12 @@ export class EAInstancesPageComponent {
           }),
           catchError(() => of([] as CurrencyPairDto[])),
         ),
-    { intervalMs: 60_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 30_000,
+      refreshOn: ['positionOpened', 'positionClosed', 'orderFilled', 'emergencyFlatten'],
+    },
   );
 
   // Live trading-account snapshot — used by the EA instance card to show
@@ -985,7 +995,12 @@ export class EAInstancesPageComponent {
         }),
         catchError(() => of([] as TradingAccountDto[])),
       ),
-    { intervalMs: 15_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 30_000,
+      refreshOn: ['positionOpened', 'positionClosed', 'orderFilled', 'emergencyFlatten'],
+    },
   );
 
   // Lookup map (account id → DTO) so the card's per-row helpers are O(1)

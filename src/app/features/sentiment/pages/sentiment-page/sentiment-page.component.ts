@@ -810,7 +810,12 @@ export class SentimentPageComponent {
           }).pipe(map(({ sentiment, regime }) => buildCard(symbol, sentiment, regime))),
         ),
       ),
-    { intervalMs: 60_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['sentimentSnapshotCreated'],
+    },
   );
 
   readonly sentimentCards = computed(() => this.cardResource.value() ?? []);
@@ -1229,7 +1234,12 @@ export class SentimentPageComponent {
           map((r) => r.data?.data ?? []),
           catchError(() => of([] as MarketRegimeSnapshotDto[])),
         ),
-    { intervalMs: 60_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['sentimentSnapshotCreated'],
+    },
   );
 
   readonly adxVolOptions = computed<EChartsOption>(() => {

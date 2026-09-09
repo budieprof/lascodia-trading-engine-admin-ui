@@ -646,7 +646,12 @@ export class ColdStartPageComponent {
           map((res) => res.data ?? EMPTY_REPORT),
           catchError(() => of(EMPTY_REPORT)),
         ),
-    { intervalMs: 60_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['compositeMLCatalogueDriftDropAlert', 'mlModelActivated', 'mlModelRetired'],
+    },
   );
 
   protected readonly donorResource = createPolledResource(
@@ -655,7 +660,12 @@ export class ColdStartPageComponent {
         map((res) => res.data ?? []),
         catchError(() => of<CompositeMLDonorSelectionDto[]>([])),
       ),
-    { intervalMs: 60_000 },
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 120_000,
+      refreshOn: ['compositeMLCatalogueDriftDropAlert', 'mlModelActivated', 'mlModelRetired'],
+    },
   );
 
   constructor() {

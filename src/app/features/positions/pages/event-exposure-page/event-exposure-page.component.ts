@@ -307,9 +307,14 @@ export class EventExposurePageComponent {
       this.positions
         .getEventExposure(this.lookaheadHours(), this.includeMedium())
         .pipe(map((res) => res.data ?? null)),
-    // Matches the open-positions P&L cadence in PRD §10: the countdown ticks in minutes, and a
-    // faster poll would add load without changing any decision this screen supports.
-    { intervalMs: 15_000 },
+    // The countdown ticks in minutes, so nothing here needs a fast poll — the
+    // exposure set only changes when a position opens or closes, which is pushed.
+    {
+      // Push-driven: the interval is only a fallback for a missed
+      // push or a reconnect gap.
+      intervalMs: 60_000,
+      refreshOn: ['positionOpened', 'positionClosed', 'positionLifecycleEvent', 'orderFilled'],
+    },
   );
 
   protected readonly data = this.resource.value;

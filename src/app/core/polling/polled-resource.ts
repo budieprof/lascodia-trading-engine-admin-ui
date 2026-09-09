@@ -1,32 +1,76 @@
 import { DestroyRef, Signal, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Observable, Subject, Subscription, fromEvent, merge, of } from 'rxjs';
-import { catchError, switchMap } from 'rxjs/operators';
+import { auditTime, catchError } from 'rxjs/operators';
+
+import { RealtimeService, type RealtimeEventName } from '@core/realtime/realtime.service';
+import { structuralEqual } from '@core/signals/structural-equal';
 
 /**
- * PRD §10 polling intervals — encode these at call sites so future refactors can centralize.
+ * A live resource: first paint comes from one fetch, and everything after that
+ * is driven by the engine's SignalR pushes. The interval is a safety net, not
+ * the mechanism.
  *
- *   Open positions P&L    — 15_000
- *   Live prices           —  5_000
- *   System health         — 15_000
- *   Pending signals       — 15_000
- *   Account balance       — 30_000
- *   Worker health         — 30_000
- *   EA heartbeat          — 15_000
+ * Three rules keep a live page from flickering, and all three live here so the
+ * ~60 call sites get them for free:
+ *
+ *  1. `loading` means "nothing to show yet" — it is true only until the first
+ *     value lands, and never again. It used to be set on EVERY poll, so the 85
+ *     templates that render a skeleton while `loading()` swapped real content
+ *     for a skeleton and back on every tick. That was the flicker.
+ *     `refreshing` is the separate, subtle signal for background work.
+ *
+ *  2. A refetch that returns the same data does not notify. The value signal
+ *     carries a structural `equal`, so an unchanged payload ends the update
+ *     right here instead of re-running every downstream computed and rebuilding
+ *     the DOM under it.
+ *
+ *  3. The previous value survives both errors and in-flight refreshes. The UI
+ *     never blanks; a failed refresh leaves the last good data on screen and
+ *     only raises `error`.
+ *
+ * PRD §10 intervals (now fallback cadences — prefer `refreshOn`):
+ *   Open positions P&L 15_000 · Live prices 5_000 · System health 15_000
+ *   Pending signals 15_000 · Account balance 30_000 · Worker health 30_000
+ *   EA heartbeat 15_000
  */
-export interface PollOptions {
-  /** Milliseconds between polls. */
+export interface PollOptions<T = unknown> {
+  /**
+   * Fallback cadence in milliseconds. Set `0` to go fully push-driven (nothing
+   * refetches unless `refreshOn` fires or `refresh()` is called). With
+   * `refreshOn` set, prefer a slow value — it is only there to heal a missed
+   * push or a reconnect gap.
+   */
   intervalMs: number;
   /** Optional external gate (e.g. a "tab active" signal). Polling pauses when false. Default: always true. */
   active?: Signal<boolean>;
   /** Run once immediately on start (default true). */
   runImmediately?: boolean;
+  /**
+   * Engine realtime events that invalidate this resource. Each one triggers a
+   * refetch, coalesced by `refreshDebounceMs` so a burst of fills costs one
+   * request rather than one per event.
+   */
+  refreshOn?: readonly RealtimeEventName[];
+  /** Coalescing window for `refreshOn` bursts. Default 400 ms. */
+  refreshDebounceMs?: number;
+  /**
+   * Equality used to decide whether a fetched value is actually new. Defaults
+   * to a structural compare, which is what stops same-data refetches from
+   * repainting the page. Pass a cheaper one for very large payloads.
+   */
+  equal?: (a: T | null, b: T | null) => boolean;
 }
 
 export interface PolledResource<T> {
   readonly value: Signal<T | null>;
+  /** True only until the first value arrives. Gate skeletons on this. */
   readonly loading: Signal<boolean>;
+  /** True while a background refresh is in flight, after the first paint. */
+  readonly refreshing: Signal<boolean>;
   readonly error: Signal<unknown | null>;
+  /** Timestamp of the last successful fetch, for "updated 3s ago" chrome. */
+  readonly lastUpdated: Signal<number | null>;
   /** Trigger an extra fetch now. Does not reset the interval. */
   refresh(): void;
   /** Stop polling. Resource remains readable. */
@@ -34,19 +78,32 @@ export interface PolledResource<T> {
 }
 
 /**
- * Component-scoped poll. Tears down with the injecting component (via DestroyRef).
- * Pauses on `document.visibilityState === 'hidden'` and when `options.active` is false.
- * Errors are captured into `.error()` signal; they do not stop the poll.
+ * Component-scoped live resource. Tears down with the injecting component (via DestroyRef).
+ * Pauses on `document.visibilityState === 'hidden'` and when `options.active` is false,
+ * and refetches once on becoming visible again so a backgrounded tab catches up.
+ * Errors are captured into `.error()`; they neither stop the resource nor clear the data.
  */
 export function createPolledResource<T>(
   fetchFn: () => Observable<T>,
-  options: PollOptions,
+  options: PollOptions<T>,
 ): PolledResource<T> {
   const destroyRef = inject(DestroyRef);
+  // Optional so the helper stays usable in tests and non-realtime contexts.
+  const realtime = inject(RealtimeService, { optional: true });
 
-  const value = signal<T | null>(null);
-  const loading = signal(false);
+  // `T | null` because the value signal starts empty; structuralEqual handles null.
+  const areEqual = options.equal ?? structuralEqual<T | null>;
+  const value = signal<T | null>(null, { equal: areEqual });
+  /**
+   * The first fetch has finished, successfully or not. Gating `loading` on
+   * "settled" rather than "has a value" matters: a first fetch that fails must
+   * fall through to the error branch, and gating on has-a-value would leave the
+   * skeleton up forever instead.
+   */
+  const settled = signal(false);
+  const refreshing = signal(false);
   const error = signal<unknown | null>(null);
+  const lastUpdated = signal<number | null>(null);
 
   const manualRefresh$ = new Subject<void>();
   const visibility$ = fromEvent(document, 'visibilitychange');
@@ -55,7 +112,9 @@ export function createPolledResource<T>(
 
   const runOnce = () => {
     if (inflight) inflight.unsubscribe();
-    loading.set(true);
+    // Never re-raise `loading` once we have data — that is the flicker. Only
+    // the subtle `refreshing` flag moves on a background fetch.
+    refreshing.set(true);
     inflight = fetchFn()
       .pipe(
         catchError((err) => {
@@ -65,10 +124,14 @@ export function createPolledResource<T>(
       )
       .subscribe((result) => {
         if (result !== null) {
+          // Identical payload → the custom `equal` makes this a no-op and
+          // nothing downstream recomputes.
           value.set(result);
           error.set(null);
+          lastUpdated.set(Date.now());
         }
-        loading.set(false);
+        settled.set(true);
+        refreshing.set(false);
       });
   };
 
@@ -79,7 +142,7 @@ export function createPolledResource<T>(
   };
 
   const startInterval = () => {
-    if (intervalId !== null) return;
+    if (intervalId !== null || !options.intervalMs) return;
     intervalId = setInterval(() => {
       if (shouldRun()) runOnce();
     }, options.intervalMs);
@@ -92,23 +155,27 @@ export function createPolledResource<T>(
     }
   };
 
-  // React to visibility and manual refresh.
   merge(visibility$, manualRefresh$)
-    .pipe(
-      takeUntilDestroyed(destroyRef),
-      switchMap(() => {
-        if (shouldRun()) {
-          runOnce();
-          startInterval();
-        } else {
-          stopInterval();
-        }
-        return of(null);
-      }),
-    )
-    .subscribe();
+    .pipe(takeUntilDestroyed(destroyRef))
+    .subscribe(() => {
+      if (shouldRun()) {
+        runOnce();
+        startInterval();
+      } else {
+        stopInterval();
+      }
+    });
 
-  // Initial kick.
+  // Push-driven invalidation. `auditTime` coalesces a burst (a flurry of fills
+  // on one position) into a single refetch on the trailing edge.
+  if (realtime && options.refreshOn?.length) {
+    merge(...options.refreshOn.map((name) => realtime.on(name)))
+      .pipe(auditTime(options.refreshDebounceMs ?? 400), takeUntilDestroyed(destroyRef))
+      .subscribe(() => {
+        if (shouldRun()) runOnce();
+      });
+  }
+
   if (options.runImmediately !== false && shouldRun()) {
     runOnce();
     startInterval();
@@ -122,8 +189,11 @@ export function createPolledResource<T>(
 
   return {
     value: computed(() => value()),
-    loading: computed(() => loading()),
+    // "Nothing to show yet" — not "a request is in flight".
+    loading: computed(() => !settled()),
+    refreshing: computed(() => refreshing()),
     error: computed(() => error()),
+    lastUpdated: computed(() => lastUpdated()),
     refresh: () => manualRefresh$.next(),
     stop: () => {
       stopInterval();

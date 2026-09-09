@@ -9,6 +9,7 @@ import {
   OnDestroy,
   ViewChild,
   effect,
+  untracked,
 } from '@angular/core';
 import { catchError, forkJoin, map, merge, Observable, of, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
@@ -19,6 +20,7 @@ import { PositionsService } from '@core/services/positions.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
+import { structuralEqual } from '@core/signals/structural-equal';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { PositionDto, PagedData, PagerRequest } from '@core/api/api.types';
 
@@ -929,10 +931,17 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       filters: { tab: this.activeTab?.() ?? null },
     }));
 
-    // Refresh positions whenever the engine pushes open/close events so the
-    // UI reflects broker-confirmed state without waiting on the 15s poll.
+    // This page is push-driven. `positionLifecycleEvent` is the important one:
+    // the EA's delta/snapshot handlers emit it, so unrealized P&L moves arrive
+    // here as they happen rather than on the next tick of a timer. Open/close
+    // and fills cover the rest of the book's shape.
     // Throttle 2s — bursts of fills on a single position get batched.
-    merge(this.realtime.on('positionOpened'), this.realtime.on('positionClosed'))
+    merge(
+      this.realtime.on('positionOpened'),
+      this.realtime.on('positionClosed'),
+      this.realtime.on('positionLifecycleEvent'),
+      this.realtime.on('orderFilled'),
+    )
       .pipe(throttleTime(2_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
       .subscribe(() => {
         this.openTable?.loadData();
@@ -956,10 +965,23 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
     // account-scope dropdown; the open table re-queries too (it still
     // server-paginates). The closed table re-slices via the effect above once
     // the fresh window lands.
+    //
+    // Depend on the KEY, never on accountIds(): that array is rebuilt by the
+    // scope service's own 30 s refresh, so a reference-equality signal reports
+    // a "change" every tick even when the account set is identical — turning
+    // this into a refetch loop (measured: 9 /position/list calls every 30 s
+    // where 3 would do, each pulling a 500-row window).
+    //
+    // The body must be untracked as well: loadSummaryData() and the table's
+    // fetchers read accountIds() themselves, and a read inside the effect is
+    // a dependency no matter what we touched at the top — swapping the top
+    // line alone changed nothing. Same shape as the dashboard's scope effect.
     effect(() => {
-      this.accountScope.accountIds();
-      this.openTable?.loadData();
-      this.loadSummaryData();
+      this.accountScope.accountIdsKey();
+      untracked(() => {
+        this.openTable?.loadData();
+        this.loadSummaryData();
+      });
     });
   }
 
@@ -969,8 +991,12 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
 
   // ── State ──
   readonly activeTab = signal('open');
-  readonly openPositions = signal<PositionDto[]>([]);
-  readonly closedPositions = signal<PositionDto[]>([]);
+  // Structural equality, not reference: every fetch hands back a fresh array, so
+  // on the default equality the 60 s fallback sweep counted as a change and
+  // rebuilt every KPI, chart and table row even when the book had not moved.
+  // Measured as 8 full-table repaints per 70 s before this.
+  readonly openPositions = signal<PositionDto[]>([], { equal: structuralEqual });
+  readonly closedPositions = signal<PositionDto[]>([], { equal: structuralEqual });
   readonly analyticsLoading = signal(true);
 
   // ── Tabs ──
@@ -2454,13 +2480,19 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.loadSummaryData();
 
-    // 15s polling for live open position updates
+    // Fallback sweep only. Open positions update from `positionLifecycleEvent`
+    // (see the realtime merge in the constructor); this timer exists to heal a
+    // dropped push or a reconnect gap, not to drive the page. It was 15 s, which
+    // meant the book was re-fetched four times a minute whether or not anything
+    // had changed — and, because the table swapped in a skeleton each time, that
+    // is what the operator saw as flicker.
     this.pollingInterval = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
       if (this.activeTab() === 'open' && this.openTable) {
         this.openTable.loadData();
       }
       this.loadSummaryData();
-    }, 15000);
+    }, 60_000);
   }
 
   ngOnDestroy(): void {
