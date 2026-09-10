@@ -235,8 +235,11 @@ export interface MonitorActionAuthorizationRequest {
   by: string;
   reason: string;
   actions: string[];
-  /** Opt out of dry-run. Defaults false, so a new monitor describes before it acts. */
-  live?: boolean;
+  /**
+   * Opt IN to describe-only. Defaults false, so an authorised monitor acts for real —
+   * the authorisation above is the deliberate act, not a second confirmation.
+   */
+  dryRun?: boolean;
 }
 
 /** Payload for POST analysis-monitors. */

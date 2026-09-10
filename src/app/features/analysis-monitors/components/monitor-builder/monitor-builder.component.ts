@@ -304,9 +304,9 @@ interface ConditionRow {
               <details class="tier2">
                 <summary>Let this monitor change live trading state…</summary>
                 <p class="tier2-warn">
-                  These act on money. Each needs your name, a reason, and the exact actions
-                  permitted. They run in dry-run first — describing what they would have done —
-                  until you turn that off.
+                  These act on money, for real, as soon as the monitor fires. Each needs your name,
+                  a reason, and the exact actions permitted — that record is what appears on the
+                  timeline beside whatever they did.
                 </p>
 
                 <div class="actions">
@@ -341,10 +341,13 @@ interface ConditionRow {
                     </label>
                   </div>
                   <label class="check">
-                    <input type="checkbox" [(ngModel)]="liveActions" />
+                    <input type="checkbox" [(ngModel)]="dryRunActions" />
                     <span>
-                      <strong>Act for real, not dry-run</strong>
-                      <em>Leave off until the intents in the timeline look right.</em>
+                      <strong>Describe only, don't act yet</strong>
+                      <em>
+                        Runs the full action list and records what each step would have done,
+                        changing nothing. Use it to confirm the trigger fires when you expect.
+                      </em>
                     </span>
                   </label>
                 }
@@ -704,7 +707,8 @@ export class MonitorBuilderComponent {
   protected readonly selectedActions = signal<string[]>(['notify']);
   protected readonly authorizedBy = signal('');
   protected readonly authorizationReason = signal('');
-  protected readonly liveActions = signal(false);
+  /** Opt IN to describe-only. An authorised tier-2 monitor acts for real by default. */
+  protected readonly dryRunActions = signal(false);
 
   protected readonly deliverTo = signal<string[]>(['bell']);
   protected readonly expiresInHours = signal(24);
@@ -1025,7 +1029,7 @@ export class MonitorBuilderComponent {
               actions: this.selectedActions().filter((t) =>
                 this.tier2Actions().some((a) => a.type === t),
               ),
-              live: this.liveActions(),
+              dryRun: this.dryRunActions(),
             }
           : null,
         // The operator has just seen the replay; a second refusal over the same
