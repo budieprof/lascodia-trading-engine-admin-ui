@@ -71,8 +71,22 @@
   }
 }
 
+// `backwards`, NOT `both`. The two differ only in what survives the animation:
+// `forwards` retains the `to` state forever, and that `to` state is
+// `transform: translateY(0)` — visually identical to no transform at all, but a
+// retained transform makes every one of these sections a permanent STACKING
+// CONTEXT. Any absolutely-positioned overlay inside a section is then trapped
+// there: the Fleet-actions dropdown on /ea-instances painted underneath the
+// next card despite `z-index: 1000`, because 1000 only competes inside its own
+// context. `backwards` still applies the `from` state during the stagger delay
+// (which is what stops late children flashing in un-animated) and leaves no
+// transform behind once the animation finishes.
+//
+// This is the general form of the bug the 2026-09-06 review patched for dialogs
+// by excluding overlays from the animation; those exclusions stay as a
+// belt-and-braces guard.
 .page > * {
-  animation: page-rise 0.35s var(--ease-out-soft) both;
+  animation: page-rise 0.35s var(--ease-out-soft) backwards;
 }
 
 // Stagger — each child lags slightly behind the one above it. Clamped at 8
