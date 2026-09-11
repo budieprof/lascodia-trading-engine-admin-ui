@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderMarkdown } from './markdown.pipe';
+import { renderInlineMarkdown, renderMarkdown } from './markdown.pipe';
 
 /** The pipe's internal placeholder; it must never survive into the output. */
 const SENTINEL_CHAR = '\u0000';
@@ -360,5 +360,20 @@ describe('renderMarkdown — ordered lists and rules', () => {
     const html = renderMarkdown(['| a |', '|---|', '| 1 |'].join('\n'));
     expect(html).toContain('<table>');
     expect(html).not.toContain('<hr>');
+  });
+});
+
+describe('renderInlineMarkdown', () => {
+  // Used by the plan card and the run-notice row, where the caller owns the block structure and
+  // a <p> wrapper would fight its own layout.
+  it('renders emphasis and code without a block wrapper', () => {
+    const html = renderInlineMarkdown('measure **MAE** against the `1.5xATR` bumper');
+    expect(html).toBe('measure <strong>MAE</strong> against the <code>1.5xATR</code> bumper');
+  });
+
+  it('escapes first, exactly like the block renderer', () => {
+    expect(renderInlineMarkdown('<script>alert(1)</script>')).toBe(
+      '&lt;script&gt;alert(1)&lt;/script&gt;',
+    );
   });
 });

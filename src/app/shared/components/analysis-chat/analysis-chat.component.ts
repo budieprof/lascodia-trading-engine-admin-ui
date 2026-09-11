@@ -1,11 +1,13 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  computed,
   effect,
   ElementRef,
   inject,
   input,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -18,8 +20,22 @@ import {
 } from '@shared/components/chat/action-impact';
 import { MarkdownCopyDirective } from '@shared/directives/markdown-copy.directive';
 import { MarketDataService } from '@core/services/market-data.service';
+import { AlgoEngineerService } from '@core/services/algo-engineer.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
-import type { SpotAnalysisFollowUpTurnDto, AnalysisMonitorDto } from '@core/api/api.types';
+import type {
+  SpotAnalysisFollowUpTurnDto,
+  AnalysisMonitorDto,
+  AlgoEngineerRunStateDto,
+} from '@core/api/api.types';
+import { EngineerRunBarComponent } from '@shared/components/engineer-chat/engineer-run-bar.component';
+import { EngineerTurnComponent } from '@shared/components/engineer-chat/engineer-turn.component';
+import {
+  ENGINEER_HINTS,
+  groupTurns,
+  isRunLive,
+  isStatus,
+  type ChatItem,
+} from '@shared/components/engineer-chat/engineer-turns';
 import {
   SpotRecChartComponent,
   type SpotRecChartRec,
@@ -30,24 +46,8 @@ import {
   type RecFileSeed,
 } from '@shared/components/rec-file-editor/rec-file-editor.component';
 
-/**
- * Whether a turn opens a new calendar day and so needs a date divider above it.
- *
- * Exported separately from the component so the boundary rule can be tested directly,
- * without a TestBed. The comparison is in the VIEWER's timezone, matching what DatePipe
- * renders beside each turn: comparing the UTC dates instead would draw the divider in the
- * wrong place for anyone whose local midnight is not UTC midnight — which is everyone here,
- * the engine stores UTC and the operator reads BST.
- */
-export function startsNewLocalDay(
-  currentIso: string | null | undefined,
-  previousIso: string | null | undefined,
-): boolean {
-  if (!currentIso) return false;
-  // The first turn always carries the date: the reader has no earlier row to infer it from.
-  if (!previousIso) return true;
-  return new Date(currentIso).toDateString() !== new Date(previousIso).toDateString();
-}
+/** Day-boundary rule for the thread's date dividers — lives with the grouping that applies it. */
+export { startsNewLocalDay } from '@shared/components/engineer-chat/engineer-turns';
 
 /**
  * One-line rendering of the model's original proposal, for a rec the operator
@@ -125,6 +125,8 @@ interface ParsedChatRec {
     RecFileEditorComponent,
     MarkdownCopyDirective,
     DatePipe,
+    EngineerRunBarComponent,
+    EngineerTurnComponent,
   ],
   template: `
     <section
@@ -152,7 +154,17 @@ interface ParsedChatRec {
         </div>
       }
 
-      @if (monitors().length > 0) {
+      @if (isEngineer()) {
+        <app-engineer-run-bar
+          [run]="runState()"
+          [loaded]="runLoaded()"
+          [stopping]="stopping()"
+          [message]="stopMessage()"
+          (stop)="stopRun()"
+        />
+      }
+
+      @if (monitorsEnabled() && monitors().length > 0) {
         <div class="monitors">
           <div class="monitors-head">👁 Active monitors ({{ monitors().length }})</div>
           @for (mon of monitors(); track mon.id) {
@@ -223,126 +235,33 @@ interface ParsedChatRec {
           </div>
         }
 
-        @for (m of messages(); track m.id; let i = $index) {
-          @if (startsNewDay(i)) {
+        @for (item of items(); track item.key) {
+          @if (item.newDay) {
             <div class="day-sep">
-              <span>{{ m.createdAtUtc | date: 'EEE d MMM y' }}</span>
+              <span>{{ item.turn.createdAtUtc | date: 'EEE d MMM y' }}</span>
             </div>
           }
-          @switch (m.role) {
-            @case ('Assistant') {
-              <div class="msg">
-                <div class="bubble md" [innerHTML]="m.content | markdown"></div>
-                <time
-                  class="msg-time"
-                  [attr.datetime]="m.createdAtUtc"
-                  [title]="m.createdAtUtc | date: 'full'"
-                  >{{ m.createdAtUtc | date: timeFormat }}</time
-                >
-              </div>
-            }
-            @case ('User') {
-              <div class="msg user">
-                <div class="bubble">{{ m.content }}</div>
-                <time
-                  class="msg-time"
-                  [attr.datetime]="m.createdAtUtc"
-                  [title]="m.createdAtUtc | date: 'full'"
-                  >{{ m.createdAtUtc | date: timeFormat }}</time
-                >
-              </div>
-            }
-            @case ('Tool') {
-              @if (m.toolName === 'recommend' && parseRec(m); as rec) {
+          @if (isHarnessItem(item)) {
+            <!-- Algo-engineer harness turns: tool strip, plan, approval, report, run notice. -->
+            <div class="msg">
+              <app-engineer-turn
+                [item]="item"
+                [resolvingId]="resolvingId()"
+                (resolve)="resolve($event.turn, $event.confirm)"
+              />
+              <time
+                class="msg-time"
+                [attr.datetime]="itemTime(item)"
+                [title]="itemTime(item) | date: 'full'"
+                >{{ itemTime(item) | date: timeFormat }}</time
+              >
+            </div>
+          } @else {
+            @let m = item.turn;
+            @switch (m.role) {
+              @case ('Assistant') {
                 <div class="msg">
-                  <div class="rec-card" [attr.data-filed]="rec.filedSignalId !== null">
-                    <div class="rec-head">
-                      <span
-                        class="rec-badge"
-                        [class.buy]="rec.action === 'Buy'"
-                        [class.sell]="rec.action === 'Sell'"
-                        >📌 {{ rec.action }} {{ rec.symbol }} · {{ rec.timeframe }}</span
-                      >
-                      <span class="rec-conf"
-                        >conf {{ rec.confidencePct === null ? '—' : rec.confidencePct + '%' }}
-                        @if (rec.riskRewardRatio !== null) {
-                          · R:R {{ rec.riskRewardRatio }}
-                        }
-                      </span>
-                    </div>
-                    <div class="rec-levels">
-                      <span class="lvl entry">Entry {{ rec.entryPrice }}</span>
-                      <span class="lvl sl">SL {{ rec.stopLoss ?? '—' }}</span>
-                      <span class="lvl tp">TP {{ rec.takeProfit ?? '—' }}</span>
-                    </div>
-                    <app-spot-rec-chart
-                      [symbol]="rec.symbol"
-                      [timeframe]="rec.timeframe"
-                      [asOfUtc]="rec.asOfUtc"
-                      [recommendations]="rec.chartRecs"
-                      [historyBars]="80"
-                      [fullWidthLevels]="true"
-                    />
-                    @if (rec.rationale) {
-                      <div class="rec-rationale md" [innerHTML]="rec.rationale | markdown"></div>
-                    }
-                    @if (rec.filedSignalId !== null) {
-                      <div class="rec-filed">
-                        ✓ Filed as signal #{{ rec.filedSignalId }}
-                        @if (rec.operatorModified) {
-                          <span class="rec-edited">· edited before filing</span>
-                        }
-                      </div>
-                      @if (rec.modelOriginal; as orig) {
-                        <div class="rec-original">
-                          Model proposed: <span class="mono">{{ orig }}</span>
-                          @if (rec.operatorNote) {
-                            <span class="rec-note">— {{ rec.operatorNote }}</span>
-                          }
-                        </div>
-                      }
-                    } @else if (editingId() === m.id) {
-                      <app-rec-file-editor
-                        [seed]="recSeed(rec)"
-                        [busy]="filingId() === m.id"
-                        [error]="fileError()"
-                        (filed)="fileSignal(m, $event)"
-                        (cancelled)="closeEditor()"
-                      />
-                    } @else {
-                      <div class="rec-actions">
-                        <button
-                          type="button"
-                          class="file-signal"
-                          [disabled]="filingId() !== null"
-                          (click)="openEditor(m)"
-                        >
-                          ⚡ File as signal
-                        </button>
-                        <span class="rec-hint">review or adjust the levels, then file</span>
-                      </div>
-                    }
-                  </div>
-                  <time
-                    class="msg-time"
-                    [attr.datetime]="m.createdAtUtc"
-                    [title]="m.createdAtUtc | date: 'full'"
-                    >{{ m.createdAtUtc | date: timeFormat }}</time
-                  >
-                </div>
-              } @else {
-                <div class="msg">
-                  <details class="tool">
-                    <summary>
-                      🔧 {{ m.toolName }} <span class="tool-hint">pulled live data</span>
-                    </summary>
-                    <div class="tool-body">
-                      @if (m.toolArgsJson && m.toolArgsJson !== '{}') {
-                        <pre class="tool-pre">args: {{ m.toolArgsJson }}</pre>
-                      }
-                      <pre class="tool-pre">{{ m.toolResultJson }}</pre>
-                    </div>
-                  </details>
+                  <div class="bubble md" [innerHTML]="m.content | markdown"></div>
                   <time
                     class="msg-time"
                     [attr.datetime]="m.createdAtUtc"
@@ -351,87 +270,198 @@ interface ParsedChatRec {
                   >
                 </div>
               }
-            }
-            @case ('ActionProposal') {
-              <div class="msg">
-                <div
-                  class="action-card"
-                  [attr.data-status]="(m.actionStatus || 'Pending').toLowerCase()"
-                >
-                  <div class="action-head">
-                    <span class="action-badge">⚡ Proposed action</span>
-                    <span class="action-status">{{ m.actionStatus }}</span>
+              @case ('User') {
+                <div class="msg user">
+                  <div class="bubble">{{ m.content }}</div>
+                  <time
+                    class="msg-time"
+                    [attr.datetime]="m.createdAtUtc"
+                    [title]="m.createdAtUtc | date: 'full'"
+                    >{{ m.createdAtUtc | date: timeFormat }}</time
+                  >
+                </div>
+              }
+              @case ('Tool') {
+                @if (m.toolName === 'recommend' && parseRec(m); as rec) {
+                  <div class="msg">
+                    <div class="rec-card" [attr.data-filed]="rec.filedSignalId !== null">
+                      <div class="rec-head">
+                        <span
+                          class="rec-badge"
+                          [class.buy]="rec.action === 'Buy'"
+                          [class.sell]="rec.action === 'Sell'"
+                          >📌 {{ rec.action }} {{ rec.symbol }} · {{ rec.timeframe }}</span
+                        >
+                        <span class="rec-conf"
+                          >conf {{ rec.confidencePct === null ? '—' : rec.confidencePct + '%' }}
+                          @if (rec.riskRewardRatio !== null) {
+                            · R:R {{ rec.riskRewardRatio }}
+                          }
+                        </span>
+                      </div>
+                      <div class="rec-levels">
+                        <span class="lvl entry">Entry {{ rec.entryPrice }}</span>
+                        <span class="lvl sl">SL {{ rec.stopLoss ?? '—' }}</span>
+                        <span class="lvl tp">TP {{ rec.takeProfit ?? '—' }}</span>
+                      </div>
+                      <app-spot-rec-chart
+                        [symbol]="rec.symbol"
+                        [timeframe]="rec.timeframe"
+                        [asOfUtc]="rec.asOfUtc"
+                        [recommendations]="rec.chartRecs"
+                        [historyBars]="80"
+                        [fullWidthLevels]="true"
+                      />
+                      @if (rec.rationale) {
+                        <div class="rec-rationale md" [innerHTML]="rec.rationale | markdown"></div>
+                      }
+                      @if (rec.filedSignalId !== null) {
+                        <div class="rec-filed">
+                          ✓ Filed as signal #{{ rec.filedSignalId }}
+                          @if (rec.operatorModified) {
+                            <span class="rec-edited">· edited before filing</span>
+                          }
+                        </div>
+                        @if (rec.modelOriginal; as orig) {
+                          <div class="rec-original">
+                            Model proposed: <span class="mono">{{ orig }}</span>
+                            @if (rec.operatorNote) {
+                              <span class="rec-note">— {{ rec.operatorNote }}</span>
+                            }
+                          </div>
+                        }
+                      } @else if (editingId() === m.id) {
+                        <app-rec-file-editor
+                          [seed]="recSeed(rec)"
+                          [busy]="filingId() === m.id"
+                          [error]="fileError()"
+                          (filed)="fileSignal(m, $event)"
+                          (cancelled)="closeEditor()"
+                        />
+                      } @else {
+                        <div class="rec-actions">
+                          <button
+                            type="button"
+                            class="file-signal"
+                            [disabled]="filingId() !== null"
+                            (click)="openEditor(m)"
+                          >
+                            ⚡ File as signal
+                          </button>
+                          <span class="rec-hint">review or adjust the levels, then file</span>
+                        </div>
+                      }
+                    </div>
+                    <time
+                      class="msg-time"
+                      [attr.datetime]="m.createdAtUtc"
+                      [title]="m.createdAtUtc | date: 'full'"
+                      >{{ m.createdAtUtc | date: timeFormat }}</time
+                    >
                   </div>
-                  <!--
+                } @else {
+                  <div class="msg">
+                    <details class="tool">
+                      <summary>
+                        🔧 {{ m.toolName }} <span class="tool-hint">pulled live data</span>
+                      </summary>
+                      <div class="tool-body">
+                        @if (m.toolArgsJson && m.toolArgsJson !== '{}') {
+                          <pre class="tool-pre">args: {{ m.toolArgsJson }}</pre>
+                        }
+                        <pre class="tool-pre">{{ m.toolResultJson }}</pre>
+                      </div>
+                    </details>
+                    <time
+                      class="msg-time"
+                      [attr.datetime]="m.createdAtUtc"
+                      [title]="m.createdAtUtc | date: 'full'"
+                      >{{ m.createdAtUtc | date: timeFormat }}</time
+                    >
+                  </div>
+                }
+              }
+              @case ('ActionProposal') {
+                <div class="msg">
+                  <div
+                    class="action-card"
+                    [attr.data-status]="(m.actionStatus || 'Pending').toLowerCase()"
+                  >
+                    <div class="action-head">
+                      <span class="action-badge">⚡ Proposed action</span>
+                      <span class="action-status">{{ m.actionStatus }}</span>
+                    </div>
+                    <!--
                     The proposal's own prose. The http_action producer puts everything in
                     toolArgsJson and leaves this empty, but the algo-engineer posts a written
                     proposal as the turn CONTENT — which used to render as nothing at all: a
                     badge, a status, and 1,168 silently discarded characters.
                   -->
-                  @if (m.content) {
-                    <div class="action-body md" [innerHTML]="m.content | markdown"></div>
-                  }
-                  @if (parseAction(m); as pa) {
-                    @if (impactOf(pa); as impact) {
-                      <div class="impact" [attr.data-severity]="impact.severity">
-                        <strong>{{ impact.verb }}</strong>
-                        <span> — {{ impact.subject }}</span>
+                    @if (m.content) {
+                      <div class="action-body md" [innerHTML]="m.content | markdown"></div>
+                    }
+                    @if (parseAction(m); as pa) {
+                      @if (impactOf(pa); as impact) {
+                        <div class="impact" [attr.data-severity]="impact.severity">
+                          <strong>{{ impact.verb }}</strong>
+                          <span> — {{ impact.subject }}</span>
+                        </div>
+                      }
+                      @if (pa.summary) {
+                        <div class="action-summary md" [innerHTML]="pa.summary | markdown"></div>
+                      }
+                      @if (bodyRows(pa); as rows) {
+                        @if (rows.length > 0) {
+                          <dl class="impact-rows">
+                            @for (row of rows; track row.label) {
+                              <dt>{{ row.label }}</dt>
+                              <dd>{{ row.value }}</dd>
+                            }
+                          </dl>
+                        }
+                      }
+                      <details class="raw-call">
+                        <summary>Raw call</summary>
+                        <code class="action-call">{{ pa.method }} {{ pa.path }}</code>
+                        @if (pa.body) {
+                          <pre class="tool-pre">{{ pa.body }}</pre>
+                        }
+                      </details>
+                    }
+                    @if (isPendingStatus(m.actionStatus)) {
+                      <div class="action-actions">
+                        <button
+                          type="button"
+                          class="confirm"
+                          [disabled]="resolvingId() !== null"
+                          (click)="resolve(m, true)"
+                        >
+                          {{ resolvingId() === m.id ? 'Running…' : 'Confirm & run' }}
+                        </button>
+                        <button
+                          type="button"
+                          class="dismiss"
+                          [disabled]="resolvingId() !== null"
+                          (click)="resolve(m, false)"
+                        >
+                          Dismiss
+                        </button>
                       </div>
+                    } @else if (m.toolResultJson) {
+                      <details class="tool">
+                        <summary>result ({{ m.actionStatus }})</summary>
+                        <pre class="tool-pre">{{ m.toolResultJson }}</pre>
+                      </details>
                     }
-                    @if (pa.summary) {
-                      <div class="action-summary md" [innerHTML]="pa.summary | markdown"></div>
-                    }
-                    @if (bodyRows(pa); as rows) {
-                      @if (rows.length > 0) {
-                        <dl class="impact-rows">
-                          @for (row of rows; track row.label) {
-                            <dt>{{ row.label }}</dt>
-                            <dd>{{ row.value }}</dd>
-                          }
-                        </dl>
-                      }
-                    }
-                    <details class="raw-call">
-                      <summary>Raw call</summary>
-                      <code class="action-call">{{ pa.method }} {{ pa.path }}</code>
-                      @if (pa.body) {
-                        <pre class="tool-pre">{{ pa.body }}</pre>
-                      }
-                    </details>
-                  }
-                  @if (m.actionStatus === 'Pending') {
-                    <div class="action-actions">
-                      <button
-                        type="button"
-                        class="confirm"
-                        [disabled]="resolvingId() !== null"
-                        (click)="resolve(m, true)"
-                      >
-                        {{ resolvingId() === m.id ? 'Running…' : 'Confirm & run' }}
-                      </button>
-                      <button
-                        type="button"
-                        class="dismiss"
-                        [disabled]="resolvingId() !== null"
-                        (click)="resolve(m, false)"
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  } @else if (m.toolResultJson) {
-                    <details class="tool">
-                      <summary>result ({{ m.actionStatus }})</summary>
-                      <pre class="tool-pre">{{ m.toolResultJson }}</pre>
-                    </details>
-                  }
+                  </div>
+                  <time
+                    class="msg-time"
+                    [attr.datetime]="m.createdAtUtc"
+                    [title]="m.createdAtUtc | date: 'full'"
+                    >{{ m.createdAtUtc | date: timeFormat }}</time
+                  >
                 </div>
-                <time
-                  class="msg-time"
-                  [attr.datetime]="m.createdAtUtc"
-                  [title]="m.createdAtUtc | date: 'full'"
-                  >{{ m.createdAtUtc | date: timeFormat }}</time
-                >
-              </div>
+              }
             }
           }
         }
@@ -447,16 +477,35 @@ interface ParsedChatRec {
         }
 
         @if (!loading() && messages().length === 0 && !sending() && !error() && !opener()) {
-          <div class="chat-empty">{{ emptyHint() }}</div>
+          <div class="chat-empty">{{ emptyText() }}</div>
         }
       </div>
+
+      @if (isEngineer()) {
+        <div class="hints" role="group" aria-label="Quick replies">
+          @for (h of engineerHints; track h.label) {
+            <button
+              type="button"
+              class="hint"
+              [class.hint-stop]="h.send === null"
+              [disabled]="
+                h.send === null ? !runLive() || stopping() : sending() || !llmInvocationId()
+              "
+              [title]="h.send === null ? 'Stop the running agent' : 'Send “' + h.send + '”'"
+              (click)="useHint(h.send)"
+            >
+              {{ h.label }}
+            </button>
+          }
+        </div>
+      }
 
       <form class="chat-input" (submit)="send($event)">
         <textarea
           rows="2"
           [value]="question()"
           [disabled]="sending()"
-          [placeholder]="placeholder()"
+          [placeholder]="composerPlaceholder()"
           (input)="question.set($any($event.target).value)"
           (keydown)="onKeydown($event)"
           aria-label="Follow-up question"
@@ -1002,6 +1051,38 @@ interface ParsedChatRec {
       .bubble.md > :last-child {
         margin-bottom: 0;
       }
+      .hints {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        padding: 6px var(--space-2) 0;
+        border-top: 1px solid var(--border);
+        background: var(--bg-secondary);
+      }
+      .hints + .chat-input {
+        border-top: none;
+      }
+      .hint {
+        font: inherit;
+        font-size: 11px;
+        padding: 2px 10px;
+        border-radius: var(--radius-full);
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        cursor: pointer;
+      }
+      .hint:hover:not(:disabled) {
+        border-color: var(--accent);
+        color: var(--text-primary);
+      }
+      .hint-stop:not(:disabled) {
+        color: var(--loss);
+      }
+      .hint:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
       .chat-input {
         display: flex;
         gap: var(--space-2);
@@ -1057,6 +1138,7 @@ interface ParsedChatRec {
 })
 export class AnalysisChatComponent {
   private readonly marketData = inject(MarketDataService);
+  private readonly algoEngineer = inject(AlgoEngineerService);
   private readonly realtime = inject(RealtimeService);
 
   /** LlmInvocation id of the analysis being discussed (the thread anchor).
@@ -1100,6 +1182,33 @@ export class AnalysisChatComponent {
   /** The "Conversation ID · copy" strip. Hosts with their own header suppress it. */
   readonly showIdBar = input<boolean>(true);
 
+  /**
+   * The conversation's Kind label (`Spot`, `Engineer`, `Wire`, …) when the host knows it. An
+   * `Engineer` thread gets the algo-engineer run header, folds every tool call into a strip, uses
+   * its own composer placeholder + quick replies, and never shows the spot-analysis monitors strip.
+   */
+  readonly kind = input<string | null>(null);
+
+  /** True for an algo-engineer work-order conversation. */
+  protected readonly isEngineer = computed(() => this.kind() === 'Engineer');
+
+  /** Monitors belong to spot analyses: off when the host opts out and always for an Engineer thread. */
+  protected readonly monitorsEnabled = computed(() => this.showMonitors() && !this.isEngineer());
+
+  protected readonly composerPlaceholder = computed(() =>
+    this.isEngineer()
+      ? 'Message the algo-engineer — a follow-up instruction, a question, or “continue”…'
+      : this.placeholder(),
+  );
+
+  protected readonly emptyText = computed(() =>
+    this.isEngineer()
+      ? 'The work order is starting — the plan, tool calls, approvals and findings stream in here live.'
+      : this.emptyHint(),
+  );
+
+  protected readonly engineerHints = ENGINEER_HINTS;
+
   protected readonly messages = signal<SpotAnalysisFollowUpTurnDto[]>([]);
   protected readonly question = signal('');
   protected readonly loading = signal(false);
@@ -1120,6 +1229,46 @@ export class AnalysisChatComponent {
   /** Brief "copied" confirmation after the operator copies the conversation id. */
   protected readonly copied = signal(false);
 
+  /** Engineer threads: the session's latest run (null = none yet / not loaded). */
+  protected readonly runState = signal<AlgoEngineerRunStateDto | null>(null);
+  /** True once the first run-state fetch for the bound conversation settled. */
+  protected readonly runLoaded = signal(false);
+  protected readonly stopping = signal(false);
+  protected readonly stopMessage = signal<{ text: string; ok: boolean } | null>(null);
+  protected readonly runLive = computed(() => isRunLive(this.runState()?.status));
+  /** Out-of-order guard: only the newest run-state response may land. */
+  private runStateSeq = 0;
+
+  /**
+   * The thread as render items — consecutive tool calls folded into one strip, harness turn kinds
+   * classified, day boundaries marked (against the opener for the first turn, so the date is not
+   * drawn twice).
+   */
+  protected readonly items = computed(() =>
+    groupTurns(this.messages(), this.isEngineer(), this.openerAt()),
+  );
+
+  /** Items rendered by `<app-engineer-turn>` rather than the chat's own bubbles and cards. */
+  protected isHarnessItem(item: ChatItem): boolean {
+    return (
+      item.type === 'tools' ||
+      item.kind === 'plan' ||
+      item.kind === 'approval' ||
+      item.kind === 'report' ||
+      item.kind === 'notice'
+    );
+  }
+
+  /** A tool strip is stamped with its latest call; every other item with its own turn. */
+  protected itemTime(item: ChatItem): string {
+    return item.type === 'tools' ? item.last.createdAtUtc : item.turn.createdAtUtc;
+  }
+
+  /** Case-insensitive: the confirm buttons must not vanish because a writer spelled it `pending`. */
+  protected isPendingStatus(status: string | null | undefined): boolean {
+    return isStatus(status, 'Pending');
+  }
+
   /**
    * Turn timestamps show SECONDS, not just hours and minutes. An agent run posts several
    * turns inside one minute — conversation 24272 has four between 05:56:25 and 05:56:44 —
@@ -1128,19 +1277,6 @@ export class AnalysisChatComponent {
    * the `title` carries the full date for anyone reconciling against an engine log.
    */
   protected readonly timeFormat = 'HH:mm:ss';
-
-  /**
-   * True when this turn is the first of a calendar day, so the thread gets a date divider.
-   * Work-order conversations are long-lived — 24272 was resumed hours later — and without
-   * this a reply from a different day is indistinguishable from the one above it.
-   */
-  protected startsNewDay(index: number): boolean {
-    const turns = this.messages();
-    // The opener is the turn before the first reply. Comparing against it stops the thread
-    // drawing the date twice — once over the brief, once over the answer below it.
-    const previous = index === 0 ? this.openerAt() : turns[index - 1]?.createdAtUtc;
-    return startsNewLocalDay(turns[index]?.createdAtUtc, previous);
-  }
 
   /** Memoised parsed recommendations, keyed by turn id + payload so the chart's
    *  inputs stay reference-stable across change detection (a fresh array every
@@ -1156,10 +1292,30 @@ export class AnalysisChatComponent {
   constructor() {
     // Load (or reload) the thread + monitors whenever the anchor id changes —
     // including the first render and after the operator re-runs the analysis.
+    //
+    // Untracked on purpose: the loaders read other signals (monitorsEnabled, isEngineer), and a
+    // late-arriving conversation Kind must not re-run the clear-and-spinner thread load.
     effect(() => {
       const id = this.llmInvocationId();
-      this.loadThread(id);
-      this.loadMonitors(id);
+      untracked(() => this.loadThread(id));
+    });
+    effect(() => {
+      const id = this.llmInvocationId();
+      const enabled = this.monitorsEnabled();
+      untracked(() => (enabled ? this.loadMonitors(id) : this.monitors.set([])));
+    });
+
+    // Engineer threads: (re)load the run header whenever the conversation is bound or turns out
+    // to be an Engineer one (the host may learn the Kind after the id).
+    effect(() => {
+      const id = this.llmInvocationId();
+      const engineer = this.isEngineer();
+      untracked(() => {
+        this.runState.set(null);
+        this.runLoaded.set(false);
+        this.stopMessage.set(null);
+        if (engineer && id) this.loadRunState(id);
+      });
     });
 
     // Keep the log pinned to the latest turn as messages arrive / while thinking.
@@ -1194,6 +1350,9 @@ export class AnalysisChatComponent {
     if (this.liveReloadTimer) clearTimeout(this.liveReloadTimer);
     this.liveReloadTimer = setTimeout(() => {
       const id = this.llmInvocationId();
+      // The run header refreshes on every tickle, even mid-send: the agent's status line is
+      // exactly what the operator is watching while their message is in flight.
+      if (id && this.isEngineer()) this.loadRunState(id);
       if (!id || this.sending()) return;
       this.refreshThreadSilently(id);
       this.loadMonitors(id);
@@ -1377,6 +1536,8 @@ export class AnalysisChatComponent {
         else this.error.set(res?.message || 'Could not resolve the action.');
         // A confirmed action may have created a monitor — refresh the strip.
         this.loadMonitors(id);
+        // An approval wakes the agent's run — pick up its new status.
+        if (this.isEngineer()) this.loadRunState(id);
       },
       error: (err) => {
         this.resolvingId.set(null);
@@ -1520,13 +1681,75 @@ export class AnalysisChatComponent {
     });
   }
 
+  /** Fetch the Engineer session's latest run for the header. A failure keeps the last state. */
+  private loadRunState(sessionId: number): void {
+    const seq = ++this.runStateSeq;
+    this.algoEngineer.getRunState(sessionId).subscribe({
+      next: (res) => {
+        if (seq !== this.runStateSeq || this.llmInvocationId() !== sessionId) return;
+        this.runLoaded.set(true);
+        if (res?.status) this.runState.set(res.data ?? null);
+      },
+      error: () => {
+        if (seq !== this.runStateSeq || this.llmInvocationId() !== sessionId) return;
+        this.runLoaded.set(true);
+      },
+    });
+  }
+
+  /** Stop the Engineer session's active run. Shared by the header button and the "stop" chip. */
+  protected stopRun(): void {
+    const id = this.llmInvocationId();
+    if (!id || this.stopping()) return;
+    this.stopping.set(true);
+    this.stopMessage.set(null);
+    this.algoEngineer.stopRun(id).subscribe({
+      next: (res) => {
+        this.stopping.set(false);
+        if (this.llmInvocationId() !== id) return;
+        const d = res?.data;
+        if (res?.status && d?.stopped) {
+          this.stopMessage.set({
+            text: d.message || 'Stop requested — the agent halts at its next step.',
+            ok: true,
+          });
+        } else {
+          this.stopMessage.set({
+            text: d?.message || res?.message || 'Could not stop the run.',
+            ok: false,
+          });
+        }
+        this.loadRunState(id);
+      },
+      error: (err) => {
+        this.stopping.set(false);
+        if (this.llmInvocationId() !== id) return;
+        this.stopMessage.set({
+          text: err?.error?.message ?? err?.message ?? 'Stop failed. Is the engine reachable?',
+          ok: false,
+        });
+      },
+    });
+  }
+
+  /** A composer quick reply: `null` is the "stop" chip, anything else is sent as a message. */
+  protected useHint(text: string | null): void {
+    if (text === null) {
+      this.stopRun();
+      return;
+    }
+    if (this.sending()) return;
+    this.question.set(text);
+    this.send();
+  }
+
   /** Load the active monitors created from this analysis. */
   private loadMonitors(llmInvocationId: number): void {
     if (!llmInvocationId) {
       this.monitors.set([]);
       return;
     }
-    if (!this.showMonitors()) {
+    if (!this.monitorsEnabled()) {
       this.monitors.set([]);
       return;
     }
