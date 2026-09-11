@@ -29,6 +29,7 @@ import { WireService } from '@core/services/wire.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
+import { isRunLive, runStatusLabel } from '@shared/components/engineer-chat/engineer-turns';
 import type {
   AnalysisConversationSummaryDto,
   AnalysisConversationDetailDto,
@@ -111,6 +112,38 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
                     [disabled]="running()"
                     [placeholder]="instructionPlaceholder"
                   ></textarea>
+                  @if (newMode === 'engineer') {
+                    <div class="new-order-opts">
+                      <label
+                        class="new-budget"
+                        title="Spend cap for this order. Leave empty for the algo-engineer's default."
+                      >
+                        <span>Budget (USD)</span>
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="0.5"
+                          inputmode="decimal"
+                          placeholder="default"
+                          [(ngModel)]="newBudgetUsd"
+                          name="budget"
+                          [disabled]="running()"
+                        />
+                      </label>
+                      <label
+                        class="new-readonly"
+                        title="The agent may investigate and propose, but not change anything live"
+                      >
+                        <input
+                          type="checkbox"
+                          [(ngModel)]="newReadOnly"
+                          name="readOnly"
+                          [disabled]="running()"
+                        />
+                        Read-only for this order
+                      </label>
+                    </div>
+                  }
                 } @else {
                   <select
                     class="new-symbol"
@@ -143,16 +176,10 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
                   <button
                     type="submit"
                     class="new-run"
-                    [disabled]="
-                      running() ||
-                      (newMode === 'engineer' ? !newInstruction.trim() : !newSymbol.trim())
-                    "
+                    [disabled]="!canRunNew()"
+                    [title]="runBlockedReason()"
                   >
-                    @if (newMode === 'engineer') {
-                      {{ running() ? 'Launching…' : 'Launch' }}
-                    } @else {
-                      {{ running() ? 'Running…' : 'Run' }}
-                    }
+                    {{ runLabel() }}
                   </button>
                   <button
                     type="button"
@@ -203,6 +230,14 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
                 (click)="select(c)"
               >
                 <div class="conv-item-top">
+                  @if (isRunLive(c.runStatus)) {
+                    <span
+                      class="run-dot"
+                      [attr.data-status]="c.runStatus"
+                      [title]="'Algo-engineer: ' + runStatusLabel(c.runStatus)"
+                      [attr.aria-label]="'Algo-engineer: ' + runStatusLabel(c.runStatus)"
+                    ></span>
+                  }
                   <span class="conv-kind" [attr.data-kind]="c.kind">{{ c.kind }}</span>
                   <span class="conv-sym">{{ conversationTitle(c) }}</span>
                   <span class="conv-time">{{ c.lastActivityAtUtc | relativeTime }}</span>
@@ -355,6 +390,7 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
                 [opener]="openerText()"
                 [openerAt]="detail()?.invokedAt ?? null"
                 [fillHeight]="true"
+                [kind]="selectedKind()"
               />
             </div>
           } @else {
@@ -448,6 +484,34 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
         resize: vertical;
         min-height: 60px;
         line-height: 1.4;
+      }
+      .new-order-opts {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px 12px;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .new-budget {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .new-budget input {
+        width: 80px;
+        font: inherit;
+        padding: 4px 7px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+      }
+      .new-readonly {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        cursor: pointer;
       }
       /* One scrollable row: ten chips wrapped onto two ragged lines in a
          320px rail. Horizontal scroll with the bar hidden keeps the rail
@@ -551,6 +615,34 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
         font-size: 10px;
         color: var(--text-tertiary);
         white-space: nowrap;
+      }
+      /* An agent run is alive on this conversation. Pulses while the agent works; steady amber
+         when it waits on the operator; steady green while it only watches. */
+      .run-dot {
+        flex: none;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+      .run-dot[data-status='Working'] {
+        animation: conv-run-pulse 1.2s ease-in-out infinite;
+      }
+      .run-dot[data-status='WaitingForOperator'] {
+        background: var(--warning);
+      }
+      .run-dot[data-status='Watching'] {
+        background: var(--profit);
+      }
+      @keyframes conv-run-pulse {
+        50% {
+          opacity: 0.35;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .run-dot[data-status='Working'] {
+          animation: none;
+        }
       }
       .conv-kind {
         font-size: 9px;
@@ -862,6 +954,58 @@ export class ConversationsPageComponent {
   protected newMode: AnalysisMode = 'spot';
   /** Free-text instruction for the agent modes (ignored by the analysis modes). */
   protected newInstruction = '';
+  /** Engineer mode: optional spend cap for this order (USD). Empty = the host's default. */
+  protected newBudgetUsd: number | null = null;
+  /** Engineer mode: the order may investigate and propose, but change nothing live. */
+  protected newReadOnly = false;
+
+  protected readonly isRunLive = isRunLive;
+  protected readonly runStatusLabel = runStatusLabel;
+
+  /** The open conversation's Kind — from the detail once loaded, else from its rail row, so the
+   *  chat knows it is an Engineer thread from the first render rather than after the detail fetch. */
+  protected readonly selectedKind = computed<string | null>(() => {
+    const d = this.detail();
+    const id = this.selectedId();
+    if (d && d.llmInvocationId === id) return d.kind;
+    return this.conversations().find((c) => c.llmInvocationId === id)?.kind ?? null;
+  });
+
+  /** Budget as sent: a positive number, or undefined when left empty. NaN / ≤ 0 is invalid. */
+  private get budgetValue(): number | undefined | 'invalid' {
+    const v = this.newBudgetUsd as unknown;
+    if (v === null || v === undefined || v === '') return undefined;
+    const n = typeof v === 'number' ? v : Number(v);
+    return Number.isFinite(n) && n > 0 ? n : 'invalid';
+  }
+
+  /** Why Run is disabled, or '' when it is not. Every mode that needs an instruction gets one. */
+  protected runBlockedReason(): string {
+    if (this.running()) return '';
+    if (this.isAgentMode) {
+      if (!this.newInstruction.trim()) return 'Write an instruction first';
+      if (this.newMode === 'engineer' && this.budgetValue === 'invalid')
+        return 'Budget must be a positive number of dollars, or empty for the default';
+      return '';
+    }
+    return this.newSymbol.trim() ? '' : 'Pick a symbol first';
+  }
+
+  protected canRunNew(): boolean {
+    return !this.running() && this.runBlockedReason() === '';
+  }
+
+  /** Agent modes launch a background run; analysis modes run inline. */
+  protected runLabel(): string {
+    switch (this.newMode) {
+      case 'engineer':
+        return this.running() ? 'Launching…' : 'Launch work order';
+      case 'wire':
+        return this.running() ? 'Asking…' : 'Ask Wire';
+      default:
+        return this.running() ? 'Running…' : 'Run';
+    }
+  }
 
   /** True for the agent modes, which take an instruction rather than a symbol + timeframe. */
   protected get isAgentMode(): boolean {
@@ -1194,6 +1338,7 @@ export class ConversationsPageComponent {
                     activeMonitorCount: updated.activeMonitorCount,
                     lastActivityAtUtc: updated.lastActivityAtUtc,
                     preview: updated.preview,
+                    runStatus: updated.runStatus ?? null,
                   }
                 : c,
             )
@@ -1404,30 +1549,39 @@ export class ConversationsPageComponent {
    *  live via SignalR. */
   private launchWorkOrder(): void {
     const instruction = this.newInstruction.trim();
-    if (!instruction) return;
+    const budget = this.budgetValue;
+    if (!instruction || budget === 'invalid') return;
     this.running.set(true);
-    this.algoEngineer.startWorkOrder(instruction).subscribe({
-      next: (res) => {
-        this.running.set(false);
-        if (res?.status && res.data) {
-          this.notify.success('Algo-engineer work order launched.');
-          this.newInstruction = '';
-          this.closeNew();
-          this.load(true); // prepend the new Engineer conversation to the list
-          this.openConversation(res.data.sessionLlmInvocationId);
-        } else {
-          this.notify.error(res?.message || 'Could not launch the work order.');
-        }
-      },
-      error: (err) => {
-        this.running.set(false);
-        this.notify.error(
-          err?.error?.message ??
-            err?.message ??
-            'Work order failed. Is the algo-engineer service running?',
-        );
-      },
-    });
+    this.algoEngineer
+      .startWorkOrder(instruction, { maxBudgetUsd: budget ?? null, readOnly: this.newReadOnly })
+      .subscribe({
+        next: (res) => {
+          this.running.set(false);
+          if (res?.status && res.data) {
+            this.notify.success(
+              res.data.status === 'delivered'
+                ? 'Work order delivered to the algo-engineer.'
+                : 'Algo-engineer work order launched.',
+            );
+            this.newInstruction = '';
+            this.newBudgetUsd = null;
+            this.newReadOnly = false;
+            this.closeNew();
+            this.load(true); // prepend the new Engineer conversation to the list
+            this.openConversation(res.data.sessionLlmInvocationId);
+          } else {
+            this.notify.error(res?.message || 'Could not launch the work order.');
+          }
+        },
+        error: (err) => {
+          this.running.set(false);
+          this.notify.error(
+            err?.error?.message ??
+              err?.message ??
+              'Work order failed. Is the algo-engineer service running?',
+          );
+        },
+      });
   }
 
   /** Ask Wire (Wire mode). Fire-and-forget on the host, same shape as a work order: the endpoint

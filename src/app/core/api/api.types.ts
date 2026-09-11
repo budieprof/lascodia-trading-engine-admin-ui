@@ -724,7 +724,53 @@ export interface AlgoEngineerScorecardRowDto {
  *  keeps running on the host; the conversation streams in live via SignalR. */
 export interface AlgoEngineerWorkOrderResultDto {
   sessionLlmInvocationId: number;
+  /** The host's own status string: `running` (a new run started) or `delivered`. */
   status: string;
+}
+
+/** Optional per-order knobs for a launched work order (harness contract 2.7). */
+export interface AlgoEngineerWorkOrderOptions {
+  /** Spend cap for this order, USD. Omitted = the host's default. */
+  maxBudgetUsd?: number | null;
+  /** True = the order may not change anything live. Omitted = the host's default. */
+  readOnly?: boolean | null;
+}
+
+/**
+ * The latest run of an algo-engineer session — GET /algo-engineer/session/{id}/run-state
+ * (harness contract 2.5). `data` is null when the session has never had a run. `status` reads
+ * `Stale` when a Working/WaitingForOperator run has not been updated for 15 minutes (the host
+ * probably died); the stored row is not rewritten.
+ */
+export interface AlgoEngineerRunStateDto {
+  runKey: string;
+  /** Working | WaitingForOperator | Watching | Done | Stopped | Failed | Stale. */
+  status: string;
+  /** new | follow_up | approval | watch | continue. */
+  trigger: string | null;
+  startedAtUtc: string;
+  updatedAtUtc: string;
+  endedAtUtc: string | null;
+  steps: number;
+  maxSteps: number;
+  costUsd: number;
+  budgetUsd: number;
+  /** Current one-line status text ("Reading training diagnostics…"). */
+  activity: string | null;
+  stopReason: string | null;
+  /** `{"mlControl","configWrite","promote","readOnly","maxSteps","budgetUsd","model"}`. */
+  capabilitiesJson: string | null;
+  /** `[{"id","kind","ids":[…],"note","nextCheckAtUtc"}]`. */
+  watchesJson: string | null;
+  /** Aggregates over every run of the session. */
+  runCount: number;
+  sessionCostUsd: number;
+}
+
+/** POST /algo-engineer/session/{id}/stop. */
+export interface AlgoEngineerStopResultDto {
+  stopped: boolean;
+  message: string;
 }
 
 /** The launched Wire briefing — its anchor "Wire" conversation id. Wire keeps working on the host;
@@ -3279,7 +3325,8 @@ export interface SpotAnalysisFollowUpTurnDto {
   toolArgsJson?: string | null;
   /** JSON of the tool result / executed-action response. Null until run. */
   toolResultJson?: string | null;
-  /** ActionProposal lifecycle: 'Pending' | 'Confirmed' | 'Failed' | 'Dismissed'. Null otherwise. */
+  /** ActionProposal lifecycle: 'Pending' | 'Confirmed' | 'Failed' | 'Dismissed' — or, for an
+   *  algo-engineer approval card, 'Pending' | 'Approved' | 'Rejected' | 'Expired'. Null otherwise. */
   actionStatus?: string | null;
   /** Audit-row id of the re-prompt that produced an assistant turn; null for user turns. */
   followUpInvocationId?: number | null;
@@ -3547,6 +3594,9 @@ export interface AnalysisConversationSummaryDto {
    *  both a conversation-id and a signal-id is disambiguated. Null for symbol/
    *  unfiltered listings. */
   matchReason?: string | null;
+  /** Latest algo-engineer run status for an Engineer (agent-session) row — Working |
+   *  WaitingForOperator | Watching | Done | Stopped | Failed | Stale. Null for every other row. */
+  runStatus?: string | null;
 }
 
 export interface AnalysisConversationsPageDto {

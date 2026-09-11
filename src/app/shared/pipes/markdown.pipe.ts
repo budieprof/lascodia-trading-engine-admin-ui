@@ -31,6 +31,26 @@ export class MarkdownPipe implements PipeTransform {
 }
 
 /**
+ * Inline-only variant for one line of text that sits inside a structure the caller already owns
+ * (a plan-card task row, a list item): emphasis, code and links, but no block wrapper — so no
+ * `<p>` margin to fight. Same escape-first guarantee as the block renderer.
+ */
+@Pipe({ name: 'markdownInline', standalone: true })
+export class MarkdownInlinePipe implements PipeTransform {
+  private readonly sanitizer = inject(DomSanitizer);
+
+  transform(value: string | null | undefined): SafeHtml {
+    if (!value) return '';
+    return this.sanitizer.bypassSecurityTrustHtml(renderInlineMarkdown(value));
+  }
+}
+
+/** Inline markdown → sanitized HTML string (see {@link MarkdownInlinePipe}). */
+export function renderInlineMarkdown(value: string): string {
+  return inline(escapeHtml(value));
+}
+
+/**
  * Markdown → sanitized HTML string. Exported separately from the pipe so the
  * rendering rules can be tested directly, without a TestBed or a DomSanitizer.
  * Escaping happens here, so every caller gets the same guarantee the pipe does.
