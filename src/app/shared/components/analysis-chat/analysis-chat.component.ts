@@ -29,13 +29,19 @@ import type {
 } from '@core/api/api.types';
 import { EngineerRunBarComponent } from '@shared/components/engineer-chat/engineer-run-bar.component';
 import { EngineerTurnComponent } from '@shared/components/engineer-chat/engineer-turn.component';
+import { EngineerThinkingComponent } from '@shared/components/engineer-chat/engineer-thinking.component';
 import {
   ENGINEER_HINTS,
   groupTurns,
   isRunLive,
   isStatus,
+  latestThinkingIndex,
+  reuseUnchangedItems,
+  runPresence,
   type ChatItem,
 } from '@shared/components/engineer-chat/engineer-turns';
+import { isPinnedToBottom, jumpLabel, mergeOptimisticTurns } from './chat-live';
+import { structuralEqual } from '@core/signals/structural-equal';
 import {
   SpotRecChartComponent,
   type SpotRecChartRec,
@@ -127,6 +133,7 @@ interface ParsedChatRec {
     DatePipe,
     EngineerRunBarComponent,
     EngineerTurnComponent,
+    EngineerThinkingComponent,
   ],
   template: `
     <section
@@ -214,7 +221,7 @@ interface ParsedChatRec {
         </div>
       }
 
-      <div class="chat-log" #log>
+      <div class="chat-log" #log (scroll)="onLogScroll()">
         @if (loading()) {
           <div class="chat-state"><span class="spinner"></span> Loading conversation…</div>
         }
@@ -235,13 +242,29 @@ interface ParsedChatRec {
           </div>
         }
 
-        @for (item of items(); track item.key) {
+        @for (item of items(); track item.key; let i = $index) {
           @if (item.newDay) {
             <div class="day-sep">
               <span>{{ item.turn.createdAtUtc | date: 'EEE d MMM y' }}</span>
             </div>
           }
-          @if (isHarnessItem(item)) {
+          @if (item.type === 'thinking') {
+            <!-- The agent thinking out loud — live narration while it works, foldable once done. -->
+            <div class="msg">
+              <app-engineer-thinking
+                [item]="item"
+                [live]="narrationLive()"
+                [latest]="i === latestThinkingIdx()"
+                [presence]="presenceText()"
+              />
+              <time
+                class="msg-time"
+                [attr.datetime]="itemTime(item)"
+                [title]="itemTime(item) | date: 'full'"
+                >{{ itemTime(item) | date: timeFormat }}</time
+              >
+            </div>
+          } @else if (isHarnessItem(item)) {
             <!-- Algo-engineer harness turns: tool strip, plan, approval, report, run notice. -->
             <div class="msg">
               <app-engineer-turn
@@ -466,7 +489,12 @@ interface ParsedChatRec {
           }
         }
 
-        @if (sending()) {
+        <!--
+          The placeholder spinner is for a chat that streams NOTHING. An engineer run narrates
+          into the thread instead, so once a live thinking block is on screen this would be a
+          second, redundant "Thinking…" sitting under the real one.
+        -->
+        @if (sending() && !streamingLive()) {
           <div class="msg">
             <div class="bubble thinking"><span class="spinner"></span> Thinking…</div>
           </div>
@@ -478,6 +506,12 @@ interface ParsedChatRec {
 
         @if (!loading() && messages().length === 0 && !sending() && !error() && !opener()) {
           <div class="chat-empty">{{ emptyText() }}</div>
+        }
+
+        <!-- Only while the reader has scrolled away from the bottom: the log stops following
+             the stream, and this is how they get back to it. -->
+        @if (!pinned()) {
+          <button type="button" class="jump" (click)="jumpToLatest()">{{ jumpText() }}</button>
         }
       </div>
 
@@ -693,6 +727,29 @@ interface ParsedChatRec {
       .monitor-cancel:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+      }
+      /* "Jump to latest" — sticky to the floor of the log, so it stays reachable however far
+         up the reader has scrolled. */
+      .jump {
+        position: sticky;
+        bottom: 2px;
+        align-self: center;
+        z-index: 2;
+        margin-top: auto;
+        padding: 3px 12px;
+        font: inherit;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
+        background: var(--bg-secondary);
+        color: var(--text-secondary);
+        box-shadow: var(--shadow-sm, 0 1px 3px rgb(0 0 0 / 12%));
+        cursor: pointer;
+      }
+      .jump:hover {
+        border-color: var(--accent);
+        color: var(--text-primary);
       }
       .chat-empty {
         font-size: var(--text-xs);
@@ -1192,8 +1249,13 @@ export class AnalysisChatComponent {
   /** True for an algo-engineer work-order conversation. */
   protected readonly isEngineer = computed(() => this.kind() === 'Engineer');
 
-  /** Monitors belong to spot analyses: off when the host opts out and always for an Engineer thread. */
-  protected readonly monitorsEnabled = computed(() => this.showMonitors() && !this.isEngineer());
+  /**
+   * Monitors are shown wherever the host allows them — INCLUDING an Engineer thread. An
+   * algo-engineer work order can arm the platform's long-horizon watchers, and the operator has
+   * to be able to see one and cancel it from the conversation that created it. (These are not the
+   * run bar's watch chips: those are short-lived, in-run waits on an engine job.)
+   */
+  protected readonly monitorsEnabled = computed(() => this.showMonitors());
 
   protected readonly composerPlaceholder = computed(() =>
     this.isEngineer()
@@ -1209,15 +1271,22 @@ export class AnalysisChatComponent {
 
   protected readonly engineerHints = ENGINEER_HINTS;
 
-  protected readonly messages = signal<SpotAnalysisFollowUpTurnDto[]>([]);
+  /**
+   * The thread. Structural equality on purpose: with a streaming agent the thread is refetched
+   * about once a second, and most of those refetches carry a payload identical to the one on
+   * screen. On reference equality every one of them re-ran the grouping and repainted the log.
+   */
+  protected readonly messages = signal<SpotAnalysisFollowUpTurnDto[]>([], {
+    equal: structuralEqual,
+  });
   protected readonly question = signal('');
   protected readonly loading = signal(false);
   protected readonly sending = signal(false);
   protected readonly error = signal<string | null>(null);
   /** Id of the action proposal currently being confirmed/dismissed, or null. */
   protected readonly resolvingId = signal<number | null>(null);
-  /** Active monitors created from this analysis. */
-  protected readonly monitors = signal<AnalysisMonitorDto[]>([]);
+  /** Active monitors created from this analysis (refetched on every tickle — hence structural). */
+  protected readonly monitors = signal<AnalysisMonitorDto[]>([], { equal: structuralEqual });
   /** Monitor id currently being cancelled, or null. */
   protected readonly cancellingId = signal<number | null>(null);
   /** Id of the recommendation turn currently being filed as a signal, or null. */
@@ -1230,7 +1299,9 @@ export class AnalysisChatComponent {
   protected readonly copied = signal(false);
 
   /** Engineer threads: the session's latest run (null = none yet / not loaded). */
-  protected readonly runState = signal<AlgoEngineerRunStateDto | null>(null);
+  protected readonly runState = signal<AlgoEngineerRunStateDto | null>(null, {
+    equal: structuralEqual,
+  });
   /** True once the first run-state fetch for the bound conversation settled. */
   protected readonly runLoaded = signal(false);
   protected readonly stopping = signal(false);
@@ -1239,19 +1310,49 @@ export class AnalysisChatComponent {
   /** Out-of-order guard: only the newest run-state response may land. */
   private runStateSeq = 0;
 
+  /** The last render items handed to the template — the baseline every refresh is diffed against. */
+  private prevItems: ChatItem[] = [];
+
   /**
-   * The thread as render items — consecutive tool calls folded into one strip, harness turn kinds
-   * classified, day boundaries marked (against the opener for the first turn, so the date is not
-   * drawn twice).
+   * The thread as render items — consecutive tool calls folded into one strip, thinking passages
+   * folded into one block, harness turn kinds classified, day boundaries marked (against the
+   * opener for the first turn, so the date is not drawn twice).
+   *
+   * Items the refresh did not change keep their previous object identity, so an OnPush child only
+   * re-renders when its own content actually moved. Without that, a streaming run repainted every
+   * card in the thread once a second.
    */
-  protected readonly items = computed(() =>
-    groupTurns(this.messages(), this.isEngineer(), this.openerAt()),
+  protected readonly items = computed(() => {
+    const next = groupTurns(this.messages(), this.isEngineer(), this.openerAt());
+    const stable = reuseUnchangedItems(this.prevItems, next);
+    this.prevItems = stable;
+    return stable;
+  });
+
+  /** Index of the newest thinking block — the only one that can be the live narration. */
+  protected readonly latestThinkingIdx = computed(() => latestThinkingIndex(this.items()));
+
+  /**
+   * Is anything being written right now? An Engineer thread knows from its run state; every other
+   * thread that streams thoughts (the assistant, Wire) has no run bar, so an in-flight ask is the
+   * liveness signal there.
+   */
+  protected readonly narrationLive = computed(() => this.runLive() || this.sending());
+
+  /** True while the newest thinking block is being written into — the thread narrates itself. */
+  protected readonly streamingLive = computed(
+    () => this.narrationLive() && this.latestThinkingIdx() >= 0,
   );
+
+  /** What the agent is doing right now, in words. Shared by the run bar and the live block. */
+  protected readonly presence = computed(() => runPresence(this.runState()));
+  protected readonly presenceText = computed(() => this.presence().text);
 
   /** Items rendered by `<app-engineer-turn>` rather than the chat's own bubbles and cards. */
   protected isHarnessItem(item: ChatItem): boolean {
+    if (item.type === 'tools') return true;
+    if (item.type !== 'turn') return false;
     return (
-      item.type === 'tools' ||
       item.kind === 'plan' ||
       item.kind === 'approval' ||
       item.kind === 'report' ||
@@ -1259,9 +1360,9 @@ export class AnalysisChatComponent {
     );
   }
 
-  /** A tool strip is stamped with its latest call; every other item with its own turn. */
+  /** A strip or a thinking block is stamped with its latest turn; every other item with its own. */
   protected itemTime(item: ChatItem): string {
-    return item.type === 'tools' ? item.last.createdAtUtc : item.turn.createdAtUtc;
+    return item.type === 'turn' ? item.turn.createdAtUtc : item.last.createdAtUtc;
   }
 
   /** Case-insensitive: the confirm buttons must not vanish because a writer spelled it `pending`. */
@@ -1284,6 +1385,38 @@ export class AnalysisChatComponent {
   private readonly recCache = new Map<string, ParsedChatRec | null>();
 
   private readonly logEl = viewChild<ElementRef<HTMLDivElement>>('log');
+
+  /** True while the log sits at (or within a few pixels of) the bottom — then it follows the stream. */
+  protected readonly pinned = signal(true);
+  /** Turns that arrived while the reader was scrolled away. */
+  protected readonly newSince = signal(0);
+  protected readonly jumpText = computed(() => jumpLabel(this.newSince()));
+  private lastCount = 0;
+
+  /** Cheap enough for a scroll handler: one layout read, and the signal only fires on a flip. */
+  protected onLogScroll(): void {
+    const el = this.logEl()?.nativeElement;
+    if (!el) return;
+    const atBottom = isPinnedToBottom(el);
+    this.pinned.set(atBottom);
+    if (atBottom) this.newSince.set(0);
+  }
+
+  protected jumpToLatest(): void {
+    this.pinned.set(true);
+    this.newSince.set(0);
+    this.scrollToBottom('smooth');
+  }
+
+  private scrollToBottom(behavior: ScrollBehavior): void {
+    const el = this.logEl()?.nativeElement;
+    if (!el) return;
+    // `scrollTo` rather than assigning scrollTop so the jump affordance can animate; the
+    // follow-the-stream path stays instant, which is what makes growing text read as typing
+    // instead of as a page that keeps sliding.
+    if (typeof el.scrollTo === 'function') el.scrollTo({ top: el.scrollHeight, behavior });
+    else el.scrollTop = el.scrollHeight; // jsdom / very old engines have no element scrollTo
+  }
 
   /** Debounce timer coalescing a burst of realtime tickles (the agentic ask loop
    *  persists several turns in quick succession) into one silent thread refresh. */
@@ -1318,13 +1451,23 @@ export class AnalysisChatComponent {
       });
     });
 
-    // Keep the log pinned to the latest turn as messages arrive / while thinking.
+    // Follow the newest turn — but ONLY while the log is already parked at the bottom.
+    //
+    // A streaming run rewrites its last turn about once a second. The old rule scrolled to the
+    // bottom on every one of those, which meant an operator reading something further up had the
+    // log yanked out from under them once a second. Now: pinned → follow; scrolled away → leave
+    // the scroll position exactly where they put it and count what they are missing.
     effect(() => {
-      this.messages();
+      const count = this.messages().length;
       this.sending();
-      queueMicrotask(() => {
-        const el = this.logEl()?.nativeElement;
-        if (el) el.scrollTop = el.scrollHeight;
+      untracked(() => {
+        if (this.pinned()) {
+          this.newSince.set(0);
+          queueMicrotask(() => this.scrollToBottom('auto'));
+        } else if (count > this.lastCount) {
+          this.newSince.update((n) => n + (count - this.lastCount));
+        }
+        this.lastCount = count;
       });
     });
 
@@ -1343,9 +1486,15 @@ export class AnalysisChatComponent {
       });
   }
 
-  /** Coalesce tickles and refresh the open thread — but never while the operator's
-   *  own send is in flight (that path reloads the thread itself; a concurrent
-   *  fetch would just flicker). */
+  /**
+   * Coalesce tickles and refresh the open thread.
+   *
+   * An Engineer thread refreshes even while the operator's own send is in flight: the agent
+   * narrates into the thread as it works, and an `ask` that runs for minutes would otherwise
+   * freeze the stream for exactly as long as the operator is waiting. The optimistic copy of
+   * their message survives that refresh (`mergeOptimisticTurns`). Other chats keep the original
+   * rule — they stream nothing, so a concurrent fetch would only race the send's own reload.
+   */
   private scheduleLiveReload(): void {
     if (this.liveReloadTimer) clearTimeout(this.liveReloadTimer);
     this.liveReloadTimer = setTimeout(() => {
@@ -1353,7 +1502,7 @@ export class AnalysisChatComponent {
       // The run header refreshes on every tickle, even mid-send: the agent's status line is
       // exactly what the operator is watching while their message is in flight.
       if (id && this.isEngineer()) this.loadRunState(id);
-      if (!id || this.sending()) return;
+      if (!id || (this.sending() && !this.isEngineer())) return;
       this.refreshThreadSilently(id);
       this.loadMonitors(id);
     }, 400);
@@ -1366,8 +1515,11 @@ export class AnalysisChatComponent {
       next: (res) => {
         if (this.llmInvocationId() !== id) return;
         if (res?.status && res.data) {
-          this.recCache.clear(); // a rec turn may have been stamped Filed
-          this.messages.set(res.data);
+          // The rec cache is keyed on turn id + payload, so a rec that was stamped Filed misses
+          // on its own. Clearing it here instead threw away every parse once a second, and each
+          // miss hands the self-fetching rec chart a fresh input array — which made it re-query
+          // candles on every tickle.
+          this.messages.set(mergeOptimisticTurns(res.data, this.messages()));
         }
       },
       error: () => {
@@ -1379,6 +1531,11 @@ export class AnalysisChatComponent {
   private loadThread(llmInvocationId: number): void {
     this.messages.set([]);
     this.error.set(null);
+    // A different conversation starts at its own bottom, with nothing "missed".
+    this.prevItems = [];
+    this.lastCount = 0;
+    this.pinned.set(true);
+    this.newSince.set(0);
     if (!llmInvocationId) return;
 
     this.loading.set(true);

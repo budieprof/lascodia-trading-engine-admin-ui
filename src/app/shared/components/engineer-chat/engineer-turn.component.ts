@@ -73,7 +73,7 @@ import {
           }
         </ul>
       </details>
-    } @else {
+    } @else if (it.type === 'turn') {
       @switch (it.kind) {
         @case ('plan') {
           @let p = plan();

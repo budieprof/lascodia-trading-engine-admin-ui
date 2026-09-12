@@ -16,6 +16,8 @@ import type { SpotAnalysisFollowUpTurnDto } from '@core/api/api.types';
 export type TurnKind =
   | 'user'
   | 'assistant'
+  /** A `thought` turn still streaming (`{"final":false}`) — the agent's inner narration. */
+  | 'thought'
   | 'plan'
   | 'report'
   | 'notice'
@@ -45,27 +47,61 @@ export interface ToolRow {
   result: ToolResult;
 }
 
-/** A renderable chat item: a single turn, or a run of consecutive tool calls folded into one strip. */
-export type ChatItem =
-  | {
-      type: 'turn';
-      key: string;
-      kind: Exclude<TurnKind, 'tool'>;
-      turn: SpotAnalysisFollowUpTurnDto;
-      /** First turn of a calendar day (viewer's timezone) — draw a date divider above it. */
-      newDay: boolean;
-    }
-  | {
-      type: 'tools';
-      key: string;
-      rows: ToolRow[];
-      failed: number;
-      /** The first call — anchors the date divider. */
-      turn: SpotAnalysisFollowUpTurnDto;
-      /** The latest call — its time stamps the strip. */
-      last: SpotAnalysisFollowUpTurnDto;
-      newDay: boolean;
-    };
+/** A single turn rendered on its own. */
+export interface TurnItem {
+  type: 'turn';
+  key: string;
+  kind: Exclude<TurnKind, 'tool' | 'thought'>;
+  turn: SpotAnalysisFollowUpTurnDto;
+  /** First turn of a calendar day (viewer's timezone) — draw a date divider above it. */
+  newDay: boolean;
+}
+
+/** A run of consecutive tool calls folded into one strip. */
+export interface ToolsItem {
+  type: 'tools';
+  key: string;
+  rows: ToolRow[];
+  failed: number;
+  /** The first call — anchors the date divider. */
+  turn: SpotAnalysisFollowUpTurnDto;
+  /** The latest call — its time stamps the strip. */
+  last: SpotAnalysisFollowUpTurnDto;
+  newDay: boolean;
+}
+
+/** One passage of the agent thinking out loud. Its content GROWS between refreshes. */
+export interface ThoughtEntry {
+  type: 'thought';
+  key: string;
+  turn: SpotAnalysisFollowUpTurnDto;
+}
+
+/**
+ * What sits inside a thinking block, in the order it happened: passages of narration and the
+ * tool calls the agent made while narrating. Tool strips render exactly as they do outside a
+ * block — folding them IN is what stops a couple of `Read` calls from cutting one train of
+ * thought into three separate "Thinking" headers.
+ */
+export type ThinkingEntry = ThoughtEntry | ToolsItem;
+
+/** A stretch of thinking: consecutive thought passages plus any tool calls between them. */
+export interface ThinkingItem {
+  type: 'thinking';
+  key: string;
+  entries: ThinkingEntry[];
+  thoughtCount: number;
+  toolCount: number;
+  failed: number;
+  /** The first turn of the stretch — anchors the date divider and the stable key. */
+  turn: SpotAnalysisFollowUpTurnDto;
+  /** The newest turn of the stretch — its time stamps the block. */
+  last: SpotAnalysisFollowUpTurnDto;
+  newDay: boolean;
+}
+
+/** A renderable chat item. */
+export type ChatItem = TurnItem | ToolsItem | ThinkingItem;
 
 function parseObject(json: string | null | undefined): Record<string, unknown> | null {
   if (!json) return null;
@@ -123,6 +159,30 @@ export function isHarnessToolTurn(t: SpotAnalysisFollowUpTurnDto): boolean {
 }
 
 /**
+ * A streaming-narration turn: `role: Assistant`, `toolName: "thought"`.
+ *
+ * The host service writes one of these while the agent thinks out loud and patches its content
+ * every ~1s as tokens arrive, then patches `toolResultJson` to `{"final":true}` when that passage
+ * turns out to be the answer the operator should read. The same turn is never posted twice.
+ */
+export function isThoughtTurn(t: SpotAnalysisFollowUpTurnDto): boolean {
+  return t.role === 'Assistant' && t.toolName === 'thought';
+}
+
+/**
+ * True when a `thought` turn has been marked final — it IS the answer, and renders as a normal
+ * assistant message rather than inner narration.
+ *
+ * ASSUMPTION: a thought turn whose result is missing or unparseable is treated as NOT final. The
+ * service writes `{"final":false}` from the first patch onwards, so the only way to see no payload
+ * at all is a turn that has just been created — which is thinking, not an answer. Erring this way
+ * keeps a mid-stream passage out of the answer column; the patch that finalises it moves it there.
+ */
+export function isFinalThought(t: SpotAnalysisFollowUpTurnDto): boolean {
+  return parseObject(t.toolResultJson)?.['final'] === true;
+}
+
+/**
  * How a turn renders. `engineer` is true for an Engineer conversation: there every non-rec tool
  * call folds into the strip. Elsewhere only harness-shaped tool turns do.
  */
@@ -131,6 +191,8 @@ export function classifyTurn(t: SpotAnalysisFollowUpTurnDto, engineer: boolean):
     case 'User':
       return 'user';
     case 'Assistant':
+      // A finalised thought is the answer: it renders exactly like any other assistant message.
+      if (t.toolName === 'thought') return isFinalThought(t) ? 'assistant' : 'thought';
       if (t.toolName === 'plan') return 'plan';
       if (t.toolName === 'work_order_report') return 'report';
       if (t.toolName === 'run_notice') return 'notice';
@@ -164,10 +226,31 @@ export function startsNewLocalDay(
   return new Date(currentIso).toDateString() !== new Date(previousIso).toDateString();
 }
 
+function newToolsItem(t: SpotAnalysisFollowUpTurnDto, row: ToolRow, newDay: boolean): ToolsItem {
+  return {
+    type: 'tools',
+    key: `tools-${t.id}`,
+    rows: [row],
+    failed: row.result.ok === false ? 1 : 0,
+    turn: t,
+    last: t,
+    newDay,
+  };
+}
+
 /**
- * Fold the thread into render items. Consecutive tool calls collapse into one strip; a strip
- * never spans a day boundary, so the date divider still lands above the right call.
+ * Fold the thread into render items.
  *
+ * Two runs collapse: consecutive tool calls into one strip, and consecutive thinking passages
+ * into one thinking block. Tool calls made DURING a thinking stretch are folded into that block
+ * (in order) rather than ending it — otherwise a train of thought punctuated by three `Read`
+ * calls would render as four separate "Thinking" headers and read as noise.
+ *
+ * Anything else — an answer (including a finalised thought), a plan, an approval, a report, a
+ * user message — closes the open block, which is the correct reading: the narration ran up to
+ * the thing it produced.
+ *
+ * No group ever spans a calendar day, so the date divider still lands above the right turn.
  * `previousIso` is the timestamp of whatever precedes the first turn (the opener), so the thread
  * does not draw the same date twice.
  */
@@ -181,23 +264,47 @@ export function groupTurns(
   for (const t of turns) {
     const newDay = startsNewLocalDay(t.createdAtUtc, prev);
     const kind = classifyTurn(t, engineer);
-    if (kind === 'tool') {
-      const row: ToolRow = { turn: t, result: parseToolResult(t.toolResultJson) };
-      const tail = items[items.length - 1];
-      if (tail && tail.type === 'tools' && !newDay) {
-        tail.rows.push(row);
+    const tail = items[items.length - 1];
+    if (kind === 'thought') {
+      const entry: ThoughtEntry = { type: 'thought', key: `thought-${t.id}`, turn: t };
+      if (tail && tail.type === 'thinking' && !newDay) {
+        tail.entries.push(entry);
+        tail.thoughtCount++;
         tail.last = t;
-        if (row.result.ok === false) tail.failed++;
       } else {
         items.push({
-          type: 'tools',
-          key: `tools-${t.id}`,
-          rows: [row],
-          failed: row.result.ok === false ? 1 : 0,
+          type: 'thinking',
+          key: `thinking-${t.id}`,
+          entries: [entry],
+          thoughtCount: 1,
+          toolCount: 0,
+          failed: 0,
           turn: t,
           last: t,
           newDay,
         });
+      }
+    } else if (kind === 'tool') {
+      const row: ToolRow = { turn: t, result: parseToolResult(t.toolResultJson) };
+      if (tail && tail.type === 'thinking' && !newDay) {
+        // Inside an open thinking block: extend its trailing strip, or start one.
+        const lastEntry = tail.entries[tail.entries.length - 1];
+        if (lastEntry && lastEntry.type === 'tools') {
+          lastEntry.rows.push(row);
+          lastEntry.last = t;
+          if (row.result.ok === false) lastEntry.failed++;
+        } else {
+          tail.entries.push(newToolsItem(t, row, false));
+        }
+        tail.toolCount++;
+        tail.last = t;
+        if (row.result.ok === false) tail.failed++;
+      } else if (tail && tail.type === 'tools' && !newDay) {
+        tail.rows.push(row);
+        tail.last = t;
+        if (row.result.ok === false) tail.failed++;
+      } else {
+        items.push(newToolsItem(t, row, newDay));
       }
     } else {
       items.push({ type: 'turn', key: `turn-${t.id}`, kind, turn: t, newDay });
@@ -211,6 +318,123 @@ export function groupTurns(
 export function toolStripLabel(count: number, failed: number): string {
   const calls = `${count} tool call${count === 1 ? '' : 's'}`;
   return failed > 0 ? `${calls} · ${failed} failed` : calls;
+}
+
+// ── Thinking block ────────────────────────────────────────────────────────────────────────────
+
+/** "12 thoughts · 3 tool calls" — what a collapsed block says it is hiding. */
+export function thinkingSummaryLabel(thoughts: number, tools: number, failed = 0): string {
+  const parts = [`${thoughts} thought${thoughts === 1 ? '' : 's'}`];
+  if (tools > 0) parts.push(toolStripLabel(tools, failed));
+  return parts.join(' · ');
+}
+
+/**
+ * Whether a thinking block starts expanded.
+ *
+ * Only the newest one, and only while the run is alive — that is the narration the operator is
+ * watching. Everything older folds away so the thread reads as answers and cards, which is what
+ * it is for. (The operator's own toggle overrides this; the component keeps that per block.)
+ */
+export function thinkingDefaultOpen(isLatest: boolean, runLive: boolean): boolean {
+  return isLatest && runLive;
+}
+
+/** The newest thought passage of a block — what a live "Thinking…" affordance shows. */
+export function latestThoughtText(item: ThinkingItem): string {
+  for (let i = item.entries.length - 1; i >= 0; i--) {
+    const e = item.entries[i];
+    if (e.type === 'thought' && (e.turn.content ?? '').trim()) return e.turn.content.trim();
+  }
+  return '';
+}
+
+/** The last line of the newest passage — a one-line presence cue that keeps up with the stream. */
+export function latestThoughtLine(item: ThinkingItem): string {
+  const lines = latestThoughtText(item)
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  return lines.length ? lines[lines.length - 1] : '';
+}
+
+/** Index of the newest thinking block in the thread, or -1 when it has none. */
+export function latestThinkingIndex(items: readonly ChatItem[]): number {
+  for (let i = items.length - 1; i >= 0; i--) if (items[i].type === 'thinking') return i;
+  return -1;
+}
+
+// ── Render identity (the anti-flicker rule) ───────────────────────────────────────────────────
+
+/** Everything about a turn that changes what it renders. Timestamps and ids included. */
+function sameTurn(a: SpotAnalysisFollowUpTurnDto, b: SpotAnalysisFollowUpTurnDto): boolean {
+  return (
+    a === b ||
+    (a.id === b.id &&
+      a.role === b.role &&
+      a.toolName === b.toolName &&
+      a.content === b.content &&
+      a.createdAtUtc === b.createdAtUtc &&
+      a.actionStatus === b.actionStatus &&
+      a.toolArgsJson === b.toolArgsJson &&
+      a.toolResultJson === b.toolResultJson)
+  );
+}
+
+function sameTools(a: ToolsItem, b: ToolsItem): boolean {
+  if (a.key !== b.key || a.failed !== b.failed || a.rows.length !== b.rows.length) return false;
+  return a.rows.every((r, i) => sameTurn(r.turn, b.rows[i].turn));
+}
+
+function sameEntry(a: ThinkingEntry, b: ThinkingEntry): boolean {
+  if (a.type !== b.type) return false;
+  return a.type === 'thought'
+    ? sameTurn(a.turn, (b as ThoughtEntry).turn)
+    : sameTools(a, b as ToolsItem);
+}
+
+/** True when two render items would produce byte-identical output. */
+export function sameChatItem(a: ChatItem, b: ChatItem): boolean {
+  if (a === b) return true;
+  if (a.type !== b.type || a.key !== b.key || a.newDay !== b.newDay) return false;
+  if (a.type === 'turn')
+    return a.kind === (b as TurnItem).kind && sameTurn(a.turn, (b as TurnItem).turn);
+  if (a.type === 'tools') return sameTools(a, b as ToolsItem);
+  const t = b as ThinkingItem;
+  return (
+    a.thoughtCount === t.thoughtCount &&
+    a.toolCount === t.toolCount &&
+    a.failed === t.failed &&
+    a.entries.length === t.entries.length &&
+    a.entries.every((e, i) => sameEntry(e, t.entries[i]))
+  );
+}
+
+/**
+ * Keep the OBJECT IDENTITY of every item the refetch did not actually change.
+ *
+ * The thread is refetched on every `analysisConversationChanged` tickle, which during a streaming
+ * run is about once a second. `groupTurns` builds brand-new objects from a brand-new payload every
+ * time, so without this each refresh hands an OnPush child a new `item` input and the whole thread
+ * re-renders once a second — the churn shows up as a flicker on tool strips, plan cards and rec
+ * charts, and it is why the `trackBy` key alone is not enough.
+ *
+ * Returns the PREVIOUS array itself when nothing changed at all, so the `computed` that wraps this
+ * can hand the template the same reference and the `@for` does no work either.
+ */
+export function reuseUnchangedItems(prev: readonly ChatItem[], next: ChatItem[]): ChatItem[] {
+  if (prev.length === 0) return next;
+  const byKey = new Map(prev.map((i) => [i.key, i]));
+  let reused = 0;
+  const out = next.map((item) => {
+    const old = byKey.get(item.key);
+    if (old && sameChatItem(old, item)) {
+      reused++;
+      return old;
+    }
+    return item;
+  });
+  return reused === next.length && prev.length === next.length ? (prev as ChatItem[]) : out;
 }
 
 // ── Plan card ─────────────────────────────────────────────────────────────────────────────────
@@ -494,6 +718,10 @@ export interface WatchChip {
   label: string;
   title: string;
   nextCheckAtUtc: string | null;
+  /** What is being watched, spaced for prose: `training run`. */
+  kind: string;
+  /** How many things this watch covers (its `ids`, or 1 when it names none). */
+  count: number;
 }
 
 /** One chip per `watchesJson` entry: `training_run 75961`, with the note as a tooltip. */
@@ -520,8 +748,79 @@ export function parseWatches(json: string | null | undefined): WatchChip[] {
           .filter(Boolean)
           .join(' · '),
         nextCheckAtUtc: next,
+        kind,
+        count: Math.max(ids.length, 1),
       };
     });
+}
+
+// ── Presence line ─────────────────────────────────────────────────────────────────────────────
+
+function pluralise(noun: string, n: number): string {
+  if (n === 1) return noun;
+  return /(s|x|z|ch|sh)$/i.test(noun) ? `${noun}es` : `${noun}s`;
+}
+
+/** "Watching 4 training runs" — null when the run holds no watches. */
+export function watchesSummary(json: string | null | undefined): string | null {
+  const chips = parseWatches(json);
+  if (chips.length === 0) return null;
+  const total = chips.reduce((n, c) => n + c.count, 0);
+  const kinds = new Set(chips.map((c) => c.kind));
+  const noun = kinds.size === 1 ? [...kinds][0] : 'watch';
+  return `Watching ${total} ${pluralise(noun, total)}`;
+}
+
+/**
+ * The agent's `activity` as presence rather than as a field.
+ *
+ * The host writes either a sentence ("Reading training diagnostics…") or the bare name of what it
+ * is running ("pnl_sim"). A bare identifier reads as a fragment in a status line, so it becomes
+ * "Running pnl_sim…"; a sentence is left exactly as written.
+ */
+export function describeActivity(activity: string | null | undefined): string | null {
+  const a = (activity ?? '').trim();
+  if (!a) return null;
+  return /^[A-Za-z][\w.:-]*$/.test(a) ? `Running ${a}…` : a;
+}
+
+export interface RunPresence {
+  /** What the operator reads: "Thinking…", "Running pnl_sim…", "Waiting for you". */
+  text: string;
+  /** True while the run is alive — the pulsing affordance and the live thinking block. */
+  live: boolean;
+}
+
+/**
+ * One line that says what the agent is doing now, from the run-state fields.
+ *
+ * Working with nothing to say is still "Thinking…": a live run always has presence, and a blank
+ * line would read as a stall.
+ */
+export function runPresence(
+  run: {
+    status: string;
+    activity?: string | null;
+    stopReason?: string | null;
+    watchesJson?: string | null;
+  } | null,
+): RunPresence {
+  if (!run) return { text: 'Idle', live: false };
+  const status = (run.status ?? '').toLowerCase();
+  const activity = describeActivity(run.activity);
+  const live = isRunLive(run.status);
+  switch (status) {
+    case 'working':
+      return { text: activity ?? 'Thinking…', live };
+    case 'waitingforoperator':
+      return { text: activity ? `Waiting for you — ${activity}` : 'Waiting for you', live };
+    case 'watching':
+      return { text: watchesSummary(run.watchesJson) ?? activity ?? 'Watching', live };
+    case 'stale':
+      return { text: 'Stalled — no report for 15 minutes', live: false };
+    default:
+      return { text: run.stopReason?.trim() || activity || runStatusLabel(run.status), live };
+  }
 }
 
 /** Composer hint chips for an Engineer thread. `stop` calls the Stop endpoint instead of sending. */
