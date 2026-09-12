@@ -12,6 +12,18 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe } from '@angular/common';
+import { Router, RouterLink } from '@angular/router';
+
+/**
+ * One entity an analysis answer named, resolved by the engine to a route the operator can open.
+ * Mirrors `AnswerCitation` on the server; carried on the turn's tool columns.
+ */
+interface AnswerCitationLink {
+  kind: string;
+  id: number;
+  text: string;
+  route: string;
+}
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import {
   describeAction,
@@ -127,6 +139,7 @@ interface ParsedChatRec {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    RouterLink,
     MarkdownPipe,
     SpotRecChartComponent,
     RecFileEditorComponent,
@@ -292,12 +305,54 @@ interface ParsedChatRec {
               @case ('Assistant') {
                 <div class="msg">
                   <div class="bubble md" [innerHTML]="m.content | markdown"></div>
-                  <time
-                    class="msg-time"
-                    [attr.datetime]="m.createdAtUtc"
-                    [title]="m.createdAtUtc | date: 'full'"
-                    >{{ m.createdAtUtc | date: timeFormat }}</time
-                  >
+
+                  <!-- Entities the answer named, resolved to links by the engine. An analysis
+                       that cites "signal 8663" should let the reader open signal 8663 rather
+                       than go and find it, which in practice means not checking. -->
+                  @if (citationsOf(m); as cites) {
+                    @if (cites.length) {
+                      <div class="citations">
+                        <span class="cite-label">Mentions</span>
+                        @for (c of cites; track c.kind + c.id) {
+                          <a class="cite" [routerLink]="c.route" [title]="c.text"
+                            >{{ c.kind }} {{ c.id }}</a
+                          >
+                        }
+                      </div>
+                    }
+                  }
+
+                  <div class="msg-foot">
+                    <time
+                      class="msg-time"
+                      [attr.datetime]="m.createdAtUtc"
+                      [title]="m.createdAtUtc | date: 'full'"
+                      >{{ m.createdAtUtc | date: timeFormat }}</time
+                    >
+                    @if (!busy()) {
+                      <!-- Retire takes the answer out of CONTEXT so it can be replaced. A bad
+                           reply otherwise stays in the transcript, is re-sent every turn, and
+                           conditions everything after it. -->
+                      <button
+                        type="button"
+                        class="turn-action"
+                        (click)="retireTurn(m)"
+                        title="Take this answer out of the conversation's context so you can ask again. The record is kept."
+                      >
+                        Retry from here
+                      </button>
+                      <!-- Fork branches the thread, inheriting the snapshot, so an alternative
+                           costs nothing to explore and the original line survives. -->
+                      <button
+                        type="button"
+                        class="turn-action"
+                        (click)="forkHere(m)"
+                        title="Branch the conversation at this point — the original is untouched."
+                      >
+                        Branch here
+                      </button>
+                    }
+                  </div>
                 </div>
               }
               @case ('User') {
@@ -800,6 +855,72 @@ interface ParsedChatRec {
       .msg.user .msg-time {
         order: -1;
       }
+      /* Per-turn controls sit with the timestamp rather than on the bubble: they are about the
+         turn, not part of what the model said, and an answer should not be framed by buttons. */
+      .msg-foot {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2, 8px);
+        flex: none;
+        padding-bottom: 2px;
+      }
+      .turn-action {
+        border: none;
+        background: none;
+        padding: 0;
+        font: inherit;
+        font-size: var(--text-xs, 11px);
+        color: var(--text-tertiary, var(--text-secondary));
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity 120ms ease;
+        white-space: nowrap;
+      }
+      /* Revealed on hover or keyboard focus — present when wanted, quiet when not. Focus-visible
+         is not optional here: hover-only controls are unreachable by keyboard. */
+      .msg:hover .turn-action,
+      .turn-action:focus-visible {
+        opacity: 1;
+      }
+      .turn-action:hover {
+        color: var(--accent, var(--text-primary));
+        text-decoration: underline;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .turn-action {
+          transition: none;
+        }
+      }
+      /* Citations are always visible — an unopened link is the thing that stops a claim being
+         checked, so hiding them behind hover would defeat the point. */
+      .citations {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin-top: 4px;
+      }
+      .cite-label {
+        font-size: var(--text-xs, 11px);
+        color: var(--text-tertiary, var(--text-secondary));
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .cite {
+        font-size: var(--text-xs, 11px);
+        font-variant-numeric: tabular-nums;
+        padding: 1px 7px;
+        border-radius: var(--radius-full, 999px);
+        background: var(--bg-secondary, rgba(127, 127, 127, 0.12));
+        color: var(--text-secondary);
+        text-decoration: none;
+        white-space: nowrap;
+      }
+      .cite:hover,
+      .cite:focus-visible {
+        color: var(--accent, var(--text-primary));
+        background: color-mix(in srgb, var(--accent, #888) 14%, transparent);
+      }
       .day-sep {
         display: flex;
         align-items: center;
@@ -1201,6 +1322,7 @@ interface ParsedChatRec {
   ],
 })
 export class AnalysisChatComponent {
+  private readonly router = inject(Router);
   private readonly marketData = inject(MarketDataService);
   private readonly algoEngineer = inject(AlgoEngineerService);
   private readonly realtime = inject(RealtimeService);
@@ -1819,6 +1941,118 @@ export class AnalysisChatComponent {
       takeProfit: rec.takeProfit,
       confidence: rec.confidencePct === null ? null : rec.confidencePct / 100,
     };
+  }
+
+  /** True while a retire/branch call is in flight — both controls hide rather than double-fire. */
+  protected readonly turnActionBusy = signal(false);
+
+  /** Convenience for the template: any operation that should hide the per-turn controls. */
+  protected busy(): boolean {
+    return this.turnActionBusy() || this.sending() || this.filingId() !== null;
+  }
+
+  /**
+   * Entities the engine resolved out of this answer, for the "Mentions" row.
+   *
+   * Stored on the turn's tool columns — unused on an Assistant turn — so the links need no second
+   * round trip. Parsing is defensive and cached: a malformed payload renders no links rather than
+   * breaking the bubble the operator came to read.
+   */
+  protected citationsOf(m: SpotAnalysisFollowUpTurnDto): AnswerCitationLink[] {
+    if (m.toolName !== 'citations' || !m.toolResultJson) return [];
+    const cached = this.citationCache.get(m.id);
+    if (cached !== undefined) return cached;
+
+    let parsed: AnswerCitationLink[] = [];
+    try {
+      const raw = JSON.parse(m.toolResultJson) as AnswerCitationLink[];
+      parsed = Array.isArray(raw)
+        ? raw.filter(
+            (c) => c && typeof c.kind === 'string' && typeof c.id === 'number' && !!c.route,
+          )
+        : [];
+    } catch {
+      parsed = [];
+    }
+    this.citationCache.set(m.id, parsed);
+    return parsed;
+  }
+
+  private readonly citationCache = new Map<number, AnswerCitationLink[]>();
+
+  /**
+   * Take an answer out of the conversation's context so it can be replaced.
+   *
+   * A bad reply can otherwise only be argued with: it stays in the transcript, is re-sent on every
+   * subsequent turn, and conditions everything after it. Everything AFTER the retired turn goes too
+   * — a later answer written knowing this one is not a coherent continuation once it is gone — so
+   * the operator is told how much is being removed before it happens.
+   */
+  protected retireTurn(m: SpotAnalysisFollowUpTurnDto): void {
+    if (this.busy()) return;
+    if (
+      !confirm(
+        'Take this answer (and anything after it) out of the conversation, so you can ask again?\n\n' +
+          'The record is kept — this only changes what the model sees next.',
+      )
+    )
+      return;
+
+    const id = this.llmInvocationId();
+    this.turnActionBusy.set(true);
+    this.error.set(null);
+    this.marketData.retireTurn(m.id).subscribe({
+      next: (res) => {
+        this.turnActionBusy.set(false);
+        if (this.llmInvocationId() !== id) return;
+        if (res?.status) {
+          this.citationCache.clear();
+          // Silent refetch: the turns are already gone server-side, and a clear-and-spinner
+          // would make a deliberate edit look like the thread reloading from scratch.
+          this.refreshThreadSilently(id);
+        } else {
+          // Refused — most often a resolved approval card in the removed range, which may have
+          // executed a live call. The engine's own words are more useful than a generic failure.
+          this.error.set(res?.message ?? 'That turn could not be retired.');
+        }
+      },
+      error: () => {
+        this.turnActionBusy.set(false);
+        this.error.set('That turn could not be retired.');
+      },
+    });
+  }
+
+  /**
+   * Branch the conversation at this turn.
+   *
+   * The branch inherits the original snapshot and analysis, so exploring an alternative costs
+   * nothing extra and the original line survives untouched. Approval cards come across as inert
+   * history: a pending decision is never offered twice.
+   */
+  protected forkHere(m: SpotAnalysisFollowUpTurnDto): void {
+    if (this.busy()) return;
+
+    const id = this.llmInvocationId();
+    if (id === null) return;
+
+    this.turnActionBusy.set(true);
+    this.error.set(null);
+    this.marketData.forkConversation(id, m.id).subscribe({
+      next: (res) => {
+        this.turnActionBusy.set(false);
+        if (res?.status && res.data) {
+          // Navigating is the point — the operator asked to work on the branch.
+          void this.router.navigate(['/conversations', res.data.conversationId]);
+        } else {
+          this.error.set(res?.message ?? 'The conversation could not be branched.');
+        }
+      },
+      error: () => {
+        this.turnActionBusy.set(false);
+        this.error.set('The conversation could not be branched.');
+      },
+    });
   }
 
   /** Open the pre-filled editor on one rec card. */
