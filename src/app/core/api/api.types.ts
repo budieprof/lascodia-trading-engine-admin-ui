@@ -1330,6 +1330,39 @@ export interface GetRecentStrategySnapshotsRequest {
 }
 
 /**
+ * The latest backtest, walk-forward and optimization run for one strategy —
+ * response element of `POST /strategy/runs/latest`.
+ *
+ * Only the fields the strategies grid renders. In particular the backtest's
+ * return arrives as one computed percent rather than as `totalReturn` +
+ * `resultJson` + the two balances for the client to reduce: the engine applies
+ * that precedence (column, then `resultJson.TotalReturn`, then recompute from
+ * balances) so the widest column on the row never has to cross the wire.
+ *
+ * A strategy with no runs of a kind still gets an entry, with those fields null.
+ */
+export interface LatestStrategyRunsDto {
+  strategyId: number;
+
+  backtestRunId: number | null;
+  backtestStatus: string | null;
+  backtestAt: string | null;
+  /** PERCENT of initial balance — never a fraction, never rescale it. */
+  backtestReturnPct: number | null;
+
+  walkForwardRunId: number | null;
+  walkForwardStatus: string | null;
+  walkForwardAt: string | null;
+  walkForwardAverageOutOfSampleScore: number | null;
+
+  optimizationRunId: number | null;
+  optimizationStatus: string | null;
+  optimizationAt: string | null;
+  optimizationBestHealthScore: number | null;
+  optimizationBaselineHealthScore: number | null;
+}
+
+/**
  * Capacity-curve point for a single AUM tier. The strategy was simulated at
  * `aumTier` and the resulting Sharpe / PF / max-DD were recorded; `meetsFloor`
  * is `true` when Sharpe stayed above the operator-set floor fraction of the

@@ -15,22 +15,18 @@ import type { EChartsOption } from 'echarts';
 
 import { StrategiesService } from '@core/services/strategies.service';
 import { StrategyFeedbackService } from '@core/services/strategy-feedback.service';
-import { BacktestsService } from '@core/services/backtests.service';
-import { WalkForwardService } from '@core/services/walk-forward.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import {
   StrategyDto,
   StrategyPerformanceSnapshotDto,
+  LatestStrategyRunsDto,
   PagerRequest,
   CreateStrategyRequest,
   StrategyTemplateDto,
   ApplyStrategyTemplateRequest,
   StrategyRejectionSummaryDto,
   RiskProfileDto,
-  BacktestRunDto,
-  WalkForwardRunDto,
-  OptimizationRunDto,
 } from '@core/api/api.types';
 import { RiskProfilesService } from '@core/services/risk-profiles.service';
 
@@ -1234,8 +1230,6 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
 export class StrategiesPageComponent {
   private readonly strategiesService = inject(StrategiesService);
   private readonly feedbackService = inject(StrategyFeedbackService);
-  private readonly backtestsService = inject(BacktestsService);
-  private readonly walkForwardService = inject(WalkForwardService);
   private readonly riskProfilesService = inject(RiskProfilesService);
   private readonly notifications = inject(NotificationService);
   private readonly realtime = inject(RealtimeService);
@@ -1766,6 +1760,22 @@ export class StrategiesPageComponent {
   }
 
   readonly columns: ColDef[] = [
+    {
+      // The id is how a strategy is referred to everywhere outside this grid —
+      // log lines, worker output, the promotion-gate summary, and the operator
+      // asking "why was 653 not activated". Without it the only handle the page
+      // offered was the generated name, which has to be read back character by
+      // character against a log line to be sure it is the same strategy.
+      field: 'id',
+      headerName: 'ID',
+      width: 88,
+      minWidth: 72,
+      flex: 0,
+      cellRenderer: (p: any) =>
+        p.value == null
+          ? '—'
+          : `<span style="font-variant-numeric:tabular-nums;color:var(--text-secondary)">#${p.value}</span>`,
+    },
     { field: 'name', headerName: 'Name', flex: 2, minWidth: 160 },
     { field: 'symbol', headerName: 'Symbol', flex: 1, minWidth: 100 },
     {
@@ -1838,7 +1848,8 @@ export class StrategiesPageComponent {
       minWidth: 110,
       sortable: false,
       filter: false,
-      valueGetter: (p: any) => backtestReturnPct(p.data?.latestBt),
+      valueGetter: (p: any) =>
+        (p.data as StrategyRowAugment)?.latestRuns?.backtestReturnPct ?? null,
       cellRenderer: (p: any) => {
         const v = p.value as number | null;
         if (v == null) return '<span style="color:var(--text-tertiary,#999)">—</span>';
@@ -1859,7 +1870,7 @@ export class StrategiesPageComponent {
       sortable: false,
       filter: false,
       valueGetter: (p: any) =>
-        (p.data?.latestWf as WalkForwardRunDto | null | undefined)?.averageOutOfSampleScore ?? null,
+        (p.data as StrategyRowAugment)?.latestRuns?.walkForwardAverageOutOfSampleScore ?? null,
       cellRenderer: (p: any) => {
         const v = p.value as number | null;
         if (v == null) return '<span style="color:var(--text-tertiary,#999)">—</span>';
@@ -1876,9 +1887,15 @@ export class StrategiesPageComponent {
       sortable: false,
       filter: false,
       valueGetter: (p: any) => {
-        const o = p.data?.latestOpt as OptimizationRunDto | null | undefined;
-        if (!o || o.bestHealthScore == null || o.baselineHealthScore == null) return null;
-        return o.bestHealthScore - o.baselineHealthScore;
+        const r = (p.data as StrategyRowAugment)?.latestRuns;
+        if (
+          !r ||
+          r.optimizationBestHealthScore == null ||
+          r.optimizationBaselineHealthScore == null
+        ) {
+          return null;
+        }
+        return r.optimizationBestHealthScore - r.optimizationBaselineHealthScore;
       },
       cellRenderer: (p: any) => {
         const v = p.value as number | null;
@@ -1950,48 +1967,37 @@ export class StrategiesPageComponent {
         const ids = page?.data?.map((s) => s.id).filter((id): id is number => id != null) ?? [];
         if (ids.length === 0) return of(page!);
 
-        // Bulk fan-out per page (NOT per row). Pulls the most-recent 500 of
-        // each so the active-strategy slice (~200 today) is comfortably covered;
-        // grouping is client-side. Failures degrade gracefully — empty cells,
-        // not a blank table.
-        const wide = { currentPage: 1, itemCountPerPage: 500, filter: null } as PagerRequest;
+        // Two bulk requests per page, both scoped to the ids on screen.
+        //
+        // This used to be four, three of which pulled the most-recent 500 rows of
+        // a run table and grouped them client-side — 1,500 rows to decorate 25.
+        // It was slow, and it was also wrong: "most recent 500 globally" is not
+        // "latest for each of these strategies", so the opt-uplift column read
+        // `—` for 337 of the 343 strategies that actually had a value, and
+        // nothing about waiting or paging would ever have filled it in.
+        //
+        // Failures still degrade gracefully — empty cells, not a blank table.
         return forkJoin({
           snaps: this.strategiesService
             .getRecentSnapshots({ strategyIds: ids, count: 24 })
             .pipe(catchError(() => of(null))),
-          backtests: this.backtestsService.list(wide).pipe(catchError(() => of(null))),
-          walkForwards: this.walkForwardService.list(wide).pipe(catchError(() => of(null))),
-          opts: this.feedbackService.listOptimizationRuns(wide).pipe(catchError(() => of(null))),
+          runs: this.strategiesService.getLatestRuns(ids).pipe(catchError(() => of(null))),
         }).pipe(
-          map(({ snaps, backtests, walkForwards, opts }) => {
+          map(({ snaps, runs }) => {
             // ── Health sparkline (existing behavior) ────────────────────
             const grouped = new Map<number, number[]>();
             for (const s of snaps?.data ?? []) {
               if (!grouped.has(s.strategyId)) grouped.set(s.strategyId, []);
               grouped.get(s.strategyId)!.push(s.healthScore);
             }
-            // ── Latest-per-strategy lookups ─────────────────────────────
-            const latestBt = pickLatestPerStrategy(
-              backtests?.data?.data ?? [],
-              (b) => b.strategyId,
-              (b) => b.completedAt ?? b.startedAt,
-            );
-            const latestWf = pickLatestPerStrategy(
-              walkForwards?.data?.data ?? [],
-              (w) => w.strategyId,
-              (w) => w.completedAt ?? w.startedAt,
-            );
-            const latestOpt = pickLatestPerStrategy(
-              opts?.data?.data ?? [],
-              (o) => o.strategyId,
-              (o) => o.completedAt ?? o.startedAt,
-            );
+            // ── Latest-per-strategy runs, resolved by the engine ────────
+            const runsById = new Map<number, LatestStrategyRunsDto>();
+            for (const r of runs?.data ?? []) runsById.set(r.strategyId, r);
+
             for (const row of page!.data) {
               const decorated = row as StrategyRowAugment;
               decorated.healthSeries = (grouped.get(row.id) ?? []).slice().reverse();
-              decorated.latestBt = latestBt.get(row.id) ?? null;
-              decorated.latestWf = latestWf.get(row.id) ?? null;
-              decorated.latestOpt = latestOpt.get(row.id) ?? null;
+              decorated.latestRuns = runsById.get(row.id) ?? null;
               decorated.eligibility = computeEligibility(row, decorated);
             }
             return page!;
@@ -2577,9 +2583,8 @@ export class StrategiesPageComponent {
 /** Augmented row shape — fields appended client-side per page. */
 type StrategyRowAugment = StrategyDto & {
   healthSeries?: number[];
-  latestBt?: BacktestRunDto | null;
-  latestWf?: WalkForwardRunDto | null;
-  latestOpt?: OptimizationRunDto | null;
+  /** Latest backtest / walk-forward / optimization, resolved per strategy by the engine. */
+  latestRuns?: LatestStrategyRunsDto | null;
   eligibility?: ActivationEligibility;
 };
 
@@ -2598,28 +2603,6 @@ type ActivationEligibility =
   // conflating them is how strategy 653 sat for a day looking like a considered rejection.
   | { kind: 'stalled'; reasons: string[] }
   | { kind: 'unknown' };
-
-function pickLatestPerStrategy<T>(
-  rows: T[],
-  getStrategyId: (r: T) => number,
-  getTimestamp: (r: T) => string | null,
-): Map<number, T> {
-  const out = new Map<number, T>();
-  for (const r of rows) {
-    const sid = getStrategyId(r);
-    if (sid == null) continue;
-    const tsStr = getTimestamp(r);
-    const ts = tsStr ? Date.parse(tsStr) : 0;
-    const prev = out.get(sid);
-    if (!prev) {
-      out.set(sid, r);
-      continue;
-    }
-    const prevTs = Date.parse(getTimestamp(prev) ?? '');
-    if (ts > (Number.isFinite(prevTs) ? prevTs : 0)) out.set(sid, r);
-  }
-  return out;
-}
 
 function computeEligibility(row: StrategyDto, aug: StrategyRowAugment): ActivationEligibility {
   // 1. Already running / rolling out — short-circuit.
@@ -2660,26 +2643,26 @@ function computeEligibility(row: StrategyDto, aug: StrategyRowAugment): Activati
   const reasonsGreen: string[] = [];
   const reasonsRed: string[] = [];
 
-  const opt = aug.latestOpt;
-  if (opt) {
+  const runs = aug.latestRuns;
+
+  if (runs?.optimizationStatus) {
     if (
-      opt.status === 'Completed' &&
-      opt.bestHealthScore != null &&
-      opt.baselineHealthScore != null &&
-      opt.bestHealthScore > opt.baselineHealthScore
+      runs.optimizationStatus === 'Completed' &&
+      runs.optimizationBestHealthScore != null &&
+      runs.optimizationBaselineHealthScore != null &&
+      runs.optimizationBestHealthScore > runs.optimizationBaselineHealthScore
     ) {
       reasonsGreen.push('opt+');
-    } else if (opt.status === 'Failed') {
+    } else if (runs.optimizationStatus === 'Failed') {
       reasonsRed.push('opt fail');
-    } else if (opt.status === 'Completed') {
+    } else if (runs.optimizationStatus === 'Completed') {
       reasonsRed.push('opt flat');
     }
   }
 
-  const bt = aug.latestBt;
-  if (bt) {
-    if (bt.status === 'Completed') {
-      const ret = backtestReturnPct(bt);
+  if (runs?.backtestStatus) {
+    if (runs.backtestStatus === 'Completed') {
+      const ret = runs.backtestReturnPct;
       if (ret != null && isWipedOutReturnPct(ret)) {
         reasonsRed.push('BT wiped out');
       } else if (ret != null) {
@@ -2688,20 +2671,17 @@ function computeEligibility(row: StrategyDto, aug: StrategyRowAugment): Activati
       } else {
         reasonsRed.push('BT no result');
       }
-    } else if (bt.status === 'Failed') {
+    } else if (runs.backtestStatus === 'Failed') {
       reasonsRed.push('BT fail');
     }
   }
 
-  const wf = aug.latestWf;
-  if (wf) {
-    if (wf.status === 'Completed' && wf.averageOutOfSampleScore != null) {
-      if (wf.averageOutOfSampleScore > 0) {
-        reasonsGreen.push(`WF +${wf.averageOutOfSampleScore.toFixed(2)}`);
-      } else {
-        reasonsRed.push(`WF ${wf.averageOutOfSampleScore.toFixed(2)}`);
-      }
-    } else if (wf.status === 'Failed') {
+  if (runs?.walkForwardStatus) {
+    const oos = runs.walkForwardAverageOutOfSampleScore;
+    if (runs.walkForwardStatus === 'Completed' && oos != null) {
+      if (oos > 0) reasonsGreen.push(`WF +${oos.toFixed(2)}`);
+      else reasonsRed.push(`WF ${oos.toFixed(2)}`);
+    } else if (runs.walkForwardStatus === 'Failed') {
       reasonsRed.push('WF fail');
     }
   }
@@ -2721,32 +2701,11 @@ function computeEligibility(row: StrategyDto, aug: StrategyRowAugment): Activati
   };
 }
 
-/**
- * Return of a backtest in PERCENT of its initial balance.
- *
- * BacktestEngine computes \`totalReturn = (final − initial) / initial × 100\`
- * and BacktestWorker stores that same percent in both the \`TotalReturn\`
- * column and \`resultJson.TotalReturn\` — there is no fraction anywhere.
- * The list used to multiply the JSON value by 100 again, so backtest #844
- * (+$10.89 on $10,000 = 0.1089%) printed as "+10.89%". Prefer the column;
- * fall back to the JSON; last resort recompute from the balances.
- */
-function backtestReturnPct(bt: BacktestRunDto | null | undefined): number | null {
-  if (!bt) return null;
-  if (bt.totalReturn != null && Number.isFinite(bt.totalReturn)) return bt.totalReturn;
-  if (bt.resultJson) {
-    try {
-      const v = JSON.parse(bt.resultJson)?.TotalReturn;
-      if (typeof v === 'number' && Number.isFinite(v)) return v;
-    } catch {
-      /* fall through to the balance recompute */
-    }
-  }
-  if (bt.finalBalance != null && bt.initialBalance > 0) {
-    return ((bt.finalBalance - bt.initialBalance) / bt.initialBalance) * 100;
-  }
-  return null;
-}
+// Backtest return used to be reduced here, from `totalReturn` / `resultJson` /
+// the two balances. The engine now applies that same precedence and ships one
+// `backtestReturnPct`, in PERCENT — see LatestStrategyRunsDto. It is already a
+// percent; multiplying by 100 is the bug that made backtest #844 (+$10.89 on
+// $10,000 = 0.1089%) print as "+10.89%".
 
 /** Same sentinel rule as the backtests page: ≤ −100% or beyond ±1000% is a wiped-out / corrupt run. */
 function isWipedOutReturnPct(pct: number): boolean {

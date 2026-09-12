@@ -14,6 +14,7 @@ import {
   StrategyVariantDto,
   PortfolioFwerReportDto,
   GetRecentStrategySnapshotsRequest,
+  LatestStrategyRunsDto,
   GetStrategyEquityCurveRequest,
   GetStrategyRejectionDistributionRequest,
   CreateStrategyRequest,
@@ -170,6 +171,21 @@ export class StrategiesService {
     body: GetRecentStrategySnapshotsRequest,
   ): Observable<ResponseData<StrategyPerformanceSnapshotDto[]>> {
     return this.api.post(`/strategy/health/recent`, body);
+  }
+
+  /**
+   * Bulk: the latest backtest, walk-forward and optimization run for each of the
+   * given strategy ids, in one request.
+   *
+   * Replaces the strategies list's old fan-out, which pulled the most recent 500
+   * rows of each run table and grouped them client-side. That was 1,500 rows to
+   * decorate 25, and it did not even answer the question: "most recent 500
+   * globally" is not "latest for each of these strategies", so the opt-uplift
+   * column was blank for 337 of the 343 strategies that had a value. The engine
+   * caps at 500 ids.
+   */
+  getLatestRuns(strategyIds: number[]): Observable<ResponseData<LatestStrategyRunsDto[]>> {
+    return this.api.post(`/strategy/runs/latest`, { strategyIds });
   }
 
   /**
