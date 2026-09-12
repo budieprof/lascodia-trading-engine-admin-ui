@@ -260,7 +260,38 @@ describe('approval card', () => {
       verb: null,
       targets: [],
       live: false,
+      destructive: false,
     });
+  });
+
+  // A delete is the one approval that cannot be taken back, so it has to be distinguishable from
+  // an ordinary write BEFORE the operator reaches the buttons — not inferred from reading the path.
+  it('marks a card that deletes', () => {
+    const del = turn({
+      role: 'ActionProposal',
+      toolName: 'approval',
+      actionStatus: 'Pending',
+      toolArgsJson: JSON.stringify({
+        verb: 'platform_delete',
+        destructive: true,
+        targets: ['DELETE /analysis-monitors/42'],
+        sideEffect:
+          'Remove a monitor (DELETE /analysis-monitors/42). DELETES DATA — there is no undo.',
+        live: true,
+      }),
+    });
+    expect(parseApproval(del).destructive).toBe(true);
+
+    // An ordinary write is not marked, whatever it says about itself.
+    expect(parseApproval(proposal).destructive).toBe(false);
+
+    // A card written before the flag existed still reads as a delete from its verb alone.
+    const older = turn({
+      role: 'ActionProposal',
+      toolName: 'approval',
+      toolArgsJson: JSON.stringify({ verb: 'platform_delete', live: true }),
+    });
+    expect(parseApproval(older).destructive).toBe(true);
   });
 });
 

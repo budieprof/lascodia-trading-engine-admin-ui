@@ -573,10 +573,19 @@ export interface ParsedApproval {
   targets: string[];
   sideEffect: string | null;
   live: boolean;
+  /**
+   * This card removes data and there is no undo. Set by the engine on any DELETE, and worth its own
+   * flag rather than a substring check on the verb: an approval card is skimmed, and the one kind
+   * that cannot be taken back should not look like every other one.
+   */
+  destructive: boolean;
   requestedAtUtc: string | null;
   /** From the resolution payload, once resolved. */
   resolvedAtUtc: string | null;
 }
+
+/** The verb the engine writes on a card that deletes. */
+export const DELETE_VERB = 'platform_delete';
 
 export function parseApproval(t: SpotAnalysisFollowUpTurnDto): ParsedApproval {
   const a = parseObject(t.toolArgsJson) ?? {};
@@ -584,12 +593,16 @@ export function parseApproval(t: SpotAnalysisFollowUpTurnDto): ParsedApproval {
   const targets = Array.isArray(a['targets'])
     ? (a['targets'] as unknown[]).filter((x) => x != null).map((x) => String(x))
     : [];
+  const verb = str(a['verb']);
   return {
     approvalId: str(a['approvalId']),
-    verb: str(a['verb']),
+    verb,
     targets,
     sideEffect: str(a['sideEffect']),
     live: a['live'] === true,
+    // The verb is the fallback for cards written before the flag existed, so an old pending
+    // delete still shows as one.
+    destructive: a['destructive'] === true || verb === DELETE_VERB,
     requestedAtUtc: str(a['requestedAtUtc']),
     resolvedAtUtc: str(r['resolvedAtUtc']),
   };

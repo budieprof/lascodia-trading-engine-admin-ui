@@ -157,9 +157,16 @@ export interface ApprovalResolveRequest {
         @case ('approval') {
           @let a = approval();
           @let st = status();
-          <div class="card approval" [attr.data-tone]="st.tone">
+          <div class="card approval" [attr.data-tone]="st.tone" [class.destructive]="a.destructive">
             <div class="head">
               <span class="badge">✋ {{ pending() ? 'Approval needed' : 'Approval' }}</span>
+              @if (a.destructive) {
+                <span
+                  class="chip destructive"
+                  title="This permanently removes data. There is no undo — the engine cannot put it back."
+                  >Deletes data</span
+                >
+              }
               @if (a.live) {
                 <span class="chip live" title="Approving this changes something in production"
                   >Goes live</span
@@ -512,6 +519,14 @@ export interface ApprovalResolveRequest {
         color: #fff;
         background: var(--loss);
       }
+      /* A delete reads as a delete before the operator reaches the buttons. Outlined rather than
+         filled so it does not compete with "Goes live" — they appear together on the same card. */
+      .chip.destructive {
+        --tone: var(--eng-bad);
+        color: var(--eng-bad);
+        background: color-mix(in srgb, var(--eng-bad) 12%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--eng-bad) 45%, transparent);
+      }
       /* Plan */
       .plan {
         border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
@@ -593,6 +608,12 @@ export interface ApprovalResolveRequest {
       .approval[data-tone='muted'] {
         border-color: var(--border);
         background: var(--bg-secondary);
+      }
+      /* Only while it is still a question. Once answered, the status tone above governs — a
+         resolved delete should read as resolved, not keep shouting. */
+      .approval.destructive[data-tone='pending'] {
+        border-color: color-mix(in srgb, var(--eng-bad) 55%, var(--border));
+        background: color-mix(in srgb, var(--eng-bad) 5%, var(--bg-primary));
       }
       .facts {
         display: grid;
