@@ -13,6 +13,8 @@ import {
   MarketAnalysisResultDto,
   MarketMacroAnalysisResultDto,
   SpotAnalysisFollowUpTurnDto,
+  ForkConversationResult,
+  RetireTurnResult,
   AnalysisMonitorDto,
   AnalysisConversationsPageDto,
   AnalysisConversationDetailDto,
@@ -283,6 +285,42 @@ export class MarketDataService {
       `/market-data/analyze/follow-up/${followUpId}/resolve?confirm=${confirm}`,
       resolveApprovalBody(opts),
     );
+  }
+
+  /**
+   * POST /market-data/analyze/conversation/{id}/fork — branch a conversation at a turn.
+   *
+   * A thread is otherwise strictly linear, so exploring "what if I had asked that differently"
+   * means starting over and re-paying the whole snapshot. The branch inherits the original
+   * snapshot and analysis, so it starts warm rather than cold.
+   *
+   * History is copied, not shared — the two threads diverge immediately. Approval cards come
+   * across as inert history, so a pending decision is never offered twice.
+   *
+   * Omitting `throughTurnId` forks the entire thread.
+   */
+  forkConversation(
+    conversationId: number,
+    throughTurnId?: number,
+  ): Observable<ResponseData<ForkConversationResult>> {
+    const through = throughTurnId ? `?throughTurnId=${throughTurnId}` : '';
+    return this.api.post(`/market-data/analyze/conversation/${conversationId}/fork${through}`, {});
+  }
+
+  /**
+   * POST /market-data/analyze/follow-up/{turnId}/retire — take an answer out of the
+   * conversation's context so it can be replaced rather than only argued with.
+   *
+   * Soft delete: the row and its audit trail survive, so "the model said this and we withdrew
+   * it" stays answerable. Everything AFTER the retired turn goes with it, because a later answer
+   * written knowing the retired one is not a coherent continuation once it is gone.
+   *
+   * Refused on a resolved approval card — that may have executed a live call, and the thread is
+   * the only place it is visible. The result carries the question above the retired turn, so the
+   * caller can offer to ask it again.
+   */
+  retireTurn(turnId: number): Observable<ResponseData<RetireTurnResult>> {
+    return this.api.post(`/market-data/analyze/follow-up/${turnId}/retire`, {});
   }
 
   /** File a chat-generated "recommend" turn as a live trade signal through the

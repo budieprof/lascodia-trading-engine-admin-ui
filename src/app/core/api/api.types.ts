@@ -3359,6 +3359,29 @@ export interface MarketAnalysisResultDto {
   exitInstructions?: MarketAnalysisExitInstructionDto[] | null;
 }
 
+/** What forking a conversation produced.
+ *  Returned by POST /market-data/analyze/conversation/{id}/fork. */
+export interface ForkConversationResult {
+  /** The new conversation — what the caller navigates to. */
+  conversationId: number;
+  forkedFromConversationId: number;
+  /** Turn it was forked at; nothing after this was copied. 0 = the whole thread. */
+  forkedAtTurnId: number;
+  turnsCopied: number;
+}
+
+/** What retiring a turn removed from context.
+ *  Returned by POST /market-data/analyze/follow-up/{turnId}/retire. */
+export interface RetireTurnResult {
+  turnId: number;
+  conversationId: number;
+  /** The answer plus everything after it — a later reply that assumed the retired
+   *  one is not a coherent continuation once it is gone. */
+  turnsRetired: number;
+  /** The question above the retired turn, so the UI can offer to ask it again. */
+  questionToReask?: string | null;
+}
+
 /** One persisted turn in a spot-analysis follow-up conversation. Threads hang
  *  off the original analysis via {@link llmInvocationId} (the analysis result's
  *  `llmInvocationId`), so the chat panel reloads when the modal reopens.
