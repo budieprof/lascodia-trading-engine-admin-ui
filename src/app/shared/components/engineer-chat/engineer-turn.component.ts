@@ -1,8 +1,29 @@
-import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  input,
+  output,
+  signal,
+} from '@angular/core';
 import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import { MarkdownInlinePipe, MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import type { SpotAnalysisFollowUpTurnDto } from '@core/api/api.types';
 import { EngineerApprovalPreviewComponent } from './engineer-approval-preview.component';
+import {
+  EngineerApprovalComposerComponent,
+  type ApprovalComposerResult,
+} from './engineer-approval-composer.component';
+import {
+  amendableFields,
+  buildAmendedArgs,
+  decisionEchoLine,
+  describeChange,
+  parseDecisionEcho,
+  parseResolution,
+  resolutionByline,
+} from './approval-resolution';
 import {
   approvalStatus,
   isPendingAction,
@@ -13,6 +34,16 @@ import {
   toolStripLabel,
   type ChatItem,
 } from './engineer-turns';
+
+/** A decision on an approval card, with the operator's words and (optionally) their edits. */
+export interface ApprovalResolveRequest {
+  turn: SpotAnalysisFollowUpTurnDto;
+  confirm: boolean;
+  /** What the operator said, or null when they said nothing. */
+  reason: string | null;
+  /** Approve-with-an-edit payload, or null for a plain decision. */
+  amendedArgs: Record<string, unknown> | null;
+}
 
 /**
  * Renders the algo-engineer harness turn kinds inside `<app-analysis-chat>`: the collapsed tool
@@ -33,6 +64,7 @@ import {
     MarkdownPipe,
     MarkdownInlinePipe,
     EngineerApprovalPreviewComponent,
+    EngineerApprovalComposerComponent,
   ],
   template: `
     @let it = item();
@@ -166,26 +198,69 @@ import {
                  it would send, the models it would swap. Renders nothing when the payload says
                  nothing recognisable or a best-effort lookup fails. -->
             <app-engineer-approval-preview [turn]="it.turn" [pending]="pending()" />
-            @if (pending()) {
-              <div class="actions">
-                <button
-                  type="button"
-                  class="approve"
-                  [class.danger]="a.live"
-                  [disabled]="resolvingId() !== null"
-                  (click)="resolve.emit({ turn: it.turn, confirm: true })"
-                >
-                  {{ resolvingId() === it.turn.id ? 'Sending…' : 'Approve' }}
-                </button>
-                <button
-                  type="button"
-                  class="reject"
-                  [disabled]="resolvingId() !== null"
-                  (click)="resolve.emit({ turn: it.turn, confirm: false })"
-                >
-                  Reject
-                </button>
+            @let res = resolution();
+            <!-- What was SAID, on the card the words answer. The engine also writes the operator's
+                 turn into the thread; that copy renders as a one-line marker (see 'decision'). -->
+            @if (res.reason) {
+              <div class="said" [attr.data-decision]="res.decision">
+                <span class="said-by">{{ byline() }}</span>
+                <p class="said-text">{{ res.reason }}</p>
               </div>
+            }
+            @if (res.changes.length > 0) {
+              <div class="amended">
+                <span class="amended-title"
+                  >Approved with an edit{{
+                    res.amendedByUserId ? ' by ' + res.amendedByUserId : ''
+                  }}</span
+                >
+                <ul>
+                  @for (c of res.changes; track c.path) {
+                    <li>
+                      <code>{{ change(c) }}</code>
+                    </li>
+                  }
+                </ul>
+              </div>
+            }
+            @if (pending()) {
+              @if (composer(); as mode) {
+                <app-engineer-approval-composer
+                  [mode]="mode"
+                  [fields]="amendFields()"
+                  [live]="a.live"
+                  [busy]="resolvingId() === it.turn.id"
+                  [error]="cardError()"
+                  (sent)="onComposed(it.turn, $event)"
+                  (cancelled)="closeComposer()"
+                />
+              } @else {
+                <div class="actions">
+                  <button
+                    type="button"
+                    class="approve"
+                    [class.danger]="a.live"
+                    [disabled]="resolvingId() !== null"
+                    (click)="openComposer('approve')"
+                  >
+                    Approve…
+                  </button>
+                  <button
+                    type="button"
+                    class="reject"
+                    [disabled]="resolvingId() !== null"
+                    (click)="openComposer('reject')"
+                  >
+                    Reject…
+                  </button>
+                  @if (res.awaitingSecondApprover) {
+                    <span class="await">one more approver needed</span>
+                  }
+                </div>
+                @if (cardError(); as e) {
+                  <p class="card-err" role="alert">{{ e }}</p>
+                }
+              }
             } @else if (a.resolvedAtUtc) {
               <div class="resolved">
                 {{ st.label }} {{ a.resolvedAtUtc | date: 'MMM d, HH:mm:ss' }}
@@ -236,6 +311,13 @@ import {
               <div class="next">Next check: {{ r.nextCheck }}</div>
             }
           </div>
+        }
+        @case ('decision') {
+          <!-- The engine's echo of a decision the operator already made. The words live on the
+               card; this keeps the moment in the thread without printing the paragraph twice. -->
+          @if (echo(); as e) {
+            <div class="echo" [attr.title]="e.text">↳ {{ echoLine() }}</div>
+          }
         }
         @case ('notice') {
           @let n = notice();
@@ -575,6 +657,71 @@ import {
         font-size: var(--text-xs);
         color: var(--text-tertiary);
       }
+      .await {
+        font-size: var(--text-xs);
+        color: var(--eng-warn);
+      }
+      .card-err {
+        margin: 8px 0 0;
+        font-size: var(--text-xs);
+        color: var(--eng-bad);
+      }
+      /* What the operator said. The card is where the words belong — they only mean something
+         next to the proposal they answer — so they are rendered here in full. */
+      .said {
+        margin-top: 8px;
+        padding: 6px 9px;
+        border-left: 2px solid var(--text-tertiary);
+        border-radius: 0 6px 6px 0;
+        background: var(--bg-secondary);
+      }
+      .said[data-decision='rejected'] {
+        border-left-color: var(--eng-bad);
+      }
+      .said[data-decision='approved'] {
+        border-left-color: var(--eng-ok);
+      }
+      .said-by {
+        display: block;
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-secondary);
+      }
+      .said-text {
+        margin: 3px 0 0;
+        font-size: var(--text-sm);
+        line-height: 1.5;
+        color: var(--text-primary);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .amended {
+        margin-top: 8px;
+        font-size: var(--text-xs);
+      }
+      .amended-title {
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--eng-warn);
+      }
+      .amended ul {
+        margin: 3px 0 0;
+        padding-left: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      /* The engine's copy of a decision already shown on its card: present, but subordinate. */
+      .echo {
+        padding: 2px 10px;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        font-style: italic;
+      }
       /* Report */
       .report {
         border-color: color-mix(in srgb, var(--accent) 25%, var(--border));
@@ -667,8 +814,23 @@ export class EngineerTurnComponent {
   readonly item = input.required<ChatItem>();
   /** Id of the proposal currently being resolved (any card), or null — disables every button. */
   readonly resolvingId = input<number | null>(null);
+  /**
+   * The server's message from a failed resolve, with the card it belongs to. Rendered on that card
+   * (and inside its composer, which is never torn down by a failure) rather than only at the foot of
+   * the thread: a refused amendment is an answer to THIS card, and the operator is looking at it.
+   */
+  readonly resolveError = input<{ turnId: number; message: string } | null>(null);
 
-  readonly resolve = output<{ turn: SpotAnalysisFollowUpTurnDto; confirm: boolean }>();
+  readonly resolve = output<ApprovalResolveRequest>();
+
+  /** Which composer is open on this card, if any. Cleared the moment the card stops being pending. */
+  protected readonly composer = signal<'approve' | 'reject' | null>(null);
+
+  constructor() {
+    effect(() => {
+      if (!this.pending()) this.composer.set(null);
+    });
+  }
 
   protected readonly stripLabel = computed(() => {
     const it = this.item();
@@ -680,4 +842,43 @@ export class EngineerTurnComponent {
   protected readonly pending = computed(() => isPendingAction(this.item().turn.actionStatus));
   protected readonly report = computed(() => parseReport(this.item().turn));
   protected readonly notice = computed(() => parseRunNotice(this.item().turn));
+
+  // ── The decision, in words ──────────────────────────────────────────────────────────────────
+  protected readonly resolution = computed(() => parseResolution(this.item().turn));
+  protected readonly byline = computed(() => resolutionByline(this.resolution()));
+  /** Values this card lets an operator change. Empty ⇒ the amend affordance is not offered at all. */
+  protected readonly amendFields = computed(() => amendableFields(this.item().turn));
+  protected readonly echo = computed(() => parseDecisionEcho(this.item().turn));
+  protected readonly echoLine = computed(() => {
+    const e = this.echo();
+    return e ? decisionEchoLine(e) : '';
+  });
+  /** The failure message for THIS card, or null when the last failure belonged to another one. */
+  protected readonly cardError = computed(() => {
+    const err = this.resolveError();
+    return err && err.turnId === this.item().turn.id ? err.message : null;
+  });
+
+  protected readonly change = describeChange;
+
+  protected openComposer(mode: 'approve' | 'reject'): void {
+    if (this.resolvingId() !== null) return;
+    this.composer.set(mode);
+  }
+
+  protected closeComposer(): void {
+    this.composer.set(null);
+  }
+
+  /**
+   * Turn what the composer collected into the request. The edits become `amendedArgs` only on an
+   * approval — the engine refuses an amendment on a rejection, and rightly: an amendment is a form
+   * of approval.
+   */
+  protected onComposed(turn: SpotAnalysisFollowUpTurnDto, r: ApprovalComposerResult): void {
+    const confirm = this.composer() === 'approve';
+    const amendedArgs =
+      confirm && r.edits ? buildAmendedArgs(turn, this.amendFields(), r.edits) : null;
+    this.resolve.emit({ turn, confirm, reason: r.reason, amendedArgs });
+  }
 }

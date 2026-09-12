@@ -29,6 +29,7 @@ import type {
 } from '@core/api/api.types';
 import { EngineerRunBarComponent } from '@shared/components/engineer-chat/engineer-run-bar.component';
 import { EngineerTurnComponent } from '@shared/components/engineer-chat/engineer-turn.component';
+import type { ResolveApprovalOptions } from '@shared/components/engineer-chat/approval-resolution';
 import { EngineerThinkingComponent } from '@shared/components/engineer-chat/engineer-thinking.component';
 import {
   ENGINEER_HINTS,
@@ -270,7 +271,13 @@ interface ParsedChatRec {
               <app-engineer-turn
                 [item]="item"
                 [resolvingId]="resolvingId()"
-                (resolve)="resolve($event.turn, $event.confirm)"
+                [resolveError]="resolveError()"
+                (resolve)="
+                  resolve($event.turn, $event.confirm, {
+                    reason: $event.reason,
+                    amendedArgs: $event.amendedArgs,
+                  })
+                "
               />
               <time
                 class="msg-time"
@@ -1285,6 +1292,8 @@ export class AnalysisChatComponent {
   protected readonly error = signal<string | null>(null);
   /** Id of the action proposal currently being confirmed/dismissed, or null. */
   protected readonly resolvingId = signal<number | null>(null);
+  /** The last resolve failure, with the card it belongs to, so that card can render it itself. */
+  protected readonly resolveError = signal<{ turnId: number; message: string } | null>(null);
   /** Active monitors created from this analysis (refetched on every tickle — hence structural). */
   protected readonly monitors = signal<AnalysisMonitorDto[]>([], { equal: structuralEqual });
   /** Monitor id currently being cancelled, or null. */
@@ -1356,7 +1365,8 @@ export class AnalysisChatComponent {
       item.kind === 'plan' ||
       item.kind === 'approval' ||
       item.kind === 'report' ||
-      item.kind === 'notice'
+      item.kind === 'notice' ||
+      item.kind === 'decision'
     );
   }
 
@@ -1679,18 +1689,29 @@ export class AnalysisChatComponent {
   }
 
   /** Confirm (execute) or dismiss a proposed action; the engine returns the
-   *  full refreshed thread. */
-  protected resolve(m: SpotAnalysisFollowUpTurnDto, confirm: boolean): void {
+   *  full refreshed thread.
+   *
+   *  `opts` carries the operator's reason and, on an algo-engineer approval card,
+   *  their edited values. A refusal (a bad amendment, a policy block) comes back
+   *  as `status:false` with a message the OPERATOR needs to read next to the card
+   *  they are looking at — so it is routed there as well as to the thread's error
+   *  line, and the composer that raised it is left standing with its text intact. */
+  protected resolve(
+    m: SpotAnalysisFollowUpTurnDto,
+    confirm: boolean,
+    opts?: ResolveApprovalOptions,
+  ): void {
     if (this.resolvingId() !== null) return;
     const id = this.llmInvocationId();
     this.resolvingId.set(m.id);
     this.error.set(null);
-    this.marketData.resolveFollowUpAction(m.id, confirm).subscribe({
+    this.resolveError.set(null);
+    this.marketData.resolveFollowUpAction(m.id, confirm, opts).subscribe({
       next: (res) => {
         this.resolvingId.set(null);
         if (this.llmInvocationId() !== id) return;
         if (res?.status && res.data) this.messages.set(res.data);
-        else this.error.set(res?.message || 'Could not resolve the action.');
+        else this.failResolve(m, res?.message || 'Could not resolve the action.');
         // A confirmed action may have created a monitor — refresh the strip.
         this.loadMonitors(id);
         // An approval wakes the agent's run — pick up its new status.
@@ -1698,9 +1719,19 @@ export class AnalysisChatComponent {
       },
       error: (err) => {
         this.resolvingId.set(null);
-        this.error.set(err?.message ?? 'Action failed. Is the engine reachable?');
+        this.failResolve(m, err?.message ?? 'Action failed. Is the engine reachable?');
       },
     });
+  }
+
+  /**
+   * An approval card renders its own failure, so the thread's error line stays quiet for it — the
+   * same sentence in two places reads as two problems. Every other proposal has no card of its own
+   * to show it on, so those keep the line.
+   */
+  private failResolve(m: SpotAnalysisFollowUpTurnDto, message: string): void {
+    this.resolveError.set({ turnId: m.id, message });
+    if (m.toolName !== 'approval') this.error.set(message);
   }
 
   /** Parse a "recommend" tool turn's payload into a chart-ready recommendation.
