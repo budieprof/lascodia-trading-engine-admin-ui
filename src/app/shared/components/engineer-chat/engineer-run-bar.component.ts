@@ -16,6 +16,7 @@ import {
   parseCapabilities,
   parseWatches,
   runElapsedMs,
+  runPresence,
   runStatusLabel,
   runStatusTone,
 } from './engineer-turns';
@@ -72,13 +73,14 @@ import {
       </div>
 
       @if (run(); as r) {
-        @if (r.activity && live()) {
-          <div class="activity" [title]="r.activity">{{ r.activity }}</div>
-        } @else if (r.stopReason && !live()) {
-          <div class="activity reason" [title]="r.stopReason">{{ r.stopReason }}</div>
-        } @else if (r.activity) {
-          <div class="activity" [title]="r.activity">{{ r.activity }}</div>
-        }
+        <!-- Presence, not a field dump: "Thinking…", "Running pnl_sim…", "Watching 4 training
+             runs", "Waiting for you". A live run always says something. -->
+        <div class="activity" [class.reason]="!live()" [title]="activityTitle()">
+          @if (live()) {
+            <span class="live-dot" aria-hidden="true"></span>
+          }
+          {{ presence().text }}
+        </div>
         @if (capabilities().length > 0 || watches().length > 0) {
           <div class="chips">
             @for (c of capabilities(); track c.label) {
@@ -215,6 +217,9 @@ import {
         color: var(--text-tertiary);
       }
       .activity {
+        display: flex;
+        align-items: center;
+        gap: 6px;
         color: var(--text-secondary);
         overflow: hidden;
         text-overflow: ellipsis;
@@ -222,6 +227,29 @@ import {
       }
       .activity.reason {
         font-style: italic;
+        color: var(--text-tertiary);
+      }
+      .live-dot {
+        flex: none;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--accent);
+        animation: rb-blink 1.4s ease-in-out infinite;
+      }
+      @keyframes rb-blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.25;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .live-dot {
+          animation: none;
+        }
       }
       .chips {
         display: flex;
@@ -291,6 +319,14 @@ export class EngineerRunBarComponent {
   });
   protected readonly capabilities = computed(() => parseCapabilities(this.run()?.capabilitiesJson));
   protected readonly watches = computed(() => parseWatches(this.run()?.watchesJson));
+  /** What the agent is doing now, in words — the same line the live thinking block shows. */
+  protected readonly presence = computed(() => runPresence(this.run()));
+  /** The raw fields behind the line, for anyone hovering to check what it was derived from. */
+  protected readonly activityTitle = computed(() => {
+    const r = this.run();
+    if (!r) return '';
+    return [r.activity, r.stopReason].filter(Boolean).join(' · ') || this.presence().text;
+  });
 
   protected readonly usd = formatUsd;
 
