@@ -501,6 +501,12 @@ export interface StrategyDto {
   lifecycleStage: StrategyLifecycleStage;
   /** When the strategy entered its current lifecycle stage (UTC ISO). */
   lifecycleStageEnteredAt: string | null;
+  /** When the promotion gate last attempted this strategy. Null = never attempted. */
+  lastPromotionGateAttemptAtUtc?: string | null;
+  /** Consecutive gate-evaluation timeouts. Non-zero means NOT rejected — never judged. */
+  promotionGateTimeoutCount?: number;
+  /** BacktestRun a cached FAILED verdict was computed against. Non-null = genuinely rejected. */
+  lastPromotionGateBacktestRunId?: number | null;
   /** Active rollout percentage (25/50/75/100); null when no rollout is in progress. */
   rolloutPct: number | null;
   /** UTC timestamp of the most recent live signal this strategy fired (null = never fired). */

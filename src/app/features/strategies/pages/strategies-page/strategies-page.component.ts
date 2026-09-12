@@ -2593,6 +2593,10 @@ type ActivationEligibility =
   | { kind: 'ready'; reasons: string[] } // all-three-legs green
   | { kind: 'partial'; reasons: string[] } // mixed evidence
   | { kind: 'blocked'; reasons: string[] } // failing or no evidence
+  // The gate ran out of time and never reached a verdict. Deliberately NOT 'blocked': blocked
+  // means the evidence was judged and found wanting, this means it was never judged at all, and
+  // conflating them is how strategy 653 sat for a day looking like a considered rejection.
+  | { kind: 'stalled'; reasons: string[] }
   | { kind: 'unknown' };
 
 function pickLatestPerStrategy<T>(
@@ -2633,7 +2637,26 @@ function computeEligibility(row: StrategyDto, aug: StrategyRowAugment): Activati
     };
   }
 
-  // 2. Three-leg evidence check.
+  // 2. Gate timed out — there is no verdict to report.
+  //
+  // Checked BEFORE the evidence legs because the evidence cannot answer the question here: the
+  // strategy may be excellent or hopeless, nobody knows, because the promotion gate ran out of
+  // budget mid-evaluation and failed closed. Showing an evidence-derived badge would imply a
+  // judgement that was never made.
+  if ((row.promotionGateTimeoutCount ?? 0) > 0) {
+    const n = row.promotionGateTimeoutCount ?? 0;
+    const when = row.lastPromotionGateAttemptAtUtc;
+    return {
+      kind: 'stalled',
+      reasons: [
+        `gate evaluation timed out ${n}x — never judged`,
+        ...(when ? [`last attempt ${new Date(when).toLocaleString()}`] : []),
+        `in cooldown (${24 * Math.pow(2, Math.min(n - 1, 5))}h), then retried`,
+      ],
+    };
+  }
+
+  // 3. Three-leg evidence check.
   const reasonsGreen: string[] = [];
   const reasonsRed: string[] = [];
 
@@ -2759,6 +2782,8 @@ function eligibilityVariant(kind: ActivationEligibility['kind']): { bg: string; 
       return { bg: 'rgba(245,158,11,0.18)', color: '#b45309' };
     case 'blocked':
       return { bg: 'rgba(239,68,68,0.15)', color: '#b91c1c' };
+    case 'stalled':
+      return { bg: 'rgba(168,85,247,0.16)', color: '#7e22ce' };
     default:
       return { bg: 'rgba(120,120,128,0.10)', color: '#71717a' };
   }
@@ -2774,6 +2799,8 @@ function eligibilityLabel(e: ActivationEligibility): string {
       return 'Partial';
     case 'blocked':
       return 'Blocked';
+    case 'stalled':
+      return '⏱ Not judged';
     default:
       return '—';
   }
@@ -2789,6 +2816,12 @@ function eligibilityTooltip(e: ActivationEligibility): string {
       return `Mixed evidence: ${e.reasons.join(' · ')}.`;
     case 'blocked':
       return `Negative evidence: ${e.reasons.join(' · ')}.`;
+    case 'stalled':
+      return (
+        `NOT rejected — never judged. The promotion gate ran out of its evaluation budget ` +
+        `and failed closed, so this strategy has no verdict either way: ${e.reasons.join(' · ')}. ` +
+        `If the CPCV is legitimately this heavy, raise StrategyPromotion:DraftGateEvaluationTimeoutSeconds.`
+      );
     default:
       return 'No optimization / backtest / walk-forward results yet.';
   }
