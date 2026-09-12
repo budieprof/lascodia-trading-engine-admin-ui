@@ -329,6 +329,71 @@ export function thinkingSummaryLabel(thoughts: number, tools: number, failed = 0
   return parts.join(' · ');
 }
 
+/** Every tool row inside a thinking block, in the order the agent made the calls. */
+function thinkingToolRows(item: ThinkingItem): ToolRow[] {
+  const rows: ToolRow[] = [];
+  for (const e of item.entries) if (e.type === 'tools') rows.push(...e.rows);
+  return rows;
+}
+
+/** First sentence (or first line) of a passage, clipped — a caption, not a paragraph. */
+function firstSentence(text: string, max = 90): string {
+  const line = text
+    .split('\n')
+    .map((l) => l.trim())
+    .find(Boolean);
+  if (!line) return '';
+  // Split on sentence punctuation followed by a space; an unfinished passage often has neither,
+  // which is why the clip below is the real bound.
+  const sentence = /^(.*?[.!?])(\s|$)/.exec(line)?.[1] ?? line;
+  return sentence.length > max ? `${sentence.slice(0, max - 1).trimEnd()}…` : sentence;
+}
+
+/**
+ * What HAPPENED inside one thinking block, in a line — "ran query_sql ×3 · 2 failed · ended on
+ * ml_activate_model".
+ *
+ * A day-long work order writes hundreds of blocks and the operator reads them closed, so a collapsed
+ * block has to say more than how many thoughts it hides: the counts tell you the block's size, this
+ * tells you its content. Everything here is derived from turns the block already holds — the tool
+ * names it called, which of them failed, and what it ended on — so it costs nothing and cannot
+ * disagree with what unfolding the block shows. No model is asked anything.
+ *
+ * A block with no tool calls falls back to the first sentence of its last passage, which is the only
+ * evidence of content a pure-narration stretch has.
+ */
+export function thinkingBlockSummary(item: ThinkingItem): string {
+  const rows = thinkingToolRows(item);
+  if (rows.length === 0) {
+    const text = latestThoughtText(item);
+    return text ? firstSentence(text) : '';
+  }
+
+  // Count by tool name, keeping first-appearance order so ties read chronologically.
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    const name = (r.turn.toolName ?? 'tool').trim() || 'tool';
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const top = ranked.slice(0, 2);
+  const hidden = ranked.length - top.length;
+  const shown = top.map(([name, n]) => (n > 1 ? `${name} ×${n}` : name));
+
+  const parts = [`ran ${shown.join(', ')}${hidden > 0 ? ` +${hidden} more` : ''}`];
+
+  const failed = rows.filter((r) => r.result.ok === false).length;
+  if (failed > 0) parts.push(`${failed} failed call${failed === 1 ? '' : 's'}`);
+
+  // Where the block landed. Said only when the tail hid it: naming a tool the line already lists
+  // would just repeat itself, but a block that ends on one of the "+2 more" ends somewhere the
+  // operator cannot otherwise see.
+  const last = (rows[rows.length - 1].turn.toolName ?? '').trim();
+  if (last && !top.some(([name]) => name === last)) parts.push(`ended on ${last}`);
+
+  return parts.join(' · ');
+}
+
 /**
  * Whether a thinking block starts expanded.
  *

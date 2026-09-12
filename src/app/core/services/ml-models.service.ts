@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { ApiService } from '@core/api/api.service';
+import { ApiCallOptions, ApiService } from '@core/api/api.service';
 import {
   ResponseData,
   PagedData,
@@ -30,8 +30,10 @@ import {
 export class MLModelsService {
   private readonly api = inject(ApiService);
 
-  getById(id: number): Observable<ResponseData<MLModelDto>> {
-    return this.api.get(`/ml-model/${id}`);
+  /** One model. `opts.silent` for callers that must not raise a toast on a missing id — the
+   *  approval-card preview reads its ids straight off an agent-written card. */
+  getById(id: number, opts?: ApiCallOptions): Observable<ResponseData<MLModelDto>> {
+    return this.api.get(`/ml-model/${id}`, opts);
   }
 
   /**

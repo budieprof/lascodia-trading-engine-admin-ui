@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, effect, input, signal } f
 import { EngineerTurnComponent } from './engineer-turn.component';
 import {
   latestThoughtLine,
+  thinkingBlockSummary,
   thinkingDefaultOpen,
   thinkingSummaryLabel,
   type ThinkingItem,
@@ -68,6 +69,10 @@ import {
         </div>
       } @else if (streaming && preview()) {
         <p class="preview">{{ preview() }}</p>
+      } @else if (digest()) {
+        <!-- A closed block still says what happened in it: which tools ran, what failed, where it
+             landed. Derived from the block's own turns — see thinkingBlockSummary. -->
+        <p class="digest" [title]="digest()">{{ digest() }}</p>
       }
     </div>
   `,
@@ -169,6 +174,17 @@ import {
         white-space: pre-wrap;
         overflow-wrap: anywhere;
       }
+      /* The closed block's one-line account of itself. Not italic: it is a fact about the block,
+         not the agent's prose. */
+      .digest {
+        margin: 0 0 3px;
+        font-size: 10px;
+        line-height: 1.5;
+        color: var(--text-tertiary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
       .preview {
         padding-bottom: 3px;
         display: -webkit-box;
@@ -228,6 +244,9 @@ export class EngineerThinkingComponent {
   );
 
   protected readonly preview = computed(() => latestThoughtLine(this.item()));
+
+  /** What happened inside the block — shown while it is closed, so folding loses nothing. */
+  protected readonly digest = computed(() => thinkingBlockSummary(this.item()));
 
   constructor() {
     effect(() => {

@@ -233,8 +233,9 @@ export class MarketDataService {
    */
   getAnalysisFollowUps(
     llmInvocationId: number,
+    opts?: ApiCallOptions,
   ): Observable<ResponseData<SpotAnalysisFollowUpTurnDto[]>> {
-    return this.api.get(`/market-data/analyze/${llmInvocationId}/follow-up`);
+    return this.api.get(`/market-data/analyze/${llmInvocationId}/follow-up`, opts);
   }
 
   /**
@@ -298,9 +299,11 @@ export class MarketDataService {
   getAnalysisMonitors(
     anchorLlmInvocationId: number,
     activeOnly = true,
+    opts?: ApiCallOptions,
   ): Observable<ResponseData<AnalysisMonitorDto[]>> {
     return this.api.get(
       `/market-data/analysis-monitors?anchorLlmInvocationId=${anchorLlmInvocationId}&activeOnly=${activeOnly}`,
+      opts,
     );
   }
 
@@ -325,6 +328,7 @@ export class MarketDataService {
     } | null,
     page = 1,
     pageSize = 30,
+    opts?: ApiCallOptions,
   ): Observable<ResponseData<AnalysisConversationsPageDto>> {
     const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
     // Direct-id filters take precedence server-side; a symbol is a substring match.
@@ -335,7 +339,7 @@ export class MarketDataService {
     else if (filter?.symbol) params.set('symbol', this.formatSymbol(filter.symbol));
     // Kind stacks with a symbol browse (server ignores it on an id search).
     if (filter?.kind) params.set('kind', filter.kind);
-    return this.api.get(`/market-data/analysis-conversations?${params.toString()}`);
+    return this.api.get(`/market-data/analysis-conversations?${params.toString()}`, opts);
   }
 
   /** GET /market-data/analysis-conversations/{id} — one conversation's opening brief. */

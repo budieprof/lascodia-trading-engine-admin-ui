@@ -129,6 +129,14 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'algo-engineer/operations',
+        data: { breadcrumb: 'Agent Operations' },
+        loadChildren: () =>
+          import('@features/algo-engineer/algo-engineer.routes').then(
+            (m) => m.ALGO_ENGINEER_OPERATIONS_ROUTES,
+          ),
+      },
+      {
         path: 'algo-engineer/scorecard',
         data: { breadcrumb: 'Change Scorecard' },
         loadChildren: () =>

@@ -16,6 +16,7 @@ import {
   reuseUnchangedItems,
   runPresence,
   sameChatItem,
+  thinkingBlockSummary,
   thinkingDefaultOpen,
   thinkingSummaryLabel,
   watchesSummary,
@@ -220,6 +221,73 @@ describe('thinking block presentation', () => {
     );
     expect(latestThinkingIndex(items)).toBe(2);
     expect(latestThinkingIndex(groupTurns([turn({ role: 'User' })], true))).toBe(-1);
+  });
+});
+
+/**
+ * The per-block digest: what a CLOSED block says happened inside it. A day-long work order writes
+ * hundreds of blocks and they are all read closed, so "12 thoughts" alone loses the content.
+ */
+describe('thinkingBlockSummary', () => {
+  const blockOf = (turns: SpotAnalysisFollowUpTurnDto[]) =>
+    groupTurns(turns, true)[0] as ThinkingItem;
+
+  it('names the tools the block ran, most-used first, with their counts', () => {
+    const b = blockOf([
+      thinking('looking'),
+      tool('query_sql'),
+      tool('query_sql'),
+      tool('platform_call'),
+      thinking('done'),
+    ]);
+    expect(thinkingBlockSummary(b)).toBe('ran query_sql ×2, platform_call');
+  });
+
+  it('counts failures separately — the thing worth noticing in a folded block', () => {
+    const b = blockOf([thinking('t'), tool('Bash', false), tool('Bash', false), tool('Bash')]);
+    expect(thinkingBlockSummary(b)).toBe('ran Bash ×3 · 2 failed calls');
+    const one = blockOf([thinking('t'), tool('Read', false)]);
+    expect(thinkingBlockSummary(one)).toBe('ran Read · 1 failed call');
+  });
+
+  it('caps the named tools at two, counts the rest, and says where it landed', () => {
+    // The landing tool is inside the "+2 more" tail, so naming it is the only way to see it.
+    const b = blockOf([
+      thinking('t'),
+      tool('query_sql'),
+      tool('query_sql'),
+      tool('Read'),
+      tool('Grep'),
+      tool('gate_reeval'),
+    ]);
+    expect(thinkingBlockSummary(b)).toBe('ran query_sql ×2, Read +2 more · ended on gate_reeval');
+  });
+
+  it('does not repeat a tool the line already names as the landing point', () => {
+    const b = blockOf([thinking('t'), tool('query_sql'), tool('Read'), tool('query_sql')]);
+    expect(thinkingBlockSummary(b)).toBe('ran query_sql ×2, Read');
+  });
+
+  it('falls back to the first sentence of the newest passage when nothing ran', () => {
+    const b = blockOf([
+      thinking('Checked the gate. Now I will look at the rejection histogram instead.'),
+    ]);
+    expect(thinkingBlockSummary(b)).toBe('Checked the gate.');
+  });
+
+  it('clips a long unpunctuated passage rather than printing a paragraph', () => {
+    const s = thinkingBlockSummary(blockOf([thinking('a'.repeat(200))]));
+    expect(s.length).toBeLessThanOrEqual(90);
+    expect(s.endsWith('…')).toBe(true);
+  });
+
+  it('is empty — not a lie — for a block with nothing in it', () => {
+    expect(thinkingBlockSummary(blockOf([thinking('   ')]))).toBe('');
+  });
+
+  it('is pure: the same block always gives the same line', () => {
+    const b = blockOf([thinking('t'), tool('Read'), tool('Bash', false)]);
+    expect(thinkingBlockSummary(b)).toBe(thinkingBlockSummary(b));
   });
 });
 

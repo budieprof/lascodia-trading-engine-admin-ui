@@ -773,6 +773,58 @@ export interface AlgoEngineerStopResultDto {
   message: string;
 }
 
+/** One durable algo-engineer change set (ADR-0020 §5) — GET /algo-engineer/change-set, newest first.
+ *  One atomic commit, traceable back to the work-order conversation that produced it. */
+export interface AgentChangeSetDto {
+  id: number;
+  sha: string;
+  branchRef: string;
+  area: string;
+  summary: string;
+  diffStatJson: string | null;
+  conversationLlmInvocationId: number;
+  experimentRunId: number | null;
+  proposalFollowUpId: number | null;
+  /** Proposed | Approved | Merged | Deployed | RolledBack | Abandoned. */
+  status: string;
+  revertedByChangeSetId: number | null;
+  createdAtUtc: string;
+  mergedAtUtc: string | null;
+  deployedAtUtc: string | null;
+}
+
+/** Kinds on the merged algo-engineer timeline. */
+export type AlgoEngineerAuditKind =
+  | 'approval_requested'
+  | 'approval_resolved'
+  | 'change_set'
+  | 'change_status'
+  | 'change_outcome'
+  | 'model_lifecycle'
+  | 'config_change'
+  | 'run_started'
+  | 'run_ended'
+  | 'monitor_armed'
+  | 'monitor_fired';
+
+/** One row of GET /algo-engineer/audit — the merged timeline of everything the agent did, across
+ *  approvals, change sets, model lifecycle, config writes, runs and monitors. `kind` is typed loosely
+ *  (a plain string) so a kind the engine adds later still renders instead of vanishing. */
+export interface AlgoEngineerAuditRowDto {
+  atUtc: string;
+  sessionLlmInvocationId: number;
+  /** One of {@link AlgoEngineerAuditKind}, or a newer kind this client has not been taught. */
+  kind: string;
+  /** Who did it — the agent, a worker, or an operator's name. */
+  actor: string;
+  summary: string;
+  detail?: string | null;
+  /** Whatever the row points at: a sha, a config key, a model id, a monitor id. */
+  ref?: string | null;
+  approvedByUserId?: number | null;
+  outcome?: string | null;
+}
+
 /** The launched Wire briefing — its anchor "Wire" conversation id. Wire keeps working on the host;
  *  the conversation streams in live via SignalR, exactly like an algo-engineer work order. */
 export interface WireBriefingResultDto {

@@ -484,6 +484,12 @@ export class SidebarComponent {
         { label: 'Proposals', route: '/strategies/llm-proposals', icon: '💡' },
         { label: 'Conversations', route: '/conversations', icon: '💬' },
         { label: 'Monitors', route: '/analysis-monitors', icon: '🔭', policy: 'Operator' },
+        {
+          label: 'Agent Operations',
+          route: '/algo-engineer/operations',
+          icon: '🛠',
+          policy: 'Operator',
+        },
         { label: 'Change Scorecard', route: '/algo-engineer/scorecard', icon: '🧮' },
         { label: 'Spot Analysis', route: '/spot-analysis', icon: '📊' },
         { label: 'Spot Sweep', route: '/spot-sweep', icon: '🛰' },
