@@ -11,11 +11,14 @@
  * chat's original rendering.
  */
 import type { SpotAnalysisFollowUpTurnDto } from '@core/api/api.types';
+import { parseDecisionEcho } from './approval-resolution';
 
 /** How one turn renders. */
 export type TurnKind =
   | 'user'
   | 'assistant'
+  /** The engine's echo of an approval decision the card already shows — a one-line marker. */
+  | 'decision'
   /** A `thought` turn still streaming (`{"final":false}`) — the agent's inner narration. */
   | 'thought'
   | 'plan'
@@ -189,7 +192,10 @@ export function isFinalThought(t: SpotAnalysisFollowUpTurnDto): boolean {
 export function classifyTurn(t: SpotAnalysisFollowUpTurnDto, engineer: boolean): TurnKind {
   switch (t.role) {
     case 'User':
-      return 'user';
+      // An Engineer thread's decision turns are written by the ENGINE, echoing words the approval
+      // card already carries. Rendering them as a second full-size bubble would read as the operator
+      // saying the same thing twice, so in that thread they collapse to a marker.
+      return engineer && parseDecisionEcho(t) ? 'decision' : 'user';
     case 'Assistant':
       // A finalised thought is the answer: it renders exactly like any other assistant message.
       if (t.toolName === 'thought') return isFinalThought(t) ? 'assistant' : 'thought';

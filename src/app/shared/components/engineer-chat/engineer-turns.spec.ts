@@ -62,6 +62,16 @@ describe('classifyTurn', () => {
     );
   });
 
+  it('collapses the engine own echo of an approval decision, but only in an Engineer thread', () => {
+    // The engine posts the operator's words as a User turn; the CARD is where they are read, so in
+    // an Engineer thread the echo renders as a one-line marker instead of a second copy.
+    const echo = turn({ role: 'User', content: '**Rejected.** the stop is inside the spread' });
+    expect(classifyTurn(echo, true)).toBe('decision');
+    expect(classifyTurn(echo, false)).toBe('user');
+    // An ordinary message keeps its bubble in both.
+    expect(classifyTurn(turn({ role: 'User', content: 'status?' }), true)).toBe('user');
+  });
+
   it('leaves legacy turns exactly as they were', () => {
     // Everything written before the harness carries toolName = null.
     expect(classifyTurn(turn({ role: 'Assistant' }), false)).toBe('assistant');

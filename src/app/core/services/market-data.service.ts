@@ -21,6 +21,10 @@ import {
   UpdateSignalExposureConfigRequest,
 } from '@core/api/api.types';
 import type { RecFileOverrides } from '@shared/components/rec-file-editor/rec-file-editor.component';
+import {
+  resolveApprovalBody,
+  type ResolveApprovalOptions,
+} from '@shared/components/engineer-chat/approval-resolution';
 
 /**
  * Shape the operator's recommendation edits for the wire. Both promote endpoints
@@ -265,14 +269,19 @@ export class MarketDataService {
    * and appends the model's outcome summary; dismiss just marks it dismissed.
    * Returns the full refreshed thread. This is the ONLY path by which a
    * chat-proposed action executes.
+   *
+   * `opts` carries the operator's words and, on an algo-engineer approval card,
+   * an approve-with-an-edit payload. Both are optional: an empty body is exactly
+   * the request this method has always sent.
    */
   resolveFollowUpAction(
     followUpId: number,
     confirm: boolean,
+    opts?: ResolveApprovalOptions,
   ): Observable<ResponseData<SpotAnalysisFollowUpTurnDto[]>> {
     return this.api.post(
       `/market-data/analyze/follow-up/${followUpId}/resolve?confirm=${confirm}`,
-      {},
+      resolveApprovalBody(opts),
     );
   }
 
