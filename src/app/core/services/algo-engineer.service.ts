@@ -3,6 +3,8 @@ import { Observable } from 'rxjs';
 
 import { ApiService } from '@core/api/api.service';
 import type {
+  AgentChangeSetDto,
+  AlgoEngineerAuditRowDto,
   AlgoEngineerRunStateDto,
   AlgoEngineerScorecardRowDto,
   AlgoEngineerStopResultDto,
@@ -52,6 +54,41 @@ export class AlgoEngineerService {
   getRunState(sessionId: number): Observable<ResponseData<AlgoEngineerRunStateDto | null>> {
     return this.api.get<ResponseData<AlgoEngineerRunStateDto | null>>(
       `/algo-engineer/session/${sessionId}/run-state`,
+      { silent: true },
+    );
+  }
+
+  /** Change sets the agent recorded, newest first — optionally scoped to one work-order conversation.
+   *  Silent: the operations page shows its own empty state rather than a toast per poll. */
+  getChangeSets(
+    conversationLlmInvocationId?: number | null,
+    limit = 50,
+  ): Observable<ResponseData<AgentChangeSetDto[]>> {
+    const p = new URLSearchParams({ limit: String(limit) });
+    if (conversationLlmInvocationId != null)
+      p.set('conversationLlmInvocationId', String(conversationLlmInvocationId));
+    return this.api.get<ResponseData<AgentChangeSetDto[]>>(
+      `/algo-engineer/change-set?${p.toString()}`,
+      { silent: true },
+    );
+  }
+
+  /**
+   * The merged agent timeline over a window — approvals, change sets, model lifecycle, config
+   * writes, runs, monitors — newest first.
+   *
+   * Silent, and callers must degrade to an empty state: this endpoint is newer than the pages that
+   * read it, so an engine that predates it answers 404 and the page must show what it does know
+   * rather than a failure.
+   */
+  getAudit(
+    fromUtc: string,
+    toUtc: string,
+    limit = 200,
+  ): Observable<ResponseData<AlgoEngineerAuditRowDto[]>> {
+    const p = new URLSearchParams({ from: fromUtc, to: toUtc, limit: String(limit) });
+    return this.api.get<ResponseData<AlgoEngineerAuditRowDto[]>>(
+      `/algo-engineer/audit?${p.toString()}`,
       { silent: true },
     );
   }

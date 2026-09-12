@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
 import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import { MarkdownInlinePipe, MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import type { SpotAnalysisFollowUpTurnDto } from '@core/api/api.types';
+import { EngineerApprovalPreviewComponent } from './engineer-approval-preview.component';
 import {
   approvalStatus,
   isPendingAction,
@@ -26,7 +27,13 @@ import {
   selector: 'app-engineer-turn',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, NgTemplateOutlet, MarkdownPipe, MarkdownInlinePipe],
+  imports: [
+    DatePipe,
+    NgTemplateOutlet,
+    MarkdownPipe,
+    MarkdownInlinePipe,
+    EngineerApprovalPreviewComponent,
+  ],
   template: `
     @let it = item();
     @if (it.type === 'tools') {
@@ -155,6 +162,10 @@ import {
                 }
               </dl>
             }
+            <!-- What the card would actually do — the live config value it overwrites, the request
+                 it would send, the models it would swap. Renders nothing when the payload says
+                 nothing recognisable or a best-effort lookup fails. -->
+            <app-engineer-approval-preview [turn]="it.turn" [pending]="pending()" />
             @if (pending()) {
               <div class="actions">
                 <button
