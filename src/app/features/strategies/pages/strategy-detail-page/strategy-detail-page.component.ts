@@ -48,6 +48,7 @@ import { PageContextService } from '@core/assistant/page-context.service';
 
 import { StrategyFormComponent } from '../../components/strategy-form/strategy-form.component';
 import { PromotionReadinessCardComponent } from '../../components/promotion-readiness-card/promotion-readiness-card.component';
+import { PromotionGateHistoryCardComponent } from '../../components/promotion-gate-history-card/promotion-gate-history-card.component';
 import { StrategyVariantsTabComponent } from '../../components/strategy-variants-tab/strategy-variants-tab.component';
 import { StrategyCapacityCardComponent } from '../../components/strategy-capacity-card/strategy-capacity-card.component';
 import { StrategyPromotionReviewsTabComponent } from '../../components/strategy-promotion-reviews-tab/strategy-promotion-reviews-tab.component';
@@ -69,6 +70,7 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
     RelativeTimePipe,
     StrategyFormComponent,
     PromotionReadinessCardComponent,
+    PromotionGateHistoryCardComponent,
     StrategyVariantsTabComponent,
     StrategyCapacityCardComponent,
     StrategyPromotionReviewsTabComponent,
@@ -389,10 +391,16 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
                on activation, with a paper-gate bypass toggle for hand-promoted
                strategies that have no PaperExecution history yet. -->
           @if (activeTab() === 'promotion' && strategy()) {
-            <app-promotion-readiness-card
-              [strategyId]="strategy()!.id"
-              (activated)="onPromotionActivated()"
-            />
+            <div class="promotion-stack">
+              <app-promotion-readiness-card
+                [strategyId]="strategy()!.id"
+                (activated)="onPromotionActivated()"
+              />
+              <!-- …and what the engine ACTUALLY decided, attempt by attempt. The card above
+                   re-evaluates live, which cannot show a budget timeout or an evidence-unchanged
+                   skip — the two outcomes that leave a Draft stuck with no verdict against it. -->
+              <app-promotion-gate-history-card [strategyId]="strategy()!.id" />
+            </div>
           }
 
           <!-- Signals Tab -->
@@ -571,6 +579,13 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
     `
       .page {
         padding: var(--space-2) 0;
+      }
+
+      /* Readiness card then attempt history, as one column with consistent spacing. */
+      .promotion-stack {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
       }
 
       .health-strip {

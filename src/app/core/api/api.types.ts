@@ -1330,6 +1330,46 @@ export interface GetRecentStrategySnapshotsRequest {
 }
 
 /**
+ * One recorded promotion-gate attempt — element of
+ * `GET /strategy/{id}/promotion-gate-history`.
+ *
+ * Distinct from `PromotionGatesDto`, which is a live re-evaluation. This is what
+ * the auto-promote phase actually decided, including the outcomes a live
+ * re-evaluation cannot reproduce: budget timeouts and evidence-unchanged skips.
+ */
+export interface PromotionGateEvaluationDto {
+  id: number;
+  evaluatedAtUtc: string;
+
+  /** `Passed` | `Rejected` | `TimedOut` | `SkippedEvidenceUnchanged` | `Errored`. */
+  outcome: string;
+  passed: boolean;
+
+  /**
+   * Whether the attempt reached an actual verdict. A timeout, a skip and an
+   * error did NOT — the strategy was never judged — and must never be rendered
+   * as a rejection. Conflating the two is how strategy 653 spent a day looking
+   * like a considered no.
+   */
+  isVerdict: boolean;
+
+  /** Every breached gate with its measured value and threshold. Null on a pass. */
+  failureSummary: string | null;
+
+  /** One entry per gate that ran — including passes and auto-skips, with reasons. */
+  diagnostics: string[];
+
+  /** The breached gates, split out of the summary for listing. */
+  failures: string[];
+
+  backtestRunId: number | null;
+  durationMs: number;
+  budgetMs: number;
+  trigger: string | null;
+  timeoutCountAtAttempt: number;
+}
+
+/**
  * The latest backtest, walk-forward and optimization run for one strategy —
  * response element of `POST /strategy/runs/latest`.
  *

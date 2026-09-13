@@ -15,6 +15,7 @@ import {
   PortfolioFwerReportDto,
   GetRecentStrategySnapshotsRequest,
   LatestStrategyRunsDto,
+  PromotionGateEvaluationDto,
   GetStrategyEquityCurveRequest,
   GetStrategyRejectionDistributionRequest,
   CreateStrategyRequest,
@@ -171,6 +172,22 @@ export class StrategiesService {
     body: GetRecentStrategySnapshotsRequest,
   ): Observable<ResponseData<StrategyPerformanceSnapshotDto[]>> {
     return this.api.post(`/strategy/health/recent`, body);
+  }
+
+  /**
+   * Recorded promotion-gate attempts, newest first — what the auto-promote phase
+   * actually decided, as opposed to `getPromotionGates`, which re-evaluates live.
+   *
+   * Only this can show a budget timeout or an evidence-unchanged skip, because a
+   * live re-evaluation always produces a verdict. The distinction matters: a
+   * timeout means the strategy was never judged, which is a different situation
+   * from a rejection and calls for a different response.
+   */
+  getPromotionGateHistory(
+    id: number,
+    limit = 25,
+  ): Observable<ResponseData<PromotionGateEvaluationDto[]>> {
+    return this.api.get(`/strategy/${id}/promotion-gate-history?limit=${limit}`);
   }
 
   /**
