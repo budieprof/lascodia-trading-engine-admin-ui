@@ -32,7 +32,7 @@ import {
 } from '@shared/components/chat/action-impact';
 import { MarkdownCopyDirective } from '@shared/directives/markdown-copy.directive';
 import { MarketDataService } from '@core/services/market-data.service';
-import { AlgoEngineerService } from '@core/services/algo-engineer.service';
+import { AlgoEngineerService, type AgentRoute } from '@core/services/algo-engineer.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import type {
   SpotAnalysisFollowUpTurnDto,
@@ -45,6 +45,7 @@ import type { ResolveApprovalOptions } from '@shared/components/engineer-chat/ap
 import { EngineerThinkingComponent } from '@shared/components/engineer-chat/engineer-thinking.component';
 import {
   ENGINEER_HINTS,
+  WIRE_HINTS,
   groupTurns,
   isRunLive,
   isStatus,
@@ -175,7 +176,7 @@ interface ParsedChatRec {
         </div>
       }
 
-      @if (isEngineer()) {
+      @if (isAgent()) {
         <app-engineer-run-bar
           [run]="runState()"
           [loaded]="runLoaded()"
@@ -577,9 +578,9 @@ interface ParsedChatRec {
         }
       </div>
 
-      @if (isEngineer()) {
+      @if (isAgent()) {
         <div class="hints" role="group" aria-label="Quick replies">
-          @for (h of engineerHints; track h.label) {
+          @for (h of agentHints(); track h.label) {
             <button
               type="button"
               class="hint"
@@ -1378,6 +1379,27 @@ export class AnalysisChatComponent {
   /** True for an algo-engineer work-order conversation. */
   protected readonly isEngineer = computed(() => this.kind() === 'Engineer');
 
+  /** True for a Wire market-intelligence briefing. */
+  protected readonly isWire = computed(() => this.kind() === 'Wire');
+
+  /**
+   * True for EITHER agent thread — the run harness is not engineer-specific.
+   *
+   * <p>The run bar, the tool strip, the harness turn rendering and the stop button were all gated on
+   * `isEngineer`, so a Wire briefing showed none of them: no status, no step count, no cost, no tool
+   * calls, and no way to interrupt. That is not because Wire lacked the capability — a run is keyed
+   * by its session anchor and both controllers delegate to the same handlers — it is because this
+   * one comparison excluded it. Conversation #30119 spent $0.67 across three runs, invisibly, and a
+   * tool defect that had been returning wrong data since Wire shipped could not be seen in the UI at
+   * all.</p>
+   */
+  protected readonly isAgent = computed(() => this.isEngineer() || this.isWire());
+
+  /** Which control plane this thread's run-state and stop calls go to. */
+  private readonly agentRoute = computed<AgentRoute>(() =>
+    this.isWire() ? 'wire' : 'algo-engineer',
+  );
+
   /**
    * Monitors are shown wherever the host allows them — INCLUDING an Engineer thread. An
    * algo-engineer work order can arm the platform's long-horizon watchers, and the operator has
@@ -1386,19 +1408,26 @@ export class AnalysisChatComponent {
    */
   protected readonly monitorsEnabled = computed(() => this.showMonitors());
 
-  protected readonly composerPlaceholder = computed(() =>
-    this.isEngineer()
-      ? 'Message the algo-engineer — a follow-up instruction, a question, or “continue”…'
-      : this.placeholder(),
-  );
+  protected readonly composerPlaceholder = computed(() => {
+    if (this.isEngineer())
+      return 'Message the algo-engineer — a follow-up instruction, a question, or “continue”…';
+    if (this.isWire())
+      return 'Message Wire — a follow-up, a currency to decompose, or “what changed?”…';
+    return this.placeholder();
+  });
 
-  protected readonly emptyText = computed(() =>
-    this.isEngineer()
-      ? 'The work order is starting — the plan, tool calls, approvals and findings stream in here live.'
-      : this.emptyHint(),
-  );
+  protected readonly emptyText = computed(() => {
+    if (this.isEngineer())
+      return 'The work order is starting — the plan, tool calls, approvals and findings stream in here live.';
+    if (this.isWire())
+      return 'The briefing is starting — Wire’s reads, its reasoning and its answer stream in here live.';
+    return this.emptyHint();
+  });
 
   protected readonly engineerHints = ENGINEER_HINTS;
+
+  /** Quick replies, per agent. Wire's are the questions its own tools answer. */
+  protected readonly agentHints = computed(() => (this.isWire() ? WIRE_HINTS : ENGINEER_HINTS));
 
   /**
    * The thread. Structural equality on purpose: with a streaming agent the thread is refetched
@@ -1454,7 +1483,7 @@ export class AnalysisChatComponent {
    * card in the thread once a second.
    */
   protected readonly items = computed(() => {
-    const next = groupTurns(this.messages(), this.isEngineer(), this.openerAt());
+    const next = groupTurns(this.messages(), this.isAgent(), this.openerAt());
     const stable = reuseUnchangedItems(this.prevItems, next);
     this.prevItems = stable;
     return stable;
@@ -1464,8 +1493,8 @@ export class AnalysisChatComponent {
   protected readonly latestThinkingIdx = computed(() => latestThinkingIndex(this.items()));
 
   /**
-   * Is anything being written right now? An Engineer thread knows from its run state; every other
-   * thread that streams thoughts (the assistant, Wire) has no run bar, so an in-flight ask is the
+   * Is anything being written right now? An agent thread (Engineer or Wire) knows from its run
+   * state; a plain analysis thread that streams thoughts has no run bar, so an in-flight ask is the
    * liveness signal there.
    */
   protected readonly narrationLive = computed(() => this.runLive() || this.sending());
@@ -1570,16 +1599,16 @@ export class AnalysisChatComponent {
       untracked(() => (enabled ? this.loadMonitors(id) : this.monitors.set([])));
     });
 
-    // Engineer threads: (re)load the run header whenever the conversation is bound or turns out
-    // to be an Engineer one (the host may learn the Kind after the id).
+    // Agent threads (Engineer or Wire): (re)load the run header whenever the conversation is bound
+    // or turns out to be an agent one (the host may learn the Kind after the id).
     effect(() => {
       const id = this.llmInvocationId();
-      const engineer = this.isEngineer();
+      const agent = this.isAgent();
       untracked(() => {
         this.runState.set(null);
         this.runLoaded.set(false);
         this.stopMessage.set(null);
-        if (engineer && id) this.loadRunState(id);
+        if (agent && id) this.loadRunState(id);
       });
     });
 
@@ -1633,8 +1662,8 @@ export class AnalysisChatComponent {
       const id = this.llmInvocationId();
       // The run header refreshes on every tickle, even mid-send: the agent's status line is
       // exactly what the operator is watching while their message is in flight.
-      if (id && this.isEngineer()) this.loadRunState(id);
-      if (!id || (this.sending() && !this.isEngineer())) return;
+      if (id && this.isAgent()) this.loadRunState(id);
+      if (!id || (this.sending() && !this.isAgent())) return;
       this.refreshThreadSilently(id);
       this.loadMonitors(id);
     }, 400);
@@ -1837,7 +1866,7 @@ export class AnalysisChatComponent {
         // A confirmed action may have created a monitor — refresh the strip.
         this.loadMonitors(id);
         // An approval wakes the agent's run — pick up its new status.
-        if (this.isEngineer()) this.loadRunState(id);
+        if (this.isAgent()) this.loadRunState(id);
       },
       error: (err) => {
         this.resolvingId.set(null);
@@ -2103,10 +2132,10 @@ export class AnalysisChatComponent {
     });
   }
 
-  /** Fetch the Engineer session's latest run for the header. A failure keeps the last state. */
+  /** Fetch the agent session's latest run for the header. A failure keeps the last state. */
   private loadRunState(sessionId: number): void {
     const seq = ++this.runStateSeq;
-    this.algoEngineer.getRunState(sessionId).subscribe({
+    this.algoEngineer.getRunState(sessionId, this.agentRoute()).subscribe({
       next: (res) => {
         if (seq !== this.runStateSeq || this.llmInvocationId() !== sessionId) return;
         this.runLoaded.set(true);
@@ -2119,13 +2148,13 @@ export class AnalysisChatComponent {
     });
   }
 
-  /** Stop the Engineer session's active run. Shared by the header button and the "stop" chip. */
+  /** Stop the agent session's active run. Shared by the header button and the "stop" chip. */
   protected stopRun(): void {
     const id = this.llmInvocationId();
     if (!id || this.stopping()) return;
     this.stopping.set(true);
     this.stopMessage.set(null);
-    this.algoEngineer.stopRun(id).subscribe({
+    this.algoEngineer.stopRun(id, this.agentRoute()).subscribe({
       next: (res) => {
         this.stopping.set(false);
         if (this.llmInvocationId() !== id) return;

@@ -13,6 +13,12 @@ import type {
   ResponseData,
 } from '@core/api/api.types';
 
+/**
+ * Which agent's control plane a session-scoped call goes to. Both expose the same session, turn,
+ * run-state and stop surface — only the base path differs.
+ */
+export type AgentRoute = 'algo-engineer' | 'wire';
+
 /** Reads the algo-engineer agent's surface (ADR-0020) — the change scorecard, launching work orders,
  *  and a session's live run state. */
 @Injectable({ providedIn: 'root' })
@@ -48,12 +54,21 @@ export class AlgoEngineerService {
     );
   }
 
-  /** Latest run of a session (`data = null` when it has none). Silent: it is refetched on every
-   *  conversation tickle, and a failure must not stack a toast per turn — the header just keeps
-   *  its last state. */
-  getRunState(sessionId: number): Observable<ResponseData<AlgoEngineerRunStateDto | null>> {
+  /**
+   * Latest run of a session (`data = null` when it has none). Silent: it is refetched on every
+   * conversation tickle, and a failure must not stack a toast per turn — the header just keeps its
+   * last state.
+   *
+   * `agent` picks the route. A run is keyed by its session anchor rather than by which agent
+   * produced it, and both controllers delegate to the same handler — so this is a base-path choice,
+   * not two different APIs.
+   */
+  getRunState(
+    sessionId: number,
+    agent: AgentRoute = 'algo-engineer',
+  ): Observable<ResponseData<AlgoEngineerRunStateDto | null>> {
     return this.api.get<ResponseData<AlgoEngineerRunStateDto | null>>(
-      `/algo-engineer/session/${sessionId}/run-state`,
+      `/${agent}/session/${sessionId}/run-state`,
       { silent: true },
     );
   }
@@ -94,9 +109,12 @@ export class AlgoEngineerService {
   }
 
   /** Ask the host to stop the session's active run. The caller renders the returned message. */
-  stopRun(sessionId: number): Observable<ResponseData<AlgoEngineerStopResultDto>> {
+  stopRun(
+    sessionId: number,
+    agent: AgentRoute = 'algo-engineer',
+  ): Observable<ResponseData<AlgoEngineerStopResultDto>> {
     return this.api.post<ResponseData<AlgoEngineerStopResultDto>>(
-      `/algo-engineer/session/${sessionId}/stop`,
+      `/${agent}/session/${sessionId}/stop`,
       {},
       { silent: true },
     );

@@ -908,6 +908,29 @@ export function runPresence(
 }
 
 /** Composer hint chips for an Engineer thread. `stop` calls the Stop endpoint instead of sending. */
+/**
+ * Wire's quick replies — the questions its own tools answer, not the engineer's.
+ *
+ * <p>"what's on the calendar?" is first deliberately. A briefing that decomposes nine currencies of
+ * news pressure and never mentions that the Fed decides rates on Wednesday has buried the most
+ * actionable thing in the store, and that is a real briefing Wire produced.</p>
+ */
+export const WIRE_HINTS: ReadonlyArray<{ label: string; send: string | null }> = [
+  {
+    label: "what's on the calendar?",
+    send: 'What is scheduled in the next 48 hours, and which open positions span it?',
+  },
+  {
+    label: 'already priced?',
+    send: 'How much of that is already priced? Quote liveShare and say what it measures.',
+  },
+  {
+    label: 'feed health',
+    send: 'Check ingestion health — any source gone quiet relative to its own normal rate?',
+  },
+  { label: 'stop', send: null },
+];
+
 export const ENGINEER_HINTS: ReadonlyArray<{ label: string; send: string | null }> = [
   { label: 'continue', send: 'continue' },
   { label: 'stop', send: null },
