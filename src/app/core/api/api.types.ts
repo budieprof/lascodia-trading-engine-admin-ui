@@ -1363,10 +1363,42 @@ export interface PromotionGateEvaluationDto {
   failures: string[];
 
   backtestRunId: number | null;
+
+  /**
+   * Full CPCV output, including every per-fold Sharpe — not just the summary.
+   *
+   * `method` distinguishes the two variants, which are NOT comparable: a
+   * `BacktestReplay` figure is a per-TRADE Sharpe of realised trades, while
+   * `MlRetrainPerFold` is a per-SAMPLE model-discrimination score an order of
+   * magnitude smaller. Only the former is thresholded by the gate.
+   */
+  cpcv: CpcvDistributionDto | null;
+
   durationMs: number;
   budgetMs: number;
   trigger: string | null;
   timeoutCountAtAttempt: number;
+}
+
+/** CPCV output as stored on a gate evaluation. */
+export interface CpcvDistributionDto {
+  strategyId: number;
+  fromDate: string;
+  toDate: string;
+  nGroups: number;
+  kTestGroups: number;
+  /** One Sharpe per C(N,K) fold — the expensive part of CPCV, and the part worth seeing. */
+  sharpeDistribution: number[];
+  medianSharpe: number;
+  p25Sharpe: number;
+  p75Sharpe: number;
+  deflatedSharpe: number;
+  probabilityOfOverfitting: number;
+  /** `BacktestReplay` (gated, per-trade) | `MlRetrainPerFold` (diagnostic, per-sample) | `None`. */
+  method: string;
+  /** Median of the non-gating per-sample diagnostic, when it was run. */
+  mlRetrainMedianSharpe: number | null;
+  mlRetrainFolds: number | null;
 }
 
 /**
