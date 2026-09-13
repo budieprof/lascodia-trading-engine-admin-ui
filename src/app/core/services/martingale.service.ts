@@ -144,6 +144,15 @@ export interface MartingaleChainLedgerEntryDto {
   /** Depth after this close. The opening loss is depth 0. */
   depthAfter: number;
   appliedAtUtc: string | null;
+  /**
+   * The balance this close ACTUALLY left behind, when drift reconciliation has since restated
+   * its money against the broker's settled figure. `runningDeficit` is the frozen snapshot the
+   * chain believed at the time and is deliberately never rewritten, so when these disagree the
+   * ledger's arithmetic will not close — show this one. Null when they agree.
+   */
+  reconciledRunningDeficit: number | null;
+  /** Broker close time postdates the advance that consumed it — the timestamp is wrong, not the ladder. */
+  closedAtImplausible: boolean;
 }
 
 /** The rung a chain would stake next, and the first thing that would stop it. */

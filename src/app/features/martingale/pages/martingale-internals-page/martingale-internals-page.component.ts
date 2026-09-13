@@ -534,7 +534,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                         <thead>
                           <tr>
                             <th>Position</th>
-                            <th>When</th>
+                            <th>Applied</th>
                             <th>Dir</th>
                             <th class="num">Lots</th>
                             <th class="num">P&amp;L</th>
@@ -547,7 +547,33 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                           @for (e of c.ledger; track e.positionId) {
                             <tr>
                               <td class="mono">#{{ e.positionId }}</td>
-                              <td>{{ e.closedAtUtc | date: 'short' : 'UTC' }}</td>
+                              <!--
+                                The ladder's own clock: rows are ordered by when the service
+                                APPLIED each close, so that is the column that explains the
+                                order they appear in. The broker close time sits underneath —
+                                it is the figure that can be wrong (an EA server-to-UTC
+                                conversion fault put 55 of them hours into the future, which
+                                made chains read as opening after their own rungs closed).
+                              -->
+                              <td>
+                                {{ e.appliedAtUtc ?? e.closedAtUtc | date: 'short' : 'UTC' }}
+                                @if (e.closedAtUtc) {
+                                  <span
+                                    class="sub"
+                                    [class.bad-time]="e.closedAtImplausible"
+                                    [title]="
+                                      e.closedAtImplausible
+                                        ? 'The broker close time postdates the advance that consumed this close, which is impossible. The timestamp reached the engine mis-converted; the ladder itself is unaffected.'
+                                        : 'Broker close time'
+                                    "
+                                  >
+                                    closed {{ e.closedAtUtc | date: 'short' : 'UTC' }}
+                                    @if (e.closedAtImplausible) {
+                                      ⚠
+                                    }
+                                  </span>
+                                }
+                              </td>
                               <td>{{ e.direction }}</td>
                               <td class="num">{{ e.lots | number: '1.2-2' }}</td>
                               <td
@@ -557,17 +583,40 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                               >
                                 {{ e.realisedPnl | number: '1.2-2' }}
                               </td>
+                              <!--
+                                "runningDeficit" is the advance's stored DeficitAfter — frozen at
+                                what the chain believed when it applied the close. Drift
+                                reconciliation restates the MONEY column against the broker's
+                                settled figure but deliberately leaves that snapshot alone, so
+                                the two can disagree and the column stops adding up (chain 44:
+                                −9.87 leaving "9.38 owed", then +3.00 arriving at "6.87 owed").
+                                When the engine can recover the true figure it sends it as
+                                reconciledRunningDeficit; that is the balance to believe.
+                              -->
                               <td
                                 class="num"
-                                [class.pos]="e.runningDeficit < 0"
-                                [class.neg]="e.runningDeficit > 0"
+                                [class.pos]="(e.reconciledRunningDeficit ?? e.runningDeficit) < 0"
+                                [class.neg]="(e.reconciledRunningDeficit ?? e.runningDeficit) > 0"
                               >
-                                @if (e.runningDeficit > 0) {
-                                  {{ e.runningDeficit | number: '1.2-2' }} owed
-                                } @else if (e.runningDeficit < 0) {
-                                  {{ -e.runningDeficit | number: '1.2-2' }} banked
+                                @let bal = e.reconciledRunningDeficit ?? e.runningDeficit;
+                                @if (bal > 0) {
+                                  {{ bal | number: '1.2-2' }} owed
+                                } @else if (bal < 0) {
+                                  {{ -bal | number: '1.2-2' }} banked
                                 } @else {
                                   level
+                                }
+                                @if (e.reconciledRunningDeficit !== null) {
+                                  <span
+                                    class="sub restated"
+                                    [title]="
+                                      'The chain booked ' +
+                                      (e.runningDeficit | number: '1.2-2') +
+                                      ' here. Reconciliation against the settled broker P&L later restated this close, and the chain carried the corrected total forward — the figure shown is the balance the close actually left.'
+                                    "
+                                  >
+                                    restated from {{ e.runningDeficit | number: '1.2-2' }}
+                                  </span>
                                 }
                               </td>
                               <td class="num mono">
@@ -631,9 +680,14 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                       of the deficit ends a ladder, so a win that merely paid some of it down burns
                       a rung just as a loss does; a break-even or an unfunded close holds.
                       @if (c.ledgerSource === 'advances') {
-                        Every row is what the service actually applied, with the figure it applied —
-                        if the last running balance disagrees with the header, the row and the chain
-                        have genuinely diverged.
+                        Every row is what the service actually applied. Rows are in the order the
+                        ladder applied them, which is the order that made the chain — not the order
+                        the broker stamped on the closes. A row marked
+                        <b>restated</b> had its money corrected against the broker's settled P&amp;L
+                        after the fact; the balance shown is the reconciled one, and the figure the
+                        chain originally booked is beside it. Once every restatement is accounted
+                        for the last balance should match the header — if it still does not, the row
+                        and the chain have genuinely diverged.
                       } @else {
                         The running balance is replayed from the chain's opening loss; if its last
                         row disagrees with the header, the reconstruction has attributed the wrong
@@ -1076,6 +1130,23 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         margin: 0.5rem 0 0;
         font-size: 0.8rem;
         color: var(--text-secondary);
+      }
+
+      /* Secondary line inside a ledger cell: the broker close time under the apply time, and
+         the pre-reconciliation figure under a restated balance. Quiet by default — it is
+         provenance, not the number the reader came for — and loud only when it contradicts. */
+      .ledger .sub {
+        display: block;
+        font-size: 0.72rem;
+        line-height: 1.3;
+        color: var(--text-secondary);
+        font-weight: 400;
+      }
+      .ledger .sub.bad-time {
+        color: var(--warning);
+      }
+      .ledger .sub.restated {
+        font-style: italic;
       }
 
       /* Rung-skip trace: same visual weight as the depth-divergence callout — both mean the
