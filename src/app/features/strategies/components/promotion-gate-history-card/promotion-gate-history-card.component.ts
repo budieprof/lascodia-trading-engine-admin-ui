@@ -124,9 +124,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                         CPCV · {{ c.nGroups }} groups, {{ c.kTestGroups }} held out ·
                         {{ c.sharpeDistribution.length }} folds
                       </span>
-                      <span
-                        [class]="'method ' + (c.method === 'BacktestReplay' ? 'gated' : 'diag')"
-                      >
+                      <span [class]="'method ' + (isGatedMethod(c.method) ? 'gated' : 'diag')">
                         {{ methodLabel(c.method) }}
                       </span>
                     </div>
@@ -544,12 +542,22 @@ export class PromotionGateHistoryCardComponent {
     }
   }
 
+  /**
+   * Rows written before the serialiser emitted enum NAMES carry the ordinal ("1") instead, so both
+   * spellings are accepted. Dropping the numeric form would silently mislabel every historical row
+   * as a diagnostic when it was in fact the gated figure.
+   */
   methodLabel(method: string): string {
-    return method === 'BacktestReplay'
-      ? 'per-trade · gated'
-      : method === 'MlRetrainPerFold'
-        ? 'per-sample · diagnostic'
-        : method;
+    const m = String(method);
+    if (m === 'BacktestReplay' || m === '1') return 'per-trade · gated';
+    if (m === 'MlRetrainPerFold' || m === '2') return 'per-sample · diagnostic';
+    return m;
+  }
+
+  /** True for the distribution the gate actually thresholds. Tolerates the legacy ordinal. */
+  isGatedMethod(method: string): boolean {
+    const m = String(method);
+    return m === 'BacktestReplay' || m === '1';
   }
 
   negativeCount(c: CpcvDistributionDto): number {
