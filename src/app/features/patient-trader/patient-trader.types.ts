@@ -40,8 +40,33 @@ export interface PatientTraderConfig {
   minConfidence: number;
 
   dailySpendCapUsd: number;
+  /** The most one market may spend in a day. 0 restores the shared pot. */
+  perMarketDailySpendCapUsd: number;
   memoryEnabled: boolean;
   maxNotesInPrompt: number;
+
+  /** Spreads of round-trip cost charged before a payoff is judged. 2 = in and out. */
+  spreadCostMultiple: number;
+  /** Bars of history the target-reach and stop-noise checks are measured over. */
+  evidenceLookbackBars: number;
+  reachPercentile: number;
+  noisePercentile: number;
+  /** How far beyond measured noise the stop must sit. */
+  stopNoiseMultiple: number;
+  /** Require the stop to sit beyond a real swing rather than float in mid-range. */
+  requireStopStructure: boolean;
+  /** Stand down entirely while the fleet kill switch is thrown. */
+  respectKillSwitch: boolean;
+  /** Armed plans allowed to share a currency leg in the same direction. 0 disables. */
+  maxCorrelatedPlans: number;
+
+  /** Extra reward:risk a plan must clear to call itself High conviction. */
+  highConvictionRewardRiskBonus: number;
+  /** Confidence floor for a High conviction claim. */
+  highConvictionMinConfidence: number;
+
+  /** View prompt arm: 'a' (control), 'b' (argue the other side first), or 'split'. */
+  promptVariant: string;
 }
 
 /**
@@ -65,8 +90,20 @@ export const DEFAULT_PATIENT_TRADER_CONFIG: PatientTraderConfig = {
   maxTargetAtrMultiple: 12.0,
   minConfidence: 0.55,
   dailySpendCapUsd: 5.0,
+  perMarketDailySpendCapUsd: 1.5,
   memoryEnabled: true,
   maxNotesInPrompt: 6,
+  spreadCostMultiple: 2.0,
+  evidenceLookbackBars: 1500,
+  reachPercentile: 0.9,
+  noisePercentile: 0.7,
+  stopNoiseMultiple: 1.0,
+  requireStopStructure: true,
+  respectKillSwitch: true,
+  maxCorrelatedPlans: 2,
+  highConvictionRewardRiskBonus: 0.5,
+  highConvictionMinConfidence: 0.7,
+  promptVariant: 'a',
 };
 
 /** One market's current standing view. */
@@ -119,6 +156,14 @@ export interface PatientTraderPlan {
   createdAtUtc: string;
   /** True when this plan's stop sat within a whisker of the survivability floor. */
   nearFloor: boolean;
+  /** 'Standard' or 'High' — how strongly the agent backed this one. */
+  conviction: string;
+  /** The way the agent said this plan would most likely die, written before it was armed. */
+  preMortem: string | null;
+  /** What the agent said would kill the idea before entry. */
+  invalidationNote: string | null;
+  /** The price at which the plan is abandoned before entry, if one was armed. */
+  invalidationPrice: number | null;
 }
 
 /** Resolved outcome of a plan, from the position-free forward walk. */

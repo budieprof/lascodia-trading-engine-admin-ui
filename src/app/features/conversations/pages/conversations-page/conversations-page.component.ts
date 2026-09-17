@@ -679,6 +679,10 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
         background: rgba(202, 138, 4, 0.15);
         color: #ca8a04;
       }
+      .conv-kind[data-kind='Patient'] {
+        background: rgba(6, 148, 162, 0.15);
+        color: #0694a2;
+      }
       .conv-match {
         display: inline-block;
         margin: 2px 0 3px;
@@ -940,6 +944,7 @@ export class ConversationsPageComponent {
     { value: 'Engineer', label: 'Engineer' },
     { value: 'Wire', label: 'Wire' },
     { value: 'Assistant', label: 'Assistant' },
+    { value: 'Patient', label: 'Patient' },
   ];
 
   protected readonly selectedId = signal<number | null>(null);
@@ -1068,6 +1073,8 @@ export class ConversationsPageComponent {
         return 'Signal guard';
       case 'Macro':
         return 'Macro brief';
+      case 'Patient':
+        return 'Patient Trader';
       default:
         return 'Untitled';
     }

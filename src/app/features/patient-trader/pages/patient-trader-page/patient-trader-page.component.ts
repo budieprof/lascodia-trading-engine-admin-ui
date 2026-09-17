@@ -288,6 +288,91 @@ import {
                     name="minConf"
                   />
                 </div>
+                <div class="field">
+                  <label for="pt-noise">Stop beyond noise (×)</label>
+                  <input
+                    id="pt-noise"
+                    type="number"
+                    step="0.1"
+                    [(ngModel)]="d.stopNoiseMultiple"
+                    name="noise"
+                  />
+                  <p class="muted small">1.0 = just outside what this market routinely does.</p>
+                </div>
+                <div class="field">
+                  <label for="pt-spread">Spread cost (×)</label>
+                  <input
+                    id="pt-spread"
+                    type="number"
+                    step="0.5"
+                    [(ngModel)]="d.spreadCostMultiple"
+                    name="spread"
+                  />
+                  <p class="muted small">Charged before the payoff is judged. 2 = in and out.</p>
+                </div>
+                <div class="field">
+                  <label for="pt-lookback">Evidence lookback (bars)</label>
+                  <input
+                    id="pt-lookback"
+                    type="number"
+                    step="100"
+                    [(ngModel)]="d.evidenceLookbackBars"
+                    name="lookback"
+                  />
+                  <p class="muted small">Long on purpose — a short window caps reach.</p>
+                </div>
+                <div class="field">
+                  <label for="pt-corr">Max correlated plans</label>
+                  <input
+                    id="pt-corr"
+                    type="number"
+                    [(ngModel)]="d.maxCorrelatedPlans"
+                    name="corr"
+                  />
+                  <p class="muted small">One dollar bet placed three times is still one bet.</p>
+                </div>
+              </div>
+
+              <div class="field check">
+                <label>
+                  <input type="checkbox" [(ngModel)]="d.requireStopStructure" name="structure" />
+                  <span>Stop must sit beyond a real swing, not float in mid-range</span>
+                </label>
+              </div>
+              <div class="field check">
+                <label>
+                  <input type="checkbox" [(ngModel)]="d.respectKillSwitch" name="kill" />
+                  <span>Stand down entirely while the fleet kill switch is thrown</span>
+                </label>
+              </div>
+
+              <p class="sub-label">Conviction</p>
+              <div class="row-2">
+                <div class="field">
+                  <label for="pt-hcrr">High conviction extra R:R</label>
+                  <input
+                    id="pt-hcrr"
+                    type="number"
+                    step="0.1"
+                    [(ngModel)]="d.highConvictionRewardRiskBonus"
+                    name="hcrr"
+                  />
+                  <p class="muted small">
+                    A tier that costs nothing to claim ends up on every plan.
+                  </p>
+                </div>
+                <div class="field">
+                  <label for="pt-hcconf">High conviction min confidence</label>
+                  <input
+                    id="pt-hcconf"
+                    type="number"
+                    step="0.05"
+                    min="0"
+                    max="1"
+                    [(ngModel)]="d.highConvictionMinConfidence"
+                    name="hcconf"
+                  />
+                </div>
               </div>
 
               <p class="sub-label">Cadence and limits</p>
@@ -344,6 +429,19 @@ import {
                     name="sc"
                   />
                 </div>
+                <div class="field">
+                  <label for="pt-pmsc">Per-market cap (USD)</label>
+                  <input
+                    id="pt-pmsc"
+                    type="number"
+                    step="0.5"
+                    [(ngModel)]="d.perMarketDailySpendCapUsd"
+                    name="pmsc"
+                  />
+                  <p class="muted small">
+                    Stops the earliest catalyst eating the day. 0 = shared pot.
+                  </p>
+                </div>
               </div>
 
               <p class="sub-label">Memory</p>
@@ -356,6 +454,19 @@ import {
               <div class="field">
                 <label for="pt-notes">Lessons in prompt</label>
                 <input id="pt-notes" type="number" [(ngModel)]="d.maxNotesInPrompt" name="notes" />
+              </div>
+
+              <p class="sub-label">Prompt experiment</p>
+              <div class="field">
+                <label for="pt-variant">View prompt</label>
+                <select id="pt-variant" [(ngModel)]="d.promptVariant" name="variant">
+                  <option value="a">a — control</option>
+                  <option value="b">b — argue the other side first</option>
+                  <option value="split">split — run both and compare</option>
+                </select>
+                <p class="muted small">
+                  The arm is recorded on every view, so accuracy can be split by it.
+                </p>
               </div>
 
               <div class="field">
@@ -468,6 +579,13 @@ import {
                                 >floor</span
                               >
                             }
+                            @if (p.conviction === 'High') {
+                              <span
+                                class="conviction-tag"
+                                title="Backed above the ordinary bar — tracked separately"
+                                >high</span
+                              >
+                            }
                           </td>
                           <td class="num">
                             {{ p.rewardRisk ? (p.rewardRisk | number: '1.2-2') : '—' }}
@@ -480,6 +598,19 @@ import {
                               <span class="muted">{{ p.rejectionReason }}</span>
                             } @else {
                               {{ p.thesis }}
+                            }
+                            @if (p.preMortem) {
+                              <span class="premortem muted" title="Named before the plan was armed">
+                                How it dies: {{ p.preMortem }}
+                              </span>
+                            }
+                            @if (p.invalidationPrice) {
+                              <span
+                                class="premortem muted"
+                                title="Abandoned before entry if price reaches this"
+                              >
+                                Abandon at {{ p.invalidationPrice }}
+                              </span>
                             }
                             @if (outcomeOf(p); as o) {
                               <span class="outcome muted">
@@ -876,6 +1007,26 @@ import {
         color: #b45309;
         font-size: 10px;
         font-weight: var(--font-semibold);
+      }
+      .conviction-tag {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 1px 6px;
+        border-radius: var(--radius-full);
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        color: var(--accent);
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      /* Its own line: the pre-mortem is a sentence, not a badge, and inlining it
+         beside the thesis made both unreadable. */
+      .premortem {
+        display: block;
+        margin-top: 3px;
+        font-size: 11px;
+        font-style: italic;
       }
       .reason {
         max-width: 42ch;
