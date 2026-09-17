@@ -2,10 +2,12 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { PatientTraderService } from '@core/services/patient-trader.service';
+import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 import {
   DEFAULT_PATIENT_TRADER_CONFIG,
   PatientTraderConfig,
+  PatientTraderMarket,
   PatientTraderMode,
   PatientTraderPlan,
   parseOutcome,
@@ -277,32 +279,66 @@ import {
           </p>
 
           <h3>Markets</h3>
-          <div class="markets">
-            @for (m of d.markets; track $index) {
-              <div class="market">
-                <input
-                  type="text"
-                  [(ngModel)]="m.symbol"
-                  [name]="'sym' + $index"
-                  placeholder="EURUSD"
-                  class="sym-input"
-                />
-                <select [(ngModel)]="m.timeframe" [name]="'tf' + $index">
-                  @for (tf of timeframes; track tf) {
-                    <option [value]="tf">{{ tf }}</option>
-                  }
-                </select>
-                <label class="check">
-                  <input type="checkbox" [(ngModel)]="m.enabled" [name]="'en' + $index" />
-                  <span>on</span>
-                </label>
-                <button type="button" class="link danger" (click)="removeMarket($index)">
-                  remove
-                </button>
-              </div>
-            }
-            <button type="button" class="link" (click)="addMarket()">+ add market</button>
+          <p class="muted small">
+            Picked from the active currency-pair catalogue, so a market the engine does not know
+            cannot be followed by a typo. Each one carries its own timeframe — the agent frames its
+            view and its levels on that chart.
+          </p>
+
+          <div class="tf-default">
+            <label>
+              <span>Timeframe for newly added markets</span>
+              <select [(ngModel)]="newMarketTimeframe" name="newTf">
+                @for (tf of timeframes; track tf) {
+                  <option [value]="tf">{{ tf }}</option>
+                }
+              </select>
+            </label>
           </div>
+
+          @if (pairsLoading()) {
+            <p class="empty">Loading the currency-pair catalogue…</p>
+          } @else if (availableSymbols().length === 0) {
+            <p class="empty">
+              No active currency pairs found. Add one under Currency Pairs before configuring this
+              module.
+            </p>
+          } @else {
+            <div class="pair-grid">
+              @for (sym of availableSymbols(); track sym) {
+                <label class="pair" [class.selected]="isFollowed(sym)">
+                  <input
+                    type="checkbox"
+                    [checked]="isFollowed(sym)"
+                    (change)="toggleMarket(sym)"
+                    [name]="'pair-' + sym"
+                  />
+                  <span class="pair-sym">{{ sym }}</span>
+                  @if (marketFor(sym); as m) {
+                    <select
+                      class="pair-tf"
+                      [ngModel]="m.timeframe"
+                      (ngModelChange)="setTimeframe(sym, $event)"
+                      [name]="'tf-' + sym"
+                      (click)="$event.preventDefault()"
+                    >
+                      @for (tf of timeframes; track tf) {
+                        <option [value]="tf">{{ tf }}</option>
+                      }
+                    </select>
+                  }
+                </label>
+              }
+            </div>
+
+            @if (followedCount() > 0) {
+              <p class="muted small followed-note">
+                Following <b>{{ followedCount() }}</b> market{{ followedCount() === 1 ? '' : 's' }}.
+                Start with two or three — the cost and the quality of the writing both tell you
+                quickly whether it scales.
+              </p>
+            }
+          }
 
           <h3>Plan standards</h3>
           <p class="muted small">
@@ -717,20 +753,39 @@ import {
       input[type='checkbox'] {
         width: auto;
       }
-      .markets {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-        align-items: flex-start;
+      .tf-default {
+        margin-bottom: var(--space-3);
       }
-      .market {
-        display: flex;
+      .pair-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
         gap: var(--space-2);
+      }
+      .pair {
+        display: flex;
+        flex-direction: row;
         align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm, 4px);
+        cursor: pointer;
       }
-      .sym-input {
-        width: 10ch;
-        text-transform: uppercase;
+      .pair.selected {
+        border-color: var(--accent-fg, #0e6e73);
+        background: var(--surface-2);
+      }
+      .pair-sym {
+        font-weight: var(--font-medium);
+        font-variant-numeric: tabular-nums;
+      }
+      .pair-tf {
+        margin-left: auto;
+        padding: 0 var(--space-1);
+        font-size: 0.7rem;
+      }
+      .followed-note {
+        margin-top: var(--space-2);
       }
       .link {
         background: none;
@@ -777,7 +832,42 @@ import {
 export class PatientTraderPageComponent {
   private readonly svc = inject(PatientTraderService);
 
+  private readonly currencyPairs = inject(CurrencyPairsService);
+
   readonly timeframes = ['M15', 'H1', 'H4', 'D1'];
+
+  /** Timeframe applied when a market is newly ticked; per-market after that. */
+  newMarketTimeframe = 'H1';
+
+  readonly availableSymbols = signal<string[]>([]);
+  readonly pairsLoading = signal(true);
+
+  constructor() {
+    this.loadCurrencyPairs();
+  }
+
+  /**
+   * Active symbols from the currency-pair catalogue.
+   *
+   * The catalogue is the authority on what the engine can actually trade, so following a market is
+   * a selection rather than a typed string — a mistyped symbol would otherwise be configured
+   * happily and then silently resolve no readings for ever.
+   */
+  private loadCurrencyPairs(): void {
+    this.pairsLoading.set(true);
+    this.currencyPairs.list({ currentPage: 1, itemCountPerPage: 500, filter: null }).subscribe({
+      next: (res) => {
+        const symbols = (res?.data?.data ?? [])
+          .filter((p) => p.isActive && p.symbol)
+          .map((p) => p.symbol!.toUpperCase())
+          .filter((s, i, arr) => arr.indexOf(s) === i)
+          .sort();
+        this.availableSymbols.set(symbols);
+        this.pairsLoading.set(false);
+      },
+      error: () => this.pairsLoading.set(false),
+    });
+  }
 
   readonly parseScenarios = parseScenarios;
 
@@ -810,19 +900,38 @@ export class PatientTraderPageComponent {
   readonly saveMessage = signal<string | null>(null);
   reason = '';
 
-  addMarket(): void {
+  /** True when this symbol is in the followed set. */
+  isFollowed(symbol: string): boolean {
+    return this.draft()?.markets.some((m) => m.symbol === symbol) ?? false;
+  }
+
+  marketFor(symbol: string): PatientTraderMarket | undefined {
+    return this.draft()?.markets.find((m) => m.symbol === symbol);
+  }
+
+  followedCount(): number {
+    return this.draft()?.markets.length ?? 0;
+  }
+
+  /** Adds or removes a market. Ticking it also enables it — following a market you left off would
+   * be a confusing half-state on a page where the checkbox IS the decision. */
+  toggleMarket(symbol: string): void {
     const current = this.draft();
     if (!current) return;
     const next = structuredClone(current);
-    next.markets = [...next.markets, { symbol: '', timeframe: 'H1', enabled: true }];
+
+    next.markets = next.markets.some((m) => m.symbol === symbol)
+      ? next.markets.filter((m) => m.symbol !== symbol)
+      : [...next.markets, { symbol, timeframe: this.newMarketTimeframe, enabled: true }];
+
     this.localDraft.set(next);
   }
 
-  removeMarket(index: number): void {
+  setTimeframe(symbol: string, timeframe: string): void {
     const current = this.draft();
     if (!current) return;
     const next = structuredClone(current);
-    next.markets = next.markets.filter((_, i) => i !== index);
+    next.markets = next.markets.map((m) => (m.symbol === symbol ? { ...m, timeframe } : m));
     this.localDraft.set(next);
   }
 
