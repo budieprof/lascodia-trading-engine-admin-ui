@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  signal,
+} from '@angular/core';
 import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { PatientTraderService } from '@core/services/patient-trader.service';
@@ -924,13 +931,27 @@ export class PatientTraderPageComponent {
 
   readonly parseScenarios = parseScenarios;
 
+  /**
+   * The board is push-driven. The interval is a long fallback that only heals a missed push or a
+   * reconnect gap — an interval short enough to feel live is also short enough to repaint the
+   * page under an operator mid-edit, which is what polling did here before.
+   */
   private readonly boardResource = createPolledResource(() => this.svc.getBoard(50), {
-    intervalMs: 60_000,
+    intervalMs: 600_000,
+    refreshOn: ['patientTraderChanged'],
   });
   readonly board = this.boardResource.value;
 
+  /**
+   * Configuration never refetches on its own.
+   *
+   * It is operator-owned: nothing in the engine changes it, so a background refetch can only ever
+   * arrive while somebody is typing into the form it would replace. Fetched once, and refreshed
+   * explicitly after a save so the persisted state — including anything governance queued or
+   * refused — is what ends up on screen.
+   */
   private readonly configResource = createPolledResource(() => this.svc.getConfig(), {
-    intervalMs: 300_000,
+    intervalMs: 0,
   });
   readonly config = this.configResource.value;
 
@@ -945,8 +966,21 @@ export class PatientTraderPageComponent {
   readonly draft = computed<PatientTraderConfig | null>(() => {
     const local = this.localDraft();
     if (local) return local;
+
+    // Seeded from the first load and then owned outright. Returning a fresh clone of config()
+    // each time looks equivalent, but the form binds straight into the returned object — so any
+    // re-emit of config() would hand back a new clone and silently discard whatever had been
+    // typed into the old one.
     const loaded = this.config();
     return loaded ? structuredClone(loaded) : null;
+  });
+
+  /** Adopts the first loaded config as the editable copy, once. */
+  private readonly seedDraft = effect(() => {
+    const loaded = this.config();
+    if (loaded && this.localDraft() === null) {
+      this.localDraft.set(structuredClone(loaded));
+    }
   });
 
   readonly saving = signal(false);

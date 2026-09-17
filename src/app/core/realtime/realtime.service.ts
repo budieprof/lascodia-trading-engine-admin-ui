@@ -47,6 +47,7 @@ export const REALTIME_EVENTS = [
   'governanceDwellAlarm',
   'reflectionEntryResolved',
   'spotSweepProgress',
+  'patientTraderChanged',
   // ── Position lifecycle (PRD-V2 FR-5.8) ──
   // Pushed directly by the 5 position-management command handlers
   // (Open / Close / ReceivePositionDelta / ReceivePositionSnapshot /
