@@ -177,7 +177,7 @@ import {
             tell a genuinely patient agent from a broken one that never finds anything.
           </p>
           @if (b.plans.length === 0) {
-            <p class="empty">Nothing written yet.</p>
+            <p class="empty spaced">Nothing written yet.</p>
           } @else {
             <div class="table-wrap">
               <table>
@@ -561,6 +561,10 @@ import {
         margin: 0;
         max-width: 78ch;
       }
+      /* Separated from the explanatory copy above, which it otherwise reads as a line of. */
+      .empty.spaced {
+        margin-top: var(--space-3);
+      }
 
       .views {
         display: grid;
@@ -755,6 +759,19 @@ import {
       }
       .tf-default {
         margin-bottom: var(--space-3);
+      }
+      /* A flex-column label stretches its control to the container width, which turned a
+         four-option dropdown into a full-page-width bar. Controls size to their content
+         unless a grid cell is giving them a track. */
+      .tf-default label,
+      .row label {
+        max-width: 24rem;
+      }
+      .row label.check {
+        max-width: none;
+      }
+      .tf-default select {
+        max-width: 9rem;
       }
       .pair-grid {
         display: grid;
