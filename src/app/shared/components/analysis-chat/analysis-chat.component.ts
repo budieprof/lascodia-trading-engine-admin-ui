@@ -135,6 +135,15 @@ interface ParsedChatRec {
  * lands. Reused by the trading-chart analysis dialog and the per-tile
  * spot-analysis modal — anywhere a `MarketAnalysisResultDto` is on screen.
  */
+/**
+ * Most recent turns a thread will load.
+ *
+ * A spot-analysis chat is one analysis and a few questions, so this never bites there. The
+ * Patient Trader's per-market journal never ends — roughly two thousand turns a year for a single
+ * market — and loading all of it would stall the panel on open.
+ */
+const MAX_THREAD_TURNS = 300;
+
 @Component({
   selector: 'app-analysis-chat',
   standalone: true,
@@ -1672,7 +1681,7 @@ export class AnalysisChatComponent {
   /** Refetch the thread WITHOUT the clear-and-spinner of loadThread, so a live
    *  update swaps the list in place rather than blanking the log. */
   private refreshThreadSilently(id: number): void {
-    this.marketData.getAnalysisFollowUps(id).subscribe({
+    this.marketData.getAnalysisFollowUps(id, undefined, MAX_THREAD_TURNS).subscribe({
       next: (res) => {
         if (this.llmInvocationId() !== id) return;
         if (res?.status && res.data) {
@@ -1700,7 +1709,7 @@ export class AnalysisChatComponent {
     if (!llmInvocationId) return;
 
     this.loading.set(true);
-    this.marketData.getAnalysisFollowUps(llmInvocationId).subscribe({
+    this.marketData.getAnalysisFollowUps(llmInvocationId, undefined, MAX_THREAD_TURNS).subscribe({
       next: (res) => {
         this.loading.set(false);
         // Guard against a stale response landing after the anchor changed.
@@ -1772,7 +1781,7 @@ export class AnalysisChatComponent {
         if (res?.status && res.data) {
           // Reload the whole thread so any tool turns and a pending action
           // proposal appear — the ask endpoint returns only the final turn.
-          this.marketData.getAnalysisFollowUps(id).subscribe({
+          this.marketData.getAnalysisFollowUps(id, undefined, MAX_THREAD_TURNS).subscribe({
             next: (t) => {
               this.sending.set(false);
               if (this.llmInvocationId() !== id) return;

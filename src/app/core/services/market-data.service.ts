@@ -240,8 +240,17 @@ export class MarketDataService {
   getAnalysisFollowUps(
     llmInvocationId: number,
     opts?: ApiCallOptions,
+    /**
+     * Most recent turns only. Omit for the whole thread.
+     *
+     * The Patient Trader's per-market journal never ends — roughly two thousand turns a year for
+     * one market — so a thread is no longer guaranteed to be a handful of turns the way a spot
+     * analysis chat is.
+     */
+    latest?: number,
   ): Observable<ResponseData<SpotAnalysisFollowUpTurnDto[]>> {
-    return this.api.get(`/market-data/analyze/${llmInvocationId}/follow-up`, opts);
+    const q = latest && latest > 0 ? `?latest=${latest}` : '';
+    return this.api.get(`/market-data/analyze/${llmInvocationId}/follow-up${q}`, opts);
   }
 
   /**
