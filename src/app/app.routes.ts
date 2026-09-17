@@ -151,6 +151,14 @@ export const routes: Routes = [
           import('@features/spot-sweep/spot-sweep.routes').then((m) => m.SPOT_SWEEP_ROUTES),
       },
       {
+        path: 'patient-trader',
+        data: { breadcrumb: 'Patient Trader' },
+        loadChildren: () =>
+          import('@features/patient-trader/patient-trader.routes').then(
+            (m) => m.PATIENT_TRADER_ROUTES,
+          ),
+      },
+      {
         path: 'news-intel',
         data: { breadcrumb: 'News Intelligence' },
         loadChildren: () =>

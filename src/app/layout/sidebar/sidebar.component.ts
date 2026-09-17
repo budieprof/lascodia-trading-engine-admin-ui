@@ -493,6 +493,7 @@ export class SidebarComponent {
         { label: 'Change Scorecard', route: '/algo-engineer/scorecard', icon: '🧮' },
         { label: 'Spot Analysis', route: '/spot-analysis', icon: '📊' },
         { label: 'Spot Sweep', route: '/spot-sweep', icon: '🛰' },
+        { label: 'Patient Trader', route: '/patient-trader', icon: '🎯' },
         { label: 'News Intel', route: '/news-intel', icon: '📰', policy: 'Operator' },
         { label: 'Viability Gates', route: '/viability-gates', icon: '🛡', policy: 'Operator' },
         { label: 'Analyser Comparison', route: '/analyser-comparison', icon: '🆚' },
