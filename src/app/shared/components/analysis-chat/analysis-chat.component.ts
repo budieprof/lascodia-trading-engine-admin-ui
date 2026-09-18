@@ -93,12 +93,25 @@ function describeModelOriginal(
 }
 
 /** A chat-generated recommendation parsed from a "recommend" tool turn. */
+/**
+ * A rec that can actually be filed: it has a direction and an entry.
+ *
+ * A "Hold" card renders — that is the whole point, it shows the market an agent passed on — but
+ * it has no trade in it. Narrowing here rather than widening the editor's seed keeps the editor
+ * unable to file a direction that was never proposed.
+ */
+type DirectionalChatRec = ParsedChatRec & { action: 'Buy' | 'Sell'; entryPrice: number };
+
 interface ParsedChatRec {
   symbol: string;
   timeframe: string;
   asOfUtc: string;
-  action: 'Buy' | 'Sell';
-  entryPrice: number;
+  action: 'Buy' | 'Sell' | 'Hold';
+  /**
+   * Null on a "Hold" card, which is an agent showing the market it looked at and passed on.
+   * There are no levels to draw — the value is the chart and the reason, not a trade.
+   */
+  entryPrice: number | null;
   /* Nullable: the engine allows a filed rec to carry no target (Tier-2 can
      supply one), and a card must still render the trade that exists. */
   stopLoss: number | null;
@@ -395,20 +408,31 @@ const MAX_THREAD_TURNS = 300;
                           class="rec-badge"
                           [class.buy]="rec.action === 'Buy'"
                           [class.sell]="rec.action === 'Sell'"
-                          >📌 {{ rec.action }} {{ rec.symbol }} · {{ rec.timeframe }}</span
+                          [class.hold]="rec.action === 'Hold'"
                         >
-                        <span class="rec-conf"
-                          >conf {{ rec.confidencePct === null ? '—' : rec.confidencePct + '%' }}
-                          @if (rec.riskRewardRatio !== null) {
-                            · R:R {{ rec.riskRewardRatio }}
+                          @if (rec.action === 'Hold') {
+                            ⏸ Stood aside · {{ rec.symbol }} · {{ rec.timeframe }}
+                          } @else {
+                            📌 {{ rec.action }} {{ rec.symbol }} · {{ rec.timeframe }}
                           }
                         </span>
+                        @if (rec.action !== 'Hold') {
+                          <span class="rec-conf"
+                            >conf {{ rec.confidencePct === null ? '—' : rec.confidencePct + '%' }}
+                            @if (rec.riskRewardRatio !== null) {
+                              · R:R {{ rec.riskRewardRatio }}
+                            }
+                          </span>
+                        }
                       </div>
-                      <div class="rec-levels">
-                        <span class="lvl entry">Entry {{ rec.entryPrice }}</span>
-                        <span class="lvl sl">SL {{ rec.stopLoss ?? '—' }}</span>
-                        <span class="lvl tp">TP {{ rec.takeProfit ?? '—' }}</span>
-                      </div>
+                      <!-- A stand-aside has no levels; the chart and the reason are the content. -->
+                      @if (rec.entryPrice !== null) {
+                        <div class="rec-levels">
+                          <span class="lvl entry">Entry {{ rec.entryPrice }}</span>
+                          <span class="lvl sl">SL {{ rec.stopLoss ?? '—' }}</span>
+                          <span class="lvl tp">TP {{ rec.takeProfit ?? '—' }}</span>
+                        </div>
+                      }
                       <app-spot-rec-chart
                         [symbol]="rec.symbol"
                         [timeframe]="rec.timeframe"
@@ -439,9 +463,9 @@ const MAX_THREAD_TURNS = 300;
                         @if (rec.statusNote) {
                           <div class="rec-status">{{ rec.statusNote }}</div>
                         }
-                      } @else if (editingId() === m.id) {
+                      } @else if (editingId() === m.id && asDirectional(rec); as drec) {
                         <app-rec-file-editor
-                          [seed]="recSeed(rec)"
+                          [seed]="recSeed(drec)"
                           [busy]="filingId() === m.id"
                           [error]="fileError()"
                           (filed)="fileSignal(m, $event)"
@@ -1230,6 +1254,10 @@ const MAX_THREAD_TURNS = 300;
       }
       /* A read-only proposal's standing — an agent that files for itself, or a plan its own
          checker refused. Deliberately quieter than .rec-filed: it is a state, not an outcome. */
+      .rec-badge.hold {
+        background: color-mix(in srgb, var(--text-secondary, #64748b) 16%, transparent);
+        color: var(--text-secondary, #64748b);
+      }
       .rec-status {
         margin-top: 8px;
         padding: 5px 9px;
@@ -1954,17 +1982,23 @@ export class AnalysisChatComponent {
           riskRewardRatio?: number | null;
         } | null;
       };
-      const action = r.action === 'Buy' || r.action === 'Sell' ? r.action : null;
-      // Entry is the only level a card cannot be drawn without. Requiring SL and
+      const action =
+        r.action === 'Buy' || r.action === 'Sell' || r.action === 'Hold' ? r.action : null;
+      // Entry is the only level a directional card cannot be drawn without. Requiring SL and
       // TP too meant a filed rec whose target the operator cleared fell back to
       // a raw-JSON blob — the card vanished at exactly the moment it mattered.
-      if (action && r.symbol && typeof r.entryPrice === 'number') {
+      //
+      // A Hold has no levels at all and must NOT be held to that: it is the market an agent
+      // looked at and declined, and requiring an entry would drop the card and with it the
+      // chart, which is the only thing a decline has to show.
+      const hasEntry = typeof r.entryPrice === 'number';
+      if (action && r.symbol && (hasEntry || action === 'Hold')) {
         parsed = {
           symbol: r.symbol,
           timeframe: r.timeframe || 'H1',
           asOfUtc: r.asOfUtc || new Date().toISOString(),
           action,
-          entryPrice: r.entryPrice,
+          entryPrice: hasEntry ? (r.entryPrice as number) : null,
           stopLoss: typeof r.stopLoss === 'number' ? r.stopLoss : null,
           takeProfit: typeof r.takeProfit === 'number' ? r.takeProfit : null,
           // `?? 0` printed "conf 0%" for a rec that simply carried no confidence —
@@ -1979,15 +2013,17 @@ export class AnalysisChatComponent {
           operatorModified: r.operatorModified === true,
           operatorNote: r.operatorNote || null,
           modelOriginal: describeModelOriginal(r.modelOriginal),
-          chartRecs: [
-            {
-              label: `${action} ${r.symbol}`,
-              action,
-              entryPrice: r.entryPrice,
-              stopLoss: typeof r.stopLoss === 'number' ? r.stopLoss : null,
-              takeProfit: typeof r.takeProfit === 'number' ? r.takeProfit : null,
-            },
-          ],
+          chartRecs: hasEntry
+            ? [
+                {
+                  label: `${action} ${r.symbol}`,
+                  action,
+                  entryPrice: r.entryPrice as number,
+                  stopLoss: typeof r.stopLoss === 'number' ? r.stopLoss : null,
+                  takeProfit: typeof r.takeProfit === 'number' ? r.takeProfit : null,
+                },
+              ]
+            : [],
         };
       }
     } catch {
@@ -1998,7 +2034,12 @@ export class AnalysisChatComponent {
   }
 
   /** Seed the inline editor from a parsed rec. */
-  protected recSeed(rec: ParsedChatRec): RecFileSeed {
+  /** The rec as a filable one, or null when it is a stand-aside with nothing to file. */
+  protected asDirectional(rec: ParsedChatRec): DirectionalChatRec | null {
+    return rec.action !== 'Hold' && rec.entryPrice !== null ? (rec as DirectionalChatRec) : null;
+  }
+
+  protected recSeed(rec: DirectionalChatRec): RecFileSeed {
     return {
       symbol: rec.symbol,
       action: rec.action,
