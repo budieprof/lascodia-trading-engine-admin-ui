@@ -119,6 +119,14 @@ export interface PatientTraderView {
   scenariosJson: string | null;
   whatWouldChangeMyMind: string | null;
   llmInvocationId: number | null;
+  /**
+   * The market's standing journal conversation.
+   *
+   * Not the same as `llmInvocationId`: that is the individual billed call, which is the billing
+   * record and is no longer browsable on /conversations. This is the thread the reasoning lives
+   * in, with a follow-up box under it.
+   */
+  journalLlmInvocationId: number | null;
   createdAtUtc: string;
   ageMinutes: number;
 }
@@ -156,6 +164,8 @@ export interface PatientTraderPlan {
   createdAtUtc: string;
   /** True when this plan's stop sat within a whisker of the survivability floor. */
   nearFloor: boolean;
+  /** The market's standing journal conversation — see the view type for why this is not llmInvocationId. */
+  journalLlmInvocationId: number | null;
   /** 'Standard' or 'High' — how strongly the agent backed this one. */
   conviction: string;
   /** The way the agent said this plan would most likely die, written before it was armed. */

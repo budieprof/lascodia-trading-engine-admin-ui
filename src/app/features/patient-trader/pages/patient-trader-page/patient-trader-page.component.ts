@@ -7,6 +7,7 @@ import {
   signal,
 } from '@angular/core';
 import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { PatientTraderService } from '@core/services/patient-trader.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
@@ -41,7 +42,7 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
 @Component({
   selector: 'app-patient-trader-page',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, PercentPipe, FormsModule],
+  imports: [DatePipe, DecimalPipe, PercentPipe, FormsModule, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -545,6 +546,24 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
                         </span>
                         <span class="spacer"></span>
                         <span class="muted small">{{ v.ageMinutes | number: '1.0-0' }}m ago</span>
+                        @if (v.journalLlmInvocationId; as jid) {
+                          <!-- Stops the click bubbling to the header's expand toggle. -->
+                          <a
+                            class="thread-link"
+                            [routerLink]="['/conversations']"
+                            [queryParams]="{ conversation: jid }"
+                            (click)="$event.stopPropagation()"
+                            [title]="
+                              'Open the ' +
+                              v.symbol +
+                              ' ' +
+                              v.timeframe +
+                              ' journal — every view and plan in order, with a follow-up box'
+                            "
+                            aria-label="Open this market's journal"
+                            >💬</a
+                          >
+                        }
                         <span class="chev">{{ isViewOpen(v.id) ? '▴' : '▾' }}</span>
                       </header>
 
@@ -609,6 +628,20 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
                               <span class="dir" [class.buy]="p.direction === 'Buy'">{{
                                 p.direction
                               }}</span>
+                            }
+                            @if (p.journalLlmInvocationId; as jid) {
+                              <a
+                                class="thread-link"
+                                [routerLink]="['/conversations']"
+                                [queryParams]="{ conversation: jid }"
+                                [title]="
+                                  'Open the ' +
+                                  p.symbol +
+                                  ' journal — this plan in context, with a follow-up box'
+                                "
+                                aria-label="Open this market's journal"
+                                >💬</a
+                              >
                             }
                           </td>
                           <td>
@@ -1042,6 +1075,22 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
       .view.open {
         background: var(--bg-secondary);
       }
+      /* Quiet, but findable. One sits on every row, so it must not compete with the lean pills
+         that carry the information — but at 0.45 it was missed entirely by someone actively
+         looking for it, which is the wrong end of that trade-off. */
+      .thread-link {
+        margin-left: 6px;
+        font-size: 13px;
+        line-height: 1;
+        opacity: 0.75;
+        text-decoration: none;
+        transition: opacity 0.12s ease;
+      }
+      .thread-link:hover,
+      .thread-link:focus-visible {
+        opacity: 1;
+      }
+
       .chev {
         color: var(--text-secondary);
         font-size: 11px;
