@@ -65,6 +65,13 @@ import {
   type RecFileOverrides,
   type RecFileSeed,
 } from '@shared/components/rec-file-editor/rec-file-editor.component';
+import { AnalysisVisualComponent } from '@shared/components/analysis-visual/analysis-visual.component';
+import { parseVisualSpec, type VisualSpec } from '@shared/components/analysis-visual/visual-spec';
+import { AnnotatedPriceChartComponent } from '@shared/components/annotated-price-chart/annotated-price-chart.component';
+import {
+  parsePriceChartSpec,
+  type PriceChartSpec,
+} from '@shared/components/annotated-price-chart/price-annotations';
 
 /** Day-boundary rule for the thread's date dividers — lives with the grouping that applies it. */
 export { startsNewLocalDay } from '@shared/components/engineer-chat/engineer-turns';
@@ -176,6 +183,8 @@ const MAX_THREAD_TURNS = 300;
     MarkdownPipe,
     SpotRecChartComponent,
     RecFileEditorComponent,
+    AnalysisVisualComponent,
+    AnnotatedPriceChartComponent,
     MarkdownCopyDirective,
     DatePipe,
     EngineerRunBarComponent,
@@ -485,6 +494,30 @@ const MAX_THREAD_TURNS = 300;
                         </div>
                       }
                     </div>
+                    <time
+                      class="msg-time"
+                      [attr.datetime]="m.createdAtUtc"
+                      [title]="m.createdAtUtc | date: 'full'"
+                      >{{ m.createdAtUtc | date: timeFormat }}</time
+                    >
+                  </div>
+                } @else if (m.toolName === 'chart' && parseChart(m); as viz) {
+                  <!-- The analyst drawing its own argument. Rendered as the turn itself rather
+                       than folded into a tool disclosure: a chart nobody expands is a chart
+                       nobody reads, and the claim it carries belongs in the flow of the
+                       conversation beside the prose that interprets it. -->
+                  <div class="msg">
+                    <app-analysis-visual [spec]="viz" />
+                    <time
+                      class="msg-time"
+                      [attr.datetime]="m.createdAtUtc"
+                      [title]="m.createdAtUtc | date: 'full'"
+                      >{{ m.createdAtUtc | date: timeFormat }}</time
+                    >
+                  </div>
+                } @else if (m.toolName === 'price_chart' && parsePriceChart(m); as pc) {
+                  <div class="msg">
+                    <app-annotated-price-chart [spec]="pc" />
                     <time
                       class="msg-time"
                       [attr.datetime]="m.createdAtUtc"
@@ -1944,6 +1977,41 @@ export class AnalysisChatComponent {
   private failResolve(m: SpotAnalysisFollowUpTurnDto, message: string): void {
     this.resolveError.set({ turnId: m.id, message });
     if (m.toolName !== 'approval') this.error.set(message);
+  }
+
+  /**
+   * Parse a "chart" tool turn into a visual spec, or null so the caller falls back to the generic
+   * tool disclosure — which is the right rendering for a spec this build does not understand
+   * (a chart type added engine-side before the UI ships) as well as for a rejected call, whose
+   * payload is an `error` the reader still wants to see.
+   *
+   * <p>Memoised on turn id + payload for the same reason `parseRec` is: a fresh object on every
+   * change-detection pass is a new `input` to a self-fetching chart, which would re-query its
+   * candle window once per cycle.</p>
+   */
+  protected parseChart(m: SpotAnalysisFollowUpTurnDto): VisualSpec | null {
+    return this.cachedSpec(m, 'chart', parseVisualSpec) as VisualSpec | null;
+  }
+
+  /** Parse a "price_chart" tool turn into its annotation layer. Same fallback and memoisation. */
+  protected parsePriceChart(m: SpotAnalysisFollowUpTurnDto): PriceChartSpec | null {
+    return this.cachedSpec(m, 'price_chart', parsePriceChartSpec) as PriceChartSpec | null;
+  }
+
+  private readonly vizCache = new Map<string, VisualSpec | PriceChartSpec | null>();
+
+  private cachedSpec(
+    m: SpotAnalysisFollowUpTurnDto,
+    toolName: string,
+    parse: (json: string) => VisualSpec | PriceChartSpec | null,
+  ): VisualSpec | PriceChartSpec | null {
+    if (m.toolName !== toolName || !m.toolResultJson) return null;
+    const key = `${m.id}:${m.toolResultJson}`;
+    const cached = this.vizCache.get(key);
+    if (cached !== undefined) return cached;
+    const parsed = parse(m.toolResultJson);
+    this.vizCache.set(key, parsed);
+    return parsed;
   }
 
   /** Parse a "recommend" tool turn's payload into a chart-ready recommendation.
