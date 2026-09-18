@@ -107,6 +107,16 @@ interface ParsedChatRec {
   riskRewardRatio: number | null;
   rationale: string;
   filedSignalId: number | null;
+  /**
+   * Suppresses the "file this signal" action.
+   *
+   * Set by agents that decide for themselves what to file. A hand-file button under a plan the
+   * Patient Trader's checker REFUSED would be an invitation to route around the one gate that
+   * exists to stop an unsurvivable stop reaching the book.
+   */
+  readOnly: boolean;
+  /** Where this proposal stands, for agents that track a plan past the proposal. */
+  statusNote: string | null;
   /** True when the operator edited the proposal before filing it. */
   operatorModified: boolean;
   /** The operator's stated reason for the edit, when they gave one. */
@@ -424,6 +434,10 @@ const MAX_THREAD_TURNS = 300;
                               <span class="rec-note">— {{ rec.operatorNote }}</span>
                             }
                           </div>
+                        }
+                      } @else if (rec.readOnly) {
+                        @if (rec.statusNote) {
+                          <div class="rec-status">{{ rec.statusNote }}</div>
                         }
                       } @else if (editingId() === m.id) {
                         <app-rec-file-editor
@@ -1214,6 +1228,16 @@ const MAX_THREAD_TURNS = 300;
         font-weight: var(--font-medium);
         color: var(--success, #16a34a);
       }
+      /* A read-only proposal's standing — an agent that files for itself, or a plan its own
+         checker refused. Deliberately quieter than .rec-filed: it is a state, not an outcome. */
+      .rec-status {
+        margin-top: 8px;
+        padding: 5px 9px;
+        border-radius: var(--radius-sm, 6px);
+        background: color-mix(in srgb, var(--text-secondary, #64748b) 10%, transparent);
+        color: var(--text-secondary, #64748b);
+        font-size: 12px;
+      }
       .rec-edited {
         font-weight: var(--font-normal, 400);
         color: var(--warning, #b45309);
@@ -1917,6 +1941,8 @@ export class AnalysisChatComponent {
         riskRewardRatio?: number | null;
         rationale?: string;
         filedSignalId?: number | null;
+        readOnly?: boolean;
+        statusNote?: string | null;
         operatorModified?: boolean;
         operatorNote?: string | null;
         modelOriginal?: {
@@ -1948,6 +1974,8 @@ export class AnalysisChatComponent {
           riskRewardRatio: r.riskRewardRatio ?? null,
           rationale: r.rationale || '',
           filedSignalId: r.filedSignalId ?? null,
+          readOnly: r.readOnly === true,
+          statusNote: r.statusNote || null,
           operatorModified: r.operatorModified === true,
           operatorNote: r.operatorNote || null,
           modelOriginal: describeModelOriginal(r.modelOriginal),
