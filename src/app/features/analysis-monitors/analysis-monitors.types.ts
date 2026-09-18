@@ -123,7 +123,13 @@ export interface AnalysisMonitorBoardFilter {
   pageSize?: number;
 }
 
-/** Payload for an in-place monitor edit. Omitted fields are left alone. */
+/**
+ * Payload for an in-place monitor edit. Omitted fields are left alone.
+ *
+ * A body that changes nothing now comes back as a FAILURE rather than a no-op success — the
+ * engine cannot tell "already that value" from "named a field I do not edit", and reporting the
+ * second as success is what let the disarm button below look like it worked for its whole life.
+ */
 export interface UpdateAnalysisMonitorRequest {
   intentText?: string | null;
   trigger?: unknown;
@@ -135,6 +141,14 @@ export interface UpdateAnalysisMonitorRequest {
   maxTriggers?: number | null;
   minEvalIntervalSeconds?: number | null;
   reason?: string | null;
+  /** Move the hard stop to this absolute instant (UTC). Mutually exclusive with expiresInHours. */
+  expiresAtUtc?: string | null;
+  /** Move the hard stop to this many hours FROM NOW — not "add", which is the extend endpoint. */
+  expiresInHours?: number | null;
+  /** Raise or lower the per-monitor dry-run flag on tier-2 actions. */
+  dryRunActions?: boolean | null;
+  /** Revoke tier-2 authorisation, dropping the monitor to notify-only. Disarms only, never grants. */
+  revokeActionAuthorization?: boolean | null;
 }
 
 // ── Authoring: subjects, metrics, actions ───────────────────────────────────

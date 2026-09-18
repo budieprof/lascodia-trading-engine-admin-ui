@@ -1414,11 +1414,19 @@ export class AnalysisMonitorsPageComponent {
    * Drops it to notify-only and re-enables dry-run in one call, rather than only
    * flipping the dry-run flag: leaving the authorisation in place would mean a
    * later edit could put it back into live action without anyone re-approving it.
+   *
+   * This used to send `reason` and nothing else. The engine had no field for either half of
+   * the disarm, discarded the rest of the body in silence, found no changes, and answered
+   * success — so the button reported "Actions disarmed" while the monitor kept every bit of
+   * its authority to open positions. Both fields below are now modelled server-side, and a
+   * body that changes nothing comes back as a failure rather than a reassurance.
    */
   protected disarmActions(monitorId: number): void {
     this.busyId.set(monitorId);
     this.svc
       .update(monitorId, {
+        revokeActionAuthorization: true,
+        dryRunActions: true,
         reason: 'tier-2 actions disarmed from the cockpit',
       })
       .pipe(catchError(() => of(null)))
