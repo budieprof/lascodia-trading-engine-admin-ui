@@ -5,7 +5,6 @@ import {
   computed,
   inject,
   effect,
-  untracked,
   input,
   output,
   viewChild,
@@ -41,6 +40,7 @@ import {
   PositionDto,
 } from '@core/api/api.types';
 import { applyTickToCandles, preserveFormingBar } from '@shared/utils/live-candle';
+import { TIMEFRAME_PILLS, chartAnalysisTarget } from './chart-analysis-link';
 
 /**
  * Every price line (BID, ASK, entry, SL, TP) pins a tag to the right edge
@@ -358,6 +358,22 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
               </button>
             }
           </div>
+          <!--
+            Escape hatch to the full charting workspace, carrying the symbol
+            and timeframe across. This plot is intentionally minimal — it
+            exists to show positions and LLM levels in context — so anything
+            that calls for drawing tools or studies belongs on that page.
+          -->
+          <a
+            class="open-analysis"
+            [routerLink]="chartAnalysisLink()"
+            [queryParams]="chartAnalysisQuery()"
+            title="Open {{
+              selectedSymbol()
+            }} in the full chart-analysis workspace (drawing tools, studies, multi-pane)"
+          >
+            Analyse ↗
+          </a>
         </div>
         <div class="toolbar-right">
           @if (livePrice()) {
@@ -1230,6 +1246,28 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
         background: var(--bg-primary);
         color: var(--text-primary);
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+      }
+
+      /* Deliberately quieter than the timeframe pills: this leaves the page,
+         so it should read as a secondary affordance rather than compete with
+         the controls that change the chart in place. */
+      .open-analysis {
+        display: inline-flex;
+        align-items: center;
+        height: 28px;
+        padding: 0 var(--space-3);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        text-decoration: none;
+        white-space: nowrap;
+        transition: all 0.15s ease;
+      }
+      .open-analysis:hover {
+        color: var(--text-primary);
+        border-color: var(--text-secondary);
       }
 
       .live-price-display {
@@ -2417,17 +2455,26 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     'NZD/USD',
     'USD/CAD',
   ]);
-  timeframes = [
-    { label: '1m', value: 'M1' },
-    { label: '5m', value: 'M5' },
-    { label: '15m', value: 'M15' },
-    { label: '1H', value: 'H1' },
-    { label: '4H', value: 'H4' },
-    { label: '1D', value: 'D1' },
-  ];
+  timeframes = TIMEFRAME_PILLS;
 
   selectedSymbol = signal('EUR/USD');
   selectedTimeframe = signal('H1');
+
+  /**
+   * Deep link to the full chart-analysis workspace for whatever the toolbar is
+   * currently showing — the drawing tools, 60 studies and multi-pane layouts
+   * this embedded plot deliberately does not carry.
+   *
+   * Rendered as a real anchor rather than a click handler so middle-click and
+   * cmd-click work — the point is usually to study the setup in a SECOND tab
+   * without losing the position context on this one.
+   */
+  private readonly analysisTarget = computed(() =>
+    chartAnalysisTarget(this.selectedSymbol(), this.selectedTimeframe()),
+  );
+
+  readonly chartAnalysisLink = computed(() => this.analysisTarget().commands);
+  readonly chartAnalysisQuery = computed(() => this.analysisTarget().queryParams);
 
   /**
    * Emits the chart's currently selected symbol (slash form, e.g. "EUR/USD")
