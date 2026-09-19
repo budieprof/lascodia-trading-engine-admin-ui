@@ -384,22 +384,19 @@ the time axis. Still to come: order lines and martingale rungs.
 
 ## 13. What is left
 
-| Item                                  | Why it is not done                                                                                                                                                                                                                                                                                           |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Engine-backed drawing persistence** | Needs a new table, a migration, CRUD endpoints, and a rebuild of all three role containers — which disconnects the EA fleet. Worth doing; worth scheduling rather than slipping into a long session. Drawings are `localStorage` today: per-browser, and they do not follow the operator to another machine. |
-| Remaining drawing tools (~56)         | Long tail; one `TOOLS` entry plus a renderer case each.                                                                                                                                                                                                                                                      |
-| Remaining indicators                  | Long tail; one registry entry each.                                                                                                                                                                                                                                                                          |
-| `VolCandle` and true `HiLo` styles    | Each needs a custom series.                                                                                                                                                                                                                                                                                  |
-| Details / News panes, market status   | Not started.                                                                                                                                                                                                                                                                                                 |
-| 8-way split                           | Layouts cap at 4; the grid takes more with a CSS change.                                                                                                                                                                                                                                                     |
+| Item                                | Why it is not done                                       |
+| ----------------------------------- | -------------------------------------------------------- |
+| Remaining drawing tools (~56)       | Long tail; one `TOOLS` entry plus a renderer case each.  |
+| Remaining indicators                | Long tail; one registry entry each.                      |
+| `VolCandle` and true `HiLo` styles  | Each needs a custom series.                              |
+| Details / News panes, market status | Not started.                                             |
+| 8-way split                         | Layouts cap at 4; the grid takes more with a CSS change. |
 
 ## Open questions
 
-1. **Drawing persistence** — schedule the engine work, or accept per-browser
-   storage?
-2. **Renko / P&F sizing** — ATR-derived today. Should the box size be an
+1. **Renko / P&F sizing** — ATR-derived today. Should the box size be an
    operator input per chart?
-3. **SignalR room semantics** — per-route or per-symbol? The live bar filters
+2. **SignalR room semantics** — per-route or per-symbol? The live bar filters
    client-side on the tick's symbol, which works but over-subscribes.
 
 ## Sources
