@@ -7,7 +7,9 @@ description: >
   change and want to SEE it render (not just build it), when asked to "check the
   admin UI", "run/screenshot the app in a browser", "verify it renders", or to
   confirm a page loads without errors. This is the Lascodia admin-UI (Angular 20,
-  standalone components, `ng serve` on :4200, engine API on :5081).
+  standalone components, engine API on :5081). Two origins: the published release
+  on :8080 (what operators see) and the `ng serve` dev server on :4200 (work in
+  progress) — pick deliberately.
 ---
 
 # Verify admin-UI changes in a browser
