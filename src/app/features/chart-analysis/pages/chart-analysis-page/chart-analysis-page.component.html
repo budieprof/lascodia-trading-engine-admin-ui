@@ -158,6 +158,81 @@
       ↷
     </button>
 
+    <div class="layout-picker">
+      <button type="button" class="tool" (click)="layoutMenuOpen.set(!layoutMenuOpen())">
+        Layouts
+      </button>
+      @if (layoutMenuOpen()) {
+        <div class="menu layout-menu">
+          <button type="button" class="menu-action" (click)="saveLayout()">💾 Save layout…</button>
+          <button
+            type="button"
+            class="menu-action"
+            (click)="saveTemplate()"
+            [disabled]="!active().length"
+          >
+            ⭐ Save studies as template…
+          </button>
+          @if (layoutStore.layouts().length) {
+            <div class="menu-heading">Layouts</div>
+            <ul class="menu-list">
+              @for (l of layoutStore.layouts(); track l.id) {
+                <li>
+                  <button type="button" (click)="applyLayout(l)">
+                    <span>{{ l.name }}</span>
+                    <span class="muted">{{ l.symbol }} {{ resolutionLabel(l.resolution) }}</span>
+                  </button>
+                  <button type="button" class="tree-remove" (click)="removeLayout(l.id, $event)">
+                    ✕
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+          @if (layoutStore.templates().length) {
+            <div class="menu-heading">Study templates</div>
+            <ul class="menu-list">
+              @for (t of layoutStore.templates(); track t.id) {
+                <li>
+                  <button type="button" (click)="applyTemplate(t)">
+                    <span>{{ t.name }}</span>
+                    <span class="muted">{{ t.indicators.length }} studies</span>
+                  </button>
+                  <button type="button" class="tree-remove" (click)="removeTemplate(t.id, $event)">
+                    ✕
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+        </div>
+      }
+    </div>
+
+    <select
+      class="style-select"
+      [ngModel]="timezone()"
+      (ngModelChange)="timezone.set($event)"
+      aria-label="Chart timezone"
+    >
+      @for (tz of timezones; track tz.id) {
+        <option [value]="tz.id">{{ tz.label }}</option>
+      }
+    </select>
+
+    <button type="button" class="tool" (click)="takeSnapshot()" title="Save chart as PNG">
+      📷
+    </button>
+    <button
+      type="button"
+      class="tool"
+      [class.active]="isFullscreen()"
+      (click)="toggleFullscreen()"
+      title="Fullscreen"
+    >
+      ⛶
+    </button>
+
     <button
       type="button"
       class="tool"
@@ -214,7 +289,7 @@
     </nav>
 
     <!-- Chart surface with the floating legend, as TradingView lays it out. -->
-    <div class="chart-area">
+    <div class="chart-area" (contextmenu)="openContextMenu($event)">
       <div class="legend">
         <div class="legend-title">
           <strong>{{ symbol() }}</strong>
@@ -266,6 +341,7 @@
         [tool]="tool()"
         [magnet]="magnet()"
         [scaleMode]="scaleMode()"
+        [timezone]="timezone()"
         [overlays]="overlays()"
         [markers]="markers()"
         (loadMore)="loadOlder()"
@@ -328,6 +404,29 @@
           </button>
           <button type="button" (click)="drawings.clone(sel.id)" title="Duplicate">⧉</button>
           <button type="button" (click)="removeDrawing(sel.id)" title="Delete (⌫)">✕</button>
+        </div>
+      }
+
+      @if (contextMenu(); as cm) {
+        <div class="context-menu" [style.left.px]="cm.x" [style.top.px]="cm.y">
+          <button type="button" (click)="resetScales()">Reset scales</button>
+          <button type="button" (click)="takeSnapshot()">Save image…</button>
+          <button type="button" (click)="objectTreeOpen.set(true); closeContextMenu()">
+            Show objects
+          </button>
+          <button type="button" (click)="indicatorMenuOpen.set(true); closeContextMenu()">
+            Add indicator…
+          </button>
+          <button type="button" (click)="saveLayout()">Save layout…</button>
+          <button
+            type="button"
+            class="danger"
+            (click)="clearDrawingsFromMenu()"
+            [disabled]="!drawings.visible().length"
+          >
+            Remove all drawings
+          </button>
+          <button type="button" (click)="closeContextMenu()">Close</button>
         </div>
       }
 

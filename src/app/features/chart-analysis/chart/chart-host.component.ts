@@ -48,6 +48,7 @@ import { DrawingStore } from '../drawings/drawing-store.service';
 import { DrawingController } from '../drawings/drawing-controller';
 import type { DrawingKind } from '../drawings/model';
 import { OverlayRenderer, type PriceOverlay } from '../overlays/overlay-renderer';
+import { timezoneOffsetMinutes } from '../workspace/layout-store.service';
 
 /**
  * Chart styles the toolbar can switch between — the 18 of TradingView's
@@ -144,7 +145,12 @@ export class ChartHostComponent implements OnDestroy {
   private readonly theme = inject(ThemeService);
   private readonly drawings = inject(DrawingStore);
   private readonly container = viewChild.required<ElementRef<HTMLDivElement>>('container');
-  private readonly controller = new DrawingController(this.drawings, () => this.precision());
+  private readonly controller = new DrawingController(
+    this.drawings,
+    () => this.precision(),
+    (t) => t + this.timezoneShiftMs(t),
+    (t) => t - this.timezoneShiftMs(t),
+  );
 
   readonly bars = input.required<Bar[]>();
   readonly style = input<ChartStyle>('candles');
@@ -160,6 +166,8 @@ export class ChartHostComponent implements OnDestroy {
   readonly overlays = input<PriceOverlay[]>([]);
   /** Bar markers for trade signals, fills and economic events. */
   readonly markers = input<ChartMarker[]>([]);
+  /** IANA zone for the time axis; bar data itself stays UTC. */
+  readonly timezone = input<string>('UTC');
 
   /** Raised when the visible range reaches the oldest bar we hold. */
   readonly loadMore = output<void>();
@@ -237,6 +245,16 @@ export class ChartHostComponent implements OnDestroy {
     effect(() => {
       const mode = this.scaleMode();
       untracked(() => this.applyScaleMode(mode));
+    });
+
+    effect(() => {
+      // Re-plot on a timezone change: the shift is applied to the bar TIMES
+      // handed to the library, since Lightweight Charts has no timezone option
+      // of its own and renders whatever instants it is given.
+      this.timezone();
+      untracked(() =>
+        this.applyData(this.bars(), this.style(), this.showVolume(), this.precision()),
+      );
     });
 
     effect(() => {
@@ -346,6 +364,68 @@ export class ChartHostComponent implements OnDestroy {
     this.applyIndicators(this.indicators(), this.bars());
   }
 
+  /**
+   * Shift bar times into the display timezone.
+   *
+   * Lightweight Charts has no timezone setting — it draws the instants it is
+   * given — so the axis is moved by offsetting the times. The offset is
+   * computed per bar at that bar's own instant, because a fixed offset would
+   * be an hour wrong either side of a DST change, which is exactly where an
+   * operator cross-checking a session open would notice.
+   */
+  private timezoneShiftMs(atMs: number): number {
+    const zone = this.timezone();
+    return zone === 'UTC' ? 0 : timezoneOffsetMinutes(zone, atMs) * 60_000;
+  }
+
+  private shiftForTimezone(bars: Bar[], zone: string): Bar[] {
+    if (zone === 'UTC' || bars.length === 0) return bars;
+    return bars.map((b) => ({
+      ...b,
+      time: b.time + timezoneOffsetMinutes(zone, b.time) * 60_000,
+    }));
+  }
+
+  /** PNG data URL of the chart as currently drawn. */
+  snapshot(): string | null {
+    const el = this.container().nativeElement;
+    const sources = [...el.querySelectorAll('canvas')] as HTMLCanvasElement[];
+    if (sources.length === 0) return null;
+    // Lightweight Charts paints across SEVERAL stacked canvases (panes, scales,
+    // the crosshair layer). Grabbing one gives a chart with no axes, so they
+    // are composited in DOM order onto a single surface.
+    const rect = el.getBoundingClientRect();
+    const out = document.createElement('canvas');
+    out.width = Math.max(1, Math.round(rect.width * window.devicePixelRatio));
+    out.height = Math.max(1, Math.round(rect.height * window.devicePixelRatio));
+    const ctx = out.getContext('2d');
+    if (!ctx) return null;
+    ctx.fillStyle = this.palette(this.theme.theme() === 'dark').background;
+    ctx.fillRect(0, 0, out.width, out.height);
+    for (const c of sources) {
+      const cr = c.getBoundingClientRect();
+      if (cr.width === 0 || cr.height === 0) continue;
+      ctx.drawImage(
+        c,
+        (cr.left - rect.left) * window.devicePixelRatio,
+        (cr.top - rect.top) * window.devicePixelRatio,
+        cr.width * window.devicePixelRatio,
+        cr.height * window.devicePixelRatio,
+      );
+    }
+    try {
+      return out.toDataURL('image/png');
+    } catch {
+      return null;
+    }
+  }
+
+  /** Reset both scales to fit the data, as double-clicking the axis does. */
+  resetScales(): void {
+    this.chart?.timeScale().fitContent();
+    this.chart?.priceScale('right').applyOptions({ autoScale: true });
+  }
+
   private sizeToContainer(el: HTMLElement): void {
     if (!this.chart) return;
     const { clientWidth, clientHeight } = el;
@@ -365,7 +445,7 @@ export class ChartHostComponent implements OnDestroy {
     this.computedCache.clear();
 
     const p = this.palette(this.theme.theme() === 'dark');
-    const source = this.transformed(bars, style);
+    const source = this.shiftForTimezone(this.transformed(bars, style), this.timezone());
     // Indicators and the legend follow the PLOTTED bars, so a price-based
     // style recomputes both against its synthetic series rather than against
     // the time bars underneath — otherwise an RSI on a Renko chart would be

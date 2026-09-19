@@ -47,11 +47,16 @@ export class DrawingController {
   constructor(
     private readonly store: DrawingStore,
     precision: () => number,
+    /** Stored UTC instant → displayed instant (timezone offset). */
+    private readonly shift: (timeMs: number) => number = (t) => t,
+    /** Displayed instant → stored UTC instant. The inverse of `shift`. */
+    private readonly unshift: (timeMs: number) => number = (t) => t,
   ) {
     this.renderer = new DrawingRenderer(
       () => this.chart,
       () => this.series,
       precision,
+      (t) => this.shift(t),
     );
   }
 
@@ -139,7 +144,10 @@ export class DrawingController {
     const time = chart.timeScale().coordinateToTime(p.x);
     const price = series.coordinateToPrice(p.y);
     if (time === null || price === null) return null;
-    const ms = (time as number) * 1000;
+    // Back to UTC before it is stored: the click lands on the DISPLAYED axis,
+    // and storing that instant would bake the current timezone into the
+    // drawing.
+    const ms = this.unshift((time as number) * 1000);
 
     if (!this.magnet) return { time: ms, price };
 

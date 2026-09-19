@@ -42,10 +42,18 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
   private preview: { drawing: Drawing; cursor: Pt | null } | null = null;
   private requestUpdate?: () => void;
 
+  /**
+   * `shift` converts a stored UTC instant into the instant the chart is
+   * actually drawing at, which differs whenever the axis is in a non-UTC
+   * timezone. Drawings are stored in UTC — they have to be, or changing the
+   * display timezone would rewrite them — so the offset is applied here, at
+   * projection time, exactly like the bars.
+   */
   constructor(
     private readonly chart: () => IChartApi | null,
     private readonly series: () => ISeriesApi<SeriesType> | null,
     private readonly precision: () => number,
+    private readonly shift: (timeMs: number) => number = (t) => t,
   ) {}
 
   attached(param: { requestUpdate: () => void }): void {
@@ -87,7 +95,7 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     const chart = this.chart();
     const series = this.series();
     if (!chart || !series) return null;
-    const x = chart.timeScale().timeToCoordinate((point.time / 1000) as Time);
+    const x = chart.timeScale().timeToCoordinate((this.shift(point.time) / 1000) as Time);
     const y = series.priceToCoordinate(point.price);
     if (x === null || y === null) return null;
     return { x, y };

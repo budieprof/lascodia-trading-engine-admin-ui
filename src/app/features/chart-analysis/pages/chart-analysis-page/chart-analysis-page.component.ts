@@ -35,6 +35,12 @@ import { TradeSignalsService } from '@core/services/trade-signals.service';
 import type { PriceOverlay } from '../../overlays/overlay-renderer';
 import type { ChartMarker } from '../../chart/chart-host.component';
 import {
+  CHART_TIMEZONES,
+  ChartLayoutStore,
+  type ChartLayout,
+  type StudyTemplate,
+} from '../../workspace/layout-store.service';
+import {
   TOOLS,
   toolFor,
   type DashStyle,
@@ -151,6 +157,14 @@ export class ChartAnalysisPageComponent {
   readonly scaleMode = signal<'normal' | 'log' | 'percent'>('normal');
   readonly objectTreeOpen = signal(false);
   readonly dashOptions: DashStyle[] = ['solid', 'dashed', 'dotted'];
+
+  // ── Workspace: layouts, templates, timezone, chrome ──────────────────────
+  readonly layoutStore = inject(ChartLayoutStore);
+  readonly timezones = CHART_TIMEZONES;
+  readonly timezone = signal<string>('UTC');
+  readonly layoutMenuOpen = signal(false);
+  readonly contextMenu = signal<{ x: number; y: number } | null>(null);
+  readonly isFullscreen = signal(false);
 
   readonly toolGroups = computed(() => {
     const groups: Array<{ name: string; tools: typeof TOOLS }> = [];
@@ -530,6 +544,124 @@ export class ChartAnalysisPageComponent {
     this.legend.set(snapshot);
   }
 
+  // ── Workspace actions ────────────────────────────────────────────────────
+
+  private snapshotOfChart(): Omit<ChartLayout, 'id' | 'name' | 'savedAt'> {
+    return {
+      symbol: this.symbol(),
+      resolution: this.resolution(),
+      style: this.style(),
+      showVolume: this.showVolume(),
+      scaleMode: this.scaleMode(),
+      timezone: this.timezone(),
+      indicators: this.active().map((i) => ({ ...i, params: { ...i.params } })),
+    };
+  }
+
+  saveLayout(): void {
+    const name = prompt(
+      'Layout name',
+      `${this.symbol()} ${this.resolutionLabel(this.resolution())}`,
+    );
+    if (name === null) return;
+    const saved = this.layoutStore.saveLayout(name, this.snapshotOfChart());
+    this.layoutStore.rememberLast(saved.id);
+    this.layoutMenuOpen.set(false);
+  }
+
+  applyLayout(layout: ChartLayout): void {
+    this.layoutMenuOpen.set(false);
+    this.style.set(layout.style);
+    this.showVolume.set(layout.showVolume);
+    this.scaleMode.set(layout.scaleMode);
+    this.timezone.set(layout.timezone ?? 'UTC');
+    // Fresh uids: reapplying a layout must not collide with studies already on
+    // the chart, which would leave the new ones un-rendered.
+    this.active.set(
+      layout.indicators.map((i, n) => ({
+        ...i,
+        params: { ...i.params },
+        uid: `${i.defId}-${Date.now().toString(36)}-${n}`,
+      })),
+    );
+    this.layoutStore.rememberLast(layout.id);
+    const changed = layout.symbol !== this.symbol() || layout.resolution !== this.resolution();
+    this.symbol.set(layout.symbol);
+    this.resolution.set(layout.resolution);
+    if (changed) void this.reload();
+  }
+
+  removeLayout(id: string, ev: Event): void {
+    ev.stopPropagation();
+    this.layoutStore.removeLayout(id);
+  }
+
+  saveTemplate(): void {
+    if (this.active().length === 0) return;
+    const name = prompt('Template name', 'My studies');
+    if (name === null) return;
+    this.layoutStore.saveTemplate(name, this.active());
+    this.layoutMenuOpen.set(false);
+  }
+
+  applyTemplate(template: StudyTemplate): void {
+    this.layoutMenuOpen.set(false);
+    this.active.set(this.layoutStore.instantiate(template));
+  }
+
+  removeTemplate(id: string, ev: Event): void {
+    ev.stopPropagation();
+    this.layoutStore.removeTemplate(id);
+  }
+
+  /** Download the chart as a PNG. */
+  takeSnapshot(): void {
+    const data = this.host()?.snapshot();
+    this.contextMenu.set(null);
+    if (!data) return;
+    const a = document.createElement('a');
+    a.href = data;
+    a.download = `${this.symbol()}-${this.resolutionLabel(this.resolution())}-${Date.now()}.png`;
+    a.click();
+  }
+
+  async toggleFullscreen(): Promise<void> {
+    const el = document.querySelector('.chart-page');
+    if (!el) return;
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+        this.isFullscreen.set(false);
+      } else {
+        await (el as HTMLElement).requestFullscreen();
+        this.isFullscreen.set(true);
+      }
+    } catch {
+      // Fullscreen is refused without a user gesture in some contexts; the
+      // chart is perfectly usable without it, so this is not worth surfacing.
+    }
+  }
+
+  openContextMenu(ev: MouseEvent): void {
+    ev.preventDefault();
+    const host = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+    this.contextMenu.set({ x: ev.clientX - host.left, y: ev.clientY - host.top });
+  }
+
+  closeContextMenu(): void {
+    this.contextMenu.set(null);
+  }
+
+  resetScales(): void {
+    this.host()?.resetScales();
+    this.contextMenu.set(null);
+  }
+
+  clearDrawingsFromMenu(): void {
+    this.drawings.clearVisible();
+    this.contextMenu.set(null);
+  }
+
   // ── Drawing actions ──────────────────────────────────────────────────────
 
   selectTool(kind: DrawingKind | null): void {
@@ -622,10 +754,20 @@ export class ChartAnalysisPageComponent {
     return toolFor(d.kind)?.label ?? d.kind;
   }
 
+  /**
+   * Format a plotted bar time for the legend.
+   *
+   * The times reaching here are already shifted into the display timezone (the
+   * chart has no timezone of its own, so the shift is applied to the data), so
+   * this formats them as wall-clock and labels them with the zone actually in
+   * use. Hardcoding " UTC" was wrong in both directions: it claimed UTC while
+   * showing New York's clock.
+   */
   formatTime(ms: number | null): string {
     if (ms === null) return '';
-    const d = new Date(ms);
-    return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+    const zone = this.timezone();
+    const label = this.timezones.find((t) => t.id === zone)?.label ?? zone;
+    return new Date(ms).toISOString().replace('T', ' ').slice(0, 16) + ` ${label}`;
   }
 }
 
