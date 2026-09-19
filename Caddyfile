@@ -75,14 +75,27 @@
 		@revalidate not path_regexp \-[A-Z0-9]{8,}\.[a-z0-9]+$
 		header @revalidate Cache-Control "no-cache"
 
-		# The uncontroversial half of docker/nginx.conf's header set.
+		# ── Content-Security-Policy, ENFORCING ──────────────────────────────
 		#
-		# nginx.conf also sends a Content-Security-Policy. Deliberately NOT
-		# copied here yet: that container has never actually served this app in
-		# production (its image could not even build for part of Sep 2026), so
-		# the policy is unproven, and a single missed directive fails closed on
-		# one page of the live console — silently, and only for whoever opens
-		# that page. Worth adding behind a report-only pass first.
+		# Enforcing, but only after a measured report-only pass — a CSP that is
+		# one directive short fails CLOSED on a single page, silently, for
+		# whoever happens to open it, which is why this was never copied over
+		# from docker/nginx.conf on trust.
+		#
+		# Verified 2026-09-19 in report-only mode: every one of the 74 routes the
+		# sidebar exposes, swept with the browser console captured, reported ZERO
+		# violations — plus the interaction paths most likely to trip a policy:
+		# drawing on the chart, adding a study, the canvas→PNG snapshot download,
+		# and the assistant bubble.
+		#
+		# `worker-src blob:` is not in the nginx copy and is needed here; the
+		# chart and several ML pages create workers from blob URLs.
+		#
+		# TO ROLL BACK: rename this header to `Content-Security-Policy-Report-Only`
+		# and `caddy reload`. That restores reporting without blocking, which is
+		# the right first move if a page ever breaks in a way CSP could explain.
+		header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' https: wss:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+
 		header {
 			X-Content-Type-Options nosniff
 			X-Frame-Options DENY
