@@ -54,8 +54,11 @@ honest they are:
 | Pay for a commercial licence              | Removes the public-project condition and unlocks Trading Platform (§2).                                                                                                                    |
 | Fall back to Lightweight Charts           | Apache-2.0, no conditions, but a hand-built replica. This plan's §4–§8 data layer is reusable verbatim; only the renderer changes.                                                         |
 
-**Nothing else in this plan should start until the application is answered.**
-Apply at <https://www.tradingview.com/advanced-charts/>.
+**Resolved 2026-09-19: the console stays private, so this route is closed.** The
+table above is kept because it is the decision, not a to-do — if anyone proposes
+embedding the real library again, the answer is here. Apply at
+<https://www.tradingview.com/advanced-charts/> only if the console's posture
+changes.
 
 ### 1.2 This repo is public — the library must never be committed to it
 
@@ -91,27 +94,29 @@ of those is non-negotiable, the decision is a commercial licence, not more code.
 
 ---
 
-## 2. What we get vs what we build
+## 2. The architecture we actually build
 
 ```
-┌─ TradingView Advanced Charts (vendored, self-hosted) ──────────────────┐
-│  candles · 110+ drawings · 100+ indicators · panes · bar replay        │
-│  crosshair · timeframes · chart types · settings · alerts UI           │
-└────────────────────────────┬───────────────────────────────────────────┘
-                             │ Datafeed API + Save/Load adapter  ← WE BUILD
-┌────────────────────────────▼───────────────────────────────────────────┐
-│  LascodiaDatafeed          onReady · searchSymbols · resolveSymbol     │
-│                            getBars · subscribeBars · getMarks ...      │
-│  CandleFeedService         paging · aggregation · cache · forming bar  │
-│  OverlayManager            positions / signals / events as shapes      │
-│  LayoutStore               chart layouts + drawings (engine-persisted) │
+┌─ Lightweight Charts v5 (Apache-2.0, npm) ──────────────────────────────┐
+│  canvas renderer · candle/bar/line/area/baseline series · panes        │
+│  crosshair · price + time scales · primitives (our drawing surface)    │
+└────────────────────────────▲───────────────────────────────────────────┘
+                             │ everything below is OURS
+┌────────────────────────────┴───────────────────────────────────────────┐
+│  ChartHostComponent    chart lifecycle · styles · panes · legend feed  │
+│  indicators/registry   the study catalogue — one entry per indicator   │
+│  indicators/math       pure, tested indicator maths                    │
+│  CandleFeedService     paging · aggregation · cache · countBack        │
+│  (to build) drawings · replay · overlays · layouts · watchlist         │
 └────────────────────────────┬───────────────────────────────────────────┘
                              │ existing engine API
                   /market-data/candle/list · SignalR priceUpdated
 ```
 
-Everything in the lower box is ours and — importantly — **is renderer-independent**.
-If §1.1 goes against us, the same code drives Lightweight Charts.
+The split that matters: the renderer draws, and **every decision about what to
+draw is ours**. That is what made the §5 data layer survive the switch away from
+Advanced Charts untouched, and it is why adding an indicator is a registry entry
+rather than a change to the chart component.
 
 ---
 
