@@ -1,0 +1,319 @@
+import { describe, expect, it } from 'vitest';
+import {
+  adx,
+  atr,
+  bollinger,
+  donchian,
+  ema,
+  macd,
+  obv,
+  rsi,
+  sma,
+  stochastic,
+  trueRange,
+  vwap,
+  wma,
+  type Ohlc,
+} from './math';
+
+const closes = (n: number, f: (i: number) => number) => Array.from({ length: n }, (_, i) => f(i));
+
+function bars(values: Array<[number, number, number, number, number?]>, startMs = 0): Ohlc[] {
+  return values.map(([o, h, l, c, v], i) => ({
+    time: startMs + i * 3_600_000,
+    open: o,
+    high: h,
+    low: l,
+    close: c,
+    volume: v ?? 100,
+  }));
+}
+
+describe('moving averages', () => {
+  it('sma averages the trailing window and nulls the warm-up', () => {
+    expect(sma([1, 2, 3, 4, 5], 3)).toEqual([null, null, 2, 3, 4]);
+  });
+
+  it('sma of a flat series is the constant', () => {
+    expect(sma([7, 7, 7, 7], 2)).toEqual([null, 7, 7, 7]);
+  });
+
+  it('ema seeds from the SMA of the first period, not the first value', () => {
+    // Seeding from closes[0] would put 1 here and drift for hundreds of bars —
+    // visibly disagreeing with TradingView without ever erroring.
+    const out = ema([1, 2, 3, 4, 5], 3);
+    expect(out[0]).toBeNull();
+    expect(out[1]).toBeNull();
+    expect(out[2]).toBeCloseTo(2, 10); // sma(1,2,3)
+    expect(out[3]).toBeCloseTo(3, 10); // 4*0.5 + 2*0.5
+    expect(out[4]).toBeCloseTo(4, 10);
+  });
+
+  it('ema returns all nulls when there are fewer bars than the period', () => {
+    expect(ema([1, 2], 5)).toEqual([null, null]);
+  });
+
+  it('wma weights the newest bar heaviest', () => {
+    // (1*1 + 2*2 + 3*3) / 6
+    expect(wma([1, 2, 3], 3)?.[2]).toBeCloseTo(14 / 6, 10);
+  });
+});
+
+describe('rsi', () => {
+  it('is 100 when every bar gains', () => {
+    const out = rsi(
+      closes(40, (i) => 100 + i),
+      14,
+    );
+    expect(out[39]).toBe(100);
+  });
+
+  it('sits at 50 for a perfectly alternating series', () => {
+    const out = rsi(
+      closes(80, (i) => (i % 2 === 0 ? 100 : 101)),
+      14,
+    );
+    expect(out[79]).toBeGreaterThan(40);
+    expect(out[79]).toBeLessThan(60);
+  });
+
+  it('stays within 0..100', () => {
+    const out = rsi(
+      closes(120, (i) => 100 + Math.sin(i / 3) * 10),
+      14,
+    ).filter((v): v is number => v !== null);
+    expect(out.length).toBeGreaterThan(0);
+    for (const v of out) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it('nulls the warm-up rather than emitting zeros', () => {
+    const out = rsi(
+      closes(20, (i) => 100 + i),
+      14,
+    );
+    expect(out.slice(0, 14).every((v) => v === null)).toBe(true);
+  });
+});
+
+describe('macd', () => {
+  it('drives the histogram to zero on a flat series', () => {
+    const { macd: line, histogram } = macd(closes(100, () => 50));
+    expect(line[99]).toBeCloseTo(0, 10);
+    expect(histogram[99]).toBeCloseTo(0, 10);
+  });
+
+  it('goes positive on a rising series', () => {
+    const { macd: line } = macd(closes(100, (i) => 100 + i));
+    expect(line[99]).toBeGreaterThan(0);
+  });
+
+  it('offsets the signal line so it starts after the MACD line', () => {
+    // Feeding the nulls into the signal EMA would poison its seed and shift
+    // every later value — this pins the offset.
+    const { macd: line, signal } = macd(closes(100, (i) => 100 + i));
+    const firstLine = line.findIndex((v) => v !== null);
+    const firstSignal = signal.findIndex((v) => v !== null);
+    expect(firstSignal).toBe(firstLine + 8); // signal period 9 → 8 more bars
+  });
+});
+
+describe('bollinger', () => {
+  it('collapses both bands onto the mean when price is flat', () => {
+    const { upper, middle, lower } = bollinger(
+      closes(30, () => 10),
+      20,
+      2,
+    );
+    expect(middle[29]).toBeCloseTo(10, 10);
+    expect(upper[29]).toBeCloseTo(10, 10);
+    expect(lower[29]).toBeCloseTo(10, 10);
+  });
+
+  it('brackets the mean symmetrically', () => {
+    const { upper, middle, lower } = bollinger(
+      closes(60, (i) => 100 + Math.sin(i) * 5),
+      20,
+      2,
+    );
+    const u = upper[59] as number;
+    const m = middle[59] as number;
+    const l = lower[59] as number;
+    expect(u).toBeGreaterThan(m);
+    expect(l).toBeLessThan(m);
+    expect(u - m).toBeCloseTo(m - l, 10);
+  });
+});
+
+describe('true range and atr', () => {
+  it('falls back to high-low on the first bar', () => {
+    expect(trueRange(bars([[10, 12, 9, 11]]))[0]).toBe(3);
+  });
+
+  it('accounts for a gap against the previous close', () => {
+    // Gap up: the true range spans from the previous close, not just the bar.
+    const tr = trueRange(
+      bars([
+        [10, 11, 9, 10],
+        [20, 21, 19, 20],
+      ]),
+    );
+    expect(tr[1]).toBe(11); // 21 - 10
+  });
+
+  it('atr of a constant-range series is that range', () => {
+    const series = bars(
+      Array.from({ length: 40 }, () => [10, 12, 8, 10] as [number, number, number, number]),
+    );
+    expect(atr(series, 14)[39]).toBeCloseTo(4, 10);
+  });
+});
+
+describe('stochastic', () => {
+  it('pins to 100 when the close is the window high', () => {
+    const rising = bars(
+      Array.from(
+        { length: 40 },
+        (_, i) => [100 + i, 100 + i, 99 + i, 100 + i] as [number, number, number, number],
+      ),
+    );
+    expect(stochastic(rising, 14, 1, 1).k[39]).toBeCloseTo(100, 6);
+  });
+
+  it('returns 50 for a completely flat window instead of dividing by zero', () => {
+    const flat = bars(
+      Array.from({ length: 30 }, () => [5, 5, 5, 5] as [number, number, number, number]),
+    );
+    const { k } = stochastic(flat, 14, 1, 1);
+    expect(k[29]).toBe(50);
+    expect(Number.isNaN(k[29] as number)).toBe(false);
+  });
+});
+
+describe('vwap', () => {
+  it('resets at each UTC day boundary', () => {
+    // Two days: day 1 trades at 10, day 2 at 20. Without the reset the second
+    // day would be dragged toward 15 and stop tracking the day's value area.
+    const day1 = Date.parse('2026-09-17T00:00:00Z');
+    const day2 = Date.parse('2026-09-18T00:00:00Z');
+    const series: Ohlc[] = [
+      { time: day1, open: 10, high: 10, low: 10, close: 10, volume: 100 },
+      { time: day1 + 3_600_000, open: 10, high: 10, low: 10, close: 10, volume: 100 },
+      { time: day2, open: 20, high: 20, low: 20, close: 20, volume: 100 },
+    ];
+    const out = vwap(series);
+    expect(out[1]).toBeCloseTo(10, 10);
+    expect(out[2]).toBeCloseTo(20, 10);
+  });
+
+  it('weights by volume within a session', () => {
+    const t = Date.parse('2026-09-17T00:00:00Z');
+    const out = vwap([
+      { time: t, open: 10, high: 10, low: 10, close: 10, volume: 1 },
+      { time: t + 1000, open: 20, high: 20, low: 20, close: 20, volume: 3 },
+    ]);
+    expect(out[1]).toBeCloseTo((10 * 1 + 20 * 3) / 4, 10);
+  });
+});
+
+describe('donchian', () => {
+  it('tracks the window extremes and their midpoint', () => {
+    const series = bars(
+      Array.from(
+        { length: 25 },
+        (_, i) => [100, 100 + i, 100 - i, 100] as [number, number, number, number],
+      ),
+    );
+    const { upper, lower, middle } = donchian(series, 20);
+    expect(upper[24]).toBe(124);
+    expect(lower[24]).toBe(76);
+    expect(middle[24]).toBe(100);
+  });
+});
+
+describe('obv', () => {
+  it('adds volume on an up close and subtracts on a down close', () => {
+    const out = obv(
+      bars([
+        [10, 10, 10, 10, 50],
+        [10, 10, 10, 11, 30],
+        [11, 11, 11, 9, 20],
+      ]),
+    );
+    expect(out).toEqual([0, 30, 10]);
+  });
+
+  it('leaves the line unchanged on an unchanged close', () => {
+    const out = obv(
+      bars([
+        [10, 10, 10, 10, 50],
+        [10, 10, 10, 10, 30],
+      ]),
+    );
+    expect(out[1]).toBe(0);
+  });
+});
+
+describe('adx', () => {
+  it('reads high on a persistent trend', () => {
+    const trend = bars(
+      Array.from(
+        { length: 80 },
+        (_, i) => [100 + i, 101 + i, 99 + i, 100.5 + i] as [number, number, number, number],
+      ),
+    );
+    const { adx: a, plusDi, minusDi } = adx(trend, 14);
+    expect(a[79]).toBeGreaterThan(40);
+    expect(plusDi[79] as number).toBeGreaterThan(minusDi[79] as number);
+  });
+
+  it('stays within 0..100', () => {
+    const noisy = bars(
+      Array.from({ length: 120 }, (_, i) => {
+        const p = 100 + Math.sin(i / 5) * 8;
+        return [p, p + 1, p - 1, p] as [number, number, number, number];
+      }),
+    );
+    for (const v of adx(noisy, 14).adx.filter((x): x is number => x !== null)) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(100);
+    }
+  });
+});
+
+describe('alignment contract', () => {
+  it('every indicator returns one value per input bar', () => {
+    // The series data must line up with bar times one-for-one; a short array
+    // silently shifts an indicator against price.
+    const series = bars(
+      Array.from(
+        { length: 60 },
+        (_, i) => [100 + i, 101 + i, 99 + i, 100 + i] as [number, number, number, number],
+      ),
+    );
+    const c = series.map((b) => b.close);
+    const n = series.length;
+    expect(sma(c, 14)).toHaveLength(n);
+    expect(ema(c, 14)).toHaveLength(n);
+    expect(wma(c, 14)).toHaveLength(n);
+    expect(rsi(c, 14)).toHaveLength(n);
+    expect(macd(c).macd).toHaveLength(n);
+    expect(macd(c).signal).toHaveLength(n);
+    expect(macd(c).histogram).toHaveLength(n);
+    expect(bollinger(c).upper).toHaveLength(n);
+    expect(atr(series, 14)).toHaveLength(n);
+    expect(stochastic(series).k).toHaveLength(n);
+    expect(vwap(series)).toHaveLength(n);
+    expect(donchian(series).upper).toHaveLength(n);
+    expect(obv(series)).toHaveLength(n);
+    expect(adx(series, 14).adx).toHaveLength(n);
+  });
+
+  it('handles an empty series without throwing', () => {
+    expect(sma([], 14)).toEqual([]);
+    expect(obv([])).toEqual([]);
+    expect(vwap([])).toEqual([]);
+  });
+});

@@ -1,0 +1,322 @@
+// Chart workstation layout. Deliberately close to TradingView's chrome:
+// a thin top toolbar, a full-bleed chart with a floating legend, and a
+// studies strip underneath.
+//
+// Colours come from the app's SCSS tokens so the page follows the global
+// theme switch; the chart canvas itself is themed in ChartHostComponent,
+// which has to be told the palette in JS rather than via CSS.
+
+:host {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+
+.chart-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #e6e9ef);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border, #e6e9ef);
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+.divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border, #e6e9ef);
+  margin: 2px 2px;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.status {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.muted {
+  color: var(--text-muted, #787b86);
+}
+
+// ── Symbol picker ──────────────────────────────────────────────────────────
+
+.symbol-picker,
+.indicator-picker {
+  position: relative;
+}
+
+.symbol-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+
+  &:hover {
+    background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+  }
+}
+
+.symbol-name {
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.caret {
+  font-size: 10px;
+  color: var(--text-muted, #787b86);
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  min-width: 260px;
+  max-height: 340px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #e6e9ef);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+
+.indicator-menu {
+  min-width: 300px;
+}
+
+.menu-search {
+  margin: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border, #e6e9ef);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.menu-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 6px;
+  overflow-y: auto;
+
+  button {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 7px 12px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+    }
+  }
+}
+
+.menu-empty {
+  padding: 10px 12px;
+  color: var(--text-muted, #787b86);
+  font-size: 13px;
+}
+
+// ── Timeframes and tools ───────────────────────────────────────────────────
+
+.timeframes {
+  display: flex;
+  gap: 2px;
+}
+
+.tf,
+.tool {
+  padding: 5px 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted, #787b86);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+    color: inherit;
+  }
+
+  &.active {
+    background: var(--accent-soft, rgba(41, 98, 255, 0.12));
+    color: var(--accent, #2962ff);
+    font-weight: 600;
+  }
+}
+
+.style-select {
+  padding: 5px 8px;
+  border: 1px solid var(--border, #e6e9ef);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+// ── Chart surface ──────────────────────────────────────────────────────────
+
+.chart-area {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.legend {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  z-index: 10;
+  // The legend floats over the canvas; without this the chart cannot be
+  // dragged wherever the legend happens to overlap it.
+  pointer-events: none;
+  font-size: 12px;
+  line-height: 1.5;
+  text-shadow: 0 0 4px var(--surface, #fff);
+}
+
+.legend-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.legend-ohlc {
+  display: flex;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+
+  b {
+    margin-left: 3px;
+    font-weight: 600;
+  }
+
+  &.up {
+    color: #26a69a;
+  }
+
+  &.down {
+    color: #ef5350;
+  }
+}
+
+.legend-time {
+  font-size: 11px;
+}
+
+.legend-indicator {
+  display: flex;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.legend-value {
+  font-weight: 600;
+}
+
+.chart-error {
+  position: absolute;
+  inset: auto 0 50% 0;
+  z-index: 12;
+  text-align: center;
+  color: var(--text-muted, #787b86);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+// ── Active studies ─────────────────────────────────────────────────────────
+
+.studies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border, #e6e9ef);
+  flex: 0 0 auto;
+}
+
+.study {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 4px;
+  border: 1px solid var(--border, #e6e9ef);
+  border-radius: 6px;
+  font-size: 12px;
+
+  &.hidden-study {
+    opacity: 0.5;
+  }
+}
+
+.study-label {
+  font-weight: 600;
+}
+
+.study-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted, #787b86);
+
+  input {
+    width: 52px;
+    padding: 2px 4px;
+    border: 1px solid var(--border, #e6e9ef);
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+  }
+}
+
+.study-toggle,
+.study-remove {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted, #787b86);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  line-height: 1;
+
+  &:hover {
+    color: inherit;
+  }
+}

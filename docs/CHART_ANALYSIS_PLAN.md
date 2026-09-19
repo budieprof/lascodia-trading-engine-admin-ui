@@ -1,12 +1,31 @@
-# Chart Analysis page — TradingView Advanced Charts
+# Chart Analysis page — a hand-built TradingView replica
 
-Plan for a dedicated chart-analysis workstation in the admin console, rendered by
-**TradingView Advanced Charts** (the real library, self-hosted), fed by the engine's
-own market data and overlaid with this system's trading state.
+Plan for a dedicated chart-analysis workstation in the admin console, rendered on
+**Lightweight Charts v5** (Apache-2.0, TradingView's own engine), fed by the
+engine's market data and overlaid with this system's trading state.
 
-Decision taken 2026-09-19: build on Advanced Charts rather than re-implementing on
-Lightweight Charts, accepting the licence conditions in §1. New route alongside the
-existing ECharts analysis chart; migrate those surfaces later once this is proven.
+## Decision log
+
+**2026-09-19 — Advanced Charts rejected, Lightweight Charts + hand-built replica
+adopted.** The console is a private, login-gated, single-operator application and
+will stay that way. TradingView grants Advanced Charts only "to companies for use
+in public web projects" and not for personal or internal use, so the real library
+is not licensable here at any effort level (§1.1 keeps the evidence).
+
+The goal is unchanged: **replicate TradingView's charting functionality**. It is
+now built rather than embedded. That means we own the parts Advanced Charts would
+have given us free — the drawing toolbar, the indicator library, bar replay, the
+chrome — and it also means none of the §1.3 paid-tier gaps apply: order and
+position lines, multi-chart layouts and the watchlist are ours to build, not
+features withheld behind a commercial licence.
+
+Sections §1.1–§1.3 are kept as the record of why, and because §1.1 is the section
+to reread if anyone proposes embedding the real library again. **§1.2 no longer
+applies** — nothing proprietary is vendored, so there is nothing to keep out of
+this public repo. The §5 data layer was built renderer-independent precisely so
+it survived this decision; it did, unchanged.
+
+Scope is tracked in §12, which replaces the old §11 sequencing.
 
 ---
 
@@ -281,31 +300,122 @@ per symbol, study and drawing templates.
 
 ---
 
-## 11. Sequencing
+## 12. Parity gap analysis — measured against Advanced Charts
 
-| Phase                     | Blocked by               | Rough size                                 |
-| ------------------------- | ------------------------ | ------------------------------------------ |
-| 0 Unblock                 | TradingView's answer     | days of waiting, no code                   |
-| 1 Data layer              | nothing — **start here** | the bulk of our real work                  |
-| 2 Page + history          | library access           | small once Phase 1 is solid                |
-| 3 Live + marks + overlays | Phase 2                  | medium; overlays are the fiddly part       |
-| 4 Persistence             | Phase 2                  | small client-side, medium if engine-backed |
-| 5 Migrate existing chart  | Phase 3                  | deferred by decision; revisit after soak   |
+Advanced Charts' own documented surface is the specification for "replica".
+Everything below is checked against TradingView's docs (`ui_elements`,
+`ChartStyle` enum, `DrawingToolIdentifier` type), not against impressions of the
+product. ✅ shipped · 🟡 partial · ❌ missing.
 
-Phase 1 is deliberately first _and_ independent: it is the only phase that survives
-unchanged if the licence answer is no.
+### 12.1 Chart styles — 7 of 18
+
+`ChartStyle` has 18 values. We have Candle ✅, HollowCandle ✅, HeikinAshi ✅,
+Bar ✅, Line ✅, Area ✅, Baseline ✅.
+
+Missing and **cheap** (a different series config over the same bars): HiLo,
+Column, LineWithMarkers, Stepline, HLCArea, HLCBars, VolCandle.
+
+Missing and **structural**: **Renko, Kagi, Point & Figure, LineBreak.** These
+are not styles — they rebuild the series on _price movement_ rather than time,
+so bars stop mapping 1:1 to timestamps. They need their own transforms and a
+time scale that tolerates synthetic bar times. Treat as a project, not a style.
+
+### 12.2 Drawing tools — 0 of ~110
+
+The single largest gap. `DrawingToolIdentifier` enumerates ~110 tools across
+lines, channels, pitchforks, Fibonacci, Gann, Elliott, patterns, shapes,
+annotations, measurers and projections.
+
+Two routes:
+
+1. **Build on Lightweight Charts v5 primitives** (`ISeriesPrimitive` /
+   `IPanePrimitive`). Full control, no third-party risk, and the hit-testing,
+   drag handles, magnet mode and persistence are all ours to write. This is
+   weeks of work before the first tool feels right.
+2. **`lightweight-charts-drawing`** (MIT, npm, built for v5, ~68 tools). Would
+   collapse most of this gap. **Unproven** — 116 stars and 8 commits at the time
+   of writing — so it needs a real evaluation (hit-testing quality, persistence
+   model, bundle size, whether it survives a pane resize) before it goes near
+   the live console. Worth a timeboxed spike precisely because the payoff is so
+   large.
+
+Either way the surrounding machinery is ours: drawing toolbar, per-tool style
+dialogs, magnet/snap, lock, clone, templates, favourites, undo/redo, the object
+tree, and persistence per symbol+timeframe.
+
+### 12.3 Indicators — 12 of 100+
+
+Shipped: SMA, EMA, WMA, Bollinger, VWAP (session-anchored), Donchian, RSI,
+MACD, Stochastic, ATR, ADX (+DI/−DI), OBV.
+
+The registry (`indicators/registry.ts`) is the extension point — one entry per
+indicator, no renderer change — so this gap closes linearly. Highest-value
+missing: Ichimoku, Parabolic SAR, Keltner, CCI, Williams %R, MFI, ROC,
+SuperTrend, Pivot Points, Awesome Oscillator, Volume Profile (needs its own
+horizontal-histogram primitive).
+
+### 12.4 UI elements
+
+| Advanced Charts element                 | Status                                          |
+| --------------------------------------- | ----------------------------------------------- |
+| Symbol search                           | ✅ searchable picker                            |
+| Resolution / timeframes                 | ✅ 9 resolutions                                |
+| Chart styles menu                       | 🟡 7 of 18                                      |
+| Indicators menu + studies legend        | ✅ add, hide, re-parameterise, remove           |
+| Panes (indicator sub-charts)            | ✅ auto-paned via `target: 'pane'`              |
+| Legend (OHLC, change, indicator values) | ✅ follows crosshair                            |
+| Price scale                             | 🟡 renders; no log/percent/invert/auto UI       |
+| Time scale                              | 🟡 renders; no timezone or session UI           |
+| Crosshair                               | 🟡 normal mode; no magnet                       |
+| Drawing toolbar                         | ❌ §12.2                                        |
+| Save layouts / templates                | ❌                                              |
+| Snapshots (chart image)                 | ❌                                              |
+| Marks on bars / timescale marks         | ❌ — the hook for signals and economic events   |
+| Context menu (right-click)              | ❌                                              |
+| Object tree                             | ❌                                              |
+| Watchlist · Details · News              | ❌ (Trading Platform-only in AC; ours to build) |
+| Bar replay                              | ❌                                              |
+| Alerts                                  | ❌                                              |
+| Multi-chart layout (up to 8)            | ❌ (Trading Platform-only in AC; ours to build) |
+| Undo/redo · keyboard shortcuts          | ❌                                              |
+| Fullscreen                              | ❌                                              |
+
+### 12.5 Beyond Advanced Charts — the reason this page exists
+
+Not in the free product at all, and the part a generic TradingView cannot do:
+open positions with entry/SL/TP, order lines, trade-signal and rejection marks,
+martingale rungs, and Tier-1 economic-event markers on the time axis. In AC
+these needed the paid Trading Platform; here they are just more primitives.
+
+---
+
+## 13. Sequencing
+
+| Phase                   | Scope                                                                      | State                  |
+| ----------------------- | -------------------------------------------------------------------------- | ---------------------- |
+| 1 Data layer            | resolutions, aggregation, paging, cache, symbol info                       | ✅ done                |
+| 2 Chart + indicators    | LWC v5 host, 7 styles, panes, legend, scroll-back, live bar, 12 indicators | ✅ done                |
+| 3 Drawing tools         | spike `lightweight-charts-drawing` first, then toolbar + persistence       | next, biggest          |
+| 4 Trading overlays      | positions / orders / signals / events (§12.5)                              | high value, low effort |
+| 5 Bar replay            | scrub history, indicators recompute                                        | after 3                |
+| 6 Chrome                | context menu, object tree, settings, snapshots, fullscreen, shortcuts      | incremental            |
+| 7 Workspace             | multi-chart layouts, watchlist, saved layouts, alerts                      | last                   |
+| 8 Migrate ECharts chart | move analysis surfaces onto this engine                                    | deferred by decision   |
 
 ---
 
 ## Open questions
 
-1. **Licence answer** — unresolved, blocking §§6–8. (§1.1)
-2. **Public-project posture** — does the console become publicly reachable? Security
-   implications in `docs/TUNNEL.md`.
-3. **Multi-chart / watchlist / account manager** — Trading Platform only. Accept the
-   gap, or price a commercial licence?
-4. **SignalR room semantics** — per-route or per-symbol? Decides §7.1.
-5. **M30/W1/MN1** — aggregate (§5.2) or drop from the resolution list?
+1. **Drawing-tools route** — spike `lightweight-charts-drawing` (MIT, ~68 tools)
+   or build primitives from scratch? Decides most of the remaining effort.
+   (§12.2)
+2. **Renko / Kagi / PnF / LineBreak** — worth the price-based bar model, or
+   accept the gap? (§12.1)
+3. **SignalR room semantics** — per-route or per-symbol? The live bar currently
+   filters client-side on the tick's symbol, which works but subscribes to more
+   than it needs.
+4. **Drawing persistence** — `localStorage` per browser, or an engine-backed
+   `ChartLayout` table so drawings follow the operator across machines? (§8)
 
 ## Sources
 

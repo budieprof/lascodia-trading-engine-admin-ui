@@ -99,6 +99,14 @@ export const routes: Routes = [
           import('@features/market-data/market-data.routes').then((m) => m.MARKET_DATA_ROUTES),
       },
       {
+        path: 'chart-analysis',
+        data: { breadcrumb: 'Charts' },
+        loadChildren: () =>
+          import('@features/chart-analysis/chart-analysis.routes').then(
+            (m) => m.CHART_ANALYSIS_ROUTES,
+          ),
+      },
+      {
         path: 'watchlist',
         data: { breadcrumb: 'Watchlist' },
         loadChildren: () =>

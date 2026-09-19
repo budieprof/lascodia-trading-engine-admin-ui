@@ -1,0 +1,199 @@
+<div class="chart-page">
+  <!-- Top toolbar — symbol, timeframes, style, studies. -->
+  <header class="toolbar">
+    <div class="symbol-picker">
+      <button
+        type="button"
+        class="symbol-button"
+        (click)="symbolMenuOpen.set(!symbolMenuOpen())"
+        [attr.aria-expanded]="symbolMenuOpen()"
+      >
+        <span class="symbol-name">{{ symbol() }}</span>
+        <span class="caret">▾</span>
+      </button>
+      @if (symbolMenuOpen()) {
+        <div class="menu symbol-menu">
+          <input
+            type="text"
+            class="menu-search"
+            placeholder="Search symbol…"
+            [ngModel]="symbolQuery()"
+            (ngModelChange)="symbolQuery.set($event)"
+            autocomplete="off"
+          />
+          <ul class="menu-list">
+            @for (p of filteredSymbols(); track p.id) {
+              <li>
+                <button type="button" (click)="selectSymbol(p.symbol ?? '')">
+                  <span>{{ p.symbol }}</span>
+                  <span class="muted">{{ p.baseCurrency }}/{{ p.quoteCurrency }}</span>
+                </button>
+              </li>
+            } @empty {
+              <li class="menu-empty">No symbols match.</li>
+            }
+          </ul>
+        </div>
+      }
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="timeframes" role="group" aria-label="Timeframe">
+      @for (r of resolutions; track r) {
+        <button
+          type="button"
+          class="tf"
+          [class.active]="resolution() === r"
+          (click)="selectResolution(r)"
+        >
+          {{ resolutionLabel(r) }}
+        </button>
+      }
+    </div>
+
+    <div class="divider"></div>
+
+    <select
+      class="style-select"
+      [ngModel]="style()"
+      (ngModelChange)="style.set($event)"
+      aria-label="Chart style"
+    >
+      @for (s of chartStyles; track s.id) {
+        <option [value]="s.id">{{ s.label }}</option>
+      }
+    </select>
+
+    <div class="indicator-picker">
+      <button type="button" class="tool" (click)="indicatorMenuOpen.set(!indicatorMenuOpen())">
+        Indicators
+      </button>
+      @if (indicatorMenuOpen()) {
+        <div class="menu indicator-menu">
+          <ul class="menu-list">
+            @for (def of catalogue; track def.id) {
+              <li>
+                <button type="button" (click)="addIndicator(def.id)">
+                  <span>{{ def.name }}</span>
+                  <span class="muted">{{ def.target === 'overlay' ? 'overlay' : 'pane' }}</span>
+                </button>
+              </li>
+            }
+          </ul>
+        </div>
+      }
+    </div>
+
+    <button
+      type="button"
+      class="tool"
+      [class.active]="showVolume()"
+      (click)="showVolume.set(!showVolume())"
+    >
+      Volume
+    </button>
+
+    <span class="spacer"></span>
+
+    @if (loading()) {
+      <span class="status">Loading…</span>
+    }
+    <span class="status muted">{{ bars().length }} bars</span>
+  </header>
+
+  <!-- Chart surface with the floating legend, as TradingView lays it out. -->
+  <div class="chart-area">
+    <div class="legend">
+      <div class="legend-title">
+        <strong>{{ symbol() }}</strong>
+        <span class="muted">{{ resolutionLabel(resolution()) }}</span>
+      </div>
+      @if (legend(); as l) {
+        <div class="legend-ohlc" [class.up]="legendUp()" [class.down]="!legendUp()">
+          <span
+            >O<b>{{ l.open | number: '1.' + precision() + '-' + precision() }}</b></span
+          >
+          <span
+            >H<b>{{ l.high | number: '1.' + precision() + '-' + precision() }}</b></span
+          >
+          <span
+            >L<b>{{ l.low | number: '1.' + precision() + '-' + precision() }}</b></span
+          >
+          <span
+            >C<b>{{ l.close | number: '1.' + precision() + '-' + precision() }}</b></span
+          >
+          @if (l.changePct !== null) {
+            <span class="change">{{ l.changePct | number: '1.2-2' }}%</span>
+          }
+        </div>
+        <div class="legend-time muted">{{ formatTime(l.time) }}</div>
+        @for (ind of l.indicators; track ind.uid) {
+          <div class="legend-indicator">
+            <span class="muted">{{ ind.label }}</span>
+            @for (v of ind.values; track v.title) {
+              <span class="legend-value" [style.color]="v.color">
+                {{ v.value === null ? '—' : (v.value | number: '1.2-5') }}
+              </span>
+            }
+          </div>
+        }
+      }
+    </div>
+
+    @if (error()) {
+      <div class="chart-error">{{ error() }}</div>
+    }
+
+    <app-chart-host
+      #host
+      [bars]="bars()"
+      [style]="style()"
+      [showVolume]="showVolume()"
+      [indicators]="active()"
+      [precision]="precision()"
+      (loadMore)="loadOlder()"
+      (legend)="onLegend($event)"
+    />
+  </div>
+
+  <!-- Active studies: rename-free, TradingView-style list with inline inputs. -->
+  @if (active().length) {
+    <aside class="studies">
+      @for (item of active(); track item.uid) {
+        <div class="study" [class.hidden-study]="!item.visible">
+          <button
+            type="button"
+            class="study-toggle"
+            (click)="toggleIndicator(item.uid)"
+            [attr.aria-pressed]="item.visible"
+            [title]="item.visible ? 'Hide' : 'Show'"
+          >
+            {{ item.visible ? '👁' : '🚫' }}
+          </button>
+          <span class="study-label">{{ labelFor(item) }}</span>
+          @for (input of inputsFor(item); track input.key) {
+            <label class="study-input">
+              {{ input.label }}
+              <input
+                type="number"
+                [value]="item.params[input.key]"
+                [min]="input.min ?? 1"
+                [max]="input.max ?? 500"
+                (change)="setParam(item.uid, input.key, $any($event.target).value)"
+              />
+            </label>
+          }
+          <button
+            type="button"
+            class="study-remove"
+            (click)="removeIndicator(item.uid)"
+            title="Remove"
+          >
+            ✕
+          </button>
+        </div>
+      }
+    </aside>
+  }
+</div>
