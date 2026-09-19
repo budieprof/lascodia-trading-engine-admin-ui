@@ -149,6 +149,13 @@ interface ParsedChatRec {
   probabilityPct: number | null;
   /** Bare levels drawn on the chart: this branch's own, plus its siblings faintly. */
   chartLevels: SpotRecChartLevel[];
+  /**
+   * True for the card that opens a view: the market as it stood when the opinion was formed,
+   * with every level the view named drawn together at equal weight.
+   */
+  isMarketState: boolean;
+  /** The agent's regime label, shown on the market-state card's badge. */
+  regime: string | null;
   /** True when the operator edited the proposal before filing it. */
   operatorModified: boolean;
   /** The operator's stated reason for the edit, when they gave one. */
@@ -429,10 +436,15 @@ const MAX_THREAD_TURNS = 300;
                           class="rec-badge"
                           [class.buy]="rec.action === 'Buy'"
                           [class.sell]="rec.action === 'Sell'"
-                          [class.hold]="rec.action === 'Hold' && !rec.isScenario"
+                          [class.hold]="
+                            rec.action === 'Hold' && !rec.isScenario && !rec.isMarketState
+                          "
                           [class.scenario]="rec.isScenario"
+                          [class.market-state]="rec.isMarketState"
                         >
-                          @if (rec.isScenario) {
+                          @if (rec.isMarketState) {
+                            🗺 Market state · {{ rec.symbol }} · {{ rec.timeframe }}
+                          } @else if (rec.isScenario) {
                             ◈ If–then · {{ rec.symbol }} · {{ rec.timeframe }}
                           } @else if (rec.action === 'Hold') {
                             ⏸ Stood aside · {{ rec.symbol }} · {{ rec.timeframe }}
@@ -440,7 +452,23 @@ const MAX_THREAD_TURNS = 300;
                             📌 {{ rec.action }} {{ rec.symbol }} · {{ rec.timeframe }}
                           }
                         </span>
-                        @if (rec.isScenario) {
+                        @if (rec.isMarketState) {
+                          <span class="rec-conf">
+                            @if (rec.regime) {
+                              {{ rec.regime }} ·
+                            }
+                            {{
+                              rec.action === 'Buy'
+                                ? 'leaning buy'
+                                : rec.action === 'Sell'
+                                  ? 'leaning sell'
+                                  : 'no lean'
+                            }}
+                            @if (rec.confidencePct !== null) {
+                              · {{ rec.confidencePct }}%
+                            }
+                          </span>
+                        } @else if (rec.isScenario) {
                           <span class="rec-conf">
                             @if (rec.probabilityPct !== null) {
                               {{ rec.probabilityPct }}% ·
@@ -1316,6 +1344,11 @@ const MAX_THREAD_TURNS = 300;
       }
       /* A read-only proposal's standing — an agent that files for itself, or a plan its own
          checker refused. Deliberately quieter than .rec-filed: it is a state, not an outcome. */
+      /* The card that opens a view — visually the heading of the group that follows it. */
+      .rec-badge.market-state {
+        background: color-mix(in srgb, var(--text-primary, #0f172a) 12%, transparent);
+        color: var(--text-primary, #0f172a);
+      }
       .rec-badge.scenario {
         background: color-mix(in srgb, var(--accent) 14%, transparent);
         color: var(--accent);
@@ -2073,6 +2106,7 @@ export class AnalysisChatComponent {
         readOnly?: boolean;
         statusNote?: string | null;
         kind?: string;
+        regime?: string | null;
         probability?: number | null;
         triggerLevel?: number | null;
         triggerOp?: string | null;
@@ -2103,9 +2137,10 @@ export class AnalysisChatComponent {
       // looked at and declined, and requiring an entry would drop the card and with it the
       // chart, which is the only thing a decline has to show.
       const hasEntry = typeof r.entryPrice === 'number';
-      // A scenario is never filable, whatever else the payload says.
+      // Neither a branch nor a market-state card is a trade, whatever else the payload says.
       const isScenario = r.kind === 'scenario';
-      if (action && r.symbol && (hasEntry || action === 'Hold' || isScenario)) {
+      const isMarketState = r.kind === 'view';
+      if (action && r.symbol && (hasEntry || action === 'Hold' || isScenario || isMarketState)) {
         parsed = {
           symbol: r.symbol,
           timeframe: r.timeframe || 'H1',
@@ -2124,6 +2159,8 @@ export class AnalysisChatComponent {
           readOnly: r.readOnly === true,
           statusNote: r.statusNote || null,
           isScenario,
+          isMarketState,
+          regime: r.regime || null,
           probabilityPct:
             typeof r.probability === 'number' ? Math.round(r.probability * 100) : null,
           // The branch's own level solid and labelled; its siblings faint, because where a
@@ -2167,7 +2204,7 @@ export class AnalysisChatComponent {
   /** Seed the inline editor from a parsed rec. */
   /** The rec as a filable one, or null when it is a stand-aside with nothing to file. */
   protected asDirectional(rec: ParsedChatRec): DirectionalChatRec | null {
-    return !rec.isScenario && rec.action !== 'Hold' && rec.entryPrice !== null
+    return !rec.isScenario && !rec.isMarketState && rec.action !== 'Hold' && rec.entryPrice !== null
       ? (rec as DirectionalChatRec)
       : null;
   }
