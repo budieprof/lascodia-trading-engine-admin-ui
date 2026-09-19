@@ -897,6 +897,33 @@ export function paintArrowMark(p: PaintCtx, dir: 'up' | 'down' | 'left' | 'right
  * `toX` bounds the histogram: anchored profiles run to the right edge, fixed
  * range to the second click.
  */
+/**
+ * The time window a volume profile covers, or null if it cannot be determined.
+ *
+ * Extracted and exported ONLY so it can be tested without a canvas — the bug
+ * it guards against is invisible to every other kind of test.
+ *
+ * The anchored variant must never ask what time the right edge of the pane is.
+ * `coordinateToTime` returns null for any coordinate past the last bar, and the
+ * pane always keeps a right-hand margin, so asking reliably returned null: the
+ * painter bailed before drawing and the tool rendered nothing but its anchor
+ * line. An anchored profile runs from its anchor to the newest bar, so its
+ * upper bound is simply unbounded.
+ */
+export function volumeProfileSpan(
+  mode: 'anchored' | 'fixed',
+  fromX: number,
+  secondX: number | undefined,
+  timeAt: (x: number) => number | null,
+): { t0: number; t1: number } | null {
+  const anchor = timeAt(fromX);
+  if (anchor === null) return null;
+  if (mode === 'anchored') return { t0: anchor, t1: Infinity };
+  const other = timeAt(secondX ?? fromX);
+  if (other === null) return null;
+  return { t0: Math.min(anchor, other), t1: Math.max(anchor, other) };
+}
+
 export function paintVolumeProfile(p: PaintCtx, mode: 'anchored' | 'fixed'): void {
   const { ctx, pts, priceAt, precision, width, height } = p;
   if (pts.length < 1) return;
@@ -905,13 +932,14 @@ export function paintVolumeProfile(p: PaintCtx, mode: 'anchored' | 'fixed'): voi
   if (!bars || bars.length === 0 || !timeAt) return;
 
   const fromX = pts[0].x;
-  const toX = mode === 'fixed' ? (pts[1]?.x ?? fromX) : width;
-  const t0 = timeAt(Math.min(fromX, toX));
-  const t1 = timeAt(Math.max(fromX, toX));
-  if (t0 === null || t1 === null) return;
+  const span = volumeProfileSpan(mode, fromX, pts[1]?.x, timeAt);
+  if (!span) return;
+  const { t0, t1 } = span;
 
   const inRange = bars.filter((b) => b.time >= t0 && b.time <= t1 && b.volume > 0);
   if (inRange.length === 0) return;
+
+  const toX = mode === 'fixed' ? (pts[1]?.x ?? fromX) : width;
 
   // Bucket over the price range actually traded in the window, not the
   // viewport: a profile that changes shape when you pan is not a profile.
