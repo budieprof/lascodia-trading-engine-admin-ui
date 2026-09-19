@@ -37,6 +37,15 @@ Thumbs.db
 # storybook output
 /storybook-static
 
+# TradingView Advanced Charts — vendored at build time, NEVER committed.
+#
+# THIS REPO IS PUBLIC (verified 2026-09-19: anonymous api.github.com GET → 200).
+# Advanced Charts is proprietary and distributed through a private repo
+# TradingView grants access to; committing its files here would redistribute
+# them publicly and break the licence. Fetch it into place instead — see
+# docs/CHART_ANALYSIS_PLAN.md §1.2.
+/public/charting_library
+
 # NOTE: Caddyfile used to be ignored here as "local dev tooling for tunnel
 # exposure". It is tracked from 2026-09-19: it is now the reference copy of the
 # config that serves the LIVE operator console (static release files, plus
