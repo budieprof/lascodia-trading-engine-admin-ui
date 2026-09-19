@@ -5,6 +5,8 @@
  * worth saying about itself; the shape below is the contract for saying it.</p>
  */
 
+import type { UiCommandSpec } from './ui-command.types';
+
 /** What a page chooses to publish about its current state. Every field is optional. */
 export interface PageFacts {
   /** One line: what this page is showing right now. "Backtest #480, AUDUSD H4, 11 trades." */
@@ -40,5 +42,10 @@ export interface PageContext {
   /** Which account(s) the console is scoped to — most figures on screen depend on this. */
   scope: { selected: string; accountIds: string; accountName: string | null };
   facts: PageFacts | null;
+  /**
+   * Commands the assistant may run in the browser on this page — see
+   * {@link UiCommandSpec}. Empty on pages that register none, which is most of them.
+   */
+  commands?: UiCommandSpec[];
   capturedAtUtc: string;
 }

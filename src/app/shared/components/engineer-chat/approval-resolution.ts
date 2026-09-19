@@ -48,6 +48,16 @@ export interface ResolveApprovalOptions {
   reason?: string | null;
   /** Approve-with-an-edit, `{route?, query?, body?}`. Never sent with a rejection. */
   amendedArgs?: Record<string, unknown> | null;
+  /**
+   * What the BROWSER did, for a `ui_action` card only.
+   *
+   * A page command (change the chart timeframe, remove a study) has no engine endpoint, so the
+   * engine cannot run it and cannot see whether it worked. The client runs it and reports the
+   * outcome here; the engine's only job is to record it. A report, never an instruction.
+   */
+  clientOutcome?: string | null;
+  /** Whether that client-side command succeeded. `ui_action` cards only. */
+  clientOk?: boolean | null;
 }
 
 /**
@@ -64,6 +74,9 @@ export function resolveApprovalBody(opts?: ResolveApprovalOptions | null): Recor
   if (reason) body['reason'] = reason.slice(0, MAX_REASON_LENGTH);
   if (opts?.amendedArgs && Object.keys(opts.amendedArgs).length > 0)
     body['amendedArgs'] = opts.amendedArgs;
+  const outcome = (opts?.clientOutcome ?? '').trim();
+  if (outcome) body['clientOutcome'] = outcome.slice(0, MAX_REASON_LENGTH);
+  if (typeof opts?.clientOk === 'boolean') body['clientOk'] = opts.clientOk;
   return body;
 }
 

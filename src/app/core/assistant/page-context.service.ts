@@ -7,6 +7,7 @@ import { AccountScopeService } from '@core/scope/account-scope.service';
 import { buildBreadcrumbTrail } from '@core/routing/breadcrumb-trail';
 import { findPage } from '@shared/navigation/page-catalog';
 import type { PageContext, PageFacts } from './page-context.types';
+import { UiCommandService } from './ui-command.service';
 
 /** How much page context may be sent. The engine caps it too; this keeps the wire small. */
 const MAX_CONTEXT_CHARS = 4000;
@@ -38,6 +39,7 @@ export class PageContextService {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly scope = inject(AccountScopeService);
+  private readonly uiCommands = inject(UiCommandService);
 
   /** The live publisher, with the URL it was registered under. */
   private current: { url: string; source: () => PageFacts } | null = null;
@@ -109,6 +111,9 @@ export class PageContextService {
         accountName: single?.accountName ?? null,
       },
       facts,
+      // What the assistant may ask this page to DO. Without these it can only read and
+      // describe — which is how it ended up guessing at chart controls it could not see.
+      commands: this.uiCommands.specs(),
       capturedAtUtc: new Date().toISOString(),
     };
   }

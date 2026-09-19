@@ -55,6 +55,8 @@ import {
   type ChatItem,
 } from '@shared/components/engineer-chat/engineer-turns';
 import { isPinnedToBottom, jumpLabel, mergeOptimisticTurns } from './chat-live';
+import { UI_ACTION_TOOL, parseUiAction } from './ui-action';
+import { UiCommandService } from '@core/assistant/ui-command.service';
 import { structuralEqual } from '@core/signals/structural-equal';
 import {
   SpotRecChartComponent,
@@ -1487,6 +1489,7 @@ export class AnalysisChatComponent {
   private readonly marketData = inject(MarketDataService);
   private readonly algoEngineer = inject(AlgoEngineerService);
   private readonly realtime = inject(RealtimeService);
+  private readonly uiCommands = inject(UiCommandService);
 
   /** LlmInvocation id of the analysis being discussed (the thread anchor).
    *  When it changes (operator re-ran the analysis) the thread reloads. */
@@ -1744,6 +1747,14 @@ export class AnalysisChatComponent {
   private liveReloadTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
+    // Carry out any page command the assistant proposed that needs no permission. Reads the
+    // thread signal so it fires on the reply that created the card and on every refresh after
+    // — `autoRan` is what stops the second of those repeating the command.
+    effect(() => {
+      const turns = this.messages();
+      untracked(() => this.autoRunUiActions(turns));
+    });
+
     // Load (or reload) the thread + monitors whenever the anchor id changes —
     // including the first render and after the operator re-runs the analysis.
     //
@@ -2013,6 +2024,24 @@ export class AnalysisChatComponent {
     opts?: ResolveApprovalOptions,
   ): void {
     if (this.resolvingId() !== null) return;
+
+    // A page command runs HERE, not on the engine. Run it first, then report what happened —
+    // the engine records the outcome rather than executing anything, so if this ran the other
+    // way round the thread would say "Confirmed" for a command that never executed.
+    if (confirm && m.toolName === UI_ACTION_TOOL) {
+      void this.runUiAction(m, opts);
+      return;
+    }
+
+    this.postResolve(m, confirm, opts);
+  }
+
+  /** The plain resolve round-trip, once any client-side work is done. */
+  private postResolve(
+    m: SpotAnalysisFollowUpTurnDto,
+    confirm: boolean,
+    opts?: ResolveApprovalOptions,
+  ): void {
     const id = this.llmInvocationId();
     this.resolvingId.set(m.id);
     this.error.set(null);
@@ -2034,6 +2063,68 @@ export class AnalysisChatComponent {
       },
     });
   }
+
+  /**
+   * Run a page command the assistant proposed, then report the outcome.
+   *
+   * <p>Only commands a MOUNTED page registered can run — {@link UiCommandService} refuses
+   * anything else — so a model that invents a command name, or names a real one after the
+   * operator has navigated away, gets a refusal rather than a surprise.</p>
+   */
+  private async runUiAction(
+    m: SpotAnalysisFollowUpTurnDto,
+    opts?: ResolveApprovalOptions,
+  ): Promise<void> {
+    const call = parseUiAction(m.toolArgsJson);
+    if (!call) {
+      this.postResolve(m, false, {
+        ...opts,
+        reason: 'The proposed page command could not be read.',
+      });
+      return;
+    }
+    this.resolvingId.set(m.id);
+    const result = await this.uiCommands.execute(call.command, call.args);
+    this.resolvingId.set(null);
+    // Confirm either way: the card records what happened, and a failed command is a fact the
+    // thread should carry, not something to hide by dismissing the card.
+    this.postResolve(m, true, {
+      ...opts,
+      clientOk: result.ok,
+      clientOutcome: result.message,
+    });
+  }
+
+  /**
+   * Carry out the page commands that need no permission.
+   *
+   * <p>Most chart commands are view changes the operator could make from the toolbar in one
+   * click and undo in one more. Routing those through an approval card would make asking the
+   * assistant slower than not asking it, which is the whole reason it exists. Only a command
+   * the page marked `confirm` — the ones that destroy work — waits for a click.</p>
+   */
+  private autoRunUiActions(turns: readonly SpotAnalysisFollowUpTurnDto[]): void {
+    if (this.resolvingId() !== null) return;
+    const pending = turns.find(
+      (t) =>
+        t.role === 'ActionProposal' &&
+        t.toolName === UI_ACTION_TOOL &&
+        this.isPendingStatus(t.actionStatus) &&
+        !this.autoRan.has(t.id),
+    );
+    if (!pending) return;
+    const call = parseUiAction(pending.toolArgsJson);
+    if (!call) return;
+    if (!this.uiCommands.has(call.command)) return;
+    if (this.uiCommands.requiresConfirmation(call.command)) return;
+    // Once per turn: the thread is refetched after every resolve, and re-running on each
+    // refresh would repeat the command.
+    this.autoRan.add(pending.id);
+    void this.runUiAction(pending);
+  }
+
+  /** Turn ids already auto-run, so a thread refresh cannot replay them. */
+  private readonly autoRan = new Set<number>();
 
   /**
    * An approval card renders its own failure, so the thread's error line stays quiet for it — the

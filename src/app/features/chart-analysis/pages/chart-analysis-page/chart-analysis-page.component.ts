@@ -44,6 +44,9 @@ import type {
   NewsPressureLeg,
 } from '@features/news-intel/news-intel.types';
 import { NotificationService } from '@core/notifications/notification.service';
+import { PageContextService } from '@core/assistant/page-context.service';
+import { UiCommandService } from '@core/assistant/ui-command.service';
+import { chartCommands } from '../../chart-commands';
 import type { EventMark } from '../../overlays/event-marks-renderer';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import type { PriceOverlay } from '../../overlays/overlay-renderer';
@@ -123,6 +126,8 @@ export class ChartAnalysisPageComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly pageContext = inject(PageContextService);
+  private readonly uiCommands = inject(UiCommandService);
 
   private readonly host = viewChild<ChartHostComponent>('host');
 
@@ -361,6 +366,77 @@ export class ChartAnalysisPageComponent {
 
   constructor() {
     this.loadSymbols();
+
+    // Tell the assistant what this page is showing, and what it may do to it.
+    //
+    // Both halves matter. Without the FACTS the assistant cannot see the chart at all, and
+    // its only honest answer about a study or a style is a guess at how charting widgets
+    // usually work — which is how it came to describe controls (an "eye / gear / ×" cluster)
+    // that this build does not have. Without the COMMANDS it can describe the chart
+    // perfectly and still not change it, because chart state is client-side and every other
+    // action it can take is an engine endpoint.
+    this.pageContext.publish(() => ({
+      headline: `Chart analysis — ${this.symbol()} ${this.resolutionLabel(this.resolution())}, ${this.style()}, ${this.active().length} stud${this.active().length === 1 ? 'y' : 'ies'}`,
+      record: { kind: 'symbol', id: this.symbol(), label: this.symbol() },
+      filters: {
+        timeframe: this.resolution(),
+        style: this.style(),
+        scaleMode: this.scaleMode(),
+        timezone: this.timezone(),
+        splitLayout: this.splitLayout(),
+        volume: this.showVolume(),
+        tradeOverlays: this.showOverlays(),
+        economicEvents: this.showEvents(),
+        magnet: this.magnet(),
+        replay: this.replayActive(),
+      },
+      figures: {
+        barsLoaded: this.bars().length,
+        drawings: this.drawings.visible().length,
+        studies:
+          this.active()
+            .map((i) => this.labelFor(i))
+            .join(', ') || '(none)',
+        lastBarUtc: this.bars().at(-1)?.time
+          ? new Date(this.bars().at(-1)!.time).toISOString()
+          : null,
+      },
+      ids: { studies: this.active().map((i) => i.uid) },
+    }));
+
+    this.uiCommands.register(
+      chartCommands({
+        symbol: this.symbol,
+        resolution: this.resolution,
+        style: this.style,
+        showVolume: this.showVolume,
+        showOverlays: this.showOverlays,
+        showEvents: this.showEvents,
+        magnet: this.magnet,
+        scaleMode: this.scaleMode,
+        timezone: this.timezone,
+        splitLayout: this.splitLayout,
+        active: this.active,
+        boxSizeAtr: this.boxSizeAtr,
+        drawingCount: () => this.drawings.visible().length,
+        selectSymbol: (s) => this.selectSymbol(s),
+        selectResolution: (r) => this.selectResolution(r as TvResolution),
+        addIndicator: (id) => this.addIndicator(id),
+        removeIndicator: (uid) => this.removeIndicator(uid),
+        toggleIndicator: (uid) => this.toggleIndicator(uid),
+        setIndicatorParam: (uid, key, value) => this.setParam(uid, key, String(value)),
+        setSplitLayout: (id) => this.setSplitLayout(id),
+        selectTool: (kind) => this.tool.set(kind),
+        clearDrawings: () => this.drawings.clearVisible(),
+        takeSnapshot: () => this.takeSnapshot(),
+        knownSymbols: () =>
+          this.symbols()
+            .map((p) => p.symbol ?? '')
+            .filter(Boolean),
+        timezones: () => this.timezones,
+      }),
+      this.destroyRef,
+    );
 
     // Keep the live-price subscriptions in step with what is on screen: the
     // primary chart, every comparison panel, and — only while it is open —
