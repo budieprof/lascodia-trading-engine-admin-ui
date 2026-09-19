@@ -330,7 +330,24 @@ cmd_status() {
     case "$served_sha" in
       "$head_sha"|"$head_sha-dirty") ok "live bundle matches the checked-out commit" ;;
       "") warn "origin serves a config.json with no buildSha — is Caddy still proxying ng serve?" ;;
-      *)  warn "live bundle ($served_sha) is NOT the checked-out commit ($head_sha) — publish to update" ;;
+      *)
+        # Don't cry wolf over commits that cannot change the bundle. A docs-only
+        # commit moves HEAD past the live release while the compiled output is
+        # byte-identical; warning there teaches you to ignore the warning, which
+        # costs you the one time it means something. Compare the INPUTS instead.
+        local base inputs_changed=1
+        base="${served_sha%-dirty}"
+        if git cat-file -e "${base}^{commit}" 2>/dev/null; then
+          git diff --quiet "$base" HEAD -- \
+            src public angular.json package.json package-lock.json \
+            tsconfig.json tsconfig.app.json 2>/dev/null && inputs_changed=0
+        fi
+        if [ "$inputs_changed" = "0" ]; then
+          ok "live bundle is $served_sha, HEAD is $head_sha — but no bundle input changed between them"
+        else
+          warn "live bundle ($served_sha) is NOT the checked-out commit ($head_sha) — publish to update"
+        fi
+        ;;
     esac
   else
     warn "could not read $ORIGIN/config.json — is Caddy running?"
