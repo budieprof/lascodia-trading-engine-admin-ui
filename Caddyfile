@@ -1,0 +1,101 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# REFERENCE COPY of the admin-UI site block.
+#
+# The file Caddy actually runs is /opt/homebrew/etc/Caddyfile (a root
+# LaunchDaemon: `sudo brew services start caddy`). That installed file carries
+# this same :8080 site — under a longer header recording why it changed — plus a
+# second site, an `app.codiapay.com:443` LAN fast path used only by EA instances
+# on other machines, which has nothing to do with the UI and is not reproduced
+# here.
+#
+# cloudflared maps app.codiapay.com → localhost:8080, so this block is what the
+# outside world reaches. Until 2026-09-19 its catch-all proxied `ng serve`,
+# which made every source edit a live deploy to the operator console; it now
+# serves a compiled release off disk and no Node process is in the path at all.
+#
+# Keep the two in sync when you change this one:
+#
+#     cp Caddyfile /opt/homebrew/etc/Caddyfile   # then re-append the LAN block
+#     caddy reload --config /opt/homebrew/etc/Caddyfile
+#
+# Deploying the UI does NOT require touching either file — `scripts/release.sh
+# publish` swaps a symlink underneath the root below.
+# ─────────────────────────────────────────────────────────────────────────────
+
+:8080 {
+	# Engine API — anything under /api/* tunnels straight to the Docker
+	# container's exposed port. Cloudflared can't reach this port directly
+	# from outside, hence the proxy. This also carries the SignalR hub at
+	# /api/hubs/trading; reverse_proxy upgrades WebSockets automatically.
+	handle /api/* {
+		reverse_proxy localhost:5081
+	}
+
+	# Health probes live at the SERVER ROOT (/health, /health/live,
+	# /health/ready), not under /api/*. Without this they fell through to the
+	# catch-all below and returned 404 HTML, so every EA reaching the engine
+	# through this tunnel logged "Health check failed (HTTP 404)" every 30s.
+	# That feeds ConnectionMonitor, which counts it toward "engine unreachable"
+	# -- i.e. a proxy routing gap was contributing to SAFE_MODE entries on the
+	# remote instances. Local instances talk to :5081 directly and never saw it,
+	# which is why it looked EA-specific.
+	#
+	# Now that the catch-all is a static SPA file server, losing this block
+	# would be WORSE, not better: try_files would answer /health with
+	# index.html and HTTP 200, so every EA would read a dead engine as healthy
+	# and the dead-man switch would never fire. Do not remove it.
+	handle /health* {
+		reverse_proxy localhost:5081
+	}
+
+	# The compiled admin UI.
+	handle {
+		root * /opt/homebrew/var/www/lascodia-admin/current
+
+		# Two cache classes, mutually exclusive by construction.
+		#
+		# Angular's production build emits content-addressed filenames
+		# (`chunk-245PJLHT.js`, `styles-ABCD1234.css`): the bytes can never
+		# change under a given name, so they are safe to cache for a year. A
+		# deploy publishes NEW names and index.html points at them.
+		#
+		# Everything else — index.html, config.json, the unhashed icons copied
+		# out of public/, and every SPA deep link that try_files rewrites to
+		# index.html — gets `no-cache`, which is "store it but revalidate before
+		# use". The browser still gets a cheap 304 for an unchanged 122 kB icon,
+		# but a redeploy is picked up on the very next load instead of serving a
+		# stale shell that references chunks which no longer exist.
+		#
+		# `header` runs BEFORE try_files in Caddy's directive order, so these
+		# match the ORIGINAL request path — which is what makes the deep-link
+		# case land in the no-cache class rather than looking like index.html.
+		@hashed path_regexp \-[A-Z0-9]{8,}\.[a-z0-9]+$
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+
+		@revalidate not path_regexp \-[A-Z0-9]{8,}\.[a-z0-9]+$
+		header @revalidate Cache-Control "no-cache"
+
+		# The uncontroversial half of docker/nginx.conf's header set.
+		#
+		# nginx.conf also sends a Content-Security-Policy. Deliberately NOT
+		# copied here yet: that container has never actually served this app in
+		# production (its image could not even build for part of Sep 2026), so
+		# the policy is unproven, and a single missed directive fails closed on
+		# one page of the live console — silently, and only for whoever opens
+		# that page. Worth adding behind a report-only pass first.
+		header {
+			X-Content-Type-Options nosniff
+			X-Frame-Options DENY
+			Referrer-Policy strict-origin-when-cross-origin
+			Permissions-Policy "camera=(), microphone=(), geolocation=()"
+			-Server
+		}
+
+		encode zstd gzip
+
+		# SPA fallback: client-side routes (/ea-instances, /market-data/...)
+		# are not files on disk, so they must resolve to the shell.
+		try_files {path} /index.html
+		file_server
+	}
+}

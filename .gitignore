@@ -37,5 +37,9 @@ Thumbs.db
 # storybook output
 /storybook-static
 
-# Local dev tooling for tunnel exposure (see Caddyfile comments)
-Caddyfile
+# NOTE: Caddyfile used to be ignored here as "local dev tooling for tunnel
+# exposure". It is tracked from 2026-09-19: it is now the reference copy of the
+# config that serves the LIVE operator console (static release files, plus
+# /api/* and /health* proxying to the engine), not a throwaway. Ignoring it
+# meant the only copy of that routing lived in /opt/homebrew/etc on one machine,
+# with no history and no way to see what a bad edit changed. It holds no secrets.

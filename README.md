@@ -15,18 +15,75 @@ The dev server proxies to the API at `http://localhost:5081` by default (see [pu
 
 ## Scripts
 
-| Script                  | Purpose                                                         |
-| ----------------------- | --------------------------------------------------------------- |
-| `npm start`             | `ng serve` on port 4200                                         |
-| `npm run build`         | Production build (output: `dist/lascodia-admin/browser/`)       |
-| `npm run watch`         | Development build with watch mode                               |
-| `npm test`              | Vitest unit tests (one-shot)                                    |
-| `npm run test:watch`    | Vitest in watch mode                                            |
-| `npm run test:coverage` | Vitest + v8 coverage report                                     |
-| `npm run e2e:install`   | Download Playwright browsers (one-time)                         |
-| `npm run e2e`           | Playwright smoke tests (starts a dev server if none is running) |
-| `npm run e2e:ui`        | Playwright interactive runner                                   |
-| `npm run icons`         | Regenerate the favicon + PWA icons (see Brand assets)           |
+| Script                     | Purpose                                                         |
+| -------------------------- | --------------------------------------------------------------- |
+| `npm start`                | `ng serve` on port 4200                                         |
+| `npm run build`            | Production build (output: `dist/lascodia-admin/browser/`)       |
+| `npm run watch`            | Development build with watch mode                               |
+| `npm test`                 | Vitest unit tests (one-shot)                                    |
+| `npm run test:watch`       | Vitest in watch mode                                            |
+| `npm run test:coverage`    | Vitest + v8 coverage report                                     |
+| `npm run e2e:install`      | Download Playwright browsers (one-time)                         |
+| `npm run e2e`              | Playwright smoke tests (starts a dev server if none is running) |
+| `npm run e2e:ui`           | Playwright interactive runner                                   |
+| `npm run icons`            | Regenerate the favicon + PWA icons (see Brand assets)           |
+| `npm run release`          | Build + publish the live console (see Deployment)               |
+| `npm run release:status`   | What is live vs what is checked out                             |
+| `npm run release:rollback` | Swap the live console back to the previous release              |
+
+## Deployment
+
+The live operator console — `https://app.codiapay.com`, and `http://localhost:8080`
+on this machine — serves a **compiled bundle off disk**. It is deliberately
+decoupled from development: `ng serve` on :4200 is yours to break, and nothing
+you do there reaches the live console until you publish.
+
+```bash
+./scripts/release.sh publish      # build → stamp → stage → atomic swap → verify
+./scripts/release.sh status       # what is live vs what is checked out
+./scripts/release.sh list         # releases on disk, live one marked
+./scripts/release.sh rollback     # back to the previous release (or name one)
+```
+
+**How it is wired.** `cloudflared` maps `app.codiapay.com` to Caddy on `:8080`
+(config: `/opt/homebrew/etc/Caddyfile`, reference copy in [Caddyfile](Caddyfile)).
+Caddy proxies `/api/*` and `/health*` to the engine on `:5081` and serves
+everything else as static files from
+`/opt/homebrew/var/www/lascodia-admin/current` — a symlink to one immutable
+release directory:
+
+```
+/opt/homebrew/var/www/lascodia-admin/
+  releases/20260919-113545-f166042/     ← one per publish, never mutated
+  current -> releases/20260919-113545-f166042
+```
+
+`publish` swaps that symlink with `rename(2)`, so a request sees either the whole
+old release or the whole new one, and going live needs no Caddy reload. Rollback
+is the same swap in reverse — the previous release is still on disk (last 5 are
+kept).
+
+**Why not `ng serve`.** Until 2026-09-19 Caddy's catch-all proxied the dev
+server, so the live console _was_ the dev build: every source edit hot-reloaded
+straight onto the screen an operator was trading from, the served bundle was
+unminified with public source maps, `ng build --configuration production` was
+never on the path (which is how it stayed red for three days in Sep 2026 — see
+the note in [angular.json](angular.json)'s budgets), and the whole console hung
+off one hand-started `npm start` that no reboot would bring back. There is now
+no Node process in the serving path at all.
+
+**Verification is part of publishing, not an afterthought.** Each release stamps
+a unique `releaseId` into its `config.json`; after the swap the script re-reads
+`config.json` _over HTTP_ and refuses to report success unless the origin is
+serving that exact release. It also checks a deep link resolves to the SPA shell
+and that `/health` still reaches the engine. Publishing to disk proves nothing
+about what a browser is handed — an earlier version of this script checked only
+the git SHA, and since two publishes of one commit share a SHA, it cheerfully
+reported success for three deploys that never went live.
+
+**Retargeting the API.** Releases bake `apiBaseUrl: ""` (same-origin), which is
+the only shape that works for a browser arriving through the tunnel — it cannot
+reach `localhost:5081`. Override per publish with `API_BASE_URL=... npm run release`.
 
 ## Runtime configuration
 
@@ -35,9 +92,13 @@ The Angular bundle is environment-agnostic. At boot the app fetches [public/conf
 To retarget the API without rebuilding:
 
 - **Local dev**: edit `public/config.json`.
+- **Published release**: `API_BASE_URL=... npm run release` — the publish script writes the release's own `config.json` (defaults to `""`, i.e. same-origin through Caddy).
 - **Docker**: set `API_BASE_URL` when running the container — the entrypoint rewrites `/usr/share/nginx/html/config.json` on start.
 
 ## Docker
+
+Not the path this deployment uses — see [Deployment](#deployment) — but the image
+is kept working for anywhere the UI needs to ship as a container.
 
 ```bash
 docker build -t lascodia-admin .
