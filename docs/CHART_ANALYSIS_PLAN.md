@@ -312,12 +312,16 @@ Checked against TradingView's docs (`ui_elements`, the `ChartStyle` enum, the
 `DrawingToolIdentifier` type), not against impressions of the product.
 Last measured 2026-09-19.
 
-### 12.1 Chart styles — 17 of 18 ✅
+### 12.1 Chart styles — 16 of 18 🟡
 
-`ChartStyle` has 18 values. Shipped: Candle, HollowCandle, HeikinAshi, Bar,
-HiLo, Line, LineWithMarkers, Stepline, Area, HLCArea, Baseline, Column, **Renko,
-Line Break, Kagi, Point & Figure**. Only `VolCandle` is missing (it needs
-per-bar volume-scaled widths, a custom series).
+`ChartStyle` has 18 values. Shipped (16): Candle, HollowCandle, HeikinAshi, Bar,
+HLCBars, Line, LineWithMarkers, Stepline, Area, HLCArea, Baseline, Column,
+**Renko, Line Break, Kagi, Point & Figure**.
+
+Missing (2), both needing a custom series rather than a series option:
+`VolCandle` (per-bar volume-scaled widths) and `HiLo` (a range bar with no open
+OR close tick — a bar series without the open tick is HLCBars, which is what we
+ship).
 
 The last four rebuild the bar array from price movement — see
 `chart/price-transforms.ts` for why that breaks bar-time uniqueness and how it

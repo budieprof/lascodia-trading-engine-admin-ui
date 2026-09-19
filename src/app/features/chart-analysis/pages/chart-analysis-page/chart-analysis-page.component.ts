@@ -60,7 +60,7 @@ const CHART_STYLES: Array<{ id: ChartStyle; label: string }> = [
   { id: 'hollow', label: 'Hollow candles' },
   { id: 'heikin-ashi', label: 'Heikin Ashi' },
   { id: 'bars', label: 'Bars' },
-  { id: 'hilo', label: 'High-Low' },
+  { id: 'hlc-bars', label: 'HLC bars' },
   { id: 'line', label: 'Line' },
   { id: 'line-markers', label: 'Line with markers' },
   { id: 'stepline', label: 'Step line' },

@@ -64,7 +64,7 @@ export type ChartStyle =
   | 'area'
   | 'baseline'
   | 'heikin-ashi'
-  | 'hilo'
+  | 'hlc-bars'
   | 'column'
   | 'line-markers'
   | 'stepline'
@@ -435,13 +435,14 @@ export class ChartHostComponent implements OnDestroy {
         });
       }
       this.price.setData(data as SeriesDataItemTypeMap['Line'][]);
-    } else if (style === 'bars' || style === 'hilo') {
-      // HiLo is a bar series without the open/close ticks — the range only.
+    } else if (style === 'bars' || style === 'hlc-bars') {
+      // Dropping the open tick is what makes a bar series HLC bars. True
+      // HiLo (no ticks at all) needs a custom series and is not shipped.
       this.price = this.chart.addSeries(BarSeries, {
         upColor: p.up,
         downColor: p.down,
-        openVisible: style !== 'hilo',
-        thinBars: style !== 'hilo',
+        openVisible: style !== 'hlc-bars',
+        thinBars: style !== 'hlc-bars',
         priceFormat,
       });
       this.price.setData(source.map(toOhlcData) as SeriesDataItemTypeMap['Bar'][]);
