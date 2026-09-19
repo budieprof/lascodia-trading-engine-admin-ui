@@ -1375,3 +1375,305 @@ export function bandwidth(closes: number[], period = 20, mult = 2): Maybe[] {
     return (u - l) / m;
   });
 }
+
+/**
+ * Chande Momentum Oscillator — (up − down) / (up + down) over the period.
+ *
+ * Unlike RSI this uses raw sums rather than Wilder smoothing, so it swings
+ * harder and reaches the extremes RSI rarely touches. That is the point of
+ * having both.
+ */
+export function cmo(closes: number[], period = 9): Maybe[] {
+  const out: Maybe[] = nulls(closes.length);
+  if (closes.length <= period) return out;
+  for (let i = period; i < closes.length; i++) {
+    let up = 0;
+    let down = 0;
+    for (let k = i - period + 1; k <= i; k++) {
+      const d = closes[k] - closes[k - 1];
+      if (d > 0) up += d;
+      else down -= d;
+    }
+    const denom = up + down;
+    // A period with no movement at all is 0 momentum, not a divide by zero.
+    out[i] = denom === 0 ? 0 : ((up - down) / denom) * 100;
+  }
+  return out;
+}
+
+/**
+ * Connors RSI — the average of three components: a short RSI of price, an RSI
+ * of the current up/down STREAK, and the percent-rank of the latest return.
+ *
+ * The streak term is what makes it different from RSI: it measures how long a
+ * run has persisted, not just how far price moved.
+ */
+export function connorsRsi(closes: number[], rsiLen = 3, streakLen = 2, rankLen = 100): Maybe[] {
+  const n = closes.length;
+  const priceRsi = rsi(closes, rsiLen);
+
+  // Signed run length: +3 means three consecutive up closes.
+  const streaks: number[] = new Array<number>(n).fill(0);
+  for (let i = 1; i < n; i++) {
+    const d = closes[i] - closes[i - 1];
+    if (d > 0) streaks[i] = streaks[i - 1] > 0 ? streaks[i - 1] + 1 : 1;
+    else if (d < 0) streaks[i] = streaks[i - 1] < 0 ? streaks[i - 1] - 1 : -1;
+    else streaks[i] = 0;
+  }
+  const streakRsi = rsi(streaks, streakLen);
+
+  const out: Maybe[] = nulls(n);
+  for (let i = 0; i < n; i++) {
+    const a = priceRsi[i];
+    const b = streakRsi[i];
+    if (a === null || b === null || i < 1) continue;
+    const window = Math.min(rankLen, i);
+    if (window < 2) continue;
+    const today = (closes[i] - closes[i - 1]) / (closes[i - 1] || 1);
+    let below = 0;
+    for (let k = i - window + 1; k <= i - 1; k++) {
+      const prior = (closes[k] - closes[k - 1]) / (closes[k - 1] || 1);
+      if (prior < today) below++;
+    }
+    const rank = (below / (window - 1)) * 100;
+    out[i] = (a + b + rank) / 3;
+  }
+  return out;
+}
+
+/**
+ * Chande Kroll Stop — ATR-offset extremes, then the extreme of THOSE.
+ *
+ * The double pass is what separates it from a plain ATR band: the first pass
+ * offsets each bar's high/low, the second takes the running extreme of the
+ * offsets, so the stop ratchets and never loosens within a trend.
+ */
+export function chandeKrollStop(
+  bars: Ohlc[],
+  atrLength = 10,
+  atrMult = 1,
+  stopLength = 9,
+): { long: Maybe[]; short: Maybe[] } {
+  const a = atr(bars, atrLength);
+  const n = bars.length;
+  const preHigh: Maybe[] = nulls(n);
+  const preLow: Maybe[] = nulls(n);
+  for (let i = 0; i < n; i++) {
+    const av = a[i];
+    if (av === null) continue;
+    let hi = -Infinity;
+    let lo = Infinity;
+    for (let k = Math.max(0, i - atrLength + 1); k <= i; k++) {
+      hi = Math.max(hi, bars[k].high);
+      lo = Math.min(lo, bars[k].low);
+    }
+    preHigh[i] = hi - atrMult * av;
+    preLow[i] = lo + atrMult * av;
+  }
+  const long: Maybe[] = nulls(n);
+  const short: Maybe[] = nulls(n);
+  for (let i = 0; i < n; i++) {
+    let hi = -Infinity;
+    let lo = Infinity;
+    let seen = 0;
+    for (let k = Math.max(0, i - stopLength + 1); k <= i; k++) {
+      const ph = preHigh[k];
+      const pl = preLow[k];
+      if (ph === null || pl === null) continue;
+      hi = Math.max(hi, ph);
+      lo = Math.min(lo, pl);
+      seen++;
+    }
+    if (seen === 0) continue;
+    long[i] = hi;
+    short[i] = lo;
+  }
+  return { long, short };
+}
+
+/**
+ * McGinley Dynamic — a moving average that adjusts its own speed to the market.
+ *
+ * The divisor tracks how far price has run from the line, so it accelerates in
+ * a fast market and slows in a quiet one, which is what stops it lagging the
+ * way a fixed-period EMA does through a gap.
+ */
+export function mcginley(closes: number[], period = 14): Maybe[] {
+  const out: Maybe[] = nulls(closes.length);
+  if (closes.length === 0) return out;
+  let md = closes[0];
+  out[0] = md;
+  for (let i = 1; i < closes.length; i++) {
+    const ratio = md === 0 ? 1 : closes[i] / md;
+    // ratio**4 is the defining term. Guard a zero ratio so a bad tick cannot
+    // divide by zero and poison every later value.
+    const denom = period * Math.pow(ratio || 1, 4);
+    md = md + (closes[i] - md) / (denom || 1);
+    out[i] = md;
+  }
+  return out;
+}
+
+/** Rolling sample standard deviation. */
+export function stdev(values: number[], period = 20): Maybe[] {
+  const out: Maybe[] = nulls(values.length);
+  if (period <= 1) return out;
+  for (let i = period - 1; i < values.length; i++) {
+    let sum = 0;
+    for (let k = i - period + 1; k <= i; k++) sum += values[k];
+    const mean = sum / period;
+    let sq = 0;
+    for (let k = i - period + 1; k <= i; k++) sq += (values[k] - mean) ** 2;
+    // Clamp: accumulated float error can leave sq at -1e-17 on a flat series,
+    // and Math.sqrt of that is NaN, which blanks the pane.
+    out[i] = Math.sqrt(Math.max(0, sq) / (period - 1));
+  }
+  return out;
+}
+
+/**
+ * True Strength Index — double-smoothed momentum over double-smoothed absolute
+ * momentum, as a percentage.
+ */
+export function tsi(
+  closes: number[],
+  long = 25,
+  short = 13,
+  signalLen = 13,
+): {
+  tsi: Maybe[];
+  signal: Maybe[];
+} {
+  const n = closes.length;
+  const mom: number[] = new Array<number>(n).fill(0);
+  const absMom: number[] = new Array<number>(n).fill(0);
+  for (let i = 1; i < n; i++) {
+    mom[i] = closes[i] - closes[i - 1];
+    absMom[i] = Math.abs(mom[i]);
+  }
+  const smooth = (v: number[]) => denseMap(ema(v, long), (d) => ema(d, short));
+  const num = smooth(mom);
+  const den = smooth(absMom);
+  const out: Maybe[] = nulls(n);
+  for (let i = 0; i < n; i++) {
+    const a = num[i];
+    const b = den[i];
+    if (a === null || b === null || b === 0) continue;
+    out[i] = (a / b) * 100;
+  }
+  return { tsi: out, signal: denseMap(out, (d) => ema(d, signalLen)) };
+}
+
+/**
+ * SMI Ergodic — the TSI line with its signal, under Blau's naming.
+ *
+ * Identical maths to `tsi` with different default lengths; kept as its own
+ * entry because operators look for it by this name and expect these defaults.
+ */
+export function smiErgodic(closes: number[], long = 20, short = 5, signalLen = 5) {
+  return tsi(closes, long, short, signalLen);
+}
+
+/**
+ * Relative Volatility Index — RSI applied to standard deviation instead of
+ * price, so it measures whether VOLATILITY is rising or falling.
+ */
+export function relativeVolatilityIndex(closes: number[], period = 10, stdevLen = 10): Maybe[] {
+  const sd = stdev(closes, stdevLen);
+  const n = closes.length;
+  const up: number[] = new Array<number>(n).fill(0);
+  const down: number[] = new Array<number>(n).fill(0);
+  for (let i = 1; i < n; i++) {
+    const s = sd[i];
+    if (s === null) continue;
+    if (closes[i] > closes[i - 1]) up[i] = s;
+    else if (closes[i] < closes[i - 1]) down[i] = s;
+  }
+  const au = wilder(up, period);
+  const ad = wilder(down, period);
+  const out: Maybe[] = nulls(n);
+  for (let i = 0; i < n; i++) {
+    const u = au[i];
+    const d = ad[i];
+    if (u === null || d === null) continue;
+    out[i] = u + d === 0 ? 50 : (u / (u + d)) * 100;
+  }
+  return out;
+}
+
+/**
+ * Williams Fractals — a bar whose high (or low) is the most extreme of the
+ * `2*size+1` bars centred on it.
+ *
+ * Confirmation LAGS by `size` bars by construction: a fractal cannot be known
+ * until that many later bars have printed. The value is placed on the pivot
+ * bar, which is where it belongs visually, but nothing here is tradeable at
+ * that bar's close — it was not knowable yet.
+ */
+export function fractals(bars: Ohlc[], size = 2): { up: Maybe[]; down: Maybe[] } {
+  const n = bars.length;
+  const up: Maybe[] = nulls(n);
+  const down: Maybe[] = nulls(n);
+  for (let i = size; i < n - size; i++) {
+    let isHigh = true;
+    let isLow = true;
+    for (let k = i - size; k <= i + size; k++) {
+      if (k === i) continue;
+      if (bars[k].high >= bars[i].high) isHigh = false;
+      if (bars[k].low <= bars[i].low) isLow = false;
+    }
+    if (isHigh) up[i] = bars[i].high;
+    if (isLow) down[i] = bars[i].low;
+  }
+  return { up, down };
+}
+
+/**
+ * Zig Zag — pivots connected only once price reverses by `deviation` percent.
+ *
+ * Like fractals this REPAINTS: the most recent leg is provisional and moves as
+ * new bars arrive. It is a structure-reading aid, never a signal.
+ */
+export function zigzag(bars: Ohlc[], deviation = 5): Maybe[] {
+  const n = bars.length;
+  const out: Maybe[] = nulls(n);
+  if (n === 0) return out;
+  const threshold = deviation / 100;
+
+  // Each entry is a confirmed turning point. While price keeps moving the same
+  // way the LAST entry is rewritten to the new extreme rather than appended —
+  // a zig zag has one pivot per leg, not one per bar that made a new high.
+  const pivots: Array<{ i: number; price: number }> = [{ i: 0, price: bars[0].close }];
+  let anchor = bars[0].close;
+  let dir: 1 | -1 | 0 = 0;
+
+  for (let i = 1; i < n; i++) {
+    const base = anchor || 1;
+    const rise = (bars[i].high - anchor) / base;
+    const fall = (anchor - bars[i].low) / base;
+
+    if (dir !== 1 && rise >= threshold) {
+      pivots.push({ i, price: bars[i].high });
+      anchor = bars[i].high;
+      dir = 1;
+    } else if (dir !== -1 && fall >= threshold) {
+      pivots.push({ i, price: bars[i].low });
+      anchor = bars[i].low;
+      dir = -1;
+    } else if (dir === 1 && bars[i].high > anchor) {
+      pivots[pivots.length - 1] = { i, price: bars[i].high };
+      anchor = bars[i].high;
+    } else if (dir === -1 && bars[i].low < anchor) {
+      pivots[pivots.length - 1] = { i, price: bars[i].low };
+      anchor = bars[i].low;
+    }
+  }
+
+  for (const pivot of pivots) out[pivot.i] = pivot.price;
+  return out;
+}
+
+/** Net volume — volume signed by the bar's direction. */
+export function netVolume(bars: Ohlc[]): Maybe[] {
+  return bars.map((b) => (b.close === b.open ? 0 : b.close > b.open ? b.volume : -b.volume));
+}

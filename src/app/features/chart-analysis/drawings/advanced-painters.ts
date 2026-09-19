@@ -20,6 +20,17 @@ export interface PaintCtx {
   /** Price at a y coordinate, for tools that label levels. */
   priceAt: (y: number) => number | null;
   precision: number;
+  /**
+   * The bars currently loaded, for the two volume-profile tools.
+   *
+   * Every other painter here is pure geometry and deliberately stays that way
+   * — a painter that reaches for market data is one that can disagree with the
+   * series it is drawn over. The profiles are the exception because a volume
+   * histogram IS the data; there is no geometric construction to use instead.
+   */
+  bars?: readonly { time: number; high: number; low: number; close: number; volume: number }[];
+  /** Screen x → time (ms). The inverse of projection, for bar counting. */
+  timeAt?: (x: number) => number | null;
 }
 
 function line(ctx: CanvasRenderingContext2D, a: Pt, b: Pt): void {
@@ -619,6 +630,364 @@ export function paintGannGrid(p: PaintCtx, repeats = 4): void {
   for (let i = 0; i <= repeats; i++) {
     line(ctx, { x: r.x + r.w * i, y: r.y }, { x: r.x + r.w * i, y: r.y + r.h * repeats });
     line(ctx, { x: r.x, y: r.y + r.h * i }, { x: r.x + r.w * repeats, y: r.y + r.h * i });
+  }
+  ctx.restore();
+}
+
+/**
+ * A Gann square anchored to a FIXED box rather than scaled to the drag.
+ *
+ * `gann-square` scales its internal ratios to whatever box you drew.
+ * This variant keeps the box square in SCREEN space — the side is the larger
+ * of the two drag extents — which is what makes the 1×1 diagonal a true 45°
+ * line. That is the whole point of the fixed variant: on the scaled version
+ * the "45° line" is only 45° by accident of the drag.
+ */
+export function paintGannSquareFixed(p: PaintCtx): void {
+  const { ctx, pts } = p;
+  if (pts.length < 2) return;
+  const side = Math.max(Math.abs(pts[1].x - pts[0].x), Math.abs(pts[1].y - pts[0].y));
+  if (side === 0) return;
+  const sx = pts[1].x >= pts[0].x ? 1 : -1;
+  const sy = pts[1].y >= pts[0].y ? 1 : -1;
+  const x0 = pts[0].x;
+  const y0 = pts[0].y;
+
+  ctx.save();
+  ctx.strokeRect(Math.min(x0, x0 + sx * side), Math.min(y0, y0 + sy * side), side, side);
+
+  // The Gann ratio fan out of the origin corner. Ratios above 1 would leave
+  // the square through its far side, so they are drawn as the reciprocal on
+  // the other axis — which is the same line reflected, and keeps every ray
+  // inside the box.
+  for (const ratio of GANN_RATIOS) {
+    const inside = ratio <= 1;
+    const end: Pt = inside
+      ? { x: x0 + sx * side, y: y0 + sy * side * ratio }
+      : { x: x0 + (sx * side) / ratio, y: y0 + sy * side };
+    ctx.lineWidth = ratio === 1 ? p.drawing.style.width + 1 : 1;
+    ctx.setLineDash(ratio === 1 ? [] : [3, 3]);
+    line(ctx, { x: x0, y: y0 }, end);
+  }
+  ctx.restore();
+}
+
+/** Degrees of the a→b line in SCREEN space, normalised to (-180, 180]. */
+function screenAngle(a: Pt, b: Pt): number {
+  // Screen y grows downward, so negate to get the angle a trader expects:
+  // a rising line reads positive.
+  return (Math.atan2(-(b.y - a.y), b.x - a.x) * 180) / Math.PI;
+}
+
+/**
+ * Trend Angle — a trend line that labels its own slope, with an arc at the
+ * origin showing the angle against horizontal.
+ *
+ * The angle is a SCREEN measurement and changes when the price scale is zoomed
+ * or switched to log. That is not a bug and matches TradingView: the tool
+ * measures the visual slope, which is the thing Gann-style analysis is about.
+ */
+export function paintTrendAngle(p: PaintCtx): void {
+  const { ctx, pts } = p;
+  if (pts.length < 2) return;
+  const [a, b] = pts;
+  line(ctx, a, b);
+
+  const deg = screenAngle(a, b);
+  const radius = Math.min(46, Math.max(18, Math.hypot(b.x - a.x, b.y - a.y) / 3));
+
+  ctx.save();
+  ctx.setLineDash([2, 2]);
+  // Horizontal reference leg.
+  line(ctx, a, { x: a.x + Math.sign(b.x - a.x || 1) * radius, y: a.y });
+  ctx.beginPath();
+  const from = 0;
+  const to = -(deg * Math.PI) / 180;
+  ctx.arc(a.x, a.y, radius, Math.min(from, to), Math.max(from, to));
+  ctx.stroke();
+  ctx.restore();
+
+  label(ctx, `${deg.toFixed(1)}°`, { x: a.x + radius + 18, y: a.y - 10 }, p.drawing.style.color);
+}
+
+/** How many loaded bars fall between two times. */
+function barsBetween(p: PaintCtx, t0: number, t1: number): number | null {
+  const bars = p.bars;
+  if (!bars || bars.length === 0) return null;
+  const lo = Math.min(t0, t1);
+  const hi = Math.max(t0, t1);
+  let n = 0;
+  for (const bar of bars) if (bar.time >= lo && bar.time <= hi) n++;
+  return n > 0 ? n - 1 : 0;
+}
+
+/**
+ * Info Line / Ruler — a trend line carrying its own measurements.
+ *
+ * Both render identically; they exist as separate tools because TradingView
+ * separates them and operators reach for them by name. The readout is price
+ * delta, percentage change and — when bar data is available — the number of
+ * bars spanned.
+ */
+export function paintInfoLine(p: PaintCtx): void {
+  const { ctx, pts, priceAt, precision } = p;
+  if (pts.length < 2) return;
+  const [a, b] = pts;
+  line(ctx, a, b);
+
+  // Arrow head at the destination so direction is unambiguous.
+  const ang = Math.atan2(b.y - a.y, b.x - a.x);
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(b.x, b.y);
+  ctx.lineTo(b.x - 9 * Math.cos(ang - Math.PI / 7), b.y - 9 * Math.sin(ang - Math.PI / 7));
+  ctx.lineTo(b.x - 9 * Math.cos(ang + Math.PI / 7), b.y - 9 * Math.sin(ang + Math.PI / 7));
+  ctx.closePath();
+  ctx.fillStyle = p.drawing.style.color;
+  ctx.fill();
+  ctx.restore();
+
+  const p0 = priceAt(a.y);
+  const p1 = priceAt(b.y);
+  const parts: string[] = [];
+  if (p0 !== null && p1 !== null) {
+    const delta = p1 - p0;
+    parts.push(`${delta >= 0 ? '+' : ''}${delta.toFixed(precision)}`);
+    // Guard the divide: a zero anchor price would print Infinity%.
+    if (p0 !== 0) parts.push(`${((delta / Math.abs(p0)) * 100).toFixed(2)}%`);
+  }
+  if (p.timeAt) {
+    const t0 = p.timeAt(a.x);
+    const t1 = p.timeAt(b.x);
+    if (t0 !== null && t1 !== null) {
+      const n = barsBetween(p, t0, t1);
+      if (n !== null) parts.push(`${n} bar${n === 1 ? '' : 's'}`);
+    }
+  }
+  if (parts.length) {
+    label(ctx, parts.join('  ·  '), midpoint(a, b), p.drawing.style.color);
+  }
+}
+
+/**
+ * Forecast — a measured move projected forward from a two-leg anchor.
+ *
+ * Points are origin → observed move → projection start. The projected leg
+ * repeats the observed leg's price delta and bar width, drawn dashed to mark
+ * it as hypothesis rather than history.
+ */
+export function paintForecast(p: PaintCtx): void {
+  const { ctx, pts, priceAt, precision } = p;
+  if (pts.length < 3) return;
+  const [a, b, c] = pts;
+  line(ctx, a, b);
+
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const target: Pt = { x: c.x + dx, y: c.y + dy };
+
+  ctx.save();
+  ctx.setLineDash([5, 4]);
+  line(ctx, c, target);
+  ctx.restore();
+
+  // Shade the projected envelope so it reads as a zone, not a promise.
+  ctx.save();
+  ctx.globalAlpha = 0.12;
+  ctx.fillStyle = p.drawing.style.color;
+  ctx.fillRect(Math.min(c.x, target.x), Math.min(c.y, target.y), Math.abs(dx), Math.abs(dy) || 1);
+  ctx.restore();
+
+  const pc = priceAt(c.y);
+  const pt = priceAt(target.y);
+  if (pc !== null && pt !== null) {
+    label(ctx, `→ ${pt.toFixed(precision)}`, target, p.drawing.style.color);
+  }
+}
+
+/**
+ * Trend-Based Fib Time — Fibonacci time divisions projected from a 3-point
+ * anchor.
+ *
+ * The first two points set the base time span; the ratios are laid out from
+ * the third point in multiples of that span, so the verticals mark WHEN a move
+ * of comparable duration would complete. Purely horizontal (time) — the price
+ * of each click is irrelevant beyond anchoring.
+ */
+export function paintTrendFibTime(p: PaintCtx): void {
+  const { ctx, pts, height } = p;
+  if (pts.length < 3) return;
+  const span = pts[1].x - pts[0].x;
+  if (span === 0) return;
+
+  const ratios = [0, 0.618, 1, 1.618, 2.618, 4.236];
+  ctx.save();
+  for (const r of ratios) {
+    const x = pts[2].x + span * r;
+    ctx.setLineDash(r === 0 || r === 1 ? [] : [3, 3]);
+    line(ctx, { x, y: 0 }, { x, y: height });
+    label(
+      ctx,
+      r.toFixed(3).replace(/0+$/, '').replace(/\.$/, ''),
+      { x, y: 14 },
+      p.drawing.style.color,
+    );
+  }
+  ctx.restore();
+}
+
+/**
+ * Circle — centre and radius, distinct from `ellipse`'s bounding box.
+ *
+ * The radius is the SCREEN distance between the two clicks, so it stays a
+ * circle as the price scale changes rather than squashing into an ellipse.
+ */
+export function paintCircle(p: PaintCtx): void {
+  const { ctx, pts } = p;
+  if (pts.length < 2) return;
+  const r = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+  if (r === 0) return;
+  ctx.beginPath();
+  ctx.arc(pts[0].x, pts[0].y, r, 0, Math.PI * 2);
+  ctx.stroke();
+  if (p.drawing.style.fill) {
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = p.drawing.style.color;
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/** A directional arrow mark pinned to one bar. */
+export function paintArrowMark(p: PaintCtx, dir: 'up' | 'down' | 'left' | 'right'): void {
+  const { ctx, pts } = p;
+  if (pts.length < 1) return;
+  const { x, y } = pts[0];
+  const s = 13;
+  const rot = { up: -Math.PI / 2, down: Math.PI / 2, left: Math.PI, right: 0 }[dir];
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rot);
+  ctx.beginPath();
+  ctx.moveTo(s, 0);
+  ctx.lineTo(-s, -s * 0.62);
+  ctx.lineTo(-s * 0.35, 0);
+  ctx.lineTo(-s, s * 0.62);
+  ctx.closePath();
+  ctx.fillStyle = p.drawing.style.color;
+  ctx.fill();
+  ctx.restore();
+}
+
+/**
+ * Volume profile — a horizontal histogram of traded volume by price.
+ *
+ * Volume is bucketed by each bar's CLOSE rather than spread across its
+ * high-low range. Spreading is more faithful in principle, but with no
+ * intrabar data it would just smear volume uniformly over the range, which
+ * invents structure that was never observed — a flat smear reads as support
+ * where there was none. Bucketing at the close under-states wide bars but
+ * never fabricates a level.
+ *
+ * The Point of Control (the highest-volume bucket) is drawn solid; the rest
+ * are translucent.
+ *
+ * `toX` bounds the histogram: anchored profiles run to the right edge, fixed
+ * range to the second click.
+ */
+export function paintVolumeProfile(p: PaintCtx, mode: 'anchored' | 'fixed'): void {
+  const { ctx, pts, priceAt, precision, width, height } = p;
+  if (pts.length < 1) return;
+  const bars = p.bars;
+  const timeAt = p.timeAt;
+  if (!bars || bars.length === 0 || !timeAt) return;
+
+  const fromX = pts[0].x;
+  const toX = mode === 'fixed' ? (pts[1]?.x ?? fromX) : width;
+  const t0 = timeAt(Math.min(fromX, toX));
+  const t1 = timeAt(Math.max(fromX, toX));
+  if (t0 === null || t1 === null) return;
+
+  const inRange = bars.filter((b) => b.time >= t0 && b.time <= t1 && b.volume > 0);
+  if (inRange.length === 0) return;
+
+  // Bucket over the price range actually traded in the window, not the
+  // viewport: a profile that changes shape when you pan is not a profile.
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const b of inRange) {
+    lo = Math.min(lo, b.low);
+    hi = Math.max(hi, b.high);
+  }
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi === lo) return;
+
+  const BUCKETS = 48;
+  const buckets = new Array<number>(BUCKETS).fill(0);
+  for (const b of inRange) {
+    const idx = Math.min(BUCKETS - 1, Math.floor(((b.close - lo) / (hi - lo)) * BUCKETS));
+    if (idx >= 0) buckets[idx] += b.volume;
+  }
+  const peak = Math.max(...buckets);
+  if (peak <= 0) return;
+  const pocIndex = buckets.indexOf(peak);
+
+  // Map bucket index → screen y by inverting priceAt over the viewport. The
+  // renderer gives us price→y only one way, so walk the pane once to build the
+  // mapping rather than assuming a linear scale (which log mode would break).
+  const yForPrice = (price: number): number | null => {
+    // Binary search the pane for the y whose price matches. ~11 iterations.
+    let top = 0;
+    let bottom = height;
+    const pTop = priceAt(top);
+    const pBottom = priceAt(bottom);
+    if (pTop === null || pBottom === null) return null;
+    if (price > Math.max(pTop, pBottom) || price < Math.min(pTop, pBottom)) return null;
+    for (let i = 0; i < 24 && bottom - top > 0.5; i++) {
+      const mid = (top + bottom) / 2;
+      const pm = priceAt(mid);
+      if (pm === null) return null;
+      // Price decreases as y increases.
+      if (pm > price) top = mid;
+      else bottom = mid;
+    }
+    return (top + bottom) / 2;
+  };
+
+  const maxBarWidth = Math.min(180, Math.abs(toX - fromX) || 180);
+  const originX = mode === 'fixed' ? Math.min(fromX, toX) : fromX;
+
+  ctx.save();
+  ctx.setLineDash([]);
+  for (let i = 0; i < BUCKETS; i++) {
+    if (buckets[i] <= 0) continue;
+    const priceLo = lo + ((hi - lo) * i) / BUCKETS;
+    const priceHi = lo + ((hi - lo) * (i + 1)) / BUCKETS;
+    const yTop = yForPrice(priceHi);
+    const yBottom = yForPrice(priceLo);
+    if (yTop === null || yBottom === null) continue;
+    const h = Math.max(1, Math.abs(yBottom - yTop) - 1);
+    const w = (buckets[i] / peak) * maxBarWidth;
+    ctx.globalAlpha = i === pocIndex ? 0.75 : 0.3;
+    ctx.fillStyle = p.drawing.style.color;
+    ctx.fillRect(originX, Math.min(yTop, yBottom), w, h);
+  }
+  ctx.globalAlpha = 1;
+
+  // Label the Point of Control — the level the window actually transacted at.
+  const pocPrice = lo + ((hi - lo) * (pocIndex + 0.5)) / BUCKETS;
+  const pocY = yForPrice(pocPrice);
+  if (pocY !== null) {
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = p.drawing.style.color;
+    line(ctx, { x: originX, y: pocY }, { x: originX + maxBarWidth, y: pocY });
+    label(
+      ctx,
+      `POC ${pocPrice.toFixed(precision)}`,
+      { x: originX + maxBarWidth + 40, y: pocY },
+      p.drawing.style.color,
+    );
   }
   ctx.restore();
 }

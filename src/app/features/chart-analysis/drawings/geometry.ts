@@ -245,7 +245,15 @@ export function hitTestDrawing(
       return pts.length >= 2 && (distanceToRay(p, a, b) <= tol || hitRect(p, a, b, true, tol));
 
     case 'fib-circles':
-      return pts.length >= 2 && hitEllipse(p, a, { x: 2 * a.x - b.x, y: 2 * a.y - b.y }, true, tol);
+      // Centred on the FIRST point with radius |b-a| — matching
+      // `paintFibCircles`, which arcs around `a`. This previously built a
+      // bounding box from `a` to `2a-b`, describing a region offset from the
+      // drawn rings by half their radius: the outermost circle was grabbable
+      // where nothing was drawn, and not grabbable where it was.
+      return (
+        pts.length >= 2 &&
+        Math.hypot(p.x - a.x, p.y - a.y) <= Math.hypot(b.x - a.x, b.y - a.y) + tol
+      );
 
     case 'fib-arcs':
       return (
@@ -342,6 +350,53 @@ export function hitTestDrawing(
     case 'callout':
       // Approximate box around the anchor; the renderer keeps the same shape.
       return Math.abs(p.x - a.x) <= 60 && Math.abs(p.y - a.y) <= 14;
+
+    case 'arrow-mark-up':
+    case 'arrow-mark-down':
+    case 'arrow-mark-left':
+    case 'arrow-mark-right':
+      // Single-anchor glyphs. These MUST be listed explicitly: the default arm
+      // below requires two points, so a one-point tool falling through it can
+      // be drawn but never selected, moved or deleted.
+      return Math.hypot(p.x - a.x, p.y - a.y) <= 16;
+
+    case 'circle':
+      // Centre + radius, so the grab band is the ring itself rather than a
+      // bounding box, which would swallow clicks meant for anything inside it.
+      if (pts.length < 2) return false;
+      {
+        const radius = Math.hypot(b.x - a.x, b.y - a.y);
+        const dist = Math.hypot(p.x - a.x, p.y - a.y);
+        return filled ? dist <= radius + tol : Math.abs(dist - radius) <= tol;
+      }
+
+    case 'anchored-volume-profile':
+      // Anchored at one point, histogram running right across at most 180px.
+      return Math.abs(p.y - a.y) <= 400 && p.x >= a.x - tol && p.x <= a.x + 180;
+
+    case 'fixed-range-volume-profile':
+      return pts.length >= 2 && hitRect(p, a, b, true, tol);
+
+    case 'trend-angle':
+    case 'info-line':
+    case 'ruler':
+      return pts.length >= 2 && distanceToSegment(p, a, b) <= tol;
+
+    case 'forecast':
+    case 'trend-fib-time':
+      // Three-point tools: grabbable along the legs the operator placed.
+      return hitPolyline(p, pts, tol);
+
+    case 'gann-square-fixed':
+      // Mirrors the painter: the box is squared to the LARGER drag extent, so
+      // hit-testing the raw drag rectangle would miss most of the shape.
+      if (pts.length < 2) return false;
+      {
+        const side = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+        const sx = b.x >= a.x ? 1 : -1;
+        const sy = b.y >= a.y ? 1 : -1;
+        return hitRect(p, a, { x: a.x + sx * side, y: a.y + sy * side }, true, tol);
+      }
 
     default:
       return pts.length >= 2 ? distanceToSegment(p, a, b) <= tol : false;

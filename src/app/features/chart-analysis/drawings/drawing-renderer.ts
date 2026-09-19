@@ -27,8 +27,17 @@ import {
   paintRotatedRectangle,
   paintSineLine,
   paintTimeCycles,
+  paintArrowMark,
+  paintCircle,
+  paintForecast,
+  paintGannSquareFixed,
+  paintInfoLine,
+  paintTrendAngle,
+  paintTrendFibTime,
+  paintVolumeProfile,
   type PaintCtx,
 } from './advanced-painters';
+import type { Bar } from '../datafeed/candle-feed.service';
 
 /**
  * Canvas renderer for every drawing on the chart, as one Lightweight Charts
@@ -62,6 +71,20 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     private readonly series: () => ISeriesApi<SeriesType> | null,
     private readonly precision: () => number,
     private readonly shift: (timeMs: number) => number = (t) => t,
+    /**
+     * Bars for the two volume-profile tools — the only drawings that read
+     * market data rather than geometry. Defaulted so every existing call site
+     * keeps working: a renderer given no bars draws no profile instead of
+     * throwing.
+     */
+    private readonly bars: () => readonly Bar[] = () => [],
+    /**
+     * Displayed instant → stored UTC instant. The inverse of `shift`, and the
+     * same contract `DrawingController` takes under this name. Only the
+     * volume profiles need it — they map a screen x back to the UTC instants
+     * the bars are keyed by.
+     */
+    private readonly unshift: (timeMs: number) => number = (t) => t,
   ) {}
 
   attached(param: { requestUpdate: () => void }): void {
@@ -354,6 +377,15 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
       height,
       priceAt: (y) => this.series()?.coordinateToPrice(y) ?? null,
       precision: this.precision(),
+      bars: this.bars(),
+      // Inverse of `project`'s x half. The library hands back seconds, and the
+      // axis may be shifted for a non-UTC timezone, so undo the shift to land
+      // back on the UTC instants the bars are keyed by.
+      timeAt: (x) => {
+        const t = this.chart()?.timeScale().coordinateToTime(x);
+        if (t === null || t === undefined) return null;
+        return this.unshift(Number(t) * 1000);
+      },
     };
 
     switch (drawing.kind) {
@@ -446,6 +478,31 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
         return paintGannFan({ ...p, pts: [pts[0], { x: pts[0].x + 200, y: pts[0].y - 200 }] });
       case 'gann-grid':
         return paintGannGrid(p);
+      case 'gann-square-fixed':
+        return paintGannSquareFixed(p);
+      case 'trend-angle':
+        return paintTrendAngle(p);
+      case 'info-line':
+      case 'ruler':
+        return paintInfoLine(p);
+      case 'forecast':
+        return paintForecast(p);
+      case 'trend-fib-time':
+        return paintTrendFibTime(p);
+      case 'circle':
+        return paintCircle(p);
+      case 'arrow-mark-up':
+        return paintArrowMark(p, 'up');
+      case 'arrow-mark-down':
+        return paintArrowMark(p, 'down');
+      case 'arrow-mark-left':
+        return paintArrowMark(p, 'left');
+      case 'arrow-mark-right':
+        return paintArrowMark(p, 'right');
+      case 'anchored-volume-profile':
+        return paintVolumeProfile(p, 'anchored');
+      case 'fixed-range-volume-profile':
+        return paintVolumeProfile(p, 'fixed');
       case 'pitchfan':
         return paintPitchfork(p, 'pitchfork');
       case 'rotated-rectangle':

@@ -59,6 +59,17 @@ import {
   vwap,
   williamsR,
   wma,
+  chandeKrollStop,
+  cmo,
+  connorsRsi,
+  fractals,
+  mcginley,
+  netVolume,
+  relativeVolatilityIndex,
+  smiErgodic,
+  stdev,
+  tsi,
+  zigzag,
   type Maybe,
   type Ohlc,
 } from './math';
@@ -990,6 +1001,178 @@ export const INDICATORS: readonly IndicatorDef[] = [
       const r = volumeIndices(bars);
       return { nvi: r.nvi, pvi: r.pvi };
     },
+  },
+  {
+    id: 'cmo',
+    name: 'Chande Momentum Oscillator',
+    target: 'pane',
+    inputs: [LENGTH(9), SOURCE],
+    plots: [{ key: 'cmo', title: 'CMO', kind: 'line', color: '#2962FF' }],
+    levels: [
+      { value: 50, color: '#787B86' },
+      { value: 0, color: '#787B86' },
+      { value: -50, color: '#787B86' },
+    ],
+    range: { min: -100, max: 100 },
+    compute: (bars, p) => ({ cmo: cmo(sourceValues(bars, src(p)), num(p, 'length', 9)) }),
+  },
+  {
+    id: 'connors-rsi',
+    name: 'Connors RSI',
+    target: 'pane',
+    inputs: [
+      { key: 'rsiLen', label: 'RSI Length', type: 'number', default: 3, min: 1, max: 50 },
+      { key: 'streakLen', label: 'Streak Length', type: 'number', default: 2, min: 1, max: 50 },
+      { key: 'rankLen', label: 'Rank Length', type: 'number', default: 100, min: 2, max: 500 },
+    ],
+    plots: [{ key: 'crsi', title: 'CRSI', kind: 'line', color: '#7B1FA2' }],
+    levels: [
+      { value: 90, color: '#787B86' },
+      { value: 50, color: '#787B86' },
+      { value: 10, color: '#787B86' },
+    ],
+    range: { min: 0, max: 100 },
+    compute: (bars, p) => ({
+      crsi: connorsRsi(
+        bars.map((b) => b.close),
+        num(p, 'rsiLen', 3),
+        num(p, 'streakLen', 2),
+        num(p, 'rankLen', 100),
+      ),
+    }),
+  },
+  {
+    id: 'chande-kroll',
+    name: 'Chande Kroll Stop',
+    target: 'overlay',
+    inputs: [
+      { key: 'atrLength', label: 'ATR Length', type: 'number', default: 10, min: 1, max: 100 },
+      { key: 'atrMult', label: 'ATR Multiplier', type: 'number', default: 1, min: 0.1, max: 10 },
+      { key: 'stopLength', label: 'Stop Length', type: 'number', default: 9, min: 1, max: 100 },
+    ],
+    plots: [
+      { key: 'long', title: 'Long Stop', kind: 'line', color: '#26A69A' },
+      { key: 'short', title: 'Short Stop', kind: 'line', color: '#EF5350' },
+    ],
+    compute: (bars, p) =>
+      chandeKrollStop(bars, num(p, 'atrLength', 10), num(p, 'atrMult', 1), num(p, 'stopLength', 9)),
+  },
+  {
+    id: 'mcginley',
+    name: 'McGinley Dynamic',
+    target: 'overlay',
+    inputs: [LENGTH(14), SOURCE],
+    plots: [{ key: 'md', title: 'McGinley', kind: 'line', color: '#FF6D00' }],
+    compute: (bars, p) => ({ md: mcginley(sourceValues(bars, src(p)), num(p, 'length', 14)) }),
+  },
+  {
+    id: 'stdev',
+    name: 'Standard Deviation',
+    target: 'pane',
+    inputs: [LENGTH(20), SOURCE],
+    plots: [{ key: 'sd', title: 'StdDev', kind: 'line', color: '#2962FF' }],
+    compute: (bars, p) => ({ sd: stdev(sourceValues(bars, src(p)), num(p, 'length', 20)) }),
+  },
+  {
+    id: 'tsi',
+    name: 'True Strength Index',
+    target: 'pane',
+    inputs: [
+      { key: 'long', label: 'Long', type: 'number', default: 25, min: 1, max: 200 },
+      { key: 'short', label: 'Short', type: 'number', default: 13, min: 1, max: 100 },
+      { key: 'signal', label: 'Signal', type: 'number', default: 13, min: 1, max: 100 },
+    ],
+    plots: [
+      { key: 'tsi', title: 'TSI', kind: 'line', color: '#2962FF' },
+      { key: 'signal', title: 'Signal', kind: 'line', color: '#FF6D00' },
+    ],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => {
+      const r = tsi(
+        bars.map((b) => b.close),
+        num(p, 'long', 25),
+        num(p, 'short', 13),
+        num(p, 'signal', 13),
+      );
+      return { tsi: r.tsi, signal: r.signal };
+    },
+  },
+  {
+    id: 'smi-ergodic',
+    name: 'SMI Ergodic',
+    target: 'pane',
+    inputs: [
+      { key: 'long', label: 'Long', type: 'number', default: 20, min: 1, max: 200 },
+      { key: 'short', label: 'Short', type: 'number', default: 5, min: 1, max: 100 },
+      { key: 'signal', label: 'Signal', type: 'number', default: 5, min: 1, max: 100 },
+    ],
+    plots: [
+      { key: 'smi', title: 'SMI', kind: 'line', color: '#7B1FA2' },
+      { key: 'signal', title: 'Signal', kind: 'line', color: '#FF6D00' },
+    ],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => {
+      const r = smiErgodic(
+        bars.map((b) => b.close),
+        num(p, 'long', 20),
+        num(p, 'short', 5),
+        num(p, 'signal', 5),
+      );
+      return { smi: r.tsi, signal: r.signal };
+    },
+  },
+  {
+    id: 'rvi-volatility',
+    name: 'Relative Volatility Index',
+    target: 'pane',
+    inputs: [
+      LENGTH(10),
+      { key: 'stdevLen', label: 'StdDev Length', type: 'number', default: 10, min: 2, max: 200 },
+    ],
+    plots: [{ key: 'rvi', title: 'RVI', kind: 'line', color: '#2962FF' }],
+    levels: [
+      { value: 80, color: '#787B86' },
+      { value: 50, color: '#787B86' },
+      { value: 20, color: '#787B86' },
+    ],
+    range: { min: 0, max: 100 },
+    compute: (bars, p) => ({
+      rvi: relativeVolatilityIndex(
+        bars.map((b) => b.close),
+        num(p, 'length', 10),
+        num(p, 'stdevLen', 10),
+      ),
+    }),
+  },
+  {
+    id: 'fractals',
+    name: 'Williams Fractals',
+    target: 'overlay',
+    inputs: [{ key: 'size', label: 'Periods', type: 'number', default: 2, min: 1, max: 10 }],
+    plots: [
+      { key: 'up', title: 'Up Fractal', kind: 'line', color: '#EF5350' },
+      { key: 'down', title: 'Down Fractal', kind: 'line', color: '#26A69A' },
+    ],
+    compute: (bars, p) => fractals(bars, num(p, 'size', 2)),
+  },
+  {
+    id: 'zigzag',
+    name: 'Zig Zag',
+    target: 'overlay',
+    inputs: [
+      { key: 'deviation', label: 'Deviation %', type: 'number', default: 5, min: 0.1, max: 50 },
+    ],
+    plots: [{ key: 'zz', title: 'Zig Zag', kind: 'line', color: '#2962FF' }],
+    compute: (bars, p) => ({ zz: zigzag(bars, num(p, 'deviation', 5)) }),
+  },
+  {
+    id: 'net-volume',
+    name: 'Net Volume',
+    target: 'pane',
+    inputs: [],
+    plots: [{ key: 'nv', title: 'Net Vol', kind: 'histogram', color: '#26A69A' }],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars) => ({ nv: netVolume(bars) }),
   },
 ] as const;
 

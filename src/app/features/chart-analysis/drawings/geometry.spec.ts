@@ -12,6 +12,8 @@ import {
   magnetPrice,
   pointInPolygon,
 } from './geometry';
+import { TOOLS } from './model';
+import type { Pt } from './geometry';
 
 const bounds = { width: 800, height: 400 };
 
@@ -191,4 +193,43 @@ describe('magnetPrice', () => {
   it('passes through when there is no bar', () => {
     expect(magnetPrice(1.234, null, 0.01)).toBe(1.234);
   });
+});
+
+describe('every tool is selectable', () => {
+  /**
+   * A drawing that renders but cannot be hit-tested is a trap: the operator
+   * places it, then cannot select, move or delete it, and the only way out is
+   * clearing the whole chart.
+   *
+   * This is not hypothetical. `hitTestDrawing`'s default arm requires TWO
+   * points, so any single-point tool that is not listed explicitly falls
+   * through it and is permanently unselectable — which is exactly what
+   * happened to the four arrow marks before they were given a case.
+   *
+   * The test synthesises each tool at its OWN declared point count and asserts
+   * a click on its own geometry registers.
+   */
+  const pointsFor = (spec: (typeof TOOLS)[number]): Pt[] => {
+    const n = spec.points === 'freehand' ? 3 : spec.points;
+    // A rising diagonal — non-degenerate in both axes, so no tool is tested
+    // against a zero-width or zero-height shape it would rightly reject.
+    return Array.from({ length: n }, (_, i) => ({ x: 100 + i * 60, y: 200 - i * 40 }));
+  };
+
+  for (const spec of TOOLS) {
+    it(`${spec.kind} responds to a click on itself`, () => {
+      const pts = pointsFor(spec);
+      // Probe the anchors AND the midpoints between them. Anchors alone are
+      // not a fair probe for every tool: an inscribed shape such as `ellipse`
+      // is BOUNDED by its two anchors and genuinely does not pass through
+      // them, so a corner click should miss. Something at or between the
+      // anchors must register though — that is what "selectable" means.
+      const probes = [...pts];
+      for (let i = 0; i + 1 < pts.length; i++) {
+        probes.push({ x: (pts[i].x + pts[i + 1].x) / 2, y: (pts[i].y + pts[i + 1].y) / 2 });
+      }
+      const hit = probes.some((pt) => hitTestDrawing(pt, spec.kind, pts, true, bounds));
+      expect(hit, `${spec.kind} is unselectable anywhere on its own geometry`).toBe(true);
+    });
+  }
 });

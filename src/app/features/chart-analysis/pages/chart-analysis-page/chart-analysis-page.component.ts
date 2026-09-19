@@ -38,7 +38,11 @@ import { AlertsService } from '@core/services/alerts.service';
 import { OrdersService } from '@core/services/orders.service';
 import { MartingaleService } from '@core/services/martingale.service';
 import { NewsIntelService } from '@core/services/news-intel.service';
-import type { NewsArticleView } from '@features/news-intel/news-intel.types';
+import type {
+  NewsArticleView,
+  NewsFocusResult,
+  NewsPressureLeg,
+} from '@features/news-intel/news-intel.types';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { EventMark } from '../../overlays/event-marks-renderer';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
@@ -176,6 +180,7 @@ export class ChartAnalysisPageComponent {
   readonly sidePane = signal<'none' | 'details' | 'news'>('none');
   readonly articles = signal<NewsArticleView[]>([]);
   readonly newsLoading = signal(false);
+  readonly newsFocus = signal<NewsFocusResult | null>(null);
 
   /**
    * Symbol facts for the Details pane, assembled from what the console already
@@ -734,6 +739,34 @@ export class ChartAnalysisPageComponent {
           this.newsLoading.set(false);
         },
       });
+
+    // The headlines above are the RECORD layer. This is the module's actual
+    // read on the pair — the base-minus-quote bias and, more importantly, how
+    // much of it is still live. A deeply negative score whose liveShare has
+    // decayed to nothing is a story the market has finished repricing; showing
+    // headlines without it invites trading news that is already in the price.
+    this.newsFocus.set(null);
+    this.newsIntel
+      .getFocus(this.symbol().toUpperCase())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (r) => this.newsFocus.set(r ?? null),
+        error: () => this.newsFocus.set(null),
+      });
+  }
+
+  /**
+   * Format a leg for the pane: score, story count and live share.
+   *
+   * `liveShare === null` is NOT the same as zero — the type documents it as
+   * "no weight to divide" versus "measured, and none of it is live" — so it
+   * renders as an em dash rather than 0%.
+   */
+  legSummary(leg: NewsPressureLeg | null): string {
+    if (!leg) return '—';
+    const live = leg.liveShare === null ? '—' : `${Math.round(leg.liveShare * 100)}% live`;
+    const stories = `${leg.storyCount} ${leg.storyCount === 1 ? 'story' : 'stories'}`;
+    return `${leg.score >= 0 ? '+' : ''}${leg.score.toFixed(2)} · ${stories} · ${live}`;
   }
 
   toggleOverlays(): void {

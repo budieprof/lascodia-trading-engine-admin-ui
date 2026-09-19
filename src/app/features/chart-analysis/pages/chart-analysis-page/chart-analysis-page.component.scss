@@ -887,6 +887,15 @@ $rail-width: 40px;
   font-size: 12px;
 }
 
+/* The news module's read on the pair, above the raw headlines. Separated by a
+   rule because it is a CONCLUSION, not another headline — reading it as one
+   more item in the list is exactly the mistake it exists to prevent. */
+.news-focus {
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border, #e0e3eb);
+}
+
 .detail-list {
   display: grid;
   grid-template-columns: auto 1fr;

@@ -108,7 +108,26 @@ export type DrawingKind =
   | 'table'
   | 'anchored-note'
   | 'idea'
-  | 'pitchfan';
+  | 'pitchfan'
+  // Measurement variants that read values off the chart rather than just
+  // drawing a shape.
+  | 'trend-angle'
+  | 'info-line'
+  | 'ruler'
+  | 'forecast'
+  // Volume profiles. These are the only drawings that need BAR data, not just
+  // geometry — see `PaintCtx.bars`.
+  | 'anchored-volume-profile'
+  | 'fixed-range-volume-profile'
+  // Remaining Fib / Gann
+  | 'trend-fib-time'
+  | 'gann-square-fixed'
+  // Remaining shapes and marks
+  | 'circle'
+  | 'arrow-mark-up'
+  | 'arrow-mark-down'
+  | 'arrow-mark-left'
+  | 'arrow-mark-right';
 
 export interface DrawingPoint {
   /** Bar time in ms. */
@@ -452,6 +471,52 @@ export const TOOLS: readonly ToolSpec[] = [
   { kind: 'table', label: 'Table', group: 'annotation', points: 1, icon: '▦' },
   { kind: 'anchored-note', label: 'Anchored Note', group: 'annotation', points: 2, icon: '📌' },
   { kind: 'idea', label: 'Idea', group: 'annotation', points: 1, icon: '💡' },
+
+  // ── Measurement variants ────────────────────────────────────────────────
+  //
+  // These differ from the plain shapes above by READING the chart: they label
+  // themselves with an angle, a price delta or a bar count. `measure` already
+  // did this, but it is transient by design (it clears on the next click);
+  // `ruler` is the persistent version operators asked for by drawing a trend
+  // line and then squinting at the axis.
+  { kind: 'trend-angle', label: 'Trend Angle', group: 'measure', points: 2, icon: '∠' },
+  { kind: 'info-line', label: 'Info Line', group: 'measure', points: 2, icon: 'ⓘ' },
+  { kind: 'ruler', label: 'Ruler', group: 'measure', points: 2, icon: '📏' },
+  { kind: 'forecast', label: 'Forecast', group: 'measure', points: 3, icon: '🔮' },
+
+  // ── Volume profiles ─────────────────────────────────────────────────────
+  //
+  // The only drawings that need bar data. Anchored runs from its anchor to the
+  // right edge; fixed-range is bounded by two clicks.
+  {
+    kind: 'anchored-volume-profile',
+    label: 'Anchored Volume Profile',
+    group: 'measure',
+    points: 1,
+    icon: '▤',
+  },
+  {
+    kind: 'fixed-range-volume-profile',
+    label: 'Fixed Range Volume Profile',
+    group: 'measure',
+    points: 2,
+    icon: '▥',
+  },
+
+  // ── Remaining Fib / Gann ────────────────────────────────────────────────
+  { kind: 'trend-fib-time', label: 'Trend-Based Fib Time', group: 'fib', points: 3, icon: '⌛' },
+  { kind: 'gann-square-fixed', label: 'Gann Square (fixed)', group: 'gann', points: 2, icon: '⊡' },
+
+  // ── Remaining shapes and marks ──────────────────────────────────────────
+  //
+  // `circle` is centre+radius, which is NOT the same tool as `ellipse` (a
+  // bounding box): a circle stays circular on screen as the price scale
+  // changes, which is the point of drawing one.
+  { kind: 'circle', label: 'Circle', group: 'shapes', points: 2, icon: '○' },
+  { kind: 'arrow-mark-up', label: 'Arrow Up', group: 'annotation', points: 1, icon: '⬆' },
+  { kind: 'arrow-mark-down', label: 'Arrow Down', group: 'annotation', points: 1, icon: '⬇' },
+  { kind: 'arrow-mark-left', label: 'Arrow Left', group: 'annotation', points: 1, icon: '⬅' },
+  { kind: 'arrow-mark-right', label: 'Arrow Right', group: 'annotation', points: 1, icon: '➡' },
 ];
 
 export function toolFor(kind: DrawingKind): ToolSpec | undefined {

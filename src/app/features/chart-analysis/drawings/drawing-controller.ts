@@ -59,6 +59,10 @@ export class DrawingController {
       () => this.series,
       precision,
       (t) => this.shift(t),
+      // The same bars the magnet snaps to, so a volume profile and a magnet
+      // snap can never disagree about what was traded.
+      () => this.bars,
+      (t) => this.unshift(t),
     );
   }
 

@@ -611,6 +611,52 @@
         @if (sidePane() === 'news') {
           <aside class="side-pane">
             <div class="tree-title">News · {{ details().base }}</div>
+
+            <!--
+              The module's read on the PAIR, above the raw headlines.
+              `liveShare` is the load-bearing number here: a strong score that
+              is no longer live is a story the market has already repriced, and
+              headlines shown without it invite trading news that is in the
+              price already.
+            -->
+            @if (newsFocus()?.context; as ctx) {
+              <dl class="detail-list news-focus">
+                <dt>Pair bias</dt>
+                <dd>
+                  @if (ctx.pairBias !== null) {
+                    <span [class.up]="ctx.pairBias > 0" [class.down]="ctx.pairBias < 0">
+                      {{ ctx.pairBias > 0 ? '+' : '' }}{{ ctx.pairBias | number: '1.2-2' }}
+                    </span>
+                  } @else {
+                    <span
+                      class="muted"
+                      title="A leg the module does not track — the two sides cannot be differenced"
+                    >
+                      not comparable
+                    </span>
+                  }
+                </dd>
+                <dt>{{ newsFocus()?.baseCurrency }}</dt>
+                <dd>{{ legSummary(ctx.baseLeg) }}</dd>
+                <!-- Rendered unconditionally rather than behind an @if: a <dl>
+                     may only contain dt/dd pairs, and a control-flow block
+                     inside one inserts anchor nodes that break that contract.
+                     A single-currency request simply has no quote leg. -->
+                <dt>{{ newsFocus()?.quoteCurrency ?? 'Quote' }}</dt>
+                <dd>{{ legSummary(ctx.quoteLeg) }}</dd>
+                <dt>As of</dt>
+                <dd class="muted">{{ ctx.asOfNote }}</dd>
+              </dl>
+              @if (newsFocus()?.omissionReason; as why) {
+                <div
+                  class="muted news-meta"
+                  title="Why this context did not reach the model's prompt"
+                >
+                  Not in prompt: {{ why }}
+                </div>
+              }
+            }
+
             @if (newsLoading()) {
               <div class="pane-empty">Loading…</div>
             } @else if (!articles().length) {

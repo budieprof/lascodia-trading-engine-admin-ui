@@ -383,7 +383,7 @@ volume, which no built-in series does. `VolCandle` measures share against the
 max volume in the **visible** range, so zooming into a quiet stretch still shows
 relative differences instead of a row of hairlines.
 
-### 12.2 Drawing tools — 82 🟡
+### 12.2 Drawing tools — 95 🟡
 
 Lines, channels (parallel, flat, regression, disjoint angle), four pitchforks,
 Gann box/fan/square, the full Fibonacci set (retracement, extension, channel,
@@ -399,11 +399,15 @@ persistence, and per-panel scoping for split layouts. Adding a tool is one
 Persistence is **engine-backed** (§8), not just localStorage: drawings survive a
 different browser and machine.
 
-Against TradingView's ~110 the remaining gap is the long tail — Fib spiral,
-cyclic and sine lines, Elliott double/triple combos, the cypher and 5-point
-harmonic variants, bars-pattern and ghost-feed projection, arcs variants.
+Against TradingView's ~110 the remainder is not analytical: images, emoji
+stickers and the publish/idea-sharing tools, none of which mean anything in a
+private console.
 
-### 12.3 Indicators — 60 🟡
+**This list was stale once already** — it named Fib spiral, cyclic/sine lines,
+the Elliott combos and the cypher/5-point harmonics as missing long after they
+shipped. Count from `TOOLS`, never from this paragraph.
+
+### 12.3 Indicators — 71 🟡
 
 Moving averages (SMA, EMA, WMA, SMMA, Hull, DEMA, TEMA, ALMA, VWMA, LinReg),
 bands (Bollinger + %B + Bandwidth, Keltner, Donchian, Envelope, Standard Error),
@@ -444,7 +448,7 @@ the fitted line gives 267 on a perfect ramp.
 | Watchlist                                 | ✅                             |
 | Multi-chart layout (1 / 2 / 4 / 6 / 8)    | ✅ (matches AC's 8)            |
 | Alerts                                    | ✅ price alerts from the chart |
-| Details · News panes                      | ❌                             |
+| Details · News panes                      | ✅ (News carries pair bias)    |
 | Market status indicator                   | ✅ (legend: "market closed")   |
 
 Two UI traps worth keeping: `[value]` on a `<select>` fed by `@for` does not
@@ -480,21 +484,39 @@ can actually serve.
 
 ## 13. What is left
 
-| Item                           | Why it is not done                                                                    |
-| ------------------------------ | ------------------------------------------------------------------------------------- |
-| Remaining drawing tools (~28)  | Long tail; one `TOOLS` entry plus a renderer case each. §12.2 names them.             |
-| Remaining indicators           | Long tail; one registry entry each.                                                   |
-| Details / News panes           | Not started. News would duplicate the news-intelligence module rather than extend it. |
-| ECharts migration of §Decision | **Rejected on measurement**, not deferred — see the decision log. Do not re-open.     |
+| Item                      | Why it is not done                                                                                            |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Images, stickers, "ideas" | TradingView's remaining ~15 tools are publishing and decoration, not analysis. No value in a private console. |
+| ECharts migration         | **Rejected on measurement**, not deferred — see the decision log. Do not re-open.                             |
 
-Everything else previously listed here has shipped: 18/18 chart styles, the
-8-way split, order lines and martingale rungs, and engine-backed drawing
-persistence.
+Everything else once listed here has shipped: 18/18 chart styles, 95 drawing
+tools, 71 indicators, the 8-way split, order lines and martingale rungs,
+engine-backed drawing persistence, and the Details and News panes.
+
+### A warning about this section
+
+Three separate entries here were **stale rather than pending** when checked on
+2026-09-19: the drawing-tool gap list named tools that had shipped, the Details
+and News panes were marked ❌ while both were built and rendering, and the
+Renko/P&F sizing "open question" had already been answered by a `Box n ×ATR`
+input sitting in the toolbar.
+
+A plan document drifts behind the code silently, and a stale "what's left" is
+worse than none — it sends someone to build what exists. **Count from the source
+before trusting any number here:**
+
+```bash
+# tools
+node -e "const s=require('fs').readFileSync('src/app/features/chart-analysis/drawings/model.ts','utf8');
+         const m=s.match(/export const TOOLS[\s\S]*?\n\];/)[0];
+         console.log((m.match(/kind:\s*'/g)||[]).length)"
+# indicators
+grep -cE "^    id: '" src/app/features/chart-analysis/indicators/registry.ts
+```
 
 ## Open questions
 
-1. **Renko / P&F sizing** — ATR-derived today. Should the box size be an
-   operator input per chart?
+None outstanding.
 
 ## Resolved questions
 
@@ -502,6 +524,8 @@ persistence.
   (`SubscribePrice`/`UnsubscribePrice`) rather than the per-route
   `EnterRoom`/`LeaveRoom` pattern. The live bar used to filter client-side on
   the tick's symbol, which worked but over-subscribed the hub.
+- **Renko / P&F box sizing** — an operator input, not a fixed ATR derivation.
+  The `Box n ×ATR` control appears in the toolbar for price-based styles only.
 
 ## Sources
 
