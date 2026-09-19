@@ -1,22 +1,27 @@
-// Drive the running admin UI in Chromium, authenticate with a dev token, visit
-// each route, screenshot it, and report console/network errors.
+// Drive the running admin UI in Chromium, authenticate, visit each route,
+// screenshot it, and report console/network errors.
+//
+// Auth is the login form's passwordless Developer tab. The previous version
+// minted an HS256 token from a hardcoded dev secret; that secret has drifted
+// from the running engine, so every request came back 401 and the app bounced
+// to /login — which reads as "the whole page is broken" rather than "auth
+// failed". `onDevLogin()` posts a fixed identity and the engine returns a real
+// token, so it is valid by construction.
 //
 // Usage (from the repo root, so require('playwright') resolves):
-//   LASC_JWT="$(cat /tmp/lasc_ui_jwt.txt)" OUT=/tmp \
-//     node .claude/skills/browser-verify/drive.js /conversations /dashboard
+//   OUT=/tmp node .claude/skills/browser-verify/drive.js /conversations /dashboard
 //
 // Env:
-//   LASC_JWT  (required) — dev JWT injected into sessionStorage['lascodia.auth.token']
-//   OUT       (optional) — screenshot output dir (default /tmp)
-//   BASE      (optional) — UI base URL (default http://localhost:4200)
-//   HEADED    (optional) — set to 1 to watch the browser (default headless)
+//   OUT    (optional) — screenshot output dir (default /tmp)
+//   BASE   (optional) — UI base URL. Default http://localhost:8080, the
+//                       PUBLISHED release, which is what operators see. Use
+//                       http://localhost:4200 for the dev server.
+//   HEADED (optional) — set to 1 to watch the browser (default headless)
 const { chromium } = require('playwright');
 
-const token = (process.env.LASC_JWT || '').trim();
 const OUT = process.env.OUT || '/tmp';
-const BASE = (process.env.BASE || 'http://localhost:4200').replace(/\/$/, '');
+const BASE = (process.env.BASE || 'http://localhost:8080').replace(/\/$/, '');
 const routes = process.argv.slice(2).length ? process.argv.slice(2) : ['/'];
-if (!token) { console.error('LASC_JWT is required'); process.exit(2); }
 
 const slug = r => (r === '/' ? 'root' : r.replace(/^\//, '').replace(/[^\w]+/g, '_'));
 
@@ -25,9 +30,13 @@ const slug = r => (r === '/' ? 'root' : r.replace(/^\//, '').replace(/[^\w]+/g, 
   const ctx = await browser.newContext({ viewport: { width: 1680, height: 1000 } });
   const page = await ctx.newPage();
 
-  // Set origin first, then inject the token so the app boots authenticated.
-  await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' }).catch(() => {});
-  await page.evaluate(t => sessionStorage.setItem('lascodia.auth.token', t), token);
+  // Sign in through the Developer tab. Deliberately NOT a minted token — see
+  // the header. `waitForURL` off /login is the completion signal; the redirect
+  // target varies by role so matching on a specific route would be brittle.
+  await page.goto(BASE + '/login', { waitUntil: 'networkidle', timeout: 60000 });
+  await page.getByRole('tab', { name: /Developer/i }).click();
+  await page.getByRole('button', { name: /Sign In/i }).click();
+  await page.waitForURL(u => !u.pathname.startsWith('/login'), { timeout: 30000 });
 
   const report = {};
   for (const route of routes) {

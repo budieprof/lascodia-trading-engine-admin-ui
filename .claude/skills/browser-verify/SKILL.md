@@ -40,12 +40,11 @@ typechecks. Drive it, screenshot it, **look at the screenshot.**
 
 ## Auth: use the login form's Developer tab
 
-> **The token-minting path below is BROKEN — don't use it.** The hardcoded HS256
-> dev secret has drifted from the running engine, so every request comes back 401
-> and the app bounces straight to `/login`. That failure reads as "the whole page
-> is broken" rather than "auth failed", which is exactly how it wastes an hour.
-> `drive.js` still implements it and still takes `LASC_JWT`; treat the file as
-> needing the same fix.
+> `drive.js` does this for you now. The token-minting recipe kept at the bottom
+> is BROKEN and retained only as context: the hardcoded HS256 dev secret has
+> drifted from the running engine, so every request comes back 401 and the app
+> bounces to `/login` — which reads as "the whole page is broken" rather than
+> "auth failed", and is exactly how it wastes an hour.
 
 The login form's **Developer** tab is passwordless — `onDevLogin()` posts a fixed
 identity and the engine returns a real token, so it is valid by construction:
@@ -92,16 +91,12 @@ page title, a text excerpt, and any `>=400` responses / console errors. Run it
 **from the repo root** so `require('playwright')` resolves:
 
 ```bash
-BASE=http://localhost:8080 \
-LASC_JWT="$(cat /tmp/lasc_ui_jwt.txt)" \
-OUT=/tmp \
-node .claude/skills/browser-verify/drive.js /conversations /dashboard /watchlist
+OUT=/tmp node .claude/skills/browser-verify/drive.js /conversations /dashboard /watchlist
 ```
 
-`BASE` defaults to `http://localhost:4200` (the dev server) — pass
-`http://localhost:8080` to drive the published release instead. And because the
-`LASC_JWT` path no longer authenticates, replace the driver's token injection
-with the Developer-tab click sequence above before trusting any run.
+`BASE` defaults to `http://localhost:8080` — the PUBLISHED release, which is
+what operators actually see. Pass `BASE=http://localhost:4200` to drive the dev
+server instead, for work in progress that has not been published.
 
 Then **Read the PNGs** it wrote (`/tmp/ui_<route>.png`) — a blank/blocked frame
 is a failure. Pick routes that exercise your change (e.g. `/conversations` for
@@ -112,13 +107,14 @@ the analysis chat + rec charts, `/watchlist` for tiles, `/dashboard` for the she
 - **Screenshot renders the change** → done. Report what you saw.
 - **Console/network errors** → investigate the offending endpoint in the engine
   logs (`docker logs lascodia-trading-engine-api-1 --since 5m`).
-- **Known false positives under the synthetic dev token** (ignore unless they
-  reproduce under a real login):
-  - `/admin/notifications/feed` → **500** (`CurrentUserService.GetUser` does
-    `.First()` on a claim the hand-minted token lacks; real login tokens carry it).
-  - SignalR "Failed to complete negotiation / Failed to start the connection" —
-    the realtime hub can't authenticate the injected token from the headless
-    context. Page rendering is unaffected.
+- **There are no longer any known false positives.** The two that used to be
+  listed here — a 500 from `/admin/notifications/feed` and SignalR "Failed to
+  complete negotiation" — were both artifacts of the hand-minted token missing
+  claims the hub and `CurrentUserService` need. Under the Developer-tab login
+  `/dashboard` reports zero failed requests and zero console errors (checked
+  2026-09-19), so **treat anything the driver reports as real**.
+- One thing that is expected and not a failure: a `401` on `/auth/whoami`
+  _before_ sign-in, which is the cold-session probe.
 
 If the driver needed new packages, a browser install, or config you had to add,
 update this skill so the next run just works.
