@@ -674,3 +674,69 @@ $rail-width: 40px;
     }
   }
 }
+
+// ── Watchlist ──────────────────────────────────────────────────────────────
+
+.watchlist {
+  position: absolute;
+  top: 8px;
+  right: 76px;
+  z-index: 19;
+  width: 210px;
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  padding: 6px 0;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #e6e9ef);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.16);
+  font-size: 12px;
+
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  li.selected {
+    background: var(--accent-soft, rgba(41, 98, 255, 0.12));
+  }
+}
+
+.watch-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 5px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+
+  &:hover {
+    background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+  }
+}
+
+.watch-symbol {
+  font-weight: 600;
+}
+
+.watch-change {
+  min-width: 48px;
+  text-align: right;
+
+  &.up {
+    color: #26a69a;
+  }
+
+  &.down {
+    color: #ef5350;
+  }
+}

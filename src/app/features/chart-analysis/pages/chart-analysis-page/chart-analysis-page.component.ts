@@ -31,6 +31,8 @@ import {
 } from '../../chart/chart-host.component';
 import { DrawingStore } from '../../drawings/drawing-store.service';
 import { PositionsService } from '@core/services/positions.service';
+import { EconomicEventsService } from '@core/services/economic-events.service';
+import type { EventMark } from '../../overlays/event-marks-renderer';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import type { PriceOverlay } from '../../overlays/overlay-renderer';
 import type { ChartMarker } from '../../chart/chart-host.component';
@@ -131,6 +133,34 @@ export class ChartAnalysisPageComponent {
   readonly markers = signal<ChartMarker[]>([]);
   readonly showOverlays = signal(true);
 
+  /** Economic events on the time axis. */
+  private readonly economicEvents = inject(EconomicEventsService);
+  readonly events = signal<EventMark[]>([]);
+  readonly showEvents = signal(true);
+  readonly minEventImpact = signal<'High' | 'Medium' | 'Low'>('Medium');
+
+  // ── Watchlist ────────────────────────────────────────────────────────────
+  //
+  // Prices come from the same throttled `priceUpdated` stream the chart uses,
+  // so the panel costs one extra map rather than 23 more polls.
+  readonly watchlistOpen = signal(false);
+  readonly prices = signal<Record<string, { bid: number; prev: number }>>({});
+
+  readonly watchlist = computed(() => {
+    const quotes = this.prices();
+    return this.symbols().map((p) => {
+      const sym = (p.symbol ?? '').toUpperCase();
+      const q = quotes[sym];
+      const changePct = q && q.prev !== 0 ? ((q.bid - q.prev) / q.prev) * 100 : null;
+      return {
+        symbol: sym,
+        digits: Math.trunc(p.decimalPlaces) || 5,
+        bid: q?.bid ?? null,
+        changePct,
+      };
+    });
+  });
+
   // ── Bar replay ───────────────────────────────────────────────────────────
   //
   // Replay is a pure VIEW over the loaded bars: it truncates the series rather
@@ -216,7 +246,10 @@ export class ChartAnalysisPageComponent {
     this.realtime
       .on<{ symbol?: string; bid?: number; ask?: number; price?: number }>('priceUpdated')
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((tick) => this.applyTick(tick));
+      .subscribe((tick) => {
+        this.applyTick(tick);
+        this.recordQuote(tick);
+      });
   }
 
   /**
@@ -362,9 +395,98 @@ export class ChartAnalysisPageComponent {
     return bars.length ? this.formatTime(bars[bars.length - 1].time) : '';
   }
 
+  /**
+   * Load the calendar around the visible window.
+   *
+   * Filtered to the currencies this pair is made of: an operator charting
+   * EURUSD cares about EUR and USD prints, and drawing every JPY release on
+   * top of them is noise that makes the ones that matter harder to see.
+   */
+  private loadEvents(): void {
+    if (!this.showEvents()) {
+      this.events.set([]);
+      return;
+    }
+    const symbol = this.symbol().toUpperCase();
+    const pair = this.symbols().find((p) => (p.symbol ?? '').toUpperCase() === symbol);
+    const currencies = [pair?.baseCurrency, pair?.quoteCurrency]
+      .filter((c): c is string => !!c)
+      .map((c) => c.toUpperCase());
+
+    // Window to the bars actually plotted, not a fixed number of days: 1500
+    // H1 bars is ~62 days but 1500 M5 bars is ~5, and a fixed window is either
+    // short of the left edge or wasteful.
+    const loaded = this.bars();
+    const fromMs = loaded.length ? loaded[0].time : Date.now() - 45 * 86_400_000;
+    const from = new Date(fromMs).toISOString();
+    const to = new Date(Date.now() + 14 * 86_400_000).toISOString();
+
+    // sortBy/sortDirection are EXPLICIT. The handler's default is ascending, so
+    // a capped page returns the OLDEST events in the window — which is exactly
+    // what happened here: the chart showed 9-18 Sep and the API cheerfully
+    // returned 5-20 Aug, so nothing rendered and the feature looked broken.
+    this.economicEvents
+      .list({
+        currentPage: 1,
+        itemCountPerPage: 500,
+        filter: { from, to },
+        sortBy: 'scheduledAt',
+        sortDirection: 'desc',
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((res) => {
+        if (!res?.status || !res.data) return;
+        const rows = (res.data.data ?? []).filter(
+          (e) => currencies.length === 0 || currencies.includes((e.currency ?? '').toUpperCase()),
+        );
+        const marks: EventMark[] = [];
+        for (const e of rows) {
+          const at = Date.parse(e.scheduledAt ?? '');
+          if (Number.isNaN(at)) continue;
+          const impact = String(e.impact);
+          marks.push({
+            time: at,
+            title: e.title ?? '',
+            currency: (e.currency ?? '').toUpperCase(),
+            impact: impact === 'High' ? 'High' : impact === 'Medium' ? 'Medium' : 'Low',
+          });
+        }
+        this.events.set(marks);
+      });
+  }
+
+  toggleEvents(): void {
+    this.showEvents.set(!this.showEvents());
+    this.loadEvents();
+  }
+
+  cycleEventImpact(): void {
+    const order: Array<'High' | 'Medium' | 'Low'> = ['High', 'Medium', 'Low'];
+    const next = order[(order.indexOf(this.minEventImpact()) + 1) % order.length];
+    this.minEventImpact.set(next);
+  }
+
   toggleOverlays(): void {
     this.showOverlays.set(!this.showOverlays());
     this.loadTradingOverlays();
+    this.loadEvents();
+  }
+
+  /**
+   * Keep the watchlist's last price and a reference for the change column.
+   *
+   * `prev` is seeded once per symbol and then left alone, so the percentage is
+   * the move since this page opened rather than since the previous tick — a
+   * per-tick delta reads as permanent noise around zero.
+   */
+  private recordQuote(tick: { symbol?: string; bid?: number; ask?: number; price?: number }): void {
+    const symbol = tick?.symbol?.toUpperCase();
+    const bid = tick.bid ?? tick.price ?? tick.ask;
+    if (!symbol || typeof bid !== 'number' || !Number.isFinite(bid)) return;
+    this.prices.update((map) => ({
+      ...map,
+      [symbol]: { bid, prev: map[symbol]?.prev ?? bid },
+    }));
   }
 
   private loadSymbols(): void {
@@ -390,6 +512,8 @@ export class ChartAnalysisPageComponent {
     try {
       const { bars } = await this.feed.getBars(this.symbol(), this.resolution(), 0, now, PAGE_BARS);
       this.bars.set(bars);
+      // After the bars, so the calendar window matches what is on screen.
+      this.loadEvents();
       if (bars.length === 0) {
         this.error.set(
           `No ${this.resolutionLabel(this.resolution())} candles stored for ${this.symbol()}.`,

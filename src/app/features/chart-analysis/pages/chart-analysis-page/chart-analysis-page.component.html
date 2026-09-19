@@ -109,6 +109,26 @@
     <button
       type="button"
       class="tool"
+      [class.active]="showEvents()"
+      (click)="toggleEvents()"
+      title="Economic events on the time axis"
+    >
+      📅
+    </button>
+    @if (showEvents()) {
+      <button
+        type="button"
+        class="tool"
+        (click)="cycleEventImpact()"
+        title="Minimum event impact shown"
+      >
+        {{ minEventImpact() }}+
+      </button>
+    }
+
+    <button
+      type="button"
+      class="tool"
       [class.active]="magnet()"
       (click)="magnet.set(!magnet())"
       title="Magnet — snap drawings to OHLC (M)"
@@ -126,6 +146,16 @@
       <option value="log">Log</option>
       <option value="percent">%</option>
     </select>
+
+    <button
+      type="button"
+      class="tool"
+      [class.active]="watchlistOpen()"
+      (click)="watchlistOpen.set(!watchlistOpen())"
+      title="Watchlist"
+    >
+      👁 Watchlist
+    </button>
 
     <button
       type="button"
@@ -342,6 +372,8 @@
         [magnet]="magnet()"
         [scaleMode]="scaleMode()"
         [timezone]="timezone()"
+        [events]="events()"
+        [minEventImpact]="minEventImpact()"
         [overlays]="overlays()"
         [markers]="markers()"
         (loadMore)="loadOlder()"
@@ -428,6 +460,32 @@
           </button>
           <button type="button" (click)="closeContextMenu()">Close</button>
         </div>
+      }
+
+      <!-- Watchlist. -->
+      @if (watchlistOpen()) {
+        <aside class="watchlist">
+          <div class="tree-title">Watchlist</div>
+          <ul>
+            @for (w of watchlist(); track w.symbol) {
+              <li [class.selected]="w.symbol === symbol()">
+                <button type="button" class="watch-row" (click)="selectSymbol(w.symbol)">
+                  <span class="watch-symbol">{{ w.symbol }}</span>
+                  <span class="watch-price">
+                    {{ w.bid === null ? '—' : (w.bid | number: '1.' + w.digits + '-' + w.digits) }}
+                  </span>
+                  <span
+                    class="watch-change"
+                    [class.up]="(w.changePct ?? 0) >= 0"
+                    [class.down]="(w.changePct ?? 0) < 0"
+                  >
+                    {{ w.changePct === null ? '' : (w.changePct | number: '1.2-2') + '%' }}
+                  </span>
+                </button>
+              </li>
+            }
+          </ul>
+        </aside>
       }
 
       <!-- Object tree. -->

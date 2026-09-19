@@ -49,6 +49,7 @@ import { DrawingController } from '../drawings/drawing-controller';
 import type { DrawingKind } from '../drawings/model';
 import { OverlayRenderer, type PriceOverlay } from '../overlays/overlay-renderer';
 import { timezoneOffsetMinutes } from '../workspace/layout-store.service';
+import { EventMarksRenderer, type EventMark } from '../overlays/event-marks-renderer';
 
 /**
  * Chart styles the toolbar can switch between — the 18 of TradingView's
@@ -168,6 +169,9 @@ export class ChartHostComponent implements OnDestroy {
   readonly markers = input<ChartMarker[]>([]);
   /** IANA zone for the time axis; bar data itself stays UTC. */
   readonly timezone = input<string>('UTC');
+  /** Economic events on the time axis. Times are UTC; shifted like the bars. */
+  readonly events = input<EventMark[]>([]);
+  readonly minEventImpact = input<'High' | 'Medium' | 'Low'>('Medium');
 
   /** Raised when the visible range reaches the oldest bar we hold. */
   readonly loadMore = output<void>();
@@ -194,6 +198,7 @@ export class ChartHostComponent implements OnDestroy {
     () => this.precision(),
   );
   private markerApi: ISeriesMarkersPluginApi<Time> | null = null;
+  private readonly eventRenderer = new EventMarksRenderer(() => this.chart);
 
   constructor() {
     // Create once the view exists, then keep it in step with inputs. Each
@@ -265,6 +270,20 @@ export class ChartHostComponent implements OnDestroy {
     effect(() => {
       const markers = this.markers();
       untracked(() => this.applyMarkers(markers));
+    });
+
+    effect(() => {
+      const events = this.events();
+      const minImpact = this.minEventImpact();
+      // Shifted with the bars so an event sits where it happened on the
+      // displayed clock, not where it happened in UTC.
+      this.timezone();
+      untracked(() =>
+        this.eventRenderer.setMarks(
+          events.map((e) => ({ ...e, time: e.time + this.timezoneShiftMs(e.time) })),
+          minImpact,
+        ),
+      );
     });
   }
 
@@ -558,6 +577,7 @@ export class ChartHostComponent implements OnDestroy {
       // Overlays and markers live on the series too, so they follow it through
       // every style change for the same reason drawings do.
       this.price.attachPrimitive(this.overlayRenderer);
+      this.price.attachPrimitive(this.eventRenderer);
       this.markerApi = createSeriesMarkers(this.price, []);
       this.applyMarkers(this.markers());
     }
