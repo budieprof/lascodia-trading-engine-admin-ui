@@ -1,56 +1,73 @@
 # Public tunnel for the admin UI
 
-Runbook for exposing the locally-running admin UI + engine API to the public
-internet via a Cloudflare Quick Tunnel. Useful for sharing the dev UI with
-someone off-net, testing from a phone without joining a private mesh, or
-demoing a work-in-progress feature.
+Runbook for exposing the admin UI + engine API to the public internet through
+Cloudflare. Two distinct uses:
 
-This is a **dev-tooling** workflow — the artefacts live in `.gitignore`d
-files (`Caddyfile`) so each developer can run it locally without affecting
-the project history. This doc is the recipe.
+1. **The permanent deployment.** `app.codiapay.com` is a _named_ tunnel running
+   as a LaunchDaemon, fronting the **compiled release** of the UI. This is how
+   the live operator console is served. See [Persistent named
+   tunnel](#persistent-named-tunnel) — it is already set up; nothing in the
+   "Starting a session" section below needs doing for it.
+2. **Ad-hoc quick tunnels.** Sharing a work-in-progress with someone off-net or
+   testing from a phone. Ephemeral `*.trycloudflare.com` URL, and the one case
+   where pointing the proxy at `ng serve` still makes sense.
+
+> **Changed 2026-09-19.** This doc used to describe one setup where Caddy's
+> catch-all proxied `ng serve` on `:4200` for _both_ uses. The permanent
+> deployment no longer does: Caddy serves static files from a published release
+> directory, so source edits no longer hot-reload the live console and the whole
+> thing survives a reboot with no `npm start`. Deployment details live in
+> [../CLAUDE.md](../CLAUDE.md#deployment) and `scripts/release.sh`; the
+> `Caddyfile` is now tracked rather than gitignored.
 
 ## Why a reverse proxy at all
 
-The admin UI talks to the engine on `:5081` via the `apiBaseUrl` in
-`public/config.json` (default `http://localhost:5081`). A naive tunnel that
-only exposes `:4200` to the internet sends the UI to a remote browser, where
-every API call hits the visitor's own `localhost:5081` — which obviously
-doesn't reach the operator's laptop. Either both ports have to be tunnelled
-(two URLs, manual UI re-config), or they have to look like one origin.
+The admin UI talks to the engine through the `apiBaseUrl` in its runtime
+`config.json` (`http://localhost:5081` in development). A naive tunnel that
+exposes only the UI sends that bundle to a remote browser, where every API call
+hits **the visitor's own** `localhost:5081` — which obviously doesn't reach the
+operator's laptop. Either both ports get tunnelled (two URLs, manual UI
+re-config), or they have to look like one origin.
 
 This runbook chooses the second option: Caddy fronts both, the UI runs in
 **same-origin** mode (`apiBaseUrl = ""`), and only one URL goes out via
-Cloudflare. Caddy serves an inline `config.json` override so the project's
-checked-in `public/config.json` stays untouched.
+Cloudflare. That is why every published release bakes `apiBaseUrl: ""` — it is
+the only shape that works for a browser arriving through the tunnel.
 
 ## What's running
 
+The permanent deployment — what `app.codiapay.com` actually serves today:
+
 ```
-┌─────────────────────┐                                     ┌─────────────────┐
-│   public internet   │ ─── https://*.trycloudflare.com ──▶ │   cloudflared   │
-└─────────────────────┘                                     └────────┬────────┘
-                                                                     │ localhost:8080
-                                                            ┌────────▼────────┐
-                                                            │      Caddy      │
-                                                            └────────┬────────┘
-                                              ┌──────────────────────┼──────────────────────┐
-                                              │                      │                      │
-                                  /config.json│                /api/*│                     /│ (catch-all)
-                                       inline │              localhost:5081       localhost:4200
-                                     respond  │              ┌───────▼───────┐    ┌────────▼───────┐
-                              (overrides UI's │              │  Engine API   │    │  ng serve      │
-                              apiBaseUrl to "")              │  (Docker)     │    │  (Angular dev) │
-                                              ▼              └───────────────┘    └────────────────┘
+┌─────────────────────┐                                  ┌─────────────────┐
+│   public internet   │ ─── https://app.codiapay.com ──▶ │   cloudflared   │
+└─────────────────────┘                                  └────────┬────────┘
+                                                                  │ localhost:8080
+                                                         ┌────────▼────────┐
+                                                         │      Caddy      │
+                                                         └────────┬────────┘
+                                     ┌────────────────────────────┼────────────────┐
+                               /api/*│                    /health*│               /│ (catch-all)
+                             localhost:5081             localhost:5081     static files
+                             ┌───────▼───────┐          ┌────────▼──────┐  ┌───────▼─────────────┐
+                             │  Engine API   │          │ Engine health │  │ /opt/homebrew/var/  │
+                             │  (Docker)     │          │  probes       │  │ www/lascodia-admin/ │
+                             └───────────────┘          └───────────────┘  │ current  (symlink)  │
+                                                                           └─────────────────────┘
 ```
 
-Four processes total:
+Three processes, and **none of them is a Node process**:
 
 | Process              | Port | Role                                                       |
 | -------------------- | ---- | ---------------------------------------------------------- |
-| `ng serve`           | 4200 | Angular dev server (HMR over WebSocket).                   |
-| Docker `api-1`       | 5081 | Engine API.                                                |
-| `caddy run`          | 8080 | Reverse proxy: routes the three paths above.               |
+| Docker `api-1`       | 5081 | Engine API (+ SignalR hub at `/api/hubs/trading`).         |
+| `caddy`              | 8080 | Reverse proxy + static file server. Root LaunchDaemon.     |
 | `cloudflared tunnel` | —    | Outbound connection to Cloudflare edge → public HTTPS URL. |
+
+The UI itself is a directory of files on disk, published by
+`scripts/release.sh`. For an **ad-hoc quick tunnel** against work in progress,
+swap the catch-all for `reverse_proxy localhost:4200` and run `npm start` —
+that variant is what the rest of this doc's session recipe describes.
 
 ## Prereqs
 
@@ -67,42 +84,46 @@ below.
 
 ## Caddyfile
 
-Lives in the project root, gitignored. If you don't have one, create it:
+**The deployed config** is `/opt/homebrew/etc/Caddyfile`, with a tracked
+reference copy of its `:8080` site at the project root ([../Caddyfile](../Caddyfile)).
+It serves the compiled release and proxies `/api/*` + `/health*`; read it there
+rather than reproducing it here, since a copy in a doc drifts. It is no longer
+gitignored — it stopped being throwaway dev tooling the moment it became the
+config serving the live console.
+
+Two details worth knowing before editing it:
+
+- **`/health*` needs its own block.** Without it the static catch-all answers
+  `/health` with `index.html` and HTTP 200, so every EA reads a dead engine as
+  healthy and the dead-man switch never fires.
+- **Releases bake `apiBaseUrl: ""` into their own `config.json`,** so Caddy no
+  longer serves an inline `/config.json` override. Feature flags come from
+  `public/config.json` at publish time — change them there, then publish. (The
+  old inline `respond` had to be hand-mirrored and silently went stale.)
+
+For an **ad-hoc quick tunnel** against a work-in-progress instead, point the
+catch-all at the dev server:
 
 ```caddyfile
-:8080 {
-    handle /config.json {
-        header Content-Type "application/json"
-        respond `{"apiBaseUrl":"","featureFlags":{"chart-annotations":{"enabled":true,"roles":["Admin","Operator","Trader"]}}}` 200
-    }
-
-    handle /api/* {
-        reverse_proxy localhost:5081
-    }
-
-    handle {
-        reverse_proxy localhost:4200 {
-            # Angular dev server checks the Host header against an
-            # allow-list; rewriting to localhost keeps it happy without
-            # touching angular.json.
-            header_up Host {upstream_hostport}
-        }
+handle {
+    reverse_proxy localhost:4200 {
+        # Angular's dev server checks the Host header against an allow-list;
+        # rewriting to localhost keeps it happy without touching angular.json.
+        header_up Host {upstream_hostport}
     }
 }
 ```
 
-The inline `config.json` keeps `apiBaseUrl` empty (same-origin) so the UI's
-API calls become `/api/v1/...` and land on Caddy. **If you change feature
-flags in `public/config.json`, mirror the change here** — this override
-shadows the file for tunnel sessions only.
-
-Confirm `Caddyfile` is in `.gitignore` (it is, after the initial setup):
-
-```bash
-grep -c '^Caddyfile$' .gitignore
-```
+That variant also needs the inline `/config.json` override the deployed config
+dropped, since `ng serve` serves `public/config.json` with its
+`http://localhost:5081` base URL, which a remote browser cannot reach.
 
 ## Starting a session
+
+> For `app.codiapay.com` there is **no session to start** — cloudflared and
+> Caddy are both `RunAtLoad` LaunchDaemons and the UI is static files on disk.
+> To ship a UI change there, run `./scripts/release.sh publish`. The steps below
+> are for an ad-hoc quick tunnel.
 
 Three commands, three terminals (or background each one).
 
@@ -112,7 +133,7 @@ Three commands, three terminals (or background each one).
 # Engine in Docker
 docker compose -f path/to/lascodia-trading-engine/docker-compose.yml up -d api
 
-# Angular dev server (project root of admin UI)
+# Angular dev server (project root of admin UI) — quick-tunnel variant only
 npm start
 ```
 
@@ -353,34 +374,37 @@ before login, before Caddy.
 
 ### Caddy auto-start
 
-Same `Caddyfile` lives in `/opt/homebrew/etc/Caddyfile`. Register the brew
-service:
+The deployed `Caddyfile` lives in `/opt/homebrew/etc/Caddyfile`:
 
 ```bash
-sudo cp Caddyfile /opt/homebrew/etc/Caddyfile
-brew services start caddy
+cp Caddyfile /opt/homebrew/etc/Caddyfile   # then re-append the LAN :443 block
+sudo brew services start caddy
 ```
 
-Brew writes `~/Library/LaunchAgents/homebrew.mxcl.caddy.plist`. Caddy
-starts at user login (not boot, but close enough — the tunnel survives
-without it; visitors just get 502 until login).
+**It must run as root**, i.e. `sudo brew services start caddy` (a
+LaunchDaemon in `/Library/LaunchDaemons/`), not the plain user LaunchAgent
+`brew services start` installs. macOS refuses to let a non-root process bind
+ports below 1024, so the user-level service cannot serve the `:443` LAN
+endpoint — it fails to bind and silently keeps serving only `:8080`. Verify
+with `lsof -nP -iTCP:443 -sTCP:LISTEN`.
 
-### `ng serve` is NOT in this picture
-
-Deliberate. The dev server is too heavy to babysit unattended, and you
-want compile errors in front of you anyway. After a reboot, run
-`npm start` from the project root by hand. Tunnel + Caddy are already up,
-so the moment ng serve binds `:4200` the public URL starts serving the UI.
-
-If you genuinely want full unattended auto-boot, wrap ng serve with
-[pm2](https://pm2.keymetrics.io/):
+Reload after an edit without dropping connections:
 
 ```bash
-brew install pm2
-pm2 start npm --name ng-serve -- start
-pm2 save
-pm2 startup     # prints the sudo line — run it to register the boot hook
+caddy reload --config /opt/homebrew/etc/Caddyfile
 ```
+
+### Nothing else needs starting
+
+The UI is static files under `/opt/homebrew/var/www/lascodia-admin/current`, so
+after a reboot cloudflared and Caddy come up on their own (both `RunAtLoad`)
+and the console is live with no manual step.
+
+This is the part that changed on 2026-09-19. Previously this section read
+"`ng serve` is NOT in this picture — after a reboot, run `npm start` by hand",
+which meant the public console was down from reboot until someone noticed, and
+that whatever happened to be checked out at that moment went live. Publishing a
+release is now the only way anything reaches it.
 
 Verify end-to-end (browser is more reliable than `curl` here — macOS's
 resolver holds a negative NXDOMAIN cache for the subdomain for ~5 min
@@ -391,8 +415,11 @@ dig +short app.codiapay.com @1.1.1.1     # cloudflare anycast IPs
 ```
 
 Then open `https://app.codiapay.com/` in a browser. Cloudflare provisions
-the cert automatically; the UI loads via Caddy → ng serve, API calls flow
-via Caddy → engine, all on the same origin.
+the cert automatically; the UI loads from Caddy's static release directory,
+API calls flow via Caddy → engine, all on the same origin.
+
+`./scripts/release.sh status` answers "is the live console the commit I think
+it is?" without opening a browser at all.
 
 ### Auth gating with Cloudflare Access (recommended)
 

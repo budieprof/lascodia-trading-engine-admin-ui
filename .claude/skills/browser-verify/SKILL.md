@@ -18,21 +18,52 @@ typechecks. Drive it, screenshot it, **look at the screenshot.**
 
 ## Preconditions (usually already true)
 
-- **Dev server:** the UI is served at `http://localhost:4200`. Check:
-  `curl -s -o /dev/null -w "%{http_code}" http://localhost:4200/` → `200`.
-  If it's not running, start it: `npm start` (aka `ng serve`) from the repo root,
-  in the background, and wait for `200`. Never `make compile`/kill live terminals.
+- **Pick the right origin.** There are two, and they are different builds:
+  - `http://localhost:8080` — the **published release** (static files via Caddy).
+    Always up; this is what operators actually see. Use it to verify a deploy.
+  - `http://localhost:4200` — the **dev server**, only up while someone is running
+    `npm start`. Use it to verify work in progress.
+
+  Check with `curl -s -o /dev/null -w "%{http_code}" <origin>/` → `200`. If you want
+  :4200 and it's down, start `npm start` from the repo root in the background and wait
+  for `200`. Never kill live terminals. Since 2026-09-19 source edits do **not** reach
+  :8080 — publish with `./scripts/release.sh publish` first (see
+  [CLAUDE.md](../../../CLAUDE.md#deployment)).
+
 - **Engine API:** `http://localhost:5081` (Docker). `curl -s localhost:5081/health`
   should answer (`Healthy`/`Degraded` both fine).
 - **Playwright + Chromium:** already installed in `node_modules` (browser cached
   under `~/Library/Caches/ms-playwright`). If `require('playwright')` fails, run
   `npx playwright install chromium` once.
 
-## Auth: inject a dev token (no login form needed)
+## Auth: use the login form's Developer tab
 
-The app keeps its JWT in `sessionStorage['lascodia.auth.token']`. `hasRole`
-treats an empty roles claim as **full access**, so a hand-minted superadmin dev
-token authenticates every route. Mint one (HS256, dev secret):
+> **The token-minting path below is BROKEN — don't use it.** The hardcoded HS256
+> dev secret has drifted from the running engine, so every request comes back 401
+> and the app bounces straight to `/login`. That failure reads as "the whole page
+> is broken" rather than "auth failed", which is exactly how it wastes an hour.
+> `drive.js` still implements it and still takes `LASC_JWT`; treat the file as
+> needing the same fix.
+
+The login form's **Developer** tab is passwordless — `onDevLogin()` posts a fixed
+identity and the engine returns a real token, so it is valid by construction:
+
+```js
+await page.goto(BASE + '/login', { waitUntil: 'networkidle' });
+await page.getByRole('tab', { name: /Developer/i }).click();
+await page.getByRole('button', { name: /Sign In/i }).click();
+await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 20000 });
+```
+
+A `401` on `/auth/whoami` _before_ sign-in is the normal cold-session probe, not a
+failure. Don't try to read the engine's real JWT secret out of the container env —
+the permission classifier blocks it, correctly.
+
+<details>
+<summary>The old mint-a-token recipe (kept for context — does not authenticate)</summary>
+
+The app keeps its JWT in `sessionStorage['lascodia.auth.token']`, and `hasRole`
+treats an empty roles claim as full access, so this worked until the secret drifted:
 
 ```bash
 python3 - > /tmp/lasc_ui_jwt.txt <<'PY'
@@ -49,8 +80,7 @@ print(seg+"."+b64(hmac.new(secret.encode(),seg.encode(),hashlib.sha256).digest()
 PY
 ```
 
-The driver injects it into sessionStorage after loading the origin, then
-navigates — so route guards pass.
+</details>
 
 ## Drive it
 
@@ -60,10 +90,16 @@ page title, a text excerpt, and any `>=400` responses / console errors. Run it
 **from the repo root** so `require('playwright')` resolves:
 
 ```bash
+BASE=http://localhost:8080 \
 LASC_JWT="$(cat /tmp/lasc_ui_jwt.txt)" \
 OUT=/tmp \
 node .claude/skills/browser-verify/drive.js /conversations /dashboard /watchlist
 ```
+
+`BASE` defaults to `http://localhost:4200` (the dev server) — pass
+`http://localhost:8080` to drive the published release instead. And because the
+`LASC_JWT` path no longer authenticates, replace the driver's token injection
+with the Developer-tab click sequence above before trusting any run.
 
 Then **Read the PNGs** it wrote (`/tmp/ui_<route>.png`) — a blank/blocked frame
 is a failure. Pick routes that exercise your change (e.g. `/conversations` for

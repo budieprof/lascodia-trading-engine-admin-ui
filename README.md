@@ -2,7 +2,7 @@
 
 Single-page admin for the Lascodia Automated Forex Trading Engine. Angular 19, standalone components + signals, custom Apple-inspired design system, Tailwind v4 + SCSS tokens, ag-grid + echarts.
 
-For the end-to-end feature roadmap see [UPGRADE_PLAN.md](UPGRADE_PLAN.md). For the detailed product spec see [PRD.md](PRD.md).
+For the end-to-end feature roadmap see [UPGRADE_PLAN.md](UPGRADE_PLAN.md). For the detailed product spec see [PRD.md](PRD.md). For architecture invariants, the deploy path and the traps that have cost real time, see [CLAUDE.md](CLAUDE.md).
 
 ## Quick start
 
