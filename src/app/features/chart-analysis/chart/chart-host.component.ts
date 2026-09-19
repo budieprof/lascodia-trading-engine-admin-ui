@@ -22,10 +22,12 @@ import {
   LineSeries,
   LineStyle,
   createChart,
+  createSeriesMarkers,
   type CandlestickData,
   type DeepPartial,
   type IChartApi,
   type ISeriesApi,
+  type ISeriesMarkersPluginApi,
   type MouseEventParams,
   type SeriesDataItemTypeMap,
   type Time,
@@ -45,6 +47,7 @@ import {
 import { DrawingStore } from '../drawings/drawing-store.service';
 import { DrawingController } from '../drawings/drawing-controller';
 import type { DrawingKind } from '../drawings/model';
+import { OverlayRenderer, type PriceOverlay } from '../overlays/overlay-renderer';
 
 /**
  * Chart styles the toolbar can switch between — the 18 of TradingView's
@@ -153,6 +156,10 @@ export class ChartHostComponent implements OnDestroy {
   readonly magnet = input<boolean>(false);
   /** Price scale mode — normal, logarithmic or percentage. */
   readonly scaleMode = input<'normal' | 'log' | 'percent'>('normal');
+  /** Engine-derived price levels: position entry/SL/TP and pending orders. */
+  readonly overlays = input<PriceOverlay[]>([]);
+  /** Bar markers for trade signals, fills and economic events. */
+  readonly markers = input<ChartMarker[]>([]);
 
   /** Raised when the visible range reaches the oldest bar we hold. */
   readonly loadMore = output<void>();
@@ -174,6 +181,11 @@ export class ChartHostComponent implements OnDestroy {
   /** Bars currently on the chart, for legend lookups by time. */
   private plotted: Bar[] = [];
   private computedCache = new Map<string, Record<string, Array<number | null>>>();
+  private readonly overlayRenderer = new OverlayRenderer(
+    () => this.price,
+    () => this.precision(),
+  );
+  private markerApi: ISeriesMarkersPluginApi<Time> | null = null;
 
   constructor() {
     // Create once the view exists, then keep it in step with inputs. Each
@@ -225,6 +237,16 @@ export class ChartHostComponent implements OnDestroy {
     effect(() => {
       const mode = this.scaleMode();
       untracked(() => this.applyScaleMode(mode));
+    });
+
+    effect(() => {
+      const overlays = this.overlays();
+      untracked(() => this.overlayRenderer.setOverlays(overlays));
+    });
+
+    effect(() => {
+      const markers = this.markers();
+      untracked(() => this.applyMarkers(markers));
     });
   }
 
@@ -452,6 +474,11 @@ export class ChartHostComponent implements OnDestroy {
     if (this.price) {
       this.controller.bindSeries(this.price);
       this.controller.sync(this.drawings.visible(), this.drawings.selectedId());
+      // Overlays and markers live on the series too, so they follow it through
+      // every style change for the same reason drawings do.
+      this.price.attachPrimitive(this.overlayRenderer);
+      this.markerApi = createSeriesMarkers(this.price, []);
+      this.applyMarkers(this.markers());
     }
 
     if (showVolume) {
@@ -506,6 +533,37 @@ export class ChartHostComponent implements OnDestroy {
       default:
         return bars;
     }
+  }
+
+  /**
+   * Bar markers for signals, fills and events.
+   *
+   * Snapped to the nearest plotted bar: a signal fired at 10:37 has no H1 bar
+   * of its own, and an unsnapped marker is dropped by the library without a
+   * word rather than drawn at the nearest candle.
+   */
+  private applyMarkers(markers: ChartMarker[]): void {
+    if (!this.markerApi) return;
+    const bars = this.plotted;
+    if (bars.length === 0) {
+      this.markerApi.setMarkers([]);
+      return;
+    }
+    const snapped = markers
+      .map((m) => {
+        const bar = nearestBarTime(bars, m.time);
+        if (bar === null) return null;
+        return {
+          time: asTime(bar),
+          position: m.position,
+          color: m.color,
+          shape: m.shape,
+          text: m.text,
+        };
+      })
+      .filter((m): m is NonNullable<typeof m> => m !== null)
+      .sort((a, b) => (a.time as number) - (b.time as number));
+    this.markerApi.setMarkers(snapped);
   }
 
   private applyIndicators(active: ActiveIndicator[], bars: Bar[]): void {
@@ -694,6 +752,32 @@ export class ChartHostComponent implements OnDestroy {
       indicators,
     });
   }
+}
+
+/** A marker pinned to a bar — trade signals, fills, economic events. */
+export interface ChartMarker {
+  time: number;
+  position: 'aboveBar' | 'belowBar' | 'inBar';
+  shape: 'circle' | 'square' | 'arrowUp' | 'arrowDown';
+  color: string;
+  text: string;
+}
+
+/** Nearest plotted bar time to `timeMs`, or null when there are no bars. */
+function nearestBarTime(bars: Bar[], timeMs: number): number | null {
+  if (bars.length === 0) return null;
+  let lo = 0;
+  let hi = bars.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (bars[mid].time < timeMs) lo = mid + 1;
+    else hi = mid;
+  }
+  const candidate = bars[lo];
+  const previous = bars[Math.max(0, lo - 1)];
+  return Math.abs(candidate.time - timeMs) <= Math.abs(previous.time - timeMs)
+    ? candidate.time
+    : previous.time;
 }
 
 /** Lightweight Charts takes seconds; our bars carry milliseconds. */

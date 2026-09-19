@@ -521,3 +521,52 @@
     color: inherit;
   }
 }
+
+// ── Bar replay ─────────────────────────────────────────────────────────────
+
+.replay-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border, #e6e9ef);
+  font-size: 12px;
+  flex: 0 0 auto;
+
+  button {
+    border: 1px solid var(--border, #e6e9ef);
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    padding: 3px 8px;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+    }
+  }
+
+  select {
+    border: 1px solid var(--border, #e6e9ef);
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    padding: 2px 4px;
+  }
+}
+
+.replay-scrub {
+  flex: 1 1 auto;
+  min-width: 120px;
+}
+
+.replay-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted, #787b86);
+}

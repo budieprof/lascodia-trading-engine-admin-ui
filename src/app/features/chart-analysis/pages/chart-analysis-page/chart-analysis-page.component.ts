@@ -30,6 +30,10 @@ import {
   type LegendSnapshot,
 } from '../../chart/chart-host.component';
 import { DrawingStore } from '../../drawings/drawing-store.service';
+import { PositionsService } from '@core/services/positions.service';
+import { TradeSignalsService } from '@core/services/trade-signals.service';
+import type { PriceOverlay } from '../../overlays/overlay-renderer';
+import type { ChartMarker } from '../../chart/chart-host.component';
 import {
   TOOLS,
   toolFor,
@@ -113,6 +117,34 @@ export class ChartAnalysisPageComponent {
 
   // ── Drawings ─────────────────────────────────────────────────────────────
   readonly drawings = inject(DrawingStore);
+  private readonly positions = inject(PositionsService);
+  private readonly signals = inject(TradeSignalsService);
+
+  /** Engine state drawn on the chart: position levels and signal markers. */
+  readonly overlays = signal<PriceOverlay[]>([]);
+  readonly markers = signal<ChartMarker[]>([]);
+  readonly showOverlays = signal(true);
+
+  // ── Bar replay ───────────────────────────────────────────────────────────
+  //
+  // Replay is a pure VIEW over the loaded bars: it truncates the series rather
+  // than refetching. Everything downstream — indicators, the legend, drawings —
+  // already follows the plotted bars, so they rewind for free and, critically,
+  // an indicator cannot accidentally see bars from the future.
+  readonly replayActive = signal(false);
+  readonly replayIndex = signal(0);
+  readonly replayPlaying = signal(false);
+  readonly replaySpeed = signal(4);
+  private replayTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** What the chart actually plots — the full series, or a replay prefix. */
+  readonly displayBars = computed(() => {
+    const all = this.bars();
+    if (!this.replayActive()) return all;
+    return all.slice(0, Math.max(1, Math.min(this.replayIndex(), all.length)));
+  });
+
+  readonly replayAtEnd = computed(() => this.replayIndex() >= this.bars().length);
   readonly tools = TOOLS;
   readonly tool = signal<DrawingKind | null>(null);
   readonly magnet = signal(false);
@@ -151,6 +183,9 @@ export class ChartAnalysisPageComponent {
 
   constructor() {
     this.loadSymbols();
+    // A running replay interval would outlive the page and keep stepping a
+    // chart nobody is looking at.
+    this.destroyRef.onDestroy(() => this.pauseReplay());
 
     // Deep link: /chart-analysis/EURUSD?tf=60 so a chart can be linked to from
     // a position or a signal without the operator re-selecting anything.
@@ -170,6 +205,154 @@ export class ChartAnalysisPageComponent {
       .subscribe((tick) => this.applyTick(tick));
   }
 
+  /**
+   * Load this symbol's open positions and recent signals onto the chart.
+   *
+   * Filtered by symbol server-side via the nested `filter` object — sent flat
+   * the criteria are discarded in silence and the handler answers with page 1
+   * of the whole table, which here would paint another symbol's stop loss onto
+   * this chart. That is a wrong chart, not an empty one.
+   */
+  private loadTradingOverlays(): void {
+    const symbol = this.symbol();
+    if (!this.showOverlays()) {
+      this.overlays.set([]);
+      this.markers.set([]);
+      return;
+    }
+
+    this.positions
+      .list({ currentPage: 1, itemCountPerPage: 50, filter: { symbol, status: 'Open' } })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((res) => {
+        if (!res?.status || !res.data) return;
+        const rows = (res.data.data ?? []).filter(
+          (p) => (p.symbol ?? '').toUpperCase() === symbol.toUpperCase(),
+        );
+        const out: PriceOverlay[] = [];
+        for (const p of rows) {
+          const long = String(p.direction).toLowerCase().includes('buy');
+          const lots = p.openLots || p.tradedLots || 0;
+          out.push({
+            kind: 'entry',
+            price: p.averageEntryPrice,
+            label: `${long ? 'LONG' : 'SHORT'} ${lots.toFixed(2)}`,
+            color: long ? '#26A69A' : '#EF5350',
+          });
+          if (p.stopLoss)
+            out.push({ kind: 'stop', price: p.stopLoss, label: 'SL', color: '#EF5350' });
+          if (p.takeProfit)
+            out.push({ kind: 'target', price: p.takeProfit, label: 'TP', color: '#26A69A' });
+        }
+        this.overlays.set(out);
+      });
+
+    this.signals
+      .list({
+        currentPage: 1,
+        itemCountPerPage: 100,
+        filter: { symbol },
+        sortBy: 'id',
+        sortDirection: 'desc',
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((res) => {
+        if (!res?.status || !res.data) return;
+        const rows = (res.data.data ?? []).filter(
+          (s) => (s.symbol ?? '').toUpperCase() === symbol.toUpperCase(),
+        );
+        const marks: ChartMarker[] = [];
+        for (const s of rows) {
+          const at = Date.parse(s.generatedAt ?? '');
+          // A signal with no readable timestamp cannot be pinned to a bar; a
+          // NaN time makes the library drop the whole batch silently.
+          if (Number.isNaN(at)) continue;
+          const long = String(s.direction).toLowerCase().includes('buy');
+          marks.push({
+            time: at,
+            position: long ? 'belowBar' : 'aboveBar',
+            shape: long ? 'arrowUp' : 'arrowDown',
+            color: long ? '#26A69A' : '#EF5350',
+            text: `#${s.id}`,
+          });
+        }
+        this.markers.set(marks);
+      });
+  }
+
+  // ── Replay controls ──────────────────────────────────────────────────────
+
+  startReplay(): void {
+    const total = this.bars().length;
+    if (total === 0) return;
+    // Start two thirds in, so there is visible history to reason from and
+    // enough ahead to be worth stepping through.
+    this.replayIndex.set(Math.max(1, Math.floor(total * 0.66)));
+    this.replayActive.set(true);
+  }
+
+  exitReplay(): void {
+    this.pauseReplay();
+    this.replayActive.set(false);
+  }
+
+  stepReplay(delta: number): void {
+    const total = this.bars().length;
+    this.replayIndex.update((i) => Math.max(1, Math.min(total, i + delta)));
+    if (this.replayAtEnd()) this.pauseReplay();
+  }
+
+  toggleReplayPlay(): void {
+    if (this.replayPlaying()) this.pauseReplay();
+    else this.playReplay();
+  }
+
+  private playReplay(): void {
+    if (this.replayAtEnd()) return;
+    this.pauseReplay();
+    this.replayPlaying.set(true);
+    // Speed is bars per second; the interval is derived so changing speed
+    // mid-playback takes effect on the next tick rather than needing a restart.
+    this.replayTimer = setInterval(
+      () => {
+        this.stepReplay(1);
+        if (this.replayAtEnd()) this.pauseReplay();
+      },
+      1000 / Math.max(1, this.replaySpeed()),
+    );
+  }
+
+  private pauseReplay(): void {
+    if (this.replayTimer !== null) {
+      clearInterval(this.replayTimer);
+      this.replayTimer = null;
+    }
+    this.replayPlaying.set(false);
+  }
+
+  setReplaySpeed(raw: string): void {
+    const speed = Number(raw);
+    if (!Number.isFinite(speed)) return;
+    this.replaySpeed.set(speed);
+    if (this.replayPlaying()) this.playReplay();
+  }
+
+  setReplayIndex(raw: string): void {
+    const index = Number(raw);
+    if (Number.isFinite(index)) this.replayIndex.set(index);
+  }
+
+  /** The time at the replay head, for the toolbar readout. */
+  replayTime(): string {
+    const bars = this.displayBars();
+    return bars.length ? this.formatTime(bars[bars.length - 1].time) : '';
+  }
+
+  toggleOverlays(): void {
+    this.showOverlays.set(!this.showOverlays());
+    this.loadTradingOverlays();
+  }
+
   private loadSymbols(): void {
     this.pairs
       .list({ currentPage: 1, itemCountPerPage: 200, filter: {} })
@@ -187,6 +370,7 @@ export class ChartAnalysisPageComponent {
     // Drawings belong to a symbol AND timeframe, so the scope has to move with
     // the chart before any drawing is read or written.
     this.drawings.setScope(this.symbol(), this.resolution());
+    this.loadTradingOverlays();
     this.feed.invalidate(this.symbol(), this.resolution());
     const now = Date.now();
     try {

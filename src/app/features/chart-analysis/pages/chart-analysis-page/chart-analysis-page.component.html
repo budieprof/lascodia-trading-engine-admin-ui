@@ -99,6 +99,16 @@
     <button
       type="button"
       class="tool"
+      [class.active]="showOverlays()"
+      (click)="toggleOverlays()"
+      title="Show open positions and trade signals on the chart"
+    >
+      Trades
+    </button>
+
+    <button
+      type="button"
+      class="tool"
       [class.active]="magnet()"
       (click)="magnet.set(!magnet())"
       title="Magnet — snap drawings to OHLC (M)"
@@ -146,6 +156,16 @@
       title="Redo (⇧⌘Z)"
     >
       ↷
+    </button>
+
+    <button
+      type="button"
+      class="tool"
+      [class.active]="replayActive()"
+      (click)="replayActive() ? exitReplay() : startReplay()"
+      title="Bar replay"
+    >
+      ⏯ Replay
     </button>
 
     @if (loading()) {
@@ -238,7 +258,7 @@
 
       <app-chart-host
         #host
-        [bars]="bars()"
+        [bars]="displayBars()"
         [style]="style()"
         [showVolume]="showVolume()"
         [indicators]="active()"
@@ -246,6 +266,8 @@
         [tool]="tool()"
         [magnet]="magnet()"
         [scaleMode]="scaleMode()"
+        [overlays]="overlays()"
+        [markers]="markers()"
         (loadMore)="loadOlder()"
         (legend)="onLegend($event)"
         (toolComplete)="onToolComplete()"
@@ -331,6 +353,36 @@
       }
     </div>
   </div>
+
+  @if (replayActive()) {
+    <div class="replay-bar">
+      <button type="button" (click)="stepReplay(-1)" title="Back one bar">⏮</button>
+      <button type="button" (click)="toggleReplayPlay()" title="Play / pause">
+        {{ replayPlaying() ? '⏸' : '▶' }}
+      </button>
+      <button type="button" (click)="stepReplay(1)" title="Forward one bar">⏭</button>
+      <input
+        type="range"
+        class="replay-scrub"
+        min="1"
+        [max]="bars().length"
+        [value]="replayIndex()"
+        (input)="setReplayIndex($any($event.target).value)"
+      />
+      <span class="muted">{{ replayIndex() }} / {{ bars().length }}</span>
+      <span class="muted">{{ replayTime() }}</span>
+      <label class="replay-speed">
+        Speed
+        <select [value]="replaySpeed()" (change)="setReplaySpeed($any($event.target).value)">
+          <option value="1">1×</option>
+          <option value="4">4×</option>
+          <option value="10">10×</option>
+          <option value="30">30×</option>
+        </select>
+      </label>
+      <button type="button" (click)="exitReplay()">Exit</button>
+    </div>
+  }
 
   <!-- Active studies: rename-free, TradingView-style list with inline inputs. -->
   @if (active().length) {
