@@ -24,6 +24,30 @@ import {
   roc,
   superTrend,
   williamsR,
+  adl,
+  alma,
+  aroon,
+  balanceOfPower,
+  choppiness,
+  cmf,
+  dema,
+  dpo,
+  elderRay,
+  envelope,
+  fisher,
+  forceIndex,
+  historicalVolatility,
+  hma,
+  linreg,
+  pvt,
+  smma,
+  stochRsi,
+  tema,
+  trix,
+  ultimate,
+  volumeProfile,
+  vortex,
+  vwma,
   type Ohlc,
 } from './math';
 
@@ -510,5 +534,209 @@ describe('awesome', () => {
       Array.from({ length: 50 }, () => [10, 10, 10, 10] as [number, number, number, number]),
     );
     expect(awesome(flat)[49]).toBeCloseTo(0, 10);
+  });
+});
+
+// ── Third wave ─────────────────────────────────────────────────────────────
+
+const trendUp = bars(
+  Array.from(
+    { length: 120 },
+    (_, i) =>
+      [100 + i, 101 + i, 99 + i, 100.5 + i, 100] as [number, number, number, number, number],
+  ),
+);
+const flat = bars(
+  Array.from(
+    { length: 120 },
+    () => [10, 10, 10, 10, 100] as [number, number, number, number, number],
+  ),
+);
+const upCloses = closes(120, (i) => 100 + i);
+
+describe('moving average family', () => {
+  it('every variant tracks a linear ramp closely', () => {
+    // On a straight line each of these should sit near the current value; a
+    // variant that is wildly off has its smoothing or its seed wrong.
+    for (const [name, out] of [
+      ['smma', smma(upCloses, 20)],
+      ['hma', hma(upCloses, 9)],
+      ['dema', dema(upCloses, 20)],
+      ['tema', tema(upCloses, 20)],
+      ['alma', alma(upCloses, 9)],
+      ['linreg', linreg(upCloses, 14)],
+    ] as const) {
+      const last = out[119] as number;
+      expect(last, name).toBeGreaterThan(180);
+      expect(last, name).toBeLessThan(240);
+    }
+  });
+
+  it('hma leads a plain SMA on a ramp', () => {
+    // Hull exists to reduce lag; if it does not lead, the nested WMAs are wrong.
+    expect(hma(upCloses, 9)[119] as number).toBeGreaterThan(sma(upCloses, 9)[119] as number);
+  });
+
+  it('vwma equals sma when every bar has the same volume', () => {
+    expect(vwma(trendUp, 20)[119] as number).toBeCloseTo(
+      sma(
+        trendUp.map((b) => b.close),
+        20,
+      )[119] as number,
+      8,
+    );
+  });
+
+  it('envelope brackets its basis by the percentage', () => {
+    const e = envelope(upCloses, 20, 2);
+    const m = e.middle[119] as number;
+    expect(e.upper[119] as number).toBeCloseTo(m * 1.02, 8);
+    expect(e.lower[119] as number).toBeCloseTo(m * 0.98, 8);
+  });
+});
+
+describe('aroon', () => {
+  it('reads 100 up / 0 down on a clean uptrend', () => {
+    const r = aroon(trendUp, 14);
+    expect(r.up[119]).toBeCloseTo(100, 6);
+    expect(r.down[119]).toBeCloseTo(0, 6);
+  });
+});
+
+describe('oscillators', () => {
+  it('trix is ~0 on a flat series', () => {
+    expect(
+      trix(
+        flat.map((b) => b.close),
+        18,
+      )[119] as number,
+    ).toBeCloseTo(0, 8);
+  });
+
+  it('ultimate oscillator stays within 0..100', () => {
+    for (const v of ultimate(trendUp).filter((x): x is number => x !== null)) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it('choppiness stays within 0..100', () => {
+    for (const v of choppiness(trendUp, 14).filter((x): x is number => x !== null)) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it('stochastic RSI stays within 0..100', () => {
+    const r = stochRsi(closes(200, (i) => 100 + Math.sin(i / 5) * 10));
+    for (const v of r.k.filter((x): x is number => x !== null)) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it('fisher transform stays finite at the extremes', () => {
+    // The transform diverges at ±1, so the clamp is what stops it becoming
+    // Infinity and blanking the pane at the top of a move.
+    const pinned = bars(
+      Array.from(
+        { length: 60 },
+        (_, i) => [100 + i, 100 + i, 100 + i, 100 + i] as [number, number, number, number],
+      ),
+    );
+    for (const v of fisher(pinned, 9).fisher.filter((x): x is number => x !== null)) {
+      expect(Number.isFinite(v)).toBe(true);
+    }
+  });
+
+  it('dpo is ~0 on a flat series', () => {
+    expect(
+      dpo(
+        flat.map((b) => b.close),
+        21,
+      )[119] as number,
+    ).toBeCloseTo(0, 8);
+  });
+});
+
+describe('volume studies', () => {
+  it('a/d line rises when every close is at the bar high', () => {
+    const atHigh = bars(
+      Array.from(
+        { length: 30 },
+        (_, i) =>
+          [100 + i, 101 + i, 99 + i, 101 + i, 50] as [number, number, number, number, number],
+      ),
+    );
+    expect(adl(atHigh)[29] as number).toBeGreaterThan(0);
+  });
+
+  it('cmf is positive when closes sit at the high', () => {
+    const atHigh = bars(
+      Array.from(
+        { length: 30 },
+        (_, i) =>
+          [100 + i, 101 + i, 99 + i, 101 + i, 50] as [number, number, number, number, number],
+      ),
+    );
+    expect(cmf(atHigh, 20)[29] as number).toBeGreaterThan(0);
+  });
+
+  it('cmf is zero when every bar has no range', () => {
+    expect(cmf(flat, 20)[119]).toBe(0);
+  });
+
+  it('force index is positive on rising closes', () => {
+    expect(forceIndex(trendUp, 13)[119] as number).toBeGreaterThan(0);
+  });
+
+  it('pvt tolerates a zero previous close without producing Infinity', () => {
+    const zeroed: Ohlc[] = [
+      { time: 0, open: 0, high: 0, low: 0, close: 0, volume: 10 },
+      { time: 1, open: 0, high: 1, low: 0, close: 1, volume: 10 },
+    ];
+    expect(Number.isFinite(pvt(zeroed)[1] as number)).toBe(true);
+  });
+});
+
+describe('elder ray', () => {
+  it('bull power exceeds bear power in an uptrend', () => {
+    const r = elderRay(trendUp, 13);
+    expect(r.bull[119] as number).toBeGreaterThan(r.bear[119] as number);
+  });
+});
+
+describe('vortex', () => {
+  it('VI+ exceeds VI- in an uptrend', () => {
+    const r = vortex(trendUp, 14);
+    expect(r.plus[119] as number).toBeGreaterThan(r.minus[119] as number);
+  });
+});
+
+describe('historicalVolatility', () => {
+  it('is zero for a perfectly flat series', () => {
+    expect(historicalVolatility(flat, 20)[119] as number).toBeCloseTo(0, 8);
+  });
+});
+
+describe('volumeProfile', () => {
+  it('distributes total volume across the bins', () => {
+    const profile = volumeProfile(trendUp, 12);
+    const total = profile.reduce((a, b) => a + b.volume, 0);
+    const expected = trendUp.reduce((a, b) => a + b.volume, 0);
+    expect(total).toBeCloseTo(expected, 4);
+  });
+
+  it('spreads a bar across every bin its range touches, not just its close', () => {
+    // A profile built only from closes is a histogram of closing prices — a
+    // different and far less useful chart.
+    const wide: Ohlc[] = [{ time: 0, open: 10, high: 20, low: 0, close: 10, volume: 100 }];
+    const profile = volumeProfile(wide, 10);
+    expect(profile.filter((b) => b.volume > 0).length).toBeGreaterThan(5);
+  });
+
+  it('returns nothing when the series has no range', () => {
+    expect(volumeProfile(flat, 10)).toEqual([]);
+    expect(volumeProfile([], 10)).toEqual([]);
   });
 });

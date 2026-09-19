@@ -1,7 +1,33 @@
 import {
+  adl,
   adx,
+  alma,
+  aroon,
   atr,
   awesome,
+  balanceOfPower,
+  chaikinOscillator,
+  choppiness,
+  cmf,
+  dema,
+  dpo,
+  easeOfMovement,
+  elderRay,
+  envelope,
+  fisher,
+  forceIndex,
+  historicalVolatility,
+  hma,
+  linreg,
+  massIndex,
+  pvt,
+  smma,
+  stochRsi,
+  tema,
+  trix,
+  ultimate,
+  vortex,
+  vwma,
   bollinger,
   cci,
   donchian,
@@ -444,6 +470,325 @@ export const INDICATORS: readonly IndicatorDef[] = [
     plots: [{ key: 'ao', title: 'AO', kind: 'histogram', color: '#26A69A' }],
     levels: [{ value: 0, color: '#787B86' }],
     compute: (bars, p) => ({ ao: awesome(bars, num(p, 'fast', 5), num(p, 'slow', 34)) }),
+  },
+
+  // ── Third wave ───────────────────────────────────────────────────────────
+  {
+    id: 'smma',
+    name: 'Moving Average (Smoothed)',
+    target: 'overlay',
+    inputs: [LENGTH(20), SOURCE],
+    plots: [{ key: 'ma', title: 'SMMA', kind: 'line', color: '#8D6E63' }],
+    compute: (bars, p) => ({ ma: smma(sourceValues(bars, src(p)), num(p, 'length', 20)) }),
+  },
+  {
+    id: 'hma',
+    name: 'Hull Moving Average',
+    target: 'overlay',
+    inputs: [LENGTH(9), SOURCE],
+    plots: [{ key: 'ma', title: 'HMA', kind: 'line', color: '#00ACC1' }],
+    compute: (bars, p) => ({ ma: hma(sourceValues(bars, src(p)), num(p, 'length', 9)) }),
+  },
+  {
+    id: 'dema',
+    name: 'Double EMA',
+    target: 'overlay',
+    inputs: [LENGTH(20), SOURCE],
+    plots: [{ key: 'ma', title: 'DEMA', kind: 'line', color: '#43A047' }],
+    compute: (bars, p) => ({ ma: dema(sourceValues(bars, src(p)), num(p, 'length', 20)) }),
+  },
+  {
+    id: 'tema',
+    name: 'Triple EMA',
+    target: 'overlay',
+    inputs: [LENGTH(20), SOURCE],
+    plots: [{ key: 'ma', title: 'TEMA', kind: 'line', color: '#6D4C41' }],
+    compute: (bars, p) => ({ ma: tema(sourceValues(bars, src(p)), num(p, 'length', 20)) }),
+  },
+  {
+    id: 'alma',
+    name: 'Arnaud Legoux MA',
+    target: 'overlay',
+    inputs: [
+      LENGTH(9),
+      { key: 'offset', label: 'Offset', type: 'number', default: 0.85, min: 0, max: 1 },
+      { key: 'sigma', label: 'Sigma', type: 'number', default: 6, min: 1, max: 50 },
+      SOURCE,
+    ],
+    plots: [{ key: 'ma', title: 'ALMA', kind: 'line', color: '#F4511E' }],
+    compute: (bars, p) => ({
+      ma: alma(
+        sourceValues(bars, src(p)),
+        num(p, 'length', 9),
+        num(p, 'offset', 0.85),
+        num(p, 'sigma', 6),
+      ),
+    }),
+  },
+  {
+    id: 'vwma',
+    name: 'Volume Weighted MA',
+    target: 'overlay',
+    inputs: [LENGTH(20)],
+    plots: [{ key: 'ma', title: 'VWMA', kind: 'line', color: '#5E35B1' }],
+    compute: (bars, p) => ({ ma: vwma(bars, num(p, 'length', 20)) }),
+  },
+  {
+    id: 'linreg',
+    name: 'Linear Regression Curve',
+    target: 'overlay',
+    inputs: [LENGTH(14), SOURCE],
+    plots: [{ key: 'lr', title: 'LinReg', kind: 'line', color: '#3949AB' }],
+    compute: (bars, p) => ({ lr: linreg(sourceValues(bars, src(p)), num(p, 'length', 14)) }),
+  },
+  {
+    id: 'envelope',
+    name: 'Envelope',
+    target: 'overlay',
+    inputs: [
+      LENGTH(20),
+      { key: 'percent', label: 'Percent', type: 'number', default: 2, min: 0.1, max: 50 },
+      SOURCE,
+    ],
+    plots: [
+      { key: 'upper', title: 'Upper', kind: 'line', color: '#2962FF' },
+      { key: 'middle', title: 'Basis', kind: 'line', color: '#787B86' },
+      { key: 'lower', title: 'Lower', kind: 'line', color: '#2962FF' },
+    ],
+    compute: (bars, p) => {
+      const r = envelope(sourceValues(bars, src(p)), num(p, 'length', 20), num(p, 'percent', 2));
+      return { upper: r.upper, middle: r.middle, lower: r.lower };
+    },
+  },
+  {
+    id: 'aroon',
+    name: 'Aroon',
+    target: 'pane',
+    inputs: [LENGTH(14)],
+    plots: [
+      { key: 'up', title: 'Up', kind: 'line', color: '#26A69A' },
+      { key: 'down', title: 'Down', kind: 'line', color: '#EF5350' },
+    ],
+    levels: [{ value: 50, color: '#787B86' }],
+    range: { min: 0, max: 100 },
+    compute: (bars, p) => {
+      const r = aroon(bars, num(p, 'length', 14));
+      return { up: r.up, down: r.down };
+    },
+  },
+  {
+    id: 'trix',
+    name: 'TRIX',
+    target: 'pane',
+    inputs: [LENGTH(18), SOURCE],
+    plots: [{ key: 'trix', title: 'TRIX', kind: 'line', color: '#2962FF' }],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => ({ trix: trix(sourceValues(bars, src(p)), num(p, 'length', 18)) }),
+  },
+  {
+    id: 'dpo',
+    name: 'Detrended Price Oscillator',
+    target: 'pane',
+    inputs: [LENGTH(21), SOURCE],
+    plots: [{ key: 'dpo', title: 'DPO', kind: 'line', color: '#AB47BC' }],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => ({ dpo: dpo(sourceValues(bars, src(p)), num(p, 'length', 21)) }),
+  },
+  {
+    id: 'ultimate',
+    name: 'Ultimate Oscillator',
+    target: 'pane',
+    inputs: [
+      { key: 'p1', label: 'Fast', type: 'number', default: 7, min: 1, max: 100 },
+      { key: 'p2', label: 'Mid', type: 'number', default: 14, min: 1, max: 200 },
+      { key: 'p3', label: 'Slow', type: 'number', default: 28, min: 1, max: 400 },
+    ],
+    plots: [{ key: 'uo', title: 'UO', kind: 'line', color: '#7E57C2' }],
+    levels: [
+      { value: 70, color: '#787B86' },
+      { value: 30, color: '#787B86' },
+    ],
+    range: { min: 0, max: 100 },
+    compute: (bars, p) => ({
+      uo: ultimate(bars, num(p, 'p1', 7), num(p, 'p2', 14), num(p, 'p3', 28)),
+    }),
+  },
+  {
+    id: 'cmf',
+    name: 'Chaikin Money Flow',
+    target: 'pane',
+    inputs: [LENGTH(20)],
+    plots: [{ key: 'cmf', title: 'CMF', kind: 'line', color: '#00897B' }],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => ({ cmf: cmf(bars, num(p, 'length', 20)) }),
+  },
+  {
+    id: 'adl',
+    name: 'Accumulation / Distribution',
+    target: 'pane',
+    inputs: [],
+    plots: [{ key: 'adl', title: 'A/D', kind: 'line', color: '#26A69A' }],
+    compute: (bars) => ({ adl: adl(bars) }),
+  },
+  {
+    id: 'chaikin-osc',
+    name: 'Chaikin Oscillator',
+    target: 'pane',
+    inputs: [
+      { key: 'fast', label: 'Fast', type: 'number', default: 3, min: 1, max: 100 },
+      { key: 'slow', label: 'Slow', type: 'number', default: 10, min: 1, max: 200 },
+    ],
+    plots: [{ key: 'co', title: 'Chaikin', kind: 'histogram', color: '#26A69A' }],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => ({
+      co: chaikinOscillator(bars, num(p, 'fast', 3), num(p, 'slow', 10)),
+    }),
+  },
+  {
+    id: 'force-index',
+    name: 'Force Index',
+    target: 'pane',
+    inputs: [LENGTH(13)],
+    plots: [{ key: 'fi', title: 'Force', kind: 'line', color: '#EF5350' }],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => ({ fi: forceIndex(bars, num(p, 'length', 13)) }),
+  },
+  {
+    id: 'elder-ray',
+    name: 'Elder Ray (Bull/Bear Power)',
+    target: 'pane',
+    inputs: [LENGTH(13)],
+    plots: [
+      { key: 'bull', title: 'Bull', kind: 'histogram', color: '#26A69A' },
+      { key: 'bear', title: 'Bear', kind: 'histogram', color: '#EF5350' },
+    ],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => {
+      const r = elderRay(bars, num(p, 'length', 13));
+      return { bull: r.bull, bear: r.bear };
+    },
+  },
+  {
+    id: 'bop',
+    name: 'Balance of Power',
+    target: 'pane',
+    inputs: [LENGTH(14)],
+    plots: [{ key: 'bop', title: 'BOP', kind: 'line', color: '#FF6D00' }],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => ({ bop: balanceOfPower(bars, num(p, 'length', 14)) }),
+  },
+  {
+    id: 'eom',
+    name: 'Ease of Movement',
+    target: 'pane',
+    inputs: [LENGTH(14)],
+    plots: [{ key: 'eom', title: 'EOM', kind: 'line', color: '#00BCD4' }],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => ({ eom: easeOfMovement(bars, num(p, 'length', 14)) }),
+  },
+  {
+    id: 'pvt',
+    name: 'Price Volume Trend',
+    target: 'pane',
+    inputs: [],
+    plots: [{ key: 'pvt', title: 'PVT', kind: 'line', color: '#5E35B1' }],
+    compute: (bars) => ({ pvt: pvt(bars) }),
+  },
+  {
+    id: 'mass-index',
+    name: 'Mass Index',
+    target: 'pane',
+    inputs: [
+      LENGTH(25),
+      { key: 'emaPeriod', label: 'EMA', type: 'number', default: 9, min: 1, max: 100 },
+    ],
+    plots: [{ key: 'mi', title: 'Mass', kind: 'line', color: '#AB47BC' }],
+    levels: [{ value: 27, color: '#787B86' }],
+    compute: (bars, p) => ({
+      mi: massIndex(bars, num(p, 'length', 25), num(p, 'emaPeriod', 9)),
+    }),
+  },
+  {
+    id: 'choppiness',
+    name: 'Choppiness Index',
+    target: 'pane',
+    inputs: [LENGTH(14)],
+    plots: [{ key: 'chop', title: 'CHOP', kind: 'line', color: '#787B86' }],
+    levels: [
+      { value: 61.8, color: '#787B86' },
+      { value: 38.2, color: '#787B86' },
+    ],
+    range: { min: 0, max: 100 },
+    compute: (bars, p) => ({ chop: choppiness(bars, num(p, 'length', 14)) }),
+  },
+  {
+    id: 'vortex',
+    name: 'Vortex',
+    target: 'pane',
+    inputs: [LENGTH(14)],
+    plots: [
+      { key: 'plus', title: 'VI+', kind: 'line', color: '#26A69A' },
+      { key: 'minus', title: 'VI-', kind: 'line', color: '#EF5350' },
+    ],
+    levels: [{ value: 1, color: '#787B86' }],
+    compute: (bars, p) => {
+      const r = vortex(bars, num(p, 'length', 14));
+      return { plus: r.plus, minus: r.minus };
+    },
+  },
+  {
+    id: 'hv',
+    name: 'Historical Volatility',
+    target: 'pane',
+    inputs: [LENGTH(20)],
+    plots: [{ key: 'hv', title: 'HV%', kind: 'line', color: '#F4511E' }],
+    compute: (bars, p) => ({ hv: historicalVolatility(bars, num(p, 'length', 20)) }),
+  },
+  {
+    id: 'stoch-rsi',
+    name: 'Stochastic RSI',
+    target: 'pane',
+    inputs: [
+      { key: 'rsiPeriod', label: 'RSI', type: 'number', default: 14, min: 1, max: 200 },
+      { key: 'stochPeriod', label: 'Stoch', type: 'number', default: 14, min: 1, max: 200 },
+      { key: 'smoothK', label: '%K', type: 'number', default: 3, min: 1, max: 50 },
+      { key: 'smoothD', label: '%D', type: 'number', default: 3, min: 1, max: 50 },
+      SOURCE,
+    ],
+    plots: [
+      { key: 'k', title: '%K', kind: 'line', color: '#2962FF' },
+      { key: 'd', title: '%D', kind: 'line', color: '#FF6D00' },
+    ],
+    levels: [
+      { value: 80, color: '#787B86' },
+      { value: 20, color: '#787B86' },
+    ],
+    range: { min: 0, max: 100 },
+    compute: (bars, p) => {
+      const r = stochRsi(
+        sourceValues(bars, src(p)),
+        num(p, 'rsiPeriod', 14),
+        num(p, 'stochPeriod', 14),
+        num(p, 'smoothK', 3),
+        num(p, 'smoothD', 3),
+      );
+      return { k: r.k, d: r.d };
+    },
+  },
+  {
+    id: 'fisher',
+    name: 'Fisher Transform',
+    target: 'pane',
+    inputs: [LENGTH(9)],
+    plots: [
+      { key: 'fisher', title: 'Fisher', kind: 'line', color: '#2962FF' },
+      { key: 'trigger', title: 'Trigger', kind: 'line', color: '#FF6D00' },
+    ],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => {
+      const r = fisher(bars, num(p, 'length', 9));
+      return { fisher: r.fisher, trigger: r.trigger };
+    },
   },
 ] as const;
 

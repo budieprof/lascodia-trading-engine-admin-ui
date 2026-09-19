@@ -201,11 +201,21 @@ export function stochastic(bars: Ohlc[], period = 14, smoothK = 3, smoothD = 3):
     const span = hh - ll;
     // A flat window has no range to position the close within; 50 is the
     // conventional answer and avoids a divide by zero.
-    raw[i] = span === 0 ? 50 : ((bars[i].close - ll) / span) * 100;
+    raw[i] = span === 0 ? 50 : clamp01x100(((bars[i].close - ll) / span) * 100);
   }
-  const k = smoothDense(raw, smoothK);
-  const d = smoothDense(k, smoothD);
+  const k = clampSeries(smoothDense(raw, smoothK), 0, 100);
+  const d = clampSeries(smoothDense(k, smoothD), 0, 100);
   return { k, d };
+}
+
+/** Pin a 0..100 oscillator inside its own range, absorbing rounding noise. */
+function clamp01x100(v: number): number {
+  return Math.max(0, Math.min(100, v));
+}
+
+/** Clamp every defined value of a sparse series into `[min, max]`. */
+function clampSeries(series: Maybe[], min: number, max: number): Maybe[] {
+  return series.map((v) => (v === null ? null : Math.max(min, Math.min(max, v))));
 }
 
 /** SMA over a sparse (null-padded) series, preserving alignment. */
@@ -626,4 +636,515 @@ export function pivotPoints(bars: Ohlc[]): PivotResult {
     result.s2[i] = p - span;
   }
   return result;
+}
+
+// ── Third wave ─────────────────────────────────────────────────────────────
+
+/** Smoothed (Wilder/RMA) moving average — exposed because several studies want it. */
+export function smma(values: number[], period: number): Maybe[] {
+  return wilder(values, period);
+}
+
+/** Hull moving average — WMA of (2·WMA(n/2) − WMA(n)), smoothed over √n. */
+export function hma(values: number[], period = 9): Maybe[] {
+  const half = Math.max(1, Math.round(period / 2));
+  const sqrt = Math.max(1, Math.round(Math.sqrt(period)));
+  const a = wma(values, half);
+  const b = wma(values, period);
+  const raw: Maybe[] = values.map((_, i) =>
+    a[i] !== null && b[i] !== null ? 2 * (a[i] as number) - (b[i] as number) : null,
+  );
+  return denseMap(raw, (dense) => wma(dense, sqrt));
+}
+
+/**
+ * Run a dense transform over the defined region of a sparse series and write
+ * it back at the right offset.
+ *
+ * Feeding warm-up nulls into a recursive average poisons its seed and shifts
+ * every later value — the same trap MACD's signal line has.
+ */
+function denseMap(series: Maybe[], fn: (dense: number[]) => Maybe[]): Maybe[] {
+  const first = series.findIndex((v) => v !== null);
+  const out: Maybe[] = nulls(series.length);
+  if (first < 0) return out;
+  const dense = series.slice(first).map((v) => (v ?? 0) as number);
+  const result = fn(dense);
+  for (let i = 0; i < result.length; i++) out[first + i] = result[i];
+  return out;
+}
+
+/** Double EMA — 2·EMA − EMA(EMA). */
+export function dema(values: number[], period = 20): Maybe[] {
+  const e1 = ema(values, period);
+  const e2 = denseMap(e1, (d) => ema(d, period));
+  return values.map((_, i) =>
+    e1[i] !== null && e2[i] !== null ? 2 * (e1[i] as number) - (e2[i] as number) : null,
+  );
+}
+
+/** Triple EMA — 3·EMA − 3·EMA² + EMA³. */
+export function tema(values: number[], period = 20): Maybe[] {
+  const e1 = ema(values, period);
+  const e2 = denseMap(e1, (d) => ema(d, period));
+  const e3 = denseMap(e2, (d) => ema(d, period));
+  return values.map((_, i) =>
+    e1[i] !== null && e2[i] !== null && e3[i] !== null
+      ? 3 * (e1[i] as number) - 3 * (e2[i] as number) + (e3[i] as number)
+      : null,
+  );
+}
+
+/** Arnaud Legoux MA — Gaussian window offset toward the recent end. */
+export function alma(values: number[], period = 9, offset = 0.85, sigma = 6): Maybe[] {
+  const out: Maybe[] = nulls(values.length);
+  if (period <= 0 || values.length < period) return out;
+  const m = offset * (period - 1);
+  const s = period / sigma;
+  const weights: number[] = [];
+  let norm = 0;
+  for (let i = 0; i < period; i++) {
+    const w = Math.exp(-((i - m) ** 2) / (2 * s * s));
+    weights.push(w);
+    norm += w;
+  }
+  for (let i = period - 1; i < values.length; i++) {
+    let acc = 0;
+    for (let j = 0; j < period; j++) acc += values[i - period + 1 + j] * weights[j];
+    out[i] = acc / norm;
+  }
+  return out;
+}
+
+/** Volume-weighted moving average. */
+export function vwma(bars: Ohlc[], period = 20): Maybe[] {
+  const out: Maybe[] = nulls(bars.length);
+  for (let i = period - 1; i < bars.length; i++) {
+    let pv = 0;
+    let v = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      pv += bars[j].close * bars[j].volume;
+      v += bars[j].volume;
+    }
+    out[i] = v === 0 ? null : pv / v;
+  }
+  return out;
+}
+
+/** Linear-regression value at each bar (the endpoint of the fitted line). */
+export function linreg(values: number[], period = 14): Maybe[] {
+  const out: Maybe[] = nulls(values.length);
+  if (period < 2) return out;
+  for (let i = period - 1; i < values.length; i++) {
+    let sx = 0;
+    let sy = 0;
+    let sxy = 0;
+    let sxx = 0;
+    for (let j = 0; j < period; j++) {
+      const x = j;
+      const y = values[i - period + 1 + j];
+      sx += x;
+      sy += y;
+      sxy += x * y;
+      sxx += x * x;
+    }
+    const denom = period * sxx - sx * sx;
+    if (denom === 0) continue;
+    const slope = (period * sxy - sx * sy) / denom;
+    const intercept = (sy - slope * sx) / period;
+    out[i] = intercept + slope * (period - 1);
+  }
+  return out;
+}
+
+/** Percentage envelope around an MA. */
+export function envelope(values: number[], period = 20, percent = 2): BandsResult {
+  const middle = sma(values, period);
+  const k = percent / 100;
+  return {
+    middle,
+    upper: middle.map((m) => (m === null ? null : m * (1 + k))),
+    lower: middle.map((m) => (m === null ? null : m * (1 - k))),
+  };
+}
+
+/** Aroon up/down — how recently the period's high and low occurred. */
+export function aroon(bars: Ohlc[], period = 14): { up: Maybe[]; down: Maybe[] } {
+  const up: Maybe[] = nulls(bars.length);
+  const down: Maybe[] = nulls(bars.length);
+  for (let i = period; i < bars.length; i++) {
+    let hi = -Infinity;
+    let lo = Infinity;
+    let hiAt = i;
+    let loAt = i;
+    for (let j = i - period; j <= i; j++) {
+      if (bars[j].high >= hi) {
+        hi = bars[j].high;
+        hiAt = j;
+      }
+      if (bars[j].low <= lo) {
+        lo = bars[j].low;
+        loAt = j;
+      }
+    }
+    up[i] = ((period - (i - hiAt)) / period) * 100;
+    down[i] = ((period - (i - loAt)) / period) * 100;
+  }
+  return { up, down };
+}
+
+/** TRIX — rate of change of a triple-smoothed EMA, in percent. */
+export function trix(values: number[], period = 18): Maybe[] {
+  const e1 = ema(values, period);
+  const e2 = denseMap(e1, (d) => ema(d, period));
+  const e3 = denseMap(e2, (d) => ema(d, period));
+  const out: Maybe[] = nulls(values.length);
+  for (let i = 1; i < values.length; i++) {
+    const now = e3[i];
+    const prev = e3[i - 1];
+    if (now === null || prev === null || prev === 0) continue;
+    out[i] = ((now - prev) / prev) * 100;
+  }
+  return out;
+}
+
+/** Detrended Price Oscillator. */
+export function dpo(values: number[], period = 21): Maybe[] {
+  const shift = Math.floor(period / 2) + 1;
+  const avg = sma(values, period);
+  const out: Maybe[] = nulls(values.length);
+  for (let i = 0; i < values.length; i++) {
+    const a = avg[i - shift + period] ?? avg[i];
+    if (a === null || a === undefined) continue;
+    out[i] = values[i] - a;
+  }
+  return out;
+}
+
+/** Ultimate Oscillator — buying pressure over three weighted lookbacks. */
+export function ultimate(bars: Ohlc[], p1 = 7, p2 = 14, p3 = 28): Maybe[] {
+  const out: Maybe[] = nulls(bars.length);
+  const bp: number[] = [];
+  const tr: number[] = [];
+  for (let i = 1; i < bars.length; i++) {
+    const prevClose = bars[i - 1].close;
+    const low = Math.min(bars[i].low, prevClose);
+    bp.push(bars[i].close - low);
+    tr.push(Math.max(bars[i].high, prevClose) - low);
+  }
+  const windowSum = (arr: number[], end: number, n: number): number => {
+    let acc = 0;
+    for (let i = end - n + 1; i <= end; i++) acc += arr[i];
+    return acc;
+  };
+  for (let i = p3 - 1; i < bp.length; i++) {
+    const t1 = windowSum(tr, i, p1);
+    const t2 = windowSum(tr, i, p2);
+    const t3 = windowSum(tr, i, p3);
+    if (t1 === 0 || t2 === 0 || t3 === 0) continue;
+    const a1 = windowSum(bp, i, p1) / t1;
+    const a2 = windowSum(bp, i, p2) / t2;
+    const a3 = windowSum(bp, i, p3) / t3;
+    out[i + 1] = ((4 * a1 + 2 * a2 + a3) / 7) * 100;
+  }
+  return out;
+}
+
+/** Chaikin Money Flow — volume weighted by where the close sat in the bar. */
+export function cmf(bars: Ohlc[], period = 20): Maybe[] {
+  const out: Maybe[] = nulls(bars.length);
+  for (let i = period - 1; i < bars.length; i++) {
+    let mfv = 0;
+    let vol = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      const span = bars[j].high - bars[j].low;
+      const multiplier =
+        span === 0 ? 0 : (bars[j].close - bars[j].low - (bars[j].high - bars[j].close)) / span;
+      mfv += multiplier * bars[j].volume;
+      vol += bars[j].volume;
+    }
+    out[i] = vol === 0 ? 0 : mfv / vol;
+  }
+  return out;
+}
+
+/** Accumulation/Distribution line. */
+export function adl(bars: Ohlc[]): Maybe[] {
+  const out: Maybe[] = [];
+  let running = 0;
+  for (const b of bars) {
+    const span = b.high - b.low;
+    const multiplier = span === 0 ? 0 : (b.close - b.low - (b.high - b.close)) / span;
+    running += multiplier * b.volume;
+    out.push(running);
+  }
+  return out;
+}
+
+/** Chaikin Oscillator — EMA(3) minus EMA(10) of the A/D line. */
+export function chaikinOscillator(bars: Ohlc[], fast = 3, slow = 10): Maybe[] {
+  const line = adl(bars).map((v) => (v ?? 0) as number);
+  const f = ema(line, fast);
+  const s = ema(line, slow);
+  return bars.map((_, i) =>
+    f[i] !== null && s[i] !== null ? (f[i] as number) - (s[i] as number) : null,
+  );
+}
+
+/** Force Index — price change times volume, smoothed. */
+export function forceIndex(bars: Ohlc[], period = 13): Maybe[] {
+  const raw: number[] = [0];
+  for (let i = 1; i < bars.length; i++) {
+    raw.push((bars[i].close - bars[i - 1].close) * bars[i].volume);
+  }
+  return ema(raw, period);
+}
+
+/** Elder Ray bull and bear power, relative to an EMA. */
+export function elderRay(bars: Ohlc[], period = 13): { bull: Maybe[]; bear: Maybe[] } {
+  const basis = ema(
+    bars.map((b) => b.close),
+    period,
+  );
+  return {
+    bull: bars.map((b, i) => (basis[i] === null ? null : b.high - (basis[i] as number))),
+    bear: bars.map((b, i) => (basis[i] === null ? null : b.low - (basis[i] as number))),
+  };
+}
+
+/** Balance of Power — close-open over the bar's range. */
+export function balanceOfPower(bars: Ohlc[], period = 14): Maybe[] {
+  const raw = bars.map((b) => {
+    const span = b.high - b.low;
+    return span === 0 ? 0 : (b.close - b.open) / span;
+  });
+  return sma(raw, period);
+}
+
+/** Ease of Movement. */
+export function easeOfMovement(bars: Ohlc[], period = 14): Maybe[] {
+  const raw: number[] = [0];
+  for (let i = 1; i < bars.length; i++) {
+    const midMove = (bars[i].high + bars[i].low) / 2 - (bars[i - 1].high + bars[i - 1].low) / 2;
+    const span = bars[i].high - bars[i].low;
+    const boxRatio = span === 0 || bars[i].volume === 0 ? 0 : bars[i].volume / 100000000 / span;
+    raw.push(boxRatio === 0 ? 0 : midMove / boxRatio);
+  }
+  return sma(raw, period);
+}
+
+/** Price Volume Trend. */
+export function pvt(bars: Ohlc[]): Maybe[] {
+  const out: Maybe[] = [0];
+  for (let i = 1; i < bars.length; i++) {
+    const prev = (out[i - 1] ?? 0) as number;
+    const prevClose = bars[i - 1].close;
+    out.push(
+      prevClose === 0 ? prev : prev + ((bars[i].close - prevClose) / prevClose) * bars[i].volume,
+    );
+  }
+  return out;
+}
+
+/** Mass Index — range expansion via a ratio of EMAs. */
+export function massIndex(bars: Ohlc[], period = 25, emaPeriod = 9): Maybe[] {
+  const range = bars.map((b) => b.high - b.low);
+  const e1 = ema(range, emaPeriod);
+  const e2 = denseMap(e1, (d) => ema(d, emaPeriod));
+  const ratio: Maybe[] = bars.map((_, i) =>
+    e1[i] !== null && e2[i] !== null && (e2[i] as number) !== 0
+      ? (e1[i] as number) / (e2[i] as number)
+      : null,
+  );
+  const out: Maybe[] = nulls(bars.length);
+  for (let i = period - 1; i < bars.length; i++) {
+    let acc = 0;
+    let ok = true;
+    for (let j = i - period + 1; j <= i; j++) {
+      if (ratio[j] === null) {
+        ok = false;
+        break;
+      }
+      acc += ratio[j] as number;
+    }
+    if (ok) out[i] = acc;
+  }
+  return out;
+}
+
+/** Choppiness Index — 100 means pure chop, 0 means pure trend. */
+export function choppiness(bars: Ohlc[], period = 14): Maybe[] {
+  const tr = trueRange(bars);
+  const out: Maybe[] = nulls(bars.length);
+  const log10Period = Math.log10(period);
+  for (let i = period - 1; i < bars.length; i++) {
+    let sumTr = 0;
+    let hh = -Infinity;
+    let ll = Infinity;
+    for (let j = i - period + 1; j <= i; j++) {
+      sumTr += tr[j];
+      hh = Math.max(hh, bars[j].high);
+      ll = Math.min(ll, bars[j].low);
+    }
+    const span = hh - ll;
+    if (span <= 0 || sumTr <= 0) continue;
+    out[i] = (100 * Math.log10(sumTr / span)) / log10Period;
+  }
+  return out;
+}
+
+/** Vortex indicator. */
+export function vortex(bars: Ohlc[], period = 14): { plus: Maybe[]; minus: Maybe[] } {
+  const plus: Maybe[] = nulls(bars.length);
+  const minus: Maybe[] = nulls(bars.length);
+  const tr = trueRange(bars);
+  for (let i = period; i < bars.length; i++) {
+    let vmPlus = 0;
+    let vmMinus = 0;
+    let sumTr = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      vmPlus += Math.abs(bars[j].high - bars[j - 1].low);
+      vmMinus += Math.abs(bars[j].low - bars[j - 1].high);
+      sumTr += tr[j];
+    }
+    if (sumTr === 0) continue;
+    plus[i] = vmPlus / sumTr;
+    minus[i] = vmMinus / sumTr;
+  }
+  return { plus, minus };
+}
+
+/** Historical volatility — annualised stdev of log returns, in percent. */
+export function historicalVolatility(bars: Ohlc[], period = 20, barsPerYear = 6240): Maybe[] {
+  const returns: number[] = [0];
+  for (let i = 1; i < bars.length; i++) {
+    const prev = bars[i - 1].close;
+    returns.push(prev > 0 ? Math.log(bars[i].close / prev) : 0);
+  }
+  const out: Maybe[] = nulls(bars.length);
+  for (let i = period; i < bars.length; i++) {
+    let mean = 0;
+    for (let j = i - period + 1; j <= i; j++) mean += returns[j];
+    mean /= period;
+    let variance = 0;
+    for (let j = i - period + 1; j <= i; j++) variance += (returns[j] - mean) ** 2;
+    out[i] = Math.sqrt(variance / (period - 1)) * Math.sqrt(barsPerYear) * 100;
+  }
+  return out;
+}
+
+/** Stochastic RSI — the stochastic oscillator applied to RSI. */
+export function stochRsi(
+  closes: number[],
+  rsiPeriod = 14,
+  stochPeriod = 14,
+  smoothK = 3,
+  smoothD = 3,
+): StochasticResult {
+  const r = rsi(closes, rsiPeriod);
+  const raw: Maybe[] = nulls(closes.length);
+  for (let i = 0; i < closes.length; i++) {
+    if (r[i] === null) continue;
+    let hh = -Infinity;
+    let ll = Infinity;
+    let ok = true;
+    for (let j = i - stochPeriod + 1; j <= i; j++) {
+      if (j < 0 || r[j] === null) {
+        ok = false;
+        break;
+      }
+      hh = Math.max(hh, r[j] as number);
+      ll = Math.min(ll, r[j] as number);
+    }
+    if (!ok) continue;
+    const span = hh - ll;
+    // Clamped because the subtraction leaves floating-point noise: an
+    // unclamped %K can land at -7e-15, which is a value below the pane's own
+    // 0 line on a 0..100 oscillator.
+    raw[i] = span === 0 ? 50 : clamp01x100((((r[i] as number) - ll) / span) * 100);
+  }
+  // Clamped AFTER smoothing as well as before. `sma` keeps a rolling sum
+  // (`sum += new; sum -= old`), which accumulates floating-point drift, so an
+  // average of values that are all exactly 0 can come out at -7e-15. On an
+  // unbounded study that is invisible; on a 0..100 oscillator it is a reading
+  // below the pane's own floor.
+  const k = clampSeries(
+    denseMap(raw, (d) => sma(d, smoothK)),
+    0,
+    100,
+  );
+  const d = clampSeries(
+    denseMap(k, (dd) => sma(dd, smoothD)),
+    0,
+    100,
+  );
+  return { k, d };
+}
+
+/** Fisher Transform — maps price into a near-Gaussian distribution. */
+export function fisher(bars: Ohlc[], period = 9): { fisher: Maybe[]; trigger: Maybe[] } {
+  const out: Maybe[] = nulls(bars.length);
+  let value = 0;
+  let prevFisher = 0;
+  const trigger: Maybe[] = nulls(bars.length);
+
+  for (let i = period - 1; i < bars.length; i++) {
+    let hh = -Infinity;
+    let ll = Infinity;
+    for (let j = i - period + 1; j <= i; j++) {
+      hh = Math.max(hh, bars[j].high);
+      ll = Math.min(ll, bars[j].low);
+    }
+    const median = (bars[i].high + bars[i].low) / 2;
+    const span = hh - ll;
+    const raw = span === 0 ? 0 : 2 * ((median - ll) / span) - 1;
+    value = 0.66 * raw + 0.67 * value;
+    // The transform blows up at ±1, so the input is clamped just inside.
+    const clamped = Math.max(-0.999, Math.min(0.999, value));
+    const f = 0.5 * Math.log((1 + clamped) / (1 - clamped)) + 0.5 * prevFisher;
+    trigger[i] = prevFisher;
+    prevFisher = f;
+    out[i] = f;
+  }
+  return { fisher: out, trigger };
+}
+
+export interface VolumeProfileBin {
+  price: number;
+  volume: number;
+}
+
+/**
+ * Volume profile — volume distributed across price bins.
+ *
+ * Returns bins rather than a per-bar series because it is a HORIZONTAL
+ * histogram: it has one value per price level for the whole window, not one
+ * per bar, so it cannot be plotted through the normal series path.
+ */
+export function volumeProfile(bars: Ohlc[], bins = 24): VolumeProfileBin[] {
+  if (bars.length === 0 || bins <= 0) return [];
+  let hi = -Infinity;
+  let lo = Infinity;
+  for (const b of bars) {
+    hi = Math.max(hi, b.high);
+    lo = Math.min(lo, b.low);
+  }
+  const span = hi - lo;
+  if (span <= 0) return [];
+  const step = span / bins;
+  const out: VolumeProfileBin[] = Array.from({ length: bins }, (_, i) => ({
+    price: lo + step * (i + 0.5),
+    volume: 0,
+  }));
+  for (const b of bars) {
+    // Spread each bar's volume across the bins its range covers, rather than
+    // dumping it all at the close — otherwise the profile is a histogram of
+    // closing prices, which is a different and much less useful chart.
+    const first = Math.max(0, Math.min(bins - 1, Math.floor((b.low - lo) / step)));
+    const last = Math.max(0, Math.min(bins - 1, Math.floor((b.high - lo) / step)));
+    const touched = last - first + 1;
+    const share = b.volume / touched;
+    for (let i = first; i <= last; i++) out[i].volume += share;
+  }
+  return out;
 }
