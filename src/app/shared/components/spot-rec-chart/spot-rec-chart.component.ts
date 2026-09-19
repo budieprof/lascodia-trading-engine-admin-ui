@@ -43,6 +43,23 @@ export interface SpotRecChartRec {
 }
 
 /**
+ * A bare horizontal level, drawn and labelled with no trade attached.
+ *
+ * A recommendation is a trade: entry, stop and target together, and the overlay drops any rec
+ * missing one of the three. A trigger condition is not a trade — it is one price the agent said
+ * it would react at — so it needs a way onto the chart that does not pretend to be a position.
+ */
+export interface SpotRecChartLevel {
+  price: number;
+  /** Shown on the line's end label, e.g. "ABOVE 1.87463". */
+  label: string;
+  /** Colours the line: the direction the branch expects, or neutral when it has none. */
+  tone: 'up' | 'down' | 'neutral';
+  /** Drawn faintly — context for a level that belongs to a sibling branch, not this card's own. */
+  muted?: boolean;
+}
+
+/**
  * Optional marker rendered as a single ECharts mark-point at a specific
  * (timestamp, price). Used for "filled here" / "exited here" annotations on
  * a live-signal chart. Time MUST be an ISO string that lands inside the
@@ -340,6 +357,9 @@ export class SpotRecChartComponent {
   readonly asOfUtc = input.required<string>();
   /** Setups to overlay. Hold recs are filtered out silently. */
   readonly recommendations = input<SpotRecChartRec[]>([]);
+
+  /** Bare horizontal levels with no trade attached — see {@link SpotRecChartLevel}. */
+  readonly levels = input<SpotRecChartLevel[]>([]);
   /**
    * Forward bars to display past `asOfUtc`. Falls back to a sensible
    * per-timeframe default (≈ 6h of forward window for TFs ≤ H1).
@@ -667,6 +687,42 @@ export class SpotRecChartComponent {
       });
     }
 
+    // ── Bare levels ───────────────────────────────────────────────────────
+    // Same two-point line-series path as LIVE above, for the same reason: the y value travels
+    // inside the series data, so a stale frame cannot separate a line from its own label.
+    const levelSeries: any[] = [];
+    this.levels().forEach((lv, i) => {
+      if (lv.price == null || !Number.isFinite(lv.price)) return;
+
+      const colour = lv.tone === 'up' ? '#15803d' : lv.tone === 'down' ? '#b91c1c' : '#6b7280';
+
+      levelSeries.push({
+        name: lv.label,
+        type: 'line',
+        data: flat(lv.price),
+        symbol: 'none',
+        lineStyle: {
+          color: colour,
+          width: lv.muted ? 1 : 2,
+          type: 'dashed',
+          opacity: lv.muted ? 0.4 : 0.95,
+        },
+        tooltip: { show: false },
+        z: lv.muted ? 8 : 10,
+        endLabel: {
+          show: !lv.muted,
+          offset: [0, 20 * i],
+          formatter: lv.label,
+          backgroundColor: colour,
+          color: '#ffffff',
+          padding: [2, 6],
+          borderRadius: 3,
+          fontWeight: 'bold',
+          fontSize: 10,
+        },
+      });
+    });
+
     // Per-rec endLabel offset — when there are multiple recs we stagger
     // labels vertically by 18px so they don't stack on top of each other.
     const lineSeries: any[] = [];
@@ -923,6 +979,7 @@ export class SpotRecChartComponent {
         },
         ...lineSeries,
         ...liveSeries,
+        ...levelSeries,
       ],
     };
   });
