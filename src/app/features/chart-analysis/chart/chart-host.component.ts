@@ -35,6 +35,9 @@ import { ThemeService } from '@core/theme/theme.service';
 import type { Bar } from '../datafeed/candle-feed.service';
 import { indicatorById, indicatorLabel, type IndicatorDef } from '../indicators/registry';
 import type { Ohlc } from '../indicators/math';
+import { DrawingStore } from '../drawings/drawing-store.service';
+import { DrawingController } from '../drawings/drawing-controller';
+import type { DrawingKind } from '../drawings/model';
 
 /** Chart styles the toolbar can switch between. */
 export type ChartStyle =
@@ -106,18 +109,27 @@ interface IndicatorSeries {
 })
 export class ChartHostComponent implements OnDestroy {
   private readonly theme = inject(ThemeService);
+  private readonly drawings = inject(DrawingStore);
   private readonly container = viewChild.required<ElementRef<HTMLDivElement>>('container');
+  private readonly controller = new DrawingController(this.drawings, () => this.precision());
 
   readonly bars = input.required<Bar[]>();
   readonly style = input<ChartStyle>('candles');
   readonly showVolume = input<boolean>(true);
   readonly indicators = input<ActiveIndicator[]>([]);
   readonly precision = input<number>(5);
+  /** Armed drawing tool, or null for the cursor. */
+  readonly tool = input<DrawingKind | null>(null);
+  readonly magnet = input<boolean>(false);
+  /** Price scale mode — normal, logarithmic or percentage. */
+  readonly scaleMode = input<'normal' | 'log' | 'percent'>('normal');
 
   /** Raised when the visible range reaches the oldest bar we hold. */
   readonly loadMore = output<void>();
   /** Crosshair readout for the legend; null time means "latest bar". */
   readonly legend = output<LegendSnapshot>();
+  /** Raised when a drawing tool finishes, so the toolbar can disarm. */
+  readonly toolComplete = output<void>();
 
   private chart: IChartApi | null = null;
   private price: ISeriesApi<'Candlestick' | 'Bar' | 'Line' | 'Area' | 'Baseline'> | null = null;
@@ -152,12 +164,48 @@ export class ChartHostComponent implements OnDestroy {
       const bars = this.bars();
       untracked(() => this.applyIndicators(active, bars));
     });
+
+    // Drawing state → renderer. Reads the store's signals so any mutation
+    // (add, drag, style change, undo) repaints without the page wiring an
+    // explicit refresh for each one.
+    effect(() => {
+      const visible = this.drawings.visible();
+      const selected = this.drawings.selectedId();
+      untracked(() => this.controller.sync(visible, selected));
+    });
+
+    effect(() => {
+      const tool = this.tool();
+      const magnet = this.magnet();
+      const bars = this.bars();
+      untracked(() => {
+        this.controller.magnet = magnet;
+        this.controller.bars = bars;
+        if (this.controller.activeTool !== tool) this.controller.setTool(tool);
+      });
+    });
+
+    effect(() => {
+      const mode = this.scaleMode();
+      untracked(() => this.applyScaleMode(mode));
+    });
   }
 
   ngOnDestroy(): void {
     this.resizeObserver?.disconnect();
+    this.controller.detach();
     this.chart?.remove();
     this.chart = null;
+  }
+
+  /**
+   * Price scale mode. Percentage and indexed-to-100 are relative to the first
+   * visible bar, which is why switching mode rescales rather than re-fetching.
+   */
+  private applyScaleMode(mode: 'normal' | 'log' | 'percent'): void {
+    this.chart?.priceScale('right').applyOptions({
+      mode: mode === 'log' ? 1 : mode === 'percent' ? 2 : 0,
+    });
   }
 
   /** Scroll to the most recent bar. */
@@ -218,6 +266,11 @@ export class ChartHostComponent implements OnDestroy {
     this.resizeObserver.observe(el);
 
     this.chart.subscribeCrosshairMove((param) => this.emitLegend(param));
+
+    this.controller.attach(this.chart, el);
+    this.controller.onToolComplete = () => this.toolComplete.emit();
+    this.controller.magnet = this.magnet();
+    this.controller.bars = this.bars();
 
     // Infinite history: when the left edge reaches the oldest bar we hold, ask
     // the page for more. The pending flag matters — the range fires on every
@@ -306,6 +359,13 @@ export class ChartHostComponent implements OnDestroy {
         priceFormat,
       });
       this.price.setData(source.map(toOhlcData) as CandlestickData<Time>[]);
+    }
+
+    // Re-bind drawings: the series above is a NEW object whenever the style
+    // changes, and primitives live on the series, not the chart.
+    if (this.price) {
+      this.controller.bindSeries(this.price);
+      this.controller.sync(this.drawings.visible(), this.drawings.selectedId());
     }
 
     if (showVolume) {

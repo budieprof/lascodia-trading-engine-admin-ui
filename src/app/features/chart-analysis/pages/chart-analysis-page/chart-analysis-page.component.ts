@@ -29,6 +29,14 @@ import {
   type ChartStyle,
   type LegendSnapshot,
 } from '../../chart/chart-host.component';
+import { DrawingStore } from '../../drawings/drawing-store.service';
+import {
+  TOOLS,
+  toolFor,
+  type DashStyle,
+  type Drawing,
+  type DrawingKind,
+} from '../../drawings/model';
 
 /** Labels for the timeframe bar, in TradingView's shorthand. */
 const RESOLUTION_LABELS: Record<TvResolution, string> = {
@@ -62,6 +70,7 @@ const PAGE_BARS = 1500;
   imports: [FormsModule, DecimalPipe, ChartHostComponent],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
+  host: { '(keydown)': 'onKeydown($event)', tabindex: '0' },
 })
 export class ChartAnalysisPageComponent {
   private readonly pairs = inject(CurrencyPairsService);
@@ -91,6 +100,25 @@ export class ChartAnalysisPageComponent {
   readonly indicatorMenuOpen = signal(false);
   readonly symbolMenuOpen = signal(false);
   readonly symbolQuery = signal('');
+
+  // ── Drawings ─────────────────────────────────────────────────────────────
+  readonly drawings = inject(DrawingStore);
+  readonly tools = TOOLS;
+  readonly tool = signal<DrawingKind | null>(null);
+  readonly magnet = signal(false);
+  readonly scaleMode = signal<'normal' | 'log' | 'percent'>('normal');
+  readonly objectTreeOpen = signal(false);
+  readonly dashOptions: DashStyle[] = ['solid', 'dashed', 'dotted'];
+
+  readonly toolGroups = computed(() => {
+    const groups: Array<{ name: string; tools: typeof TOOLS }> = [];
+    for (const t of TOOLS) {
+      const existing = groups.find((g) => g.name === t.group);
+      if (existing) (existing.tools as (typeof TOOLS)[number][]).push(t);
+      else groups.push({ name: t.group, tools: [t] as unknown as typeof TOOLS });
+    }
+    return groups;
+  });
 
   readonly precision = computed(() => {
     const pair = this.symbols().find((p) => p.symbol === this.symbol());
@@ -146,6 +174,9 @@ export class ChartAnalysisPageComponent {
   async reload(): Promise<void> {
     this.loading.set(true);
     this.error.set(null);
+    // Drawings belong to a symbol AND timeframe, so the scope has to move with
+    // the chart before any drawing is read or written.
+    this.drawings.setScope(this.symbol(), this.resolution());
     this.feed.invalidate(this.symbol(), this.resolution());
     const now = Date.now();
     try {
@@ -305,9 +336,108 @@ export class ChartAnalysisPageComponent {
     this.legend.set(snapshot);
   }
 
+  // ── Drawing actions ──────────────────────────────────────────────────────
+
+  selectTool(kind: DrawingKind | null): void {
+    this.tool.set(this.tool() === kind ? null : kind);
+  }
+
+  /** The chart disarms the tool itself once a drawing completes. */
+  onToolComplete(): void {
+    this.tool.set(null);
+  }
+
+  toolLabel(kind: DrawingKind): string {
+    return toolFor(kind)?.label ?? kind;
+  }
+
+  removeDrawing(id: string): void {
+    this.drawings.remove(id);
+  }
+
+  selectDrawing(id: string): void {
+    this.drawings.selectedId.set(id);
+  }
+
+  setDrawingColor(id: string, color: string): void {
+    this.drawings.updateStyle(id, { color });
+  }
+
+  setDrawingWidth(id: string, raw: string): void {
+    const width = Number(raw);
+    if (Number.isFinite(width)) this.drawings.updateStyle(id, { width });
+  }
+
+  setDrawingDash(id: string, dash: string): void {
+    this.drawings.updateStyle(id, { dash: dash as DashStyle });
+  }
+
+  setDrawingText(id: string, text: string): void {
+    this.drawings.updateStyle(id, { text });
+  }
+
+  toggleDrawingFill(id: string, current: string | null): void {
+    // Toggling fill has to preserve the drawing's own colour, not snap back to
+    // the default blue, or restyling a shape loses the styling twice over.
+    const selected = this.drawings.selected();
+    const base = selected?.style.color ?? '#2962FF';
+    this.drawings.updateStyle(id, { fill: current ? null : withAlpha(base, 0.15) });
+  }
+
+  /**
+   * Keyboard shortcuts, matching TradingView's where they exist.
+   *
+   * Bound on the host rather than on `document` so typing in the symbol search
+   * or an indicator input never deletes the selected drawing.
+   */
+  onKeydown(ev: KeyboardEvent): void {
+    const target = ev.target as HTMLElement | null;
+    if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+
+    const mod = ev.metaKey || ev.ctrlKey;
+    if (mod && ev.key.toLowerCase() === 'z') {
+      ev.preventDefault();
+      if (ev.shiftKey) this.drawings.redo();
+      else this.drawings.undo();
+      return;
+    }
+    if (mod && ev.key.toLowerCase() === 'y') {
+      ev.preventDefault();
+      this.drawings.redo();
+      return;
+    }
+    if (ev.key === 'Escape') {
+      this.tool.set(null);
+      this.drawings.selectedId.set(null);
+      return;
+    }
+    if (ev.key === 'Delete' || ev.key === 'Backspace') {
+      const id = this.drawings.selectedId();
+      if (id) {
+        ev.preventDefault();
+        this.drawings.remove(id);
+      }
+      return;
+    }
+    if (ev.key.toLowerCase() === 'm' && !mod) {
+      this.magnet.set(!this.magnet());
+    }
+  }
+
+  drawingLabel(d: Drawing): string {
+    return toolFor(d.kind)?.label ?? d.kind;
+  }
+
   formatTime(ms: number | null): string {
     if (ms === null) return '';
     const d = new Date(ms);
     return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
   }
+}
+
+/** Translate a hex colour into an rgba fill at the given alpha. */
+function withAlpha(hex: string, alpha: number): string {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!m) return `rgba(41,98,255,${alpha})`;
+  return `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},${alpha})`;
 }
