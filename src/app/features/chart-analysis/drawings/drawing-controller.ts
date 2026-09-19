@@ -1,4 +1,4 @@
-import type { IChartApi, ISeriesApi, SeriesType, Time } from 'lightweight-charts';
+import type { IChartApi, ISeriesApi, SeriesType } from 'lightweight-charts';
 import type { Bar } from '../datafeed/candle-feed.service';
 import { DrawingRenderer } from './drawing-renderer';
 import type { DrawingStore } from './drawing-store.service';

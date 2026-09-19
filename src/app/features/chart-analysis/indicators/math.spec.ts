@@ -13,6 +13,17 @@ import {
   trueRange,
   vwap,
   wma,
+  awesome,
+  cci,
+  ichimoku,
+  keltner,
+  mfi,
+  momentum,
+  pivotPoints,
+  psar,
+  roc,
+  superTrend,
+  williamsR,
   type Ohlc,
 } from './math';
 
@@ -315,5 +326,189 @@ describe('alignment contract', () => {
     expect(sma([], 14)).toEqual([]);
     expect(obv([])).toEqual([]);
     expect(vwap([])).toEqual([]);
+  });
+});
+
+// ── Second wave ────────────────────────────────────────────────────────────
+
+describe('momentum and roc', () => {
+  it('momentum is the difference against the bar `period` back', () => {
+    expect(momentum([1, 2, 3, 4, 5], 2)).toEqual([null, null, 2, 2, 2]);
+  });
+
+  it('roc is that difference as a percentage', () => {
+    expect(roc([100, 110, 121], 1)?.[1]).toBeCloseTo(10, 6);
+  });
+
+  it('roc guards a zero base instead of returning Infinity', () => {
+    expect(roc([0, 5], 1)?.[1]).toBeNull();
+  });
+});
+
+describe('williamsR', () => {
+  it('is 0 at the top of the range and -100 at the bottom', () => {
+    const top = bars(
+      Array.from(
+        { length: 20 },
+        (_, i) => [100, 100 + i, 99, 100 + i] as [number, number, number, number],
+      ),
+    );
+    expect(williamsR(top, 14)[19]).toBeCloseTo(0, 6);
+  });
+
+  it('returns -50 for a flat window rather than dividing by zero', () => {
+    const flat = bars(
+      Array.from({ length: 20 }, () => [5, 5, 5, 5] as [number, number, number, number]),
+    );
+    expect(williamsR(flat, 14)[19]).toBe(-50);
+  });
+});
+
+describe('cci', () => {
+  it('is 0 when price does not move', () => {
+    const flat = bars(
+      Array.from({ length: 30 }, () => [10, 10, 10, 10] as [number, number, number, number]),
+    );
+    expect(cci(flat, 20)[29]).toBe(0);
+  });
+
+  it('goes positive on a rally', () => {
+    const up = bars(
+      Array.from(
+        { length: 40 },
+        (_, i) => [100 + i, 101 + i, 99 + i, 100 + i] as [number, number, number, number],
+      ),
+    );
+    expect(cci(up, 20)[39] as number).toBeGreaterThan(0);
+  });
+});
+
+describe('mfi', () => {
+  it('pins to 100 when every bar is an up-flow', () => {
+    const up = bars(
+      Array.from(
+        { length: 30 },
+        (_, i) =>
+          [100 + i, 101 + i, 99 + i, 100 + i, 10] as [number, number, number, number, number],
+      ),
+    );
+    expect(mfi(up, 14)[29]).toBe(100);
+  });
+});
+
+describe('keltner', () => {
+  it('brackets the EMA basis symmetrically', () => {
+    const series = bars(
+      Array.from({ length: 60 }, (_, i) => {
+        const p = 100 + Math.sin(i / 4) * 3;
+        return [p, p + 1, p - 1, p] as [number, number, number, number];
+      }),
+    );
+    const { upper, middle, lower } = keltner(series, 20, 2, 10);
+    const u = upper[59] as number;
+    const m = middle[59] as number;
+    const l = lower[59] as number;
+    expect(u).toBeGreaterThan(m);
+    expect(l).toBeLessThan(m);
+    expect(u - m).toBeCloseTo(m - l, 8);
+  });
+});
+
+describe('psar', () => {
+  it('stays below price in an uptrend', () => {
+    const up = bars(
+      Array.from(
+        { length: 50 },
+        (_, i) => [100 + i, 101 + i, 99.5 + i, 100.8 + i] as [number, number, number, number],
+      ),
+    );
+    const out = psar(up, 0.02, 0.2);
+    expect(out[49] as number).toBeLessThan(up[49].close);
+  });
+
+  it('flips to above price after a reversal', () => {
+    // Rise then fall: by the end the stop must have crossed to the other side.
+    const series = bars([
+      ...Array.from(
+        { length: 30 },
+        (_, i) => [100 + i, 101 + i, 99 + i, 100.5 + i] as [number, number, number, number],
+      ),
+      ...Array.from(
+        { length: 30 },
+        (_, i) => [130 - i, 131 - i, 129 - i, 129.5 - i] as [number, number, number, number],
+      ),
+    ]);
+    const out = psar(series, 0.02, 0.2);
+    expect(out[59] as number).toBeGreaterThan(series[59].close);
+  });
+});
+
+describe('ichimoku', () => {
+  const series = bars(
+    Array.from(
+      { length: 120 },
+      (_, i) => [100 + i, 101 + i, 99 + i, 100 + i] as [number, number, number, number],
+    ),
+  );
+
+  it('shifts the spans FORWARD by the displacement', () => {
+    // The forward shift is the indicator, not a presentation detail: span A at
+    // bar i must equal the raw value computed at bar i-26.
+    const r = ichimoku(series, 9, 26, 52, 26);
+    const raw = ichimoku(series, 9, 26, 52, 0);
+    expect(r.spanA[80]).toBeCloseTo(raw.spanA[54] as number, 8);
+  });
+
+  it('shifts the lagging span BACKWARD by the displacement', () => {
+    const r = ichimoku(series, 9, 26, 52, 26);
+    expect(r.lagging[50]).toBeCloseTo(series[76].close, 8);
+  });
+
+  it('keeps every plot aligned to the bar count', () => {
+    const r = ichimoku(series);
+    for (const plot of [r.conversion, r.base, r.spanA, r.spanB, r.lagging]) {
+      expect(plot).toHaveLength(series.length);
+    }
+  });
+});
+
+describe('superTrend', () => {
+  it('tracks below price while the trend holds', () => {
+    const up = bars(
+      Array.from(
+        { length: 60 },
+        (_, i) => [100 + i, 101 + i, 99 + i, 100.7 + i] as [number, number, number, number],
+      ),
+    );
+    expect(superTrend(up, 10, 3)[59] as number).toBeLessThan(up[59].close);
+  });
+});
+
+describe('pivotPoints', () => {
+  it('holds the previous day levels flat through the current day', () => {
+    const d1 = Date.parse('2026-09-17T00:00:00Z');
+    const d2 = Date.parse('2026-09-18T00:00:00Z');
+    const series: Ohlc[] = [
+      { time: d1, open: 10, high: 12, low: 8, close: 11, volume: 1 },
+      { time: d1 + 3_600_000, open: 11, high: 13, low: 9, close: 10, volume: 1 },
+      { time: d2, open: 10, high: 10.5, low: 9.5, close: 10, volume: 1 },
+      { time: d2 + 3_600_000, open: 10, high: 10.2, low: 9.8, close: 10, volume: 1 },
+    ];
+    const r = pivotPoints(series);
+    // Day 1 has no prior day, so no levels.
+    expect(r.pivot[0]).toBeNull();
+    // Day 2 uses day 1's H=13 L=8 C=10 → P = 31/3.
+    expect(r.pivot[2]).toBeCloseTo(31 / 3, 8);
+    // And it does not move within the day.
+    expect(r.pivot[3]).toBeCloseTo(r.pivot[2] as number, 10);
+  });
+});
+
+describe('awesome', () => {
+  it('is zero on a flat series', () => {
+    const flat = bars(
+      Array.from({ length: 50 }, () => [10, 10, 10, 10] as [number, number, number, number]),
+    );
+    expect(awesome(flat)[49]).toBeCloseTo(0, 10);
   });
 });

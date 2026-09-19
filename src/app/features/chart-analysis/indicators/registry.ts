@@ -1,15 +1,26 @@
 import {
   adx,
   atr,
+  awesome,
   bollinger,
+  cci,
   donchian,
   ema,
+  ichimoku,
+  keltner,
   macd,
+  mfi,
+  momentum,
   obv,
+  pivotPoints,
+  psar,
+  roc,
   rsi,
   sma,
   stochastic,
+  superTrend,
   vwap,
+  williamsR,
   wma,
   type Maybe,
   type Ohlc,
@@ -269,6 +280,170 @@ export const INDICATORS: readonly IndicatorDef[] = [
     inputs: [],
     plots: [{ key: 'obv', title: 'OBV', kind: 'line', color: '#26A69A' }],
     compute: (bars) => ({ obv: obv(bars) }),
+  },
+
+  // ── Second wave ──────────────────────────────────────────────────────────
+  {
+    id: 'ichimoku',
+    name: 'Ichimoku Cloud',
+    target: 'overlay',
+    inputs: [
+      { key: 'conversion', label: 'Conversion', type: 'number', default: 9, min: 1, max: 200 },
+      { key: 'base', label: 'Base', type: 'number', default: 26, min: 1, max: 200 },
+      { key: 'spanB', label: 'Span B', type: 'number', default: 52, min: 1, max: 400 },
+      { key: 'displacement', label: 'Shift', type: 'number', default: 26, min: 1, max: 200 },
+    ],
+    plots: [
+      { key: 'conversion', title: 'Tenkan', kind: 'line', color: '#2962FF' },
+      { key: 'base', title: 'Kijun', kind: 'line', color: '#EF5350' },
+      { key: 'spanA', title: 'Span A', kind: 'line', color: '#26A69A' },
+      { key: 'spanB', title: 'Span B', kind: 'line', color: '#FF6D00' },
+      { key: 'lagging', title: 'Chikou', kind: 'line', color: '#787B86' },
+    ],
+    compute: (bars, p) => {
+      const r = ichimoku(
+        bars,
+        num(p, 'conversion', 9),
+        num(p, 'base', 26),
+        num(p, 'spanB', 52),
+        num(p, 'displacement', 26),
+      );
+      return {
+        conversion: r.conversion,
+        base: r.base,
+        spanA: r.spanA,
+        spanB: r.spanB,
+        lagging: r.lagging,
+      };
+    },
+  },
+  {
+    id: 'psar',
+    name: 'Parabolic SAR',
+    target: 'overlay',
+    inputs: [
+      { key: 'step', label: 'Step', type: 'number', default: 0.02, min: 0.001, max: 1 },
+      { key: 'max', label: 'Max', type: 'number', default: 0.2, min: 0.01, max: 1 },
+    ],
+    plots: [{ key: 'psar', title: 'PSAR', kind: 'line', color: '#AB47BC' }],
+    compute: (bars, p) => ({ psar: psar(bars, num(p, 'step', 0.02), num(p, 'max', 0.2)) }),
+  },
+  {
+    id: 'supertrend',
+    name: 'SuperTrend',
+    target: 'overlay',
+    inputs: [
+      LENGTH(10),
+      { key: 'mult', label: 'Factor', type: 'number', default: 3, min: 0.1, max: 20 },
+    ],
+    plots: [{ key: 'st', title: 'SuperTrend', kind: 'line', color: '#26A69A' }],
+    compute: (bars, p) => ({ st: superTrend(bars, num(p, 'length', 10), num(p, 'mult', 3)) }),
+  },
+  {
+    id: 'keltner',
+    name: 'Keltner Channels',
+    target: 'overlay',
+    inputs: [
+      LENGTH(20),
+      { key: 'mult', label: 'Factor', type: 'number', default: 2, min: 0.1, max: 10 },
+      { key: 'atrPeriod', label: 'ATR', type: 'number', default: 10, min: 1, max: 200 },
+    ],
+    plots: [
+      { key: 'upper', title: 'Upper', kind: 'line', color: '#2962FF' },
+      { key: 'middle', title: 'Basis', kind: 'line', color: '#FF6D00' },
+      { key: 'lower', title: 'Lower', kind: 'line', color: '#2962FF' },
+    ],
+    compute: (bars, p) => {
+      const r = keltner(bars, num(p, 'length', 20), num(p, 'mult', 2), num(p, 'atrPeriod', 10));
+      return { upper: r.upper, middle: r.middle, lower: r.lower };
+    },
+  },
+  {
+    id: 'pivots',
+    name: 'Pivot Points (Daily)',
+    target: 'overlay',
+    inputs: [],
+    plots: [
+      { key: 'r2', title: 'R2', kind: 'line', color: '#EF5350' },
+      { key: 'r1', title: 'R1', kind: 'line', color: '#EF5350' },
+      { key: 'pivot', title: 'P', kind: 'line', color: '#787B86' },
+      { key: 's1', title: 'S1', kind: 'line', color: '#26A69A' },
+      { key: 's2', title: 'S2', kind: 'line', color: '#26A69A' },
+    ],
+    compute: (bars) => {
+      const r = pivotPoints(bars);
+      return { pivot: r.pivot, r1: r.r1, r2: r.r2, s1: r.s1, s2: r.s2 };
+    },
+  },
+  {
+    id: 'cci',
+    name: 'Commodity Channel Index',
+    target: 'pane',
+    inputs: [LENGTH(20)],
+    plots: [{ key: 'cci', title: 'CCI', kind: 'line', color: '#2962FF' }],
+    levels: [
+      { value: 100, color: '#787B86' },
+      { value: -100, color: '#787B86' },
+    ],
+    compute: (bars, p) => ({ cci: cci(bars, num(p, 'length', 20)) }),
+  },
+  {
+    id: 'williams-r',
+    name: 'Williams %R',
+    target: 'pane',
+    inputs: [LENGTH(14)],
+    plots: [{ key: 'wr', title: '%R', kind: 'line', color: '#7E57C2' }],
+    levels: [
+      { value: -20, color: '#787B86' },
+      { value: -80, color: '#787B86' },
+    ],
+    range: { min: -100, max: 0 },
+    compute: (bars, p) => ({ wr: williamsR(bars, num(p, 'length', 14)) }),
+  },
+  {
+    id: 'mfi',
+    name: 'Money Flow Index',
+    target: 'pane',
+    inputs: [LENGTH(14)],
+    plots: [{ key: 'mfi', title: 'MFI', kind: 'line', color: '#00BCD4' }],
+    levels: [
+      { value: 80, color: '#787B86' },
+      { value: 20, color: '#787B86' },
+    ],
+    range: { min: 0, max: 100 },
+    compute: (bars, p) => ({ mfi: mfi(bars, num(p, 'length', 14)) }),
+  },
+  {
+    id: 'momentum',
+    name: 'Momentum',
+    target: 'pane',
+    inputs: [LENGTH(10), SOURCE],
+    plots: [{ key: 'mom', title: 'MOM', kind: 'line', color: '#FF6D00' }],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => ({
+      mom: momentum(sourceValues(bars, src(p)), num(p, 'length', 10)),
+    }),
+  },
+  {
+    id: 'roc',
+    name: 'Rate of Change',
+    target: 'pane',
+    inputs: [LENGTH(9), SOURCE],
+    plots: [{ key: 'roc', title: 'ROC', kind: 'line', color: '#AB47BC' }],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => ({ roc: roc(sourceValues(bars, src(p)), num(p, 'length', 9)) }),
+  },
+  {
+    id: 'awesome',
+    name: 'Awesome Oscillator',
+    target: 'pane',
+    inputs: [
+      { key: 'fast', label: 'Fast', type: 'number', default: 5, min: 1, max: 100 },
+      { key: 'slow', label: 'Slow', type: 'number', default: 34, min: 1, max: 200 },
+    ],
+    plots: [{ key: 'ao', title: 'AO', kind: 'histogram', color: '#26A69A' }],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => ({ ao: awesome(bars, num(p, 'fast', 5), num(p, 'slow', 34)) }),
   },
 ] as const;
 

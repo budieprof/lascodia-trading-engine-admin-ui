@@ -35,11 +35,24 @@ import { ThemeService } from '@core/theme/theme.service';
 import type { Bar } from '../datafeed/candle-feed.service';
 import { indicatorById, indicatorLabel, type IndicatorDef } from '../indicators/registry';
 import type { Ohlc } from '../indicators/math';
+import {
+  averageTrueRange,
+  toKagi,
+  toLineBreak,
+  toPointAndFigure,
+  toRenko,
+} from './price-transforms';
 import { DrawingStore } from '../drawings/drawing-store.service';
 import { DrawingController } from '../drawings/drawing-controller';
 import type { DrawingKind } from '../drawings/model';
 
-/** Chart styles the toolbar can switch between. */
+/**
+ * Chart styles the toolbar can switch between — the 18 of TradingView's
+ * `ChartStyle` enum that apply to this data.
+ *
+ * The last four are price-based rather than time-based: they rebuild the bar
+ * array (see `price-transforms.ts`) instead of re-skinning it.
+ */
 export type ChartStyle =
   | 'candles'
   | 'hollow'
@@ -47,7 +60,24 @@ export type ChartStyle =
   | 'line'
   | 'area'
   | 'baseline'
-  | 'heikin-ashi';
+  | 'heikin-ashi'
+  | 'hilo'
+  | 'column'
+  | 'line-markers'
+  | 'stepline'
+  | 'hlc-area'
+  | 'renko'
+  | 'kagi'
+  | 'pnf'
+  | 'line-break';
+
+/** Styles whose bars are built from price movement, not time. */
+const PRICE_BASED: ReadonlySet<ChartStyle> = new Set<ChartStyle>([
+  'renko',
+  'kagi',
+  'pnf',
+  'line-break',
+]);
 
 /** An indicator the operator has added to this chart. */
 export interface ActiveIndicator {
@@ -132,7 +162,11 @@ export class ChartHostComponent implements OnDestroy {
   readonly toolComplete = output<void>();
 
   private chart: IChartApi | null = null;
-  private price: ISeriesApi<'Candlestick' | 'Bar' | 'Line' | 'Area' | 'Baseline'> | null = null;
+  // Includes 'Histogram' because the Column style plots the close as bars on
+  // the price scale — it is a price series here, not the volume overlay.
+  private price: ISeriesApi<
+    'Candlestick' | 'Bar' | 'Line' | 'Area' | 'Baseline' | 'Histogram'
+  > | null = null;
   private volume: ISeriesApi<'Histogram'> | null = null;
   private indicatorSeries: IndicatorSeries[] = [];
   private resizeObserver: ResizeObserver | null = null;
@@ -161,8 +195,11 @@ export class ChartHostComponent implements OnDestroy {
 
     effect(() => {
       const active = this.indicators();
-      const bars = this.bars();
-      untracked(() => this.applyIndicators(active, bars));
+      // Depend on style as well: a price-based style replaces the bar array,
+      // and the studies have to be recomputed against what is actually drawn.
+      this.bars();
+      this.style();
+      untracked(() => this.applyIndicators(active, this.plotted));
     });
 
     // Drawing state → renderer. Reads the store's signals so any mutation
@@ -306,7 +343,12 @@ export class ChartHostComponent implements OnDestroy {
     this.computedCache.clear();
 
     const p = this.palette(this.theme.theme() === 'dark');
-    const source = style === 'heikin-ashi' ? toHeikinAshi(bars) : bars;
+    const source = this.transformed(bars, style);
+    // Indicators and the legend follow the PLOTTED bars, so a price-based
+    // style recomputes both against its synthetic series rather than against
+    // the time bars underneath — otherwise an RSI on a Renko chart would be
+    // reading a different series from the one on screen.
+    this.plotted = source;
 
     // Series type is part of the chart's structure, not its options, so a style
     // change means replacing the series rather than setting an option.
@@ -317,12 +359,43 @@ export class ChartHostComponent implements OnDestroy {
 
     const priceFormat = { type: 'price' as const, precision, minMove: 1 / 10 ** precision };
 
-    if (style === 'line' || style === 'area' || style === 'baseline') {
+    if (
+      style === 'line' ||
+      style === 'area' ||
+      style === 'baseline' ||
+      style === 'stepline' ||
+      style === 'line-markers' ||
+      style === 'hlc-area' ||
+      style === 'kagi'
+    ) {
+      // HLC area plots the close but autoscales to the high/low, so its value
+      // series is the close while the band it occupies comes from the bar.
       const data = source.map((b) => ({ time: asTime(b.time), value: b.close }));
-      if (style === 'line') {
+      if (style === 'line' || style === 'kagi') {
+        this.price = this.chart.addSeries(LineSeries, {
+          color: style === 'kagi' ? '#787B86' : '#2962FF',
+          lineWidth: 2,
+          priceFormat,
+        });
+      } else if (style === 'stepline') {
         this.price = this.chart.addSeries(LineSeries, {
           color: '#2962FF',
           lineWidth: 2,
+          lineType: 1, // with-steps
+          priceFormat,
+        });
+      } else if (style === 'line-markers') {
+        this.price = this.chart.addSeries(LineSeries, {
+          color: '#2962FF',
+          lineWidth: 2,
+          pointMarkersVisible: true,
+          priceFormat,
+        });
+      } else if (style === 'hlc-area') {
+        this.price = this.chart.addSeries(AreaSeries, {
+          lineColor: '#2962FF',
+          topColor: 'rgba(41,98,255,0.28)',
+          bottomColor: 'rgba(41,98,255,0.02)',
           priceFormat,
         });
       } else if (style === 'area') {
@@ -340,13 +413,26 @@ export class ChartHostComponent implements OnDestroy {
         });
       }
       this.price.setData(data as SeriesDataItemTypeMap['Line'][]);
-    } else if (style === 'bars') {
+    } else if (style === 'bars' || style === 'hilo') {
+      // HiLo is a bar series without the open/close ticks — the range only.
       this.price = this.chart.addSeries(BarSeries, {
         upColor: p.up,
         downColor: p.down,
+        openVisible: style !== 'hilo',
+        thinBars: style !== 'hilo',
         priceFormat,
       });
       this.price.setData(source.map(toOhlcData) as SeriesDataItemTypeMap['Bar'][]);
+    } else if (style === 'column') {
+      const column = this.chart.addSeries(HistogramSeries, { color: p.up, priceFormat });
+      column.setData(
+        source.map((b) => ({
+          time: asTime(b.time),
+          value: b.close,
+          color: b.close >= b.open ? p.up : p.down,
+        })),
+      );
+      this.price = column;
     } else {
       const hollow = style === 'hollow';
       this.price = this.chart.addSeries(CandlestickSeries, {
@@ -379,7 +465,7 @@ export class ChartHostComponent implements OnDestroy {
         this.volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
       }
       this.volume.setData(
-        bars.map((b) => ({
+        source.map((b) => ({
           time: asTime(b.time),
           value: b.volume,
           color: b.close >= b.open ? p.volumeUp : p.volumeDown,
@@ -391,6 +477,35 @@ export class ChartHostComponent implements OnDestroy {
     }
 
     this.emitLegend(null);
+  }
+
+  /**
+   * Rebuild the bar array for styles that are not time-based.
+   *
+   * Brick and box sizes default to a fraction of ATR rather than a fixed price:
+   * a 10-pip brick is reasonable on EURUSD H1 and absurd on the same pair's D1,
+   * so a constant would make these chart types useless on most timeframes.
+   */
+  private transformed(bars: Bar[], style: ChartStyle): Bar[] {
+    if (!PRICE_BASED.has(style)) {
+      return style === 'heikin-ashi' ? toHeikinAshi(bars) : bars;
+    }
+    if (bars.length === 0) return bars;
+    const atr = averageTrueRange(bars, 14);
+    const unit = atr > 0 ? atr : Math.abs(bars[bars.length - 1].close) * 0.001;
+
+    switch (style) {
+      case 'renko':
+        return toRenko(bars, unit);
+      case 'line-break':
+        return toLineBreak(bars, 3);
+      case 'pnf':
+        return toPointAndFigure(bars, unit, 3);
+      case 'kagi':
+        return toKagi(bars, unit * 2);
+      default:
+        return bars;
+    }
   }
 
   private applyIndicators(active: ActiveIndicator[], bars: Bar[]): void {

@@ -325,3 +325,305 @@ export function adx(
   }
   return { adx: out, plusDi, minusDi };
 }
+
+// ── Second wave: the indicators TradingView ships that we were missing ──────
+
+/** Momentum — close minus the close `period` bars ago. */
+export function momentum(closes: number[], period = 10): Maybe[] {
+  const out: Maybe[] = nulls(closes.length);
+  for (let i = period; i < closes.length; i++) out[i] = closes[i] - closes[i - period];
+  return out;
+}
+
+/** Rate of Change, as a percentage. */
+export function roc(closes: number[], period = 9): Maybe[] {
+  const out: Maybe[] = nulls(closes.length);
+  for (let i = period; i < closes.length; i++) {
+    const base = closes[i - period];
+    out[i] = base === 0 ? null : ((closes[i] - base) / base) * 100;
+  }
+  return out;
+}
+
+/** Williams %R — where the close sits in the period's range, as -100..0. */
+export function williamsR(bars: Ohlc[], period = 14): Maybe[] {
+  const out: Maybe[] = nulls(bars.length);
+  for (let i = period - 1; i < bars.length; i++) {
+    let hh = -Infinity;
+    let ll = Infinity;
+    for (let j = i - period + 1; j <= i; j++) {
+      hh = Math.max(hh, bars[j].high);
+      ll = Math.min(ll, bars[j].low);
+    }
+    const span = hh - ll;
+    out[i] = span === 0 ? -50 : ((hh - bars[i].close) / span) * -100;
+  }
+  return out;
+}
+
+/**
+ * Commodity Channel Index.
+ *
+ * The 0.015 constant is Lambert's, chosen so roughly 70-80% of values fall
+ * within ±100 — it is not a tunable, and changing it silently redefines every
+ * overbought/oversold reading.
+ */
+export function cci(bars: Ohlc[], period = 20): Maybe[] {
+  const typical = bars.map((b) => (b.high + b.low + b.close) / 3);
+  const avg = sma(typical, period);
+  const out: Maybe[] = nulls(bars.length);
+  for (let i = period - 1; i < bars.length; i++) {
+    const mean = avg[i];
+    if (mean === null) continue;
+    let deviation = 0;
+    for (let j = i - period + 1; j <= i; j++) deviation += Math.abs(typical[j] - mean);
+    const meanDeviation = deviation / period;
+    out[i] = meanDeviation === 0 ? 0 : (typical[i] - mean) / (0.015 * meanDeviation);
+  }
+  return out;
+}
+
+/** Money Flow Index — RSI weighted by volume. */
+export function mfi(bars: Ohlc[], period = 14): Maybe[] {
+  const out: Maybe[] = nulls(bars.length);
+  const typical = bars.map((b) => (b.high + b.low + b.close) / 3);
+  for (let i = period; i < bars.length; i++) {
+    let positive = 0;
+    let negative = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      const flow = typical[j] * bars[j].volume;
+      if (typical[j] > typical[j - 1]) positive += flow;
+      else if (typical[j] < typical[j - 1]) negative += flow;
+    }
+    out[i] = negative === 0 ? 100 : 100 - 100 / (1 + positive / negative);
+  }
+  return out;
+}
+
+/** Awesome Oscillator — SMA(5) minus SMA(34) of the median price. */
+export function awesome(bars: Ohlc[], fast = 5, slow = 34): Maybe[] {
+  const median = bars.map((b) => (b.high + b.low) / 2);
+  const f = sma(median, fast);
+  const s = sma(median, slow);
+  return bars.map((_, i) =>
+    f[i] !== null && s[i] !== null ? (f[i] as number) - (s[i] as number) : null,
+  );
+}
+
+/** Keltner Channels — EMA basis with an ATR-scaled envelope. */
+export function keltner(bars: Ohlc[], period = 20, mult = 2, atrPeriod = 10): BandsResult {
+  const basis = ema(
+    bars.map((b) => b.close),
+    period,
+  );
+  const range = atr(bars, atrPeriod);
+  const upper: Maybe[] = nulls(bars.length);
+  const lower: Maybe[] = nulls(bars.length);
+  for (let i = 0; i < bars.length; i++) {
+    const m = basis[i];
+    const r = range[i];
+    if (m === null || r === null) continue;
+    upper[i] = m + mult * r;
+    lower[i] = m - mult * r;
+  }
+  return { upper, middle: basis, lower };
+}
+
+/**
+ * Parabolic SAR.
+ *
+ * Genuinely stateful: the acceleration factor ratchets up on each new extreme
+ * and resets on every flip, so it cannot be computed for one bar in isolation.
+ */
+export function psar(bars: Ohlc[], step = 0.02, max = 0.2): Maybe[] {
+  const out: Maybe[] = nulls(bars.length);
+  if (bars.length < 2) return out;
+  let rising = bars[1].close >= bars[0].close;
+  let sar = rising ? bars[0].low : bars[0].high;
+  let extreme = rising ? bars[0].high : bars[0].low;
+  let af = step;
+  out[0] = sar;
+
+  for (let i = 1; i < bars.length; i++) {
+    sar = sar + af * (extreme - sar);
+    if (rising) {
+      // SAR may never move above the last two lows while rising.
+      sar = Math.min(sar, bars[i - 1].low, bars[Math.max(0, i - 2)].low);
+      if (bars[i].low < sar) {
+        rising = false;
+        sar = extreme;
+        extreme = bars[i].low;
+        af = step;
+      } else if (bars[i].high > extreme) {
+        extreme = bars[i].high;
+        af = Math.min(max, af + step);
+      }
+    } else {
+      sar = Math.max(sar, bars[i - 1].high, bars[Math.max(0, i - 2)].high);
+      if (bars[i].high > sar) {
+        rising = true;
+        sar = extreme;
+        extreme = bars[i].high;
+        af = step;
+      } else if (bars[i].low < extreme) {
+        extreme = bars[i].low;
+        af = Math.min(max, af + step);
+      }
+    }
+    out[i] = sar;
+  }
+  return out;
+}
+
+/** SuperTrend — ATR bands that flip side when price closes through them. */
+export function superTrend(bars: Ohlc[], period = 10, mult = 3): Maybe[] {
+  const range = atr(bars, period);
+  const out: Maybe[] = nulls(bars.length);
+  let trendUp = true;
+  let previous: number | null = null;
+
+  for (let i = 0; i < bars.length; i++) {
+    const r = range[i];
+    if (r === null) continue;
+    const mid = (bars[i].high + bars[i].low) / 2;
+    const upper = mid + mult * r;
+    const lower = mid - mult * r;
+    if (previous === null) {
+      previous = lower;
+      out[i] = lower;
+      continue;
+    }
+    if (trendUp) {
+      previous = Math.max(lower, previous);
+      if (bars[i].close < previous) {
+        trendUp = false;
+        previous = upper;
+      }
+    } else {
+      previous = Math.min(upper, previous);
+      if (bars[i].close > previous) {
+        trendUp = true;
+        previous = lower;
+      }
+    }
+    out[i] = previous;
+  }
+  return out;
+}
+
+export interface IchimokuResult {
+  conversion: Maybe[];
+  base: Maybe[];
+  spanA: Maybe[];
+  spanB: Maybe[];
+  lagging: Maybe[];
+}
+
+/**
+ * Ichimoku Cloud.
+ *
+ * Spans are plotted FORWARD by `displacement` bars and the lagging span
+ * BACKWARD by the same — that shift is the indicator, not a presentation
+ * detail. Values shifted past the end of the series are dropped rather than
+ * clamped, since the cloud legitimately extends beyond the last bar.
+ */
+export function ichimoku(
+  bars: Ohlc[],
+  conversionPeriod = 9,
+  basePeriod = 26,
+  spanBPeriod = 52,
+  displacement = 26,
+): IchimokuResult {
+  const midpoint = (period: number): Maybe[] => {
+    const out: Maybe[] = nulls(bars.length);
+    for (let i = period - 1; i < bars.length; i++) {
+      let hh = -Infinity;
+      let ll = Infinity;
+      for (let j = i - period + 1; j <= i; j++) {
+        hh = Math.max(hh, bars[j].high);
+        ll = Math.min(ll, bars[j].low);
+      }
+      out[i] = (hh + ll) / 2;
+    }
+    return out;
+  };
+
+  const conversion = midpoint(conversionPeriod);
+  const base = midpoint(basePeriod);
+  const rawSpanA: Maybe[] = bars.map((_, i) =>
+    conversion[i] !== null && base[i] !== null
+      ? ((conversion[i] as number) + (base[i] as number)) / 2
+      : null,
+  );
+  const rawSpanB = midpoint(spanBPeriod);
+
+  const shift = (series: Maybe[], by: number): Maybe[] => {
+    const out: Maybe[] = nulls(series.length);
+    for (let i = 0; i < series.length; i++) {
+      const target = i + by;
+      if (target >= 0 && target < series.length) out[target] = series[i];
+    }
+    return out;
+  };
+
+  return {
+    conversion,
+    base,
+    spanA: shift(rawSpanA, displacement),
+    spanB: shift(rawSpanB, displacement),
+    lagging: shift(
+      bars.map((b) => b.close as Maybe),
+      -displacement,
+    ),
+  };
+}
+
+export interface PivotResult {
+  pivot: Maybe[];
+  r1: Maybe[];
+  r2: Maybe[];
+  s1: Maybe[];
+  s2: Maybe[];
+}
+
+/**
+ * Classic daily pivot points, carried across each session.
+ *
+ * Computed from the PREVIOUS day's high/low/close and held flat through the
+ * current day — a pivot that recomputed intrabar would not be a pivot.
+ */
+export function pivotPoints(bars: Ohlc[]): PivotResult {
+  const n = bars.length;
+  const result: PivotResult = {
+    pivot: nulls(n),
+    r1: nulls(n),
+    r2: nulls(n),
+    s1: nulls(n),
+    s2: nulls(n),
+  };
+  let day = -1;
+  let prev: { high: number; low: number; close: number } | null = null;
+  let current: { high: number; low: number; close: number } | null = null;
+
+  for (let i = 0; i < n; i++) {
+    const d = Math.floor(bars[i].time / 86_400_000);
+    if (d !== day) {
+      prev = current;
+      current = { high: bars[i].high, low: bars[i].low, close: bars[i].close };
+      day = d;
+    } else if (current) {
+      current.high = Math.max(current.high, bars[i].high);
+      current.low = Math.min(current.low, bars[i].low);
+      current.close = bars[i].close;
+    }
+    if (!prev) continue;
+    const p = (prev.high + prev.low + prev.close) / 3;
+    const span = prev.high - prev.low;
+    result.pivot[i] = p;
+    result.r1[i] = 2 * p - prev.low;
+    result.s1[i] = 2 * p - prev.high;
+    result.r2[i] = p + span;
+    result.s2[i] = p - span;
+  }
+  return result;
+}

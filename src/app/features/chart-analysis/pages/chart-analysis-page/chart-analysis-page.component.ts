@@ -56,9 +56,19 @@ const CHART_STYLES: Array<{ id: ChartStyle; label: string }> = [
   { id: 'hollow', label: 'Hollow candles' },
   { id: 'heikin-ashi', label: 'Heikin Ashi' },
   { id: 'bars', label: 'Bars' },
+  { id: 'hilo', label: 'High-Low' },
   { id: 'line', label: 'Line' },
+  { id: 'line-markers', label: 'Line with markers' },
+  { id: 'stepline', label: 'Step line' },
   { id: 'area', label: 'Area' },
+  { id: 'hlc-area', label: 'HLC area' },
   { id: 'baseline', label: 'Baseline' },
+  { id: 'column', label: 'Columns' },
+  // Price-based: these rebuild the bars rather than re-skinning them.
+  { id: 'renko', label: 'Renko' },
+  { id: 'line-break', label: 'Line Break' },
+  { id: 'kagi', label: 'Kagi' },
+  { id: 'pnf', label: 'Point & Figure' },
 ];
 
 /** How many bars to pull per request / per scroll-back page. */

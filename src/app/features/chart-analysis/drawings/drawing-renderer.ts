@@ -287,7 +287,7 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
 
       case 'long-position':
       case 'short-position':
-        if (pts.length >= 2) this.position(ctx, drawing, pts, w);
+        if (pts.length >= 2) this.position(ctx, drawing, pts);
         break;
 
       default:
@@ -460,7 +460,7 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
    * out of them. This is the one drawing that states a trade rather than
    * describing the chart, so the ratio is the point of it.
    */
-  private position(ctx: CanvasRenderingContext2D, drawing: Drawing, pts: Pt[], w: number): void {
+  private position(ctx: CanvasRenderingContext2D, drawing: Drawing, pts: Pt[]): void {
     const [entry, target, stop] = pts;
     const right = Math.max(entry.x, target?.x ?? entry.x, stop?.x ?? entry.x);
     const left = Math.min(entry.x, target?.x ?? entry.x, stop?.x ?? entry.x);
