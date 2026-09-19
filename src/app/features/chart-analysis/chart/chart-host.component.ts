@@ -37,6 +37,7 @@ import { ThemeService } from '@core/theme/theme.service';
 import type { Bar } from '../datafeed/candle-feed.service';
 import { indicatorById, indicatorLabel, type IndicatorDef } from '../indicators/registry';
 import type { Ohlc } from '../indicators/math';
+import { HiLoSeries, VolCandleSeries, type OhlcvData } from './custom-series';
 import {
   averageTrueRange,
   toKagi,
@@ -67,6 +68,8 @@ export type ChartStyle =
   | 'baseline'
   | 'heikin-ashi'
   | 'hlc-bars'
+  | 'hilo'
+  | 'vol-candle'
   | 'column'
   | 'line-markers'
   | 'stepline'
@@ -173,6 +176,8 @@ export class ChartHostComponent implements OnDestroy {
   /** Economic events on the time axis. Times are UTC; shifted like the bars. */
   readonly events = input<EventMark[]>([]);
   readonly minEventImpact = input<'High' | 'Medium' | 'Low'>('Medium');
+  /** Multiplier on the ATR-derived Renko / P&F / Kagi box size. */
+  readonly boxSizeAtr = input<number>(1);
   /** Which chart this panel is, so it renders only its own drawings. */
   readonly symbol = input<string>('');
   readonly resolution = input<string>('');
@@ -188,7 +193,7 @@ export class ChartHostComponent implements OnDestroy {
   // Includes 'Histogram' because the Column style plots the close as bars on
   // the price scale — it is a price series here, not the volume overlay.
   private price: ISeriesApi<
-    'Candlestick' | 'Bar' | 'Line' | 'Area' | 'Baseline' | 'Histogram'
+    'Candlestick' | 'Bar' | 'Line' | 'Area' | 'Baseline' | 'Histogram' | 'Custom'
   > | null = null;
   private volume: ISeriesApi<'Histogram'> | null = null;
   private indicatorSeries: IndicatorSeries[] = [];
@@ -219,6 +224,7 @@ export class ChartHostComponent implements OnDestroy {
       const style = this.style();
       const showVolume = this.showVolume();
       const precision = this.precision();
+      this.boxSizeAtr();
       untracked(() => this.applyData(bars, style, showVolume, precision));
     });
 
@@ -564,6 +570,29 @@ export class ChartHostComponent implements OnDestroy {
         priceFormat,
       });
       this.price.setData(source.map(toOhlcData) as SeriesDataItemTypeMap['Bar'][]);
+    } else if (style === 'hilo' || style === 'vol-candle') {
+      // The only two styles with no built-in series: HiLo draws the range with
+      // neither tick, and VolCandle varies body width by volume. Both are
+      // custom series — see custom-series.ts.
+      const view = style === 'hilo' ? new HiLoSeries() : new VolCandleSeries();
+      const custom = this.chart.addCustomSeries(view, {
+        upColor: p.up,
+        downColor: p.down,
+        priceFormat,
+      });
+      custom.setData(
+        source.map(
+          (b): OhlcvData => ({
+            time: asTime(b.time),
+            open: b.open,
+            high: b.high,
+            low: b.low,
+            close: b.close,
+            volume: b.volume,
+          }),
+        ),
+      );
+      this.price = custom;
     } else if (style === 'column') {
       const column = this.chart.addSeries(HistogramSeries, { color: p.up, priceFormat });
       column.setData(
@@ -642,7 +671,8 @@ export class ChartHostComponent implements OnDestroy {
     }
     if (bars.length === 0) return bars;
     const atr = averageTrueRange(bars, 14);
-    const unit = atr > 0 ? atr : Math.abs(bars[bars.length - 1].close) * 0.001;
+    const base = atr > 0 ? atr : Math.abs(bars[bars.length - 1].close) * 0.001;
+    const unit = base * Math.max(0.1, this.boxSizeAtr());
 
     switch (style) {
       case 'renko':

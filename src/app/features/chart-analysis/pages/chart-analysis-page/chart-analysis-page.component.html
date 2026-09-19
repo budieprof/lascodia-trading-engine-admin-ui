@@ -65,6 +65,21 @@
       }
     </select>
 
+    @if (priceBasedStyle()) {
+      <label class="box-size" title="Box size as a multiple of ATR">
+        Box
+        <input
+          type="number"
+          min="0.1"
+          max="20"
+          step="0.1"
+          [value]="boxSizeAtr()"
+          (change)="setBoxSize($any($event.target).value)"
+        />
+        ×ATR
+      </label>
+    }
+
     <div class="indicator-picker">
       <button type="button" class="tool" (click)="indicatorMenuOpen.set(!indicatorMenuOpen())">
         Indicators
@@ -160,6 +175,25 @@
         </button>
       }
     </div>
+
+    <button
+      type="button"
+      class="tool"
+      [class.active]="sidePane() === 'details'"
+      (click)="openSidePane('details')"
+      title="Symbol details"
+    >
+      ℹ
+    </button>
+    <button
+      type="button"
+      class="tool"
+      [class.active]="sidePane() === 'news'"
+      (click)="openSidePane('news')"
+      title="News for this pair"
+    >
+      📰
+    </button>
 
     <button
       type="button"
@@ -358,6 +392,15 @@
           <div class="legend-title">
             <strong>{{ symbol() }}</strong>
             <span class="muted">{{ resolutionLabel(resolution()) }}</span>
+            <span class="market-status" [class]="marketStatus()">
+              {{
+                marketStatus() === 'open'
+                  ? '● live'
+                  : marketStatus() === 'closed'
+                    ? '○ market closed'
+                    : '⚠ feed stale'
+              }}
+            </span>
           </div>
           @if (legend(); as l) {
             <div class="legend-ohlc" [class.up]="legendUp()" [class.down]="!legendUp()">
@@ -408,6 +451,7 @@
           [timezone]="timezone()"
           [events]="events()"
           [minEventImpact]="minEventImpact()"
+          [boxSizeAtr]="boxSizeAtr()"
           [symbol]="symbol()"
           [resolution]="resolution()"
           [overlays]="overlays()"
@@ -501,6 +545,89 @@
             </button>
             <button type="button" (click)="closeContextMenu()">Close</button>
           </div>
+        }
+
+        <!-- Details / News side pane. -->
+        @if (sidePane() === 'details') {
+          <aside class="side-pane">
+            <div class="tree-title">{{ details().symbol }} details</div>
+            <dl class="detail-list">
+              <dt>Pair</dt>
+              <dd>{{ details().base }} / {{ details().quote }}</dd>
+              <dt>Digits</dt>
+              <dd>{{ details().digits }}</dd>
+              <dt>Contract</dt>
+              <dd>{{ details().contractSize ?? '—' }}</dd>
+              <dt>Lots</dt>
+              <dd>
+                {{ details().minLot ?? '—' }} – {{ details().maxLot ?? '—' }} step
+                {{ details().lotStep ?? '—' }}
+              </dd>
+              <dt>Last</dt>
+              <dd>
+                {{
+                  details().last === null
+                    ? '—'
+                    : (details().last | number: '1.' + details().digits + '-' + details().digits)
+                }}
+              </dd>
+              <dt>Session</dt>
+              <dd>
+                @if (details().dayChangePct !== null) {
+                  <span
+                    [class.up]="(details().dayChangePct ?? 0) >= 0"
+                    [class.down]="(details().dayChangePct ?? 0) < 0"
+                  >
+                    {{ details().dayChangePct | number: '1.2-2' }}%
+                  </span>
+                } @else {
+                  —
+                }
+              </dd>
+              <dt>Day H/L</dt>
+              <dd>
+                {{
+                  details().dayHigh === null
+                    ? '—'
+                    : (details().dayHigh | number: '1.' + details().digits + '-' + details().digits)
+                }}
+                /
+                {{
+                  details().dayLow === null
+                    ? '—'
+                    : (details().dayLow | number: '1.' + details().digits + '-' + details().digits)
+                }}
+              </dd>
+              <dt>Loaded</dt>
+              <dd>{{ details().bars }} bars</dd>
+              <dt>From</dt>
+              <dd class="muted">{{ details().from }}</dd>
+              <dt>To</dt>
+              <dd class="muted">{{ details().to }}</dd>
+            </dl>
+          </aside>
+        }
+
+        @if (sidePane() === 'news') {
+          <aside class="side-pane">
+            <div class="tree-title">News · {{ details().base }}</div>
+            @if (newsLoading()) {
+              <div class="pane-empty">Loading…</div>
+            } @else if (!articles().length) {
+              <div class="pane-empty">No headlines in the last 48h.</div>
+            } @else {
+              <ul class="news-list">
+                @for (a of articles(); track a.id) {
+                  <li>
+                    <a [href]="a.url" target="_blank" rel="noopener noreferrer">{{ a.title }}</a>
+                    <div class="muted news-meta">
+                      {{ a.sourceName }} · {{ a.publishedAtUtc | date: 'MMM d HH:mm' }}
+                    </div>
+                  </li>
+                }
+              </ul>
+            }
+          </aside>
         }
 
         <!-- Watchlist. -->

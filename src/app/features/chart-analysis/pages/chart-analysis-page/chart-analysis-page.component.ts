@@ -10,7 +10,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DecimalPipe } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import type { CurrencyPairDto } from '@core/api/api.types';
@@ -33,6 +33,10 @@ import { DrawingStore } from '../../drawings/drawing-store.service';
 import { PositionsService } from '@core/services/positions.service';
 import { EconomicEventsService } from '@core/services/economic-events.service';
 import { AlertsService } from '@core/services/alerts.service';
+import { OrdersService } from '@core/services/orders.service';
+import { MartingaleService } from '@core/services/martingale.service';
+import { NewsIntelService } from '@core/services/news-intel.service';
+import type { NewsArticleView } from '@features/news-intel/news-intel.types';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { EventMark } from '../../overlays/event-marks-renderer';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
@@ -79,6 +83,8 @@ const CHART_STYLES: Array<{ id: ChartStyle; label: string }> = [
   { id: 'heikin-ashi', label: 'Heikin Ashi' },
   { id: 'bars', label: 'Bars' },
   { id: 'hlc-bars', label: 'HLC bars' },
+  { id: 'hilo', label: 'High-Low' },
+  { id: 'vol-candle', label: 'Volume candles' },
   { id: 'line', label: 'Line' },
   { id: 'line-markers', label: 'Line with markers' },
   { id: 'stepline', label: 'Step line' },
@@ -99,7 +105,7 @@ const PAGE_BARS = 1500;
 @Component({
   selector: 'app-chart-analysis-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, DecimalPipe, ChartHostComponent],
+  imports: [FormsModule, DecimalPipe, DatePipe, ChartHostComponent],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
   host: { '(keydown)': 'onKeydown($event)', tabindex: '0' },
@@ -139,9 +145,17 @@ export class ChartAnalysisPageComponent {
   private readonly signals = inject(TradeSignalsService);
 
   /** Engine state drawn on the chart: position levels and signal markers. */
-  readonly overlays = signal<PriceOverlay[]>([]);
-  readonly markers = signal<ChartMarker[]>([]);
+  /** Position levels. Kept separate from order levels so each can refresh alone. */
+  private readonly positionOverlays = signal<PriceOverlay[]>([]);
+  private readonly orderOverlays = signal<PriceOverlay[]>([]);
+  private readonly signalMarkers = signal<ChartMarker[]>([]);
+  private readonly rungMarkers = signal<ChartMarker[]>([]);
+
+  readonly overlays = computed(() => [...this.positionOverlays(), ...this.orderOverlays()]);
+  readonly markers = computed(() => [...this.signalMarkers(), ...this.rungMarkers()]);
   readonly showOverlays = signal(true);
+  private readonly orders = inject(OrdersService);
+  private readonly martingale = inject(MartingaleService);
 
   /** Economic events on the time axis. */
   private readonly economicEvents = inject(EconomicEventsService);
@@ -154,6 +168,47 @@ export class ChartAnalysisPageComponent {
   // Prices come from the same throttled `priceUpdated` stream the chart uses,
   // so the panel costs one extra map rather than 23 more polls.
   readonly watchlistOpen = signal(false);
+
+  // ── Side panes: Details and News ─────────────────────────────────────────
+  private readonly newsIntel = inject(NewsIntelService);
+  readonly sidePane = signal<'none' | 'details' | 'news'>('none');
+  readonly articles = signal<NewsArticleView[]>([]);
+  readonly newsLoading = signal(false);
+
+  /**
+   * Symbol facts for the Details pane, assembled from what the console already
+   * knows rather than a new endpoint: the pair's own metadata, the loaded bar
+   * range, and the session's move.
+   */
+  readonly details = computed(() => {
+    const symbol = this.symbol();
+    const pair = this.symbols().find((p) => (p.symbol ?? '').toUpperCase() === symbol);
+    const bars = this.bars();
+    const first = bars[0];
+    const last = bars[bars.length - 1];
+    const dayStart = last ? Math.floor(last.time / 86_400_000) * 86_400_000 : 0;
+    const today = bars.filter((b) => b.time >= dayStart);
+    const dayOpen = today[0]?.open ?? null;
+    return {
+      symbol,
+      base: pair?.baseCurrency ?? '—',
+      quote: pair?.quoteCurrency ?? '—',
+      digits: pair ? Math.trunc(pair.decimalPlaces) : 5,
+      contractSize: pair?.contractSize ?? null,
+      minLot: pair?.minLotSize ?? null,
+      maxLot: pair?.maxLotSize ?? null,
+      lotStep: pair?.lotStep ?? null,
+      bars: bars.length,
+      from: first ? this.formatTime(first.time) : '—',
+      to: last ? this.formatTime(last.time) : '—',
+      last: last?.close ?? null,
+      dayOpen,
+      dayHigh: today.length ? Math.max(...today.map((b) => b.high)) : null,
+      dayLow: today.length ? Math.min(...today.map((b) => b.low)) : null,
+      dayChangePct:
+        dayOpen && last && dayOpen !== 0 ? ((last.close - dayOpen) / dayOpen) * 100 : null,
+    };
+  });
   readonly prices = signal<Record<string, { bid: number; prev: number }>>({});
 
   readonly watchlist = computed(() => {
@@ -208,19 +263,53 @@ export class ChartAnalysisPageComponent {
   private readonly notify = inject(NotificationService);
   readonly isFullscreen = signal(false);
 
+  /**
+   * Box size for the price-based styles, as a multiple of ATR.
+   *
+   * An absolute price would be useless across timeframes — 10 pips is a
+   * sensible Renko brick on H1 and absurd on D1 — so the operator scales the
+   * ATR-derived default rather than replacing it.
+   */
+  readonly boxSizeAtr = signal(1);
+
+  /**
+   * FX market status, from the bar data rather than a clock.
+   *
+   * The week runs Sunday 22:00 UTC to Friday 22:00 UTC, but brokers differ and
+   * holidays are not on any weekday rule. Asking "has a bar closed recently?"
+   * answers the question the operator actually has — is this chart live — and
+   * cannot disagree with the data on screen.
+   */
+  readonly marketStatus = computed<'open' | 'closed' | 'stale'>(() => {
+    const bars = this.bars();
+    if (bars.length === 0) return 'closed';
+    const step = resolutionMs(this.resolution()) ?? 60_000;
+    const age = Date.now() - bars[bars.length - 1].time;
+    if (age <= step * 2) return 'open';
+    // Beyond two bars but inside a weekend is "closed"; beyond that, the feed
+    // itself is suspect and saying "open" would be a lie.
+    return age <= 3 * 86_400_000 ? 'closed' : 'stale';
+  });
+
   // ── Split view ───────────────────────────────────────────────────────────
   //
   // The primary chart keeps every tool. Comparison panels are their own charts
   // with their own symbol, timeframe, bars and drawings — drawings are scoped
   // per symbol+timeframe, so each panel renders only its own.
-  readonly splitLayout = signal<'1' | '2h' | '2v' | '4'>('1');
+  readonly splitLayout = signal<'1' | '2h' | '2v' | '4' | '6' | '8'>('1');
   readonly comparePanels = signal<ComparePanel[]>([]);
 
-  readonly splitLayouts: Array<{ id: '1' | '2h' | '2v' | '4'; label: string; panels: number }> = [
+  readonly splitLayouts: Array<{
+    id: '1' | '2h' | '2v' | '4' | '6' | '8';
+    label: string;
+    panels: number;
+  }> = [
     { id: '1', label: '▢', panels: 0 },
     { id: '2h', label: '◫', panels: 1 },
     { id: '2v', label: '⊟', panels: 1 },
     { id: '4', label: '⊞', panels: 3 },
+    { id: '6', label: '⊟⊞', panels: 5 },
+    { id: '8', label: '⊞⊞', panels: 7 },
   ];
 
   readonly toolGroups = computed(() => {
@@ -290,8 +379,10 @@ export class ChartAnalysisPageComponent {
   private loadTradingOverlays(): void {
     const symbol = this.symbol();
     if (!this.showOverlays()) {
-      this.overlays.set([]);
-      this.markers.set([]);
+      this.positionOverlays.set([]);
+      this.orderOverlays.set([]);
+      this.signalMarkers.set([]);
+      this.rungMarkers.set([]);
       return;
     }
 
@@ -318,7 +409,80 @@ export class ChartAnalysisPageComponent {
           if (p.takeProfit)
             out.push({ kind: 'target', price: p.takeProfit, label: 'TP', color: '#26A69A' });
         }
-        this.overlays.set(out);
+        this.positionOverlays.set(out);
+      });
+
+    // ── Working orders ────────────────────────────────────────────────────
+    //
+    // Only orders that can still fill. A filled order is already a position and
+    // is drawn as one; a cancelled one is history. Drawing either would put
+    // lines on the chart at prices nothing is waiting at.
+    this.orders
+      .list({
+        currentPage: 1,
+        itemCountPerPage: 50,
+        filter: { symbol },
+        sortBy: 'id',
+        sortDirection: 'desc',
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((res) => {
+        if (!res?.status || !res.data) return;
+        const working = (res.data.data ?? []).filter(
+          (o) =>
+            (o.symbol ?? '').toUpperCase() === symbol.toUpperCase() &&
+            ['Pending', 'Submitted', 'PartialFill'].includes(String(o.status)),
+        );
+        const lines: PriceOverlay[] = [];
+        for (const o of working) {
+          const buy = String(o.orderType) === 'Buy';
+          lines.push({
+            kind: 'order',
+            price: o.price,
+            label: `${String(o.executionType).toUpperCase()} ${buy ? 'BUY' : 'SELL'} ${o.quantity}`,
+            color: buy ? '#26A69A' : '#EF5350',
+          });
+          if (o.stopLoss)
+            lines.push({ kind: 'stop', price: o.stopLoss, label: 'O·SL', color: '#EF5350' });
+          if (o.takeProfit)
+            lines.push({ kind: 'target', price: o.takeProfit, label: 'O·TP', color: '#26A69A' });
+        }
+        this.orderOverlays.set(lines);
+      });
+
+    // ── Martingale rungs ──────────────────────────────────────────────────
+    //
+    // Each closed rung is pinned to the BAR it closed on, not to a price line:
+    // a chain's rungs are events in sequence, and stacking six horizontal lines
+    // on the price scale buries the candles the operator is reading.
+    this.martingale
+      .getOverview({ maxChains: 40 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (overview) => {
+          const chains = (overview?.chains ?? []).filter(
+            (c) => (c.symbol ?? '').toUpperCase() === symbol.toUpperCase(),
+          );
+          const marks: ChartMarker[] = [];
+          for (const chain of chains) {
+            for (const entry of chain.ledger ?? []) {
+              const at = Date.parse(entry.closedAtUtc ?? '');
+              if (Number.isNaN(at)) continue;
+              const loss = String(entry.outcome) === 'Loss';
+              marks.push({
+                time: at,
+                position: 'belowBar',
+                shape: 'square',
+                color: loss ? '#EF5350' : '#26A69A',
+                text: `R${entry.depthAfter}`,
+              });
+            }
+          }
+          this.rungMarkers.set(marks);
+        },
+        // The ladder module can be off entirely; that is not an error worth a
+        // toast, it just means there are no rungs to draw.
+        error: () => this.rungMarkers.set([]),
       });
 
     this.signals
@@ -350,7 +514,7 @@ export class ChartAnalysisPageComponent {
             text: `#${s.id}`,
           });
         }
-        this.markers.set(marks);
+        this.signalMarkers.set(marks);
       });
   }
 
@@ -403,6 +567,16 @@ export class ChartAnalysisPageComponent {
     }
     this.replayPlaying.set(false);
   }
+
+  setBoxSize(raw: string): void {
+    const value = Number(raw);
+    if (Number.isFinite(value) && value > 0) this.boxSizeAtr.set(value);
+  }
+
+  /** True while a price-based style is showing, so the box control appears. */
+  readonly priceBasedStyle = computed(() =>
+    ['renko', 'kagi', 'pnf', 'line-break'].includes(this.style()),
+  );
 
   setReplaySpeed(raw: string): void {
     const speed = Number(raw);
@@ -491,6 +665,41 @@ export class ChartAnalysisPageComponent {
     const order: Array<'High' | 'Medium' | 'Low'> = ['High', 'Medium', 'Low'];
     const next = order[(order.indexOf(this.minEventImpact()) + 1) % order.length];
     this.minEventImpact.set(next);
+  }
+
+  openSidePane(pane: 'details' | 'news'): void {
+    this.sidePane.set(this.sidePane() === pane ? 'none' : pane);
+    if (this.sidePane() === 'news') this.loadNews();
+  }
+
+  /**
+   * Headlines for the charted pair's currencies.
+   *
+   * Filtered to the two currencies the pair is made of, for the same reason the
+   * economic events are: an operator charting EURUSD does not want JPY
+   * headlines competing for the same space.
+   */
+  private loadNews(): void {
+    const pair = this.symbols().find(
+      (p) => (p.symbol ?? '').toUpperCase() === this.symbol().toUpperCase(),
+    );
+    const currency = pair?.baseCurrency?.toUpperCase();
+    this.newsLoading.set(true);
+    this.newsIntel
+      .getArticles({ currency, hours: 48, take: 40 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (rows) => {
+          this.articles.set(Array.isArray(rows) ? rows : []);
+          this.newsLoading.set(false);
+        },
+        // The news module can be disabled entirely; an empty pane says that
+        // better than an error toast the operator cannot act on.
+        error: () => {
+          this.articles.set([]);
+          this.newsLoading.set(false);
+        },
+      });
   }
 
   toggleOverlays(): void {
@@ -697,7 +906,7 @@ export class ChartAnalysisPageComponent {
 
   // ── Split view ───────────────────────────────────────────────────────────
 
-  setSplitLayout(id: '1' | '2h' | '2v' | '4'): void {
+  setSplitLayout(id: '1' | '2h' | '2v' | '4' | '6' | '8'): void {
     this.splitLayout.set(id);
     const wanted = this.splitLayouts.find((l) => l.id === id)?.panels ?? 0;
     const current = this.comparePanels();
