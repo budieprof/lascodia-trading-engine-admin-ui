@@ -1,5 +1,6 @@
-import { Injectable, computed, signal } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
 import { newDrawingId, type Drawing, type DrawingKind, type DrawingStyle } from './model';
+import { ChartDrawingsService, type ChartDrawingDto } from '@core/services/chart-drawings.service';
 
 const STORAGE_KEY = 'lascodia.chart.drawings.v1';
 const UNDO_DEPTH = 50;
@@ -13,14 +14,37 @@ const UNDO_DEPTH = 50;
  * set available for the object tree and for "delete all on this symbol"
  * without a second index to keep in step.
  *
- * Persistence is deliberately `localStorage` for now: it is per-browser and
- * does not follow the operator to another machine. The durable version is an
- * engine-backed `ChartLayout` table (plan §8) — the interface here does not
- * change when that lands, only `persist()` and `restore()`.
+ * ── Persistence: two tiers, on purpose ─────────────────────────────────────
+ *
+ * `localStorage` is the WRITE-THROUGH cache and the engine is the source of
+ * truth. Every mutation hits storage immediately so the chart never waits on a
+ * round trip and keeps working offline; the engine is synced on a debounce.
+ *
+ * The debounce matters: dragging a trendline emits a change per animation
+ * frame, and a request per frame would be both wasteful and prone to arriving
+ * out of order. Coalescing to one whole-scope replace after the gesture settles
+ * makes the write idempotent — whatever the client believes becomes true.
+ *
+ * On load the engine wins. A drawing made on another machine is real and a
+ * stale local cache is not, so `hydrate` replaces the cached set for that scope
+ * rather than merging: merging two versions of the same drawing has no correct
+ * answer, and the last machine to sync is the better guess.
  */
+/** How long after the last change before the engine is synced. */
+const SYNC_DEBOUNCE_MS = 900;
+
 @Injectable({ providedIn: 'root' })
 export class DrawingStore {
+  private readonly remote = inject(ChartDrawingsService);
   private readonly all = signal<Drawing[]>(this.restore());
+
+  /** Scopes hydrated from the engine this session, so we fetch each once. */
+  private readonly hydrated = new Set<string>();
+  private syncTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly dirtyScopes = new Set<string>();
+
+  /** Surfaced so the page can show when drawings are local-only. */
+  readonly syncState = signal<'idle' | 'saving' | 'error' | 'offline'>('idle');
 
   /**
    * Every drawing, unfiltered.
@@ -62,6 +86,110 @@ export class DrawingStore {
   setScope(symbol: string, resolution: string): void {
     this.scope.set({ symbol, resolution });
     this.selectedId.set(null);
+    if (symbol && resolution) this.hydrate(symbol, resolution);
+  }
+
+  /**
+   * Pull one chart's drawings from the engine, once per session per scope.
+   *
+   * Failure is deliberately quiet in the data and loud in the status: the
+   * cached drawings stay on screen and `syncState` goes `offline`, because a
+   * chart that blanks its trendlines the moment the API hiccups is worse than
+   * one showing slightly stale ones.
+   */
+  private hydrate(symbol: string, resolution: string): void {
+    const key = `${symbol}|${resolution}`;
+    if (this.hydrated.has(key)) return;
+    this.hydrated.add(key);
+
+    this.remote.list(symbol, resolution).subscribe({
+      next: (res) => {
+        if (!res?.status || !Array.isArray(res.data)) {
+          this.syncState.set('offline');
+          return;
+        }
+        const incoming = res.data
+          .map((row) => this.fromDto(row))
+          .filter((d): d is Drawing => d !== null);
+        this.all.update((list) => [
+          ...list.filter((d) => !(d.symbol === symbol && d.resolution === resolution)),
+          ...incoming,
+        ]);
+        this.persist(this.all());
+        this.syncState.set('idle');
+      },
+      error: () => {
+        // Allow a later retry rather than marking this scope permanently done.
+        this.hydrated.delete(key);
+        this.syncState.set('offline');
+      },
+    });
+  }
+
+  private fromDto(row: ChartDrawingDto): Drawing | null {
+    try {
+      const points = JSON.parse(row.pointsJson) as Drawing['points'];
+      const style = JSON.parse(row.styleJson) as DrawingStyle;
+      if (!Array.isArray(points)) return null;
+      return {
+        id: row.clientId,
+        kind: row.kind as DrawingKind,
+        symbol: row.symbol,
+        resolution: row.resolution,
+        points,
+        style,
+        locked: row.locked,
+        createdAt: Date.parse(row.createdAt) || Date.now(),
+      };
+    } catch {
+      // A row we cannot parse is dropped rather than throwing: one bad record
+      // must not cost the operator every other drawing on the chart.
+      return null;
+    }
+  }
+
+  /** Queue a scope for the next debounced sync. */
+  private markDirty(symbol: string, resolution: string): void {
+    if (!symbol || !resolution) return;
+    this.dirtyScopes.add(`${symbol}|${resolution}`);
+    if (this.syncTimer !== null) clearTimeout(this.syncTimer);
+    this.syncTimer = setTimeout(() => this.flush(), SYNC_DEBOUNCE_MS);
+  }
+
+  private flush(): void {
+    this.syncTimer = null;
+    const scopes = [...this.dirtyScopes];
+    this.dirtyScopes.clear();
+    if (scopes.length === 0) return;
+    this.syncState.set('saving');
+
+    let pending = scopes.length;
+    let failed = false;
+    for (const key of scopes) {
+      const [symbol, resolution] = key.split('|');
+      const payload = this.forScope(symbol, resolution).map((d) => ({
+        clientId: d.id,
+        kind: d.kind,
+        pointsJson: JSON.stringify(d.points),
+        styleJson: JSON.stringify(d.style),
+        locked: d.locked,
+        createdAt: new Date(d.createdAt).toISOString(),
+      }));
+
+      this.remote.replaceScope(symbol, resolution, payload).subscribe({
+        next: (res) => {
+          if (!res?.status) failed = true;
+          if (--pending === 0) this.syncState.set(failed ? 'error' : 'idle');
+        },
+        error: () => {
+          failed = true;
+          // Requeue so the change is not lost; the next mutation or scope
+          // change retries it.
+          this.dirtyScopes.add(key);
+          if (--pending === 0) this.syncState.set('offline');
+        },
+      });
+    }
   }
 
   /** Drawings belonging to one chart panel. */
@@ -137,18 +265,22 @@ export class DrawingStore {
   undo(): void {
     const previous = this.undoStack.pop();
     if (!previous) return;
-    this.redoStack.push(this.all());
+    const before = this.all();
+    this.redoStack.push(before);
     this.all.set(previous);
     this.persist(previous);
+    this.syncAffected(before, previous);
     this.undoRevision.update((v) => v + 1);
   }
 
   redo(): void {
     const next = this.redoStack.pop();
     if (!next) return;
-    this.undoStack.push(this.all());
+    const before = this.all();
+    this.undoStack.push(before);
     this.all.set(next);
     this.persist(next);
+    this.syncAffected(before, next);
     this.undoRevision.update((v) => v + 1);
   }
 
@@ -169,7 +301,25 @@ export class DrawingStore {
     const after = fn(before);
     this.all.set(after);
     this.persist(after);
+    this.syncAffected(before, after);
     this.undoRevision.update((v) => v + 1);
+  }
+
+  /**
+   * Mark every scope touched by a change, comparing before and after.
+   *
+   * Looking at both sides matters for deletes: the removed drawing is absent
+   * from `after`, so a scope derived only from the new state would never be
+   * synced and the deletion would live on locally while the engine still held
+   * the row.
+   */
+  private syncAffected(before: Drawing[], after: Drawing[]): void {
+    const scopes = new Set<string>();
+    for (const d of [...before, ...after]) scopes.add(`${d.symbol}|${d.resolution}`);
+    for (const key of scopes) {
+      const [symbol, resolution] = key.split('|');
+      this.markDirty(symbol, resolution);
+    }
   }
 
   /** Snapshot for a gesture that will emit many intermediate updates. */

@@ -287,6 +287,25 @@
       ⏯ Replay
     </button>
 
+    @switch (drawings.syncState()) {
+      @case ('saving') {
+        <span class="status muted" title="Saving drawings to the engine">⟳</span>
+      }
+      @case ('offline') {
+        <span
+          class="status sync-warn"
+          title="Drawings are saved in this browser only — the engine is unreachable"
+        >
+          ⚠ local only
+        </span>
+      }
+      @case ('error') {
+        <span class="status sync-warn" title="The engine rejected the last drawing sync"
+          >⚠ not saved</span
+        >
+      }
+    }
+
     @if (loading()) {
       <span class="status">Loading…</span>
     }
