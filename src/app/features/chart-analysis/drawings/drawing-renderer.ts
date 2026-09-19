@@ -19,6 +19,14 @@ import {
   paintMarker,
   paintPitchfork,
   paintRegressionChannel,
+  paintBarRegion,
+  paintCyclicLines,
+  paintDoubleCurve,
+  paintFibSpiral,
+  paintGannGrid,
+  paintRotatedRectangle,
+  paintSineLine,
+  paintTimeCycles,
   type PaintCtx,
 } from './advanced-painters';
 
@@ -406,6 +414,64 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
           this.line(ctx, pts[0], pts[1]);
         }
         return;
+      case 'fib-spiral':
+        return paintFibSpiral(p);
+      case 'fib-resistance-arcs':
+        return paintFibArcs(p);
+      case 'cyclic-lines':
+        return paintCyclicLines(p);
+      case 'time-cycles':
+        return paintTimeCycles(p);
+      case 'sine-line':
+        return paintSineLine(p);
+      case 'bars-pattern':
+        return paintBarRegion(p, 'bars pattern');
+      case 'ghost-feed':
+        return paintBarRegion(p, 'ghost feed');
+      case 'projection':
+        return paintLabelledPolyline(p, false);
+      case 'elliott-double-combo':
+      case 'elliott-triple-combo':
+      case 'elliott-minor':
+      case 'elliott-intermediate':
+        return paintLabelledPolyline(p, false);
+      case 'cypher-pattern':
+      case 'five-point-pattern':
+        return paintLabelledPolyline(p, true);
+      case 'head-and-shoulders-inverse':
+        return paintLabelledPolyline(p, false);
+      case 'gann-fan-fixed':
+        // One anchor: the fan uses a default unit box so the 1×1 is meaningful
+        // without a second click.
+        return paintGannFan({ ...p, pts: [pts[0], { x: pts[0].x + 200, y: pts[0].y - 200 }] });
+      case 'gann-grid':
+        return paintGannGrid(p);
+      case 'pitchfan':
+        return paintPitchfork(p, 'pitchfork');
+      case 'rotated-rectangle':
+        return paintRotatedRectangle(p);
+      case 'arc-curve':
+        return paintCurve(p);
+      case 'double-curve':
+        return paintDoubleCurve(p);
+      case 'highlighter':
+        return paintLabelledPolyline(p, false);
+      case 'comment':
+        return paintMarker(p, '🗨', false);
+      case 'balloon':
+        return paintMarker(p, '🎈', false);
+      case 'sticker':
+        return paintMarker(p, '⭐', false);
+      case 'table':
+        return paintMarker(p, '▦', false);
+      case 'idea':
+        return paintMarker(p, '💡', false);
+      case 'anchored-note':
+        if (pts.length >= 2) {
+          this.line(ctx, pts[0], pts[1]);
+          return paintMarker({ ...p, pts: [pts[1]] }, '📌', false);
+        }
+        return paintMarker(p, '📌', false);
       case 'anchored-vwap':
         // The VWAP itself is computed by the indicator engine from the anchor;
         // here we only mark where the anchor sits.

@@ -446,3 +446,179 @@ export function paintMarker(p: PaintCtx, glyph: string, withPrice: boolean): voi
   label(ctx, `${glyph} ${text}`.trim(), { x: at.x, y: at.y - 34 }, drawing.style.color);
   ctx.restore();
 }
+
+// ── Cycles, spirals and projection ─────────────────────────────────────────
+
+/**
+ * Fibonacci spiral — a golden spiral of quarter-arcs growing by φ.
+ *
+ * Each quarter turn multiplies the radius by the golden ratio, which is what
+ * makes it a Fib spiral rather than a plain Archimedean one; the anchors set
+ * the origin and the first radius.
+ */
+export function paintFibSpiral(p: PaintCtx): void {
+  const { ctx, pts } = p;
+  if (pts.length < 2) return;
+  const [a, b] = pts;
+  let radius = Math.max(2, Math.hypot(b.x - a.x, b.y - a.y) / 8);
+  const phi = 1.6180339887;
+  let cx = a.x;
+  let cy = a.y;
+
+  ctx.save();
+  ctx.beginPath();
+  for (let turn = 0; turn < 8; turn++) {
+    const start = (turn * Math.PI) / 2;
+    ctx.arc(cx, cy, radius, start, start + Math.PI / 2);
+    // Step the centre so the next quarter continues from where this one ended.
+    const end = {
+      x: cx + radius * Math.cos(start + Math.PI / 2),
+      y: cy + radius * Math.sin(start + Math.PI / 2),
+    };
+    const next = radius * phi;
+    cx = end.x - next * Math.cos(start + Math.PI / 2);
+    cy = end.y - next * Math.sin(start + Math.PI / 2);
+    radius = next;
+    if (radius > 20000) break;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Evenly spaced vertical lines — cycle counts across the time axis. */
+export function paintCyclicLines(p: PaintCtx, count = 12): void {
+  const { ctx, pts, height, drawing } = p;
+  if (pts.length < 2) return;
+  const [a, b] = pts;
+  const step = b.x - a.x;
+  if (step === 0) return;
+  ctx.save();
+  for (let i = 0; i <= count; i++) {
+    const x = a.x + step * i;
+    ctx.setLineDash(i === 0 || i === 1 ? [] : [3, 4]);
+    line(ctx, { x, y: 0 }, { x, y: height });
+    if (drawing.style.showLabels && i > 0 && i % 2 === 0) {
+      label(ctx, String(i), { x, y: 14 }, drawing.style.color);
+    }
+  }
+  ctx.restore();
+}
+
+/** Concentric circles on the time axis — time-cycle rings. */
+export function paintTimeCycles(p: PaintCtx, count = 8): void {
+  const { ctx, pts, height } = p;
+  if (pts.length < 2) return;
+  const [a, b] = pts;
+  const step = Math.abs(b.x - a.x);
+  if (step === 0) return;
+  ctx.save();
+  ctx.setLineDash([3, 3]);
+  for (let i = 1; i <= count; i++) {
+    ctx.beginPath();
+    ctx.ellipse(a.x, height / 2, step * i, height / 2, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** A sine wave fitted between two anchors — cycle overlay. */
+export function paintSineLine(p: PaintCtx, cycles = 3): void {
+  const { ctx, pts } = p;
+  if (pts.length < 2) return;
+  const [a, b] = pts;
+  const span = b.x - a.x;
+  if (span === 0) return;
+  const amplitude = (b.y - a.y) / 2;
+  const mid = (a.y + b.y) / 2;
+
+  ctx.beginPath();
+  const steps = Math.max(24, Math.abs(span));
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const x = a.x + span * t;
+    const y = mid + amplitude * Math.sin(t * cycles * Math.PI * 2);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
+
+/**
+ * Bars-pattern / ghost-feed placeholder.
+ *
+ * TradingView's versions COPY a range of real bars and replay them elsewhere
+ * on the chart. That needs the bar data, which this module deliberately does
+ * not have — the painters take projected points only — so the region is drawn
+ * as a labelled band instead of silently drawing nothing. Promoting it to a
+ * true bar copy means passing the source bars in, and is noted in the plan.
+ */
+export function paintBarRegion(p: PaintCtx, text: string): void {
+  const { ctx, pts, drawing } = p;
+  if (pts.length < 2) return;
+  const r = rectOf(pts[0], pts[1]);
+  ctx.save();
+  ctx.setLineDash([5, 4]);
+  ctx.strokeRect(r.x, r.y, r.w, r.h);
+  ctx.fillStyle = drawing.style.fill ?? 'rgba(120,123,134,0.10)';
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.restore();
+  if (drawing.style.showLabels) {
+    label(ctx, text, { x: r.x + r.w / 2, y: r.y + 10 }, drawing.style.color);
+  }
+}
+
+/** A rectangle rotated to sit along the first two anchors. */
+export function paintRotatedRectangle(p: PaintCtx): void {
+  const { ctx, pts, drawing } = p;
+  if (pts.length < 3) {
+    if (pts.length >= 2) line(ctx, pts[0], pts[1]);
+    return;
+  }
+  const [a, b, c] = pts;
+  // Thickness is the perpendicular distance from the third anchor to the a→b
+  // axis, so dragging it widens the band without rotating it.
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len;
+  const ny = dx / len;
+  const offset = (c.x - a.x) * nx + (c.y - a.y) * ny;
+
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.lineTo(b.x + nx * offset, b.y + ny * offset);
+  ctx.lineTo(a.x + nx * offset, a.y + ny * offset);
+  ctx.closePath();
+  if (drawing.style.fill) {
+    ctx.fillStyle = drawing.style.fill;
+    ctx.fill();
+  }
+  ctx.stroke();
+}
+
+/** Two joined quadratic curves through four anchors. */
+export function paintDoubleCurve(p: PaintCtx): void {
+  const { ctx, pts } = p;
+  if (pts.length < 4) return paintCurve(p);
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  ctx.quadraticCurveTo(pts[1].x, pts[1].y, pts[2].x, pts[2].y);
+  ctx.quadraticCurveTo(pts[3].x, pts[3].y, pts[0].x, pts[0].y);
+  ctx.stroke();
+}
+
+/** A Gann grid — evenly spaced squares from one box. */
+export function paintGannGrid(p: PaintCtx, repeats = 4): void {
+  const { ctx, pts } = p;
+  if (pts.length < 2) return;
+  const r = rectOf(pts[0], pts[1]);
+  if (r.w === 0 || r.h === 0) return;
+  ctx.save();
+  ctx.setLineDash([2, 3]);
+  for (let i = 0; i <= repeats; i++) {
+    line(ctx, { x: r.x + r.w * i, y: r.y }, { x: r.x + r.w * i, y: r.y + r.h * repeats });
+    line(ctx, { x: r.x, y: r.y + r.h * i }, { x: r.x + r.w * repeats, y: r.y + r.h * i });
+  }
+  ctx.restore();
+}

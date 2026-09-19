@@ -274,9 +274,66 @@ export function hitTestDrawing(
     case 'triangle-pattern':
       return hitPolygon(p, pts, filled, tol);
 
+    case 'fib-spiral':
+    case 'time-cycles':
+      // Radial shapes: grabbable within the first ring rather than by outline,
+      // which on a spiral is a hairline the pointer can never find.
+      return (
+        pts.length >= 2 && Math.hypot(p.x - a.x, p.y - a.y) <= Math.hypot(b.x - a.x, b.y - a.y)
+      );
+
+    case 'fib-resistance-arcs':
+      return (
+        pts.length >= 2 && Math.hypot(p.x - b.x, p.y - b.y) <= Math.hypot(b.x - a.x, b.y - a.y)
+      );
+
+    case 'cyclic-lines':
+      // Any of the repeated verticals, not just the first two.
+      if (pts.length < 2) return false;
+      {
+        const step = b.x - a.x;
+        if (step === 0) return Math.abs(p.x - a.x) <= tol;
+        const index = Math.round((p.x - a.x) / step);
+        return index >= 0 && index <= 12 && Math.abs(p.x - (a.x + step * index)) <= tol;
+      }
+
+    case 'sine-line':
+    case 'arc-curve':
+    case 'double-curve':
+    case 'projection':
+    case 'elliott-double-combo':
+    case 'elliott-triple-combo':
+    case 'elliott-minor':
+    case 'elliott-intermediate':
+    case 'head-and-shoulders-inverse':
+    case 'highlighter':
+      return hitPolyline(p, pts, tol * 2);
+
+    case 'cypher-pattern':
+    case 'five-point-pattern':
+      return hitPolygon(p, pts, filled, tol);
+
+    case 'bars-pattern':
+    case 'ghost-feed':
+    case 'gann-grid':
+    case 'rotated-rectangle':
+      return pts.length >= 2 && hitRect(p, a, b, true, tol);
+
+    case 'gann-fan-fixed':
+      return Math.hypot(p.x - a.x, p.y - a.y) <= 40;
+
+    case 'pitchfan':
+      return hitPolyline(p, pts, tol);
+
     case 'flag':
     case 'signpost':
     case 'price-label':
+    case 'comment':
+    case 'balloon':
+    case 'sticker':
+    case 'table':
+    case 'idea':
+    case 'anchored-note':
     case 'anchored-vwap':
       // Pinned markers draw a 26px stem with a label above it.
       return Math.abs(p.x - a.x) <= 30 && p.y <= a.y + tol && p.y >= a.y - 44;

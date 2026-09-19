@@ -74,7 +74,41 @@ export type DrawingKind =
   | 'flag'
   | 'price-label'
   | 'signpost'
-  | 'anchored-vwap';
+  | 'anchored-vwap'
+  // Remaining Fibonacci
+  | 'fib-spiral'
+  | 'fib-resistance-arcs'
+  // Cycles and projection
+  | 'cyclic-lines'
+  | 'sine-line'
+  | 'time-cycles'
+  | 'bars-pattern'
+  | 'ghost-feed'
+  | 'projection'
+  // Remaining Elliott
+  | 'elliott-double-combo'
+  | 'elliott-triple-combo'
+  | 'elliott-minor'
+  | 'elliott-intermediate'
+  // Remaining harmonics
+  | 'cypher-pattern'
+  | 'five-point-pattern'
+  | 'head-and-shoulders-inverse'
+  // Gann extras
+  | 'gann-fan-fixed'
+  | 'gann-grid'
+  // Shapes and annotations
+  | 'rotated-rectangle'
+  | 'arc-curve'
+  | 'double-curve'
+  | 'highlighter'
+  | 'comment'
+  | 'balloon'
+  | 'sticker'
+  | 'table'
+  | 'anchored-note'
+  | 'idea'
+  | 'pitchfan';
 
 export interface DrawingPoint {
   /** Bar time in ms. */
@@ -334,6 +368,90 @@ export const TOOLS: readonly ToolSpec[] = [
     icon: '⚓',
     defaultStyle: { color: '#00BCD4' },
   },
+
+  // ── Remaining Fibonacci ──────────────────────────────────────────────────
+  { kind: 'fib-spiral', label: 'Fib Spiral', group: 'fib', points: 2, icon: '🌀' },
+  { kind: 'fib-resistance-arcs', label: 'Fib Resistance Arcs', group: 'fib', points: 2, icon: '◟' },
+
+  // ── Cycles and projection ────────────────────────────────────────────────
+  { kind: 'cyclic-lines', label: 'Cyclic Lines', group: 'measure', points: 2, icon: '┆' },
+  { kind: 'sine-line', label: 'Sine Line', group: 'measure', points: 2, icon: '∿' },
+  { kind: 'time-cycles', label: 'Time Cycles', group: 'measure', points: 2, icon: '◍' },
+  { kind: 'bars-pattern', label: 'Bars Pattern', group: 'measure', points: 2, icon: '▥' },
+  { kind: 'ghost-feed', label: 'Ghost Feed', group: 'measure', points: 2, icon: '👻' },
+  { kind: 'projection', label: 'Projection', group: 'measure', points: 3, icon: '⤳' },
+
+  // ── Remaining Elliott ────────────────────────────────────────────────────
+  {
+    kind: 'elliott-double-combo',
+    label: 'Elliott Double Combo (WXY)',
+    group: 'elliott',
+    points: 4,
+    icon: 'Ⓨ',
+  },
+  {
+    kind: 'elliott-triple-combo',
+    label: 'Elliott Triple Combo (WXYXZ)',
+    group: 'elliott',
+    points: 6,
+    icon: 'Ⓩ',
+  },
+  { kind: 'elliott-minor', label: 'Elliott Minor Wave', group: 'elliott', points: 6, icon: 'ⓜ' },
+  {
+    kind: 'elliott-intermediate',
+    label: 'Elliott Intermediate Wave',
+    group: 'elliott',
+    points: 6,
+    icon: 'ⓘ',
+  },
+
+  // ── Remaining harmonics ──────────────────────────────────────────────────
+  { kind: 'cypher-pattern', label: 'Cypher Pattern', group: 'patterns', points: 5, icon: 'Ⓒ' },
+  {
+    kind: 'five-point-pattern',
+    label: '5-Point Pattern',
+    group: 'patterns',
+    points: 5,
+    icon: '⑤',
+  },
+  {
+    kind: 'head-and-shoulders-inverse',
+    label: 'Inverse Head and Shoulders',
+    group: 'patterns',
+    points: 7,
+    icon: 'Ⓥ',
+  },
+
+  // ── Gann extras ──────────────────────────────────────────────────────────
+  { kind: 'gann-fan-fixed', label: 'Gann Fan (fixed)', group: 'gann', points: 1, icon: '✲' },
+  { kind: 'gann-grid', label: 'Gann Grid', group: 'gann', points: 2, icon: '▩' },
+  { kind: 'pitchfan', label: 'Pitchfan', group: 'pitchfork', points: 3, icon: 'ϡ' },
+
+  // ── Shapes and annotations ───────────────────────────────────────────────
+  {
+    kind: 'rotated-rectangle',
+    label: 'Rotated Rectangle',
+    group: 'shapes',
+    points: 3,
+    icon: '▱',
+    defaultStyle: { fill: 'rgba(41,98,255,0.12)' },
+  },
+  { kind: 'arc-curve', label: 'Arc Curve', group: 'shapes', points: 3, icon: '⌒' },
+  { kind: 'double-curve', label: 'Double Curve', group: 'shapes', points: 4, icon: '∽' },
+  {
+    kind: 'highlighter',
+    label: 'Highlighter',
+    group: 'shapes',
+    points: 'freehand',
+    icon: '🖍',
+    defaultStyle: { color: 'rgba(255,214,0,0.55)', width: 12 },
+  },
+  { kind: 'comment', label: 'Comment', group: 'annotation', points: 1, icon: '🗨' },
+  { kind: 'balloon', label: 'Balloon', group: 'annotation', points: 1, icon: '🎈' },
+  { kind: 'sticker', label: 'Sticker', group: 'annotation', points: 1, icon: '⭐' },
+  { kind: 'table', label: 'Table', group: 'annotation', points: 1, icon: '▦' },
+  { kind: 'anchored-note', label: 'Anchored Note', group: 'annotation', points: 2, icon: '📌' },
+  { kind: 'idea', label: 'Idea', group: 'annotation', points: 1, icon: '💡' },
 ];
 
 export function toolFor(kind: DrawingKind): ToolSpec | undefined {
@@ -348,6 +466,14 @@ export const FIB_RADII = [0.236, 0.382, 0.5, 0.618, 1] as const;
 
 /** Wave labels per Elliott tool, in click order. */
 export const ELLIOTT_LABELS: Record<string, readonly string[]> = {
+  'elliott-double-combo': ['0', 'W', 'X', 'Y'],
+  'elliott-triple-combo': ['0', 'W', 'X', 'Y', 'X', 'Z'],
+  'elliott-minor': ['0', '1', '2', '3', '4', '5'],
+  'elliott-intermediate': ['0', '1', '2', '3', '4', '5'],
+  'cypher-pattern': ['X', 'A', 'B', 'C', 'D'],
+  'five-point-pattern': ['X', 'A', 'B', 'C', 'D'],
+  'head-and-shoulders-inverse': ['', 'LS', '', 'H', '', 'RS', ''],
+  projection: ['A', 'B', 'C'],
   'elliott-impulse': ['0', '1', '2', '3', '4', '5'],
   'elliott-correction': ['0', 'A', 'B', 'C'],
   'elliott-triangle': ['0', 'A', 'B', 'C', 'D', 'E'],
