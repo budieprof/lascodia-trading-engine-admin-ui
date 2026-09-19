@@ -1,3 +1,6 @@
+// Width of the left drawing rail; the chart area is inset by it.
+$rail-width: 40px;
+
 // Chart workstation layout. Deliberately close to TradingView's chrome:
 // a thin top toolbar, a full-bleed chart with a floating legend, and a
 // studies strip underneath.
@@ -191,14 +194,26 @@
 // ── Chart surface ──────────────────────────────────────────────────────────
 
 .chart-body {
-  display: flex;
+  // `position: relative` + an ABSOLUTE rail, not a flex row.
+  //
+  // The rail holds 50+ buttons, ~1700px of intrinsic height. As an in-flow
+  // flex child that height participates in sizing the page, and `height: 100%`
+  // higher up cannot win against it — the whole page grew to 1861px inside a
+  // 950px viewport and the chart rendered taller than the screen. `min-height:
+  // 0` + `overflow-y: auto` did not help, because the row itself had already
+  // been stretched by the same content.
+  //
+  // Taking the rail out of flow removes it from intrinsic sizing entirely, so
+  // the chart area is once again the only thing deciding the height.
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
 }
 
 .chart-area {
-  position: relative;
-  flex: 1 1 auto;
+  position: absolute;
+  inset: 0 0 0 $rail-width;
   min-width: 0;
   min-height: 0;
 }
@@ -206,13 +221,17 @@
 // ── Left drawing rail ──────────────────────────────────────────────────────
 
 .draw-rail {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: $rail-width;
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding: 6px 4px;
   border-right: 1px solid var(--border, #e6e9ef);
+  // Bounded by `inset`, so this genuinely scrolls instead of growing.
   overflow-y: auto;
-  flex: 0 0 auto;
+  scrollbar-width: thin;
 }
 
 .rail-group {

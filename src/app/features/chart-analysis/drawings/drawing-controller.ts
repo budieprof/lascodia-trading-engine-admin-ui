@@ -63,10 +63,16 @@ export class DrawingController {
     this.detach();
     this.chart = chart;
     this.container = container;
-    container.addEventListener('pointerdown', this.onPointerDown);
-    container.addEventListener('pointermove', this.onPointerMove);
-    container.addEventListener('pointerup', this.onPointerUp);
-    container.addEventListener('dblclick', this.onDoubleClick);
+    // CAPTURE phase, deliberately. Lightweight Charts attaches its own pointer
+    // handlers to the canvas inside this container and stops the event there,
+    // so a bubble-phase listener never sees a click that lands on the chart —
+    // which is every click that matters. Capturing also makes an armed tool
+    // authoritative over the chart's pan/zoom, which is the behaviour we want:
+    // the first click of a trendline must place a point, not start a drag.
+    container.addEventListener('pointerdown', this.onPointerDown, true);
+    container.addEventListener('pointermove', this.onPointerMove, true);
+    container.addEventListener('pointerup', this.onPointerUp, true);
+    container.addEventListener('dblclick', this.onDoubleClick, true);
   }
 
   /**
@@ -85,10 +91,10 @@ export class DrawingController {
   detach(): void {
     const c = this.container;
     if (c) {
-      c.removeEventListener('pointerdown', this.onPointerDown);
-      c.removeEventListener('pointermove', this.onPointerMove);
-      c.removeEventListener('pointerup', this.onPointerUp);
-      c.removeEventListener('dblclick', this.onDoubleClick);
+      c.removeEventListener('pointerdown', this.onPointerDown, true);
+      c.removeEventListener('pointermove', this.onPointerMove, true);
+      c.removeEventListener('pointerup', this.onPointerUp, true);
+      c.removeEventListener('dblclick', this.onDoubleClick, true);
     }
     this.chart = null;
     this.series = null;
@@ -217,7 +223,8 @@ export class DrawingController {
 
     const model = this.toModel(p);
     if (!model) return;
-    const drawing = this.store.visible().find((d) => d.id === this.dragging?.id);
+    const dragId = this.dragging.id;
+    const drawing = this.store.visible().find((d) => d.id === dragId);
     if (!drawing) return;
 
     if (this.dragging.handleIndex >= 0) {

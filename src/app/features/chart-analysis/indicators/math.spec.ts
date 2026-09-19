@@ -27,7 +27,6 @@ import {
   adl,
   alma,
   aroon,
-  balanceOfPower,
   choppiness,
   cmf,
   dema,

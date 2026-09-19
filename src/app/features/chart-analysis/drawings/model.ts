@@ -36,7 +36,45 @@ export type DrawingKind =
   | 'price-range'
   | 'date-range'
   | 'long-position'
-  | 'short-position';
+  | 'short-position'
+  // Channels and regression
+  | 'flat-channel'
+  | 'regression-channel'
+  | 'disjoint-angle'
+  // Pitchforks
+  | 'pitchfork'
+  | 'schiff-pitchfork'
+  | 'modified-schiff-pitchfork'
+  | 'inside-pitchfork'
+  // Gann
+  | 'gann-box'
+  | 'gann-fan'
+  | 'gann-square'
+  // Fibonacci (extended set)
+  | 'fib-channel'
+  | 'fib-timezone'
+  | 'fib-circles'
+  | 'fib-arcs'
+  | 'fib-wedge'
+  | 'fib-speed-fan'
+  // Elliott
+  | 'elliott-impulse'
+  | 'elliott-correction'
+  | 'elliott-triangle'
+  // Harmonic patterns
+  | 'abcd-pattern'
+  | 'xabcd-pattern'
+  | 'three-drives'
+  | 'head-and-shoulders'
+  | 'triangle-pattern'
+  // More annotations
+  | 'arc'
+  | 'curve'
+  | 'polyline'
+  | 'flag'
+  | 'price-label'
+  | 'signpost'
+  | 'anchored-vwap';
 
 export interface DrawingPoint {
   /** Bar time in ms. */
@@ -73,7 +111,17 @@ export interface Drawing {
 export interface ToolSpec {
   kind: DrawingKind;
   label: string;
-  group: 'lines' | 'shapes' | 'fib' | 'annotation' | 'measure';
+  group:
+    | 'lines'
+    | 'channels'
+    | 'pitchfork'
+    | 'gann'
+    | 'shapes'
+    | 'fib'
+    | 'elliott'
+    | 'patterns'
+    | 'annotation'
+    | 'measure';
   /** Clicks needed to complete the drawing. `'freehand'` collects on drag. */
   points: number | 'freehand';
   icon: string;
@@ -177,11 +225,138 @@ export const TOOLS: readonly ToolSpec[] = [
     icon: '🡇',
     defaultStyle: { color: '#EF5350' },
   },
+
+  // ── Channels ─────────────────────────────────────────────────────────────
+  {
+    kind: 'flat-channel',
+    label: 'Flat Channel',
+    group: 'channels',
+    points: 2,
+    icon: '⊟',
+    defaultStyle: { fill: 'rgba(41,98,255,0.10)' },
+  },
+  {
+    kind: 'regression-channel',
+    label: 'Regression Channel',
+    group: 'channels',
+    points: 2,
+    icon: '⋰',
+    defaultStyle: { fill: 'rgba(41,98,255,0.10)' },
+  },
+  { kind: 'disjoint-angle', label: 'Disjoint Angle', group: 'channels', points: 3, icon: '∠' },
+
+  // ── Pitchforks ───────────────────────────────────────────────────────────
+  { kind: 'pitchfork', label: "Andrews' Pitchfork", group: 'pitchfork', points: 3, icon: 'Ψ' },
+  { kind: 'schiff-pitchfork', label: 'Schiff Pitchfork', group: 'pitchfork', points: 3, icon: 'ψ' },
+  {
+    kind: 'modified-schiff-pitchfork',
+    label: 'Modified Schiff',
+    group: 'pitchfork',
+    points: 3,
+    icon: 'Ϣ',
+  },
+  { kind: 'inside-pitchfork', label: 'Inside Pitchfork', group: 'pitchfork', points: 3, icon: 'ϟ' },
+
+  // ── Gann ─────────────────────────────────────────────────────────────────
+  {
+    kind: 'gann-box',
+    label: 'Gann Box',
+    group: 'gann',
+    points: 2,
+    icon: '▦',
+    defaultStyle: { fill: 'rgba(41,98,255,0.06)' },
+  },
+  { kind: 'gann-fan', label: 'Gann Fan', group: 'gann', points: 2, icon: '✳' },
+  { kind: 'gann-square', label: 'Gann Square', group: 'gann', points: 2, icon: '⊞' },
+
+  // ── Fibonacci (extended) ─────────────────────────────────────────────────
+  { kind: 'fib-channel', label: 'Fib Channel', group: 'fib', points: 3, icon: '⊿' },
+  { kind: 'fib-timezone', label: 'Fib Time Zone', group: 'fib', points: 2, icon: '⏲' },
+  { kind: 'fib-circles', label: 'Fib Circles', group: 'fib', points: 2, icon: '◎' },
+  { kind: 'fib-arcs', label: 'Fib Arcs', group: 'fib', points: 2, icon: '◠' },
+  { kind: 'fib-wedge', label: 'Fib Wedge', group: 'fib', points: 3, icon: '◣' },
+  { kind: 'fib-speed-fan', label: 'Fib Speed Fan', group: 'fib', points: 2, icon: '⋀' },
+
+  // ── Elliott ──────────────────────────────────────────────────────────────
+  {
+    kind: 'elliott-impulse',
+    label: 'Elliott Impulse (12345)',
+    group: 'elliott',
+    points: 6,
+    icon: '⑤',
+  },
+  {
+    kind: 'elliott-correction',
+    label: 'Elliott Correction (ABC)',
+    group: 'elliott',
+    points: 4,
+    icon: 'Ⓒ',
+  },
+  {
+    kind: 'elliott-triangle',
+    label: 'Elliott Triangle (ABCDE)',
+    group: 'elliott',
+    points: 6,
+    icon: 'Ⓔ',
+  },
+
+  // ── Harmonic patterns ────────────────────────────────────────────────────
+  { kind: 'abcd-pattern', label: 'ABCD Pattern', group: 'patterns', points: 4, icon: 'Ⓐ' },
+  { kind: 'xabcd-pattern', label: 'XABCD Pattern', group: 'patterns', points: 5, icon: 'Ⓧ' },
+  { kind: 'three-drives', label: 'Three Drives', group: 'patterns', points: 7, icon: '3' },
+  {
+    kind: 'head-and-shoulders',
+    label: 'Head and Shoulders',
+    group: 'patterns',
+    points: 7,
+    icon: 'Ⓗ',
+  },
+  {
+    kind: 'triangle-pattern',
+    label: 'Triangle Pattern',
+    group: 'patterns',
+    points: 4,
+    icon: '◺',
+  },
+
+  // ── More annotations ─────────────────────────────────────────────────────
+  { kind: 'arc', label: 'Arc', group: 'shapes', points: 2, icon: '◡' },
+  { kind: 'curve', label: 'Curve', group: 'shapes', points: 3, icon: '∿' },
+  { kind: 'polyline', label: 'Polyline', group: 'shapes', points: 'freehand', icon: '⏢' },
+  { kind: 'flag', label: 'Flag Mark', group: 'annotation', points: 1, icon: '⚑' },
+  { kind: 'price-label', label: 'Price Label', group: 'annotation', points: 1, icon: '🏷' },
+  { kind: 'signpost', label: 'Signpost', group: 'annotation', points: 1, icon: '📍' },
+  {
+    kind: 'anchored-vwap',
+    label: 'Anchored VWAP',
+    group: 'measure',
+    points: 1,
+    icon: '⚓',
+    defaultStyle: { color: '#00BCD4' },
+  },
 ];
 
 export function toolFor(kind: DrawingKind): ToolSpec | undefined {
   return TOOLS.find((t) => t.kind === kind);
 }
+
+/** Gann fan angles as rise:run ratios, 1×1 being the 45° line. */
+export const GANN_RATIOS = [1 / 8, 1 / 4, 1 / 3, 1 / 2, 1, 2, 3, 4, 8] as const;
+
+/** Fibonacci ratios used by circles, arcs and speed fans. */
+export const FIB_RADII = [0.236, 0.382, 0.5, 0.618, 1] as const;
+
+/** Wave labels per Elliott tool, in click order. */
+export const ELLIOTT_LABELS: Record<string, readonly string[]> = {
+  'elliott-impulse': ['0', '1', '2', '3', '4', '5'],
+  'elliott-correction': ['0', 'A', 'B', 'C'],
+  'elliott-triangle': ['0', 'A', 'B', 'C', 'D', 'E'],
+  'abcd-pattern': ['A', 'B', 'C', 'D'],
+  'xabcd-pattern': ['X', 'A', 'B', 'C', 'D'],
+  'three-drives': ['0', '1', 'A', '2', 'B', '3', 'C'],
+  'head-and-shoulders': ['', 'LS', '', 'H', '', 'RS', ''],
+  'triangle-pattern': ['A', 'B', 'C', 'D'],
+};
 
 /** Fibonacci levels, shared by retracement and extension. */
 export const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.272, 1.618, 2.618] as const;

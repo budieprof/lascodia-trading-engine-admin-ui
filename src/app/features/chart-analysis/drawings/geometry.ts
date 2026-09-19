@@ -223,6 +223,64 @@ export function hitTestDrawing(
       if (pts.length < 2) return false;
       return hitRect(p, a, { x: b.x, y: (c ?? b).y }, true, tol);
 
+    // ── Analytical families ────────────────────────────────────────────
+    case 'pitchfork':
+    case 'schiff-pitchfork':
+    case 'modified-schiff-pitchfork':
+    case 'inside-pitchfork':
+    case 'fib-wedge':
+    case 'disjoint-angle':
+      // Grabbable along any of the legs the operator actually placed, rather
+      // than along the derived median — the pivots are what they reason about.
+      return hitPolyline(p, pts, tol);
+
+    case 'gann-box':
+    case 'gann-square':
+    case 'flat-channel':
+      return pts.length >= 2 && hitRect(p, a, b, true, tol);
+
+    case 'gann-fan':
+    case 'fib-speed-fan':
+      // A fan is a sheaf of rays from one anchor; the outermost pair bounds it.
+      return pts.length >= 2 && (distanceToRay(p, a, b) <= tol || hitRect(p, a, b, true, tol));
+
+    case 'fib-circles':
+      return pts.length >= 2 && hitEllipse(p, a, { x: 2 * a.x - b.x, y: 2 * a.y - b.y }, true, tol);
+
+    case 'fib-arcs':
+      return (
+        pts.length >= 2 && Math.hypot(p.x - b.x, p.y - b.y) <= Math.hypot(b.x - a.x, b.y - a.y)
+      );
+
+    case 'fib-timezone':
+      return pts.length >= 2 && Math.abs(p.x - a.x) <= tol * 2;
+
+    case 'fib-channel':
+    case 'regression-channel':
+      return pts.length >= 2 && distanceToSegment(p, a, b) <= tol * 3;
+
+    case 'elliott-impulse':
+    case 'elliott-correction':
+    case 'elliott-triangle':
+    case 'three-drives':
+    case 'head-and-shoulders':
+    case 'polyline':
+    case 'curve':
+    case 'arc':
+      return hitPolyline(p, pts, tol);
+
+    case 'abcd-pattern':
+    case 'xabcd-pattern':
+    case 'triangle-pattern':
+      return hitPolygon(p, pts, filled, tol);
+
+    case 'flag':
+    case 'signpost':
+    case 'price-label':
+    case 'anchored-vwap':
+      // Pinned markers draw a 26px stem with a label above it.
+      return Math.abs(p.x - a.x) <= 30 && p.y <= a.y + tol && p.y >= a.y - 44;
+
     case 'text':
     case 'callout':
       // Approximate box around the anchor; the renderer keeps the same shape.

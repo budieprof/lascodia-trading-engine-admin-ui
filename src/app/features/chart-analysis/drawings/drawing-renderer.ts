@@ -2,6 +2,25 @@ import type { CanvasRenderingTarget2D } from 'fancy-canvas';
 import type { IChartApi, ISeriesApi, ISeriesPrimitive, SeriesType, Time } from 'lightweight-charts';
 import { FIB_LEVELS, type DashStyle, type Drawing } from './model';
 import { HANDLE_RADIUS, rectOf, type Pt } from './geometry';
+import {
+  paintArc,
+  paintCurve,
+  paintFibArcs,
+  paintFibChannel,
+  paintFibCircles,
+  paintFibSpeedFan,
+  paintFibTimezone,
+  paintFibWedge,
+  paintFlatChannel,
+  paintGannBox,
+  paintGannFan,
+  paintGannSquare,
+  paintLabelledPolyline,
+  paintMarker,
+  paintPitchfork,
+  paintRegressionChannel,
+  type PaintCtx,
+} from './advanced-painters';
 
 /**
  * Canvas renderer for every drawing on the chart, as one Lightweight Charts
@@ -291,11 +310,101 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
         break;
 
       default:
-        if (pts.length >= 2) this.line(ctx, a, b);
+        this.paintAdvanced(ctx, drawing, pts, w, h);
     }
 
     ctx.setLineDash([]);
     if (selected) this.handles(ctx, pts, drawing.locked);
+  }
+
+  /**
+   * The analytical families — pitchforks, Gann, extended Fibonacci, Elliott
+   * and harmonic patterns — live in `advanced-painters.ts`. Dispatching here
+   * rather than inlining keeps this switch about canvas plumbing and that
+   * module about geometry.
+   */
+  private paintAdvanced(
+    ctx: CanvasRenderingContext2D,
+    drawing: Drawing,
+    pts: Pt[],
+    width: number,
+    height: number,
+  ): void {
+    const p: PaintCtx = {
+      ctx,
+      drawing,
+      pts,
+      width,
+      height,
+      priceAt: (y) => this.series()?.coordinateToPrice(y) ?? null,
+      precision: this.precision(),
+    };
+
+    switch (drawing.kind) {
+      case 'pitchfork':
+      case 'schiff-pitchfork':
+      case 'modified-schiff-pitchfork':
+      case 'inside-pitchfork':
+        return paintPitchfork(p, drawing.kind);
+      case 'gann-box':
+        return paintGannBox(p);
+      case 'gann-fan':
+        return paintGannFan(p);
+      case 'gann-square':
+        return paintGannSquare(p);
+      case 'fib-circles':
+        return paintFibCircles(p);
+      case 'fib-arcs':
+        return paintFibArcs(p);
+      case 'fib-speed-fan':
+        return paintFibSpeedFan(p);
+      case 'fib-timezone':
+        return paintFibTimezone(p);
+      case 'fib-channel':
+        return paintFibChannel(p);
+      case 'fib-wedge':
+        return paintFibWedge(p);
+      case 'flat-channel':
+        return paintFlatChannel(p);
+      case 'regression-channel':
+        return paintRegressionChannel(p);
+      case 'elliott-impulse':
+      case 'elliott-correction':
+      case 'elliott-triangle':
+      case 'three-drives':
+      case 'head-and-shoulders':
+        return paintLabelledPolyline(p, false);
+      case 'abcd-pattern':
+      case 'xabcd-pattern':
+      case 'triangle-pattern':
+        return paintLabelledPolyline(p, true);
+      case 'curve':
+        return paintCurve(p);
+      case 'arc':
+        return paintArc(p);
+      case 'polyline':
+        return paintLabelledPolyline(p, false);
+      case 'flag':
+        return paintMarker(p, '⚑', false);
+      case 'signpost':
+        return paintMarker(p, '📍', false);
+      case 'price-label':
+        return paintMarker(p, '', true);
+      case 'disjoint-angle':
+        if (pts.length >= 3) {
+          this.line(ctx, pts[0], pts[1]);
+          this.line(ctx, pts[1], pts[2]);
+        } else if (pts.length >= 2) {
+          this.line(ctx, pts[0], pts[1]);
+        }
+        return;
+      case 'anchored-vwap':
+        // The VWAP itself is computed by the indicator engine from the anchor;
+        // here we only mark where the anchor sits.
+        return paintMarker(p, '⚓', true);
+      default:
+        if (pts.length >= 2) this.line(ctx, pts[0], pts[1]);
+    }
   }
 
   private line(ctx: CanvasRenderingContext2D, a: Pt, b: Pt): void {
