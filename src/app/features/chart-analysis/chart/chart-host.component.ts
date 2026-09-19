@@ -453,6 +453,11 @@ export class ChartHostComponent implements OnDestroy {
     }
   }
 
+  /** Price at a y offset inside the chart, for click-to-act features. */
+  priceAtY(y: number): number | null {
+    return this.price?.coordinateToPrice(y) ?? null;
+  }
+
   /** Reset both scales to fit the data, as double-clicking the axis does. */
   resetScales(): void {
     this.chart?.timeScale().fitContent();

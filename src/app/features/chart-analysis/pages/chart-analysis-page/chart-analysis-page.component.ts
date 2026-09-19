@@ -32,6 +32,8 @@ import {
 import { DrawingStore } from '../../drawings/drawing-store.service';
 import { PositionsService } from '@core/services/positions.service';
 import { EconomicEventsService } from '@core/services/economic-events.service';
+import { AlertsService } from '@core/services/alerts.service';
+import { NotificationService } from '@core/notifications/notification.service';
 import type { EventMark } from '../../overlays/event-marks-renderer';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import type { PriceOverlay } from '../../overlays/overlay-renderer';
@@ -201,7 +203,9 @@ export class ChartAnalysisPageComponent {
   readonly timezones = CHART_TIMEZONES;
   readonly timezone = signal<string>('UTC');
   readonly layoutMenuOpen = signal(false);
-  readonly contextMenu = signal<{ x: number; y: number } | null>(null);
+  readonly contextMenu = signal<{ x: number; y: number; price: number | null } | null>(null);
+  private readonly alerts = inject(AlertsService);
+  private readonly notify = inject(NotificationService);
   readonly isFullscreen = signal(false);
 
   // ── Split view ───────────────────────────────────────────────────────────
@@ -870,7 +874,53 @@ export class ChartAnalysisPageComponent {
   openContextMenu(ev: MouseEvent): void {
     ev.preventDefault();
     const host = (ev.currentTarget as HTMLElement).getBoundingClientRect();
-    this.contextMenu.set({ x: ev.clientX - host.left, y: ev.clientY - host.top });
+    const y = ev.clientY - host.top;
+    // The price under the cursor is captured HERE, while the pointer position
+    // is still meaningful. Reading it when the menu item is clicked would
+    // measure wherever the pointer had drifted to by then.
+    this.contextMenu.set({ x: ev.clientX - host.left, y, price: this.host()?.priceAtY(y) ?? null });
+  }
+
+  /**
+   * Create a price alert at the point that was right-clicked.
+   *
+   * Uses the engine's existing `PriceLevel` alert type, so an alert raised
+   * from the chart is the same object as one raised anywhere else — it routes
+   * through the same channels and shows up in the same list, rather than being
+   * a chart-only notion that quietly does nothing.
+   */
+  createAlertHere(): void {
+    const menu = this.contextMenu();
+    this.contextMenu.set(null);
+    const price = menu?.price;
+    if (price === null || price === undefined) return;
+
+    const digits = this.precision();
+    const symbol = this.symbol();
+    const last = this.bars().at(-1)?.close ?? price;
+    const direction = price >= last ? 'Above' : 'Below';
+
+    this.alerts
+      .create({
+        alertType: 'PriceLevel',
+        symbol,
+        conditionJson: JSON.stringify({ symbol, price, direction }),
+        isActive: true,
+        deduplicationKey: `chart:${symbol}:${price.toFixed(digits)}`,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          if (res?.status) {
+            this.notify.success(
+              `Alert set: ${symbol} ${direction.toLowerCase()} ${price.toFixed(digits)}`,
+            );
+          } else {
+            this.notify.error(res?.message ?? 'Could not create the alert.');
+          }
+        },
+        error: () => this.notify.error('Could not create the alert.'),
+      });
   }
 
   closeContextMenu(): void {

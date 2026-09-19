@@ -466,6 +466,11 @@
             <button type="button" (click)="indicatorMenuOpen.set(true); closeContextMenu()">
               Add indicator…
             </button>
+            @if (cm.price !== null) {
+              <button type="button" (click)="createAlertHere()">
+                Add alert at {{ cm.price | number: '1.' + precision() + '-' + precision() }}
+              </button>
+            }
             <button type="button" (click)="saveLayout()">Save layout…</button>
             <button
               type="button"
