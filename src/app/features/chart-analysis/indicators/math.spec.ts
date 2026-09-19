@@ -47,6 +47,17 @@ import {
   volumeProfile,
   vortex,
   vwma,
+  alligator,
+  bandwidth,
+  coppock,
+  kst,
+  percentB,
+  ppo,
+  rvi,
+  schaff,
+  standardErrorBands,
+  volumeIndices,
+  volumeOscillator,
   type Ohlc,
 } from './math';
 
@@ -737,5 +748,133 @@ describe('volumeProfile', () => {
   it('returns nothing when the series has no range', () => {
     expect(volumeProfile(flat, 10)).toEqual([]);
     expect(volumeProfile([], 10)).toEqual([]);
+  });
+});
+
+// ── Fourth wave ────────────────────────────────────────────────────────────
+
+describe('kst and coppock', () => {
+  it('kst is ~0 on a flat series', () => {
+    expect(kst(closes(200, () => 50)).kst[199] as number).toBeCloseTo(0, 6);
+  });
+
+  it('kst goes positive on a sustained rise', () => {
+    expect(kst(closes(200, (i) => 100 + i)).kst[199] as number).toBeGreaterThan(0);
+  });
+
+  it('coppock is ~0 on a flat series', () => {
+    expect(coppock(closes(120, () => 50))[119] as number).toBeCloseTo(0, 6);
+  });
+});
+
+describe('ppo', () => {
+  it('is a PERCENTAGE, so it is scale-invariant where MACD is not', () => {
+    // The same shape at 10x the price gives the same PPO but a 10x MACD —
+    // that scale independence is the entire reason PPO exists.
+    const small = closes(120, (i) => 100 + i);
+    const large = closes(120, (i) => 1000 + i * 10);
+    expect(ppo(small).ppo[119] as number).toBeCloseTo(ppo(large).ppo[119] as number, 6);
+    expect(macd(large).macd[119] as number).toBeGreaterThan((macd(small).macd[119] as number) * 5);
+  });
+});
+
+describe('schaff', () => {
+  it('stays within 0..100', () => {
+    const series = closes(300, (i) => 100 + Math.sin(i / 9) * 12);
+    for (const v of schaff(series).filter((x): x is number => x !== null)) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(100);
+    }
+  });
+});
+
+describe('rvi', () => {
+  it('is positive when every bar closes above its open', () => {
+    const up = bars(
+      Array.from(
+        { length: 40 },
+        (_, i) => [100 + i, 102 + i, 99 + i, 101.5 + i] as [number, number, number, number],
+      ),
+    );
+    expect(rvi(up, 10).rvi[39] as number).toBeGreaterThan(0);
+  });
+});
+
+describe('percentB and bandwidth', () => {
+  const series = closes(80, (i) => 100 + Math.sin(i / 4) * 5);
+
+  it('%B sits at ~0.5 when price is at the basis', () => {
+    const flat = closes(60, () => 10);
+    expect(percentB(flat, 20, 2)[59]).toBeNull(); // bands collapse; undefined by design
+    expect(percentB(series, 20, 2)[79]).not.toBeNull();
+  });
+
+  it('%B exceeds 1 above the upper band', () => {
+    const spike = [...closes(60, () => 100), 200];
+    const pb = percentB(spike, 20, 2);
+    expect(pb[60] as number).toBeGreaterThan(1);
+  });
+
+  it('bandwidth is 0 for a flat series', () => {
+    expect(
+      bandwidth(
+        closes(40, () => 10),
+        20,
+        2,
+      )[39] as number,
+    ).toBeCloseTo(0, 10);
+  });
+});
+
+describe('alligator', () => {
+  it('shifts each line forward by its own displacement', () => {
+    const series = bars(
+      Array.from(
+        { length: 80 },
+        (_, i) => [100 + i, 101 + i, 99 + i, 100 + i] as [number, number, number, number],
+      ),
+    );
+    const r = alligator(series);
+    // The jaw is the slowest AND the most displaced, so it starts last.
+    const firstJaw = r.jaw.findIndex((v) => v !== null);
+    const firstLips = r.lips.findIndex((v) => v !== null);
+    expect(firstJaw).toBeGreaterThan(firstLips);
+  });
+});
+
+describe('volume studies (fourth wave)', () => {
+  it('volume oscillator is 0 when volume is constant', () => {
+    const flat = bars(
+      Array.from(
+        { length: 60 },
+        () => [10, 10, 10, 10, 100] as [number, number, number, number, number],
+      ),
+    );
+    expect(volumeOscillator(flat, 5, 10)[59] as number).toBeCloseTo(0, 8);
+  });
+
+  it('nvi and pvi both start at 1000 and move on their own volume regime', () => {
+    const series = bars([
+      [10, 10, 10, 10, 100],
+      [10, 11, 10, 11, 50], // volume DOWN → nvi moves, pvi does not
+      [11, 12, 11, 12, 200], // volume UP → pvi moves, nvi does not
+    ]);
+    const r = volumeIndices(series);
+    expect(r.nvi[0]).toBe(1000);
+    expect(r.pvi[0]).toBe(1000);
+    expect(r.nvi[1] as number).toBeGreaterThan(1000);
+    expect(r.pvi[1]).toBe(1000);
+    expect(r.pvi[2] as number).toBeGreaterThan(1000);
+    expect(r.nvi[2]).toBeCloseTo(r.nvi[1] as number, 10);
+  });
+});
+
+describe('standardErrorBands', () => {
+  it('collapses onto the fit when the series is a perfect line', () => {
+    // Zero residual ⇒ zero standard error ⇒ bands sit on the regression.
+    const line = closes(60, (i) => 100 + i * 2);
+    const r = standardErrorBands(line, 21, 2);
+    expect(r.upper[59] as number).toBeCloseTo(r.middle[59] as number, 6);
+    expect(r.lower[59] as number).toBeCloseTo(r.middle[59] as number, 6);
   });
 });

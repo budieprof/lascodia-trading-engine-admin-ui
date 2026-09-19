@@ -1,6 +1,17 @@
 import {
   adl,
   adx,
+  alligator,
+  bandwidth,
+  coppock,
+  kst,
+  percentB,
+  ppo,
+  rvi,
+  schaff,
+  standardErrorBands,
+  volumeIndices,
+  volumeOscillator,
   alma,
   aroon,
   atr,
@@ -788,6 +799,196 @@ export const INDICATORS: readonly IndicatorDef[] = [
     compute: (bars, p) => {
       const r = fisher(bars, num(p, 'length', 9));
       return { fisher: r.fisher, trigger: r.trigger };
+    },
+  },
+
+  // ── Fourth wave ──────────────────────────────────────────────────────────
+  {
+    id: 'alligator',
+    name: 'Williams Alligator',
+    target: 'overlay',
+    inputs: [],
+    plots: [
+      { key: 'jaw', title: 'Jaw', kind: 'line', color: '#2962FF' },
+      { key: 'teeth', title: 'Teeth', kind: 'line', color: '#EF5350' },
+      { key: 'lips', title: 'Lips', kind: 'line', color: '#26A69A' },
+    ],
+    compute: (bars) => {
+      const r = alligator(bars);
+      return { jaw: r.jaw, teeth: r.teeth, lips: r.lips };
+    },
+  },
+  {
+    id: 'se-bands',
+    name: 'Standard Error Bands',
+    target: 'overlay',
+    inputs: [
+      LENGTH(21),
+      { key: 'mult', label: 'StdErr', type: 'number', default: 2, min: 0.1, max: 10 },
+      SOURCE,
+    ],
+    plots: [
+      { key: 'upper', title: 'Upper', kind: 'line', color: '#2962FF' },
+      { key: 'middle', title: 'Fit', kind: 'line', color: '#787B86' },
+      { key: 'lower', title: 'Lower', kind: 'line', color: '#2962FF' },
+    ],
+    compute: (bars, p) => {
+      const r = standardErrorBands(
+        sourceValues(bars, src(p)),
+        num(p, 'length', 21),
+        num(p, 'mult', 2),
+      );
+      return { upper: r.upper, middle: r.middle, lower: r.lower };
+    },
+  },
+  {
+    id: 'kst',
+    name: 'Know Sure Thing',
+    target: 'pane',
+    inputs: [SOURCE],
+    plots: [
+      { key: 'kst', title: 'KST', kind: 'line', color: '#2962FF' },
+      { key: 'signal', title: 'Signal', kind: 'line', color: '#FF6D00' },
+    ],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => {
+      const r = kst(sourceValues(bars, src(p)));
+      return { kst: r.kst, signal: r.signal };
+    },
+  },
+  {
+    id: 'coppock',
+    name: 'Coppock Curve',
+    target: 'pane',
+    inputs: [SOURCE],
+    plots: [{ key: 'coppock', title: 'Coppock', kind: 'line', color: '#7E57C2' }],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => ({ coppock: coppock(sourceValues(bars, src(p))) }),
+  },
+  {
+    id: 'rvi',
+    name: 'Relative Vigor Index',
+    target: 'pane',
+    inputs: [LENGTH(10)],
+    plots: [
+      { key: 'rvi', title: 'RVI', kind: 'line', color: '#2962FF' },
+      { key: 'signal', title: 'Signal', kind: 'line', color: '#FF6D00' },
+    ],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => {
+      const r = rvi(bars, num(p, 'length', 10));
+      return { rvi: r.rvi, signal: r.signal };
+    },
+  },
+  {
+    id: 'ppo',
+    name: 'Percentage Price Oscillator',
+    target: 'pane',
+    inputs: [
+      { key: 'fast', label: 'Fast', type: 'number', default: 12, min: 1, max: 200 },
+      { key: 'slow', label: 'Slow', type: 'number', default: 26, min: 1, max: 400 },
+      { key: 'signal', label: 'Signal', type: 'number', default: 9, min: 1, max: 200 },
+      SOURCE,
+    ],
+    plots: [
+      { key: 'histogram', title: 'Hist', kind: 'histogram', color: '#26A69A' },
+      { key: 'ppo', title: 'PPO', kind: 'line', color: '#2962FF' },
+      { key: 'signal', title: 'Signal', kind: 'line', color: '#FF6D00' },
+    ],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => {
+      const r = ppo(
+        sourceValues(bars, src(p)),
+        num(p, 'fast', 12),
+        num(p, 'slow', 26),
+        num(p, 'signal', 9),
+      );
+      return { ppo: r.ppo, signal: r.signal, histogram: r.histogram };
+    },
+  },
+  {
+    id: 'schaff',
+    name: 'Schaff Trend Cycle',
+    target: 'pane',
+    inputs: [
+      { key: 'fast', label: 'Fast', type: 'number', default: 23, min: 1, max: 200 },
+      { key: 'slow', label: 'Slow', type: 'number', default: 50, min: 1, max: 400 },
+      { key: 'cycle', label: 'Cycle', type: 'number', default: 10, min: 1, max: 100 },
+      SOURCE,
+    ],
+    plots: [{ key: 'stc', title: 'STC', kind: 'line', color: '#AB47BC' }],
+    levels: [
+      { value: 75, color: '#787B86' },
+      { value: 25, color: '#787B86' },
+    ],
+    range: { min: 0, max: 100 },
+    compute: (bars, p) => ({
+      stc: schaff(
+        sourceValues(bars, src(p)),
+        num(p, 'fast', 23),
+        num(p, 'slow', 50),
+        num(p, 'cycle', 10),
+      ),
+    }),
+  },
+  {
+    id: 'percent-b',
+    name: 'Bollinger %B',
+    target: 'pane',
+    inputs: [
+      LENGTH(20),
+      { key: 'mult', label: 'StdDev', type: 'number', default: 2, min: 0.1, max: 10 },
+      SOURCE,
+    ],
+    plots: [{ key: 'pb', title: '%B', kind: 'line', color: '#2962FF' }],
+    levels: [
+      { value: 1, color: '#787B86' },
+      { value: 0, color: '#787B86' },
+    ],
+    compute: (bars, p) => ({
+      pb: percentB(sourceValues(bars, src(p)), num(p, 'length', 20), num(p, 'mult', 2)),
+    }),
+  },
+  {
+    id: 'bandwidth',
+    name: 'Bollinger Bandwidth',
+    target: 'pane',
+    inputs: [
+      LENGTH(20),
+      { key: 'mult', label: 'StdDev', type: 'number', default: 2, min: 0.1, max: 10 },
+      SOURCE,
+    ],
+    plots: [{ key: 'bw', title: 'BW', kind: 'line', color: '#00BCD4' }],
+    compute: (bars, p) => ({
+      bw: bandwidth(sourceValues(bars, src(p)), num(p, 'length', 20), num(p, 'mult', 2)),
+    }),
+  },
+  {
+    id: 'volume-osc',
+    name: 'Volume Oscillator',
+    target: 'pane',
+    inputs: [
+      { key: 'fast', label: 'Fast', type: 'number', default: 5, min: 1, max: 100 },
+      { key: 'slow', label: 'Slow', type: 'number', default: 10, min: 1, max: 200 },
+    ],
+    plots: [{ key: 'vo', title: 'VO%', kind: 'histogram', color: '#26A69A' }],
+    levels: [{ value: 0, color: '#787B86' }],
+    compute: (bars, p) => ({
+      vo: volumeOscillator(bars, num(p, 'fast', 5), num(p, 'slow', 10)),
+    }),
+  },
+  {
+    id: 'nvi-pvi',
+    name: 'Negative / Positive Volume Index',
+    target: 'pane',
+    inputs: [],
+    plots: [
+      { key: 'nvi', title: 'NVI', kind: 'line', color: '#2962FF' },
+      { key: 'pvi', title: 'PVI', kind: 'line', color: '#FF6D00' },
+    ],
+    compute: (bars) => {
+      const r = volumeIndices(bars);
+      return { nvi: r.nvi, pvi: r.pvi };
     },
   },
 ] as const;

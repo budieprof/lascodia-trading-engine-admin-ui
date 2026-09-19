@@ -1148,3 +1148,230 @@ export function volumeProfile(bars: Ohlc[], bins = 24): VolumeProfileBin[] {
   }
   return out;
 }
+
+// ── Fourth wave ────────────────────────────────────────────────────────────
+
+/** Know Sure Thing — four smoothed ROCs, weighted. */
+export function kst(closes: number[]): { kst: Maybe[]; signal: Maybe[] } {
+  const parts: Array<[number, number, number]> = [
+    [10, 10, 1],
+    [15, 10, 2],
+    [20, 10, 3],
+    [30, 15, 4],
+  ];
+  const out: Maybe[] = nulls(closes.length);
+  const smoothed = parts.map(([rocLen, smaLen]) =>
+    denseMap(roc(closes, rocLen), (d) => sma(d, smaLen)),
+  );
+  for (let i = 0; i < closes.length; i++) {
+    let acc = 0;
+    let ok = true;
+    for (let k = 0; k < parts.length; k++) {
+      const v = smoothed[k][i];
+      if (v === null) {
+        ok = false;
+        break;
+      }
+      acc += v * parts[k][2];
+    }
+    if (ok) out[i] = acc;
+  }
+  return { kst: out, signal: denseMap(out, (d) => sma(d, 9)) };
+}
+
+/** Coppock Curve — WMA of two summed ROCs. Long-horizon bottoming signal. */
+export function coppock(closes: number[], roc1 = 14, roc2 = 11, wmaLen = 10): Maybe[] {
+  const a = roc(closes, roc1);
+  const b = roc(closes, roc2);
+  const summed: Maybe[] = closes.map((_, i) =>
+    a[i] !== null && b[i] !== null ? (a[i] as number) + (b[i] as number) : null,
+  );
+  return denseMap(summed, (d) => wma(d, wmaLen));
+}
+
+/** Relative Vigor Index — close-open over range, smoothed, with a signal. */
+export function rvi(bars: Ohlc[], period = 10): { rvi: Maybe[]; signal: Maybe[] } {
+  const numerator: number[] = [];
+  const denominator: number[] = [];
+  for (let i = 0; i < bars.length; i++) {
+    numerator.push(bars[i].close - bars[i].open);
+    denominator.push(bars[i].high - bars[i].low);
+  }
+  const num = sma(numerator, period);
+  const den = sma(denominator, period);
+  const line: Maybe[] = bars.map((_, i) =>
+    num[i] !== null && den[i] !== null && (den[i] as number) !== 0
+      ? (num[i] as number) / (den[i] as number)
+      : null,
+  );
+  return { rvi: line, signal: denseMap(line, (d) => sma(d, 4)) };
+}
+
+/** Percentage Price Oscillator — MACD expressed as a percentage. */
+export function ppo(
+  closes: number[],
+  fast = 12,
+  slow = 26,
+  signalPeriod = 9,
+): { ppo: Maybe[]; signal: Maybe[]; histogram: Maybe[] } {
+  const f = ema(closes, fast);
+  const s = ema(closes, slow);
+  const line: Maybe[] = closes.map((_, i) =>
+    f[i] !== null && s[i] !== null && (s[i] as number) !== 0
+      ? (((f[i] as number) - (s[i] as number)) / (s[i] as number)) * 100
+      : null,
+  );
+  const signal = denseMap(line, (d) => ema(d, signalPeriod));
+  return {
+    ppo: line,
+    signal,
+    histogram: closes.map((_, i) =>
+      line[i] !== null && signal[i] !== null ? (line[i] as number) - (signal[i] as number) : null,
+    ),
+  };
+}
+
+/** Volume oscillator — the gap between two volume EMAs, as a percentage. */
+export function volumeOscillator(bars: Ohlc[], fast = 5, slow = 10): Maybe[] {
+  const volumes = bars.map((b) => b.volume);
+  const f = ema(volumes, fast);
+  const s = ema(volumes, slow);
+  return bars.map((_, i) =>
+    f[i] !== null && s[i] !== null && (s[i] as number) !== 0
+      ? (((f[i] as number) - (s[i] as number)) / (s[i] as number)) * 100
+      : null,
+  );
+}
+
+/** Negative and positive volume indices. */
+export function volumeIndices(bars: Ohlc[]): { nvi: Maybe[]; pvi: Maybe[] } {
+  const nvi: Maybe[] = [1000];
+  const pvi: Maybe[] = [1000];
+  for (let i = 1; i < bars.length; i++) {
+    const prevClose = bars[i - 1].close;
+    const change = prevClose === 0 ? 0 : (bars[i].close - prevClose) / prevClose;
+    const lastNvi = (nvi[i - 1] ?? 1000) as number;
+    const lastPvi = (pvi[i - 1] ?? 1000) as number;
+    nvi.push(bars[i].volume < bars[i - 1].volume ? lastNvi * (1 + change) : lastNvi);
+    pvi.push(bars[i].volume > bars[i - 1].volume ? lastPvi * (1 + change) : lastPvi);
+  }
+  return { nvi, pvi };
+}
+
+/**
+ * Standard-error bands — a regression curve with a ±k·SE envelope.
+ *
+ * The residual at each point is measured against the FITTED LINE AT THAT POINT,
+ * not against the regression's endpoint value. Using the endpoint for the whole
+ * window measures the window's slope rather than its scatter: a perfectly
+ * straight series has zero error but would have produced bands as wide as the
+ * move. The regression is therefore recomputed here rather than reusing
+ * `linreg`, which by design returns only the endpoint.
+ */
+export function standardErrorBands(closes: number[], period = 21, mult = 2): BandsResult {
+  const middle = linreg(closes, period);
+  const upper: Maybe[] = nulls(closes.length);
+  const lower: Maybe[] = nulls(closes.length);
+  if (period < 3) return { upper, middle, lower };
+
+  for (let i = period - 1; i < closes.length; i++) {
+    const fit = middle[i];
+    if (fit === null) continue;
+
+    let sx = 0;
+    let sy = 0;
+    let sxy = 0;
+    let sxx = 0;
+    for (let k = 0; k < period; k++) {
+      const y = closes[i - period + 1 + k];
+      sx += k;
+      sy += y;
+      sxy += k * y;
+      sxx += k * k;
+    }
+    const denom = period * sxx - sx * sx;
+    if (denom === 0) continue;
+    const slope = (period * sxy - sx * sy) / denom;
+    const intercept = (sy - slope * sx) / period;
+
+    let sumSq = 0;
+    for (let k = 0; k < period; k++) {
+      const predicted = intercept + slope * k;
+      sumSq += (closes[i - period + 1 + k] - predicted) ** 2;
+    }
+    const se = Math.sqrt(sumSq / (period - 2));
+    upper[i] = fit + mult * se;
+    lower[i] = fit - mult * se;
+  }
+  return { upper, middle, lower };
+}
+
+/** Schaff Trend Cycle — a stochastic applied twice to MACD. */
+export function schaff(closes: number[], fast = 23, slow = 50, cycle = 10): Maybe[] {
+  const macdLine = macd(closes, fast, slow, 9).macd;
+  const stochOf = (series: Maybe[]): Maybe[] => {
+    const out: Maybe[] = nulls(series.length);
+    for (let i = 0; i < series.length; i++) {
+      if (series[i] === null) continue;
+      let hi = -Infinity;
+      let lo = Infinity;
+      let ok = true;
+      for (let j = i - cycle + 1; j <= i; j++) {
+        if (j < 0 || series[j] === null) {
+          ok = false;
+          break;
+        }
+        hi = Math.max(hi, series[j] as number);
+        lo = Math.min(lo, series[j] as number);
+      }
+      if (!ok) continue;
+      const span = hi - lo;
+      out[i] = span === 0 ? 50 : clamp01x100((((series[i] as number) - lo) / span) * 100);
+    }
+    return out;
+  };
+  // Twice: the first pass normalises MACD, the second sharpens the cycle. One
+  // pass is just a stochastic of MACD and oscillates far more.
+  return clampSeries(stochOf(stochOf(macdLine)), 0, 100);
+}
+
+/** Williams Alligator — three displaced smoothed averages. */
+export function alligator(bars: Ohlc[]): { jaw: Maybe[]; teeth: Maybe[]; lips: Maybe[] } {
+  const median = bars.map((b) => (b.high + b.low) / 2);
+  const shift = (series: Maybe[], by: number): Maybe[] => {
+    const out: Maybe[] = nulls(series.length);
+    for (let i = 0; i < series.length; i++) {
+      const target = i + by;
+      if (target < series.length) out[target] = series[i];
+    }
+    return out;
+  };
+  return {
+    jaw: shift(smma(median, 13), 8),
+    teeth: shift(smma(median, 8), 5),
+    lips: shift(smma(median, 5), 3),
+  };
+}
+
+/** Bollinger %B — where price sits within the bands, 0..1. */
+export function percentB(closes: number[], period = 20, mult = 2): Maybe[] {
+  const { upper, lower } = bollinger(closes, period, mult);
+  return closes.map((c, i) => {
+    const u = upper[i];
+    const l = lower[i];
+    if (u === null || l === null || u === l) return null;
+    return (c - l) / (u - l);
+  });
+}
+
+/** Bollinger bandwidth — band span as a fraction of the basis. */
+export function bandwidth(closes: number[], period = 20, mult = 2): Maybe[] {
+  const { upper, middle, lower } = bollinger(closes, period, mult);
+  return closes.map((_, i) => {
+    const u = upper[i];
+    const m = middle[i];
+    const l = lower[i];
+    if (u === null || m === null || l === null || m === 0) return null;
+    return (u - l) / m;
+  });
+}
