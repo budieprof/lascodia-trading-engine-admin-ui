@@ -3,8 +3,10 @@ import {
   Component,
   DestroyRef,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -341,8 +343,40 @@ export class ChartAnalysisPageComponent {
     return l?.close != null && l?.open != null ? l.close >= l.open : true;
   });
 
+  /**
+   * Symbols this page currently holds a live-price subscription for.
+   *
+   * The hub rooms are PER-SYMBOL (`SubscribePrice` / `UnsubscribePrice`), not
+   * per-route, so a chart that never subscribes receives whatever ticks other
+   * pages happen to have joined — which is why the watchlist showed a dash for
+   * every price. Tracking the set lets the diff below subscribe and
+   * unsubscribe only what actually changed.
+   */
+  private readonly subscribedSymbols = new Set<string>();
+
   constructor() {
     this.loadSymbols();
+
+    // Keep the live-price subscriptions in step with what is on screen: the
+    // primary chart, every comparison panel, and — only while it is open —
+    // the watchlist. The watchlist costs 23 rooms, which is the honest price
+    // of a live watchlist and why it is not subscribed when closed.
+    effect(() => {
+      const wanted = new Set<string>([
+        this.symbol().toUpperCase(),
+        ...this.comparePanels().map((p) => p.symbol.toUpperCase()),
+        ...(this.watchlistOpen() ? this.symbols().map((p) => (p.symbol ?? '').toUpperCase()) : []),
+      ]);
+      wanted.delete('');
+      untracked(() => this.syncPriceSubscriptions(wanted));
+    });
+
+    this.destroyRef.onDestroy(() => {
+      for (const symbol of this.subscribedSymbols) {
+        void this.realtime.invoke('UnsubscribePrice', symbol).catch(() => undefined);
+      }
+      this.subscribedSymbols.clear();
+    });
     // A running replay interval would outlive the page and keep stepping a
     // chart nobody is looking at.
     this.destroyRef.onDestroy(() => this.pauseReplay());
@@ -723,6 +757,25 @@ export class ChartAnalysisPageComponent {
       ...map,
       [symbol]: { bid, prev: map[symbol]?.prev ?? bid },
     }));
+  }
+
+  private syncPriceSubscriptions(wanted: Set<string>): void {
+    for (const symbol of [...this.subscribedSymbols]) {
+      if (wanted.has(symbol)) continue;
+      this.subscribedSymbols.delete(symbol);
+      // Failures are ignored on purpose: the hub drops a connection's groups
+      // automatically on disconnect, so a missed unsubscribe costs nothing.
+      void this.realtime.invoke('UnsubscribePrice', symbol).catch(() => undefined);
+    }
+    for (const symbol of wanted) {
+      if (this.subscribedSymbols.has(symbol)) continue;
+      this.subscribedSymbols.add(symbol);
+      void this.realtime.invoke('SubscribePrice', symbol).catch(() => {
+        // Re-arm so a reconnect can try again rather than leaving the symbol
+        // permanently unsubscribed.
+        this.subscribedSymbols.delete(symbol);
+      });
+    }
   }
 
   private loadSymbols(): void {
