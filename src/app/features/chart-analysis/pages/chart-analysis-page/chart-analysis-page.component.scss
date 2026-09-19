@@ -740,3 +740,78 @@ $rail-width: 40px;
     color: #ef5350;
   }
 }
+
+// ── Split view ─────────────────────────────────────────────────────────────
+
+.split-picker {
+  display: flex;
+  gap: 2px;
+}
+
+.chart-grid {
+  position: absolute;
+  inset: 0 0 0 $rail-width;
+  display: grid;
+  gap: 1px;
+  background: var(--border, #e6e9ef);
+
+  &[data-layout='1'] {
+    grid-template-columns: 1fr;
+  }
+
+  &[data-layout='2h'] {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  &[data-layout='2v'] {
+    grid-template-rows: 1fr 1fr;
+  }
+
+  &[data-layout='4'] {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
+}
+
+// Inside the grid the areas are ordinary cells, not absolutely positioned.
+.chart-grid .chart-area {
+  position: relative;
+  inset: auto;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface, #fff);
+}
+
+.panel-bar {
+  position: absolute;
+  top: 4px;
+  left: 8px;
+  z-index: 14;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.panel-select {
+  padding: 2px 4px;
+  border: 1px solid var(--border, #e6e9ef);
+  border-radius: 4px;
+  background: var(--surface, #fff);
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+}
+
+.panel-focus {
+  border: 1px solid var(--border, #e6e9ef);
+  border-radius: 4px;
+  background: var(--surface, #fff);
+  color: var(--text-muted, #787b86);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 6px;
+
+  &:hover {
+    color: inherit;
+  }
+}

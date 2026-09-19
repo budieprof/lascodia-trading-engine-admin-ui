@@ -147,6 +147,20 @@
       <option value="percent">%</option>
     </select>
 
+    <div class="split-picker" role="group" aria-label="Split layout">
+      @for (l of splitLayouts; track l.id) {
+        <button
+          type="button"
+          class="tool"
+          [class.active]="splitLayout() === l.id"
+          (click)="setSplitLayout(l.id)"
+          [title]="l.panels + 1 + ' chart(s)'"
+        >
+          {{ l.label }}
+        </button>
+      }
+    </div>
+
     <button
       type="button"
       class="tool"
@@ -318,194 +332,254 @@
       }
     </nav>
 
-    <!-- Chart surface with the floating legend, as TradingView lays it out. -->
-    <div class="chart-area" (contextmenu)="openContextMenu($event)">
-      <div class="legend">
-        <div class="legend-title">
-          <strong>{{ symbol() }}</strong>
-          <span class="muted">{{ resolutionLabel(resolution()) }}</span>
-        </div>
-        @if (legend(); as l) {
-          <div class="legend-ohlc" [class.up]="legendUp()" [class.down]="!legendUp()">
-            <span
-              >O<b>{{ l.open | number: '1.' + precision() + '-' + precision() }}</b></span
-            >
-            <span
-              >H<b>{{ l.high | number: '1.' + precision() + '-' + precision() }}</b></span
-            >
-            <span
-              >L<b>{{ l.low | number: '1.' + precision() + '-' + precision() }}</b></span
-            >
-            <span
-              >C<b>{{ l.close | number: '1.' + precision() + '-' + precision() }}</b></span
-            >
-            @if (l.changePct !== null) {
-              <span class="change">{{ l.changePct | number: '1.2-2' }}%</span>
-            }
+    <div class="chart-grid" [attr.data-layout]="splitLayout()">
+      <!-- Chart surface with the floating legend, as TradingView lays it out. -->
+      <div class="chart-area primary" (contextmenu)="openContextMenu($event)">
+        <div class="legend">
+          <div class="legend-title">
+            <strong>{{ symbol() }}</strong>
+            <span class="muted">{{ resolutionLabel(resolution()) }}</span>
           </div>
-          <div class="legend-time muted">{{ formatTime(l.time) }}</div>
-          @for (ind of l.indicators; track ind.uid) {
-            <div class="legend-indicator">
-              <span class="muted">{{ ind.label }}</span>
-              @for (v of ind.values; track v.title) {
-                <span class="legend-value" [style.color]="v.color">
-                  {{ v.value === null ? '—' : (v.value | number: '1.2-5') }}
-                </span>
+          @if (legend(); as l) {
+            <div class="legend-ohlc" [class.up]="legendUp()" [class.down]="!legendUp()">
+              <span
+                >O<b>{{ l.open | number: '1.' + precision() + '-' + precision() }}</b></span
+              >
+              <span
+                >H<b>{{ l.high | number: '1.' + precision() + '-' + precision() }}</b></span
+              >
+              <span
+                >L<b>{{ l.low | number: '1.' + precision() + '-' + precision() }}</b></span
+              >
+              <span
+                >C<b>{{ l.close | number: '1.' + precision() + '-' + precision() }}</b></span
+              >
+              @if (l.changePct !== null) {
+                <span class="change">{{ l.changePct | number: '1.2-2' }}%</span>
               }
             </div>
+            <div class="legend-time muted">{{ formatTime(l.time) }}</div>
+            @for (ind of l.indicators; track ind.uid) {
+              <div class="legend-indicator">
+                <span class="muted">{{ ind.label }}</span>
+                @for (v of ind.values; track v.title) {
+                  <span class="legend-value" [style.color]="v.color">
+                    {{ v.value === null ? '—' : (v.value | number: '1.2-5') }}
+                  </span>
+                }
+              </div>
+            }
           }
+        </div>
+
+        @if (error()) {
+          <div class="chart-error">{{ error() }}</div>
+        }
+
+        <app-chart-host
+          #host
+          [bars]="displayBars()"
+          [style]="style()"
+          [showVolume]="showVolume()"
+          [indicators]="active()"
+          [precision]="precision()"
+          [tool]="tool()"
+          [magnet]="magnet()"
+          [scaleMode]="scaleMode()"
+          [timezone]="timezone()"
+          [events]="events()"
+          [minEventImpact]="minEventImpact()"
+          [symbol]="symbol()"
+          [resolution]="resolution()"
+          [overlays]="overlays()"
+          [markers]="markers()"
+          (loadMore)="loadOlder()"
+          (legend)="onLegend($event)"
+          (toolComplete)="onToolComplete()"
+        />
+
+        <!-- Style editor for the selected drawing. -->
+        @if (drawings.selected(); as sel) {
+          <div class="draw-inspector">
+            <span class="inspector-title">{{ drawingLabel(sel) }}</span>
+            <input
+              type="color"
+              [value]="sel.style.color"
+              (input)="setDrawingColor(sel.id, $any($event.target).value)"
+              title="Colour"
+            />
+            <select
+              [value]="sel.style.dash"
+              (change)="setDrawingDash(sel.id, $any($event.target).value)"
+              title="Line style"
+            >
+              @for (d of dashOptions; track d) {
+                <option [value]="d">{{ d }}</option>
+              }
+            </select>
+            <input
+              type="number"
+              class="width-input"
+              min="1"
+              max="10"
+              [value]="sel.style.width"
+              (change)="setDrawingWidth(sel.id, $any($event.target).value)"
+              title="Line width"
+            />
+            <button
+              type="button"
+              [class.active]="sel.style.fill !== null"
+              (click)="toggleDrawingFill(sel.id, sel.style.fill)"
+              title="Fill"
+            >
+              ▩
+            </button>
+            @if (sel.kind === 'text' || sel.kind === 'callout') {
+              <input
+                type="text"
+                class="text-input"
+                placeholder="Label…"
+                [value]="sel.style.text"
+                (input)="setDrawingText(sel.id, $any($event.target).value)"
+              />
+            }
+            <button
+              type="button"
+              (click)="drawings.toggleLock(sel.id)"
+              [class.active]="sel.locked"
+              title="Lock"
+            >
+              {{ sel.locked ? '🔒' : '🔓' }}
+            </button>
+            <button type="button" (click)="drawings.clone(sel.id)" title="Duplicate">⧉</button>
+            <button type="button" (click)="removeDrawing(sel.id)" title="Delete (⌫)">✕</button>
+          </div>
+        }
+
+        @if (contextMenu(); as cm) {
+          <div class="context-menu" [style.left.px]="cm.x" [style.top.px]="cm.y">
+            <button type="button" (click)="resetScales()">Reset scales</button>
+            <button type="button" (click)="takeSnapshot()">Save image…</button>
+            <button type="button" (click)="objectTreeOpen.set(true); closeContextMenu()">
+              Show objects
+            </button>
+            <button type="button" (click)="indicatorMenuOpen.set(true); closeContextMenu()">
+              Add indicator…
+            </button>
+            <button type="button" (click)="saveLayout()">Save layout…</button>
+            <button
+              type="button"
+              class="danger"
+              (click)="clearDrawingsFromMenu()"
+              [disabled]="!drawings.visible().length"
+            >
+              Remove all drawings
+            </button>
+            <button type="button" (click)="closeContextMenu()">Close</button>
+          </div>
+        }
+
+        <!-- Watchlist. -->
+        @if (watchlistOpen()) {
+          <aside class="watchlist">
+            <div class="tree-title">Watchlist</div>
+            <ul>
+              @for (w of watchlist(); track w.symbol) {
+                <li [class.selected]="w.symbol === symbol()">
+                  <button type="button" class="watch-row" (click)="selectSymbol(w.symbol)">
+                    <span class="watch-symbol">{{ w.symbol }}</span>
+                    <span class="watch-price">
+                      {{
+                        w.bid === null ? '—' : (w.bid | number: '1.' + w.digits + '-' + w.digits)
+                      }}
+                    </span>
+                    <span
+                      class="watch-change"
+                      [class.up]="(w.changePct ?? 0) >= 0"
+                      [class.down]="(w.changePct ?? 0) < 0"
+                    >
+                      {{ w.changePct === null ? '' : (w.changePct | number: '1.2-2') + '%' }}
+                    </span>
+                  </button>
+                </li>
+              }
+            </ul>
+          </aside>
+        }
+
+        <!-- Object tree. -->
+        @if (objectTreeOpen() && drawings.visible().length) {
+          <div class="object-tree">
+            <div class="tree-title">Objects</div>
+            <ul>
+              @for (d of drawings.visible(); track d.id) {
+                <li [class.selected]="drawings.selectedId() === d.id">
+                  <button type="button" class="tree-row" (click)="selectDrawing(d.id)">
+                    <span class="swatch" [style.background]="d.style.color"></span>
+                    <span>{{ drawingLabel(d) }}</span>
+                    @if (d.locked) {
+                      <span class="muted">🔒</span>
+                    }
+                  </button>
+                  <button type="button" class="tree-remove" (click)="removeDrawing(d.id)">✕</button>
+                </li>
+              }
+            </ul>
+          </div>
         }
       </div>
 
-      @if (error()) {
-        <div class="chart-error">{{ error() }}</div>
-      }
-
-      <app-chart-host
-        #host
-        [bars]="displayBars()"
-        [style]="style()"
-        [showVolume]="showVolume()"
-        [indicators]="active()"
-        [precision]="precision()"
-        [tool]="tool()"
-        [magnet]="magnet()"
-        [scaleMode]="scaleMode()"
-        [timezone]="timezone()"
-        [events]="events()"
-        [minEventImpact]="minEventImpact()"
-        [overlays]="overlays()"
-        [markers]="markers()"
-        (loadMore)="loadOlder()"
-        (legend)="onLegend($event)"
-        (toolComplete)="onToolComplete()"
-      />
-
-      <!-- Style editor for the selected drawing. -->
-      @if (drawings.selected(); as sel) {
-        <div class="draw-inspector">
-          <span class="inspector-title">{{ drawingLabel(sel) }}</span>
-          <input
-            type="color"
-            [value]="sel.style.color"
-            (input)="setDrawingColor(sel.id, $any($event.target).value)"
-            title="Colour"
+      @for (panel of comparePanels(); track panel.id) {
+        <div class="chart-area compare">
+          <div class="panel-bar">
+            <!--
+              ngModel, not [value]: on a <select> whose <option>s come from a
+              @for, the value is applied before the options exist, so the
+              browser falls back to the first entry and every panel showed the
+              same (alphabetically first) symbol.
+            -->
+            <select
+              class="panel-select"
+              [ngModel]="panel.symbol"
+              (ngModelChange)="setPanelSymbol(panel.id, $event)"
+              [ngModelOptions]="{ standalone: true }"
+              aria-label="Panel symbol"
+            >
+              @for (p of symbols(); track p.id) {
+                <option [value]="p.symbol">{{ p.symbol }}</option>
+              }
+            </select>
+            <select
+              class="panel-select"
+              [ngModel]="panel.resolution"
+              (ngModelChange)="setPanelResolution(panel.id, $event)"
+              [ngModelOptions]="{ standalone: true }"
+              aria-label="Panel timeframe"
+            >
+              @for (r of resolutions; track r) {
+                <option [value]="r">{{ resolutionLabel(r) }}</option>
+              }
+            </select>
+            <button
+              type="button"
+              class="panel-focus"
+              (click)="focusPanel(panel.id)"
+              title="Swap with the main chart"
+            >
+              ⇄
+            </button>
+          </div>
+          <app-chart-host
+            [bars]="panel.bars"
+            [style]="style()"
+            [showVolume]="false"
+            [indicators]="[]"
+            [precision]="panelPrecision(panel.symbol)"
+            [scaleMode]="scaleMode()"
+            [timezone]="timezone()"
+            [symbol]="panel.symbol"
+            [resolution]="panel.resolution"
           />
-          <select
-            [value]="sel.style.dash"
-            (change)="setDrawingDash(sel.id, $any($event.target).value)"
-            title="Line style"
-          >
-            @for (d of dashOptions; track d) {
-              <option [value]="d">{{ d }}</option>
-            }
-          </select>
-          <input
-            type="number"
-            class="width-input"
-            min="1"
-            max="10"
-            [value]="sel.style.width"
-            (change)="setDrawingWidth(sel.id, $any($event.target).value)"
-            title="Line width"
-          />
-          <button
-            type="button"
-            [class.active]="sel.style.fill !== null"
-            (click)="toggleDrawingFill(sel.id, sel.style.fill)"
-            title="Fill"
-          >
-            ▩
-          </button>
-          @if (sel.kind === 'text' || sel.kind === 'callout') {
-            <input
-              type="text"
-              class="text-input"
-              placeholder="Label…"
-              [value]="sel.style.text"
-              (input)="setDrawingText(sel.id, $any($event.target).value)"
-            />
-          }
-          <button
-            type="button"
-            (click)="drawings.toggleLock(sel.id)"
-            [class.active]="sel.locked"
-            title="Lock"
-          >
-            {{ sel.locked ? '🔒' : '🔓' }}
-          </button>
-          <button type="button" (click)="drawings.clone(sel.id)" title="Duplicate">⧉</button>
-          <button type="button" (click)="removeDrawing(sel.id)" title="Delete (⌫)">✕</button>
-        </div>
-      }
-
-      @if (contextMenu(); as cm) {
-        <div class="context-menu" [style.left.px]="cm.x" [style.top.px]="cm.y">
-          <button type="button" (click)="resetScales()">Reset scales</button>
-          <button type="button" (click)="takeSnapshot()">Save image…</button>
-          <button type="button" (click)="objectTreeOpen.set(true); closeContextMenu()">
-            Show objects
-          </button>
-          <button type="button" (click)="indicatorMenuOpen.set(true); closeContextMenu()">
-            Add indicator…
-          </button>
-          <button type="button" (click)="saveLayout()">Save layout…</button>
-          <button
-            type="button"
-            class="danger"
-            (click)="clearDrawingsFromMenu()"
-            [disabled]="!drawings.visible().length"
-          >
-            Remove all drawings
-          </button>
-          <button type="button" (click)="closeContextMenu()">Close</button>
-        </div>
-      }
-
-      <!-- Watchlist. -->
-      @if (watchlistOpen()) {
-        <aside class="watchlist">
-          <div class="tree-title">Watchlist</div>
-          <ul>
-            @for (w of watchlist(); track w.symbol) {
-              <li [class.selected]="w.symbol === symbol()">
-                <button type="button" class="watch-row" (click)="selectSymbol(w.symbol)">
-                  <span class="watch-symbol">{{ w.symbol }}</span>
-                  <span class="watch-price">
-                    {{ w.bid === null ? '—' : (w.bid | number: '1.' + w.digits + '-' + w.digits) }}
-                  </span>
-                  <span
-                    class="watch-change"
-                    [class.up]="(w.changePct ?? 0) >= 0"
-                    [class.down]="(w.changePct ?? 0) < 0"
-                  >
-                    {{ w.changePct === null ? '' : (w.changePct | number: '1.2-2') + '%' }}
-                  </span>
-                </button>
-              </li>
-            }
-          </ul>
-        </aside>
-      }
-
-      <!-- Object tree. -->
-      @if (objectTreeOpen() && drawings.visible().length) {
-        <div class="object-tree">
-          <div class="tree-title">Objects</div>
-          <ul>
-            @for (d of drawings.visible(); track d.id) {
-              <li [class.selected]="drawings.selectedId() === d.id">
-                <button type="button" class="tree-row" (click)="selectDrawing(d.id)">
-                  <span class="swatch" [style.background]="d.style.color"></span>
-                  <span>{{ drawingLabel(d) }}</span>
-                  @if (d.locked) {
-                    <span class="muted">🔒</span>
-                  }
-                </button>
-                <button type="button" class="tree-remove" (click)="removeDrawing(d.id)">✕</button>
-              </li>
-            }
-          </ul>
         </div>
       }
     </div>

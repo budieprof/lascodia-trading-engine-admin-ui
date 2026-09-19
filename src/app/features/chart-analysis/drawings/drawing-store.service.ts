@@ -22,6 +22,16 @@ const UNDO_DEPTH = 50;
 export class DrawingStore {
   private readonly all = signal<Drawing[]>(this.restore());
 
+  /**
+   * Every drawing, unfiltered.
+   *
+   * Exposed because a multi-chart layout has several panels on screen at once,
+   * each showing a different symbol or timeframe. A single global "visible"
+   * set cannot serve them — the second panel would render the first panel's
+   * trendlines — so each panel filters this itself via `forScope`.
+   */
+  readonly allDrawings = this.all.asReadonly();
+
   private undoStack: Drawing[][] = [];
   private redoStack: Drawing[][] = [];
 
@@ -54,8 +64,18 @@ export class DrawingStore {
     this.selectedId.set(null);
   }
 
-  add(kind: DrawingKind, points: Drawing['points'], style: DrawingStyle): Drawing {
-    const { symbol, resolution } = this.scope();
+  /** Drawings belonging to one chart panel. */
+  forScope(symbol: string, resolution: string): Drawing[] {
+    return this.all().filter((d) => d.symbol === symbol && d.resolution === resolution);
+  }
+
+  add(
+    kind: DrawingKind,
+    points: Drawing['points'],
+    style: DrawingStyle,
+    scope?: { symbol: string; resolution: string },
+  ): Drawing {
+    const { symbol, resolution } = scope ?? this.scope();
     const drawing: Drawing = {
       id: newDrawingId(),
       kind,

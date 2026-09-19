@@ -50,6 +50,14 @@ import {
   type DrawingKind,
 } from '../../drawings/model';
 
+/** One comparison chart in a split layout. */
+export interface ComparePanel {
+  id: string;
+  symbol: string;
+  resolution: TvResolution;
+  bars: Bar[];
+}
+
 /** Labels for the timeframe bar, in TradingView's shorthand. */
 const RESOLUTION_LABELS: Record<TvResolution, string> = {
   '1': '1m',
@@ -195,6 +203,21 @@ export class ChartAnalysisPageComponent {
   readonly layoutMenuOpen = signal(false);
   readonly contextMenu = signal<{ x: number; y: number } | null>(null);
   readonly isFullscreen = signal(false);
+
+  // ── Split view ───────────────────────────────────────────────────────────
+  //
+  // The primary chart keeps every tool. Comparison panels are their own charts
+  // with their own symbol, timeframe, bars and drawings — drawings are scoped
+  // per symbol+timeframe, so each panel renders only its own.
+  readonly splitLayout = signal<'1' | '2h' | '2v' | '4'>('1');
+  readonly comparePanels = signal<ComparePanel[]>([]);
+
+  readonly splitLayouts: Array<{ id: '1' | '2h' | '2v' | '4'; label: string; panels: number }> = [
+    { id: '1', label: '▢', panels: 0 },
+    { id: '2h', label: '◫', panels: 1 },
+    { id: '2v', label: '⊟', panels: 1 },
+    { id: '4', label: '⊞', panels: 3 },
+  ];
 
   readonly toolGroups = computed(() => {
     const groups: Array<{ name: string; tools: typeof TOOLS }> = [];
@@ -666,6 +689,84 @@ export class ChartAnalysisPageComponent {
 
   onLegend(snapshot: LegendSnapshot): void {
     this.legend.set(snapshot);
+  }
+
+  // ── Split view ───────────────────────────────────────────────────────────
+
+  setSplitLayout(id: '1' | '2h' | '2v' | '4'): void {
+    this.splitLayout.set(id);
+    const wanted = this.splitLayouts.find((l) => l.id === id)?.panels ?? 0;
+    const current = this.comparePanels();
+    if (current.length === wanted) return;
+
+    if (current.length > wanted) {
+      this.comparePanels.set(current.slice(0, wanted));
+      return;
+    }
+    // New panels open on a different symbol from the primary chart: two
+    // identical charts side by side is never what the operator wanted.
+    const taken = new Set([this.symbol(), ...current.map((p) => p.symbol)]);
+    const candidates = this.symbols()
+      .map((s) => (s.symbol ?? '').toUpperCase())
+      .filter((s) => s && !taken.has(s));
+    const added: ComparePanel[] = [];
+    for (let i = current.length; i < wanted; i++) {
+      const symbol = candidates[i - current.length] ?? this.symbol();
+      added.push({
+        id: `p${Date.now().toString(36)}${i}`,
+        symbol,
+        resolution: this.resolution(),
+        bars: [],
+      });
+    }
+    this.comparePanels.set([...current, ...added]);
+    for (const panel of added) void this.loadPanel(panel.id);
+  }
+
+  private async loadPanel(id: string): Promise<void> {
+    const panel = this.comparePanels().find((p) => p.id === id);
+    if (!panel) return;
+    const { bars } = await this.feed
+      .getBars(panel.symbol, panel.resolution, 0, Date.now(), PAGE_BARS)
+      .catch(() => ({ bars: [] as Bar[], noData: true }));
+    this.comparePanels.update((list) => list.map((p) => (p.id === id ? { ...p, bars } : p)));
+  }
+
+  setPanelSymbol(id: string, symbol: string): void {
+    this.comparePanels.update((list) =>
+      list.map((p) => (p.id === id ? { ...p, symbol: symbol.toUpperCase(), bars: [] } : p)),
+    );
+    void this.loadPanel(id);
+  }
+
+  setPanelResolution(id: string, resolution: string): void {
+    this.comparePanels.update((list) =>
+      list.map((p) =>
+        p.id === id ? { ...p, resolution: resolution as TvResolution, bars: [] } : p,
+      ),
+    );
+    void this.loadPanel(id);
+  }
+
+  /** Promote a comparison panel to the primary chart. */
+  focusPanel(id: string): void {
+    const panel = this.comparePanels().find((p) => p.id === id);
+    if (!panel) return;
+    const previous = { symbol: this.symbol(), resolution: this.resolution() };
+    this.comparePanels.update((list) =>
+      list.map((p) => (p.id === id ? { ...p, ...previous, bars: [] } : p)),
+    );
+    this.symbol.set(panel.symbol);
+    this.resolution.set(panel.resolution);
+    void this.reload();
+    void this.loadPanel(id);
+  }
+
+  panelPrecision(symbol: string): number {
+    const pair = this.symbols().find(
+      (p) => (p.symbol ?? '').toUpperCase() === symbol.toUpperCase(),
+    );
+    return pair ? Math.trunc(pair.decimalPlaces) || 5 : 5;
   }
 
   // ── Workspace actions ────────────────────────────────────────────────────

@@ -149,6 +149,7 @@ export class ChartHostComponent implements OnDestroy {
   private readonly controller = new DrawingController(
     this.drawings,
     () => this.precision(),
+    () => ({ symbol: this.symbol(), resolution: this.resolution() }),
     (t) => t + this.timezoneShiftMs(t),
     (t) => t - this.timezoneShiftMs(t),
   );
@@ -172,6 +173,9 @@ export class ChartHostComponent implements OnDestroy {
   /** Economic events on the time axis. Times are UTC; shifted like the bars. */
   readonly events = input<EventMark[]>([]);
   readonly minEventImpact = input<'High' | 'Medium' | 'Low'>('Medium');
+  /** Which chart this panel is, so it renders only its own drawings. */
+  readonly symbol = input<string>('');
+  readonly resolution = input<string>('');
 
   /** Raised when the visible range reaches the oldest bar we hold. */
   readonly loadMore = output<void>();
@@ -231,9 +235,19 @@ export class ChartHostComponent implements OnDestroy {
     // (add, drag, style change, undo) repaints without the page wiring an
     // explicit refresh for each one.
     effect(() => {
-      const visible = this.drawings.visible();
+      // Filtered by THIS panel's symbol and timeframe rather than the store's
+      // single global scope: in a split layout every panel is on screen at
+      // once, and a global set would paint one panel's trendlines onto another.
+      const all = this.drawings.allDrawings();
+      const symbol = this.symbol();
+      const resolution = this.resolution();
       const selected = this.drawings.selectedId();
-      untracked(() => this.controller.sync(visible, selected));
+      untracked(() =>
+        this.controller.sync(
+          all.filter((d) => d.symbol === symbol && d.resolution === resolution),
+          selected,
+        ),
+      );
     });
 
     effect(() => {
@@ -573,7 +587,10 @@ export class ChartHostComponent implements OnDestroy {
     // changes, and primitives live on the series, not the chart.
     if (this.price) {
       this.controller.bindSeries(this.price);
-      this.controller.sync(this.drawings.visible(), this.drawings.selectedId());
+      this.controller.sync(
+        this.drawings.forScope(this.symbol(), this.resolution()),
+        this.drawings.selectedId(),
+      );
       // Overlays and markers live on the series too, so they follow it through
       // every style change for the same reason drawings do.
       this.price.attachPrimitive(this.overlayRenderer);

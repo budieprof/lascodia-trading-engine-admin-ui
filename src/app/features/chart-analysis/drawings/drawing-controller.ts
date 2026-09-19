@@ -47,6 +47,8 @@ export class DrawingController {
   constructor(
     private readonly store: DrawingStore,
     precision: () => number,
+    /** This panel's symbol + timeframe, so drawings land on the right chart. */
+    private readonly scope: () => { symbol: string; resolution: string },
     /** Stored UTC instant → displayed instant (timezone offset). */
     private readonly shift: (timeMs: number) => number = (t) => t,
     /** Displayed instant → stored UTC instant. The inverse of `shift`. */
@@ -112,7 +114,8 @@ export class DrawingController {
   deleteSelected(): boolean {
     const id = this.store.selectedId();
     if (!id) return false;
-    const drawing = this.store.visible().find((d) => d.id === id);
+    const { symbol, resolution } = this.scope();
+    const drawing = this.store.forScope(symbol, resolution).find((d) => d.id === id);
     if (!drawing || drawing.locked) return false;
     this.store.remove(id);
     this.onSelectionChange?.(null);
@@ -232,7 +235,8 @@ export class DrawingController {
     const model = this.toModel(p);
     if (!model) return;
     const dragId = this.dragging.id;
-    const drawing = this.store.visible().find((d) => d.id === dragId);
+    const { symbol, resolution } = this.scope();
+    const drawing = this.store.forScope(symbol, resolution).find((d) => d.id === dragId);
     if (!drawing) return;
 
     if (this.dragging.handleIndex >= 0) {
@@ -282,7 +286,7 @@ export class DrawingController {
   private commitPending(): void {
     if (!this.pendingKind || this.pending.length === 0) return;
     const style = styleFor(this.pendingKind);
-    this.store.add(this.pendingKind, this.pending, style);
+    this.store.add(this.pendingKind, this.pending, style, this.scope());
     this.cancelPending();
     this.activeTool = null;
     this.setChartInteractive(true);
@@ -310,7 +314,8 @@ export class DrawingController {
    * checked before bodies so a resize always beats a move.
    */
   private pick(p: Pt): { id: string; drawing: Drawing; handleIndex: number } | null {
-    const list = this.store.visible();
+    const { symbol, resolution } = this.scope();
+    const list = this.store.forScope(symbol, resolution);
     const bounds = {
       width: this.container?.clientWidth ?? 0,
       height: this.container?.clientHeight ?? 0,
