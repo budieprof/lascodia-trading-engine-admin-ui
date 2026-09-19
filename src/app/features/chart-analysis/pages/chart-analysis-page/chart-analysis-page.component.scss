@@ -890,6 +890,11 @@ $rail-width: 40px;
 /* The news module's read on the pair, above the raw headlines. Separated by a
    rule because it is a CONCLUSION, not another headline — reading it as one
    more item in the list is exactly the mistake it exists to prevent. */
+.note-hint {
+  cursor: help;
+  font-style: italic;
+}
+
 .news-focus {
   padding-bottom: 8px;
   margin-bottom: 8px;
