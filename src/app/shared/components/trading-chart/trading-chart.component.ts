@@ -363,6 +363,11 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
             and timeframe across. This plot is intentionally minimal — it
             exists to show positions and LLM levels in context — so anything
             that calls for drawing tools or studies belongs on that page.
+
+            Labelled "Full Chart", NOT "Analyse": the LLM analysis menu one row
+            below is already called Analyse, and two adjacent controls sharing
+            a verb while doing unrelated things (navigate vs. spend a model
+            call) is a misclick waiting to happen.
           -->
           <a
             class="open-analysis"
@@ -370,9 +375,9 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
             [queryParams]="chartAnalysisQuery()"
             title="Open {{
               selectedSymbol()
-            }} in the full chart-analysis workspace (drawing tools, studies, multi-pane)"
+            }} in the full chart workspace — drawing tools, studies, multi-pane"
           >
-            Analyse ↗
+            Full Chart ↗
           </a>
         </div>
         <div class="toolbar-right">
