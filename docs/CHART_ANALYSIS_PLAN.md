@@ -308,119 +308,110 @@ per symbol, study and drawing templates.
 ## 12. Parity gap analysis — measured against Advanced Charts
 
 Advanced Charts' own documented surface is the specification for "replica".
-Everything below is checked against TradingView's docs (`ui_elements`,
-`ChartStyle` enum, `DrawingToolIdentifier` type), not against impressions of the
-product. ✅ shipped · 🟡 partial · ❌ missing.
+Checked against TradingView's docs (`ui_elements`, the `ChartStyle` enum, the
+`DrawingToolIdentifier` type), not against impressions of the product.
+Last measured 2026-09-19.
 
-### 12.1 Chart styles — 7 of 18
+### 12.1 Chart styles — 17 of 18 ✅
 
-`ChartStyle` has 18 values. We have Candle ✅, HollowCandle ✅, HeikinAshi ✅,
-Bar ✅, Line ✅, Area ✅, Baseline ✅.
+`ChartStyle` has 18 values. Shipped: Candle, HollowCandle, HeikinAshi, Bar,
+HiLo, Line, LineWithMarkers, Stepline, Area, HLCArea, Baseline, Column, **Renko,
+Line Break, Kagi, Point & Figure**. Only `VolCandle` is missing (it needs
+per-bar volume-scaled widths, a custom series).
 
-Missing and **cheap** (a different series config over the same bars): HiLo,
-Column, LineWithMarkers, Stepline, HLCArea, HLCBars, VolCandle.
+The last four rebuild the bar array from price movement — see
+`chart/price-transforms.ts` for why that breaks bar-time uniqueness and how it
+is resequenced.
 
-Missing and **structural**: **Renko, Kagi, Point & Figure, LineBreak.** These
-are not styles — they rebuild the series on _price movement_ rather than time,
-so bars stop mapping 1:1 to timestamps. They need their own transforms and a
-time scale that tolerates synthetic bar times. Treat as a project, not a style.
+### 12.2 Drawing tools — 23 shipped 🟡
 
-### 12.2 Drawing tools — 0 of ~110
+`DrawingToolIdentifier` enumerates ~110. We have 23 covering the ones that get
+used: trend line, ray, extended line, horizontal line and ray, vertical line,
+cross line, parallel channel, rectangle, ellipse, triangle, path, brush, Fib
+retracement, Fib extension, text, callout, arrow, measure, price range, date
+range, long and short position.
 
-The single largest gap. `DrawingToolIdentifier` enumerates ~110 tools across
-lines, channels, pitchforks, Fibonacci, Gann, Elliott, patterns, shapes,
-annotations, measurers and projections.
+**The machinery is complete**, which is the part that mattered: hit-testing,
+handles, drag, resize, magnet snapping, style inspector, lock, clone, object
+tree, undo/redo, per-symbol+timeframe persistence. Adding a tool is one entry in
+`TOOLS` plus a case in the renderer.
 
-Two routes:
+Still missing, in rough order of usefulness: Gann boxes and fans, Andrews
+pitchforks, Elliott wave sets, the harmonic pattern tools (ABCD, XABCD, cypher),
+Fib circles/spirals/arcs/wedge, regression channel, and the bars-pattern and
+ghost-feed projection tools.
 
-1. **Build on Lightweight Charts v5 primitives** (`ISeriesPrimitive` /
-   `IPanePrimitive`). Full control, no third-party risk, and the hit-testing,
-   drag handles, magnet mode and persistence are all ours to write. This is
-   weeks of work before the first tool feels right.
-2. **`lightweight-charts-drawing`** (MIT, npm, built for v5, ~68 tools). Would
-   collapse most of this gap. **Unproven** — 116 stars and 8 commits at the time
-   of writing — so it needs a real evaluation (hit-testing quality, persistence
-   model, bundle size, whether it survives a pane resize) before it goes near
-   the live console. Worth a timeboxed spike precisely because the payoff is so
-   large.
+`lightweight-charts-drawing` (MIT, ~68 tools) was evaluated and NOT adopted:
+0.1.1, 8 commits, 2.7 MB unpacked. Worth revisiting if it matures.
 
-Either way the surrounding machinery is ours: drawing toolbar, per-tool style
-dialogs, magnet/snap, lock, clone, templates, favourites, undo/redo, the object
-tree, and persistence per symbol+timeframe.
+### 12.3 Indicators — 23 of 100+ 🟡
 
-### 12.3 Indicators — 12 of 100+
+Shipped: SMA, EMA, WMA, Bollinger, VWAP, Donchian, Keltner, Ichimoku, Parabolic
+SAR, SuperTrend, Pivot Points, RSI, MACD, Stochastic, ATR, ADX/DI, OBV, CCI,
+Williams %R, MFI, Momentum, ROC, Awesome Oscillator.
 
-Shipped: SMA, EMA, WMA, Bollinger, VWAP (session-anchored), Donchian, RSI,
-MACD, Stochastic, ATR, ADX (+DI/−DI), OBV.
-
-The registry (`indicators/registry.ts`) is the extension point — one entry per
-indicator, no renderer change — so this gap closes linearly. Highest-value
-missing: Ichimoku, Parabolic SAR, Keltner, CCI, Williams %R, MFI, ROC,
-SuperTrend, Pivot Points, Awesome Oscillator, Volume Profile (needs its own
-horizontal-histogram primitive).
+Closes linearly through `indicators/registry.ts` — one entry each, no renderer
+change. Highest-value missing: Volume Profile (needs a horizontal-histogram
+primitive), Elder Ray, Chaikin, Aroon, TRIX, Ultimate Oscillator, Vortex,
+Standard Error bands.
 
 ### 12.4 UI elements
 
-| Advanced Charts element                 | Status                                          |
-| --------------------------------------- | ----------------------------------------------- |
-| Symbol search                           | ✅ searchable picker                            |
-| Resolution / timeframes                 | ✅ 9 resolutions                                |
-| Chart styles menu                       | 🟡 7 of 18                                      |
-| Indicators menu + studies legend        | ✅ add, hide, re-parameterise, remove           |
-| Panes (indicator sub-charts)            | ✅ auto-paned via `target: 'pane'`              |
-| Legend (OHLC, change, indicator values) | ✅ follows crosshair                            |
-| Price scale                             | 🟡 renders; no log/percent/invert/auto UI       |
-| Time scale                              | 🟡 renders; no timezone or session UI           |
-| Crosshair                               | 🟡 normal mode; no magnet                       |
-| Drawing toolbar                         | ❌ §12.2                                        |
-| Save layouts / templates                | ❌                                              |
-| Snapshots (chart image)                 | ❌                                              |
-| Marks on bars / timescale marks         | ❌ — the hook for signals and economic events   |
-| Context menu (right-click)              | ❌                                              |
-| Object tree                             | ❌                                              |
-| Watchlist · Details · News              | ❌ (Trading Platform-only in AC; ours to build) |
-| Bar replay                              | ❌                                              |
-| Alerts                                  | ❌                                              |
-| Multi-chart layout (up to 8)            | ❌ (Trading Platform-only in AC; ours to build) |
-| Undo/redo · keyboard shortcuts          | ❌                                              |
-| Fullscreen                              | ❌                                              |
+| Advanced Charts element                   | Status                       |
+| ----------------------------------------- | ---------------------------- |
+| Symbol search · timeframes · chart styles | ✅                           |
+| Indicators menu, studies legend, panes    | ✅                           |
+| Legend (OHLC, change, study values)       | ✅                           |
+| Drawing toolbar + object tree + inspector | ✅                           |
+| Undo/redo · keyboard shortcuts · magnet   | ✅                           |
+| Price scale: normal / log / percent       | ✅                           |
+| Bar replay (step, scrub, play 1-30×)      | ✅                           |
+| Marks on bars (trade signals)             | ✅                           |
+| Position / order lines                    | ✅ (§12.5 — paid tier in AC) |
+| Saved layouts / chart templates           | ❌                           |
+| Snapshots (chart image)                   | ❌                           |
+| Context menu (right-click)                | ❌                           |
+| Timescale marks (economic events)         | ❌                           |
+| Watchlist · Details · News panes          | ❌                           |
+| Alerts                                    | ❌                           |
+| Multi-chart layout (up to 8)              | ❌                           |
+| Fullscreen                                | ❌                           |
+| Timezone selector · market status         | ❌                           |
 
-### 12.5 Beyond Advanced Charts — the reason this page exists
+### 12.5 Beyond Advanced Charts ✅
 
-Not in the free product at all, and the part a generic TradingView cannot do:
-open positions with entry/SL/TP, order lines, trade-signal and rejection marks,
-martingale rungs, and Tier-1 economic-event markers on the time axis. In AC
-these needed the paid Trading Platform; here they are just more primitives.
+Open positions with entry/SL/TP and trade-signal markers are live. Still to
+come: order lines, martingale rungs, and Tier-1 economic events on the time
+axis.
 
 ---
 
 ## 13. Sequencing
 
-| Phase                   | Scope                                                                      | State                  |
-| ----------------------- | -------------------------------------------------------------------------- | ---------------------- |
-| 1 Data layer            | resolutions, aggregation, paging, cache, symbol info                       | ✅ done                |
-| 2 Chart + indicators    | LWC v5 host, 7 styles, panes, legend, scroll-back, live bar, 12 indicators | ✅ done                |
-| 3 Drawing tools         | spike `lightweight-charts-drawing` first, then toolbar + persistence       | next, biggest          |
-| 4 Trading overlays      | positions / orders / signals / events (§12.5)                              | high value, low effort |
-| 5 Bar replay            | scrub history, indicators recompute                                        | after 3                |
-| 6 Chrome                | context menu, object tree, settings, snapshots, fullscreen, shortcuts      | incremental            |
-| 7 Workspace             | multi-chart layouts, watchlist, saved layouts, alerts                      | last                   |
-| 8 Migrate ECharts chart | move analysis surfaces onto this engine                                    | deferred by decision   |
+| Phase                        | Scope                                                | State       |
+| ---------------------------- | ---------------------------------------------------- | ----------- |
+| 1 Data layer                 | resolutions, aggregation, paging, cache              | ✅          |
+| 2 Chart + indicators         | LWC v5 host, styles, panes, legend, live bar         | ✅          |
+| 3 Drawing tools              | 23 tools + full interaction machinery                | ✅          |
+| 4 Trading overlays           | positions, signals                                   | ✅          |
+| 5 Bar replay                 | step, scrub, play                                    | ✅          |
+| 6 Chrome                     | layouts, snapshots, context menu, fullscreen, alerts | next        |
+| 7 Workspace                  | multi-chart, watchlist, timescale marks              | after 6     |
+| 8 Remaining tools/indicators | the long tail of §12.2 and §12.3                     | incremental |
+| 9 Migrate ECharts chart      | move analysis surfaces onto this engine              | deferred    |
 
 ---
 
 ## Open questions
 
-1. **Drawing-tools route** — spike `lightweight-charts-drawing` (MIT, ~68 tools)
-   or build primitives from scratch? Decides most of the remaining effort.
-   (§12.2)
-2. **Renko / Kagi / PnF / LineBreak** — worth the price-based bar model, or
-   accept the gap? (§12.1)
-3. **SignalR room semantics** — per-route or per-symbol? The live bar currently
-   filters client-side on the tick's symbol, which works but subscribes to more
-   than it needs.
-4. **Drawing persistence** — `localStorage` per browser, or an engine-backed
-   `ChartLayout` table so drawings follow the operator across machines? (§8)
+1. **Drawing persistence** — `localStorage` today, so drawings are per-browser
+   and do not follow the operator to another machine. Engine-backed
+   `ChartLayout` table is the durable answer (§8).
+2. **Renko/P&F sizing** — currently ATR-derived. Should the box size be an
+   operator input per chart?
+3. **SignalR room semantics** — per-route or per-symbol? The live bar filters
+   client-side on the tick's symbol, which works but over-subscribes.
+4. **VolCandle** — the one missing chart style; needs a custom series.
 
 ## Sources
 
