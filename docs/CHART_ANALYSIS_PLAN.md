@@ -27,6 +27,24 @@ it survived this decision; it did, unchanged.
 
 Scope is tracked in §12, which replaces the old §11 sequencing.
 
+**2026-09-19 — the embedded ECharts plot stays on ECharts.** Migrating
+`shared/components/trading-chart` onto this engine was considered and rejected
+on measurement, not taste:
+
+- It removes **no dependency**. ECharts is imported by 61 files for gauges,
+  heatmaps, scatter and bar charts — none of which Lightweight Charts, a
+  financial time-series library, can draw. The bundle saving is zero.
+- The coupled surface is ~790 lines, not the ~145 that merely mention
+  `echarts`. About 230 of those are the draggable SL/TP handles, and dragging
+  one queues an EA command that moves a **real stop-loss broker-side**.
+
+Paying that risk for cosmetic consistency on one panel is a bad trade. What the
+migration was actually _for_ — reaching the drawing tools and studies from a
+position or a recommendation — is served by a deep link instead: the toolbar's
+**Full Chart ↗** anchor (`shared/components/trading-chart/chart-analysis-link.ts`)
+carries the symbol and timeframe into `/chart-analysis/:symbol?tf=`. Reopen this
+only if ECharts is being dropped app-wide, which is a different project.
+
 ---
 
 ## 1. Read this before writing any code
@@ -262,34 +280,67 @@ tick; signals and events are visible on the axes.
 
 ---
 
-## 8. Phase 4 — Persistence
+## 8. Phase 4 — Persistence ✅ SHIPPED
 
-Implement `IExternalSaveLoadAdapter`: chart layouts, drawing (line-tool) persistence
-per symbol, study and drawing templates.
+Two tiers, both live:
 
-- **Interim:** `localStorage` adapter — works immediately, per-browser only.
-- **Durable:** new engine surface (`ChartLayout` table + CRUD endpoints). The
-  existing `/chart-annotations` is a _text note_ surface, a different shape; don't
-  contort it into layout storage.
+- **Layouts and study templates** — `workspace/layout-store.service.ts`,
+  `localStorage`. Per-browser is the right scope for a window arrangement.
+- **Drawings** — engine-backed. `drawings/drawing-store.service.ts` keeps a
+  `localStorage` cache for instant paint and syncs to the engine on a 900 ms
+  debounce via `core/services/chart-drawings.service.ts`.
 
-**Exit criteria:** drawings and layouts survive reload and a republish.
+Engine side: `ChartDrawing` entity, `GetChartDrawings` query,
+`ReplaceChartDrawings` command, `ChartDrawingController`. Two traps paid for:
+
+- **Ownership key is a `string`, not a `long`.** `long.TryParse(UserId)`
+  rejected every caller, because the dev login issues `dev-user-1`. Hence
+  `OwnerKey` (migration `20260919160822_ChartDrawingOwnerKeyAsString`).
+- **The unique index must be PARTIAL.** `(OwnerKey, ClientId)` unique across all
+  rows breaks on delete → undo → delete, because the soft-deleted row still
+  occupies the key. It is filtered on `"IsDeleted" = false`, so uniqueness holds
+  among live rows only.
+
+The existing `/chart-annotations` is a _text note_ surface, a different shape;
+it was deliberately not contorted into drawing storage.
+
+**Exit criteria met:** drawings survive reload, a republish, a different browser
+and a different machine.
 
 ---
 
 ## 9. Build, deploy and runtime traps
 
-- **Release gate.** `release.sh publish` must assert `public/charting_library/` is
-  present. The page is otherwise a silent blank.
-- **Bundle size.** The library is ~20 MB of unhashed static files. Under the Caddy
-  rules they fall in the `no-cache` class (revalidate, cheap 304s) — acceptable, but
-  consider a dedicated `immutable` rule keyed on the pinned version directory.
-- **CSP.** The library uses web workers and iframes. This is a concrete argument for
-  the CSP still being deliberately off (see `CLAUDE.md` § Deliberately not done) —
-  if CSP is ever added, do the report-only pass with this page open first.
-- **Server time.** `getServerTime` should come from the engine, not the browser. The
-  EA fleet has already been burned by a server-to-UTC offset fault producing future
-  timestamps; a chart that silently draws bars in the future is the same class of bug.
-- **Attribution.** Do not "clean up" the TradingView logo. It is a licence condition.
+The first two entries here used to concern vendoring `public/charting_library/`
+and its logo attribution. Neither applies — nothing proprietary is vendored
+(decision log). What remains:
+
+- **CSP is ENFORCING** as of 2026-09-19, promoted only after a measured
+  report-only pass: all 74 sidebar routes swept with the console captured, zero
+  violations, plus drawing on the chart, adding a study, the canvas→PNG
+  snapshot and the assistant bubble. `worker-src blob:` is required and is not
+  in the `docker/nginx.conf` copy — this page and several ML pages create
+  workers from blob URLs. To roll back, rename the header to
+  `Content-Security-Policy-Report-Only` and `caddy reload`.
+- **Pointer events must be captured, not bubbled.** Lightweight Charts stops
+  them at its own canvas, so a bubble-phase listener never sees a click on the
+  chart. `drawings/drawing-controller.ts` uses **capture phase** for this
+  reason; moving it back silently kills every drawing tool.
+- **Paged engine queries need an explicit sort.** The economic-events overlay
+  showed 9–18 Sep while the API returned 5–20 Aug: an ascending default sort on
+  a capped page returns the OLDEST window. Always send `sortBy` /
+  `sortDirection`.
+- **Candles page newest-first.** `datafeed/candle-feed.service.ts` exports
+  `normaliseRows` as a pure function precisely because aggregation over
+  reversed input silently inverts candles rather than failing.
+- **Server time.** Bar times come from the engine, not the browser. The EA fleet
+  has already been burned by a server-to-UTC offset fault producing future
+  timestamps; a chart that silently draws bars in the future is the same class
+  of bug.
+- **Deploys are not live-reload.** Since 2026-09-19 source edits do not reach
+  `:8080`; `./scripts/release.sh publish` builds, stamps, stages and atomically
+  swaps a symlink. Verify with `release.sh status`, roll back with
+  `release.sh rollback`.
 
 ---
 
@@ -300,8 +351,16 @@ per symbol, study and drawing templates.
   canvas renders with bars, no console errors, drawings persist across reload. Use
   the login form's Developer tab — the skill's token-minting path no longer
   authenticates.
-- **Contract:** if engine endpoints are added in Phase 4, extend the engine repo's
-  `integration-tests/contract-test`.
+- **Cross-feature invariants:** where two features must agree but neither
+  imports the other, the guard has to live in a module both can reach.
+  `chart-analysis-link.spec.ts` is the worked example — it imports the embedded
+  chart's timeframe pills and the datafeed's `SUPPORTED_RESOLUTIONS` and asserts
+  every pill leads somewhere servable.
+- **Contract:** Phase 4 added engine endpoints, so keep the engine repo's
+  `integration-tests/contract-test` in step when `ChartDrawingController`
+  changes shape.
+
+Suite is at 526 vitest tests across 26 files.
 
 ---
 
@@ -310,18 +369,21 @@ per symbol, study and drawing templates.
 Checked against TradingView's own docs (`ui_elements`, the `ChartStyle` enum,
 the `DrawingToolIdentifier` type). Last measured 2026-09-19.
 
-### 12.1 Chart styles — 16 of 18 🟡
+### 12.1 Chart styles — 18 of 18 ✅
 
-Shipped: Candle, HollowCandle, HeikinAshi, Bar, HLCBars, Line, LineWithMarkers,
-Stepline, Area, HLCArea, Baseline, Column, **Renko, Line Break, Kagi, Point &
-Figure**.
+Candle, HollowCandle, HeikinAshi, Bar, HLCBars, Line, LineWithMarkers,
+Stepline, Area, HLCArea, Baseline, Column, Renko, Line Break, Kagi, Point &
+Figure, **VolCandle, HiLo**.
 
-Missing (2), both needing a custom series rather than a series option:
-`VolCandle` (volume-scaled bar widths) and `HiLo` (a range bar with neither an
-open nor a close tick — a bar series without the open tick is HLCBars, which is
-what we ship).
+The last two are the only ones with no built-in series behind them and live in
+`chart/custom-series.ts` as `ICustomSeriesPaneView` implementations: `HiLo` is a
+range bar with neither an open nor a close tick (a bar series minus the open
+tick is HLCBars, a different style), and `VolCandle` scales each body's WIDTH by
+volume, which no built-in series does. `VolCandle` measures share against the
+max volume in the **visible** range, so zooming into a quiet stretch still shows
+relative differences instead of a row of hairlines.
 
-### 12.2 Drawing tools — 54 🟡
+### 12.2 Drawing tools — 82 🟡
 
 Lines, channels (parallel, flat, regression, disjoint angle), four pitchforks,
 Gann box/fan/square, the full Fibonacci set (retracement, extension, channel,
@@ -334,21 +396,31 @@ inspector, lock, clone, object tree, undo/redo, per-symbol+timeframe
 persistence, and per-panel scoping for split layouts. Adding a tool is one
 `TOOLS` entry plus a renderer case.
 
+Persistence is **engine-backed** (§8), not just localStorage: drawings survive a
+different browser and machine.
+
 Against TradingView's ~110 the remaining gap is the long tail — Fib spiral,
 cyclic and sine lines, Elliott double/triple combos, the cypher and 5-point
 harmonic variants, bars-pattern and ghost-feed projection, arcs variants.
 
-### 12.3 Indicators — 49 🟡
+### 12.3 Indicators — 60 🟡
 
 Moving averages (SMA, EMA, WMA, SMMA, Hull, DEMA, TEMA, ALMA, VWMA, LinReg),
-bands (Bollinger, Keltner, Donchian, Envelope), Ichimoku, PSAR, SuperTrend,
-Pivot Points, VWAP, and the oscillator/volume set (RSI, MACD, Stochastic,
-Stoch RSI, ATR, ADX, CCI, Williams %R, MFI, Momentum, ROC, TRIX, DPO, Aroon,
-Ultimate, Awesome, Fisher, Choppiness, Vortex, Historical Volatility, OBV, A/D,
-CMF, Chaikin Osc, Force Index, Elder Ray, BOP, EOM, PVT, Mass Index, Volume
-Profile).
+bands (Bollinger + %B + Bandwidth, Keltner, Donchian, Envelope, Standard Error),
+Ichimoku, PSAR, SuperTrend, Alligator, Pivot Points, VWAP, and the
+oscillator/volume set (RSI, MACD, PPO, Stochastic, Stoch RSI, Schaff Trend
+Cycle, ATR, ADX, CCI, Williams %R, MFI, Momentum, ROC, TRIX, DPO, Aroon, KST,
+Coppock, RVI, Ultimate, Awesome, Fisher, Choppiness, Vortex, Historical
+Volatility, OBV, A/D, CMF, Chaikin Osc, Force Index, Elder Ray, BOP, EOM, PVT,
+Mass Index, Volume Oscillator, NVI/PVI, Volume Profile).
 
 Closes linearly through `indicators/registry.ts` — one entry each.
+
+Two traps already paid for, both in `indicators/math.ts`: `sma`'s rolling sum
+drifts, so Stoch RSI emitted −7.1e-15 until it was clamped after smoothing; and
+standard-error bands must recompute the regression **inside** the band
+calculation — measuring residuals against the regression endpoint gave 218 where
+the fitted line gives 267 on a perfect ramp.
 
 ### 12.4 UI elements
 
@@ -370,34 +442,66 @@ Closes linearly through `indicators/registry.ts` — one entry each.
 | Fullscreen                                | ✅                             |
 | Timezone selector                         | ✅                             |
 | Watchlist                                 | ✅                             |
-| Multi-chart layout (1 / 2 / 4)            | ✅ (up to 8 in AC)             |
+| Multi-chart layout (1 / 2 / 4 / 6 / 8)    | ✅ (matches AC's 8)            |
 | Alerts                                    | ✅ price alerts from the chart |
 | Details · News panes                      | ❌                             |
-| Market status indicator                   | ❌                             |
+| Market status indicator                   | ✅ (legend: "market closed")   |
+
+Two UI traps worth keeping: `[value]` on a `<select>` fed by `@for` does not
+stick — all three split panels showed the same symbol until it moved to
+`ngModel`; and the 50+ button tool rail has ~1700px of intrinsic height, which
+drove the page to 1861px in a 950px viewport. `min-height: 0` + `overflow-y:
+auto` did **not** fix that; the rail has to leave flow (`position: absolute`).
 
 ### 12.5 Beyond Advanced Charts ✅
 
-Open positions with entry/SL/TP, trade-signal markers, and economic events on
-the time axis. Still to come: order lines and martingale rungs.
+Open positions with entry/SL/TP, **order lines, martingale rungs**,
+trade-signal markers, and economic events on the time axis — none of which
+Advanced Charts offers at any tier we could licence.
+
+Timezone handling is the subtle one: drawings are stored in UTC, so the
+selected offset is applied at projection and **inverted on click-read**. Skip
+the inversion and every drawing slides when the operator changes timezone.
+
+Economic-event marks must render at `zOrder: 'normal'` — `'bottom'` puts them
+beneath the pane background, i.e. invisible.
+
+### 12.6 Reaching the workspace from elsewhere ✅
+
+`/chart-analysis/:symbol?tf=` is a deep link, and the embedded trading chart's
+**Full Chart ↗** anchor uses it so an operator studying a position or an LLM
+recommendation can get to the drawing tools without re-selecting the
+instrument. The symbol and timeframe vocabularies differ between the two
+surfaces; `shared/components/trading-chart/chart-analysis-link.ts` owns the
+translation and its spec asserts every pill maps to a resolution the datafeed
+can actually serve.
 
 ---
 
 ## 13. What is left
 
-| Item                                | Why it is not done                                       |
-| ----------------------------------- | -------------------------------------------------------- |
-| Remaining drawing tools (~56)       | Long tail; one `TOOLS` entry plus a renderer case each.  |
-| Remaining indicators                | Long tail; one registry entry each.                      |
-| `VolCandle` and true `HiLo` styles  | Each needs a custom series.                              |
-| Details / News panes, market status | Not started.                                             |
-| 8-way split                         | Layouts cap at 4; the grid takes more with a CSS change. |
+| Item                           | Why it is not done                                                                    |
+| ------------------------------ | ------------------------------------------------------------------------------------- |
+| Remaining drawing tools (~28)  | Long tail; one `TOOLS` entry plus a renderer case each. §12.2 names them.             |
+| Remaining indicators           | Long tail; one registry entry each.                                                   |
+| Details / News panes           | Not started. News would duplicate the news-intelligence module rather than extend it. |
+| ECharts migration of §Decision | **Rejected on measurement**, not deferred — see the decision log. Do not re-open.     |
+
+Everything else previously listed here has shipped: 18/18 chart styles, the
+8-way split, order lines and martingale rungs, and engine-backed drawing
+persistence.
 
 ## Open questions
 
 1. **Renko / P&F sizing** — ATR-derived today. Should the box size be an
    operator input per chart?
-2. **SignalR room semantics** — per-route or per-symbol? The live bar filters
-   client-side on the tick's symbol, which works but over-subscribes.
+
+## Resolved questions
+
+- **SignalR room semantics** — settled as **per-symbol**
+  (`SubscribePrice`/`UnsubscribePrice`) rather than the per-route
+  `EnterRoom`/`LeaveRoom` pattern. The live bar used to filter client-side on
+  the tick's symbol, which worked but over-subscribed the hub.
 
 ## Sources
 
