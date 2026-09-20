@@ -9,8 +9,14 @@ import { findPage } from '@shared/navigation/page-catalog';
 import type { PageContext, PageFacts } from './page-context.types';
 import { UiCommandService } from './ui-command.service';
 
-/** How much page context may be sent. The engine caps it too; this keeps the wire small. */
-const MAX_CONTEXT_CHARS = 4000;
+/**
+ * How much page context may be sent.
+ *
+ * <p>Matches the engine's own `AssistantPageContextMaxChars` (8000). Staying under the
+ * server cap is the point: the engine truncates as plain TEXT with a marker, which the model
+ * can cope with, but a page that routinely overruns would be handing it half a sentence.</p>
+ */
+const MAX_CONTEXT_CHARS = 8000;
 
 /**
  * Assembles what the assistant is told about the current page.
@@ -118,18 +124,64 @@ export class PageContextService {
     };
   }
 
-  /** Capture, serialise and cap. Returns null when there is nothing worth sending. */
+  /**
+   * Capture, serialise and fit inside the cap.
+   *
+   * <p><b>Never slices the JSON.</b> It used to, and the moment a page published enough to
+   * overrun the cap the result was a truncated string that is not valid JSON — which the
+   * caller then tried to parse, so the context was dropped entirely and the assistant
+   * answered as if it had no idea what page it was on. Nothing warned; the reply simply said
+   * the page was not being reported.</p>
+   *
+   * <p>Instead the payload is reduced in stages, each one a complete object that still
+   * serialises. Command PARAMETER detail goes first (the model can ask), then the facts, then
+   * the command list down to bare ids — route and scope are small and always useful, so they
+   * are what survives.</p>
+   */
   captureJson(): string | null {
     try {
-      const json = JSON.stringify(this.capture());
-      if (json.length <= MAX_CONTEXT_CHARS) return json;
-      // Facts are the droppable part — route and scope are small and always useful.
-      const withoutFacts = JSON.stringify({
-        ...this.capture(),
-        facts: null,
-        factsOmitted: 'too large',
-      });
-      return withoutFacts.slice(0, MAX_CONTEXT_CHARS);
+      const full = this.capture();
+      const commands = full.commands ?? [];
+
+      const stages: PageContext[] = [
+        full,
+        // 1. Keep every command, lose the parameter documentation.
+        {
+          ...full,
+          commands: commands.map((c) => ({
+            ...c,
+            params: c.params?.map((p) => ({ name: p.name, type: p.type, description: '' })),
+          })),
+        },
+        // 2. Lose the parameters entirely.
+        {
+          ...full,
+          commands: commands.map(({ id, description, confirm }) => ({
+            id,
+            description,
+            ...(confirm ? { confirm } : {}),
+          })),
+        },
+        // 3. Lose the page's own facts.
+        {
+          ...full,
+          facts: null,
+          commands: commands.map(({ id, description }) => ({ id, description })),
+        },
+        // 4. Bare command ids, so the assistant still knows what it could ask to run.
+        { ...full, facts: null, commands: commands.map(({ id }) => ({ id, description: '' })) },
+        // 5. Route and scope only.
+        { ...full, facts: null, commands: [] },
+      ];
+
+      for (const stage of stages) {
+        const json = JSON.stringify(stage);
+        if (json.length <= MAX_CONTEXT_CHARS) return json;
+      }
+
+      // Everything still too big means the route/scope alone overran, which cannot happen
+      // with any real URL — but returning invalid JSON is not the fallback.
+      return null;
     } catch {
       return null;
     }

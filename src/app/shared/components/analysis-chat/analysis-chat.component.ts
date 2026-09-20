@@ -613,9 +613,28 @@ const MAX_THREAD_TURNS = 300;
                     [attr.data-status]="(m.actionStatus || 'Pending').toLowerCase()"
                   >
                     <div class="action-head">
-                      <span class="action-badge">⚡ Proposed action</span>
+                      <span class="action-badge">{{
+                        m.toolName === 'ui_action' ? '🖥 Page command' : '⚡ Proposed action'
+                      }}</span>
                       <span class="action-status">{{ m.actionStatus }}</span>
                     </div>
+                    <!--
+                      A page command is not an engine call, so the http_action rendering below
+                      cannot describe it: it has no method and no path, and the generic
+                      fallback announced it as "not a call this console recognises" — which
+                      reads as a warning about a command the operator themselves asked for.
+                    -->
+                    @if (uiActionOf(m); as ua) {
+                      <div class="impact" data-severity="low">
+                        <strong>{{ ua.command }}</strong>
+                        @if (ua.detail) {
+                          <span> — {{ ua.detail }}</span>
+                        }
+                      </div>
+                      @if (ua.outcome) {
+                        <div class="action-summary">{{ ua.outcome }}</div>
+                      }
+                    }
                     <!--
                     The proposal's own prose. The http_action producer puts everything in
                     toolArgsJson and leaves this empty, but the algo-engineer posts a written
@@ -625,7 +644,7 @@ const MAX_THREAD_TURNS = 300;
                     @if (m.content) {
                       <div class="action-body md" [innerHTML]="m.content | markdown"></div>
                     }
-                    @if (parseAction(m); as pa) {
+                    @if (m.toolName !== 'ui_action' && parseAction(m); as pa) {
                       @if (impactOf(pa); as impact) {
                         <div class="impact" [attr.data-severity]="impact.severity">
                           <strong>{{ impact.verb }}</strong>
@@ -2121,6 +2140,32 @@ export class AnalysisChatComponent {
     // refresh would repeat the command.
     this.autoRan.add(pending.id);
     void this.runUiAction(pending);
+  }
+
+  /**
+   * A page command card, described for the operator.
+   *
+   * <p>Returns null for every other kind of proposal so the engine-call rendering keeps the
+   * card to itself.</p>
+   */
+  protected uiActionOf(
+    m: SpotAnalysisFollowUpTurnDto,
+  ): { command: string; detail: string; outcome: string } | null {
+    if (m.toolName !== UI_ACTION_TOOL) return null;
+    const call = parseUiAction(m.toolArgsJson);
+    if (!call) return { command: 'Unreadable page command', detail: '', outcome: '' };
+    const detail = Object.entries(call.args)
+      .map(([k, v]) => `${k}: ${String(v)}`)
+      .join(', ');
+    let outcome = '';
+    try {
+      const r = m.toolResultJson ? (JSON.parse(m.toolResultJson) as Record<string, unknown>) : null;
+      const text = r?.['outcome'] ?? r?.['reason'];
+      if (typeof text === 'string') outcome = text;
+    } catch {
+      /* a card with an unreadable result still renders its command */
+    }
+    return { command: call.command, detail, outcome };
   }
 
   /** Turn ids already auto-run, so a thread refresh cannot replay them. */

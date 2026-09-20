@@ -25,6 +25,23 @@ const ASK_TIMEOUT_MS = 180_000;
  * the follow-up endpoints the spot-analysis chat has used since it shipped, because an
  * assistant session is the same object: an anchor conversation with turns hanging off it.</p>
  */
+/**
+ * Re-parse the serialised context, or send none.
+ *
+ * <p>A bare `JSON.parse` here used to throw on a malformed payload and take the whole
+ * question down with it. The context is an optional enrichment — losing it should cost the
+ * assistant some awareness, never the operator their message — so a payload that will not
+ * parse is dropped and the question still goes.</p>
+ */
+function parseContext(json: string | null): unknown {
+  if (!json) return undefined;
+  try {
+    return JSON.parse(json);
+  } catch {
+    return undefined;
+  }
+}
+
 @Injectable({ providedIn: 'root' })
 export class AssistantService {
   private readonly api = inject(ApiService);
@@ -46,7 +63,7 @@ export class AssistantService {
     return this.api
       .post<
         ResponseData<SpotAnalysisFollowUpTurnDto>
-      >(`/market-data/analyze/${llmInvocationId}/follow-up`, { question, pageContext: pageContext ? JSON.parse(pageContext) : undefined }, { silent: true })
+      >(`/market-data/analyze/${llmInvocationId}/follow-up`, { question, pageContext: parseContext(pageContext) }, { silent: true })
       .pipe(timeout(ASK_TIMEOUT_MS));
   }
 }
