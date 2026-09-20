@@ -88,6 +88,14 @@ export interface ChartCommandHost {
   objectTreeOpen: { (): boolean; set(v: boolean): void };
   toggleFullscreen(): Promise<void>;
   isFullscreen(): boolean;
+
+  // ── Analysis overlays ──────────────────────────────────────────────────
+  showVolumeProfile: { (): boolean; set(v: boolean): void };
+  showSupportResistance: { (): boolean; set(v: boolean): void };
+  /** Support/resistance as currently computed, so the model can cite the levels. */
+  srLevels(): readonly { price: number; kind: string; touches: number; strength: number }[];
+  /** Volume profile POC and value area for the loaded window, or null. */
+  volumeProfile(): { poc: number; valueAreaLow: number; valueAreaHigh: number } | null;
 }
 
 const ok = (message: string, data?: unknown): UiCommandOutcome => ({ ok: true, message, data });
@@ -1012,6 +1020,43 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
         if (host.isFullscreen() === want) return ok(`Already ${want ? 'fullscreen' : 'windowed'}.`);
         await host.toggleFullscreen();
         return ok(want ? 'Fullscreen.' : 'Left fullscreen.');
+      },
+    },
+    {
+      id: 'chart.setOverlay',
+      description:
+        'Turn an analysis overlay on or off: the volume profile (volume by price, with POC and value area) or auto-detected support/resistance.',
+      params: [
+        {
+          name: 'overlay',
+          type: 'enum',
+          required: true,
+          values: ['volumeProfile', 'supportResistance'],
+          description: 'Which overlay.',
+        },
+        { name: 'visible', type: 'boolean', required: true, description: 'true to show.' },
+      ],
+      run: (a) => {
+        const want = bool(a, 'visible');
+        if (str(a, 'overlay') === 'volumeProfile') host.showVolumeProfile.set(want);
+        else host.showSupportResistance.set(want);
+        return ok(`${str(a, 'overlay')} ${want ? 'on' : 'off'}.`);
+      },
+    },
+    {
+      id: 'chart.readLevels',
+      description:
+        'Read the auto-detected support/resistance levels and the volume profile POC / value area as numbers — so they can be quoted or drawn on without guessing from the picture.',
+      run: () => {
+        const levels = host.srLevels();
+        const vp = host.volumeProfile();
+        const parts: string[] = [];
+        if (levels.length) parts.push(`${levels.length} level(s)`);
+        if (vp) parts.push(`POC ${vp.poc}`);
+        return ok(
+          parts.length ? parts.join(', ') + '.' : 'No levels detected on the loaded bars.',
+          { levels, volumeProfile: vp },
+        );
       },
     },
     {

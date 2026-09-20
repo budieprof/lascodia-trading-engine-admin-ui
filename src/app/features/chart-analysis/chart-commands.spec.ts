@@ -159,6 +159,10 @@ function makeHost(over: Partial<ChartCommandHost> = {}) {
       fullscreen = !fullscreen;
     },
     isFullscreen: () => fullscreen,
+    showVolumeProfile: sig(false),
+    showSupportResistance: sig(false),
+    srLevels: () => [{ price: 1.15, kind: 'resistance', touches: 3, strength: 0.8 }],
+    volumeProfile: () => ({ poc: 1.147, valueAreaLow: 1.144, valueAreaHigh: 1.15 }),
     knownSymbols: () => ['EURUSD', 'GBPUSD', 'AUDCAD'],
     timezones: () => [
       { id: 'UTC', label: 'UTC' },
@@ -620,5 +624,41 @@ describe('workspace, replay and chrome', () => {
     expect((await run('chart.setFullscreen', { on: false })).message).toMatch(/Already/);
     expect((await run('chart.setFullscreen', { on: true })).ok).toBe(true);
     expect(host.isFullscreen()).toBe(true);
+  });
+});
+
+describe('analysis overlays', () => {
+  let host: ChartCommandHost;
+  let cmds: UiCommand[];
+
+  beforeEach(() => {
+    host = makeHost();
+    cmds = chartCommands(host);
+  });
+
+  it('toggles the volume profile and support/resistance independently', async () => {
+    await byId(cmds, 'chart.setOverlay').run({ overlay: 'volumeProfile', visible: true });
+    expect(host.showVolumeProfile()).toBe(true);
+    expect(host.showSupportResistance()).toBe(false);
+
+    await byId(cmds, 'chart.setOverlay').run({ overlay: 'supportResistance', visible: true });
+    expect(host.showSupportResistance()).toBe(true);
+  });
+
+  it('reads the levels back as NUMBERS, not as a picture', async () => {
+    // The point of this command: the assistant can quote a level or draw on it without
+    // squinting at the screenshot and guessing the price.
+    const r = await byId(cmds, 'chart.readLevels').run({});
+    expect(r.ok).toBe(true);
+    const data = r.data as { levels: unknown[]; volumeProfile: { poc: number } | null };
+    expect(data.levels).toHaveLength(1);
+    expect(data.volumeProfile?.poc).toBe(1.147);
+    expect(r.message).toMatch(/POC/);
+  });
+
+  it('says plainly when nothing was detected', async () => {
+    const empty = makeHost({ srLevels: () => [], volumeProfile: () => null });
+    const r = await byId(chartCommands(empty), 'chart.readLevels').run({});
+    expect(r.message).toMatch(/No levels detected/);
   });
 });

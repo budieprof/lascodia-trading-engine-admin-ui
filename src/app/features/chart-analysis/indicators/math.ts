@@ -1677,3 +1677,39 @@ export function zigzag(bars: Ohlc[], deviation = 5): Maybe[] {
 export function netVolume(bars: Ohlc[]): Maybe[] {
   return bars.map((b) => (b.close === b.open ? 0 : b.close > b.open ? b.volume : -b.volume));
 }
+
+export interface DeltaBar {
+  time: number;
+  /** Estimated buy-minus-sell volume for the bar. */
+  delta: number;
+  /** Running sum from the first bar. */
+  cumulative: number;
+}
+
+/**
+ * Buy/sell imbalance ESTIMATED from OHLCV.
+ *
+ * <p><b>This is not order flow.</b> Real order flow needs an aggressor tape — which side
+ * crossed the spread on each trade — and this system has none for FX. The CME
+ * microstructure work that would have supplied one closed NEGATIVE: aggressor delta did not
+ * beat the tick-rule proxy, and it ships disabled.</p>
+ *
+ * <p>What this computes is the standard OHLCV proxy: a bar that closes near its high is
+ * assumed to have been bought, one that closes near its low sold, scaled by volume. It is a
+ * reasonable read of pressure and a poor substitute for the real thing, so every surface
+ * that draws it must say "estimated" — a drawn estimate reads as a measurement unless the
+ * chart itself says otherwise.</p>
+ */
+export function estimatedDelta(bars: readonly Ohlc[]): DeltaBar[] {
+  const out: DeltaBar[] = [];
+  let cumulative = 0;
+  for (const bar of bars) {
+    const range = bar.high - bar.low;
+    // A zero-range bar carries no information about which side was in control; calling it
+    // balanced is the only honest answer, and it avoids a divide by zero.
+    const delta = range > 0 ? bar.volume * ((2 * (bar.close - bar.low)) / range - 1) : 0;
+    cumulative += delta;
+    out.push({ time: bar.time, delta, cumulative });
+  }
+  return out;
+}

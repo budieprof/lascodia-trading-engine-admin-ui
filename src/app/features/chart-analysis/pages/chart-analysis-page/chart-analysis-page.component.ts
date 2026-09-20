@@ -48,6 +48,7 @@ import { PageContextService } from '@core/assistant/page-context.service';
 import { UiCommandService } from '@core/assistant/ui-command.service';
 import { chartCommands } from '../../chart-commands';
 import type { EventMark } from '../../overlays/event-marks-renderer';
+import { profileWithValueArea, supportResistance } from '../../overlays/analysis-overlays';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import type { PriceOverlay } from '../../overlays/overlay-renderer';
 import type { ChartMarker } from '../../chart/chart-host.component';
@@ -166,6 +167,22 @@ export class ChartAnalysisPageComponent {
   readonly overlays = computed(() => [...this.positionOverlays(), ...this.orderOverlays()]);
   readonly markers = computed(() => [...this.signalMarkers(), ...this.rungMarkers()]);
   readonly showOverlays = signal(true);
+
+  // ── Analytical overlays ──────────────────────────────────────────────────
+  //
+  // Derived from the loaded bars, not fetched. The chart host computes them; these are the
+  // toggles the toolbar drives.
+  readonly showVolumeProfile = signal(false);
+  readonly showSupportResistance = signal(false);
+
+  /** The estimated-delta study, which is a PANE study rather than a price overlay. */
+  readonly deltaOn = computed(() => this.active().some((i) => i.defId === 'est-delta'));
+
+  toggleDelta(): void {
+    const existing = this.active().find((i) => i.defId === 'est-delta');
+    if (existing) this.removeIndicator(existing.uid);
+    else this.addIndicator('est-delta');
+  }
   private readonly orders = inject(OrdersService);
   private readonly martingale = inject(MartingaleService);
 
@@ -508,6 +525,17 @@ export class ChartAnalysisPageComponent {
         objectTreeOpen: this.objectTreeOpen,
         toggleFullscreen: () => this.toggleFullscreen(),
         isFullscreen: () => this.isFullscreen(),
+        showVolumeProfile: this.showVolumeProfile,
+        showSupportResistance: this.showSupportResistance,
+        // Computed on demand rather than held in a signal: the assistant asks rarely, and a
+        // second copy of this would be a second thing that can disagree with the chart.
+        srLevels: () => supportResistance(this.bars()),
+        volumeProfile: () => {
+          const p = profileWithValueArea(this.bars());
+          return p
+            ? { poc: p.poc, valueAreaLow: p.valueAreaLow, valueAreaHigh: p.valueAreaHigh }
+            : null;
+        },
       }),
       this.destroyRef,
     );

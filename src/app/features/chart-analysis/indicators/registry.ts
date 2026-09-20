@@ -70,6 +70,7 @@ import {
   stdev,
   tsi,
   zigzag,
+  estimatedDelta,
   type Maybe,
   type Ohlc,
 } from './math';
@@ -1164,6 +1165,29 @@ export const INDICATORS: readonly IndicatorDef[] = [
     ],
     plots: [{ key: 'zz', title: 'Zig Zag', kind: 'line', color: '#2962FF' }],
     compute: (bars, p) => ({ zz: zigzag(bars, num(p, 'deviation', 5)) }),
+  },
+  {
+    id: 'est-delta',
+    name: 'Delta (estimated)',
+    target: 'pane',
+    inputs: [],
+    plots: [{ key: 'delta', title: 'Δ est', kind: 'histogram', color: '#26A69A' }],
+    levels: [{ value: 0, color: '#787B86' }],
+    // NOT order flow. There is no aggressor tape for FX here, so this is the standard
+    // OHLCV proxy: a bar closing near its high is assumed bought, near its low sold. The
+    // name says "estimated" because a drawn estimate reads as a measurement otherwise.
+    compute: (bars) => ({ delta: estimatedDelta(bars).map((d) => d.delta) }),
+  },
+  {
+    id: 'est-cum-delta',
+    name: 'Cumulative Delta (estimated)',
+    target: 'pane',
+    inputs: [],
+    plots: [{ key: 'cum', title: 'ΣΔ est', kind: 'line', color: '#2962FF' }],
+    levels: [{ value: 0, color: '#787B86' }],
+    // The reason to plot the cumulative form: price making higher highs while this slopes
+    // down is the divergence worth seeing, and it is invisible in the per-bar series.
+    compute: (bars) => ({ cum: estimatedDelta(bars).map((d) => d.cumulative) }),
   },
   {
     id: 'net-volume',

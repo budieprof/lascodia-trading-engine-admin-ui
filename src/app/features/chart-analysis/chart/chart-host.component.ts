@@ -49,6 +49,12 @@ import { DrawingStore } from '../drawings/drawing-store.service';
 import { DrawingController } from '../drawings/drawing-controller';
 import type { DrawingKind } from '../drawings/model';
 import { OverlayRenderer, type PriceOverlay } from '../overlays/overlay-renderer';
+import { AnalysisOverlayRenderer } from '../overlays/analysis-overlay-renderer';
+import {
+  profileWithValueArea,
+  supportResistance,
+  type SrLevel,
+} from '../overlays/analysis-overlays';
 import { timezoneOffsetMinutes } from '../workspace/layout-store.service';
 import { EventMarksRenderer, type EventMark } from '../overlays/event-marks-renderer';
 
@@ -160,6 +166,10 @@ export class ChartHostComponent implements OnDestroy {
   readonly bars = input.required<Bar[]>();
   readonly style = input<ChartStyle>('candles');
   readonly showVolume = input<boolean>(true);
+  /** Volume-by-price histogram down the right edge, with POC and value area. */
+  readonly showVolumeProfile = input<boolean>(false);
+  /** Auto-detected support/resistance from swing pivots. */
+  readonly showSupportResistance = input<boolean>(false);
   readonly indicators = input<ActiveIndicator[]>([]);
   readonly precision = input<number>(5);
   /** Armed drawing tool, or null for the cursor. */
@@ -203,6 +213,10 @@ export class ChartHostComponent implements OnDestroy {
   private plotted: Bar[] = [];
   private computedCache = new Map<string, Record<string, Array<number | null>>>();
   private readonly overlayRenderer = new OverlayRenderer(
+    () => this.price,
+    () => this.precision(),
+  );
+  private readonly analysisRenderer = new AnalysisOverlayRenderer(
     () => this.price,
     () => this.precision(),
   );
@@ -285,6 +299,19 @@ export class ChartHostComponent implements OnDestroy {
     effect(() => {
       const overlays = this.overlays();
       untracked(() => this.overlayRenderer.setOverlays(overlays));
+    });
+
+    // Analytical overlays, recomputed when the bars or the toggles change. Both are O(n)
+    // over the loaded bars, which is why they are computed here rather than per frame —
+    // the renderer only projects.
+    effect(() => {
+      const bars = this.bars();
+      const wantProfile = this.showVolumeProfile();
+      const wantLevels = this.showSupportResistance();
+      untracked(() => {
+        this.analysisRenderer.setProfile(wantProfile ? profileWithValueArea(bars) : null);
+        this.analysisRenderer.setLevels(wantLevels ? supportResistance(bars) : []);
+      });
     });
 
     effect(() => {
@@ -663,6 +690,7 @@ export class ChartHostComponent implements OnDestroy {
       // Overlays and markers live on the series too, so they follow it through
       // every style change for the same reason drawings do.
       this.price.attachPrimitive(this.overlayRenderer);
+      this.price.attachPrimitive(this.analysisRenderer);
       this.price.attachPrimitive(this.eventRenderer);
       this.markerApi = createSeriesMarkers(this.price, []);
       this.applyMarkers(this.markers());

@@ -141,6 +141,41 @@
       </button>
     }
 
+    <!--
+      Analytical overlays. These are DERIVED from the loaded bars, not fetched — which is
+      why the delta one says "est.": there is no aggressor tape for FX here, so it is the
+      standard OHLCV proxy and must not read as measured order flow.
+    -->
+    <div class="overlay-picker" role="group" aria-label="Analysis overlays">
+      <button
+        type="button"
+        class="tool"
+        [class.active]="showVolumeProfile()"
+        (click)="showVolumeProfile.set(!showVolumeProfile())"
+        title="Volume profile — volume by price for the loaded window, with POC and value area"
+      >
+        ▤ VP
+      </button>
+      <button
+        type="button"
+        class="tool"
+        [class.active]="showSupportResistance()"
+        (click)="showSupportResistance.set(!showSupportResistance())"
+        title="Support &amp; resistance — auto-detected from swing pivots, weighted by touches"
+      >
+        ⇥ S/R
+      </button>
+      <button
+        type="button"
+        class="tool"
+        [class.active]="deltaOn()"
+        (click)="toggleDelta()"
+        title="Order-flow delta, ESTIMATED from OHLCV — there is no aggressor tape for FX here, so a bar closing near its high is assumed bought"
+      >
+        ⧗ Δ est
+      </button>
+    </div>
+
     <button
       type="button"
       class="tool"
@@ -452,6 +487,8 @@
           [events]="events()"
           [minEventImpact]="minEventImpact()"
           [boxSizeAtr]="boxSizeAtr()"
+          [showVolumeProfile]="showVolumeProfile()"
+          [showSupportResistance]="showSupportResistance()"
           [symbol]="symbol()"
           [resolution]="resolution()"
           [overlays]="overlays()"
