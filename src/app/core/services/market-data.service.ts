@@ -266,10 +266,16 @@ export class MarketDataService {
     question: string,
     /** Admin-assistant threads only: what the operator is looking at right now. */
     pageContext?: unknown,
+    /**
+     * Admin-assistant threads only: a JPEG of the operator's screen, bare base64.
+     * Present only while they have a screen-sharing session open. Never stored.
+     */
+    screenshot?: string | null,
   ): Observable<ResponseData<SpotAnalysisFollowUpTurnDto>> {
     return this.api.post(`/market-data/analyze/${llmInvocationId}/follow-up`, {
       question,
       ...(pageContext ? { pageContext } : {}),
+      ...(screenshot ? { screenshot } : {}),
     });
   }
 

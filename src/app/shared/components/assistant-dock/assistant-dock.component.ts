@@ -16,6 +16,8 @@ import { AnalysisChatComponent } from '@shared/components/analysis-chat/analysis
 import { AssistantDockService } from '@core/assistant/assistant-dock.service';
 import { AssistantService } from '@core/assistant/assistant.service';
 import { PageContextService } from '@core/assistant/page-context.service';
+import { ScreenCaptureService } from '@core/assistant/screen-capture.service';
+import { NotificationService } from '@core/notifications/notification.service';
 
 /**
  * The console's assistant: a bubble on every page that opens a chat which knows where you
@@ -81,6 +83,28 @@ import { PageContextService } from '@core/assistant/page-context.service';
             }
           </div>
           <div class="dock-actions">
+            <!--
+              Screen sharing. The browser shows its own indicator for the whole session, so
+              this toggle can only ever agree with something the operator can already see —
+              it cannot put the assistant's eyes anywhere they did not put them.
+            -->
+            @if (capture.supported) {
+              <button
+                type="button"
+                class="icon"
+                [class.sharing]="capture.sharing()"
+                (click)="toggleSharing()"
+                [title]="
+                  capture.sharing()
+                    ? 'Stop sharing your screen with the assistant'
+                    : 'Let the assistant see your screen'
+                "
+                [attr.aria-pressed]="capture.sharing()"
+                aria-label="Share screen with the assistant"
+              >
+                {{ capture.sharing() ? '👁' : '👁‍🗨' }}
+              </button>
+            }
             <button
               type="button"
               class="icon"
@@ -140,6 +164,7 @@ import { PageContextService } from '@core/assistant/page-context.service';
               [placeholder]="'Ask about this page, or anything in the console…'"
               [emptyHint]="emptyHint()"
               [contextProvider]="contextProvider"
+              [screenshotProvider]="screenshotProvider"
             />
           }
         </div>
@@ -270,6 +295,14 @@ import { PageContextService } from '@core/assistant/page-context.service';
         text-overflow: ellipsis;
         max-width: 18ch;
       }
+      /* Sharing is a state the operator should be able to see at a glance without hunting
+         for the browser's own indicator. */
+      .icon.sharing {
+        color: #fff;
+        background: #d93025;
+        border-radius: 6px;
+      }
+
       .dock-actions {
         display: flex;
         gap: 2px;
@@ -341,6 +374,8 @@ export class AssistantDockComponent {
   protected readonly dock = inject(AssistantDockService);
   private readonly assistant = inject(AssistantService);
   private readonly pageContext = inject(PageContextService);
+  protected readonly capture = inject(ScreenCaptureService);
+  private readonly notifications = inject(NotificationService);
   private readonly router = inject(Router);
 
   private readonly dockEl = viewChild<ElementRef<HTMLElement>>('dockEl');
@@ -365,6 +400,31 @@ export class AssistantDockComponent {
     const json = this.pageContext.captureJson();
     return json ? JSON.parse(json) : null;
   };
+
+  /**
+   * A frame of the operator's screen at send time, or null when they are not sharing.
+   *
+   * <p>Grabbed per question rather than once per session, because the point is what they are
+   * looking at NOW — a still from when sharing started would show a page they have since
+   * navigated away from, and the assistant would describe it with total confidence.</p>
+   */
+  protected readonly screenshotProvider = async (): Promise<string | null> => {
+    if (!this.capture.sharing()) return null;
+    const frame = await this.capture.grab();
+    return frame?.base64 ?? null;
+  };
+
+  protected async toggleSharing(): Promise<void> {
+    if (this.capture.sharing()) {
+      this.capture.stop();
+      return;
+    }
+    const started = await this.capture.start();
+    const problem = this.capture.error();
+    // A declined prompt is a decision, not a failure — but silence would leave the operator
+    // wondering whether the toggle did anything.
+    if (!started && problem) this.notifications.info?.(problem);
+  }
 
   constructor() {
     // ⌘/ (Ctrl+/) toggles. ⌘K is the command palette.

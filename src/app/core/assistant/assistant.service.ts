@@ -59,11 +59,13 @@ export class AssistantService {
     llmInvocationId: number,
     question: string,
     pageContext: string | null,
+    /** A JPEG of the operator's screen, bare base64. Only while they are sharing. */
+    screenshot?: string | null,
   ): Observable<ResponseData<SpotAnalysisFollowUpTurnDto>> {
     return this.api
       .post<
         ResponseData<SpotAnalysisFollowUpTurnDto>
-      >(`/market-data/analyze/${llmInvocationId}/follow-up`, { question, pageContext: parseContext(pageContext) }, { silent: true })
+      >(`/market-data/analyze/${llmInvocationId}/follow-up`, { question, pageContext: parseContext(pageContext), screenshot: screenshot || undefined }, { silent: true })
       .pipe(timeout(ASK_TIMEOUT_MS));
   }
 }

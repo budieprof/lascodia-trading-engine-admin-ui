@@ -1535,6 +1535,14 @@ export class AnalysisChatComponent {
   readonly contextProvider = input<(() => unknown | null) | null>(null);
 
   /**
+   * Called at send time for a frame of the operator's screen, when they are sharing one.
+   *
+   * <p>Async because capturing a frame is: the provider grabs it from a live track. Returns
+   * null whenever nothing is being shared, which is the normal case.</p>
+   */
+  readonly screenshotProvider = input<(() => Promise<string | null>) | null>(null);
+
+  /**
    * Chat-created live monitors belong to a spot analysis. An assistant thread has none, so
    * it opts out rather than firing a request that can only ever return an empty list.
    */
@@ -1927,7 +1935,7 @@ export class AnalysisChatComponent {
     }
   }
 
-  protected send(ev?: Event): void {
+  protected async send(ev?: Event): Promise<void> {
     ev?.preventDefault();
     const q = this.question().trim();
     const id = this.llmInvocationId();
@@ -1953,7 +1961,14 @@ export class AnalysisChatComponent {
       /* describing the page must never block the question */
     }
 
-    this.marketData.askAnalysisFollowUp(id, q, pageContext ?? undefined).subscribe({
+    let screenshot: string | null = null;
+    try {
+      screenshot = (await this.screenshotProvider()?.()) ?? null;
+    } catch {
+      /* the same rule as the page context: losing the picture must not lose the question */
+    }
+
+    this.marketData.askAnalysisFollowUp(id, q, pageContext ?? undefined, screenshot).subscribe({
       next: (res) => {
         if (this.llmInvocationId() !== id) {
           this.sending.set(false);
