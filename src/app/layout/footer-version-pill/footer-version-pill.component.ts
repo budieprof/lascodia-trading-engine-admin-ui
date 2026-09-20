@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { DatePipe } from '@angular/common';
 import { catchError, map, of } from 'rxjs';
 
+import { ReleaseWatchService } from '@core/services/release-watch.service';
 import { HealthService } from '@core/services/health.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import type { HealthStatusDto } from '@core/api/api.types';
@@ -41,6 +42,28 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         }
         @if (uiEnvironment(); as env) {
           <span class="env-pill" [attr.data-env]="env.toLowerCase()">{{ env }}</span>
+        }
+        <!--
+          A publish swaps the files on disk, but this tab keeps running the JavaScript it
+          loaded — so without this an operator can sit in front of a fixed bug indefinitely
+          and report that the fix does not work. Reloading is THEIR call: yanking the page
+          out from under someone reading a live trading console is not an improvement.
+        -->
+        @if (releases.pending(); as next) {
+          <button
+            type="button"
+            class="update-pill"
+            (click)="reload()"
+            [title]="
+              'This tab is running ' +
+              (releases.current ?? '?') +
+              '. Deployed: ' +
+              next +
+              '. Click to reload.'
+            "
+          >
+            ⟳ Update available
+          </button>
         }
         @if (!uiSha() && !uiVersion() && !uiBuildTime()) {
           <span class="muted small">dev</span>
@@ -128,6 +151,22 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         background: var(--bg-primary);
         border-radius: var(--radius-sm);
       }
+      /* Deliberately the one coloured, clickable thing in the bar: it is the only element
+         here that asks the operator to DO something. */
+      .update-pill {
+        border: none;
+        cursor: pointer;
+        font: inherit;
+        font-size: var(--text-xs, 11px);
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: #2962ff;
+        color: #fff;
+      }
+      .update-pill:hover {
+        background: #1e4fd8;
+      }
+
       .env-pill {
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -195,6 +234,18 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 })
 export class FooterVersionPillComponent {
   private readonly health = inject(HealthService);
+  protected readonly releases = inject(ReleaseWatchService);
+
+  constructor() {
+    // The pill is mounted on every page and lives as long as the shell, which makes it the
+    // natural owner of the poll: one watcher, not one per route.
+    this.releases.start();
+  }
+
+  /** Full reload so the new index.html and its hashed chunks are fetched. */
+  protected reload(): void {
+    window.location.reload();
+  }
   private readonly runtime = inject(RUNTIME_CONFIG);
 
   protected readonly uiVersion = computed(() => this.runtime.appVersion ?? null);

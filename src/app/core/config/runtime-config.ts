@@ -26,6 +26,13 @@ export interface RuntimeConfig {
   buildSha?: string;
   buildTime?: string;
   environmentLabel?: string;
+  /**
+   * Unique per PUBLISH, not per commit — `20260920-010621-3ef5bec`.
+   *
+   * <p>Two publishes of one commit share a SHA, so a SHA cannot tell a tab whether what it
+   * is running is still what is deployed. {@link ReleaseWatchService} compares this.</p>
+   */
+  releaseId?: string;
 }
 
 export const RUNTIME_CONFIG = new InjectionToken<RuntimeConfig>('RUNTIME_CONFIG');
@@ -52,6 +59,7 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
       buildSha: cfg.buildSha,
       buildTime: cfg.buildTime,
       environmentLabel: cfg.environmentLabel,
+      releaseId: cfg.releaseId,
     };
   } catch {
     return FALLBACK_CONFIG;
