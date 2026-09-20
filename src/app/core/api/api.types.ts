@@ -3516,6 +3516,13 @@ export interface SpotAnalysisFollowUpTurnDto {
   actionStatus?: string | null;
   /** Audit-row id of the re-prompt that produced an assistant turn; null for user turns. */
   followUpInvocationId?: number | null;
+  /**
+   * True when this turn carries a screenshot of the operator's screen.
+   *
+   * A FLAG, not the bytes — a thread is re-fetched after every send, so the image is pulled
+   * separately from `/analyze/follow-up/{id}/screenshot` and only for turns that have one.
+   */
+  hasScreenshot?: boolean;
   createdAtUtc: string;
 }
 

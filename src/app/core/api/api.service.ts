@@ -1,4 +1,5 @@
 import { Injectable, inject } from '@angular/core';
+import { firstValueFrom } from 'rxjs';
 import { HttpClient, HttpContext, HttpContextToken } from '@angular/common/http';
 import { map, Observable } from 'rxjs';
 import { RUNTIME_CONFIG } from '../config/runtime-config';
@@ -44,6 +45,26 @@ export class ApiService {
 
   get<T>(path: string, opts?: ApiCallOptions): Observable<T> {
     return this.http.get<T>(`${this.baseUrl}${path}`, requestOptions(opts));
+  }
+
+  /**
+   * Fetch a binary response, e.g. an image.
+   *
+   * <p>Goes through here rather than an `<img src>` so the request carries the operator's
+   * token — an img element cannot send an Authorization header, and the endpoints behind
+   * these are gated like the rest of the console.</p>
+   *
+   * <p>Returns null on any failure rather than throwing: a missing picture is not worth
+   * taking a view down for.</p>
+   */
+  async getBlob(path: string): Promise<Blob | null> {
+    try {
+      return await firstValueFrom(
+        this.http.get(`${this.baseUrl}${path}`, { responseType: 'blob' }),
+      );
+    } catch {
+      return null;
+    }
   }
 
   post<T>(path: string, body?: unknown, opts?: ApiCallOptions): Observable<T> {

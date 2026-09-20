@@ -69,6 +69,7 @@ import {
   type RecFileSeed,
 } from '@shared/components/rec-file-editor/rec-file-editor.component';
 import { AnalysisVisualComponent } from '@shared/components/analysis-visual/analysis-visual.component';
+import { TurnScreenshotComponent } from '@shared/components/turn-screenshot/turn-screenshot.component';
 import { parseVisualSpec, type VisualSpec } from '@shared/components/analysis-visual/visual-spec';
 import { AnnotatedPriceChartComponent } from '@shared/components/annotated-price-chart/annotated-price-chart.component';
 import {
@@ -211,6 +212,7 @@ const MAX_THREAD_TURNS = 300;
     EngineerRunBarComponent,
     EngineerTurnComponent,
     EngineerThinkingComponent,
+    TurnScreenshotComponent,
   ],
   template: `
     <section
@@ -421,6 +423,14 @@ const MAX_THREAD_TURNS = 300;
               @case ('User') {
                 <div class="msg user">
                   <div class="bubble">{{ m.content }}</div>
+                  <!--
+                    The frame the assistant was shown. Without it the operator has to take
+                    the answer on trust — there is no way to tell a correct reading from a
+                    confident one, or to see that something was covering half the chart.
+                  -->
+                  @if (m.hasScreenshot) {
+                    <app-turn-screenshot [turnId]="m.id" />
+                  }
                   <time
                     class="msg-time"
                     [attr.datetime]="m.createdAtUtc"
