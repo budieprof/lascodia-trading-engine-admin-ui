@@ -93,10 +93,19 @@ export interface SrOptions {
   lookback?: number;
   /** Cluster tolerance as a multiple of ATR. */
   toleranceAtr?: number;
-  /** Most levels to return. */
+  /** Most levels to return, across both sides. */
   max?: number;
   /** Ignore levels formed by fewer than this many pivots. */
   minTouches?: number;
+  /**
+   * Minimum gap between REPORTED levels, as a multiple of ATR.
+   *
+   * <p>Separate from `toleranceAtr`, which decides what counts as one cluster. Without it
+   * the output was four levels inside twenty pips — 1.15457, 1.15353, 1.15311, 1.15255 on
+   * live EURUSD — which is chop rendered as structure. Each is a real cluster; reporting
+   * all four is still wrong.</p>
+   */
+  separationAtr?: number;
 }
 
 /**
@@ -171,7 +180,7 @@ export function supportResistance(bars: readonly Ohlc[], opts: SrOptions = {}): 
   const close = bars[bars.length - 1].close;
   const maxTouches = Math.max(...clusters.map((c) => c.prices.length));
 
-  return clusters
+  const scored: SrLevel[] = clusters
     .filter((c) => c.prices.length >= minTouches)
     .map((c) => {
       const price = c.prices.reduce((s, p) => s + p, 0) / c.prices.length;
@@ -187,8 +196,34 @@ export function supportResistance(bars: readonly Ohlc[], opts: SrOptions = {}): 
         lastMs: c.lastMs,
       };
     })
-    .sort((a, b) => b.strength - a.strength)
-    .slice(0, max);
+    .sort((a, b) => b.strength - a.strength);
+
+  const separation = lastAtr * (opts.separationAtr ?? 1.5);
+
+  /** Strongest first, skipping anything too close to a level already taken. */
+  const pick = (from: SrLevel[], limit: number, taken: SrLevel[]): SrLevel[] => {
+    const out: SrLevel[] = [];
+    for (const level of from) {
+      if (out.length >= limit) break;
+      const clash = [...taken, ...out].some((k) => Math.abs(k.price - level.price) < separation);
+      if (!clash) out.push(level);
+    }
+    return out;
+  };
+
+  // Balanced: an S/R overlay showing seven resistances and no support is not telling the
+  // operator where price might hold. Take the best of each side, then let the stronger side
+  // use whatever the weaker one could not fill.
+  const half = Math.max(1, Math.floor(max / 2));
+  const above = scored.filter((l) => l.kind === 'resistance');
+  const below = scored.filter((l) => l.kind === 'support');
+  const resistances = pick(above, half, []);
+  const supports = pick(below, half, resistances);
+  const chosen = [...resistances, ...supports];
+  if (chosen.length < max) {
+    chosen.push(...pick(scored, max - chosen.length, chosen));
+  }
+  return chosen.sort((a, b) => b.price - a.price);
 }
 
 // ── Estimated order-flow delta ───────────────────────────────────────────────

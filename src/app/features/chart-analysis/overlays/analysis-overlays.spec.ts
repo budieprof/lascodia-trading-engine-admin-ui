@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { profileWithValueArea, supportResistance, estimatedDelta } from './analysis-overlays';
 import type { Ohlc } from '../indicators/math';
+import { EURUSD_H1 } from './__fixtures__/eurusd-h1';
 
 const HOUR = 3_600_000;
 const T0 = Date.UTC(2026, 8, 1);
@@ -192,5 +193,74 @@ describe('supportResistance clustering width', () => {
     }
     const levels = supportResistance(bars, { lookback: 1, toleranceAtr: 0.5, minTouches: 2 });
     expect(levels.some((l) => Math.abs(l.price - 1.2) < 0.002)).toBe(true);
+  });
+});
+
+/**
+ * 400 real EURUSD H1 bars, captured from the running engine on 2026-09-20.
+ *
+ * The selection bugs below were found on live data and were invisible on synthetic bars: a
+ * regular sawtooth does not produce the distinct pivot clusters real price does, so a
+ * hand-built fixture reported one level and proved nothing. `[time, o, h, l, c, v]`.
+ */
+const REAL: Ohlc[] = EURUSD_H1.map(([time, open, high, low, close, volume]) => ({
+  time,
+  open,
+  high,
+  low,
+  close,
+  volume,
+}));
+
+describe('supportResistance on real EURUSD bars', () => {
+  /**
+   * Both faults below were visible on the live chart: seven resistances and a single
+   * support, four of them stacked inside twenty pips.
+   */
+  it('shows both sides, not whichever side happens to score highest', () => {
+    const levels = supportResistance(REAL, { max: 8 });
+    const close = REAL[REAL.length - 1].close;
+    expect(levels.filter((l) => l.price < close).length).toBeGreaterThan(0);
+    expect(levels.filter((l) => l.price >= close).length).toBeGreaterThan(0);
+  });
+
+  it('keeps reported levels apart', () => {
+    const levels = supportResistance(REAL, { max: 8, separationAtr: 1.5 });
+    const prices = levels.map((l) => l.price).sort((a, b) => a - b);
+    // Before the fix this produced 1.15457 / 1.15353 / 1.15311 / 1.15255 — four "levels"
+    // inside twenty pips, which is chop rendered as structure.
+    for (let i = 1; i < prices.length; i++) {
+      expect(prices[i] - prices[i - 1]).toBeGreaterThan(0.0005);
+    }
+  });
+
+  it('honours the max across both sides', () => {
+    expect(supportResistance(REAL, { max: 4 }).length).toBeLessThanOrEqual(4);
+  });
+
+  it('returns levels ordered by price, highest first', () => {
+    const levels = supportResistance(REAL, { max: 8 });
+    for (let i = 1; i < levels.length; i++) {
+      expect(levels[i - 1].price).toBeGreaterThan(levels[i].price);
+    }
+  });
+
+  it('puts every level inside the range the bars actually traded', () => {
+    const lo = Math.min(...REAL.map((b) => b.low));
+    const hi = Math.max(...REAL.map((b) => b.high));
+    for (const l of supportResistance(REAL, { max: 8 })) {
+      expect(l.price).toBeGreaterThanOrEqual(lo);
+      expect(l.price).toBeLessThanOrEqual(hi);
+    }
+  });
+
+  it('puts the volume-profile POC inside the traded range and its value area around it', () => {
+    const lo = Math.min(...REAL.map((b) => b.low));
+    const hi = Math.max(...REAL.map((b) => b.high));
+    const vp = profileWithValueArea(REAL)!;
+    expect(vp.poc).toBeGreaterThanOrEqual(lo);
+    expect(vp.poc).toBeLessThanOrEqual(hi);
+    expect(vp.valueAreaLow).toBeLessThanOrEqual(vp.poc);
+    expect(vp.valueAreaHigh).toBeGreaterThanOrEqual(vp.poc);
   });
 });

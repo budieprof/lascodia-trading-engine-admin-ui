@@ -301,17 +301,13 @@ export class ChartHostComponent implements OnDestroy {
       untracked(() => this.overlayRenderer.setOverlays(overlays));
     });
 
-    // Analytical overlays, recomputed when the bars or the toggles change. Both are O(n)
-    // over the loaded bars, which is why they are computed here rather than per frame —
-    // the renderer only projects.
+    // Analytical overlays. Recomputed when the bars or the toggles change, and — via
+    // `onVisibleRangeChanged` — whenever the operator pans or zooms.
     effect(() => {
-      const bars = this.bars();
-      const wantProfile = this.showVolumeProfile();
-      const wantLevels = this.showSupportResistance();
-      untracked(() => {
-        this.analysisRenderer.setProfile(wantProfile ? profileWithValueArea(bars) : null);
-        this.analysisRenderer.setLevels(wantLevels ? supportResistance(bars) : []);
-      });
+      this.bars();
+      this.showVolumeProfile();
+      this.showSupportResistance();
+      untracked(() => this.recomputeAnalysis());
     });
 
     effect(() => {
@@ -349,6 +345,64 @@ export class ChartHostComponent implements OnDestroy {
     this.chart?.priceScale('right').applyOptions({
       mode: mode === 'log' ? 1 : mode === 'percent' ? 2 : 0,
     });
+  }
+
+  /**
+   * Recompute the analytical overlays for the VISIBLE window.
+   *
+   * <p>Not the loaded window. The chart holds 1500 bars — nearly three months of EURUSD
+   * hourly — while the operator is usually looking at ten days of it, so profiling
+   * everything loaded described mostly off-screen data: the POC landed at 1.14323 from a
+   * range the visible candles never touched. A profile is a statement about the window you
+   * are looking at, and an operator reasonably reads it as one.</p>
+   *
+   * <p>Falls back to all loaded bars only when the library cannot report a range yet, which
+   * is the first frame before the scale settles.</p>
+   */
+  private recomputeAnalysis(): void {
+    const bars = this.bars();
+    const wantProfile = this.showVolumeProfile();
+    const wantLevels = this.showSupportResistance();
+    if (!wantProfile && !wantLevels) {
+      this.analysisRenderer.setProfile(null);
+      this.analysisRenderer.setLevels([]);
+      return;
+    }
+
+    const window = this.visibleBars(bars);
+    this.analysisRenderer.setProfile(wantProfile ? profileWithValueArea(window) : null);
+    this.analysisRenderer.setLevels(wantLevels ? supportResistance(window) : []);
+  }
+
+  /** The slice of `bars` currently on screen. */
+  private visibleBars(bars: readonly Bar[]): Bar[] {
+    const range = this.chart?.timeScale().getVisibleLogicalRange();
+    if (!range || bars.length === 0) return [...bars];
+    // The logical range runs past both ends when the chart has whitespace margins, so it is
+    // clamped rather than trusted as an index.
+    const from = Math.max(0, Math.floor(range.from));
+    const to = Math.min(bars.length, Math.ceil(range.to) + 1);
+    const slice = bars.slice(from, to);
+    // A handful of bars produces a profile of noise and no usable pivots; showing the whole
+    // window is a better answer than showing nonsense.
+    return slice.length >= 20 ? slice : [...bars];
+  }
+
+  /**
+   * Recompute the overlays after the pan settles.
+   *
+   * <p>`subscribeVisibleLogicalRangeChange` fires on every frame of a drag. The profile is
+   * O(bars) and the pivot scan O(bars × lookback), so doing this per frame is what turns a
+   * smooth pan into a stutter.</p>
+   */
+  private analysisTimer: ReturnType<typeof setTimeout> | null = null;
+  private scheduleAnalysis(): void {
+    if (!this.showVolumeProfile() && !this.showSupportResistance()) return;
+    if (this.analysisTimer !== null) clearTimeout(this.analysisTimer);
+    this.analysisTimer = setTimeout(() => {
+      this.analysisTimer = null;
+      this.recomputeAnalysis();
+    }, 120);
   }
 
   /** Scroll to the most recent bar. */
@@ -459,6 +513,10 @@ export class ChartHostComponent implements OnDestroy {
         this.loadMorePending.set(true);
         this.loadMore.emit();
       }
+      // The analytical overlays describe the VISIBLE window, so panning and zooming change
+      // what they say. Debounced: this fires on every frame of a drag, and recomputing a
+      // profile per frame would make the pan stutter.
+      this.scheduleAnalysis();
     });
 
     this.applyData(this.bars(), this.style(), this.showVolume(), this.precision());
