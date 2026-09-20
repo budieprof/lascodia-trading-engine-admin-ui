@@ -57,6 +57,37 @@ export interface ChartCommandHost {
   fitContent(): void;
   scrollToRealtime(): void;
   resetScales(): void;
+
+  // ── Workspace ──────────────────────────────────────────────────────────
+  layouts(): readonly { id: string; name: string; symbol: string; resolution: string }[];
+  saveLayout(name: string): string;
+  applyLayout(id: string): void;
+  removeLayout(id: string): void;
+  studyTemplates(): readonly { id: string; name: string; count: number }[];
+  saveStudyTemplate(name: string): boolean;
+  applyStudyTemplate(id: string): void;
+  removeStudyTemplate(id: string): void;
+
+  // ── Replay ─────────────────────────────────────────────────────────────
+  replay(): { active: boolean; index: number; total: number; playing: boolean; speed: number };
+  startReplay(): void;
+  exitReplay(): void;
+  stepReplay(delta: number): void;
+  toggleReplayPlay(): void;
+  setReplaySpeed(x: number): void;
+  setReplayIndex(i: number): void;
+
+  // ── History, panes and chrome ──────────────────────────────────────────
+  /** Fetch an older page of candles. `chart.navigate` only moves what is SHOWN. */
+  loadOlder(): Promise<void>;
+  eventImpact(): string;
+  setEventImpact(v: 'High' | 'Medium' | 'Low'): void;
+  sidePane(): string;
+  setSidePane(v: 'none' | 'details' | 'news'): void;
+  watchlistOpen: { (): boolean; set(v: boolean): void };
+  objectTreeOpen: { (): boolean; set(v: boolean): void };
+  toggleFullscreen(): Promise<void>;
+  isFullscreen(): boolean;
 }
 
 const ok = (message: string, data?: unknown): UiCommandOutcome => ({ ok: true, message, data });
@@ -172,6 +203,23 @@ function findTool(query: string): (typeof TOOLS)[number] | string {
       .join(', ')}. Name one exactly.`;
   }
   return `No drawing tool matches "${query}".`;
+}
+
+/** Match a saved layout or template by name, reporting ambiguity rather than guessing. */
+function matchByName<T extends { id: string; name: string }>(
+  all: readonly T[],
+  query: string,
+): T | string {
+  const q = query.trim().toLowerCase();
+  if (all.length === 0) return 'There are none saved.';
+  const exact = all.filter((x) => x.name.toLowerCase() === q);
+  if (exact.length === 1) return exact[0];
+  const partial = all.filter((x) => x.name.toLowerCase().includes(q));
+  if (partial.length === 1) return partial[0];
+  if (partial.length > 1) {
+    return `"${query}" matches ${partial.length}: ${partial.map((x) => x.name).join(', ')}. Name one exactly.`;
+  }
+  return `Nothing matches "${query}". Available: ${all.map((x) => x.name).join(', ')}.`;
 }
 
 /** Every command the chart page offers the assistant. */
@@ -733,6 +781,237 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
         if (Object.keys(patch).length === 0) return fail('Nothing to change.');
         host.styleDrawing(id, patch);
         return ok('Drawing restyled.');
+      },
+    },
+    {
+      id: 'chart.layouts',
+      description:
+        'Saved chart layouts: list them, save the current chart as one, apply one, or delete one. A layout carries symbol, timeframe, style, studies, scale and timezone.',
+      params: [
+        {
+          name: 'action',
+          type: 'enum',
+          required: true,
+          values: ['list', 'save', 'apply', 'delete'],
+          description: 'What to do.',
+        },
+        { name: 'name', type: 'string', description: 'Layout name, for save / apply / delete.' },
+      ],
+      run: (a) => {
+        const action = str(a, 'action');
+        const all = host.layouts();
+        if (action === 'list') {
+          return ok(
+            all.length ? `${all.length} saved layout(s).` : 'No saved layouts.',
+            all.map((l) => ({ name: l.name, symbol: l.symbol, resolution: l.resolution })),
+          );
+        }
+        const name = str(a, 'name');
+        if (!name) return fail(`"name" is required to ${action} a layout.`);
+        if (action === 'save') {
+          // The toolbar's own Save asks for the name through prompt(), which nothing here
+          // can answer — hence a name-taking path rather than reusing that handler.
+          host.saveLayout(name);
+          return ok(`Saved layout "${name}".`);
+        }
+        const hit = matchByName(all, name);
+        if (typeof hit === 'string') return fail(hit);
+        if (action === 'apply') {
+          host.applyLayout(hit.id);
+          return ok(`Applied layout "${hit.name}".`);
+        }
+        host.removeLayout(hit.id);
+        return ok(`Deleted layout "${hit.name}".`);
+      },
+    },
+    {
+      id: 'chart.studyTemplates',
+      description:
+        'Study templates — a named set of indicators, without the symbol or timeframe. List, save the loaded studies as one, apply one, or delete one.',
+      params: [
+        {
+          name: 'action',
+          type: 'enum',
+          required: true,
+          values: ['list', 'save', 'apply', 'delete'],
+          description: 'What to do.',
+        },
+        { name: 'name', type: 'string', description: 'Template name, for save / apply / delete.' },
+      ],
+      run: (a) => {
+        const action = str(a, 'action');
+        const all = host.studyTemplates();
+        if (action === 'list') {
+          return ok(
+            all.length ? `${all.length} template(s).` : 'No study templates.',
+            all.map((t) => ({ name: t.name, studies: t.count })),
+          );
+        }
+        const name = str(a, 'name');
+        if (!name) return fail(`"name" is required to ${action} a template.`);
+        if (action === 'save') {
+          return host.saveStudyTemplate(name)
+            ? ok(`Saved template "${name}".`)
+            : fail('There are no studies loaded to save.');
+        }
+        const hit = matchByName(all, name);
+        if (typeof hit === 'string') return fail(hit);
+        if (action === 'apply') {
+          host.applyStudyTemplate(hit.id);
+          return ok(`Applied template "${hit.name}".`);
+        }
+        host.removeStudyTemplate(hit.id);
+        return ok(`Deleted template "${hit.name}".`);
+      },
+    },
+    {
+      id: 'chart.replay',
+      description:
+        'Bar replay: start, stop, step forward or back, play/pause, set the speed, or jump to a bar index.',
+      params: [
+        {
+          name: 'action',
+          type: 'enum',
+          required: true,
+          values: ['status', 'start', 'stop', 'step', 'play', 'pause', 'speed', 'goto'],
+          description: 'What to do.',
+        },
+        { name: 'bars', type: 'number', description: 'Bars to step (may be negative), for step.' },
+        { name: 'speed', type: 'number', description: 'Playback speed 1-30, for speed.' },
+        { name: 'index', type: 'number', description: 'Bar index, for goto.' },
+      ],
+      run: (a) => {
+        const action = str(a, 'action');
+        const st = host.replay();
+        if (action === 'status') {
+          return ok(
+            st.active
+              ? `Replay at bar ${st.index} of ${st.total}, ${st.playing ? 'playing' : 'paused'} at ${st.speed}×.`
+              : 'Replay is off.',
+            st,
+          );
+        }
+        if (action === 'start') {
+          if (st.active) return ok('Replay was already running.');
+          host.startReplay();
+          return host.replay().active ? ok('Replay started.') : fail('No bars are loaded.');
+        }
+        // Everything below acts ON a running replay; saying so beats doing nothing.
+        if (!st.active && action !== 'stop') return fail('Replay is not running — start it first.');
+        if (action === 'stop') {
+          if (!st.active) return ok('Replay was already off.');
+          host.exitReplay();
+          return ok('Replay stopped.');
+        }
+        if (action === 'step') {
+          const n = Math.round(Number(a['bars'] ?? 1));
+          if (!Number.isFinite(n) || n === 0) return fail('bars must be a non-zero whole number.');
+          host.stepReplay(n);
+          return ok(`Stepped ${n > 0 ? 'forward' : 'back'} ${Math.abs(n)} bar(s).`);
+        }
+        if (action === 'play' || action === 'pause') {
+          const want = action === 'play';
+          if (st.playing === want) return ok(`Replay is already ${want ? 'playing' : 'paused'}.`);
+          host.toggleReplayPlay();
+          return ok(want ? 'Playing.' : 'Paused.');
+        }
+        if (action === 'speed') {
+          const x = Number(a['speed']);
+          if (!(x >= 1 && x <= 30)) return fail('speed must be between 1 and 30.');
+          host.setReplaySpeed(x);
+          return ok(`Replay speed ${x}×.`);
+        }
+        const i = Math.round(Number(a['index']));
+        if (!Number.isFinite(i) || i < 1 || i > st.total) {
+          return fail(`index must be between 1 and ${st.total}.`);
+        }
+        host.setReplayIndex(i);
+        return ok(`Replay at bar ${i}.`);
+      },
+    },
+    {
+      id: 'chart.loadMoreHistory',
+      description:
+        'Fetch an older page of candles. Use when a date range is outside the loaded data — chart.navigate only moves what is SHOWN, it does not fetch.',
+      run: async () => {
+        const before = host.bars().length;
+        await host.loadOlder();
+        const after = host.bars().length;
+        return after > before
+          ? ok(`Loaded ${after - before} older bars (${after} total).`)
+          : ok(`No older bars were returned; ${after} loaded. The history may start here.`);
+      },
+    },
+    {
+      id: 'chart.setEventImpact',
+      description:
+        'Minimum economic-event impact shown on the time axis — the "Medium+" filter in the toolbar.',
+      params: [
+        {
+          name: 'impact',
+          type: 'enum',
+          required: true,
+          values: ['High', 'Medium', 'Low'],
+          description: 'Lowest impact to show.',
+        },
+      ],
+      run: (a) => {
+        const v = str(a, 'impact') as 'High' | 'Medium' | 'Low';
+        host.setEventImpact(v);
+        return ok(`Showing ${v}+ impact events.`);
+      },
+    },
+    {
+      id: 'chart.setSidePane',
+      description:
+        'Open the Details pane (symbol facts) or the News pane (headlines and pair bias), or close whichever is open.',
+      params: [
+        {
+          name: 'pane',
+          type: 'enum',
+          required: true,
+          values: ['none', 'details', 'news'],
+          description: 'Which pane.',
+        },
+      ],
+      run: (a) => {
+        const v = str(a, 'pane') as 'none' | 'details' | 'news';
+        host.setSidePane(v);
+        return ok(v === 'none' ? 'Side pane closed.' : `${v} pane open.`);
+      },
+    },
+    {
+      id: 'chart.setPanel',
+      description:
+        'Show or hide the watchlist and the object tree — the toggles to the right of the split-layout buttons.',
+      params: [
+        {
+          name: 'panel',
+          type: 'enum',
+          required: true,
+          values: ['watchlist', 'objects'],
+          description: 'Which panel.',
+        },
+        { name: 'visible', type: 'boolean', required: true, description: 'true to show.' },
+      ],
+      run: (a) => {
+        const want = bool(a, 'visible');
+        if (str(a, 'panel') === 'watchlist') host.watchlistOpen.set(want);
+        else host.objectTreeOpen.set(want);
+        return ok(`${str(a, 'panel')} ${want ? 'shown' : 'hidden'}.`);
+      },
+    },
+    {
+      id: 'chart.setFullscreen',
+      description: 'Put the chart into fullscreen, or leave it.',
+      params: [
+        { name: 'on', type: 'boolean', required: true, description: 'true for fullscreen.' },
+      ],
+      run: async (a) => {
+        const want = bool(a, 'on');
+        if (host.isFullscreen() === want) return ok(`Already ${want ? 'fullscreen' : 'windowed'}.`);
+        await host.toggleFullscreen();
+        return ok(want ? 'Fullscreen.' : 'Left fullscreen.');
       },
     },
     {

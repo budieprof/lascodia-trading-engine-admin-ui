@@ -450,6 +450,64 @@ export class ChartAnalysisPageComponent {
         fitContent: () => this.host()?.fitContent(),
         scrollToRealtime: () => this.host()?.scrollToRealtime(),
         resetScales: () => this.resetScales(),
+
+        layouts: () => this.layoutStore.layouts(),
+        // The toolbar's Save asks for a name through prompt(), which nothing outside the
+        // browser can answer — so the store is called directly with the given name.
+        saveLayout: (name) => this.layoutStore.saveLayout(name, this.snapshotOfChart()).id,
+        applyLayout: (id) => {
+          const found = this.layoutStore.layouts().find((l) => l.id === id);
+          if (found) this.applyLayout(found);
+        },
+        removeLayout: (id) => this.layoutStore.removeLayout(id),
+        studyTemplates: () =>
+          this.layoutStore.templates().map((t) => ({
+            id: t.id,
+            name: t.name,
+            count: t.indicators.length,
+          })),
+        saveStudyTemplate: (name) => {
+          if (this.active().length === 0) return false;
+          this.layoutStore.saveTemplate(name, this.active());
+          return true;
+        },
+        applyStudyTemplate: (id) => {
+          const found = this.layoutStore.templates().find((t) => t.id === id);
+          if (found) this.applyTemplate(found);
+        },
+        removeStudyTemplate: (id) => this.layoutStore.removeTemplate(id),
+
+        replay: () => ({
+          active: this.replayActive(),
+          index: this.replayIndex(),
+          total: this.bars().length,
+          playing: this.replayPlaying(),
+          speed: this.replaySpeed(),
+        }),
+        startReplay: () => this.startReplay(),
+        exitReplay: () => this.exitReplay(),
+        stepReplay: (d) => this.stepReplay(d),
+        toggleReplayPlay: () => this.toggleReplayPlay(),
+        setReplaySpeed: (x) => this.setReplaySpeed(String(x)),
+        setReplayIndex: (i) => this.setReplayIndex(String(i)),
+
+        loadOlder: () => this.loadOlder(),
+        eventImpact: () => this.minEventImpact(),
+        setEventImpact: (v) => {
+          this.minEventImpact.set(v);
+          this.loadEvents();
+        },
+        sidePane: () => this.sidePane(),
+        setSidePane: (v) => {
+          // openSidePane TOGGLES, which cannot express "open the news pane" when it is
+          // already open. Set the state outright and fire the same load it would have.
+          this.sidePane.set(v);
+          if (v === 'news') this.loadNews();
+        },
+        watchlistOpen: this.watchlistOpen,
+        objectTreeOpen: this.objectTreeOpen,
+        toggleFullscreen: () => this.toggleFullscreen(),
+        isFullscreen: () => this.isFullscreen(),
       }),
       this.destroyRef,
     );

@@ -23,6 +23,14 @@ const bars = Array.from({ length: 72 }, (_, i) => ({
   close: 1.145,
 }));
 
+let savedLayouts: Array<{ id: string; name: string; symbol: string; resolution: string }>;
+let savedTemplates: Array<{ id: string; name: string; count: number }>;
+let replayState: { active: boolean; index: number; total: number; playing: boolean; speed: number };
+let impact: string;
+let pane: string;
+let fullscreen: boolean;
+let activeCount: () => number;
+
 let placed: Array<{
   id: string;
   kind: string;
@@ -35,7 +43,14 @@ let moves: string[];
 function makeHost(over: Partial<ChartCommandHost> = {}) {
   placed = [];
   moves = [];
+  savedLayouts = [];
+  savedTemplates = [];
+  replayState = { active: false, index: 0, total: bars.length, playing: false, speed: 4 };
+  impact = 'Medium';
+  pane = 'none';
+  fullscreen = false;
   const active = sig<ActiveIndicator[]>([]);
+  activeCount = () => active().length;
   const host: ChartCommandHost = {
     symbol: sig('EURUSD'),
     resolution: sig('60'),
@@ -94,6 +109,56 @@ function makeHost(over: Partial<ChartCommandHost> = {}) {
     fitContent: () => moves.push('fit'),
     scrollToRealtime: () => moves.push('latest'),
     resetScales: () => moves.push('reset'),
+    layouts: () => savedLayouts,
+    saveLayout: (name) => {
+      const id = `L${savedLayouts.length + 1}`;
+      savedLayouts.push({ id, name, symbol: 'EURUSD', resolution: '60' });
+      return id;
+    },
+    applyLayout: (id) => moves.push(`applyLayout:${id}`),
+    removeLayout: (id) => {
+      savedLayouts = savedLayouts.filter((l) => l.id !== id);
+    },
+    studyTemplates: () => savedTemplates,
+    saveStudyTemplate: (name) => {
+      if (activeCount() === 0) return false;
+      savedTemplates.push({ id: `T${savedTemplates.length + 1}`, name, count: activeCount() });
+      return true;
+    },
+    applyStudyTemplate: (id) => moves.push(`applyTemplate:${id}`),
+    removeStudyTemplate: (id) => {
+      savedTemplates = savedTemplates.filter((t) => t.id !== id);
+    },
+    replay: () => replayState,
+    startReplay: () => {
+      replayState = { ...replayState, active: true, index: 48, total: bars.length };
+    },
+    exitReplay: () => {
+      replayState = { ...replayState, active: false, playing: false };
+    },
+    stepReplay: (d) => moves.push(`step:${d}`),
+    toggleReplayPlay: () => {
+      replayState = { ...replayState, playing: !replayState.playing };
+    },
+    setReplaySpeed: (x) => moves.push(`speed:${x}`),
+    setReplayIndex: (i) => moves.push(`goto:${i}`),
+    loadOlder: async () => {
+      moves.push('loadOlder');
+    },
+    eventImpact: () => impact,
+    setEventImpact: (v) => {
+      impact = v;
+    },
+    sidePane: () => pane,
+    setSidePane: (v) => {
+      pane = v;
+    },
+    watchlistOpen: sig(false),
+    objectTreeOpen: sig(false),
+    toggleFullscreen: async () => {
+      fullscreen = !fullscreen;
+    },
+    isFullscreen: () => fullscreen,
     knownSymbols: () => ['EURUSD', 'GBPUSD', 'AUDCAD'],
     timezones: () => [
       { id: 'UTC', label: 'UTC' },
@@ -420,5 +485,140 @@ describe('placing drawings and navigating', () => {
     const r = await byId(cmds, 'chart.navigate').run({ mode: 'range', from: 'soon', to: 'later' });
     expect(r.ok).toBe(false);
     expect(r.message).toMatch(/ISO dates/);
+  });
+});
+
+describe('workspace, replay and chrome', () => {
+  let host: ChartCommandHost;
+  let cmds: UiCommand[];
+
+  beforeEach(() => {
+    host = makeHost();
+    cmds = chartCommands(host);
+  });
+
+  const run = (id: string, args: Record<string, unknown> = {}) => byId(cmds, id).run(args);
+
+  describe('layouts', () => {
+    it('saves, lists, applies and deletes by name', async () => {
+      expect((await run('chart.layouts', { action: 'save', name: 'Swing EU' })).ok).toBe(true);
+      const list = await run('chart.layouts', { action: 'list' });
+      expect((list.data as unknown[]).length).toBe(1);
+      expect((await run('chart.layouts', { action: 'apply', name: 'Swing EU' })).ok).toBe(true);
+      expect(moves).toContain('applyLayout:L1');
+      expect((await run('chart.layouts', { action: 'delete', name: 'Swing EU' })).ok).toBe(true);
+      expect(savedLayouts).toHaveLength(0);
+    });
+
+    it('needs a name for anything but list', async () => {
+      const r = await run('chart.layouts', { action: 'apply' });
+      expect(r.ok).toBe(false);
+      expect(r.message).toMatch(/name/);
+    });
+
+    it('refuses an ambiguous name rather than applying the wrong layout', async () => {
+      await run('chart.layouts', { action: 'save', name: 'EU swing' });
+      await run('chart.layouts', { action: 'save', name: 'EU scalp' });
+      const r = await run('chart.layouts', { action: 'apply', name: 'EU' });
+      expect(r.ok).toBe(false);
+      expect(r.message).toMatch(/matches 2/);
+    });
+
+    it('lists the available names when nothing matches', async () => {
+      await run('chart.layouts', { action: 'save', name: 'Swing EU' });
+      const r = await run('chart.layouts', { action: 'apply', name: 'nope' });
+      expect(r.message).toMatch(/Swing EU/);
+    });
+  });
+
+  describe('study templates', () => {
+    it('refuses to save with no studies loaded', async () => {
+      const r = await run('chart.studyTemplates', { action: 'save', name: 'Mine' });
+      expect(r.ok).toBe(false);
+      expect(r.message).toMatch(/no studies/i);
+    });
+
+    it('saves once studies exist', async () => {
+      await byId(cmds, 'chart.addIndicator').run({ indicator: 'rsi' });
+      expect((await run('chart.studyTemplates', { action: 'save', name: 'Mine' })).ok).toBe(true);
+      expect((await run('chart.studyTemplates', { action: 'apply', name: 'Mine' })).ok).toBe(true);
+      expect(moves).toContain('applyTemplate:T1');
+    });
+  });
+
+  describe('replay', () => {
+    it('reports off, then starts', async () => {
+      expect((await run('chart.replay', { action: 'status' })).message).toMatch(/off/);
+      expect((await run('chart.replay', { action: 'start' })).ok).toBe(true);
+      expect(host.replay().active).toBe(true);
+    });
+
+    it('refuses to step, play or seek while replay is off', async () => {
+      // Doing nothing silently is the failure here: the operator asked for a step and the
+      // chart did not move, with no reason given.
+      for (const action of ['step', 'play', 'pause', 'speed', 'goto']) {
+        const r = await run('chart.replay', { action, bars: 1, speed: 4, index: 2 });
+        expect(r.ok, action).toBe(false);
+        expect(r.message).toMatch(/not running/);
+      }
+    });
+
+    it('steps forward and back', async () => {
+      await run('chart.replay', { action: 'start' });
+      expect((await run('chart.replay', { action: 'step', bars: 5 })).message).toMatch(/forward 5/);
+      expect((await run('chart.replay', { action: 'step', bars: -2 })).message).toMatch(/back 2/);
+    });
+
+    it('refuses a zero step', async () => {
+      await run('chart.replay', { action: 'start' });
+      expect((await run('chart.replay', { action: 'step', bars: 0 })).ok).toBe(false);
+    });
+
+    it('is idempotent about play and pause', async () => {
+      await run('chart.replay', { action: 'start' });
+      expect((await run('chart.replay', { action: 'pause' })).message).toMatch(/already paused/);
+      expect((await run('chart.replay', { action: 'play' })).ok).toBe(true);
+      expect(host.replay().playing).toBe(true);
+    });
+
+    it('bounds speed and index', async () => {
+      await run('chart.replay', { action: 'start' });
+      expect((await run('chart.replay', { action: 'speed', speed: 99 })).ok).toBe(false);
+      expect((await run('chart.replay', { action: 'goto', index: 99999 })).ok).toBe(false);
+      expect((await run('chart.replay', { action: 'goto', index: 10 })).ok).toBe(true);
+      expect(moves).toContain('goto:10');
+    });
+  });
+
+  it('fetches older history, and says when none came back', async () => {
+    // chart.navigate only moves what is SHOWN; this is the one that fetches.
+    const r = await run('chart.loadMoreHistory');
+    expect(moves).toContain('loadOlder');
+    expect(r.message).toMatch(/No older bars|Loaded/);
+  });
+
+  it('sets the economic-event impact threshold', async () => {
+    expect((await run('chart.setEventImpact', { impact: 'High' })).ok).toBe(true);
+    expect(host.eventImpact()).toBe('High');
+  });
+
+  it('opens and closes the side panes', async () => {
+    await run('chart.setSidePane', { pane: 'news' });
+    expect(host.sidePane()).toBe('news');
+    await run('chart.setSidePane', { pane: 'none' });
+    expect(host.sidePane()).toBe('none');
+  });
+
+  it('toggles the watchlist and object tree', async () => {
+    await run('chart.setPanel', { panel: 'watchlist', visible: true });
+    expect(host.watchlistOpen()).toBe(true);
+    await run('chart.setPanel', { panel: 'objects', visible: true });
+    expect(host.objectTreeOpen()).toBe(true);
+  });
+
+  it('is idempotent about fullscreen', async () => {
+    expect((await run('chart.setFullscreen', { on: false })).message).toMatch(/Already/);
+    expect((await run('chart.setFullscreen', { on: true })).ok).toBe(true);
+    expect(host.isFullscreen()).toBe(true);
   });
 });
