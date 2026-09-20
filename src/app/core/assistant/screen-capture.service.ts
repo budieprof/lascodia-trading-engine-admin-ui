@@ -24,6 +24,19 @@ const JPEG_QUALITY = 0.72;
 /** Refuse to send anything larger; a frame this big means something went wrong. */
 const MAX_BYTES = 4_000_000;
 
+/**
+ * Wait for two painted frames.
+ *
+ * <p>One is not enough: `requestAnimationFrame` fires BEFORE paint, so a single wait can
+ * still encode the pre-hide composition. Two puts a completed paint between the style change
+ * and the capture.</p>
+ */
+function twoFrames(): Promise<void> {
+  return new Promise<void>((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 80))),
+  );
+}
+
 export interface CapturedFrame {
   /** Bare base64, no data: prefix — the wire format the engine expects. */
   base64: string;
@@ -126,11 +139,54 @@ export class ScreenCaptureService {
    *
    * <p>Downscaled to {@link MAX_EDGE} and JPEG-encoded. The scale is applied on the longest
    * edge so an ultrawide monitor does not arrive as an unreadable strip.</p>
+   *
+   * <p>`hideSelectors` are hidden for the duration of the capture. The assistant's own dock
+   * is docked right and covers roughly a third of the page — on a chart that is the price
+   * axis and the newest bars, which is the part worth looking at. Photographing the panel
+   * asking the question is not useful; photographing what it hides is.</p>
    */
-  async grab(): Promise<CapturedFrame | null> {
+  async grab(hideSelectors: readonly string[] = []): Promise<CapturedFrame | null> {
     const video = this.video;
     if (!this.sharing() || !video || video.videoWidth === 0) return null;
 
+    const hidden = this.hide(hideSelectors);
+    try {
+      // The track runs at ~30fps and the compositor is a frame or two behind the DOM, so
+      // grabbing immediately after hiding still catches the panel. Wait for two painted
+      // frames plus a margin — without this the whole exercise silently does nothing.
+      if (hidden.length > 0) await twoFrames();
+      return this.encode(video);
+    } finally {
+      for (const entry of hidden) entry.restore();
+    }
+  }
+
+  /** Hide elements for a capture, returning how to put each one back. */
+  private hide(selectors: readonly string[]): Array<{ restore: () => void }> {
+    const out: Array<{ restore: () => void }> = [];
+    for (const selector of selectors) {
+      let nodes: NodeListOf<HTMLElement>;
+      try {
+        nodes = document.querySelectorAll<HTMLElement>(selector);
+      } catch {
+        continue; // a bad selector must not cost the frame
+      }
+      for (const node of Array.from(nodes)) {
+        const previous = node.style.visibility;
+        // `visibility`, not `display`: display:none reflows the page, so the chart would
+        // resize for the shot and the operator would see it jump.
+        node.style.visibility = 'hidden';
+        out.push({
+          restore: () => {
+            node.style.visibility = previous;
+          },
+        });
+      }
+    }
+    return out;
+  }
+
+  private encode(video: HTMLVideoElement): CapturedFrame | null {
     const scale = Math.min(1, MAX_EDGE / Math.max(video.videoWidth, video.videoHeight));
     const width = Math.max(1, Math.round(video.videoWidth * scale));
     const height = Math.max(1, Math.round(video.videoHeight * scale));

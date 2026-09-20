@@ -58,6 +58,7 @@ import {
   type StudyTemplate,
 } from '../../workspace/layout-store.service';
 import {
+  DEFAULT_STYLE,
   TOOLS,
   toolFor,
   type DashStyle,
@@ -434,6 +435,21 @@ export class ChartAnalysisPageComponent {
             .map((p) => p.symbol ?? '')
             .filter(Boolean),
         timezones: () => this.timezones,
+        bars: () => this.bars(),
+        drawings: () => this.drawings.visible(),
+        addDrawing: (kind, points, color) =>
+          this.drawings.add(kind, points, {
+            ...DEFAULT_STYLE,
+            ...(toolFor(kind)?.defaultStyle ?? {}),
+            ...(color ? { color } : {}),
+          }).id,
+        removeDrawing: (id) => this.drawings.remove(id),
+        styleDrawing: (id, patch) => this.drawings.updateStyle(id, patch),
+        setVisibleRange: (from, to) => this.host()?.setVisibleRange(from, to) ?? false,
+        showLastBars: (n) => this.host()?.showLastBars(n) ?? false,
+        fitContent: () => this.host()?.fitContent(),
+        scrollToRealtime: () => this.host()?.scrollToRealtime(),
+        resetScales: () => this.resetScales(),
       }),
       this.destroyRef,
     );

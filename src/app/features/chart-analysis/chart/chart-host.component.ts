@@ -333,6 +333,41 @@ export class ChartHostComponent implements OnDestroy {
     this.chart?.timeScale().fitContent();
   }
 
+  /**
+   * Show the window between two instants (ms), inclusive.
+   *
+   * <p>The library takes SECONDS on the time scale while everything in this feature is
+   * milliseconds, and the conversion is the kind of thing that silently shows 1970 when it
+   * is forgotten. Returns false when the chart is not up yet so a caller can say so rather
+   * than reporting a move that did not happen.</p>
+   */
+  setVisibleRange(fromMs: number, toMs: number): boolean {
+    const scale = this.chart?.timeScale();
+    if (!scale) return false;
+    const from = Math.min(fromMs, toMs);
+    const to = Math.max(fromMs, toMs);
+    try {
+      scale.setVisibleRange({
+        from: Math.floor(from / 1000) as unknown as Time,
+        to: Math.floor(to / 1000) as unknown as Time,
+      });
+      return true;
+    } catch {
+      // The library throws when the range holds no data at all.
+      return false;
+    }
+  }
+
+  /** Show the most recent `count` bars. */
+  showLastBars(count: number): boolean {
+    const scale = this.chart?.timeScale();
+    const total = this.bars().length;
+    if (!scale || total === 0) return false;
+    const from = Math.max(0, total - count);
+    scale.setVisibleLogicalRange({ from, to: total - 1 });
+    return true;
+  }
+
   private palette(dark: boolean) {
     return {
       background: dark ? '#131722' : '#FFFFFF',

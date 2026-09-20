@@ -39,6 +39,24 @@ export interface ChartCommandHost {
   takeSnapshot(): void;
   knownSymbols(): readonly string[];
   timezones(): readonly { id: string; label: string }[];
+
+  /** Loaded bars, for resolving dates and for "last N bars". */
+  bars(): readonly { time: number; high: number; low: number; close: number }[];
+  /** Drawings on the current symbol + timeframe. */
+  drawings(): readonly {
+    id: string;
+    kind: DrawingKind;
+    points: { time: number; price: number }[];
+  }[];
+  addDrawing(kind: DrawingKind, points: { time: number; price: number }[], color?: string): string;
+  removeDrawing(id: string): void;
+  styleDrawing(id: string, patch: { color?: string; width?: number; text?: string }): void;
+  /** Show a time window, in ms. False when the chart cannot honour it. */
+  setVisibleRange(fromMs: number, toMs: number): boolean;
+  showLastBars(count: number): boolean;
+  fitContent(): void;
+  scrollToRealtime(): void;
+  resetScales(): void;
 }
 
 const ok = (message: string, data?: unknown): UiCommandOutcome => ({ ok: true, message, data });
@@ -136,6 +154,25 @@ const STYLES: readonly ChartStyle[] = [
   'pnf',
   'line-break',
 ];
+
+/** Resolve a tool by kind or label, reporting ambiguity rather than picking. */
+function findTool(query: string): (typeof TOOLS)[number] | string {
+  const q = query.trim().toLowerCase();
+  if (!q) return 'No tool named.';
+  const exact = TOOLS.find((t) => t.kind.toLowerCase() === q || t.label.toLowerCase() === q);
+  if (exact) return exact;
+  const partial = TOOLS.filter(
+    (t) => t.label.toLowerCase().includes(q) || t.kind.toLowerCase().includes(q),
+  );
+  if (partial.length === 1) return partial[0];
+  if (partial.length > 1) {
+    return `"${query}" matches ${partial.length} tools: ${partial
+      .slice(0, 8)
+      .map((t) => t.label)
+      .join(', ')}. Name one exactly.`;
+  }
+  return `No drawing tool matches "${query}".`;
+}
 
 /** Every command the chart page offers the assistant. */
 export function chartCommands(host: ChartCommandHost): UiCommand[] {
@@ -490,30 +527,14 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
           host.selectTool(null);
           return ok('Back to the cursor.');
         }
-        const hits = TOOLS.filter(
-          (t) => t.kind.toLowerCase() === q || t.label.toLowerCase() === q,
-        ).concat(
-          TOOLS.filter(
-            (t) => t.label.toLowerCase().includes(q) || t.kind.toLowerCase().includes(q),
-          ),
-        );
-        const unique = hits.filter((t, i) => hits.findIndex((x) => x.kind === t.kind) === i);
-        if (unique.length === 0) return fail(`No drawing tool matches "${str(a, 'tool')}".`);
-        if (
-          unique.length > 1 &&
-          unique[0].label.toLowerCase() !== q &&
-          unique[0].kind.toLowerCase() !== q
-        ) {
-          return fail(
-            `"${str(a, 'tool')}" matches ${unique.length} tools: ${unique
-              .slice(0, 8)
-              .map((t) => t.label)
-              .join(', ')}. Name one exactly.`,
-          );
-        }
-        host.selectTool(unique[0].kind);
+        const spec = findTool(str(a, 'tool'));
+        if (typeof spec === 'string') return fail(spec);
+        host.selectTool(spec.kind);
         // Deliberately explicit: arming a tool changes nothing until the operator clicks.
-        return ok(`${unique[0].label} armed — click on the chart to place it.`);
+        // `chart.placeDrawing` is the one that does not need them.
+        return ok(
+          `${spec.label} armed — click on the chart to place it. (Use chart.placeDrawing to put one at exact coordinates instead.)`,
+        );
       },
     },
     {
@@ -528,6 +549,190 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
         if (n === 0) return ok('There were no drawings to clear.');
         host.clearDrawings();
         return ok(`Cleared ${n} drawing(s).`);
+      },
+    },
+    {
+      id: 'chart.navigate',
+      description:
+        'Move the visible time window: fit everything, jump to the latest bar, show the last N bars, or show a date range.',
+      params: [
+        {
+          name: 'mode',
+          type: 'enum',
+          required: true,
+          values: ['fit', 'latest', 'lastBars', 'range', 'resetScales'],
+          description: 'What kind of move.',
+        },
+        { name: 'bars', type: 'number', description: 'How many bars, for mode=lastBars.' },
+        { name: 'from', type: 'string', description: 'ISO date/time, for mode=range.' },
+        { name: 'to', type: 'string', description: 'ISO date/time, for mode=range.' },
+      ],
+      run: (a) => {
+        const mode = str(a, 'mode');
+        if (mode === 'fit') {
+          host.fitContent();
+          return ok('Zoomed to fit all loaded bars.');
+        }
+        if (mode === 'latest') {
+          host.scrollToRealtime();
+          return ok('Scrolled to the latest bar.');
+        }
+        if (mode === 'resetScales') {
+          host.resetScales();
+          return ok('Price and time scales reset.');
+        }
+        if (mode === 'lastBars') {
+          const n = Math.round(Number(a['bars'] ?? 0));
+          if (!Number.isFinite(n) || n < 2) return fail('bars must be 2 or more.');
+          return host.showLastBars(n)
+            ? ok(`Showing the last ${n} bars.`)
+            : fail('No bars are loaded.');
+        }
+        const from = Date.parse(str(a, 'from'));
+        const to = Date.parse(str(a, 'to'));
+        if (!Number.isFinite(from) || !Number.isFinite(to)) {
+          return fail('from and to must be ISO dates, e.g. 2026-09-15T00:00:00Z.');
+        }
+        // Say which way it failed: an out-of-range window and a chart that is not up yet
+        // are different problems for the operator.
+        const loaded = host.bars();
+        if (loaded.length === 0) return fail('No bars are loaded.');
+        const first = loaded[0].time;
+        const last = loaded[loaded.length - 1].time;
+        if (Math.max(from, to) < first || Math.min(from, to) > last) {
+          return fail(
+            `That window is outside the loaded data (${new Date(first).toISOString().slice(0, 10)} to ${new Date(last).toISOString().slice(0, 10)}). Scroll back to load more first.`,
+          );
+        }
+        return host.setVisibleRange(from, to)
+          ? ok(`Showing ${str(a, 'from')} → ${str(a, 'to')}.`)
+          : fail('The chart could not show that range.');
+      },
+    },
+    {
+      id: 'chart.listDrawings',
+      description: 'List the drawings on the current symbol and timeframe, with their ids.',
+      run: () => {
+        const items = host.drawings().map((d) => ({
+          id: d.id,
+          kind: d.kind,
+          points: d.points.map((p) => ({ time: new Date(p.time).toISOString(), price: p.price })),
+        }));
+        return ok(items.length ? `${items.length} drawing(s).` : 'No drawings.', items);
+      },
+    },
+    {
+      id: 'chart.placeDrawing',
+      description:
+        'Place a drawing at exact coordinates — no clicking needed. Give price/time pairs: one point for a horizontal line, two for a trend line or box, more for multi-point tools.',
+      params: [
+        {
+          name: 'tool',
+          type: 'string',
+          required: true,
+          description: 'Tool name or kind, e.g. "Trend Line", "horizontal-line", "Rectangle".',
+        },
+        {
+          name: 'points',
+          type: 'string',
+          required: true,
+          description:
+            'JSON array of {price, time?} — time is an ISO string; omit it on a horizontal line. Example: [{"price":1.1490,"time":"2026-09-15T00:00:00Z"},{"price":1.1520,"time":"2026-09-18T00:00:00Z"}]',
+        },
+        { name: 'color', type: 'string', description: 'Hex colour, e.g. #FF6D00.' },
+        { name: 'text', type: 'string', description: 'Label shown on the drawing.' },
+      ],
+      run: (a) => {
+        const spec = findTool(str(a, 'tool'));
+        if (typeof spec === 'string') return fail(spec);
+
+        let raw: unknown;
+        try {
+          raw = JSON.parse(str(a, 'points'));
+        } catch {
+          return fail('points must be a JSON array.');
+        }
+        if (!Array.isArray(raw) || raw.length === 0)
+          return fail('points must be a non-empty array.');
+
+        const loaded = host.bars();
+        if (loaded.length === 0) return fail('No bars are loaded to place a drawing on.');
+        const lastTime = loaded[loaded.length - 1].time;
+        const midTime = loaded[Math.floor(loaded.length / 2)].time;
+
+        const points: { time: number; price: number }[] = [];
+        for (const [i, entry] of raw.entries()) {
+          const o = entry as Record<string, unknown>;
+          const price = Number(o['price']);
+          if (!Number.isFinite(price)) return fail(`points[${i}].price must be a number.`);
+          // A horizontal line has a price and no meaningful time, but the model still has to
+          // put the anchor SOMEWHERE — default it rather than refusing over a coordinate
+          // that does not affect what is drawn.
+          const timeRaw = o['time'];
+          let time: number;
+          if (timeRaw === undefined || timeRaw === null || timeRaw === '') {
+            time = spec.axis === 'price' ? midTime : lastTime;
+          } else {
+            time = Date.parse(String(timeRaw));
+            if (!Number.isFinite(time)) return fail(`points[${i}].time is not an ISO date.`);
+          }
+          points.push({ time, price });
+        }
+
+        const needed = spec.points === 'freehand' ? 2 : spec.points;
+        if (points.length < needed) {
+          return fail(`${spec.label} needs ${needed} point(s); ${points.length} given.`);
+        }
+
+        const id = host.addDrawing(
+          spec.kind,
+          points.slice(0, Math.max(needed, points.length)),
+          str(a, 'color') || undefined,
+        );
+        const label = str(a, 'text');
+        if (label) host.styleDrawing(id, { text: label });
+        return ok(`Placed ${spec.label}.`, { id });
+      },
+    },
+    {
+      id: 'chart.removeDrawing',
+      description: 'Remove one drawing by its id (from chart.listDrawings).',
+      params: [{ name: 'id', type: 'string', required: true, description: 'Drawing id.' }],
+      run: (a) => {
+        const id = str(a, 'id');
+        if (!host.drawings().some((d) => d.id === id)) return fail(`No drawing with id "${id}".`);
+        host.removeDrawing(id);
+        return ok('Drawing removed.');
+      },
+    },
+    {
+      id: 'chart.styleDrawing',
+      description: 'Change one drawing’s colour, line width or label.',
+      params: [
+        { name: 'id', type: 'string', required: true, description: 'Drawing id.' },
+        { name: 'color', type: 'string', description: 'Hex colour.' },
+        { name: 'width', type: 'number', description: 'Line width, 1-6.' },
+        { name: 'text', type: 'string', description: 'Label.' },
+      ],
+      run: (a) => {
+        const id = str(a, 'id');
+        if (!host.drawings().some((d) => d.id === id)) return fail(`No drawing with id "${id}".`);
+        const patch: { color?: string; width?: number; text?: string } = {};
+        const color = str(a, 'color');
+        if (color) {
+          if (!/^#[0-9a-f]{3,8}$/i.test(color))
+            return fail('color must be a hex value like #FF6D00.');
+          patch.color = color;
+        }
+        if (a['width'] !== undefined) {
+          const w = Number(a['width']);
+          if (!(w >= 1 && w <= 6)) return fail('width must be between 1 and 6.');
+          patch.width = w;
+        }
+        if (a['text'] !== undefined) patch.text = str(a, 'text');
+        if (Object.keys(patch).length === 0) return fail('Nothing to change.');
+        host.styleDrawing(id, patch);
+        return ok('Drawing restyled.');
       },
     },
     {

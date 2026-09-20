@@ -14,7 +14,27 @@ function sig<T>(initial: T) {
   return fn;
 }
 
+/** Three days of hourly bars ending 2026-09-18, so date arguments have something to hit. */
+const LAST_MS = Date.parse('2026-09-18T20:00:00Z');
+const bars = Array.from({ length: 72 }, (_, i) => ({
+  time: LAST_MS - (71 - i) * 3_600_000,
+  high: 1.15,
+  low: 1.14,
+  close: 1.145,
+}));
+
+let placed: Array<{
+  id: string;
+  kind: string;
+  points: { time: number; price: number }[];
+  color?: string;
+  text?: string;
+}>;
+let moves: string[];
+
 function makeHost(over: Partial<ChartCommandHost> = {}) {
+  placed = [];
+  moves = [];
   const active = sig<ActiveIndicator[]>([]);
   const host: ChartCommandHost = {
     symbol: sig('EURUSD'),
@@ -48,6 +68,32 @@ function makeHost(over: Partial<ChartCommandHost> = {}) {
     selectTool: () => void 0,
     clearDrawings: () => void 0,
     takeSnapshot: () => void 0,
+    bars: () => bars,
+    drawings: () => placed,
+    addDrawing: (kind, points, color) => {
+      const id = `d${placed.length + 1}`;
+      placed.push({ id, kind, points, color });
+      return id;
+    },
+    removeDrawing: (id) => {
+      const i = placed.findIndex((d) => d.id === id);
+      if (i >= 0) placed.splice(i, 1);
+    },
+    styleDrawing: (id, patch) => {
+      const d = placed.find((x) => x.id === id);
+      if (d) Object.assign(d, patch);
+    },
+    setVisibleRange: (from, to) => {
+      moves.push(`range:${from}-${to}`);
+      return true;
+    },
+    showLastBars: (n) => {
+      moves.push(`lastBars:${n}`);
+      return true;
+    },
+    fitContent: () => moves.push('fit'),
+    scrollToRealtime: () => moves.push('latest'),
+    resetScales: () => moves.push('reset'),
     knownSymbols: () => ['EURUSD', 'GBPUSD', 'AUDCAD'],
     timezones: () => [
       { id: 'UTC', label: 'UTC' },
@@ -244,5 +290,135 @@ describe('chart commands', () => {
     const r = await byId(chartCommands(h), 'chart.clearDrawings').run({});
     expect(r.ok).toBe(true);
     expect(cleared).toBe(false);
+  });
+});
+
+describe('placing drawings and navigating', () => {
+  let host: ChartCommandHost;
+  let cmds: UiCommand[];
+
+  beforeEach(() => {
+    host = makeHost();
+    cmds = chartCommands(host);
+  });
+
+  const place = (args: Record<string, unknown>) => byId(cmds, 'chart.placeDrawing').run(args);
+
+  it('places a trend line at exact coordinates, no clicking', async () => {
+    // The gap this closes: selectTool only ARMS a tool and waits for the operator's clicks,
+    // so the assistant could never actually draw anything itself.
+    const r = await place({
+      tool: 'Trend Line',
+      points: JSON.stringify([
+        { price: 1.144, time: '2026-09-17T00:00:00Z' },
+        { price: 1.149, time: '2026-09-18T00:00:00Z' },
+      ]),
+    });
+    expect(r.ok).toBe(true);
+    expect(placed).toHaveLength(1);
+    expect(placed[0].kind).toBe('trend-line');
+    expect(placed[0].points[0].price).toBe(1.144);
+  });
+
+  it('lets a horizontal line omit the time', async () => {
+    // Its anchor time does not affect what is drawn, so refusing over a missing coordinate
+    // would be pedantry.
+    const r = await place({ tool: 'Horizontal Line', points: JSON.stringify([{ price: 1.147 }]) });
+    expect(r.ok).toBe(true);
+    expect(placed[0].points[0].time).toBeGreaterThan(0);
+  });
+
+  it('refuses too few points for the tool', async () => {
+    const r = await place({ tool: 'Trend Line', points: JSON.stringify([{ price: 1.14 }]) });
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/needs 2/);
+    expect(placed).toHaveLength(0);
+  });
+
+  it('refuses points that are not JSON, or not an array', async () => {
+    expect((await place({ tool: 'Trend Line', points: 'nope' })).ok).toBe(false);
+    expect((await place({ tool: 'Trend Line', points: '{}' })).ok).toBe(false);
+  });
+
+  it('refuses a non-numeric price and a bad date, naming the index', async () => {
+    const bad = await place({
+      tool: 'Trend Line',
+      points: JSON.stringify([{ price: 'x' }, { price: 1.15 }]),
+    });
+    expect(bad.message).toMatch(/points\[0\]\.price/);
+    const badTime = await place({
+      tool: 'Trend Line',
+      points: JSON.stringify([
+        { price: 1.14, time: 'yesterday' },
+        { price: 1.15, time: '2026-09-18T00:00:00Z' },
+      ]),
+    });
+    expect(badTime.message).toMatch(/points\[0\]\.time/);
+  });
+
+  it('applies a colour and a label', async () => {
+    await place({
+      tool: 'Horizontal Line',
+      points: JSON.stringify([{ price: 1.147 }]),
+      color: '#FF6D00',
+      text: 'Weekly high',
+    });
+    expect(placed[0].color).toBe('#FF6D00');
+    expect(placed[0].text).toBe('Weekly high');
+  });
+
+  it('lists, restyles and removes a drawing by id', async () => {
+    await place({ tool: 'Horizontal Line', points: JSON.stringify([{ price: 1.147 }]) });
+    const list = await byId(cmds, 'chart.listDrawings').run({});
+    expect((list.data as unknown[]).length).toBe(1);
+
+    const styled = await byId(cmds, 'chart.styleDrawing').run({ id: 'd1', width: 4 });
+    expect(styled.ok).toBe(true);
+
+    const gone = await byId(cmds, 'chart.removeDrawing').run({ id: 'd1' });
+    expect(gone.ok).toBe(true);
+    expect(placed).toHaveLength(0);
+  });
+
+  it('refuses to restyle with a colour that is not hex', async () => {
+    await place({ tool: 'Horizontal Line', points: JSON.stringify([{ price: 1.147 }]) });
+    const r = await byId(cmds, 'chart.styleDrawing').run({ id: 'd1', color: 'orange' });
+    expect(r.ok).toBe(false);
+  });
+
+  it('refuses an unknown drawing id rather than doing nothing quietly', async () => {
+    expect((await byId(cmds, 'chart.removeDrawing').run({ id: 'nope' })).ok).toBe(false);
+    expect((await byId(cmds, 'chart.styleDrawing').run({ id: 'nope', width: 2 })).ok).toBe(false);
+  });
+
+  it('navigates: fit, latest, last N bars and a date range', async () => {
+    const nav = byId(cmds, 'chart.navigate');
+    expect((await nav.run({ mode: 'fit' })).ok).toBe(true);
+    expect((await nav.run({ mode: 'latest' })).ok).toBe(true);
+    expect((await nav.run({ mode: 'lastBars', bars: 50 })).ok).toBe(true);
+    expect(
+      (await nav.run({ mode: 'range', from: '2026-09-17T00:00:00Z', to: '2026-09-18T00:00:00Z' }))
+        .ok,
+    ).toBe(true);
+    expect(moves).toEqual(['fit', 'latest', 'lastBars:50', expect.stringMatching(/^range:/)]);
+  });
+
+  it('says a range is outside the loaded data, and names the window that is loaded', async () => {
+    // "the chart could not show that range" would send the operator looking for a bug; the
+    // real answer is that the bars are not loaded yet.
+    const r = await byId(cmds, 'chart.navigate').run({
+      mode: 'range',
+      from: '2020-01-01T00:00:00Z',
+      to: '2020-02-01T00:00:00Z',
+    });
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/outside the loaded data/);
+    expect(r.message).toMatch(/2026-09/);
+  });
+
+  it('refuses a nonsense date range', async () => {
+    const r = await byId(cmds, 'chart.navigate').run({ mode: 'range', from: 'soon', to: 'later' });
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/ISO dates/);
   });
 });

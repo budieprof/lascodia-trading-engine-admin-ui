@@ -410,7 +410,11 @@ export class AssistantDockComponent {
    */
   protected readonly screenshotProvider = async (): Promise<string | null> => {
     if (!this.capture.sharing()) return null;
-    const frame = await this.capture.grab();
+    // Hide this panel for the shot. It is docked right over roughly a third of the page —
+    // on the chart that is the price axis and the newest bars, so a frame taken with it up
+    // omits exactly what a question about the chart is about. The assistant said as much
+    // itself: "covering roughly the right third of the chart including the price axis".
+    const frame = await this.capture.grab(['.dock', '.assistant-fab']);
     return frame?.base64 ?? null;
   };
 
