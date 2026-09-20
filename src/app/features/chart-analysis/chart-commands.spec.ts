@@ -161,6 +161,8 @@ function makeHost(over: Partial<ChartCommandHost> = {}) {
     isFullscreen: () => fullscreen,
     showVolumeProfile: sig(false),
     showSupportResistance: sig(false),
+    showStructure: sig(false),
+    structureSummary: () => 'Balancing 43 pips over 50 bars, 1.14548–1.14979.',
     srLevels: () => [{ price: 1.15, kind: 'resistance', touches: 3, strength: 0.8 }],
     volumeProfile: () => ({ poc: 1.147, valueAreaLow: 1.144, valueAreaHigh: 1.15 }),
     knownSymbols: () => ['EURUSD', 'GBPUSD', 'AUDCAD'],
@@ -657,7 +659,11 @@ describe('analysis overlays', () => {
   });
 
   it('says plainly when nothing was detected', async () => {
-    const empty = makeHost({ srLevels: () => [], volumeProfile: () => null });
+    const empty = makeHost({
+      srLevels: () => [],
+      volumeProfile: () => null,
+      structureSummary: () => null,
+    });
     const r = await byId(chartCommands(empty), 'chart.readLevels').run({});
     expect(r.message).toMatch(/No levels detected/);
   });

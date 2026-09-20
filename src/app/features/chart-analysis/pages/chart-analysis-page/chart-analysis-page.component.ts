@@ -49,6 +49,7 @@ import { UiCommandService } from '@core/assistant/ui-command.service';
 import { chartCommands } from '../../chart-commands';
 import type { EventMark } from '../../overlays/event-marks-renderer';
 import { profileWithValueArea, supportResistance } from '../../overlays/analysis-overlays';
+import { marketStructure } from '../../overlays/market-structure';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import type { PriceOverlay } from '../../overlays/overlay-renderer';
 import type { ChartMarker } from '../../chart/chart-host.component';
@@ -174,6 +175,7 @@ export class ChartAnalysisPageComponent {
   // toggles the toolbar drives.
   readonly showVolumeProfile = signal(false);
   readonly showSupportResistance = signal(false);
+  readonly showStructure = signal(false);
 
   /** The estimated-delta study, which is a PANE study rather than a price overlay. */
   readonly deltaOn = computed(() => this.active().some((i) => i.defId === 'est-delta'));
@@ -527,6 +529,8 @@ export class ChartAnalysisPageComponent {
         isFullscreen: () => this.isFullscreen(),
         showVolumeProfile: this.showVolumeProfile,
         showSupportResistance: this.showSupportResistance,
+        showStructure: this.showStructure,
+        structureSummary: () => marketStructure(this.bars()).summary,
         // Computed on demand rather than held in a signal: the assistant asks rarely, and a
         // second copy of this would be a second thing that can disagree with the chart.
         srLevels: () => supportResistance(this.bars()),

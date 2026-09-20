@@ -55,6 +55,7 @@ import {
   supportResistance,
   type SrLevel,
 } from '../overlays/analysis-overlays';
+import { marketStructure } from '../overlays/market-structure';
 import { timezoneOffsetMinutes } from '../workspace/layout-store.service';
 import { EventMarksRenderer, type EventMark } from '../overlays/event-marks-renderer';
 
@@ -170,6 +171,8 @@ export class ChartHostComponent implements OnDestroy {
   readonly showVolumeProfile = input<boolean>(false);
   /** Auto-detected support/resistance from swing pivots. */
   readonly showSupportResistance = input<boolean>(false);
+  /** Balance range, value area, stop pools and the events that formed them. */
+  readonly showStructure = input<boolean>(false);
   readonly indicators = input<ActiveIndicator[]>([]);
   readonly precision = input<number>(5);
   /** Armed drawing tool, or null for the cursor. */
@@ -307,6 +310,7 @@ export class ChartHostComponent implements OnDestroy {
       this.bars();
       this.showVolumeProfile();
       this.showSupportResistance();
+      this.showStructure();
       untracked(() => this.recomputeAnalysis());
     });
 
@@ -363,15 +367,18 @@ export class ChartHostComponent implements OnDestroy {
     const bars = this.bars();
     const wantProfile = this.showVolumeProfile();
     const wantLevels = this.showSupportResistance();
-    if (!wantProfile && !wantLevels) {
+    const wantStructure = this.showStructure();
+    if (!wantProfile && !wantLevels && !wantStructure) {
       this.analysisRenderer.setProfile(null);
       this.analysisRenderer.setLevels([]);
+      this.analysisRenderer.setStructure(null);
       return;
     }
 
     const window = this.visibleBars(bars);
     this.analysisRenderer.setProfile(wantProfile ? profileWithValueArea(window) : null);
     this.analysisRenderer.setLevels(wantLevels ? supportResistance(window) : []);
+    this.analysisRenderer.setStructure(wantStructure ? marketStructure(window) : null);
   }
 
   /** The slice of `bars` currently on screen. */
@@ -397,7 +404,7 @@ export class ChartHostComponent implements OnDestroy {
    */
   private analysisTimer: ReturnType<typeof setTimeout> | null = null;
   private scheduleAnalysis(): void {
-    if (!this.showVolumeProfile() && !this.showSupportResistance()) return;
+    if (!this.showVolumeProfile() && !this.showSupportResistance() && !this.showStructure()) return;
     if (this.analysisTimer !== null) clearTimeout(this.analysisTimer);
     this.analysisTimer = setTimeout(() => {
       this.analysisTimer = null;

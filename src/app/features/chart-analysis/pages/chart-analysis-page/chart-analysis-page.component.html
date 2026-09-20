@@ -168,6 +168,15 @@
       <button
         type="button"
         class="tool"
+        [class.active]="showStructure()"
+        (click)="showStructure.set(!showStructure())"
+        title="Market structure — balance range, value area, estimated stop pools, and the climax / spring / upthrust bars that formed them"
+      >
+        ⌗ Structure
+      </button>
+      <button
+        type="button"
+        class="tool"
         [class.active]="deltaOn()"
         (click)="toggleDelta()"
         title="Order-flow delta, ESTIMATED from OHLCV — there is no aggressor tape for FX here, so a bar closing near its high is assumed bought"
@@ -489,6 +498,7 @@
           [boxSizeAtr]="boxSizeAtr()"
           [showVolumeProfile]="showVolumeProfile()"
           [showSupportResistance]="showSupportResistance()"
+          [showStructure]="showStructure()"
           [symbol]="symbol()"
           [resolution]="resolution()"
           [overlays]="overlays()"

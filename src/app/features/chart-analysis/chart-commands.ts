@@ -92,6 +92,9 @@ export interface ChartCommandHost {
   // ── Analysis overlays ──────────────────────────────────────────────────
   showVolumeProfile: { (): boolean; set(v: boolean): void };
   showSupportResistance: { (): boolean; set(v: boolean): void };
+  showStructure: { (): boolean; set(v: boolean): void };
+  /** One line describing the current balance, or null when price is not balancing. */
+  structureSummary(): string | null;
   /** Support/resistance as currently computed, so the model can cite the levels. */
   srLevels(): readonly { price: number; kind: string; touches: number; strength: number }[];
   /** Volume profile POC and value area for the loaded window, or null. */
@@ -1025,22 +1028,24 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
     {
       id: 'chart.setOverlay',
       description:
-        'Turn an analysis overlay on or off: the volume profile (volume by price, with POC and value area) or auto-detected support/resistance.',
+        'Turn an analysis overlay on or off: the volume profile (volume by price, with POC and value area), auto-detected support/resistance, or market structure (balance range, value area, estimated stop pools, climax / spring / upthrust bars).',
       params: [
         {
           name: 'overlay',
           type: 'enum',
           required: true,
-          values: ['volumeProfile', 'supportResistance'],
+          values: ['volumeProfile', 'supportResistance', 'structure'],
           description: 'Which overlay.',
         },
         { name: 'visible', type: 'boolean', required: true, description: 'true to show.' },
       ],
       run: (a) => {
         const want = bool(a, 'visible');
-        if (str(a, 'overlay') === 'volumeProfile') host.showVolumeProfile.set(want);
+        const which = str(a, 'overlay');
+        if (which === 'volumeProfile') host.showVolumeProfile.set(want);
+        else if (which === 'structure') host.showStructure.set(want);
         else host.showSupportResistance.set(want);
-        return ok(`${str(a, 'overlay')} ${want ? 'on' : 'off'}.`);
+        return ok(`${which} ${want ? 'on' : 'off'}.`);
       },
     },
     {
@@ -1050,13 +1055,16 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
       run: () => {
         const levels = host.srLevels();
         const vp = host.volumeProfile();
+        const structure = host.structureSummary();
         const parts: string[] = [];
         if (levels.length) parts.push(`${levels.length} level(s)`);
         if (vp) parts.push(`POC ${vp.poc}`);
-        return ok(
-          parts.length ? parts.join(', ') + '.' : 'No levels detected on the loaded bars.',
-          { levels, volumeProfile: vp },
-        );
+        if (structure) parts.push(structure);
+        return ok(parts.length ? parts.join(', ') : 'No levels detected on the loaded bars.', {
+          levels,
+          volumeProfile: vp,
+          structure,
+        });
       },
     },
     {
