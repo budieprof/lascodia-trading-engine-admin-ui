@@ -752,8 +752,12 @@ const MAX_THREAD_TURNS = 300;
           The placeholder spinner is for a chat that streams NOTHING. An engineer run narrates
           into the thread instead, so once a live thinking block is on screen this would be a
           second, redundant "Thinking…" sitting under the real one.
+
+          Keyed on narrationLive, not sending: the page-command path finishes the ask early and
+          does the rest of the work inside the resolve, so reading sending() alone left the thread
+          looking idle for the longest stretch of the turn.
         -->
-        @if (sending() && !streamingLive()) {
+        @if (narrationLive() && !streamingLive()) {
           <div class="msg">
             <div class="bubble thinking"><span class="spinner"></span> Thinking…</div>
           </div>
@@ -1852,8 +1856,15 @@ export class AnalysisChatComponent {
    * Is anything being written right now? An agent thread (Engineer or Wire) knows from its run
    * state; a plain analysis thread that streams thoughts has no run bar, so an in-flight ask is the
    * liveness signal there.
+   *
+   * <p>A resolve counts. When the assistant proposes page commands the ASK returns early — the
+   * browser has to run them — and the work then continues inside the resolve call, which is the
+   * longest part of the turn. Reading only `sending()` made the console go completely still at
+   * exactly the moment there was most to wait for, with no way to tell it apart from finished.</p>
    */
-  protected readonly narrationLive = computed(() => this.runLive() || this.sending());
+  protected readonly narrationLive = computed(
+    () => this.runLive() || this.sending() || this.resolvingId() !== null,
+  );
 
   /** True while the newest thinking block is being written into — the thread narrates itself. */
   protected readonly streamingLive = computed(
