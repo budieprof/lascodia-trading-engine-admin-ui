@@ -84,26 +84,42 @@ import { NotificationService } from '@core/notifications/notification.service';
           </div>
           <div class="dock-actions">
             <!--
-              Screen sharing. The browser shows its own indicator for the whole session, so
-              this toggle can only ever agree with something the operator can already see —
-              it cannot put the assistant's eyes anywhere they did not put them.
+              Vision. In page mode this costs nothing: no browser prompt, no sharing banner,
+              no capture session — the frame is rendered from the live DOM. Screen mode is
+              still one click away for what the document cannot show, and it carries the
+              browser's own picker and indicator, which the page has no way to waive.
             -->
             @if (capture.supported) {
               <button
                 type="button"
                 class="icon"
-                [class.sharing]="capture.sharing()"
-                (click)="toggleSharing()"
+                [class.sharing]="capture.enabled()"
+                [class.screen]="capture.sharing()"
+                (click)="toggleVision()"
                 [title]="
-                  capture.sharing()
-                    ? 'Stop sharing your screen with the assistant'
-                    : 'Let the assistant see your screen'
+                  capture.enabled()
+                    ? 'Stop letting the assistant see (' + capture.mode() + ')'
+                    : 'Let the assistant see this page'
                 "
-                [attr.aria-pressed]="capture.sharing()"
-                aria-label="Share screen with the assistant"
+                [attr.aria-pressed]="capture.enabled()"
+                aria-label="Let the assistant see this page"
               >
-                {{ capture.sharing() ? '👁' : '👁‍🗨' }}
+                {{ capture.enabled() ? '👁' : '👁‍🗨' }}
               </button>
+              @if (capture.enabled() && capture.screenSupported) {
+                <button
+                  type="button"
+                  class="vision-mode"
+                  (click)="toggleVisionMode()"
+                  [title]="
+                    capture.mode() === 'page'
+                      ? 'Seeing this page only, with no browser prompt. Switch to the whole screen — the browser will ask, and will show its sharing bar.'
+                      : 'Sharing your screen. Switch back to this page only, with no prompt or sharing bar.'
+                  "
+                >
+                  {{ capture.mode() === 'page' ? 'page' : 'screen' }}
+                </button>
+              }
             }
             <button
               type="button"
@@ -295,12 +311,36 @@ import { NotificationService } from '@core/notifications/notification.service';
         text-overflow: ellipsis;
         max-width: 18ch;
       }
-      /* Sharing is a state the operator should be able to see at a glance without hunting
-         for the browser's own indicator. */
+      /* Vision is a state the operator should be able to see at a glance. Page mode has no
+         browser indicator of its own — nothing is being captured off the screen — so this
+         badge is the only signal, which is exactly why it is not subtle. */
       .icon.sharing {
         color: #fff;
-        background: #d93025;
+        background: #1a73e8;
         border-radius: 6px;
+      }
+      /* Red is reserved for the browser actually capturing the screen. Wearing it in page
+         mode would claim a recording that is not happening — and would leave nothing louder
+         for the mode that IS. */
+      .icon.sharing.screen {
+        background: #d93025;
+      }
+      /* Which source is in use, and the switch between them. Deliberately a word rather than
+         an icon: "page" and "screen" differ in what the browser will do to the operator, and
+         a glyph cannot carry that. */
+      .vision-mode {
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        border-radius: 999px;
+        font-size: 10px;
+        line-height: 1;
+        padding: 4px 7px;
+        cursor: pointer;
+        align-self: center;
+      }
+      .vision-mode:hover {
+        color: var(--text-primary);
       }
 
       .dock-actions {
@@ -409,25 +449,44 @@ export class AssistantDockComponent {
    * navigated away from, and the assistant would describe it with total confidence.</p>
    */
   protected readonly screenshotProvider = async (): Promise<string | null> => {
-    if (!this.capture.sharing()) return null;
+    if (!this.capture.enabled()) return null;
     // Hide this panel for the shot. It is docked right over roughly a third of the page —
     // on the chart that is the price axis and the newest bars, so a frame taken with it up
     // omits exactly what a question about the chart is about. The assistant said as much
     // itself: "covering roughly the right third of the chart including the price axis".
-    const frame = await this.capture.grab(['.dock', '.assistant-fab']);
+    // '.fab', not '.assistant-fab' — the latter matches nothing, so the floating Ask button
+    // used to sit in every frame.
+    const frame = await this.capture.grab(['.dock', '.fab']);
     return frame?.base64 ?? null;
   };
 
-  protected async toggleSharing(): Promise<void> {
-    if (this.capture.sharing()) {
-      this.capture.stop();
+  protected async toggleVision(): Promise<void> {
+    if (this.capture.enabled()) {
+      this.capture.disable();
       return;
     }
-    const started = await this.capture.start();
+    const started = await this.capture.enable();
     const problem = this.capture.error();
     // A declined prompt is a decision, not a failure — but silence would leave the operator
     // wondering whether the toggle did anything.
     if (!started && problem) this.notifications.info?.(problem);
+  }
+
+  /**
+   * Swap between seeing this page and seeing the whole screen.
+   *
+   * <p>Falling back to page mode when the screen prompt is declined matters: the operator
+   * turned vision ON, and dropping them to blind because they cancelled a picker they did
+   * not expect would be the opposite of what they asked for.</p>
+   */
+  protected async toggleVisionMode(): Promise<void> {
+    const next = this.capture.mode() === 'page' ? 'screen' : 'page';
+    const ok = await this.capture.enable(next);
+    if (!ok) {
+      const problem = this.capture.error();
+      if (problem) this.notifications.info?.(problem);
+      await this.capture.enable('page');
+    }
   }
 
   constructor() {

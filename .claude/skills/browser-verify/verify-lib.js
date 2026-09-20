@@ -104,19 +104,35 @@ async function ensureOpen(page, buttonLocator, panelLocator, tries = 3) {
   return panelLocator.isVisible().catch(() => false);
 }
 
-/** Start screen sharing with the assistant. Requires a `screen: true` launch. */
-async function shareScreen(page) {
-  const toggle = page.locator('button[aria-label="Share screen with the assistant"]');
+/**
+ * Let the assistant see the page.
+ *
+ * <p>Default `page` mode renders the DOM in-process: no permission prompt, no sharing
+ * banner, and it works HEADLESS. Only `screen` mode needs `launch({ screen: true })` and a
+ * headed browser — `getDisplayMedia` throws NotSupportedError in headless Chromium under
+ * every flag.</p>
+ */
+async function enableVision(page, mode = 'page') {
+  const toggle = page.locator('button[aria-label="Let the assistant see this page"]');
   if ((await toggle.count()) === 0) return false;
-  await toggle.click();
-  await page.waitForTimeout(3000);
+  if ((await toggle.getAttribute('aria-pressed')) !== 'true') {
+    await toggle.click();
+    await page.waitForTimeout(600);
+  }
+  const chip = page.locator('.vision-mode');
+  if ((await chip.count()) && (await chip.textContent())?.trim() !== mode) {
+    await chip.click();
+    await page.waitForTimeout(3000);
+  }
   return (await toggle.getAttribute('aria-pressed')) === 'true';
 }
 
 /** Open the assistant dock. */
 async function openAssistant(page) {
+  // '.fab' is the real class; '.assistant-fab' matches nothing and only ever worked because
+  // of the :has-text fallback behind it.
   await page
-    .locator('button[aria-label*="assistant" i], .assistant-fab, button:has-text("Ask")')
+    .locator('button[aria-label*="assistant" i], .fab, button:has-text("Ask")')
     .first()
     .click();
   await page.waitForTimeout(2000);
@@ -143,7 +159,7 @@ module.exports = {
   capturePosted,
   collectErrors,
   ensureOpen,
-  shareScreen,
+  enableVision,
   openAssistant,
   servedRelease,
 };

@@ -96,10 +96,32 @@ single run of everything is too long to read.
 **Clean up after a sweep.** Drawings persist server-side: a tools sweep left 94 on EURUSD/60.
 Clear them with the rail's danger button and confirm the clear survived a reload.
 
-## 5. Screen sharing (assistant vision)
+## 5. Assistant vision
 
-`getDisplayMedia` returns **`NotSupportedError` in headless Chromium under every flag
-combination.** It can only be exercised headed:
+Two sources, and the default is the easy one.
+
+```js
+await enableVision(page); // 'page' — DOM render, works HEADLESS, no prompt, no banner
+await enableVision(page, 'screen'); // getDisplayMedia — headed only, see below
+```
+
+**Page mode** re-renders the live DOM (`modern-screenshot`) and never touches
+`getDisplayMedia`, so there is no permission prompt and no browser sharing bar. It works in
+headless Chromium. To prove a change did not silently fall back to the screen API, install a
+tripwire before navigating:
+
+```js
+await page.addInitScript(() => {
+  window.__gdmCalls = 0;
+  const md = navigator.mediaDevices;
+  const o = md?.getDisplayMedia?.bind(md);
+  if (md) md.getDisplayMedia = (...a) => (window.__gdmCalls++, o(...a));
+});
+// …then: expect 0 after enabling page vision
+```
+
+**Screen mode** returns **`NotSupportedError` in headless Chromium under every flag
+combination**, so it can only be exercised headed:
 
 ```js
 const browser = await launch(chromium, { screen: true }); // headless:false + auto-accept
@@ -108,6 +130,11 @@ const browser = await launch(chromium, { screen: true }); // headless:false + au
 It also needs `display-capture=(self)` in the `Permissions-Policy` header (both Caddyfiles).
 Without it the browser refuses before prompting and the toggle just fails to turn on — and
 the console error blames _camera_, which is a red herring.
+
+Neither the picker nor the "Sharing this tab" bar can be suppressed by the page: the picker
+is mandated by the `getDisplayMedia` spec (the Chrome `*CaptureAllowedByOrigins` policies
+only _permit_ capture, they do not bypass it) and the bar has no flag at all. That is why
+page mode exists — do not go looking for a way to turn them off again.
 
 ## Traps that have cost time here
 
@@ -119,6 +146,7 @@ the console error blames _camera_, which is a red herring.
 | Too few clicks                      | Multi-point tools need 6–7 anchors; a 5-click sweep made 8 working tools look broken.                                 | Click to the deepest tool's point count.                                                      |
 | Reading the last `.msg`             | The last bubble is often a command card, not prose.                                                                   | Assert on the specific element, not "the last one".                                           |
 | Asking the model instead of looking | It will describe what it expects.                                                                                     | Screenshot, decode, open the file.                                                            |
+| `.assistant-fab`                    | Matches nothing — the class is `.fab`. Hide lists using it silently kept the Ask button in every captured frame.      | Grep the template for the real class before trusting a selector.                              |
 
 ## Reading the result
 
