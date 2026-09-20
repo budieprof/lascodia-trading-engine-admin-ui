@@ -472,9 +472,18 @@ export class SpotRecChartComponent {
         return;
       }
       if (!sym || this.subscribedSymbol === sym) return;
-      if (this.subscribedSymbol) this.realtime.invoke('UnsubscribePrice', this.subscribedSymbol);
+      // `join`/`leave`, not `invoke`: a subscription issued before the hub finishes connecting is
+      // otherwise dropped in silence, and this chart then waits forever for prices the server was
+      // never asked to send. Same fault the chart-analysis page had.
+      if (this.subscribedSymbol) {
+        void this.realtime.leave(
+          `price:${this.subscribedSymbol}`,
+          'UnsubscribePrice',
+          this.subscribedSymbol,
+        );
+      }
       this.livePrice.set(null);
-      this.realtime.invoke('SubscribePrice', sym);
+      void this.realtime.join(`price:${sym}`, 'SubscribePrice', sym);
       this.subscribedSymbol = sym;
     });
 

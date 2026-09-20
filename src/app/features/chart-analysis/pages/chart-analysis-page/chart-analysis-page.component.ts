@@ -980,14 +980,20 @@ export class ChartAnalysisPageComponent {
       this.subscribedSymbols.delete(symbol);
       // Failures are ignored on purpose: the hub drops a connection's groups
       // automatically on disconnect, so a missed unsubscribe costs nothing.
-      void this.realtime.invoke('UnsubscribePrice', symbol).catch(() => undefined);
+      void this.realtime
+        .leave(`price:${symbol}`, 'UnsubscribePrice', symbol)
+        .catch(() => undefined);
     }
     for (const symbol of wanted) {
       if (this.subscribedSymbols.has(symbol)) continue;
       this.subscribedSymbols.add(symbol);
-      void this.realtime.invoke('SubscribePrice', symbol).catch(() => {
-        // Re-arm so a reconnect can try again rather than leaving the symbol
-        // permanently unsubscribed.
+      // `join`, not `invoke`: the subscription is recorded and applied when the hub is up, and
+      // re-applied after a reconnect. A plain invoke resolves with undefined when the connection
+      // is not yet Connected — so the re-arm below never ran, the symbol stayed marked as
+      // subscribed, and the page received no prices for the rest of its life. That is invisible on
+      // localhost, where the hub connects before the chart asks, and reliable through a tunnel,
+      // where it does not.
+      void this.realtime.join(`price:${symbol}`, 'SubscribePrice', symbol).catch(() => {
         this.subscribedSymbols.delete(symbol);
       });
     }

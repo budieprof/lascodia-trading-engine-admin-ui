@@ -164,13 +164,20 @@ export class RealtimeService {
     }
 
     connection.onreconnecting(() => this.state.set(HubConnectionState.Reconnecting));
-    connection.onreconnected(() => this.state.set(HubConnectionState.Connected));
+    connection.onreconnected(() => {
+      this.state.set(HubConnectionState.Connected);
+      // The hub drops a connection's groups when it drops the connection, so a
+      // reconnect starts in no rooms at all. Without this the page stays on
+      // screen looking live and silently receives nothing ever again.
+      void this.replayStanding();
+    });
     connection.onclose(() => this.state.set(HubConnectionState.Disconnected));
 
     this.connection = connection;
     try {
       await connection.start();
       this.state.set(connection.state);
+      await this.replayStanding();
     } catch {
       // Let `withAutomaticReconnect` handle transient failures. Persistent
       // failures surface via the state signal — the UI can show a banner.
@@ -189,6 +196,44 @@ export class RealtimeService {
       this.connection = null;
     }
     this.state.set(HubConnectionState.Disconnected);
+  }
+
+  /**
+   * Room joins that must survive a slow start and a reconnect.
+   *
+   * <p>`invoke` is a soft no-op while the connection is not yet up, which is correct for presence
+   * but silently wrong for a subscription: the caller believes it is in the room and waits forever
+   * for events the server was never asked to send. On localhost the hub is connected within
+   * milliseconds so the join always landed; through the Cloudflare tunnel the negotiate, upgrade
+   * and auth take long enough that the chart's `SubscribePrice` ran FIRST and did nothing — the
+   * page then sat there live-looking and price-less, which is exactly how it was reported.</p>
+   *
+   * <p>Keyed by room so a repeated join is idempotent and a leave can remove it.</p>
+   */
+  private readonly standing = new Map<string, { method: string; args: unknown[] }>();
+
+  /**
+   * Join a hub room now if possible, and again on every future connection.
+   *
+   * <p>Records the intent first, so a join issued before the connection is up is applied the
+   * moment it comes up rather than dropped.</p>
+   */
+  async join(room: string, method: string, ...args: unknown[]): Promise<void> {
+    this.standing.set(room, { method, args });
+    await this.invoke(method, ...args);
+  }
+
+  /** Leave a room and stop re-applying it. */
+  async leave(room: string, method: string, ...args: unknown[]): Promise<void> {
+    this.standing.delete(room);
+    await this.invoke(method, ...args);
+  }
+
+  /** Re-issue every standing join. Best-effort: one bad room must not cost the others. */
+  private async replayStanding(): Promise<void> {
+    for (const { method, args } of [...this.standing.values()]) {
+      await this.invoke(method, ...args);
+    }
   }
 
   /**
