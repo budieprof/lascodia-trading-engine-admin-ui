@@ -429,29 +429,36 @@ const MAX_THREAD_TURNS = 300;
               }
               @case ('User') {
                 <div class="msg user">
-                  <div class="bubble">{{ m.content }}</div>
                   <!--
-                    The frame the assistant was shown. Without it the operator has to take
-                    the answer on trust — there is no way to tell a correct reading from a
-                    confident one, or to see that something was covering half the chart.
+                    One column for everything the operator sent. .msg is a horizontal row, so
+                    without this wrapper the screenshot and the attachment chips land BESIDE
+                    the bubble and are clipped against the panel edge.
                   -->
-                  @if (m.hasScreenshot) {
-                    <app-turn-screenshot [turnId]="m.id" />
-                  }
-                  @if (m.attachments?.length) {
-                    <div class="sent-attachments">
-                      @for (a of m.attachments; track a.index) {
-                        <button
-                          type="button"
-                          class="chip"
-                          (click)="openAttachment(m.id, a.index)"
-                          [title]="a.mediaType + ' · ' + sizeOf(a.bytes)"
-                        >
-                          {{ a.mediaType.startsWith('image/') ? '🖼' : '📄' }} {{ a.name }}
-                        </button>
-                      }
-                    </div>
-                  }
+                  <div class="msg-body">
+                    <div class="bubble">{{ m.content }}</div>
+                    <!--
+                      The frame the assistant was shown. Without it the operator has to take
+                      the answer on trust — there is no way to tell a correct reading from a
+                      confident one, or to see that something was covering half the chart.
+                    -->
+                    @if (m.hasScreenshot) {
+                      <app-turn-screenshot [turnId]="m.id" />
+                    }
+                    @if (m.attachments?.length) {
+                      <div class="sent-attachments">
+                        @for (a of m.attachments; track a.index) {
+                          <button
+                            type="button"
+                            class="chip"
+                            (click)="openAttachment(m.id, a.index)"
+                            [title]="a.mediaType + ' · ' + sizeOf(a.bytes)"
+                          >
+                            {{ a.mediaType.startsWith('image/') ? '🖼' : '📄' }} {{ a.name }}
+                          </button>
+                        }
+                      </div>
+                    }
+                  </div>
                   <time
                     class="msg-time"
                     [attr.datetime]="m.createdAtUtc"
@@ -855,12 +862,29 @@ const MAX_THREAD_TURNS = 300;
   `,
   styles: [
     `
+      /* The bubble, its screenshot and its chips stack; the timestamp stays beside the whole
+         stack because this column is a single flex item of .msg. min-width:0 lets a long
+         unbroken word shrink instead of forcing the column past the panel. */
+      .msg-body {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 4px;
+        min-width: 0;
+        max-width: 100%;
+      }
       .sent-attachments {
         display: flex;
         flex-wrap: wrap;
         gap: 4px;
-        margin-top: 4px;
         justify-content: flex-end;
+        max-width: 100%;
+      }
+      .sent-attachments .chip {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .sent-attachments .chip {
         cursor: pointer;
