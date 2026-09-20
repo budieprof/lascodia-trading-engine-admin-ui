@@ -30,9 +30,24 @@ export interface VolumeProfileResult {
  * shapes. Spreading is the convention and the better answer; one implementation is the
  * point.</p>
  */
+/**
+ * How many price buckets to profile a window into.
+ *
+ * <p>Fixed at 40 the bars came out as thick slabs — on a tall pane each one was thirty-odd
+ * pixels, which reads as a bar chart of five prices rather than a distribution. A volume
+ * profile is supposed to be fine enough to show WHERE inside the range the trade happened.</p>
+ *
+ * <p>Scaled to the window rather than fixed high, because 200 buckets over a fifty-bar
+ * window is mostly empty buckets, and the POC then lands on whichever single bar happened to
+ * be busiest — precision that is not in the data.</p>
+ */
+export function binsForWindow(barCount: number): number {
+  return Math.max(48, Math.min(180, Math.round(barCount * 0.8)));
+}
+
 export function profileWithValueArea(
   bars: readonly Ohlc[],
-  bins = 40,
+  bins = binsForWindow(bars.length),
   valueAreaPct = 0.7,
 ): VolumeProfileResult | null {
   const computed = volumeProfile(bars as Ohlc[], bins);

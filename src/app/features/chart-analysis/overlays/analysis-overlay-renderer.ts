@@ -115,9 +115,12 @@ export class AnalysisOverlayRenderer implements ISeriesPrimitive<Time> {
       const y = series.priceToCoordinate(bin.price);
       if (y === null) continue;
       const inValue = bin.price >= profile.valueAreaLow && bin.price <= profile.valueAreaHigh;
-      ctx.globalAlpha = inValue ? 0.3 : 0.14;
+      ctx.globalAlpha = inValue ? 0.42 : 0.2;
       ctx.fillStyle = '#2962FF';
       const w = (bin.volume / profile.peak) * maxWidth;
+      // A 1px gap between rows: without it adjacent buckets fuse into one slab and the
+      // profile stops reading as a distribution. Alpha is raised to compensate — thin bars
+      // at the old opacity nearly vanish.
       ctx.fillRect(width - w, y - binHeight / 2, w, Math.max(1, binHeight - 1));
     }
 
@@ -157,8 +160,10 @@ export class AnalysisOverlayRenderer implements ISeriesPrimitive<Time> {
     if (profile.bins.length < 2) return 4;
     const a = series.priceToCoordinate(profile.bins[0].price);
     const b = series.priceToCoordinate(profile.bins[1].price);
-    if (a === null || b === null) return Math.max(2, height / profile.bins.length);
-    return Math.max(2, Math.abs(b - a));
+    // Floor of 1, not 2: at a wide zoom a 2px floor makes neighbouring rows overlap, which
+    // is what turned the profile into a solid block.
+    if (a === null || b === null) return Math.max(1, height / profile.bins.length);
+    return Math.max(1, Math.abs(b - a));
   }
 
   private drawLevels(
