@@ -271,11 +271,24 @@ export class MarketDataService {
      * Present only while they have a screen-sharing session open. Never stored.
      */
     screenshot?: string | null,
+    /** Files the operator attached to this message. */
+    attachments?: ReadonlyArray<{ name: string; mediaType: string; base64: string }>,
   ): Observable<ResponseData<SpotAnalysisFollowUpTurnDto>> {
     return this.api.post(`/market-data/analyze/${llmInvocationId}/follow-up`, {
       question,
       ...(pageContext ? { pageContext } : {}),
       ...(screenshot ? { screenshot } : {}),
+      ...(attachments?.length
+        ? {
+            // `bytes` is a composer-side convenience; the engine derives it from the
+            // payload, so sending it would be a second source of truth.
+            attachments: attachments.map(({ name, mediaType, base64 }) => ({
+              name,
+              mediaType,
+              base64,
+            })),
+          }
+        : {}),
     });
   }
 

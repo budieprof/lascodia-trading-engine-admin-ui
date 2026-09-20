@@ -56,7 +56,14 @@ import {
 } from '@shared/components/engineer-chat/engineer-turns';
 import { isPinnedToBottom, jumpLabel, mergeOptimisticTurns } from './chat-live';
 import { UI_ACTION_TOOL, parseUiAction } from './ui-action';
+import {
+  ACCEPT_ATTR,
+  formatBytes,
+  readAttachments,
+  type Attachment,
+} from '@core/assistant/attachments';
 import { UiCommandService } from '@core/assistant/ui-command.service';
+import { ApiService } from '@core/api/api.service';
 import { structuralEqual } from '@core/signals/structural-equal';
 import {
   SpotRecChartComponent,
@@ -431,6 +438,20 @@ const MAX_THREAD_TURNS = 300;
                   @if (m.hasScreenshot) {
                     <app-turn-screenshot [turnId]="m.id" />
                   }
+                  @if (m.attachments?.length) {
+                    <div class="sent-attachments">
+                      @for (a of m.attachments; track a.index) {
+                        <button
+                          type="button"
+                          class="chip"
+                          (click)="openAttachment(m.id, a.index)"
+                          [title]="a.mediaType + ' · ' + sizeOf(a.bytes)"
+                        >
+                          {{ a.mediaType.startsWith('image/') ? '🖼' : '📄' }} {{ a.name }}
+                        </button>
+                      }
+                    </div>
+                  }
                   <time
                     class="msg-time"
                     [attr.datetime]="m.createdAtUtc"
@@ -765,7 +786,54 @@ const MAX_THREAD_TURNS = 300;
         </div>
       }
 
-      <form class="chat-input" (submit)="send($event)">
+      @if (pending().length || attachError()) {
+        <div class="attach-tray">
+          @for (a of pending(); track a.name + a.bytes) {
+            <span class="chip" [title]="a.mediaType">
+              {{ a.mediaType.startsWith('image/') ? '🖼' : '📄' }} {{ a.name }}
+              <span class="muted">{{ sizeOf(a.bytes) }}</span>
+              <button type="button" (click)="dropAttachment(a)" aria-label="Remove attachment">
+                ✕
+              </button>
+            </span>
+          }
+          @if (attachError(); as err) {
+            <span class="chip refused" [title]="err">⚠ {{ err }}</span>
+          }
+        </div>
+      }
+
+      <!--
+        Drop target is the whole composer, not just the button: dragging a file onto a chat
+        and having nothing happen is the failure people report as "it does not support
+        attachments".
+      -->
+      <form
+        class="chat-input"
+        [class.dropping]="dropping()"
+        (submit)="send($event)"
+        (dragover)="onDragOver($event)"
+        (dragleave)="dropping.set(false)"
+        (drop)="onDrop($event)"
+      >
+        <button
+          type="button"
+          class="attach"
+          (click)="fileInput.click()"
+          [disabled]="sending()"
+          title="Attach images or text files (csv, json, markdown, logs)"
+          aria-label="Attach a file"
+        >
+          📎
+        </button>
+        <input
+          #fileInput
+          type="file"
+          multiple
+          hidden
+          [accept]="acceptAttr"
+          (change)="onFilesPicked($event)"
+        />
         <textarea
           rows="2"
           [value]="question()"
@@ -773,9 +841,13 @@ const MAX_THREAD_TURNS = 300;
           [placeholder]="composerPlaceholder()"
           (input)="question.set($any($event.target).value)"
           (keydown)="onKeydown($event)"
+          (paste)="onPaste($event)"
           aria-label="Follow-up question"
         ></textarea>
-        <button type="submit" [disabled]="sending() || !question().trim() || !llmInvocationId()">
+        <button
+          type="submit"
+          [disabled]="sending() || (!question().trim() && !pending().length) || !llmInvocationId()"
+        >
           {{ sending() ? 'Sending…' : 'Send' }}
         </button>
       </form>
@@ -783,6 +855,65 @@ const MAX_THREAD_TURNS = 300;
   `,
   styles: [
     `
+      .sent-attachments {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 4px;
+        justify-content: flex-end;
+      }
+      .sent-attachments .chip {
+        cursor: pointer;
+        background: var(--bg-primary);
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        text-decoration: none;
+        color: inherit;
+      }
+
+      .attach-tray {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 6px 10px 0;
+      }
+      .attach-tray .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 8px;
+        font-size: 11px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--bg-secondary, #f6f7f9);
+      }
+      .attach-tray .chip.refused {
+        border-color: #ef5350;
+        color: #ef5350;
+      }
+      .attach-tray .chip button {
+        border: none;
+        background: none;
+        cursor: pointer;
+        padding: 0;
+        line-height: 1;
+        color: inherit;
+      }
+      .chat-input .attach {
+        border: none;
+        background: none;
+        cursor: pointer;
+        font-size: 16px;
+        padding: 0 6px;
+      }
+      /* The whole composer lights up, so it is obvious where a dragged file will land. */
+      .chat-input.dropping {
+        outline: 2px dashed #2962ff;
+        outline-offset: -2px;
+      }
+
       .chat {
         display: flex;
         flex-direction: column;
@@ -1519,6 +1650,7 @@ export class AnalysisChatComponent {
   private readonly algoEngineer = inject(AlgoEngineerService);
   private readonly realtime = inject(RealtimeService);
   private readonly uiCommands = inject(UiCommandService);
+  private readonly api = inject(ApiService);
 
   /** LlmInvocation id of the analysis being discussed (the thread anchor).
    *  When it changes (operator re-ran the analysis) the thread reloads. */
@@ -1978,33 +2110,42 @@ export class AnalysisChatComponent {
       /* the same rule as the page context: losing the picture must not lose the question */
     }
 
-    this.marketData.askAnalysisFollowUp(id, q, pageContext ?? undefined, screenshot).subscribe({
-      next: (res) => {
-        if (this.llmInvocationId() !== id) {
+    // Taken and cleared BEFORE the request: a send that fails should not silently re-send
+    // the same files on the next attempt, and leaving them in the tray implies they are
+    // still going.
+    const attachments = this.pending();
+    this.pending.set([]);
+    this.attachError.set(null);
+
+    this.marketData
+      .askAnalysisFollowUp(id, q, pageContext ?? undefined, screenshot, attachments)
+      .subscribe({
+        next: (res) => {
+          if (this.llmInvocationId() !== id) {
+            this.sending.set(false);
+            return; // anchor changed mid-flight
+          }
+          if (res?.status && res.data) {
+            // Reload the whole thread so any tool turns and a pending action
+            // proposal appear — the ask endpoint returns only the final turn.
+            this.marketData.getAnalysisFollowUps(id, undefined, MAX_THREAD_TURNS).subscribe({
+              next: (t) => {
+                this.sending.set(false);
+                if (this.llmInvocationId() !== id) return;
+                if (t?.status && t.data) this.messages.set(t.data);
+              },
+              error: () => this.sending.set(false),
+            });
+          } else {
+            this.sending.set(false);
+            this.error.set(res?.message || 'The model did not return a response. Try again.');
+          }
+        },
+        error: (err) => {
           this.sending.set(false);
-          return; // anchor changed mid-flight
-        }
-        if (res?.status && res.data) {
-          // Reload the whole thread so any tool turns and a pending action
-          // proposal appear — the ask endpoint returns only the final turn.
-          this.marketData.getAnalysisFollowUps(id, undefined, MAX_THREAD_TURNS).subscribe({
-            next: (t) => {
-              this.sending.set(false);
-              if (this.llmInvocationId() !== id) return;
-              if (t?.status && t.data) this.messages.set(t.data);
-            },
-            error: () => this.sending.set(false),
-          });
-        } else {
-          this.sending.set(false);
-          this.error.set(res?.message || 'The model did not return a response. Try again.');
-        }
-      },
-      error: (err) => {
-        this.sending.set(false);
-        this.error.set(err?.message ?? 'Follow-up failed. Is the engine reachable?');
-      },
-    });
+          this.error.set(err?.message ?? 'Follow-up failed. Is the engine reachable?');
+        },
+      });
   }
 
   /** Parse an ActionProposal's args JSON into a display-friendly call spec. */
@@ -2191,6 +2332,84 @@ export class AnalysisChatComponent {
       /* a card with an unreadable result still renders its command */
     }
     return { command: call.command, detail, outcome };
+  }
+
+  // ── Attachments ──────────────────────────────────────────────────────────
+  protected readonly acceptAttr = ACCEPT_ATTR;
+  protected readonly pending = signal<Attachment[]>([]);
+  protected readonly dropping = signal(false);
+  /** Why the last file was refused, shown as a chip until the next attempt. */
+  protected readonly attachError = signal<string | null>(null);
+
+  /**
+   * Open one attachment in a new tab.
+   *
+   * <p>Fetched as a blob rather than linked directly: that route is permission-gated, and a
+   * plain `<a href>` navigation carries no Authorization header, so it would 401 — the same
+   * reason the turn screenshot is fetched this way.</p>
+   */
+  protected async openAttachment(turnId: number, index: number): Promise<void> {
+    const blob = await this.api.getBlob(
+      `/market-data/analyze/follow-up/${turnId}/attachment/${index}`,
+    );
+    if (!blob) {
+      this.error.set('That attachment could not be loaded.');
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener');
+    // The tab has the bytes by now; holding the object URL would pin the blob for the life
+    // of this one.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+
+  protected sizeOf(bytes: number): string {
+    return formatBytes(bytes);
+  }
+
+  protected dropAttachment(target: Attachment): void {
+    this.pending.update((list) => list.filter((a) => a !== target));
+  }
+
+  protected async onFilesPicked(ev: Event): Promise<void> {
+    const input = ev.target as HTMLInputElement;
+    await this.accept(Array.from(input.files ?? []));
+    // Clear the input or picking the SAME file twice in a row fires no change event.
+    input.value = '';
+  }
+
+  protected onDragOver(ev: DragEvent): void {
+    if (!ev.dataTransfer?.types.includes('Files')) return;
+    ev.preventDefault();
+    this.dropping.set(true);
+  }
+
+  protected async onDrop(ev: DragEvent): Promise<void> {
+    if (!ev.dataTransfer?.files.length) return;
+    ev.preventDefault();
+    this.dropping.set(false);
+    await this.accept(Array.from(ev.dataTransfer.files));
+  }
+
+  /**
+   * Pasting an image straight into the composer.
+   *
+   * <p>This is how a screenshot usually arrives — ⌘⇧4 then ⌘V — and without it the operator
+   * has to save to disk first for no reason. Text paste is left entirely alone: it is the
+   * normal case and must keep working.</p>
+   */
+  protected async onPaste(ev: ClipboardEvent): Promise<void> {
+    const files = Array.from(ev.clipboardData?.files ?? []);
+    if (files.length === 0) return;
+    ev.preventDefault();
+    await this.accept(files);
+  }
+
+  private async accept(files: File[]): Promise<void> {
+    if (files.length === 0) return;
+    const { attachments, refused } = await readAttachments(files, this.pending().length);
+    if (attachments.length) this.pending.update((list) => [...list, ...attachments]);
+    this.attachError.set(refused.length ? refused.join('; ') : null);
   }
 
   /** Turn ids already auto-run, so a thread refresh cannot replay them. */

@@ -3523,6 +3523,8 @@ export interface SpotAnalysisFollowUpTurnDto {
    * separately from `/analyze/follow-up/{id}/screenshot` and only for turns that have one.
    */
   hasScreenshot?: boolean;
+  /** Files attached to this message — metadata only; bytes come from the attachment route. */
+  attachments?: { index: number; name: string; mediaType: string; bytes: number }[];
   createdAtUtc: string;
 }
 
