@@ -100,7 +100,16 @@
 			X-Content-Type-Options nosniff
 			X-Frame-Options DENY
 			Referrer-Policy strict-origin-when-cross-origin
-			Permissions-Policy "camera=(), microphone=(), geolocation=()"
+			# `display-capture=(self)` is what lets the assistant see the screen.
+			#
+			# It is NOT a relaxation of the three below: camera, microphone and
+			# geolocation stay denied outright. Screen capture is a different
+			# permission with a different prompt — the browser still asks, the
+			# operator still picks the surface, and its sharing indicator is lit for
+			# the whole session. Without this line `getDisplayMedia` is refused by
+			# policy before any of that happens, and the only symptom is the toggle
+			# silently failing to turn on.
+			Permissions-Policy "camera=(), microphone=(), geolocation=(), display-capture=(self)"
 			-Server
 		}
 
