@@ -7,6 +7,7 @@ import {
   output,
   signal,
 } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import type { EChartsOption } from 'echarts';
 import { buildRecPreviewChartOption } from '@shared/components/analysis-recommendations/rec-preview-chart';
@@ -46,6 +47,7 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
     AnalysisChatComponent,
     RecFileEditorComponent,
     MarkdownCopyDirective,
+    RouterLink,
   ],
   template: `
     <div class="backdrop" (click)="closed.emit()">
@@ -129,6 +131,21 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
                 Auto-created {{ r.generatedSignalIds.length }} signal{{
                   r.generatedSignalIds.length === 1 ? '' : 's'
                 }}: #{{ r.generatedSignalIds.join(', #') }}
+              </div>
+            }
+
+            @if (r.armedMonitorIds && r.armedMonitorIds.length > 0) {
+              <div class="signal-banner watch">
+                Watching
+                {{
+                  r.armedMonitorIds.length === 1 ? 'a level' : r.armedMonitorIds.length + ' levels'
+                }}
+                — the analysis re-runs when price gets there:
+                @for (id of r.armedMonitorIds; track id) {
+                  <a [routerLink]="['/analysis-monitors']" [queryParams]="{ focus: id }"
+                    >#{{ id }}</a
+                  >
+                }
               </div>
             }
 
@@ -442,6 +459,15 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
       .signal-banner.ok {
         color: #1d8a3e;
         background: rgba(29, 138, 62, 0.1);
+      }
+      .signal-banner.watch {
+        color: var(--accent, #2f6fd6);
+        background: color-mix(in srgb, var(--accent, #2f6fd6) 10%, transparent);
+      }
+      .signal-banner.watch a {
+        margin-left: 4px;
+        color: inherit;
+        text-decoration: underline;
       }
       .rec-actions {
         margin-top: var(--space-2);

@@ -3468,6 +3468,10 @@ export interface MarketAnalysisResultDto {
    *  can show the LLM's full intent and explain rejections. Empty/absent
    *  when the model chose not to act on any open positions. */
   exitInstructions?: MarketAnalysisExitInstructionDto[] | null;
+  /** Monitors this analysis armed. Under patient spot analysis this is its WATCH: the analysis
+   *  held because price was not at the location it would trade, and armed a watch there that
+   *  re-runs the analysis when price arrives. Empty/absent when nothing was armed. */
+  armedMonitorIds?: number[] | null;
 }
 
 /** What forking a conversation produced.
