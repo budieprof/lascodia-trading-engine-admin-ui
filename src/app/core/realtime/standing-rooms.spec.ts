@@ -1,4 +1,41 @@
 import { describe, expect, it } from 'vitest';
+import { MAX_RETRY_MS, backoffMs } from './realtime.service';
+
+/**
+ * The reconnection policy.
+ *
+ * <p>SignalR's default gives up after four attempts — 0s, 2s, 10s, 30s — and then closes for good,
+ * which is how the console ended up showing "Live updates offline" with nothing behind it ever
+ * trying again. A laptop that sleeps, a wifi drop, or an engine redeploy all outlast 42 seconds.</p>
+ */
+describe('reconnect backoff', () => {
+  it('never gives up — every attempt returns a delay', () => {
+    // Returning null is how SignalR is told to stop. This policy never does.
+    for (const attempt of [0, 1, 5, 20, 500]) {
+      const d = backoffMs(attempt);
+      expect(typeof d).toBe('number');
+      expect(d).toBeGreaterThan(0);
+    }
+  });
+
+  it('backs off, then holds at a ceiling', () => {
+    expect(backoffMs(0)).toBeLessThan(backoffMs(4));
+    // Flat from attempt 5 on, so a long outage retries steadily rather than drifting to hours.
+    for (const attempt of [5, 9, 50]) {
+      expect(backoffMs(attempt)).toBeLessThanOrEqual(MAX_RETRY_MS);
+      expect(backoffMs(attempt)).toBeGreaterThanOrEqual(MAX_RETRY_MS / 2);
+    }
+  });
+
+  it('jitters, so a fleet of tabs does not stampede a restarted engine', () => {
+    const seen = new Set(Array.from({ length: 40 }, () => backoffMs(5)));
+    expect(seen.size).toBeGreaterThan(1);
+  });
+
+  it('the first retry is prompt — a blip should not cost seconds', () => {
+    expect(backoffMs(0)).toBeLessThanOrEqual(1000);
+  });
+});
 
 /**
  * The rule behind `RealtimeService.join` / `leave`, isolated from SignalR.

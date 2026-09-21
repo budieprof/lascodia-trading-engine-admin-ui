@@ -90,6 +90,24 @@ export interface RealtimeMessage<T = unknown> {
   receivedAt: number;
 }
 
+/** Longest gap between reconnection attempts. */
+export const MAX_RETRY_MS = 30_000;
+
+/**
+ * How long to wait before attempt number `attempt` (0-based).
+ *
+ * <p>Exponential to 30s and then flat — it never returns null, which is how SignalR is told to
+ * stop. The default policy stops after four tries, and a console that gives up after 42 seconds is
+ * a console that is offline every time the operator was away from their desk.</p>
+ *
+ * <p>Jittered so that a fleet of tabs reconnecting after an engine redeploy arrives spread out
+ * rather than as one synchronised burst against a server that has just started.</p>
+ */
+export function backoffMs(attempt: number): number {
+  const base = Math.min(MAX_RETRY_MS, 1000 * 2 ** Math.min(attempt, 5));
+  return Math.round(base / 2 + Math.random() * (base / 2));
+}
+
 /**
  * Owns the single SignalR connection to `/api/hubs/trading` for the whole
  * tab. Consumer services subscribe to `events$` and filter by name; the
@@ -117,12 +135,33 @@ export class RealtimeService {
   readonly state = signal<HubConnectionState>(HubConnectionState.Disconnected);
   readonly isConnected = computed(() => this.state() === HubConnectionState.Connected);
 
+  /** Pending restart, so the outer retry loop never stacks two timers. */
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** How many times the OUTER loop has retried; reset on every successful connect. */
+  private restartAttempt = 0;
+
+  /** True only when the operator signed out or the app is being torn down. */
+  private manualStop = false;
+
   constructor() {
     // When the auth token disappears (logout/idle-timeout) we tear the
     // connection down — otherwise SignalR would keep reconnecting against
     // a server that no longer trusts us and the engine would refuse the
     // upgrade with a 401 loop.
     this.destroyRef.onDestroy(() => this.disconnect());
+
+    // A dropped connection usually outlives its cause: the laptop wakes, the wifi returns, the
+    // operator comes back to the tab. Waiting out a 30s backoff in those moments is needless —
+    // the console should be live by the time they have finished looking at it.
+    if (typeof window !== 'undefined') {
+      const wake = () => this.retryNow();
+      window.addEventListener('online', wake);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') wake();
+      });
+      this.destroyRef.onDestroy(() => window.removeEventListener('online', wake));
+    }
   }
 
   /**
@@ -131,6 +170,7 @@ export class RealtimeService {
    * multiple features; the shared singleton dedupes.
    */
   async connect(): Promise<void> {
+    this.manualStop = false;
     if (!this.auth.isAuthenticated()) return;
     if (this.connection && this.connection.state !== HubConnectionState.Disconnected) return;
 
@@ -138,19 +178,25 @@ export class RealtimeService {
     // JWT here, so swap the cookie for a short-lived ticket on each
     // (re)connect. Legacy bearer-token sessions return the real token and
     // skip the round trip.
-    let token = this.auth.getToken();
+    const token = await this.freshToken();
     if (!token) return;
-    if (token === 'cookie-session') {
-      token = (await firstValueFrom(this.auth.fetchWsTicket())) ?? '';
-      if (!token) return;
-    }
 
     const base = this.runtime.apiBaseUrl.replace(/\/$/, '');
     const url = `${base}/api/hubs/trading`;
 
     const connection = new HubConnectionBuilder()
-      .withUrl(url, { accessTokenFactory: () => token! })
-      .withAutomaticReconnect()
+      // Per ATTEMPT, not per connect. A cookie session's ticket is short-lived by design, and
+      // closing over one meant every reconnect after it expired re-presented the same dead
+      // ticket and was refused — so a connection that dropped after the ticket aged out could
+      // never come back, however many times it tried.
+      .withUrl(url, { accessTokenFactory: () => this.freshToken() })
+      // The DEFAULT policy gives up after four attempts (0s, 2s, 10s, 30s) and closes for good.
+      // A trading console is meant to stay connected: a laptop that sleeps through lunch, or an
+      // engine redeployed while the tab is open, both outlast 42 seconds, and what the operator
+      // gets is a stale page wearing an "offline" banner that never clears.
+      .withAutomaticReconnect({
+        nextRetryDelayInMilliseconds: (ctx) => backoffMs(ctx.previousRetryCount),
+      })
       .configureLogging(LogLevel.Warning)
       .build();
 
@@ -171,21 +217,96 @@ export class RealtimeService {
       // screen looking live and silently receives nothing ever again.
       void this.replayStanding();
     });
-    connection.onclose(() => this.state.set(HubConnectionState.Disconnected));
+    // SignalR's own retry loop can still end — a close during the handshake, or a server that
+    // refuses outright, closes without ever entering Reconnecting. This is the outer loop that
+    // makes "connected" the steady state rather than a phase the page passes through once.
+    connection.onclose(() => {
+      this.state.set(HubConnectionState.Disconnected);
+      this.scheduleRestart();
+    });
 
     this.connection = connection;
     try {
       await connection.start();
       this.state.set(connection.state);
+      this.restartAttempt = 0;
       await this.replayStanding();
     } catch {
-      // Let `withAutomaticReconnect` handle transient failures. Persistent
-      // failures surface via the state signal — the UI can show a banner.
+      // A failed FIRST start never reaches withAutomaticReconnect — that only covers a
+      // connection that was established and then lost. Without its own retry, opening the
+      // console a moment before the engine is ready left it offline until a manual reload.
       this.state.set(HubConnectionState.Disconnected);
+      this.scheduleRestart();
     }
   }
 
+  /**
+   * A token for THIS attempt.
+   *
+   * <p>Cookie sessions carry a sentinel rather than a JWT and have to swap it for a short-lived
+   * ticket; doing that once per <c>connect()</c> rather than once per attempt is what made a long
+   * outage unrecoverable.</p>
+   */
+  private async freshToken(): Promise<string> {
+    const token = this.auth.getToken();
+    if (!token) return '';
+    if (token !== 'cookie-session') return token;
+    try {
+      return (await firstValueFrom(this.auth.fetchWsTicket())) ?? '';
+    } catch {
+      // No ticket this time — the retry loop will ask again.
+      return '';
+    }
+  }
+
+  /**
+   * Try again later, for as long as the operator is signed in.
+   *
+   * <p>Never gives up on its own. The only things that stop it are signing out and the service
+   * being destroyed, both of which set {@link manualStop} — an idle console must be reconnected
+   * when the operator comes back to it, not waiting to be reloaded.</p>
+   */
+  private scheduleRestart(): void {
+    if (this.manualStop || this.reconnectTimer !== null) return;
+    if (!this.auth.isAuthenticated()) return;
+
+    // Reconnecting, not Disconnected: a retry is scheduled, so the console should say it is
+    // coming back rather than that it has stopped. "Offline" is reserved for a connection with
+    // nothing behind it — which, now, only means signed out. The operator read the old wording
+    // as final, and under the four-attempt default policy it was.
+    this.state.set(HubConnectionState.Reconnecting);
+
+    const delay = backoffMs(this.restartAttempt++);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      // Drop the dead instance so `connect()` builds a new one rather than seeing a stale
+      // non-Disconnected state and returning immediately.
+      this.connection = null;
+      void this.connect();
+    }, delay);
+  }
+
+  /** Come back immediately when the machine does, instead of waiting out the backoff. */
+  private retryNow(): void {
+    if (this.manualStop || this.isConnected()) return;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.restartAttempt = 0;
+    this.connection = null;
+    void this.connect();
+  }
+
   async disconnect(): Promise<void> {
+    // Signing out is the one close that must NOT be retried: the server no longer trusts this
+    // session, and an outer loop would sit there being refused.
+    this.manualStop = true;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.restartAttempt = 0;
     this.stop.next();
     if (this.connection) {
       try {
