@@ -11,6 +11,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import type { Subscription } from 'rxjs';
 import { DatePipe } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 
@@ -220,9 +221,6 @@ export function isCheckpointTurn(t: SpotAnalysisFollowUpTurnDto | null | undefin
     return false;
   }
 }
-
-/** Client-side backstop on resumes per question; the engine enforces its own, lower, ceiling. */
-const MAX_AUTO_RESUMES = 12;
 
 @Component({
   selector: 'app-analysis-chat',
@@ -995,12 +993,26 @@ const MAX_AUTO_RESUMES = 12;
           (paste)="onPaste($event)"
           aria-label="Follow-up question"
         ></textarea>
-        <button
-          type="submit"
-          [disabled]="sending() || (!question().trim() && !pending().length) || !llmInvocationId()"
-        >
-          {{ sending() ? 'Sending…' : 'Send' }}
-        </button>
+        @if (sending() && !isAgent()) {
+          <!-- The assistant has no work budget, so the operator is what ends a question. -->
+          <button
+            type="button"
+            class="stop-asking"
+            (click)="stopAsking()"
+            title="Stop the assistant — what it has already read stays on the thread"
+          >
+            Stop
+          </button>
+        } @else {
+          <button
+            type="submit"
+            [disabled]="
+              sending() || (!question().trim() && !pending().length) || !llmInvocationId()
+            "
+          >
+            Send
+          </button>
+        }
       </form>
     </section>
   `,
@@ -1883,6 +1895,10 @@ const MAX_AUTO_RESUMES = 12;
         opacity: 0.5;
         cursor: not-allowed;
       }
+      .chat-input button.stop-asking {
+        border-color: var(--loss);
+        background: var(--loss);
+      }
       .spinner {
         width: 13px;
         height: 13px;
@@ -2367,6 +2383,7 @@ export class AnalysisChatComponent {
     this.messages.update((m) => [...m, optimistic]);
     this.question.set('');
     this.sending.set(true);
+    this.stopped = false;
     this.error.set(null);
 
     let pageContext: unknown | null = null;
@@ -2390,7 +2407,7 @@ export class AnalysisChatComponent {
     this.pending.set([]);
     this.attachError.set(null);
 
-    this.marketData
+    this.askSub = this.marketData
       .askAnalysisFollowUp(id, q, pageContext ?? undefined, screenshot, attachments)
       .subscribe({
         next: (res) => {
@@ -2418,7 +2435,7 @@ export class AnalysisChatComponent {
    * question. `sending` stays up across the chain: to the operator it is one answer.
    */
   private afterAnswer(id: number, last: SpotAnalysisFollowUpTurnDto, resumes: number): void {
-    const paused = isCheckpointTurn(last) && resumes < MAX_AUTO_RESUMES;
+    const paused = isCheckpointTurn(last) && !this.stopped;
     this.marketData.getAnalysisFollowUps(id, undefined, MAX_THREAD_TURNS).subscribe({
       next: (t) => {
         if (!paused) this.sending.set(false);
@@ -2434,8 +2451,12 @@ export class AnalysisChatComponent {
 
   /** Carry on a question that paused at a checkpoint. */
   private resumePaused(id: number, resumes: number): void {
+    if (this.stopped) {
+      this.sending.set(false);
+      return;
+    }
     this.sending.set(true);
-    this.marketData.resumeAnalysisFollowUp(id).subscribe({
+    this.askSub = this.marketData.resumeAnalysisFollowUp(id).subscribe({
       next: (res) => {
         if (this.llmInvocationId() !== id) {
           this.sending.set(false);
@@ -2455,6 +2476,33 @@ export class AnalysisChatComponent {
         this.error.set(
           err?.message ?? 'The assistant could not continue. Reply "continue" to retry.',
         );
+      },
+    });
+  }
+
+  /** The request answering the current question (the first ask or a resume). */
+  private askSub: Subscription | null = null;
+  /** Set by Stop: no further resume is sent for this question. */
+  private stopped = false;
+
+  /**
+   * End the current assistant question.
+   *
+   * <p>With no work budget, a question runs until it is answered — the operator is the only
+   * limit, so there must be a way to exercise it. Aborting the request cancels the engine's
+   * loop, which posts an "interrupted" note; a question paused between segments simply is not
+   * resumed. Either way what was already read stays on the thread, and "continue" picks it up.</p>
+   */
+  protected stopAsking(): void {
+    this.stopped = true;
+    this.askSub?.unsubscribe();
+    this.askSub = null;
+    this.sending.set(false);
+    const id = this.llmInvocationId();
+    if (!id) return;
+    this.marketData.getAnalysisFollowUps(id, undefined, MAX_THREAD_TURNS).subscribe({
+      next: (t) => {
+        if (this.llmInvocationId() === id && t?.status && t.data) this.messages.set(t.data);
       },
     });
   }

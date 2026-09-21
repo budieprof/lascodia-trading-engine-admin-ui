@@ -1,4 +1,5 @@
 import {
+  DestroyRef,
   ChangeDetectionStrategy,
   Component,
   ElementRef,
@@ -8,7 +9,9 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { Router } from '@angular/router';
+import { Router, type Routes } from '@angular/router';
+import { UiCommandService } from '@core/assistant/ui-command.service';
+import type { UiCommand } from '@core/assistant/ui-command.types';
 import { fromEvent } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -417,6 +420,7 @@ export class AssistantDockComponent {
   protected readonly capture = inject(ScreenCaptureService);
   private readonly notifications = inject(NotificationService);
   private readonly router = inject(Router);
+  private readonly uiCommands = inject(UiCommandService);
 
   private readonly dockEl = viewChild<ElementRef<HTMLElement>>('dockEl');
 
@@ -506,6 +510,11 @@ export class AssistantDockComponent {
         }
       });
 
+    // App-wide page commands. Pages register their own while mounted; these belong to the dock,
+    // which lives as long as the console, so the assistant can move the operator anywhere —
+    // before this it could only act on the chart page, the one page that registered commands.
+    this.uiCommands.register(appCommands(this.router), inject(DestroyRef));
+
     // Keep the page chip current.
     effect(() => {
       if (!this.dock.open()) return;
@@ -561,4 +570,84 @@ export class AssistantDockComponent {
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', up);
   }
+}
+
+/** A top-level console page, as the router declares it. */
+interface ConsolePage {
+  path: string;
+  title: string;
+}
+
+/** Every page under the authenticated layout, read from the router so it can never drift. */
+export function consolePages(config: Routes): ConsolePage[] {
+  const shell = config.find((r) => r.path === '' && Array.isArray(r.children));
+  return (shell?.children ?? [])
+    .filter((r) => !!r.path && !r.redirectTo && r.path !== '**')
+    .map((r) => ({
+      path: '/' + r.path,
+      title: (r.data?.['breadcrumb'] as string | undefined) ?? r.path!,
+    }));
+}
+
+/**
+ * Whether a navigation target is a real console page (or somewhere beneath one). Deep links —
+ * `/monitors/646`, `/positions/123` — are fine; the first segment is what must exist.
+ */
+export function isConsolePath(url: string, pages: readonly ConsolePage[]): boolean {
+  if (!url.startsWith('/') || url.startsWith('//')) return false;
+  const first = '/' + (url.slice(1).split(/[/?#]/)[0] ?? '');
+  return pages.some((p) => p.path === first);
+}
+
+function appCommands(router: Router): UiCommand[] {
+  const pages = () => consolePages(router.config);
+  return [
+    {
+      id: 'app.navigate',
+      description:
+        'Take the operator to any page of the console, e.g. "/monitors", "/positions/123", ' +
+        '"/strategies?status=Active". The path must start with a page app.listPages returns.',
+      params: [
+        {
+          name: 'path',
+          type: 'string',
+          required: true,
+          description: 'Absolute in-app path beginning with "/".',
+        },
+      ],
+      run: async (args) => {
+        const url = String(args['path'] ?? '').trim();
+        if (!isConsolePath(url, pages())) {
+          return {
+            ok: false,
+            message: `"${url}" is not a console page. Call app.listPages for the valid ones.`,
+          };
+        }
+        const ok = await router.navigateByUrl(url);
+        return ok
+          ? { ok: true, message: `Navigated to ${url}.` }
+          : { ok: false, message: `Navigation to ${url} was refused (a guard or permission).` };
+      },
+    },
+    {
+      id: 'app.listPages',
+      description: 'List every page of the console with its path, for app.navigate.',
+      run: () => {
+        const list = pages();
+        return {
+          ok: true,
+          message: list.map((p) => `${p.path} — ${p.title}`).join('\n'),
+          data: list,
+        };
+      },
+    },
+    {
+      id: 'app.back',
+      description: 'Go back to the page the operator was on before.',
+      run: () => {
+        history.back();
+        return { ok: true, message: 'Went back one page.' };
+      },
+    },
+  ];
 }
