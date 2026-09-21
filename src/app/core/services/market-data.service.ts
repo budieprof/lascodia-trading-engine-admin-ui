@@ -294,6 +294,21 @@ export class MarketDataService {
   }
 
   /**
+   * POST /market-data/analyze/{llmInvocationId}/follow-up with `resume: true` — carry on an
+   * admin-assistant question that paused at a checkpoint (see {@link isCheckpointTurn}).
+   * One request is bounded by the engine's round cap and wall clock; the question is not, so
+   * a long task arrives as a chain of these rather than being cut off mid-work.
+   */
+  resumeAnalysisFollowUp(
+    llmInvocationId: number,
+  ): Observable<ResponseData<SpotAnalysisFollowUpTurnDto>> {
+    return this.api.post(`/market-data/analyze/${llmInvocationId}/follow-up`, {
+      question: '',
+      resume: true,
+    });
+  }
+
+  /**
    * POST /market-data/analyze/follow-up/{followUpId}/resolve?confirm=… —
    * confirm (execute) or dismiss a mutating action the follow-up chat LLM
    * proposed. Confirm runs the proposed engine call with the operator's auth

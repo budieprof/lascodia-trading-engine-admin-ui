@@ -206,6 +206,24 @@ interface ParsedChatRec {
  */
 const MAX_THREAD_TURNS = 300;
 
+/**
+ * An admin-assistant turn saying the question PAUSED, not ended: the engine spent one
+ * request's round cap / wall clock while the model was still working. The client resumes it
+ * straight away, so a long task never stops mid-way on a per-request limit.
+ */
+export function isCheckpointTurn(t: SpotAnalysisFollowUpTurnDto | null | undefined): boolean {
+  if (!t || t.role !== 'Assistant' || t.toolName !== 'run_notice' || !t.toolResultJson)
+    return false;
+  try {
+    return (JSON.parse(t.toolResultJson) as { kind?: string }).kind === 'checkpoint';
+  } catch {
+    return false;
+  }
+}
+
+/** Client-side backstop on resumes per question; the engine enforces its own, lower, ceiling. */
+const MAX_AUTO_RESUMES = 12;
+
 @Component({
   selector: 'app-analysis-chat',
   standalone: true,
@@ -2381,16 +2399,7 @@ export class AnalysisChatComponent {
             return; // anchor changed mid-flight
           }
           if (res?.status && res.data) {
-            // Reload the whole thread so any tool turns and a pending action
-            // proposal appear — the ask endpoint returns only the final turn.
-            this.marketData.getAnalysisFollowUps(id, undefined, MAX_THREAD_TURNS).subscribe({
-              next: (t) => {
-                this.sending.set(false);
-                if (this.llmInvocationId() !== id) return;
-                if (t?.status && t.data) this.messages.set(t.data);
-              },
-              error: () => this.sending.set(false),
-            });
+            this.afterAnswer(id, res.data, 0);
           } else {
             this.sending.set(false);
             this.error.set(res?.message || 'The model did not return a response. Try again.');
@@ -2401,6 +2410,53 @@ export class AnalysisChatComponent {
           this.error.set(err?.message ?? 'Follow-up failed. Is the engine reachable?');
         },
       });
+  }
+
+  /**
+   * Reload the whole thread so any tool turns and a pending action proposal appear — the ask
+   * endpoint returns only the final turn — and, when that turn is a checkpoint, resume the
+   * question. `sending` stays up across the chain: to the operator it is one answer.
+   */
+  private afterAnswer(id: number, last: SpotAnalysisFollowUpTurnDto, resumes: number): void {
+    const paused = isCheckpointTurn(last) && resumes < MAX_AUTO_RESUMES;
+    this.marketData.getAnalysisFollowUps(id, undefined, MAX_THREAD_TURNS).subscribe({
+      next: (t) => {
+        if (!paused) this.sending.set(false);
+        if (this.llmInvocationId() !== id) return;
+        if (t?.status && t.data) this.messages.set(t.data);
+      },
+      error: () => {
+        if (!paused) this.sending.set(false);
+      },
+    });
+    if (paused) this.resumePaused(id, resumes + 1);
+  }
+
+  /** Carry on a question that paused at a checkpoint. */
+  private resumePaused(id: number, resumes: number): void {
+    this.sending.set(true);
+    this.marketData.resumeAnalysisFollowUp(id).subscribe({
+      next: (res) => {
+        if (this.llmInvocationId() !== id) {
+          this.sending.set(false);
+          return; // anchor changed mid-flight — the thread keeps its checkpoint
+        }
+        if (res?.status && res.data) {
+          this.afterAnswer(id, res.data, resumes);
+        } else {
+          this.sending.set(false);
+          this.error.set(
+            res?.message || 'The assistant could not continue. Reply "continue" to retry.',
+          );
+        }
+      },
+      error: (err) => {
+        this.sending.set(false);
+        this.error.set(
+          err?.message ?? 'The assistant could not continue. Reply "continue" to retry.',
+        );
+      },
+    });
   }
 
   /** Parse an ActionProposal's args JSON into a display-friendly call spec. */
@@ -2490,8 +2546,12 @@ export class AnalysisChatComponent {
       next: (res) => {
         this.resolvingId.set(null);
         if (this.llmInvocationId() !== id) return;
-        if (res?.status && res.data) this.messages.set(res.data);
-        else this.failResolve(m, res?.message || 'Could not resolve the action.');
+        if (res?.status && res.data) {
+          this.messages.set(res.data);
+          // The resolve may have resumed the question, and that resume may itself have paused.
+          const tail = res.data[res.data.length - 1];
+          if (isCheckpointTurn(tail)) this.resumePaused(id, 1);
+        } else this.failResolve(m, res?.message || 'Could not resolve the action.');
         // A confirmed action may have created a monitor — refresh the strip.
         this.loadMonitors(id);
         // An approval wakes the agent's run — pick up its new status.
