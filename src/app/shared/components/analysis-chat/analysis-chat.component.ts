@@ -37,6 +37,7 @@ import { RealtimeService } from '@core/realtime/realtime.service';
 import type {
   SpotAnalysisFollowUpTurnDto,
   AnalysisMonitorDto,
+  TradeRecommendationDto,
   AlgoEngineerRunStateDto,
 } from '@core/api/api.types';
 import { EngineerRunBarComponent } from '@shared/components/engineer-chat/engineer-run-bar.component';
@@ -255,6 +256,98 @@ const MAX_THREAD_TURNS = 300;
           [message]="stopMessage()"
           (stop)="stopRun()"
         />
+      }
+
+      @if (monitorsEnabled() && recs().length > 0) {
+        <div class="trecs">
+          <div class="monitors-head">
+            Trades this analysis proposed ({{ recs().length }}) — each has an id a monitor can file
+          </div>
+          @for (r of recs(); track r.id) {
+            <div class="trec">
+              <div class="trec-line">
+                <span class="trec-id">Rec #{{ r.id }}</span>
+                <span
+                  class="mon-dir"
+                  [class.buy]="r.direction === 'Buy'"
+                  [class.sell]="r.direction === 'Sell'"
+                  >{{ r.direction }}</span
+                >
+                <span class="trec-levels">
+                  {{ r.orderType ?? '' }} {{ r.entryPrice ?? '—' }} · SL {{ r.stopLoss ?? '—' }} ·
+                  TP
+                  {{ r.takeProfit ?? '—' }}
+                </span>
+                <span
+                  class="trec-status"
+                  [attr.data-status]="r.status"
+                  [title]="r.statusReason ?? ''"
+                >
+                  {{ r.status }}
+                  @if (r.tradeSignalId) {
+                    → signal #{{ r.tradeSignalId }}
+                  } @else if (r.status === 'Parked' && r.pendingSignalRecId) {
+                    as #{{ r.pendingSignalRecId }}
+                  }
+                </span>
+              </div>
+              @if (r.statusReason && r.status !== 'Filed') {
+                <div class="trec-reason" [title]="r.statusReason">{{ r.statusReason }}</div>
+              }
+              @if (r.watchingMonitorId) {
+                <div class="trec-watch">
+                  👁 Monitor #{{ r.watchingMonitorId }} files it at the entry
+                </div>
+              } @else if (recActionable(r)) {
+                <div class="trec-actions">
+                  <button
+                    type="button"
+                    [disabled]="recBusyId() !== null"
+                    (click)="armRec(r, 'direct')"
+                    title="Arm a monitor that files this exact card when price reaches the entry"
+                  >
+                    {{
+                      recBusyId() === r.id && recBusyWhat() === 'direct'
+                        ? 'Arming…'
+                        : 'File at entry'
+                    }}
+                  </button>
+                  <button
+                    type="button"
+                    [disabled]="recBusyId() !== null"
+                    (click)="armRec(r, 'confirm')"
+                    title="At the entry, re-check the market first and file this card only if the re-check agrees"
+                  >
+                    {{
+                      recBusyId() === r.id && recBusyWhat() === 'confirm'
+                        ? 'Arming…'
+                        : 'Re-check at entry, then file'
+                    }}
+                  </button>
+                  <button
+                    type="button"
+                    class="trec-file"
+                    [class.confirming]="recConfirmId() === r.id"
+                    [disabled]="recBusyId() !== null"
+                    (click)="fileRec(r)"
+                    title="File this card as a signal now, through the normal risk gates"
+                  >
+                    {{
+                      recBusyId() === r.id && recBusyWhat() === 'file'
+                        ? 'Filing…'
+                        : recConfirmId() === r.id
+                          ? 'Confirm — file now'
+                          : 'File now'
+                    }}
+                  </button>
+                </div>
+              }
+              @if (recError()?.id === r.id) {
+                <div class="trec-error">{{ recError()?.message }}</div>
+              }
+            </div>
+          }
+        </div>
       }
 
       @if (monitorsEnabled() && monitors().length > 0) {
@@ -1018,6 +1111,94 @@ const MAX_THREAD_TURNS = 300;
         padding: var(--space-3);
         max-height: 320px;
         overflow-y: auto;
+      }
+      /* Bounded: a brief rarely proposes more than three trades, but nothing here may grow the
+         header without limit. */
+      .trecs {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: var(--space-2) var(--space-3);
+        border-bottom: 1px solid var(--border);
+        max-height: 220px;
+        overflow-y: auto;
+      }
+      .trec {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .trec-line {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+        font-size: var(--text-xs);
+      }
+      .trec-id {
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-primary);
+      }
+      .trec-levels {
+        font-variant-numeric: tabular-nums;
+        color: var(--text-secondary);
+      }
+      .trec-status {
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: var(--radius-full);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+      }
+      .trec-status[data-status='Filed'] {
+        background: rgba(52, 199, 89, 0.16);
+        color: var(--success, #16a34a);
+      }
+      .trec-status[data-status='Rejected'] {
+        background: rgba(255, 59, 48, 0.12);
+        color: var(--danger, #dc2626);
+      }
+      .trec-status[data-status='Parked'] {
+        background: color-mix(in srgb, var(--accent) 14%, transparent);
+        color: var(--accent);
+      }
+      .trec-reason,
+      .trec-watch {
+        font-size: 10px;
+        color: var(--text-tertiary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .trec-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .trec-actions button {
+        font-size: 10px;
+        padding: 2px 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm, 4px);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        cursor: pointer;
+      }
+      .trec-actions button:hover:not(:disabled) {
+        border-color: var(--accent);
+      }
+      .trec-actions button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .trec-actions .trec-file.confirming {
+        border-color: var(--loss);
+        color: var(--loss);
+      }
+      .trec-error {
+        font-size: 10px;
+        color: var(--loss);
       }
       .monitors {
         display: flex;
@@ -1809,6 +1990,14 @@ export class AnalysisChatComponent {
   protected readonly monitors = signal<AnalysisMonitorDto[]>([], { equal: structuralEqual });
   /** Monitor id currently being cancelled, or null. */
   protected readonly cancellingId = signal<number | null>(null);
+
+  /** Every trade this analysis proposed, each with the id a monitor files it by. */
+  protected readonly recs = signal<TradeRecommendationDto[]>([], { equal: structuralEqual });
+  protected readonly recBusyId = signal<number | null>(null);
+  protected readonly recBusyWhat = signal<'direct' | 'confirm' | 'file' | null>(null);
+  /** "File now" places a trade, so it takes a second click on the same row. */
+  protected readonly recConfirmId = signal<number | null>(null);
+  protected readonly recError = signal<{ id: number; message: string } | null>(null);
   /** Id of the recommendation turn currently being filed as a signal, or null. */
   protected readonly filingId = signal<number | null>(null);
   /** Id of the recommendation turn whose pre-file editor is open, or null. */
@@ -1972,6 +2161,7 @@ export class AnalysisChatComponent {
       const id = this.llmInvocationId();
       const enabled = this.monitorsEnabled();
       untracked(() => (enabled ? this.loadMonitors(id) : this.monitors.set([])));
+      untracked(() => (enabled ? this.loadRecs(id) : this.recs.set([])));
     });
 
     // Agent threads (Engineer or Wire): (re)load the run header whenever the conversation is bound
@@ -2041,6 +2231,7 @@ export class AnalysisChatComponent {
       if (!id || (this.sending() && !this.isAgent())) return;
       this.refreshThreadSilently(id);
       this.loadMonitors(id);
+      this.loadRecs(id);
     }, 400);
   }
 
@@ -2874,6 +3065,84 @@ export class AnalysisChatComponent {
       },
       error: () => {
         /* non-fatal — the monitors strip just stays empty */
+      },
+    });
+  }
+
+  /** Load the trades this analysis proposed. */
+  private loadRecs(llmInvocationId: number): void {
+    if (!llmInvocationId || !this.monitorsEnabled()) {
+      this.recs.set([]);
+      return;
+    }
+    this.marketData.getTradeRecommendations(llmInvocationId).subscribe({
+      next: (res) => {
+        if (this.llmInvocationId() !== llmInvocationId) return;
+        this.recs.set(res?.status && res.data ? res.data : []);
+      },
+      error: () => {
+        /* non-fatal — the strip just stays empty */
+      },
+    });
+  }
+
+  /**
+   * Whether offering File / Arm makes sense. The engine has the final say (it refuses a card
+   * overtaken by price or too old); this only hides buttons that can never succeed.
+   */
+  protected recActionable(r: TradeRecommendationDto): boolean {
+    if (r.status === 'Filed' || r.status === 'Parked' || r.status === 'Withdrawn') return false;
+    if (r.status === 'Rejected') return (r.statusReason ?? '').startsWith('[EntryTooFar]');
+    return r.entryPrice !== null && r.stopLoss !== null;
+  }
+
+  protected armRec(r: TradeRecommendationDto, mode: 'direct' | 'confirm'): void {
+    if (this.recBusyId() !== null) return;
+    const id = this.llmInvocationId();
+    this.recConfirmId.set(null);
+    this.recError.set(null);
+    this.recBusyId.set(r.id);
+    this.recBusyWhat.set(mode);
+    this.marketData.armTradeRecommendation(r.id, mode).subscribe({
+      next: (res) => {
+        this.recBusyId.set(null);
+        this.recBusyWhat.set(null);
+        if (!res?.status)
+          this.recError.set({ id: r.id, message: res?.message || 'Could not arm.' });
+        this.loadRecs(id);
+        this.loadMonitors(id);
+      },
+      error: (err) => {
+        this.recBusyId.set(null);
+        this.recBusyWhat.set(null);
+        this.recError.set({ id: r.id, message: err?.error?.message || 'Could not arm.' });
+      },
+    });
+  }
+
+  protected fileRec(r: TradeRecommendationDto): void {
+    if (this.recBusyId() !== null) return;
+    if (this.recConfirmId() !== r.id) {
+      this.recConfirmId.set(r.id);
+      return;
+    }
+    const id = this.llmInvocationId();
+    this.recConfirmId.set(null);
+    this.recError.set(null);
+    this.recBusyId.set(r.id);
+    this.recBusyWhat.set('file');
+    this.marketData.fileTradeRecommendation(r.id).subscribe({
+      next: (res) => {
+        this.recBusyId.set(null);
+        this.recBusyWhat.set(null);
+        if (!res?.status)
+          this.recError.set({ id: r.id, message: res?.message || 'Could not file.' });
+        this.loadRecs(id);
+      },
+      error: (err) => {
+        this.recBusyId.set(null);
+        this.recBusyWhat.set(null);
+        this.recError.set({ id: r.id, message: err?.error?.message || 'Could not file.' });
       },
     });
   }

@@ -16,6 +16,7 @@ import {
   ForkConversationResult,
   RetireTurnResult,
   AnalysisMonitorDto,
+  TradeRecommendationDto,
   AnalysisConversationsPageDto,
   AnalysisConversationDetailDto,
   LiveExposureDto,
@@ -385,6 +386,27 @@ export class MarketDataService {
   /** POST /market-data/analysis-monitors/{id}/cancel — deactivate a monitor. */
   cancelAnalysisMonitor(monitorId: number): Observable<ResponseData<AnalysisMonitorDto>> {
     return this.api.post(`/market-data/analysis-monitors/${monitorId}/cancel`, {});
+  }
+
+  /** POST /trade-recommendation/query — every trade an analysis proposed, with its id. */
+  getTradeRecommendations(
+    llmInvocationId: number,
+    opts?: ApiCallOptions,
+  ): Observable<ResponseData<TradeRecommendationDto[]>> {
+    return this.api.post('/trade-recommendation/query', { llmInvocationId, limit: 50 }, opts);
+  }
+
+  /** POST /trade-recommendation/{id}/file — file the stored card as a signal now. */
+  fileTradeRecommendation(id: number): Observable<ResponseData<number>> {
+    return this.api.post(`/trade-recommendation/${id}/file`, {});
+  }
+
+  /** POST /trade-recommendation/{id}/arm-monitor — file it when price reaches the entry. */
+  armTradeRecommendation(
+    id: number,
+    mode: 'direct' | 'confirm',
+  ): Observable<ResponseData<AnalysisMonitorDto>> {
+    return this.api.post(`/trade-recommendation/${id}/arm-monitor`, { mode });
   }
 
   /**

@@ -3925,6 +3925,36 @@ export interface AnalysisFiledSignalDto {
   status: string;
 }
 
+/** One trade an analysis proposed, with its own id and outcome. Returned by the
+ *  /trade-recommendation endpoints. A monitor files one by this id. */
+export interface TradeRecommendationDto {
+  id: number;
+  /** SpotAnalysis | ChatRecommend | PatientTrader */
+  source: string;
+  llmInvocationId: number | null;
+  patientTraderPlanId: number | null;
+  /** The monitor whose re-check wrote it, when it came from a fire. */
+  analysisMonitorId: number | null;
+  symbol: string;
+  timeframe: string;
+  direction: 'Buy' | 'Sell';
+  orderType: string | null;
+  entryPrice: number | null;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  confidence: number | null;
+  rationale: string | null;
+  /** Proposed | Filed | Parked | Rejected | Expired | Withdrawn */
+  status: string;
+  statusReason: string | null;
+  tradeSignalId: number | null;
+  pendingSignalRecId: number | null;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+  /** The active monitor armed to file it, if any. */
+  watchingMonitorId: number | null;
+}
+
 /** A chat-created live-market monitor: a background watch that, when its
  *  condition fires, re-runs the spot analysis + notifies. Returned by the
  *  /market-data/analysis-monitors endpoints. */
