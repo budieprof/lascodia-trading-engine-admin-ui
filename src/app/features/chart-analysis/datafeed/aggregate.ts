@@ -108,3 +108,112 @@ export function aggregateCandles(candles: CandleDto[], resolution: TvResolution)
   if (out.length > 0) out[out.length - 1].isClosed = false;
   return out;
 }
+
+/** The subset of a bar the forming-bar fold needs. Matches `Bar` in candle-feed.service. */
+export interface FoldBar {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+/**
+ * Fold near-live 1-minute bars into `resolution` buckets.
+ *
+ * <p>This is what builds the bar that is still FORMING. The engine stores a bar only once it has
+ * closed, so the newest bar on any timeframe above M1 is never in the history. The chart used to
+ * invent it from the first live tick the browser happened to receive: open the page forty minutes
+ * into an H1 bar and that bar's open, high and low covered the last few seconds, not the hour — a
+ * candle that visibly jumped away from the previous close. M1 bars are at most a minute behind, so
+ * folding them gives the true open, high, low and volume.</p>
+ *
+ * <p>Input must be ascending. Output is ascending, one bar per bucket.</p>
+ */
+export function foldBars(bars: readonly FoldBar[], resolution: TvResolution): FoldBar[] {
+  const out: FoldBar[] = [];
+  for (const b of bars) {
+    const key = bucketStartFor(resolution, b.time);
+    if (key === null) continue;
+    const tail = out[out.length - 1];
+    if (tail && tail.time === key) {
+      tail.high = Math.max(tail.high, b.high);
+      tail.low = Math.min(tail.low, b.low);
+      tail.close = b.close;
+      tail.volume += b.volume;
+    } else {
+      out.push({
+        time: key,
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Lay the forming bars over the chart's bars, without disturbing anything already stored.
+ *
+ * <ul>
+ *   <li>Bars at or before `lastStored` came from the engine's history and are closed. They are
+ *       authoritative and never replaced.</li>
+ *   <li>After that, the folded M1 bars are the truth for open, high, low and volume.</li>
+ *   <li>A live bar at the same time wins on CLOSE and widens high/low: ticks are newer than M1,
+ *       which trails by up to a minute.</li>
+ *   <li>A live bar newer than anything M1 has yet (a bucket that opened seconds ago) is kept as it
+ *       is, and the next sync corrects it.</li>
+ * </ul>
+ */
+export function mergeForming(
+  current: readonly FoldBar[],
+  folded: readonly FoldBar[],
+  lastStored: number,
+): FoldBar[] {
+  const out = current.filter((b) => b.time <= lastStored).map((b) => ({ ...b }));
+  const live = new Map(current.filter((b) => b.time > lastStored).map((b) => [b.time, b]));
+
+  for (const f of folded) {
+    if (f.time <= lastStored) continue;
+    const l = live.get(f.time);
+    if (l) {
+      out.push({
+        time: f.time,
+        open: f.open,
+        high: Math.max(f.high, l.high),
+        low: Math.min(f.low, l.low),
+        close: l.close,
+        volume: Math.max(f.volume, l.volume),
+      });
+      live.delete(f.time);
+    } else {
+      out.push({ ...f });
+    }
+  }
+  for (const l of live.values()) out.push({ ...l });
+  return out.sort((a, b) => a.time - b.time);
+}
+
+/**
+ * The newest bar in freshly loaded history that can be trusted as COMPLETE.
+ *
+ * <p>For a timeframe the engine stores, that is simply the last bar — the engine writes a bar only
+ * once it has closed. For one this app builds by aggregation (30m from M15, weeks and months from
+ * D1) the last bucket is usually still open: it holds only the source bars that have closed so far.
+ * Treating it as complete would freeze a half-built candle, so the cut-off sits just before it and
+ * the bucket is rebuilt from M1 with the rest of the forming bars.</p>
+ */
+export function lastCompleteBarTime(
+  bars: readonly FoldBar[],
+  resolution: TvResolution,
+): number | null {
+  if (bars.length === 0) return null;
+  const last = bars[bars.length - 1].time;
+  const src = resolutionSource(resolution);
+  const aggregated = !!src && src.aggregate !== 1;
+  return aggregated ? last - 1 : last;
+}

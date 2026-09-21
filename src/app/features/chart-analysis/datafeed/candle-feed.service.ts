@@ -77,6 +77,39 @@ export class CandleFeedService {
   }
 
   /**
+   * Every stored M1 bar from `sinceMs` to now, ascending, uncached.
+   *
+   * <p>The raw material for the bar that is still forming. Returns null — not an empty list — when
+   * the window is too wide to cover in one request, because a fold over a truncated window builds a
+   * bar whose open is simply wrong, which is worse than keeping the tick-built one.</p>
+   */
+  async minuteBarsSince(symbol: string, sinceMs: number): Promise<Bar[] | null> {
+    const now = Date.now();
+    const needed = Math.ceil((now - sinceMs) / 60_000) + 2;
+    if (needed <= 0) return [];
+    if (needed > MAX_PAGE) return null;
+    // Headroom for duplicate rows: the handler pages by ROW, newest first, so if a minute is
+    // stored twice the page stops short of `sinceMs` and the oldest bucket folds from a partial
+    // set of minutes — a wrong open, which is the bug this exists to fix.
+    const rows = Math.min(MAX_PAGE, needed * 2);
+
+    const res = await firstValueFrom(
+      this.marketData.listCandles({
+        currentPage: 1,
+        itemCountPerPage: rows,
+        filter: { symbol, timeframe: 'M1', to: new Date(now).toISOString() },
+      }),
+    ).catch(() => null);
+    if (!res?.status || !res.data) return null;
+
+    const all = (res.data.data ?? []).map(toBar).filter((b) => Number.isFinite(b.time));
+    // A full page whose oldest row is still after `sinceMs` did not reach back far enough.
+    if (all.length >= rows && all.every((b) => b.time > sinceMs)) return null;
+
+    return all.filter((b) => b.time >= sinceMs).sort((a, b) => a.time - b.time);
+  }
+
+  /**
    * Bars at or before `toMs`, at least `countBack` of them where they exist.
    *
    * `countBack` rather than `fromMs` is the authority: from v29 the library

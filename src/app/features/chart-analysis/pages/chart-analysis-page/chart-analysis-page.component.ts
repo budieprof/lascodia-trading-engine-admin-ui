@@ -18,6 +18,12 @@ import { RealtimeService } from '@core/realtime/realtime.service';
 import type { CurrencyPairDto } from '@core/api/api.types';
 import { CandleFeedService, type Bar } from '../../datafeed/candle-feed.service';
 import { SUPPORTED_RESOLUTIONS, resolutionMs, type TvResolution } from '../../datafeed/resolution';
+import {
+  bucketStartFor,
+  foldBars,
+  lastCompleteBarTime,
+  mergeForming,
+} from '../../datafeed/aggregate';
 import { priceScaleFor } from '../../datafeed/symbol-info';
 import {
   INDICATORS,
@@ -587,6 +593,13 @@ export class ChartAnalysisPageComponent {
         this.applyTick(tick);
         this.recordQuote(tick);
       });
+
+    // Re-read the forming bar from M1 every minute. Ticks arrive throttled to ~1 Hz, so a spike
+    // between two of them never reaches the live bar's high or low; and a bar that closed while the
+    // page was open was built entirely from those throttled ticks. One small request a minute keeps
+    // the newest candle honest without waiting for a reload.
+    const resync = setInterval(() => void this.syncFormingBars(), 60_000);
+    this.destroyRef.onDestroy(() => clearInterval(resync));
   }
 
   /**
@@ -1022,6 +1035,10 @@ export class ChartAnalysisPageComponent {
     try {
       const { bars } = await this.feed.getBars(this.symbol(), this.resolution(), 0, now, PAGE_BARS);
       this.bars.set(bars);
+      this.lastStored = lastCompleteBarTime(bars, this.resolution());
+      // The history ends at the last CLOSED bar; build the one still forming from real data
+      // rather than from whatever tick happens to arrive first.
+      void this.syncFormingBars();
       // After the bars, so the calendar window matches what is on screen.
       this.loadEvents();
       if (bars.length === 0) {
@@ -1072,6 +1089,38 @@ export class ChartAnalysisPageComponent {
     }
   }
 
+  /**
+   * Time of the newest bar that is known to be COMPLETE in stored history. Every bar after it is
+   * still forming, and is rebuilt from M1 rather than trusted.
+   */
+  private lastStored: number | null = null;
+
+  /**
+   * Rebuild the forming bar (and any closed bar the engine has not yet stored) from M1.
+   *
+   * <p>The engine writes a bar only once it has closed, so the newest bar is never in the history
+   * and the chart had to invent it from live ticks — opening it at whatever price arrived first
+   * after the page loaded. Load the chart mid-bar and the candle jumped away from the previous close,
+   * with an open, high and low that covered seconds instead of the whole period. M1 trails the
+   * market by at most a minute, so it gives the real ones.</p>
+   *
+   * <p>Ticks still move the close between syncs; this corrects everything else.</p>
+   */
+  private async syncFormingBars(): Promise<void> {
+    const resolution = this.resolution();
+    const symbol = this.symbol();
+    const stored = this.lastStored;
+    if (resolution === '1' || stored === null || this.bars().length === 0) return;
+
+    const minutes = await this.feed.minuteBarsSince(symbol, stored + 1);
+    if (!minutes || minutes.length === 0) return;
+    // The operator may have switched symbol or timeframe while the request was in flight.
+    if (symbol !== this.symbol() || resolution !== this.resolution() || stored !== this.lastStored)
+      return;
+
+    this.bars.set(mergeForming(this.bars(), foldBars(minutes, resolution), stored));
+  }
+
   private applyTick(tick: { symbol?: string; bid?: number; ask?: number; price?: number }): void {
     if (!tick?.symbol || tick.symbol.toUpperCase() !== this.symbol().toUpperCase()) return;
     const price = tick.bid ?? tick.price ?? tick.ask;
@@ -1079,11 +1128,13 @@ export class ChartAnalysisPageComponent {
 
     const current = this.bars();
     if (current.length === 0) return;
-    const step = resolutionMs(this.resolution());
-    if (!step) return;
 
     const last = current[current.length - 1];
-    const bucket = Math.floor(Date.now() / step) * step;
+    // The same bucketing the history uses. `floor(now / step)` put weekly bars on an
+    // epoch-aligned week (which starts on a THURSDAY) and treated a month as a flat 31 days,
+    // so on 1W and 1M a live tick could open a bar that no stored bar would ever line up with.
+    const bucket = bucketStartFor(this.resolution(), Date.now());
+    if (bucket === null) return;
 
     if (bucket > last.time) {
       // A new bar opened. Seed it from the tick rather than waiting for the
