@@ -139,6 +139,8 @@ interface ParsedChatRec {
   riskRewardRatio: number | null;
   rationale: string;
   filedSignalId: number | null;
+  /** The recommendation id this card was recorded under — what a monitor files it by. */
+  recommendationId: number | null;
   /**
    * Suppresses the "file this signal" action.
    *
@@ -261,7 +263,8 @@ const MAX_THREAD_TURNS = 300;
       @if (monitorsEnabled() && recs().length > 0) {
         <div class="trecs">
           <div class="monitors-head">
-            Trades this analysis proposed ({{ recs().length }}) — each has an id a monitor can file
+            Trades proposed in this conversation ({{ recs().length }}) — each has an id a monitor
+            can file
           </div>
           @for (r of recs(); track r.id) {
             <div class="trec">
@@ -296,7 +299,7 @@ const MAX_THREAD_TURNS = 300;
               }
               @if (r.watchingMonitorId) {
                 <div class="trec-watch">
-                  👁 Monitor #{{ r.watchingMonitorId }} files it at the entry
+                  👁 Monitor #{{ r.watchingMonitorId }} files it when price nears the entry
                 </div>
               } @else if (recActionable(r)) {
                 <div class="trec-actions">
@@ -304,12 +307,12 @@ const MAX_THREAD_TURNS = 300;
                     type="button"
                     [disabled]="recBusyId() !== null"
                     (click)="armRec(r, 'direct')"
-                    title="Arm a monitor that files this exact card when price reaches the entry"
+                    title="When price comes within half an ATR of the entry, file this exact card — no new analysis — so it rests at the broker before the touch"
                   >
                     {{
                       recBusyId() === r.id && recBusyWhat() === 'direct'
                         ? 'Arming…'
-                        : 'File at entry'
+                        : 'File near entry'
                     }}
                   </button>
                   <button
@@ -321,7 +324,7 @@ const MAX_THREAD_TURNS = 300;
                     {{
                       recBusyId() === r.id && recBusyWhat() === 'confirm'
                         ? 'Arming…'
-                        : 'Re-check at entry, then file'
+                        : 'Re-check near entry, then file'
                     }}
                   </button>
                   <button
@@ -583,6 +586,9 @@ const MAX_THREAD_TURNS = 300;
                             ⏸ Stood aside · {{ rec.symbol }} · {{ rec.timeframe }}
                           } @else {
                             📌 {{ rec.action }} {{ rec.symbol }} · {{ rec.timeframe }}
+                            @if (rec.recommendationId) {
+                              · Rec #{{ rec.recommendationId }}
+                            }
                           }
                         </span>
                         @if (rec.isMarketState) {
@@ -671,6 +677,11 @@ const MAX_THREAD_TURNS = 300;
                           (cancelled)="closeEditor()"
                         />
                       } @else {
+                        @if (rec.recommendationId && watcherOf(rec.recommendationId); as monId) {
+                          <div class="rec-status">
+                            👁 Monitor #{{ monId }} files this card when price nears the entry
+                          </div>
+                        }
                         <div class="rec-actions">
                           <button
                             type="button"
@@ -680,8 +691,26 @@ const MAX_THREAD_TURNS = 300;
                           >
                             ⚡ File as signal
                           </button>
+                          @if (rec.recommendationId && !watcherOf(rec.recommendationId)) {
+                            <button
+                              type="button"
+                              class="file-signal"
+                              [disabled]="recBusyId() !== null"
+                              (click)="armRecById(rec.recommendationId, 'direct')"
+                              title="When price comes within half an ATR of the entry, file this exact card as a signal — no new analysis — so it is resting at the broker before price touches it"
+                            >
+                              {{
+                                recBusyId() === rec.recommendationId
+                                  ? 'Arming…'
+                                  : '📍 File near entry'
+                              }}
+                            </button>
+                          }
                           <span class="rec-hint">review or adjust the levels, then file</span>
                         </div>
+                        @if (rec.recommendationId && recError()?.id === rec.recommendationId) {
+                          <div class="trec-error">{{ recError()?.message }}</div>
+                        }
                       }
                     </div>
                     <time
@@ -2709,6 +2738,7 @@ export class AnalysisChatComponent {
         riskRewardRatio?: number | null;
         rationale?: string;
         filedSignalId?: number | null;
+        recommendationId?: number | null;
         readOnly?: boolean;
         statusNote?: string | null;
         kind?: string;
@@ -2762,6 +2792,7 @@ export class AnalysisChatComponent {
           riskRewardRatio: r.riskRewardRatio ?? null,
           rationale: r.rationale || '',
           filedSignalId: r.filedSignalId ?? null,
+          recommendationId: typeof r.recommendationId === 'number' ? r.recommendationId : null,
           readOnly: r.readOnly === true,
           statusNote: r.statusNote || null,
           isScenario,
@@ -3096,26 +3127,35 @@ export class AnalysisChatComponent {
     return r.entryPrice !== null && r.stopLoss !== null;
   }
 
+  /** The monitor already armed to file this recommendation, if any. */
+  protected watcherOf(recommendationId: number): number | null {
+    return this.recs().find((x) => x.id === recommendationId)?.watchingMonitorId ?? null;
+  }
+
   protected armRec(r: TradeRecommendationDto, mode: 'direct' | 'confirm'): void {
+    this.armRecById(r.id, mode);
+  }
+
+  protected armRecById(recId: number, mode: 'direct' | 'confirm'): void {
     if (this.recBusyId() !== null) return;
     const id = this.llmInvocationId();
     this.recConfirmId.set(null);
     this.recError.set(null);
-    this.recBusyId.set(r.id);
+    this.recBusyId.set(recId);
     this.recBusyWhat.set(mode);
-    this.marketData.armTradeRecommendation(r.id, mode).subscribe({
+    this.marketData.armTradeRecommendation(recId, mode).subscribe({
       next: (res) => {
         this.recBusyId.set(null);
         this.recBusyWhat.set(null);
         if (!res?.status)
-          this.recError.set({ id: r.id, message: res?.message || 'Could not arm.' });
+          this.recError.set({ id: recId, message: res?.message || 'Could not arm.' });
         this.loadRecs(id);
         this.loadMonitors(id);
       },
       error: (err) => {
         this.recBusyId.set(null);
         this.recBusyWhat.set(null);
-        this.recError.set({ id: r.id, message: err?.error?.message || 'Could not arm.' });
+        this.recError.set({ id: recId, message: err?.error?.message || 'Could not arm.' });
       },
     });
   }
