@@ -429,9 +429,19 @@ export function latestThoughtLine(item: ThinkingItem): string {
   return lines.length ? lines[lines.length - 1] : '';
 }
 
-/** Index of the newest thinking block in the thread, or -1 when it has none. */
+/**
+ * Index of the newest thinking block of the CURRENT turn, or -1 when it has none.
+ *
+ * <p>A block the operator has since replied under belongs to a finished turn. Returning it made
+ * the previous answer's thinking pose as the live one — and hid the "Thinking…" indicator for the
+ * whole of the next question.</p>
+ */
 export function latestThinkingIndex(items: readonly ChatItem[]): number {
-  for (let i = items.length - 1; i >= 0; i--) if (items[i].type === 'thinking') return i;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.type === 'thinking') return i;
+    if (it.type === 'turn' && it.turn.role === 'User') return -1;
+  }
   return -1;
 }
 

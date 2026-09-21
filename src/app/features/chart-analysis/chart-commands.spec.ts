@@ -391,6 +391,24 @@ describe('placing drawings and navigating', () => {
     expect(placed[0].points[0].price).toBe(1.144);
   });
 
+  it('matches a tool named in camelCase, snake_case or a short alias', async () => {
+    // Conversation #33534: the model asked for "horizontalLine" and was told no such tool exists.
+    for (const tool of ['horizontalLine', 'horizontal_line', 'HORIZONTAL LINE', 'hline']) {
+      const r = await place({ tool, points: JSON.stringify([{ price: 1.14775 }]) });
+      expect(r.ok).toBe(true);
+    }
+    expect(placed.map((p) => p.kind)).toEqual(Array(4).fill('horizontal-line'));
+  });
+
+  it('takes `label` as the drawing text', async () => {
+    await place({
+      tool: 'horizontal-line',
+      points: JSON.stringify([{ price: 1.14775 }]),
+      label: 'POC 1.14775',
+    });
+    expect(placed[0].text).toBe('POC 1.14775');
+  });
+
   it('lets a horizontal line omit the time', async () => {
     // Its anchor time does not affect what is drawn, so refusing over a missing coordinate
     // would be pedantry.

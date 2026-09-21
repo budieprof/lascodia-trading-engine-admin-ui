@@ -887,15 +887,16 @@ export function isCheckpointTurn(t: SpotAnalysisFollowUpTurnDto | null | undefin
         }
 
         <!--
-          The placeholder spinner is for a chat that streams NOTHING. An engineer run narrates
-          into the thread instead, so once a live thinking block is on screen this would be a
-          second, redundant "Thinking…" sitting under the real one.
+          Shown for the WHOLE time the assistant is working, pinned under the newest item. It
+          used to hide whenever a thinking block existed — but charts and tool strips land below
+          that block, and the previous turn's block counted too, so the thread sat looking
+          finished while work was still running. The operator asked to always see it.
 
           Keyed on narrationLive, not sending: the page-command path finishes the ask early and
           does the rest of the work inside the resolve, so reading sending() alone left the thread
           looking idle for the longest stretch of the turn.
         -->
-        @if (narrationLive() && !streamingLive()) {
+        @if (narrationLive()) {
           <div class="msg">
             <div class="bubble thinking"><span class="spinner"></span> Thinking…</div>
           </div>
@@ -2116,11 +2117,6 @@ export class AnalysisChatComponent {
    */
   protected readonly narrationLive = computed(
     () => this.runLive() || this.sending() || this.resolvingId() !== null,
-  );
-
-  /** True while the newest thinking block is being written into — the thread narrates itself. */
-  protected readonly streamingLive = computed(
-    () => this.narrationLive() && this.latestThinkingIdx() >= 0,
   );
 
   /** What the agent is doing right now, in words. Shared by the run bar and the live block. */

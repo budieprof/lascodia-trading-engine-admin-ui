@@ -197,15 +197,45 @@ const STYLES: readonly ChartStyle[] = [
   'line-break',
 ];
 
+/**
+ * Case, spaces, hyphens and underscores removed: "horizontalLine", "horizontal_line",
+ * "Horizontal Line" and "horizontal-line" are one tool. A model names tools in whatever casing
+ * the sentence it came from used — camelCase most of all — and matching on the raw string
+ * refused the most common drawing there is (conversation #33534).
+ */
+const toolKey = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/** Short names an operator or model reaches for that no label contains. */
+const TOOL_ALIASES: Record<string, DrawingKind> = {
+  hline: 'horizontal-line',
+  horizontal: 'horizontal-line',
+  level: 'horizontal-line',
+  pricelevel: 'horizontal-line',
+  vline: 'vertical-line',
+  vertical: 'vertical-line',
+  trend: 'trend-line',
+  line: 'trend-line',
+  box: 'rectangle',
+  rect: 'rectangle',
+  zone: 'rectangle',
+  fib: 'fib-retracement',
+  fibonacci: 'fib-retracement',
+  label: 'text',
+  note: 'text',
+};
+
 /** Resolve a tool by kind or label, reporting ambiguity rather than picking. */
 function findTool(query: string): (typeof TOOLS)[number] | string {
-  const q = query.trim().toLowerCase();
+  const q = toolKey(query);
   if (!q) return 'No tool named.';
-  const exact = TOOLS.find((t) => t.kind.toLowerCase() === q || t.label.toLowerCase() === q);
+  const exact = TOOLS.find((t) => toolKey(t.kind) === q || toolKey(t.label) === q);
   if (exact) return exact;
-  const partial = TOOLS.filter(
-    (t) => t.label.toLowerCase().includes(q) || t.kind.toLowerCase().includes(q),
-  );
+  const alias = TOOL_ALIASES[q];
+  if (alias) {
+    const hit = TOOLS.find((t) => t.kind === alias);
+    if (hit) return hit;
+  }
+  const partial = TOOLS.filter((t) => toolKey(t.label).includes(q) || toolKey(t.kind).includes(q));
   if (partial.length === 1) return partial[0];
   if (partial.length > 1) {
     return `"${query}" matches ${partial.length} tools: ${partial
@@ -748,7 +778,9 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
           points.slice(0, Math.max(needed, points.length)),
           str(a, 'color') || undefined,
         );
-        const label = str(a, 'text');
+        // `label` is what models reach for; `text` is the documented name. Honour both rather
+        // than drop the one the operator will actually read.
+        const label = str(a, 'text') || str(a, 'label');
         if (label) host.styleDrawing(id, { text: label });
         return ok(`Placed ${spec.label}.`, { id });
       },

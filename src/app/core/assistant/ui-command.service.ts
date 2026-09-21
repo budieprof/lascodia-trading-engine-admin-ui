@@ -127,7 +127,10 @@ function validate(params: readonly UiCommandParam[], args: Record<string, unknow
       if (!hit) return `"${p.name}" must be one of: ${allowed.join(', ')}. Got "${s}".`;
       args[p.name] = hit;
     } else {
-      args[p.name] = String(value);
+      // A string param that carries JSON (placeDrawing's `points`) is often sent as the real
+      // array rather than as its text. String() on that yields "[object Object]" and the
+      // handler's own parse fails — re-serialise instead so it receives what the model meant.
+      args[p.name] = typeof value === 'object' ? JSON.stringify(value) : String(value);
     }
   }
   return null;

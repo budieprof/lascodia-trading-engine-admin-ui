@@ -81,6 +81,7 @@ describe('UiCommandService', () => {
               { name: 'n', type: 'number', description: 'n', required: true },
               { name: 'flag', type: 'boolean', description: 'flag' },
               { name: 'mode', type: 'enum', values: ['normal', 'log'], description: 'mode' },
+              { name: 'points', type: 'string', description: 'JSON array' },
             ],
           }),
         ],
@@ -116,6 +117,12 @@ describe('UiCommandService', () => {
       expect(r.ok).toBe(false);
       expect(r.message).toContain('must be one of');
       expect(ran).toHaveLength(0);
+    });
+
+    it('re-serialises a JSON string param sent as the real array', async () => {
+      // String([{price:1}]) is "[object Object]" — the handler's parse would then fail.
+      await svc.execute('test.echo', { n: 1, points: [{ price: 1.14775 }] });
+      expect(ran[0]['points']).toBe('[{"price":1.14775}]');
     });
 
     it('ignores an optional argument that was left out', async () => {

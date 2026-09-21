@@ -1,9 +1,20 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  ElementRef,
+  afterNextRender,
+  computed,
+  inject,
+  input,
+  signal,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { NgxEchartsDirective } from 'ngx-echarts';
 
 import { ThemeService } from '@core/theme/theme.service';
 
+import { MARKER_GAP_PX, layoutTimeline } from './timeline-layout';
 import { toEchartsOption, type VisualSpec } from './visual-spec';
 
 /**
@@ -40,38 +51,78 @@ import { toEchartsOption, type VisualSpec } from './visual-spec';
         </figcaption>
 
         @if (s.type === 'timeline') {
-          <!-- A runway is a band with shaded windows and labelled ticks; no cartesian series
-               expresses that without being fought. -->
-          <div class="strip">
-            <div class="strip-track">
-              @for (w of windows(); track w.label + w.from) {
-                <div
-                  class="strip-window"
-                  [attr.data-kind]="w.kind || 'neutral'"
-                  [style.left.%]="w.leftPct"
-                  [style.width.%]="w.widthPct"
-                  [title]="w.label"
-                >
-                  <span class="strip-window-label">{{ w.label }}</span>
+          <!-- A runway is a band with shaded windows and numbered markers; no cartesian series
+               expresses that without being fought. The words live in the agenda below, where
+               each gets a full line — see timeline-layout.ts for why. -->
+          @if (timeline(); as tl) {
+            <div class="strip">
+              <div class="strip-track" [style.height.px]="trackHeight()">
+                @for (w of tl.windows; track w.label + w.from) {
+                  <div
+                    class="strip-window"
+                    [attr.data-kind]="w.kind || 'neutral'"
+                    [style.left.%]="w.leftPct"
+                    [style.width.%]="w.widthPct"
+                    [title]="w.label + ' · ' + w.range"
+                  >
+                    <span class="strip-window-label">{{ w.label }}</span>
+                  </div>
+                }
+                @for (m of tl.midnights; track m) {
+                  <div class="strip-midnight" [style.left.%]="m"></div>
+                }
+                @for (e of tl.events; track e.n) {
+                  <div
+                    class="strip-event"
+                    [attr.data-impact]="e.impact || 'low'"
+                    [style.left.%]="e.leftPct"
+                    [style.top.px]="laneTop(e.lane)"
+                    [title]="e.n + '. ' + e.time + ' · ' + e.label + (e.note ? ' — ' + e.note : '')"
+                  >
+                    <span class="strip-badge">{{ e.n }}</span>
+                    <span class="strip-stem"></span>
+                  </div>
+                }
+              </div>
+              <div class="strip-days">
+                @for (d of tl.days; track d.leftPct) {
+                  <span [style.left.%]="d.leftPct" [style.width.%]="d.widthPct">{{ d.label }}</span>
+                }
+              </div>
+
+              @if (tl.windows.length) {
+                <div class="strip-legend">
+                  @for (w of tl.windows; track w.label + w.from) {
+                    <span class="strip-legend-item">
+                      <span class="strip-swatch" [attr.data-kind]="w.kind || 'neutral'"></span>
+                      {{ w.label }} <span class="strip-muted">{{ w.range }}</span>
+                    </span>
+                  }
                 </div>
               }
-              @for (e of events(); track e.label + e.at) {
-                <div
-                  class="strip-event"
-                  [attr.data-impact]="e.impact || 'low'"
-                  [style.left.%]="e.leftPct"
-                  [title]="e.note || e.label"
-                >
-                  <span class="strip-tick"></span>
-                  <span class="strip-event-label">{{ e.label }}</span>
+
+              @if (tl.agenda.length) {
+                <div class="agenda">
+                  @for (d of tl.agenda; track d.day) {
+                    <div class="agenda-day">{{ d.day }}</div>
+                    @for (e of d.events; track e.n) {
+                      <div class="agenda-row" [attr.data-impact]="e.impact || 'low'">
+                        <span class="strip-badge">{{ e.n }}</span>
+                        <span class="agenda-time">{{ e.time }}</span>
+                        <span class="agenda-what">
+                          {{ e.label }}
+                          @if (e.note) {
+                            <span class="strip-muted"> · {{ e.note }}</span>
+                          }
+                        </span>
+                        <span class="agenda-impact">{{ e.impact || 'low' }}</span>
+                      </div>
+                    }
+                  }
                 </div>
               }
             </div>
-            <div class="strip-axis">
-              <span>{{ rangeFrom() }}</span>
-              <span>{{ rangeTo() }}</span>
-            </div>
-          </div>
+          }
         } @else if (options(); as opts) {
           <div
             echarts
@@ -235,14 +286,13 @@ import { toEchartsOption, type VisualSpec } from './visual-spec';
       }
       .strip-track {
         position: relative;
-        height: 86px;
         border-radius: 4px;
         background: var(--bg-secondary, rgba(0, 0, 0, 0.03));
       }
       .strip-window {
         position: absolute;
         top: 0;
-        bottom: 34px;
+        bottom: 0;
         border-radius: 3px;
         overflow: hidden;
       }
@@ -261,47 +311,154 @@ import { toEchartsOption, type VisualSpec } from './visual-spec';
       .strip-window-label {
         position: absolute;
         left: 5px;
+        right: 5px;
         top: 3px;
         font-size: 0.68rem;
         color: var(--text-secondary);
         white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .strip-midnight {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        border-left: 1px dashed var(--border);
       }
       .strip-event {
         position: absolute;
         bottom: 0;
-        height: 100%;
         transform: translateX(-50%);
         display: flex;
         flex-direction: column;
-        justify-content: flex-end;
         align-items: center;
+        cursor: default;
+        z-index: 1;
       }
-      .strip-tick {
+      .strip-event:hover {
+        z-index: 2;
+      }
+      .strip-stem {
+        flex: 1;
         width: 2px;
-        height: 52px;
-        background: var(--text-secondary);
+        background: var(--impact-color);
+        opacity: 0.7;
       }
-      .strip-event[data-impact='high'] .strip-tick {
-        background: #c4290a;
-        width: 3px;
+      /* The marker. Colour carries impact; the number ties it to its agenda line. */
+      .strip-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: none;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        font-size: 0.62rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        color: #fff;
+        background: var(--impact-color);
+        box-shadow: 0 0 0 2px var(--bg-primary);
       }
-      .strip-event[data-impact='medium'] .strip-tick {
-        background: #b45309;
+      [data-impact] {
+        --impact-color: #6e6e73;
       }
-      .strip-event-label {
-        margin-top: 3px;
-        font-size: 0.66rem;
-        line-height: 1.2;
-        max-width: 92px;
-        text-align: center;
-        color: var(--text-primary);
+      [data-impact='medium'] {
+        --impact-color: #b45309;
       }
-      .strip-axis {
-        display: flex;
-        justify-content: space-between;
-        margin-top: 0.3rem;
+      [data-impact='high'] {
+        --impact-color: #c4290a;
+      }
+      .strip-days {
+        position: relative;
+        height: 1.1rem;
+        margin-top: 0.2rem;
         font-size: 0.68rem;
         color: var(--text-secondary);
+      }
+      .strip-days > span {
+        position: absolute;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+      }
+      .strip-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.3rem 1rem;
+        margin-top: 0.3rem;
+        font-size: 0.72rem;
+        color: var(--text-primary);
+      }
+      /* Inline flow, not flex: in a narrow pane the range wraps UNDER the label instead of
+         splitting the item into three squeezed columns. */
+      .strip-legend-item {
+        display: inline;
+      }
+      .strip-swatch {
+        display: inline-block;
+        vertical-align: -1px;
+        margin-right: 0.3rem;
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+      }
+      .strip-swatch[data-kind='quiet'] {
+        background: rgba(31, 138, 61, 0.45);
+      }
+      .strip-swatch[data-kind='risk'] {
+        background: rgba(196, 41, 10, 0.45);
+      }
+      .strip-swatch[data-kind='session'] {
+        background: rgba(0, 113, 227, 0.4);
+      }
+      .strip-swatch[data-kind='neutral'] {
+        background: rgba(110, 110, 115, 0.45);
+      }
+      .strip-muted {
+        color: var(--text-secondary);
+      }
+
+      /* ── Agenda: the event names, one full line each ── */
+      .agenda {
+        display: grid;
+        grid-template-columns: auto auto 1fr auto;
+        align-items: center;
+        gap: 0.2rem 0.55rem;
+        margin-top: 0.55rem;
+        font-size: 0.76rem;
+      }
+      .agenda-day {
+        grid-column: 1 / -1;
+        margin-top: 0.3rem;
+        padding-bottom: 0.1rem;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.7rem;
+        font-weight: 650;
+        letter-spacing: 0.02em;
+        color: var(--text-secondary);
+      }
+      .agenda-row {
+        display: contents;
+      }
+      .agenda-time {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: 0.72rem;
+        color: var(--text-secondary);
+      }
+      .agenda-what {
+        color: var(--text-primary);
+        min-width: 0;
+      }
+      .agenda-row[data-impact='high'] .agenda-what {
+        font-weight: 650;
+      }
+      .agenda-impact {
+        font-size: 0.62rem;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--impact-color);
       }
     `,
   ],
@@ -329,41 +486,37 @@ export class AnalysisVisualComponent {
 
   // ── Timeline layout ────────────────────────────────────────────────────────
   // Positions are percentages of the strip's own span, so the strip stays fluid at any chat width.
+  // Lane packing needs the width in px (a marker is a fixed size), hence the observer.
 
-  private readonly span = computed(() => {
-    const s = this.spec();
-    const stamps = [
-      ...(s.events ?? []).map((e) => Date.parse(e.at)),
-      ...(s.windows ?? []).flatMap((w) => [Date.parse(w.from), Date.parse(w.to)]),
-      ...(s.from ? [Date.parse(s.from)] : []),
-      ...(s.to ? [Date.parse(s.to)] : []),
-    ].filter((n) => Number.isFinite(n));
-    if (stamps.length === 0) return { from: 0, to: 1 };
-    const from = Math.min(...stamps);
-    const to = Math.max(...stamps);
-    // A single-instant timeline would divide by zero; give it an hour of air either side.
-    return to > from ? { from, to } : { from: from - 3.6e6, to: to + 3.6e6 };
-  });
+  private readonly widthPx = signal(640);
 
-  protected readonly events = computed(() => {
-    const { from, to } = this.span();
-    return (this.spec().events ?? []).map((e) => ({
-      ...e,
-      leftPct: pct(Date.parse(e.at), from, to),
-    }));
-  });
-
-  protected readonly windows = computed(() => {
-    const { from, to } = this.span();
-    return (this.spec().windows ?? []).map((w) => {
-      const l = pct(Date.parse(w.from), from, to);
-      const r = pct(Date.parse(w.to), from, to);
-      return { ...w, leftPct: l, widthPct: Math.max(0.5, r - l) };
+  constructor() {
+    const host = inject<ElementRef<HTMLElement>>(ElementRef);
+    const destroyRef = inject(DestroyRef);
+    afterNextRender(() => {
+      if (typeof ResizeObserver === 'undefined') return;
+      const ro = new ResizeObserver((entries) => {
+        const w = Math.round(entries[0]?.contentRect.width ?? 0);
+        if (w > 0 && w !== this.widthPx()) this.widthPx.set(w);
+      });
+      ro.observe(host.nativeElement);
+      destroyRef.onDestroy(() => ro.disconnect());
     });
+  }
+
+  protected readonly timeline = computed(() => {
+    const s = this.spec();
+    return s.type === 'timeline' ? layoutTimeline(s, this.widthPx()) : null;
   });
 
-  protected readonly rangeFrom = computed(() => stamp(this.span().from));
-  protected readonly rangeTo = computed(() => stamp(this.span().to));
+  /** Top row holds the window labels; one lane per marker row; the rest is stem. */
+  protected laneTop(lane: number): number {
+    return TIMELINE_LABEL_ROW_PX + lane * MARKER_GAP_PX;
+  }
+
+  protected readonly trackHeight = computed(
+    () => this.laneTop(Math.max(1, this.timeline()?.lanes ?? 1)) + 14,
+  );
 
   // ── Table view ─────────────────────────────────────────────────────────────
 
@@ -404,33 +557,15 @@ export class AnalysisVisualComponent {
           head: ['step', 'value', 'note'],
           rows: (s.steps ?? []).map((st) => [st.label, cell(st.value), st.note ?? '']),
         };
-      case 'timeline':
-        return {
-          head: ['when', 'what', 'impact'],
-          rows: [
-            ...(s.windows ?? []).map((w) => [
-              `${stamp(Date.parse(w.from))} → ${stamp(Date.parse(w.to))}`,
-              w.label,
-              w.kind ?? '',
-            ]),
-            ...(s.events ?? []).map((e) => [stamp(Date.parse(e.at)), e.label, e.impact ?? '']),
-          ],
-        };
       default:
-        // A tree's content is its labels, which are already fully on screen.
+        // A tree's content is its labels, which are already fully on screen — and so is a
+        // timeline's: its agenda and window legend ARE the table.
         return null;
     }
   });
 }
 
-const pct = (at: number, from: number, to: number): number =>
-  Number.isFinite(at) ? Math.max(0, Math.min(100, ((at - from) / (to - from)) * 100)) : 0;
-
-const stamp = (ms: number): string => {
-  if (!Number.isFinite(ms)) return '';
-  const d = new Date(ms);
-  return `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}Z`;
-};
+const TIMELINE_LABEL_ROW_PX = 22;
 
 const cell = (v: number | null | undefined): string =>
   v === null || v === undefined ? '—' : String(v);

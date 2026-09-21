@@ -222,6 +222,14 @@ describe('thinking block presentation', () => {
     expect(latestThinkingIndex(items)).toBe(2);
     expect(latestThinkingIndex(groupTurns([turn({ role: 'User' })], true))).toBe(-1);
   });
+
+  it('does not treat a previous turn’s thinking as live once the operator asks again', () => {
+    const items = groupTurns(
+      [thinking('a'), finalThought('answer'), turn({ role: 'User', content: 'next?' })],
+      true,
+    );
+    expect(latestThinkingIndex(items)).toBe(-1);
+  });
 });
 
 /**
