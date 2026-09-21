@@ -683,6 +683,10 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
         background: rgba(6, 148, 162, 0.15);
         color: #0694a2;
       }
+      .conv-kind[data-kind='Review'] {
+        background: rgba(79, 70, 229, 0.15);
+        color: #4f46e5;
+      }
       .conv-match {
         display: inline-block;
         margin: 2px 0 3px;
@@ -945,6 +949,7 @@ export class ConversationsPageComponent {
     { value: 'Wire', label: 'Wire' },
     { value: 'Assistant', label: 'Assistant' },
     { value: 'Patient', label: 'Patient' },
+    { value: 'Review', label: 'Plan review' },
   ];
 
   protected readonly selectedId = signal<number | null>(null);
@@ -1075,6 +1080,8 @@ export class ConversationsPageComponent {
         return 'Macro brief';
       case 'Patient':
         return 'Patient Trader';
+      case 'Review':
+        return 'Plan review';
       default:
         return 'Untitled';
     }
