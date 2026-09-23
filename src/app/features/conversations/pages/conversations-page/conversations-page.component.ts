@@ -35,6 +35,7 @@ import type {
   AnalysisConversationDetailDto,
   AnalysisFiledSignalDto,
   AnalysisParkedRecDto,
+  ConversationChainNodeDto,
   MarketAnalysisRecommendationDto,
   ResponseData,
 } from '@core/api/api.types';
@@ -288,6 +289,41 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
                   #{{ id }} <span class="conv-id-copy">{{ copiedId() === id ? '✓' : '⧉' }}</span>
                 </button>
               </header>
+
+              <!-- Provenance chain. A monitor-driven review used to render as an island: it
+                   names its origin in prose ("View #903 was written at 12:23Z") while nothing
+                   let the reader get there. Steps that ARE conversations are clickable; a
+                   monitor or a fire is a record, shown but inert. -->
+              @if (d.chain?.length) {
+                <nav class="conv-chain" aria-label="Conversation history">
+                  <ol>
+                    @for (n of d.chain; track $index) {
+                      <li
+                        class="chain-node"
+                        [attr.data-kind]="n.kind"
+                        [class.is-current]="n.isCurrent"
+                        [class.is-link]="!n.isCurrent && !!n.llmInvocationId"
+                      >
+                        <button
+                          type="button"
+                          (click)="openChainNode(n)"
+                          [disabled]="n.isCurrent || !n.llmInvocationId"
+                          [title]="n.detail ?? n.label"
+                        >
+                          <span class="chain-kind">{{ n.kind }}</span>
+                          <span class="chain-label">{{ n.label }}</span>
+                          @if (n.atUtc) {
+                            <span class="chain-at">{{ n.atUtc | date: 'MMM d, HH:mm' }}</span>
+                          }
+                        </button>
+                        @if (n.detail) {
+                          <p class="chain-detail">{{ n.detail }}</p>
+                        }
+                      </li>
+                    }
+                  </ol>
+                </nav>
+              }
             } @else if (detailLoading()) {
               <header class="conv-header"><span class="spinner"></span> Loading…</header>
             }
@@ -750,6 +786,124 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
         color: var(--text-tertiary);
         font-size: var(--text-xs);
         font-weight: var(--font-normal);
+      }
+
+      /* ── Provenance chain ──────────────────────────────────────────────
+         Reads top-down as history: what was thought, what was armed, what
+         tripped it, what was then decided. The current step is anchored by
+         a filled marker so the reader's place is obvious at a glance. */
+      .conv-chain {
+        flex: none;
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+        background: var(--surface-2, transparent);
+      }
+      .conv-chain ol {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+      }
+      .chain-node {
+        position: relative;
+        padding-left: var(--space-4);
+      }
+      /* The spine, drawn per-node so it stops cleanly at the last step. */
+      .chain-node::before {
+        content: '';
+        position: absolute;
+        left: 4px;
+        top: 1.15em;
+        bottom: calc(-1 * var(--space-1));
+        width: 1px;
+        background: var(--border);
+      }
+      .chain-node:last-child::before {
+        display: none;
+      }
+      .chain-node::after {
+        content: '';
+        position: absolute;
+        left: 1px;
+        top: 0.5em;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        border: 1px solid var(--border-strong, var(--border));
+        background: var(--surface-1, var(--surface-2, transparent));
+      }
+      .chain-node.is-current::after {
+        background: var(--accent, currentColor);
+        border-color: var(--accent, currentColor);
+      }
+      .chain-node > button {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-2);
+        width: 100%;
+        padding: 0;
+        border: 0;
+        background: none;
+        text-align: left;
+        color: inherit;
+        font: inherit;
+        font-size: var(--text-xs);
+      }
+      .chain-node.is-link > button {
+        cursor: pointer;
+      }
+      .chain-node.is-link > button:hover .chain-label,
+      .chain-node.is-link > button:focus-visible .chain-label {
+        text-decoration: underline;
+      }
+      .chain-node > button:disabled {
+        cursor: default;
+      }
+      .chain-kind {
+        flex: none;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-size: 10px;
+        color: var(--text-tertiary);
+        min-width: 4.5rem;
+      }
+      .chain-label {
+        color: var(--text-secondary, inherit);
+      }
+      .chain-node.is-current .chain-label {
+        color: var(--text-primary, inherit);
+        font-weight: var(--font-medium, 500);
+      }
+      .chain-at {
+        margin-left: auto;
+        flex: none;
+        color: var(--text-tertiary);
+        font-size: 10px;
+      }
+      .chain-detail {
+        margin: 2px 0 0;
+        padding-left: 4.5rem;
+        color: var(--text-tertiary);
+        font-size: 11px;
+        line-height: 1.45;
+        /* The intent is the useful part; two lines is enough to recognise it. */
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      @media (max-width: 720px) {
+        .chain-node > button {
+          flex-wrap: wrap;
+        }
+        .chain-at {
+          margin-left: 0;
+        }
+        .chain-detail {
+          padding-left: 0;
+        }
       }
       .conv-id {
         margin-left: auto;
@@ -1627,8 +1781,18 @@ export class ConversationsPageComponent {
     });
   }
 
+  /**
+   * Open the conversation a chain node points at. Nodes that are records rather than
+   * conversations — a monitor, a fire — carry no invocation id and are inert.
+   */
+  protected openChainNode(n: ConversationChainNodeDto): void {
+    if (n.isCurrent || !n.llmInvocationId) return;
+    this.detail.set(null);
+    this.openConversation(n.llmInvocationId);
+  }
+
   /** Select + load a conversation by its anchor invocation id. */
-  private openConversation(llmInvocationId: number): void {
+  protected openConversation(llmInvocationId: number): void {
     this.selectedId.set(llmInvocationId);
     this.detailLoading.set(true);
     this.marketData.getAnalysisConversation(llmInvocationId).subscribe({

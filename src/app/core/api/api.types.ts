@@ -3910,6 +3910,28 @@ export interface AnalysisConversationDetailDto {
   fillMarker?: AnalysisChartMarkerDto | null;
   /** Where the signal exited (TP/SL/expiry), for a journal chart. Null otherwise. */
   exitMarker?: AnalysisChartMarkerDto | null;
+  /** Provenance chain, oldest first, with exactly one node flagged `isCurrent`. Empty when the
+   *  conversation has no ancestry or descendants, which is most spot analyses. A monitor-driven
+   *  review used to render as an island: it would name its origin in prose ("View #903 was
+   *  written at 12:23Z") while nothing let the reader get there. */
+  chain?: ConversationChainNodeDto[];
+}
+
+/** One step in a conversation's provenance chain. */
+export interface ConversationChainNodeDto {
+  /** "view" | "analysis" | "plan" | "monitor" | "fire" | "review" | "signal". */
+  kind: string;
+  /** The conversation to open when clicked, when this node IS one. Null for a node that is a
+   *  record rather than a conversation (a monitor, a fire) — shown as a non-navigable step. */
+  llmInvocationId?: number | null;
+  /** Id of the underlying record — the view, plan, monitor or signal. */
+  refId?: number | null;
+  label: string;
+  /** The step's own words where it has them — the intent, the verdict. */
+  detail?: string | null;
+  atUtc?: string | null;
+  /** True on the single node the reader is currently looking at. */
+  isCurrent: boolean;
 }
 
 /** A single point annotation on a conversation's chart (fill / exit marker). */
