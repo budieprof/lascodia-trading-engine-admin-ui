@@ -113,14 +113,12 @@ describe('ExecutionPolicyCardComponent', () => {
     switchBtn().click();
     fixture.detectChanges();
     dialog()!.querySelector<HTMLButtonElement>('.btn.confirm')!.click();
-    http
-      .expectOne(POLICY_URL)
-      .flush({
-        data: false,
-        status: false,
-        message: "Policy must be 'Standard' or 'Direct'",
-        responseCode: '-11',
-      });
+    http.expectOne(POLICY_URL).flush({
+      data: false,
+      status: false,
+      message: "Policy must be 'Standard' or 'Direct'",
+      responseCode: '-11',
+    });
     fixture.detectChanges();
     expect(current()).toBe('Direct');
     expect(el.querySelector('[role="alert"]')!.textContent).toContain('Policy must be');

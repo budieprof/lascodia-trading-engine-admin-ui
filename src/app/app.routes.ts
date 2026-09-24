@@ -248,6 +248,15 @@ export const routes: Routes = [
           import('@features/walk-forward/walk-forward.routes').then((m) => m.WALK_FORWARD_ROUTES),
       },
       {
+        // Pine screener (ADR-0027 §6): runs a script over many symbols' recent bars.
+        path: 'pine-screener',
+        data: { breadcrumb: 'Pine Screener' },
+        loadComponent: () =>
+          import('@features/scripting/screener/pine-screener-page.component').then(
+            (m) => m.PineScreenerPageComponent,
+          ),
+      },
+      {
         path: 'strategy-ensemble',
         data: { breadcrumb: 'Strategy Ensemble' },
         loadChildren: () =>

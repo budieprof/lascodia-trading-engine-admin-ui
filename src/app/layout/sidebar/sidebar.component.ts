@@ -525,6 +525,7 @@ export class SidebarComponent {
         { label: 'Portfolio', route: '/strategy-portfolio', icon: '🥧' },
         { label: 'Compare', route: '/strategies/compare', icon: '🆚' },
         { label: 'Generation', route: '/strategy-generation', icon: '🧬' },
+        { label: 'Pine Screener', route: '/pine-screener', icon: '🔍', policy: 'Analyst' },
       ],
     },
     {

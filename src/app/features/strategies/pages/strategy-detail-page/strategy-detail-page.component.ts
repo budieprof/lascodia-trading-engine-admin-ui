@@ -57,6 +57,8 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
 // ADR-0027 script strategies: execution (bindings + policy), live session, alerts, backtests.
 import { StrategyExecutionPanelComponent } from '@features/scripting/execution/strategy-execution-panel.component';
 import { ScriptLivePanelComponent } from '@features/scripting/live/script-live-panel.component';
+import { ScriptAlertsTabComponent } from '@features/scripting/alerts/script-alerts-tab.component';
+import { ScriptBacktestLauncherComponent } from '@features/scripting/backtest/script-backtest-launcher.component';
 import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
 
 @Component({
@@ -82,6 +84,8 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
     RationaleInlineComponent,
     StrategyExecutionPanelComponent,
     ScriptLivePanelComponent,
+    ScriptAlertsTabComponent,
+    ScriptBacktestLauncherComponent,
     RouterLink,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -446,6 +450,11 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
                navigates to the backtest detail page (same view the global
                Backtests page links to). -->
           @if (activeTab() === 'backtests') {
+            @if (isScript()) {
+              <!-- Script strategies: symbol / timeframe / input overrides, deep mode and
+                   the bar magnifier (ADR-0027 §4). -->
+              <app-script-backtest-launcher [strategy]="strategy()!" />
+            }
             <app-data-table
               [columnDefs]="backtestColumns"
               [fetchData]="fetchBacktests"
@@ -551,6 +560,11 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
                from the bound accounts and the live Strategy report. -->
           @if (activeTab() === 'live' && isScript()) {
             <app-script-live-panel [strategyId]="strategyId" />
+          }
+
+          <!-- Alerts Tab (script strategies) — alertcondition / alert() / order-fill bindings. -->
+          @if (activeTab() === 'alerts' && isScript()) {
+            <app-script-alerts-tab [strategy]="strategy()!" />
           }
         </ui-tabs>
       } @else if (loadError()) {
@@ -1416,6 +1430,7 @@ export class StrategyDetailPageComponent implements OnInit {
     { label: 'Orders', value: 'orders' },
     { label: 'Execution', value: 'execution' },
     { label: 'Live', value: 'live' },
+    { label: 'Alerts', value: 'alerts' },
     { label: 'Optimization', value: 'optimization' },
     { label: 'Backtests', value: 'backtests' },
     { label: 'Walk-Forward', value: 'walkforward' },

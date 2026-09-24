@@ -40,7 +40,7 @@ describe('StrategyDetailPageComponent (script-strategy tabs)', () => {
   it('adds the script-only tabs for a script strategy', () => {
     cmp.strategy.set({ id: 41, strategyType: 'RuleBased', authoringMode: 'Script' } as any);
     expect(cmp.isScript()).toBe(true);
-    expect(tabs()).toEqual(expect.arrayContaining(['execution', 'live']));
+    expect(tabs()).toEqual(expect.arrayContaining(['execution', 'live', 'alerts']));
   });
 
   it('hides them for a DSL strategy', () => {
