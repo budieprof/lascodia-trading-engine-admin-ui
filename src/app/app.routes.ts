@@ -504,6 +504,15 @@ export const routes: Routes = [
         loadChildren: () =>
           import('@features/account/account.routes').then((m) => m.ACCOUNT_ROUTES),
       },
+      {
+        // Pine chart renderer on fixtures or a live scripting/run (dev surface of the Pine program).
+        path: 'pine-chart-lab',
+        data: { breadcrumb: 'Pine Chart Lab' },
+        loadChildren: () =>
+          import('@features/scripting/pine-chart-lab/pine-chart-lab.routes').then(
+            (m) => m.PINE_CHART_LAB_ROUTES,
+          ),
+      },
       { path: '**', redirectTo: 'dashboard' },
     ],
   },
