@@ -114,6 +114,71 @@ export interface SpotSweepConfig {
   hunterSkipWhileArmed: boolean;
   /** Ceiling (hours) on monitor expiry the LLM may request; clamped to [1, this]. */
   hunterMaxExpiryHours: number;
+  /**
+   * With skip-while-armed on, how old (minutes) a scheduled watch may get before the sweep takes a
+   * fresh look anyway; the fresh plan supersedes it. 0 = never. A re-check successor and a watch
+   * mid-confirmation are never refreshed away. Hourly re-analysis left no watch alive long enough
+   * to wait; never re-analysing let one unreachable plan blind a pair for its whole expiry.
+   */
+  hunterRefreshAfterMinutes: number;
+}
+
+// ── Waiting scoreboard ────────────────────────────────────────────────────
+
+/** Graded watch plans that ended the same way. */
+export interface WaitingFateRow {
+  /** FiredTaken | FiredDeclined | Superseded | Expired | Invalidated | Cancelled | All. */
+  fate: string;
+  plans: number;
+  filled: number;
+  hitTp: number;
+  hitSl: number;
+  open: number;
+  notFilled: number;
+  /** Sum of R over plans that filled (open walks marked to the window's end). */
+  netR: number;
+  /** netR per filled plan — the expectancy of having taken these. Null when none filled. */
+  avgR: number | null;
+}
+
+/** How far price went after the engine stood aside. */
+export interface StandAsideSummary {
+  count: number;
+  medianUpPips: number | null;
+  medianDownPips: number | null;
+  medianUpAtr: number | null;
+  medianDownAtr: number | null;
+  /** Stand-asides after which price travelled ≥ 2×ATR one way — the big misses, if any. */
+  movesOver2Atr: number;
+}
+
+export interface ForwardWalkRow {
+  kind: 'WatchPlan' | 'StandAside' | string;
+  monitorId: number | null;
+  llmInvocationId: number | null;
+  symbol: string;
+  origin: string | null;
+  fate: string | null;
+  direction: string | null;
+  fromUtc: string;
+  outcome: string | null;
+  rMultiple: number | null;
+  mfePips: number | null;
+  maePips: number | null;
+  upMovePips: number | null;
+  downMovePips: number | null;
+  atrPips: number | null;
+}
+
+/** What waiting cost or saved — every declined plan and stand-aside, graded against the candles. */
+export interface WaitingScoreboard {
+  symbol: string | null;
+  days: number;
+  sinceUtc: string;
+  plans: WaitingFateRow[];
+  planTotals: WaitingFateRow;
+  standAsides: StandAsideSummary;
+  recent: ForwardWalkRow[];
 }
 
 /** Day-of-week names the engine parses (invariant English DayOfWeek names). */
@@ -303,4 +368,5 @@ export const DEFAULT_SWEEP_CONFIG: SpotSweepConfig = {
   hunterMaxRearmDepth: 1,
   hunterSkipWhileArmed: true,
   hunterMaxExpiryHours: 72,
+  hunterRefreshAfterMinutes: 240,
 };

@@ -1163,6 +1163,12 @@ const STATUS_FILTERS = [
         background: rgba(234, 179, 8, 0.18);
         color: var(--warning);
       }
+      /* Price reached a close-confirmed watch; its re-check waits for that bar to close. Neither
+         a fire nor a near-miss, so it gets its own neutral-accent treatment. */
+      .tl-kind[data-kind='Touched'] {
+        background: rgba(59, 130, 246, 0.16);
+        color: var(--accent, #3b82f6);
+      }
       .tl-kind[data-kind='Invalidated'],
       .tl-kind[data-kind='EvalError'] {
         background: rgba(239, 68, 68, 0.18);

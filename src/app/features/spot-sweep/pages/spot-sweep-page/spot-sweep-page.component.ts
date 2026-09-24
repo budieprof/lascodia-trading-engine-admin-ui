@@ -574,6 +574,28 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
                       />
                       <span>Skip scheduled sweeps while a watch is armed for the pair</span>
                     </label>
+                    @if (cfg.hunterSkipWhileArmed) {
+                      <div class="field">
+                        <label>Refresh a watch after (minutes)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="10080"
+                          step="30"
+                          [value]="cfg.hunterRefreshAfterMinutes"
+                          (change)="
+                            patch({
+                              hunterRefreshAfterMinutes: refreshMinutes($any($event.target).value),
+                            })
+                          "
+                        />
+                        <p class="muted small">
+                          How old a scheduled watch may get before the sweep takes a fresh look and
+                          supersedes it. 0 = never. A re-check's successor and a watch
+                          mid-confirmation are never refreshed away.
+                        </p>
+                      </div>
+                    }
                   </div>
                 }
                 <span class="muted small">
@@ -780,6 +802,112 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
                   </ul>
                 } @else {
                   <p class="muted small">No hunter watches armed.</p>
+                }
+              }
+
+              <!-- What waiting cost or saved. Every declined plan is walked forward against the
+                   candles once its window closes, so "did we miss the trend?" is read here rather
+                   than reconstructed from plan prose by hand. -->
+              @if (cfg.hunterEnabled || (scoreboard()?.planTotals?.plans ?? 0) > 0) {
+                <header class="card-head">
+                  <h2>Waiting scoreboard</h2>
+                  <span class="muted small">
+                    last {{ scoreboard()?.days ?? 7 }} days
+                    @if (scoreboard()?.symbol) {
+                      · {{ scoreboard()?.symbol }}
+                    }
+                    · graded once each window closes
+                  </span>
+                </header>
+                @if (scoreboard(); as sb) {
+                  @if (sb.planTotals.plans > 0) {
+                    <table class="score-table">
+                      <thead>
+                        <tr>
+                          <th>Watch ended</th>
+                          <th class="num">Plans</th>
+                          <th class="num">Filled</th>
+                          <th class="num">TP</th>
+                          <th class="num">SL</th>
+                          <th class="num">Open</th>
+                          <th class="num">Net R</th>
+                          <th class="num">R / fill</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (r of sb.plans; track r.fate) {
+                          <tr>
+                            <td>{{ fateLabel(r.fate) }}</td>
+                            <td class="num mono">{{ r.plans }}</td>
+                            <td class="num mono">{{ r.filled }}</td>
+                            <td class="num mono">{{ r.hitTp }}</td>
+                            <td class="num mono">{{ r.hitSl }}</td>
+                            <td class="num mono">{{ r.open }}</td>
+                            <td class="num mono" [class.pos]="r.netR > 0" [class.neg]="r.netR < 0">
+                              {{ r.netR > 0 ? '+' : '' }}{{ r.netR | number: '1.2-2' }}
+                            </td>
+                            <td class="num mono">
+                              {{ r.avgR === null ? '—' : (r.avgR | number: '1.2-2') }}
+                            </td>
+                          </tr>
+                        }
+                        <tr class="total">
+                          <td>All plans</td>
+                          <td class="num mono">{{ sb.planTotals.plans }}</td>
+                          <td class="num mono">{{ sb.planTotals.filled }}</td>
+                          <td class="num mono">{{ sb.planTotals.hitTp }}</td>
+                          <td class="num mono">{{ sb.planTotals.hitSl }}</td>
+                          <td class="num mono">{{ sb.planTotals.open }}</td>
+                          <td
+                            class="num mono"
+                            [class.pos]="sb.planTotals.netR > 0"
+                            [class.neg]="sb.planTotals.netR < 0"
+                          >
+                            {{ sb.planTotals.netR > 0 ? '+' : ''
+                            }}{{ sb.planTotals.netR | number: '1.2-2' }}
+                          </td>
+                          <td class="num mono">
+                            {{
+                              sb.planTotals.avgR === null
+                                ? '—'
+                                : (sb.planTotals.avgR | number: '1.2-2')
+                            }}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <p class="muted small">
+                      A plan that fired is walked from the fire at market; one that never fired is
+                      walked as a resting order at its entry, answering "had we left it alone". Open
+                      = filled, neither side hit by the window's end (marked to that close).
+                    </p>
+                  } @else {
+                    <p class="muted small">
+                      No watch plans graded yet. A plan is graded once its window closes — a day on
+                      H1 — and only plans armed with structured prices can be graded.
+                    </p>
+                  }
+                  @if (sb.standAsides.count > 0) {
+                    <p class="small stand-aside-line">
+                      Stood aside <strong>{{ sb.standAsides.count }}×</strong>. Over the next 6 bars
+                      price moved a median
+                      <span class="mono">{{ sb.standAsides.medianUpPips | number: '1.1-1' }}p</span>
+                      up and
+                      <span class="mono"
+                        >{{ sb.standAsides.medianDownPips | number: '1.1-1' }}p</span
+                      >
+                      down
+                      @if (sb.standAsides.medianUpAtr !== null) {
+                        ({{ sb.standAsides.medianUpAtr | number: '1.1-1' }} /
+                        {{ sb.standAsides.medianDownAtr | number: '1.1-1' }} ATR)
+                      }
+                      —
+                      <strong>{{ sb.standAsides.movesOver2Atr }}</strong>
+                      of them were followed by a move of 2×ATR or more.
+                    </p>
+                  }
+                } @else {
+                  <p class="muted small">Loading scoreboard…</p>
                 }
               }
 
@@ -1443,6 +1571,50 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
         flex-direction: column;
         gap: 2px;
       }
+
+      /* ── Waiting scoreboard ─────────────────────────────────────────── */
+      .score-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--text-xs);
+        margin: 0 0 var(--space-2);
+      }
+      .score-table th {
+        text-align: left;
+        font-weight: var(--font-medium, 500);
+        color: var(--text-tertiary);
+        padding: 4px 6px;
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+      }
+      .score-table td {
+        padding: 4px 6px;
+        border-bottom: 1px solid var(--border);
+      }
+      .score-table .num {
+        text-align: right;
+      }
+      .score-table .pos {
+        color: var(--profit);
+      }
+      .score-table .neg {
+        color: var(--loss);
+      }
+      .score-table tr.total td {
+        font-weight: var(--font-medium, 500);
+        border-bottom: none;
+      }
+      .stand-aside-line {
+        margin: var(--space-2) 0 var(--space-3);
+        line-height: 1.5;
+      }
+      /* Wide tables scroll inside the card rather than widening the page on a phone. */
+      @media (max-width: 720px) {
+        .score-table {
+          display: block;
+          overflow-x: auto;
+        }
+      }
       .watch-row {
         display: flex;
         align-items: center;
@@ -1660,6 +1832,43 @@ export class SpotSweepPageComponent implements OnDestroy {
   readonly history = this.historyResource.value;
 
   /**
+   * What waiting cost or saved. Graded server-side once each plan's window has closed (every 15
+   * minutes), so a slow poll is enough — a sweep push only means a new plan exists, not a grade.
+   * Scoped to the sweep's symbol when it runs exactly one, so an operator's stand-asides on other
+   * pairs do not dilute the sweep's own record.
+   */
+  private readonly scoreboardResource = createPolledResource(
+    () => this.svc.getScoreboard(this.scoreboardSymbol(), 7),
+    { intervalMs: 300_000 },
+  );
+  readonly scoreboard = this.scoreboardResource.value;
+
+  private scoreboardSymbol(): string | null {
+    const symbols = new Set((this.config()?.pairs ?? []).map((p) => p.symbol.toUpperCase()));
+    return symbols.size === 1 ? [...symbols][0] : null;
+  }
+
+  /** Plain words for a fate, in the order the table reads. */
+  fateLabel(fate: string): string {
+    switch (fate) {
+      case 'FiredTaken':
+        return 'Fired · traded';
+      case 'FiredDeclined':
+        return 'Fired · declined';
+      case 'Superseded':
+        return 'Superseded';
+      case 'Expired':
+        return 'Expired unfired';
+      case 'Invalidated':
+        return 'Invalidated';
+      case 'Cancelled':
+        return 'Cancelled';
+      default:
+        return fate;
+    }
+  }
+
+  /**
    * Wall-clock signal that ticks every second. Drives the cooldown countdown
    * — the status poll only fires every 5s, which would make the countdown
    * jump in 5-second chunks. A separate 1Hz tick keeps the display smooth.
@@ -1856,11 +2065,14 @@ export class SpotSweepPageComponent implements OnDestroy {
           hunterMaxRearmDepth: cfg.hunterMaxRearmDepth ?? 1,
           hunterSkipWhileArmed: cfg.hunterSkipWhileArmed ?? true,
           hunterMaxExpiryHours: cfg.hunterMaxExpiryHours ?? 72,
+          hunterRefreshAfterMinutes: cfg.hunterRefreshAfterMinutes ?? 240,
         });
         // Seed the timeframe selector from existing pairs (uniform timeframe).
         if (cfg.pairs.length > 0) this.sweepTimeframe.set(cfg.pairs[0].timeframe);
         this.dirty.set(false);
         this.loading.set(false);
+        // The scoreboard is scoped by the sweep's pairs, which are only known now.
+        this.scoreboardResource.refresh();
       },
       error: () => {
         this.error.set('Could not load sweep configuration.');
@@ -2159,6 +2371,17 @@ export class SpotSweepPageComponent implements OnDestroy {
     const n = Math.round(Number(v));
     if (Number.isNaN(n)) return min;
     return Math.min(max, Math.max(min, n));
+  }
+
+  /**
+   * The watch refresh age. 0 means never and is kept as 0; anything else is floored at 30 minutes,
+   * mirroring the engine — a shorter refresh re-analyses faster than the sweep ticks and reproduces
+   * the hourly churn the setting exists to stop.
+   */
+  refreshMinutes(v: string): number {
+    const n = Math.round(Number(v));
+    if (Number.isNaN(n) || n <= 0) return 0;
+    return Math.min(10080, Math.max(30, n));
   }
 
   /**

@@ -8,6 +8,7 @@ import {
   SpotSweepConfig,
   SpotSweepStatus,
   SweepHistoryItem,
+  WaitingScoreboard,
 } from '@features/spot-sweep/spot-sweep.types';
 
 /**
@@ -122,6 +123,19 @@ export class SpotSweepService {
     }
     return this.api.getEnvelope<SweepHistoryItem[]>(
       `/market-data/spot-sweep/history?limit=${limit}`,
+    );
+  }
+
+  /**
+   * What waiting cost or saved: every graded watch plan grouped by how it ended, and the move that
+   * followed each stand-aside. Graded once each window has elapsed, so the newest few hours are
+   * always still pending.
+   */
+  getScoreboard(symbol: string | null, days = 7): Observable<WaitingScoreboard> {
+    const params = new URLSearchParams({ days: String(days) });
+    if (symbol) params.set('symbol', symbol);
+    return this.api.getEnvelope<WaitingScoreboard>(
+      `/market-data/spot-sweep/scoreboard?${params.toString()}`,
     );
   }
 
