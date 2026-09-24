@@ -71,6 +71,17 @@ export function compileResultOf(data: unknown): ScriptCompileResult | null {
   return null;
 }
 
+/**
+ * The run a refused `scripting/run` envelope still describes: its compile response — alone as
+ * `data`, or inside a partial run result, which is kept whole. Null when `data` holds neither.
+ */
+function refusedRun(data: unknown): ScriptRunResult | null {
+  const compiled = compileResultOf(data);
+  if (!compiled) return null;
+  const partial = (data as Record<string, unknown>)['compile'] ? (data as object) : {};
+  return { ...partial, compile: normaliseCompile(compiled) } as ScriptRunResult;
+}
+
 function envelopeData<T>(res: ResponseData<T> | null | undefined, fallback: string): T {
   if (res && res.status && res.data !== null && res.data !== undefined) return res.data;
   throw new ScriptingApiError(
@@ -180,23 +191,28 @@ export class ScriptingService {
 
   // ── §3 Run / preview ────────────────────────────────────────────────────
 
-  /** `POST scripting/run` — runs a script over history (preview, or a strategy's backtest report). */
+  /**
+   * `POST scripting/run` — runs a script over history (preview, or a strategy's backtest report).
+   * The console's one HTTP path for §3: the Pine chart's `ScriptingRunService` reshapes this
+   * result instead of calling the endpoint itself.
+   */
   run(req: ScriptRunRequest): Observable<ScriptRunResult> {
     return this.api.post<ResponseData<ScriptRunResult>>('/scripting/run', req, SILENT).pipe(
       map((res) => {
         if (res && !res.status) {
           // A script that does not compile comes back refused with the compile response.
-          const compiled = compileResultOf(res.data);
-          if (compiled) return { compile: normaliseCompile(compiled) } as ScriptRunResult;
+          const refused = refusedRun(res.data);
+          if (refused) return refused;
         }
         const run = envelopeData(res, 'The engine could not run the script.');
         return { ...run, compile: normaliseCompile(run.compile) };
       }),
       catchError((err) => {
         const e = toScriptingError(err, 'The engine could not run the script.');
-        return e.compile
-          ? of({ compile: normaliseCompile(e.compile) } as ScriptRunResult)
-          : throwError(() => e);
+        if (!e.compile) return throwError(() => e);
+        const body = err instanceof HttpErrorResponse ? err.error : null;
+        const refused = refusedRun(body && typeof body === 'object' ? body.data : null);
+        return of(refused ?? ({ compile: normaliseCompile(e.compile) } as ScriptRunResult));
       }),
     );
   }

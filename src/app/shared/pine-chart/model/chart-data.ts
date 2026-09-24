@@ -12,7 +12,7 @@ export type PineChartData = PineChartInput;
 
 /**
  * Input transform for the chart: accepts a `PineChartData`, a §3 run result (`{ compile, bars,
- * outputs, report }` — also UI-IDE's `ScriptRunResult`), or a whole `ResponseData` envelope, and
+ * outputs, report }` — also `ScriptingService.run()`'s `ScriptRunResult`), or a whole `ResponseData` envelope, and
  * returns normalised chart data (null when there is nothing to draw).
  */
 export function toPineChartData(raw: unknown): PineChartData | null {

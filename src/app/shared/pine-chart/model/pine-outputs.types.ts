@@ -438,7 +438,7 @@ export interface PineScriptOutputs {
   droppedLogs: number;
 }
 
-// ── §3 run: strategy report (only what the chart draws; the report stream owns the rest) ───────────
+// ── §3 run: strategy report (only what the chart draws; `app-strategy-report` reads the rest) ─────
 
 /** One row of the Strategy Tester's "List of trades" (`StrategyReport.trades`). */
 export interface PineReportTrade {

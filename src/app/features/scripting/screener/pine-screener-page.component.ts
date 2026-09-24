@@ -20,8 +20,9 @@ import {
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { StrategiesService } from '@core/services/strategies.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
+import { ScriptingService } from '@core/services/scripting.service';
 
-import { ScriptStrategyApiService } from '../api/script-strategy-api.service';
+import { ScriptStrategyService } from '../api/script-strategy.service';
 import type {
   ScreenerRequest,
   ScreenerRow,
@@ -496,7 +497,8 @@ interface StrategyOption {
   ],
 })
 export class PineScreenerPageComponent implements OnInit {
-  private readonly api = inject(ScriptStrategyApiService);
+  private readonly api = inject(ScriptStrategyService);
+  private readonly scripting = inject(ScriptingService);
   private readonly strategiesApi = inject(StrategiesService);
   private readonly pairsApi = inject(CurrencyPairsService);
 
@@ -682,26 +684,23 @@ export class PineScreenerPageComponent implements OnInit {
     if (!source.trim()) return;
     this.compiling.set(true);
     this.compileNote.set(null);
-    this.api.compile({ source, timeframe: this.timeframe() }).subscribe({
-      next: (res) => {
+    // A script with errors still resolves (with its diagnostics); only a refusal without a
+    // compile result, or an unreachable engine, rejects.
+    this.scripting.compile({ source, timeframe: this.timeframe() }).subscribe({
+      next: (result) => {
         this.compiling.set(false);
-        if (isOk(res) && res.data) {
-          this.inputDefs.set(res.data.inputs ?? []);
-          const firstError = (res.data.diagnostics ?? []).find((d) => d.severity === 'error');
-          if (firstError) {
-            this.compileNote.set(`Line ${firstError.line}: ${firstError.message}`);
-          }
-          return;
+        this.inputDefs.set(result.inputs ?? []);
+        const firstError = (result.diagnostics ?? []).find((d) => d.severity === 'error');
+        if (firstError) {
+          this.compileNote.set(`Line ${firstError.line}: ${firstError.message}`);
         }
-        this.inputDefs.set(null);
-        this.compileNote.set(
-          `The script did not compile (${describeFailure(res, 'no reason given')}); enter overrides by input id.`,
-        );
       },
       error: (err: unknown) => {
         this.compiling.set(false);
         this.inputDefs.set(null);
-        this.compileNote.set(describeFailure(err, 'The script could not be compiled just now.'));
+        this.compileNote.set(
+          `The script could not be compiled (${describeFailure(err, 'the engine did not answer')}); enter overrides by input id.`,
+        );
       },
     });
   }
@@ -840,10 +839,10 @@ export class PineScreenerPageComponent implements OnInit {
   }
 
   private loadLibraries(): void {
-    this.api
+    this.scripting
       .listLibraries()
-      .pipe(catchError(() => of(null)))
-      .subscribe((res) => this.libraries.set(res && isOk(res) ? (res.data ?? []) : []));
+      .pipe(catchError(() => of([])))
+      .subscribe((list) => this.libraries.set(list));
   }
 
   private loadSymbols(): void {

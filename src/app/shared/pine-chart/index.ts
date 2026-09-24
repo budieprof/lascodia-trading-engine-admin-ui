@@ -15,7 +15,7 @@ export { PineTracePaneComponent } from './panes/pine-trace-pane.component';
 export { PineProfilerPaneComponent } from './panes/pine-profiler-pane.component';
 export { PineReplayComponent } from './replay/pine-replay.component';
 export { ReplaySession, type ReplayApi, type ReplayStatus } from './replay/replay-session';
-export { ScriptingRunApiService } from './api/scripting-run-api.service';
+export { ScriptingRunService } from './api/scripting-run.service';
 export { toPineChartData, type PineChartData } from './model/chart-data';
 export { normalizeRunResult, normalizeOutputs } from './model/normalize';
 export { mergeOutputs } from './model/merge-outputs';

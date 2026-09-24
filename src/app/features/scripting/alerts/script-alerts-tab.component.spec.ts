@@ -6,7 +6,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 
 import { ScriptAlertsTabComponent } from './script-alerts-tab.component';
-import { declareSignalIo } from '../testing/jit-signal-io';
+import { declareSignalIo } from '@shared/testing/jit-signal-io';
 import { BREAKOUT_SOURCE, RSI_INDICATOR_SOURCE } from '../testing/pine-sources';
 
 declareSignalIo(ScriptAlertsTabComponent, { inputs: ['strategy'] });

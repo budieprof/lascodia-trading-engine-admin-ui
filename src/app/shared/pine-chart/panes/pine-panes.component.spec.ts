@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Type } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import type { PineLogOutput, PineTraceBar } from '../model/pine-outputs.types';
-import { declareSignalIo } from '../testing/signal-io';
+import { declareSignalIo } from '@shared/testing/jit-signal-io';
 import { PineLogsPaneComponent, type PineLineJump } from './pine-logs-pane.component';
 import { PineProfilerPaneComponent } from './pine-profiler-pane.component';
 import { PineTracePaneComponent } from './pine-trace-pane.component';

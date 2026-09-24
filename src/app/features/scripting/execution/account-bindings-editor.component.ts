@@ -15,7 +15,7 @@ import type { TradingAccountDto } from '@core/api/api.types';
 import { TradingAccountsService } from '@core/services/trading-accounts.service';
 import { NotificationService } from '@core/notifications/notification.service';
 
-import { StrategyExecutionApiService } from '../api/strategy-execution-api.service';
+import { StrategyExecutionService } from '../api/strategy-execution.service';
 import { MAX_LOT_MULTIPLIER } from '../api/scripting-api.types';
 import { describeFailure, isOk } from '../shared/api-error';
 import {
@@ -610,7 +610,7 @@ interface AccountOption {
   ],
 })
 export class AccountBindingsEditorComponent {
-  private readonly api = inject(StrategyExecutionApiService);
+  private readonly api = inject(StrategyExecutionService);
   private readonly accountsApi = inject(TradingAccountsService);
   private readonly notifications = inject(NotificationService);
 

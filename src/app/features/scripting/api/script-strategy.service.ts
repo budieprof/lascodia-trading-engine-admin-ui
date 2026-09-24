@@ -11,9 +11,6 @@ import type {
   ScreenerRow,
   ScriptAlertBinding,
   ScriptBacktestRequest,
-  ScriptCompileRequest,
-  ScriptCompileResult,
-  ScriptLibrarySummary,
   ScriptLiveStatus,
 } from './scripting-api.types';
 import { describeFailure } from '../shared/api-error';
@@ -27,31 +24,22 @@ export interface DownloadedFile {
 }
 
 /**
- * Script-strategy endpoints (ADR-0027 scripting API): compile, screener, libraries, live status,
- * alert bindings, script backtests and the backtest report export.
+ * Script-strategy endpoints (ADR-0027 scripting API): screener, live status, alert bindings,
+ * script backtests and the backtest report export. Compile, run and the libraries go through
+ * `ScriptingService` (`@core/services/scripting.service`), the one client for those endpoints.
  *
  * Every call is `silent` — the pages render their own inline error for a refusal, so the global
  * interceptor does not stack a toast on top of it.
  */
 @Injectable({ providedIn: 'root' })
-export class ScriptStrategyApiService {
+export class ScriptStrategyService {
   private readonly api = inject(ApiService);
   private readonly http = inject(HttpClient);
   private readonly baseUrl = `${inject(RUNTIME_CONFIG).apiBaseUrl}/api/v1/lascodia-trading-engine`;
 
-  /** §2 — all diagnostics, the declaration and the inputs schema of a source. */
-  compile(req: ScriptCompileRequest): Observable<ResponseData<ScriptCompileResult>> {
-    return this.api.post('/scripting/compile', req, { silent: true });
-  }
-
   /** §6 — one row per symbol with the script's screener plots and fired alerts. */
   runScreener(req: ScreenerRequest): Observable<ResponseData<ScreenerRow[]>> {
     return this.api.post('/scripting/screener', req, { silent: true });
-  }
-
-  /** §7 — libraries visible to the operator (incl. the built-in `lascodia/std`). */
-  listLibraries(): Observable<ResponseData<ScriptLibrarySummary[]>> {
-    return this.api.get('/scripting/libraries', { silent: true });
   }
 
   /** §8 — the live session: status, emulator position/trades/orders, live report, divergences. */

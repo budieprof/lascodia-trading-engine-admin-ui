@@ -5,8 +5,9 @@ import { firstValueFrom, of, throwError } from 'rxjs';
 import { ApiService } from '@core/api/api.service';
 import { ApiError } from '@core/api/api.types';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
+import { ScriptingApiError, ScriptingService } from '@core/services/scripting.service';
 import { ReplaySession } from '../replay/replay-session';
-import { ScriptingRunApiService } from './scripting-run-api.service';
+import { ScriptingRunService } from './scripting-run.service';
 
 const BASE = 'http://engine/api/v1/lascodia-trading-engine';
 
@@ -34,15 +35,16 @@ function setup(
       { provide: HttpClient, useValue: http },
       { provide: RUNTIME_CONFIG, useValue: { apiBaseUrl: 'http://engine' } },
       { provide: ApiService, useClass: ApiService },
-      { provide: ScriptingRunApiService, useClass: ScriptingRunApiService },
+      { provide: ScriptingService, useClass: ScriptingService },
+      { provide: ScriptingRunService, useClass: ScriptingRunService },
     ],
   });
-  return { http, api: injector.get(ScriptingRunApiService) };
+  return { http, api: injector.get(ScriptingRunService) };
 }
 
 const ok = (data: unknown) => ({ status: true, data, message: null, responseCode: '00' });
 
-describe('ScriptingRunApiService', () => {
+describe('ScriptingRunService', () => {
   it('posts the §3 request to scripting/run and normalises the result', async () => {
     const { http, api } = setup({
       post: () =>
@@ -107,21 +109,41 @@ describe('ScriptingRunApiService', () => {
     expect(res.bars).toEqual([]);
   });
 
-  it('throws an ApiError for other engine failures and passes HTTP errors through', async () => {
+  it('keeps a partial run that a refused envelope carries with its compile result', async () => {
+    const { api } = setup({
+      post: () => ({
+        status: false,
+        responseCode: '-11',
+        message: 'Runtime error',
+        data: {
+          compile: { success: true, diagnostics: [], declaration: null },
+          bars: [{ t: 1, o: 1, h: 2, l: 0, c: 1.5, v: 10 }],
+          runtimeError: { code: 'PS5001', message: 'boom', barIndex: 0 },
+        },
+      }),
+    });
+    const res = await firstValueFrom(api.run({ source: 'x', symbol: 'EURUSD', timeframe: '60' }));
+    expect(res.bars).toHaveLength(1);
+    expect(res.runtimeError?.code).toBe('PS5001');
+  });
+
+  it('rejects other engine failures and transport errors with a ScriptingApiError', async () => {
     const failing = setup({
       post: () => ({ status: false, data: null, message: 'Symbol not found', responseCode: '-14' }),
     });
     await expect(
       firstValueFrom(failing.api.run({ source: 'x', symbol: 'NOPE', timeframe: '60' })),
     ).rejects.toMatchObject({
-      name: 'ApiError',
+      name: 'ScriptingApiError',
       code: '-14',
       message: 'Symbol not found',
     });
     const down = setup({ post: () => new HttpErrorResponse({ status: 502 }) });
-    await expect(
-      firstValueFrom(down.api.run({ source: 'x', symbol: 'EURUSD', timeframe: '60' })),
-    ).rejects.toBeInstanceOf(HttpErrorResponse);
+    const err = await firstValueFrom(
+      down.api.run({ source: 'x', symbol: 'EURUSD', timeframe: '60' }),
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ScriptingApiError);
+    expect((err as ScriptingApiError).httpStatus).toBe(502);
   });
 
   it('drives a replay session over §5: start, step (clamped), stop', async () => {

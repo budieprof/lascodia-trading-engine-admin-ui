@@ -5,7 +5,7 @@ import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { StrategyExecutionPanelComponent } from './strategy-execution-panel.component';
 import { AccountBindingsEditorComponent } from './account-bindings-editor.component';
 import { ExecutionPolicyCardComponent } from './execution-policy-card.component';
-import { declareSignalIo } from '../testing/jit-signal-io';
+import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
 declareSignalIo(StrategyExecutionPanelComponent, { inputs: ['strategy'], outputs: ['changed'] });
 

@@ -3,7 +3,7 @@ import { TestBed, type ComponentFixture } from '@angular/core/testing';
 
 import { InputOverridesEditorComponent } from './input-overrides-editor.component';
 import type { ScriptInputDef } from '../api/scripting-api.types';
-import { declareSignalIo } from '../testing/jit-signal-io';
+import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
 declareSignalIo(InputOverridesEditorComponent, {
   inputs: ['inputs', 'baseline', 'disabled'],

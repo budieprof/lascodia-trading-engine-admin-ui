@@ -58,7 +58,7 @@ const colorArr = (v: unknown): (string | null)[] | null =>
 const numArr = (v: unknown): (number | null)[] =>
   Array.isArray(v) ? (v as (number | null)[]) : [];
 
-/** Accepts the §3 `data`, the whole `ResponseData` envelope, or UI-IDE's `ScriptRunResult`. */
+/** Accepts the §3 `data`, the whole `ResponseData` envelope, or `ScriptingService.run()`'s `ScriptRunResult`. */
 export function normalizeRunResult(raw: unknown): PineRunResult | null {
   if (!isObj(raw)) return null;
   // A whole envelope was passed: unwrap it.

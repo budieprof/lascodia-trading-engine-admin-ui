@@ -11,14 +11,14 @@ import type {
 } from './scripting-api.types';
 
 /**
- * How a strategy executes live (ADR-0027 DEC-05 / DEC-06, engine stream A-EXEC): which accounts
+ * How a strategy executes live (ADR-0027 DEC-05 / DEC-06): which accounts
  * it may trade on and which signal-pipeline gates its entries pass.
  *
  * Live-capital endpoints — callers must gate REAL-account changes behind an explicit operator
  * confirmation before calling {@link replaceAccountBindings}.
  */
 @Injectable({ providedIn: 'root' })
-export class StrategyExecutionApiService {
+export class StrategyExecutionService {
   private readonly api = inject(ApiService);
 
   /** `[{tradingAccountId, accountName, lotMultiplier, isEnabled}]`. */

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 
 import { TypedConfirmDialogComponent } from './typed-confirm-dialog.component';
-import { declareSignalIo } from '../testing/jit-signal-io';
+import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
 declareSignalIo(TypedConfirmDialogComponent, {
   inputs: [

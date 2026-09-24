@@ -11,10 +11,7 @@ import {
 import { ThemeService } from '@core/theme/theme.service';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 
-import {
-  ScriptStrategyApiService,
-  type BacktestExportFormat,
-} from '../api/script-strategy-api.service';
+import { ScriptStrategyService, type BacktestExportFormat } from '../api/script-strategy.service';
 import { describeFailure } from '../shared/api-error';
 import { saveBlob } from '../shared/download';
 import { normalizeStrategyReport, reportCurrency } from './strategy-report.model';
@@ -395,7 +392,7 @@ let nextReportUid = 0;
   ],
 })
 export class StrategyReportComponent {
-  private readonly api = inject(ScriptStrategyApiService);
+  private readonly api = inject(ScriptStrategyService);
   private readonly theme = inject(ThemeService);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 

@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { map, type Observable } from 'rxjs';
 import { ApiService } from '@core/api/api.service';
 import { ApiError, type ResponseData } from '@core/api/api.types';
+import { ScriptingService } from '@core/services/scripting.service';
 import { normalizeReplayFrame, normalizeReplayStart, normalizeRunResult } from '../model/normalize';
 import type {
   PineReplayFrame,
@@ -16,36 +17,30 @@ import type {
 const SILENT = { silent: true } as const;
 
 /**
- * The scripting endpoints the Pine chart drives: §3 run/preview and §5 Bar Replay sessions
- * (`docs/api/scripting-api.md`). Payloads are normalised on the way in (`normalize.ts`), so a field
- * the engine has not shipped yet reads as its Pine default instead of crashing a render.
+ * The Pine chart's run and Bar Replay port (`docs/api/scripting-api.md` §3 and §5), in the chart's
+ * own model: payloads are normalised on the way in (`normalize.ts`), so a field the engine has not
+ * shipped yet reads as its Pine default instead of crashing a render.
+ *
+ * `run` goes through {@link ScriptingService} — the console's one client for the scripting
+ * endpoints — and only reshapes its result for the chart. The §5 replay endpoints serve the chart
+ * alone and are called from here.
  */
 @Injectable({ providedIn: 'root' })
-export class ScriptingRunApiService {
+export class ScriptingRunService {
   private readonly api = inject(ApiService);
+  private readonly scripting = inject(ScriptingService);
 
   /**
    * `POST scripting/run`. A script that does not compile still resolves — with `compile.success`
    * false and its diagnostics — whether the engine answers 200 or -11 with the compile result in
-   * `data`; transport and other engine errors reject.
+   * `data`; transport and other engine failures reject with a `ScriptingApiError`.
    */
   run(request: PineRunRequest): Observable<PineRunResult> {
-    return this.api.post<ResponseData<unknown>>('/scripting/run', request, SILENT).pipe(
+    return this.scripting.run(request).pipe(
       map((res) => {
-        if (res?.status && res.data) {
-          const run = normalizeRunResult(res.data);
-          if (run) return run;
-        }
-        if (res?.data && typeof res.data === 'object') {
-          const d = res.data as Record<string, unknown>;
-          const run = normalizeRunResult('compile' in d ? d : { compile: d });
-          if (run?.compile) return run;
-        }
-        throw new ApiError(
-          res?.responseCode ?? 'UNKNOWN',
-          res?.message ?? 'The engine could not run the script.',
-          res as ResponseData<unknown>,
-        );
+        const run = normalizeRunResult(res);
+        if (!run) throw new Error('The engine did not return a run result.');
+        return run;
       }),
     );
   }

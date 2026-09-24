@@ -10,7 +10,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { ScriptingRunApiService } from '../api/scripting-run-api.service';
+import { ScriptingRunService } from '../api/scripting-run.service';
 import type { PineChartData } from '../model/chart-data';
 import type { PineDeclaration, PineRunRequest } from '../model/pine-outputs.types';
 import { REPLAY_SPEEDS, ReplaySession, type ReplayApi } from './replay-session';
@@ -163,7 +163,7 @@ import { REPLAY_SPEEDS, ReplaySession, type ReplayApi } from './replay-session';
   ],
 })
 export class PineReplayComponent implements OnDestroy {
-  private readonly service = inject(ScriptingRunApiService);
+  private readonly service = inject(ScriptingRunService);
 
   /** The §3 request of the run being replayed (source or strategyId, symbol, timeframe, inputs). */
   readonly request = input<PineRunRequest | null>(null);

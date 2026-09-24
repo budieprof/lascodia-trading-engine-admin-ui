@@ -64,7 +64,7 @@ interface PaneOverlay {
  * window, tables over their pane and tooltips.
  *
  * Host it in a sized container (it fills its host). `result` takes the run response `data`, the
- * whole envelope, UI-IDE's `ScriptRunResult` or a `PineChartData`. Give a replay's growing data to the
+ * whole envelope, `ScriptingService.run()`'s `ScriptRunResult` or a `PineChartData`. Give a replay's growing data to the
  * same input: a result that extends the previous one keeps the view and follows the newest bar.
  */
 @Component({

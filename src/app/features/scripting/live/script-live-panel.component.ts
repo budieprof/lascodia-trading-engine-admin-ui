@@ -13,8 +13,8 @@ import { catchError, of } from 'rxjs';
 
 import { createPolledResource } from '@core/polling/polled-resource';
 
-import { ScriptStrategyApiService } from '../api/script-strategy-api.service';
-import { StrategyExecutionApiService } from '../api/strategy-execution-api.service';
+import { ScriptStrategyService } from '../api/script-strategy.service';
+import { StrategyExecutionService } from '../api/strategy-execution.service';
 import type { ScriptDivergence } from '../api/scripting-api.types';
 import { describeFailure, isOk } from '../shared/api-error';
 import { StrategyReportComponent } from '../report/strategy-report.component';
@@ -478,8 +478,8 @@ const STALE_MINUTES = 240;
   ],
 })
 export class ScriptLivePanelComponent {
-  private readonly api = inject(ScriptStrategyApiService);
-  private readonly executionApi = inject(StrategyExecutionApiService);
+  private readonly api = inject(ScriptStrategyService);
+  private readonly executionApi = inject(StrategyExecutionService);
 
   readonly strategyId = input.required<number>();
 

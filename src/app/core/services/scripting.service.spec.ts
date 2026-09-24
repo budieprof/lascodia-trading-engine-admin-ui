@@ -129,6 +129,54 @@ describe('ScriptingService — compile', () => {
   });
 });
 
+describe('ScriptingService — run (the one scripting/run path)', () => {
+  it('returns the run with its compile normalised', async () => {
+    const run = { compile: COMPILE, bars: [{ t: 1, o: 1, h: 1, l: 1, c: 1, v: 1 }], elapsedMs: 9 };
+    const post = vi
+      .fn()
+      .mockReturnValue(of({ status: true, data: run, message: null, responseCode: '00' }));
+    const req = { source: 'x', symbol: 'EURUSD', timeframe: 'H1', lastBars: 500 };
+    const r = await firstValueFrom(make({ post } as any).run(req));
+    expect(post).toHaveBeenCalledWith('/scripting/run', req, { silent: true });
+    expect(r.bars).toHaveLength(1);
+    expect(r.compile.declaration?.kind).toBe('strategy');
+  });
+
+  it('resolves a refused run to its compile result, keeping a partial run it carries', async () => {
+    const onlyCompile = vi
+      .fn()
+      .mockReturnValue(of({ status: false, data: COMPILE, message: 'm', responseCode: '-11' }));
+    const r1 = await firstValueFrom(make({ post: onlyCompile } as any).run({} as any));
+    expect(r1.compile.success).toBe(false);
+    expect(r1.bars).toBeUndefined();
+
+    const partial = { compile: COMPILE, bars: [{ t: 1, o: 1, h: 1, l: 1, c: 1, v: 1 }] };
+    const inError = vi.fn().mockReturnValue(
+      throwError(
+        () =>
+          new HttpErrorResponse({
+            status: 400,
+            error: { status: false, data: partial, message: 'm', responseCode: '-11' },
+          }),
+      ),
+    );
+    const r2 = await firstValueFrom(make({ post: inError } as any).run({} as any));
+    expect(r2.bars).toHaveLength(1);
+    expect(r2.compile.inputs[0].kind).toBe('textArea');
+  });
+
+  it('rejects a refusal without a compile result', async () => {
+    const post = vi
+      .fn()
+      .mockReturnValue(of({ status: false, data: null, message: 'No bars', responseCode: '-14' }));
+    await expect(firstValueFrom(make({ post } as any).run({} as any))).rejects.toMatchObject({
+      name: 'ScriptingApiError',
+      message: 'No bars',
+      code: '-14',
+    });
+  });
+});
+
 describe('ScriptingService — libraries and strategy scripts', () => {
   it('builds the library URLs', async () => {
     const get = vi

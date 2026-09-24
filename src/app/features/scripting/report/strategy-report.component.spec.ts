@@ -16,7 +16,7 @@ import { ReportMonthlyHeatmapComponent } from './report-monthly-heatmap.componen
 import { ReportPropertiesComponent } from './report-properties.component';
 import { MINUS } from './report-format';
 import { strategyReportFixture, toPascalCaseKeys } from '../testing/strategy-report.fixture';
-import { declareSignalIo } from '../testing/jit-signal-io';
+import { declareSignalIo } from '@shared/testing/jit-signal-io';
 import { AgGridStubComponent, ChartCardStubComponent } from '../testing/stubs';
 
 declareSignalIo(StrategyReportComponent, { inputs: ['report', 'backtestRunId', 'heading'] });

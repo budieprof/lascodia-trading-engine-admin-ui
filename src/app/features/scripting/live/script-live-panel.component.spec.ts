@@ -8,7 +8,7 @@ import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 
 import { ScriptLivePanelComponent } from './script-live-panel.component';
 import { StrategyReportComponent } from '../report/strategy-report.component';
-import { declareSignalIo } from '../testing/jit-signal-io';
+import { declareSignalIo } from '@shared/testing/jit-signal-io';
 import { strategyReportFixture } from '../testing/strategy-report.fixture';
 
 declareSignalIo(ScriptLivePanelComponent, { inputs: ['strategyId'] });

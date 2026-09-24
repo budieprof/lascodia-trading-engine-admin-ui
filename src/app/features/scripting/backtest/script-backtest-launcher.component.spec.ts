@@ -11,7 +11,7 @@ import {
   validateBacktestForm,
 } from './script-backtest-launcher.component';
 import { InputOverridesEditorComponent } from '../shared/input-overrides-editor.component';
-import { declareSignalIo } from '../testing/jit-signal-io';
+import { declareSignalIo } from '@shared/testing/jit-signal-io';
 import { BREAKOUT_SOURCE } from '../testing/pine-sources';
 
 declareSignalIo(ScriptBacktestLauncherComponent, { inputs: ['strategy'], outputs: ['queued'] });

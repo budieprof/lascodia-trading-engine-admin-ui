@@ -13,11 +13,11 @@ import { RouterLink } from '@angular/router';
 
 import type { StrategyDto } from '@core/api/api.types';
 import { NotificationService } from '@core/notifications/notification.service';
+import { ScriptingService } from '@core/services/scripting.service';
 
-import { ScriptStrategyApiService } from '../api/script-strategy-api.service';
+import { ScriptStrategyService } from '../api/script-strategy.service';
 import type {
   ScriptBacktestRequest,
-  ScriptCompileResult,
   ScriptInputDef,
   ScriptStrategyFields,
 } from '../api/scripting-api.types';
@@ -335,7 +335,8 @@ export function validateBacktestForm(f: {
   ],
 })
 export class ScriptBacktestLauncherComponent {
-  private readonly api = inject(ScriptStrategyApiService);
+  private readonly api = inject(ScriptStrategyService);
+  private readonly scripting = inject(ScriptingService);
   private readonly notifications = inject(NotificationService);
 
   readonly strategy = input.required<StrategyDto & ScriptStrategyFields>();
@@ -398,24 +399,18 @@ export class ScriptBacktestLauncherComponent {
     }
     const s = this.strategy();
     this.compiling.set(true);
-    this.api
+    // A script with errors still resolves (with its diagnostics); only a refusal without a
+    // compile result, or an unreachable engine, rejects.
+    this.scripting
       .compile({ source, symbol: s.symbol ?? undefined, timeframe: s.timeframe ?? undefined })
       .subscribe({
-        next: (res) => {
+        next: (result) => {
           this.compiling.set(false);
-          const result: ScriptCompileResult | null = isOk(res) ? res.data : null;
-          if (!result) {
-            this.inputDefs.set(null);
-            this.compileNote.set(
-              `The script could not be compiled (${describeFailure(res, 'no reason given')}); enter overrides by input id.`,
-            );
-            return;
-          }
           this.inputDefs.set(result.inputs ?? []);
           const props = result.declaration?.strategy ?? null;
-          const capital = props ? Number(props['initialCapital']) : NaN;
+          const capital = Number(props?.initialCapital);
           if (Number.isFinite(capital) && capital > 0) this.initialBalance.set(capital);
-          const mag = props ? props['useBarMagnifier'] : undefined;
+          const mag = props?.useBarMagnifier;
           this.declaredMagnifier.set(typeof mag === 'boolean' ? mag : null);
         },
         error: (err: unknown) => {

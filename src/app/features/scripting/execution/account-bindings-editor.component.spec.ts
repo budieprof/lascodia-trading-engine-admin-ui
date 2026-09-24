@@ -9,7 +9,7 @@ import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { AccountBindingsEditorComponent } from './account-bindings-editor.component';
 import { TypedConfirmDialogComponent } from './typed-confirm-dialog.component';
 import type { StrategyAccountBinding } from '../api/scripting-api.types';
-import { declareSignalIo } from '../testing/jit-signal-io';
+import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
 declareSignalIo(AccountBindingsEditorComponent, {
   inputs: ['strategyId', 'isScript', 'symbol', 'strategyName'],

@@ -11,10 +11,9 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { HttpErrorResponse } from '@angular/common/http';
 import type { Subscription } from 'rxjs';
-import { ApiError } from '@core/api/api.types';
-import { ScriptingRunApiService } from '@shared/pine-chart/api/scripting-run-api.service';
+import { toScriptingError } from '@core/services/scripting.service';
+import { ScriptingRunService } from '@shared/pine-chart/api/scripting-run.service';
 import {
   PineChartComponent,
   type PineBarRef,
@@ -346,7 +345,7 @@ type DockTab = 'logs' | 'trace' | 'profiler';
   ],
 })
 export class PinePreviewComponent {
-  private readonly api = inject(ScriptingRunApiService);
+  private readonly api = inject(ScriptingRunService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly chart = viewChild(PineChartComponent);
 
@@ -514,13 +513,5 @@ export class PinePreviewComponent {
 }
 
 function runErrorMessage(e: unknown): string {
-  if (e instanceof ApiError) return e.message || 'The engine could not run the script.';
-  if (e instanceof HttpErrorResponse) {
-    if (e.status === 0) return 'The engine is unreachable.';
-    const body = e.error as { message?: string } | null;
-    return body?.message
-      ? `${body.message} (HTTP ${e.status})`
-      : `The run failed (HTTP ${e.status}).`;
-  }
-  return e instanceof Error ? e.message : 'The run failed.';
+  return toScriptingError(e, 'The engine could not run the script.').message;
 }

@@ -12,8 +12,9 @@ import { catchError, forkJoin, of } from 'rxjs';
 
 import type { AlertChannel, StrategyDto } from '@core/api/api.types';
 import { NotificationService } from '@core/notifications/notification.service';
+import { ScriptingService } from '@core/services/scripting.service';
 
-import { ScriptStrategyApiService } from '../api/script-strategy-api.service';
+import { ScriptStrategyService } from '../api/script-strategy.service';
 import type { ScriptCompileResult, ScriptStrategyFields } from '../api/scripting-api.types';
 import { describeFailure, isOk } from '../shared/api-error';
 import { scriptSourceOf } from '../shared/script-strategy';
@@ -458,7 +459,8 @@ const KIND_HINTS: Record<AlertRow['kind'], string> = {
   ],
 })
 export class ScriptAlertsTabComponent {
-  private readonly api = inject(ScriptStrategyApiService);
+  private readonly api = inject(ScriptStrategyService);
+  private readonly scripting = inject(ScriptingService);
   private readonly notifications = inject(NotificationService);
 
   readonly strategy = input.required<StrategyDto & ScriptStrategyFields>();
@@ -502,7 +504,7 @@ export class ScriptAlertsTabComponent {
     forkJoin({
       alerts: this.api.getAlerts(s.id),
       compile: source
-        ? this.api
+        ? this.scripting
             .compile({ source, symbol: s.symbol ?? undefined, timeframe: s.timeframe ?? undefined })
             .pipe(catchError(() => of(null)))
         : of(null),
@@ -513,7 +515,7 @@ export class ScriptAlertsTabComponent {
           this.loading.set(false);
           return;
         }
-        const compiled: ScriptCompileResult | null = compile && isOk(compile) ? compile.data : null;
+        const compiled: ScriptCompileResult | null = compile;
         if (!source) {
           this.compileNote.set(
             'This strategy carries no script source; only saved bindings are shown.',

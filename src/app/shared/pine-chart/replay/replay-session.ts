@@ -15,7 +15,7 @@ import type {
   PineRunRequest,
 } from '../model/pine-outputs.types';
 
-/** The §5 calls a replay needs (ScriptingRunApiService implements it). */
+/** The §5 calls a replay needs (ScriptingRunService implements it). */
 export interface ReplayApi {
   startReplay(request: PineReplayStartRequest): Observable<PineReplayStartResponse>;
   stepReplay(sessionId: string, request: PineReplayStepRequest): Observable<PineReplayFrame>;

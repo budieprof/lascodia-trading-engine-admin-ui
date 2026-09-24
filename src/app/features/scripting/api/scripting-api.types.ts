@@ -1,9 +1,14 @@
 import type { AlertChannel, StrategyDto } from '@core/api/api.types';
+import type { ScriptStrategyProperties } from '@core/api/scripting.types';
 
 /**
  * Wire types for the ADR-0027 scripting endpoints the report / screener / alerts / live /
  * execution pages use. Source of truth: `docs/api/scripting-api.md` in the engine repo (§ numbers
- * below refer to it) and the A-EXEC controller for account bindings and execution policy.
+ * below refer to it) and the engine's account-binding / execution-policy endpoints.
+ *
+ * The §2 compile types are the pages' read of `ScriptingService.compile()`'s result
+ * (`@core/api/scripting.types`): structurally compatible with it, with the optional fields a newer
+ * engine build may add.
  */
 
 // ── §2 Compile ────────────────────────────────────────────────────────────────
@@ -28,7 +33,7 @@ export interface ScriptDeclaration {
   shortTitle?: string | null;
   overlay?: boolean;
   /** `strategy()` properties, camelCase — present for strategies only. */
-  strategy?: Record<string, unknown> | null;
+  strategy?: ScriptStrategyProperties | null;
 }
 
 /** §9 InputDto. `kind` is camelCase on the wire; older builds may send PascalCase. */
@@ -47,17 +52,11 @@ export interface ScriptInputDef {
   inline?: string | null;
   group?: string | null;
   confirm?: boolean;
-  display?: string;
+  display?: string | null;
   activeWhenInputId?: string | null;
   enumName?: string | null;
   line?: number;
   column?: number;
-}
-
-export interface ScriptCompileRequest {
-  source: string;
-  symbol?: string;
-  timeframe?: string;
 }
 
 export interface ScriptCompileResult {

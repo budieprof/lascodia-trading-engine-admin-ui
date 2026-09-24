@@ -8,7 +8,7 @@ import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { ExecutionPolicyCardComponent } from './execution-policy-card.component';
 import { TypedConfirmDialogComponent } from './typed-confirm-dialog.component';
 import type { ExecutionPolicy } from '../api/scripting-api.types';
-import { declareSignalIo } from '../testing/jit-signal-io';
+import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
 declareSignalIo(ExecutionPolicyCardComponent, {
   inputs: ['strategyId', 'policy', 'isScript'],

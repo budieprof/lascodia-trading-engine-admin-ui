@@ -74,7 +74,7 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
         <!-- Strategy List Tab -->
         @if (activeTab() === 'list') {
           <app-page-header title="Strategies" subtitle="Manage trading strategies">
-            <!-- UI-IDE: create a strategy from a Pine v6 file (POST strategy/import). -->
+            <!-- Create a strategy from a Pine v6 file (POST strategy/import). -->
             <app-import-script-button />
             <button
               class="btn btn-secondary"

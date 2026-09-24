@@ -277,8 +277,9 @@ export interface ScriptReportSplit {
 }
 
 /**
- * Scripting `Broker/StrategyReport` — only the headline fields the console reads today are typed;
- * the full report (trades, equity curve, monthly returns) belongs to the report stream.
+ * Scripting `Broker/StrategyReport` — only the headline fields are typed here. The whole report
+ * (trades, equity curve, monthly returns) is read casing-tolerantly by `app-strategy-report`
+ * (`@features/scripting`, `normalizeStrategyReport`).
  */
 export interface ScriptStrategyReport {
   meta?: {
@@ -304,7 +305,7 @@ export interface ScriptStrategyReport {
   warnings?: string[];
 }
 
-/** Scripting `Output/ScriptOutputs` — rendered by the chart-overlay stream; counted here. */
+/** Scripting `Output/ScriptOutputs` — loosely typed here; the Pine chart (`@shared/pine-chart`) normalises and renders it. */
 export interface ScriptOutputs {
   plots?: unknown[];
   shapes?: unknown[];

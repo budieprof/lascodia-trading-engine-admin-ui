@@ -12,7 +12,7 @@ import {
 
 import { NotificationService } from '@core/notifications/notification.service';
 
-import { StrategyExecutionApiService } from '../api/strategy-execution-api.service';
+import { StrategyExecutionService } from '../api/strategy-execution.service';
 import type { ExecutionPolicy } from '../api/scripting-api.types';
 import { describeFailure, isOk } from '../shared/api-error';
 import {
@@ -219,7 +219,7 @@ let nextPolicyUid = 0;
   ],
 })
 export class ExecutionPolicyCardComponent {
-  private readonly api = inject(StrategyExecutionApiService);
+  private readonly api = inject(StrategyExecutionService);
   private readonly notifications = inject(NotificationService);
 
   readonly strategyId = input.required<number>();
