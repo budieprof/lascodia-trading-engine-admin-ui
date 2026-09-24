@@ -375,7 +375,7 @@ export class ScriptAuthoringComponent {
     } catch (err) {
       const e = toScriptingError(err, 'Saving the script failed.');
       if (e.compile) this.workbench?.showResult(e.compile);
-      this.message.set(`The engine refused the script: ${e.message}`);
+      this.message.set(e.code || e.compile ? `The engine refused the script: ${e.message}` : e.message);
       return false;
     } finally {
       this.phase.set('idle');
