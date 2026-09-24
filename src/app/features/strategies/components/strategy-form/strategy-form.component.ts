@@ -35,6 +35,13 @@ import {
   RiskProfileDto,
   CurrencyPairDto,
 } from '@core/api/api.types';
+// ── Pine script authoring (UI-IDE) — see the "Pine script authoring" block at the end of the class.
+import { AuthoringModeSwitchComponent } from '@features/scripting/components/script-authoring/authoring-mode-switch.component';
+import { ScriptAuthoringComponent } from '@features/scripting/components/script-authoring/script-authoring.component';
+import {
+  linkedAuthoringMode,
+  linkedScriptDraft,
+} from '@features/scripting/components/script-authoring/authoring-mode';
 import { StrategiesService } from '@core/services/strategies.service';
 import { RiskProfilesService } from '@core/services/risk-profiles.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
@@ -133,6 +140,8 @@ const TIMEFRAME_LABELS: Record<string, string> = {
     CloneStrategyDialogComponent,
     StrategyVersionDiffComponent,
     ConfirmDialogComponent,
+    AuthoringModeSwitchComponent,
+    ScriptAuthoringComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -149,6 +158,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
           role="dialog"
           aria-modal="true"
           tabindex="-1"
+          [class.dialog-wide]="isScriptAuthoring()"
           (click)="$event.stopPropagation()"
           (keydown)="$event.stopPropagation()"
         >
@@ -173,7 +183,11 @@ const TIMEFRAME_LABELS: Record<string, string> = {
               ×
             </button>
           </div>
-          <form [formGroup]="form" (ngSubmit)="onSubmit()" class="dialog-body">
+          <form
+            [formGroup]="form"
+            (ngSubmit)="isScriptAuthoring() ? submitScript() : onSubmit()"
+            class="dialog-body"
+          >
             <!-- Tab strip — TradingView-style — splits the modal into discrete config sections -->
             <div class="tab-strip" role="tablist">
               <button
@@ -351,6 +365,22 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                 ></textarea>
               </div>
 
+              <!-- ── Pine script authoring (UI-IDE) ─────────────────────────────
+                   RuleBased strategies are authored either with the rule builder
+                   (Parameters JSON below) or as a Pine v6 script. In script mode the
+                   panel replaces the rules block and the DSL backtest preview. -->
+              @if (isRuleBased()) {
+                <app-authoring-mode-switch [(mode)]="authoringMode" [locked]="!!strategy()" />
+              }
+              @if (isScriptAuthoring()) {
+                <app-script-authoring
+                  [(draft)]="scriptDraft"
+                  [strategy]="strategy()"
+                  [symbol]="scriptSymbol()"
+                  [timeframe]="scriptTimeframe()"
+                />
+              }
+
               <!-- Typed parameter form (v1) — drives the Parameters JSON textarea
                    below for strategy types with a registered schema. Operators on
                    types without a schema see only the textarea (legacy behaviour). -->
@@ -411,127 +441,131 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                 </div>
               }
 
-              <div class="form-group">
-                <label class="form-label">
-                  {{ isDslType() ? 'Rules (DSL JSON)' : 'Parameters JSON' }}
-                  <span class="dsl-example-loader">
-                    <button
-                      type="button"
-                      class="btn btn-link dsl-format-btn"
-                      (click)="formatParametersJson()"
-                      title="Pretty-print the JSON"
-                    >
-                      Format
-                    </button>
-                    @if (!strategy() || isDslType()) {
-                      <select
-                        class="dsl-example-select"
-                        [title]="
-                          strategy()
-                            ? 'Replaces the current rules'
-                            : 'Loads a complete v2 rule and sets the type to RuleBased'
-                        "
-                        (change)="
-                          loadDslExample($any($event.target).value); $any($event.target).value = ''
-                        "
+              <!-- UI-IDE: rules block hidden in script mode (body deliberately not re-indented). -->
+              @if (!isScriptAuthoring()) {
+                <div class="form-group">
+                  <label class="form-label">
+                    {{ isDslType() ? 'Rules (DSL JSON)' : 'Parameters JSON' }}
+                    <span class="dsl-example-loader">
+                      <button
+                        type="button"
+                        class="btn btn-link dsl-format-btn"
+                        (click)="formatParametersJson()"
+                        title="Pretty-print the JSON"
                       >
-                        <option value="">Insert DSL example…</option>
-                        @for (ex of dslExamples; track ex.id) {
-                          <option [value]="ex.id">{{ ex.label }}</option>
-                        }
-                      </select>
+                        Format
+                      </button>
+                      @if (!strategy() || isDslType()) {
+                        <select
+                          class="dsl-example-select"
+                          [title]="
+                            strategy()
+                              ? 'Replaces the current rules'
+                              : 'Loads a complete v2 rule and sets the type to RuleBased'
+                          "
+                          (change)="
+                            loadDslExample($any($event.target).value);
+                            $any($event.target).value = ''
+                          "
+                        >
+                          <option value="">Insert DSL example…</option>
+                          @for (ex of dslExamples; track ex.id) {
+                            <option [value]="ex.id">{{ ex.label }}</option>
+                          }
+                        </select>
+                      }
+                    </span>
+                  </label>
+                  @if (isDslType()) {
+                    <app-dsl-builder
+                      [parametersJson]="paramsJson()"
+                      [timeframe]="formTimeframe()"
+                      [symbol]="primarySymbol()"
+                      [strategyName]="formName()"
+                      [issues]="dslIssues()"
+                      [isNew]="!strategy()"
+                      [canUpgrade]="canUpgradeDsl()"
+                      (parametersJsonChange)="onDslBuilderChange($event)"
+                      (upgradeRequested)="askUpgrade()"
+                    />
+                  }
+                  <textarea
+                    formControlName="parametersJson"
+                    class="form-input form-textarea form-mono"
+                    rows="8"
+                    [placeholder]="paramsPlaceholder()"
+                  ></textarea>
+                  @if (isDslType()) {
+                    <div class="dsl-status" aria-live="polite">
+                      @if (dslChecking()) {
+                        <span class="form-hint dsl-checking">Validating with the engine…</span>
+                      } @else if (dslCheckFailed(); as why) {
+                        <span class="form-hint">
+                          Engine validation unavailable ({{ why }}) — showing this console's own
+                          checks.
+                        </span>
+                      }
+                      @if (dslSummary(); as summary) {
+                        <span class="dsl-summary">📖 {{ summary }}</span>
+                      }
+                      @if (dslIssues().length > 0) {
+                        <div class="dsl-issue-list" [class.has-errors]="dslErrorCount() > 0">
+                          <div class="dsl-issue-list-head">
+                            @if (dslErrorCount() > 0) {
+                              <strong>
+                                {{ dslErrorCount() }} error{{ dslErrorCount() === 1 ? '' : 's' }} —
+                                fix before saving
+                              </strong>
+                            }
+                            @if (dslWarningCount() > 0) {
+                              <span>
+                                {{ dslWarningCount() }} warning{{
+                                  dslWarningCount() === 1 ? '' : 's'
+                                }}
+                              </span>
+                            }
+                            <span class="muted">{{ dslIssueSource() }}</span>
+                          </div>
+                          <ul>
+                            @for (i of dslIssues(); track $index) {
+                              <li [class.warning]="i.severity === 'warning'">
+                                {{ i.message }}
+                                @if (i.path) {
+                                  <code class="dsl-issue-path">{{ i.path }}</code>
+                                }
+                              </li>
+                            }
+                          </ul>
+                        </div>
+                      }
+                    </div>
+                  }
+
+                  <span class="form-hint">
+                    @if (isDslType()) {
+                      The rules are one JSON document: an <code>entryConditionsRoot</code> tree of
+                      <code>And</code> / <code>Or</code> / <code>Not</code> groups over
+                      {{ conditionTypes.length }} condition types —
+                      @for (t of conditionTypes; track t.type; let lastType = $last) {
+                        <code [title]="t.description">{{ t.type }}</code
+                        >{{ lastType ? '.' : ',' }}
+                      }
+                      Indicators:
+                      @for (ind of indicatorCatalogue; track ind.kind; let lastInd = $last) {
+                        <code [title]="ind.hint">{{ ind.kind }}</code
+                        >{{ lastInd ? '.' : ',' }}
+                      }
+                      An optional <code>exitConditionsRoot</code> closes the strategy's open
+                      position when it holds. <code>dslVersion: 2</code> selects Pine-exact
+                      indicator math; new strategies are created on it. Keys may be camelCase or
+                      PascalCase — the builder writes camelCase. A legacy flat
+                      <code>entryConditions</code> list still reads as an implicit <code>And</code>.
+                    } @else {
+                      Strategy-type-specific tuning parameters.
                     }
                   </span>
-                </label>
-                @if (isDslType()) {
-                  <app-dsl-builder
-                    [parametersJson]="paramsJson()"
-                    [timeframe]="formTimeframe()"
-                    [symbol]="primarySymbol()"
-                    [strategyName]="formName()"
-                    [issues]="dslIssues()"
-                    [isNew]="!strategy()"
-                    [canUpgrade]="canUpgradeDsl()"
-                    (parametersJsonChange)="onDslBuilderChange($event)"
-                    (upgradeRequested)="askUpgrade()"
-                  />
-                }
-                <textarea
-                  formControlName="parametersJson"
-                  class="form-input form-textarea form-mono"
-                  rows="8"
-                  [placeholder]="paramsPlaceholder()"
-                ></textarea>
-                @if (isDslType()) {
-                  <div class="dsl-status" aria-live="polite">
-                    @if (dslChecking()) {
-                      <span class="form-hint dsl-checking">Validating with the engine…</span>
-                    } @else if (dslCheckFailed(); as why) {
-                      <span class="form-hint">
-                        Engine validation unavailable ({{ why }}) — showing this console's own
-                        checks.
-                      </span>
-                    }
-                    @if (dslSummary(); as summary) {
-                      <span class="dsl-summary">📖 {{ summary }}</span>
-                    }
-                    @if (dslIssues().length > 0) {
-                      <div class="dsl-issue-list" [class.has-errors]="dslErrorCount() > 0">
-                        <div class="dsl-issue-list-head">
-                          @if (dslErrorCount() > 0) {
-                            <strong>
-                              {{ dslErrorCount() }} error{{ dslErrorCount() === 1 ? '' : 's' }} —
-                              fix before saving
-                            </strong>
-                          }
-                          @if (dslWarningCount() > 0) {
-                            <span>
-                              {{ dslWarningCount() }} warning{{
-                                dslWarningCount() === 1 ? '' : 's'
-                              }}
-                            </span>
-                          }
-                          <span class="muted">{{ dslIssueSource() }}</span>
-                        </div>
-                        <ul>
-                          @for (i of dslIssues(); track $index) {
-                            <li [class.warning]="i.severity === 'warning'">
-                              {{ i.message }}
-                              @if (i.path) {
-                                <code class="dsl-issue-path">{{ i.path }}</code>
-                              }
-                            </li>
-                          }
-                        </ul>
-                      </div>
-                    }
-                  </div>
-                }
-
-                <span class="form-hint">
-                  @if (isDslType()) {
-                    The rules are one JSON document: an <code>entryConditionsRoot</code> tree of
-                    <code>And</code> / <code>Or</code> / <code>Not</code> groups over
-                    {{ conditionTypes.length }} condition types —
-                    @for (t of conditionTypes; track t.type; let lastType = $last) {
-                      <code [title]="t.description">{{ t.type }}</code
-                      >{{ lastType ? '.' : ',' }}
-                    }
-                    Indicators:
-                    @for (ind of indicatorCatalogue; track ind.kind; let lastInd = $last) {
-                      <code [title]="ind.hint">{{ ind.kind }}</code
-                      >{{ lastInd ? '.' : ',' }}
-                    }
-                    An optional <code>exitConditionsRoot</code> closes the strategy's open position
-                    when it holds. <code>dslVersion: 2</code> selects Pine-exact indicator math; new
-                    strategies are created on it. Keys may be camelCase or PascalCase — the builder
-                    writes camelCase. A legacy flat <code>entryConditions</code> list still reads as
-                    an implicit <code>And</code>.
-                  } @else {
-                    Strategy-type-specific tuning parameters.
-                  }
-                </span>
-              </div>
+                </div>
+              }
             }
 
             <!-- ========== RISK OVERRIDES TAB ========== -->
@@ -622,323 +656,334 @@ const TIMEFRAME_LABELS: Record<string, string> = {
               </div>
             }
 
-            <!-- Backtest preview panel — synchronous, server-bounded (≤90d, ≤6000
+            <!-- UI-IDE: a script previews through its own panel (scripting/run); this
+                 DSL preview is hidden in script mode (body deliberately not re-indented). -->
+            @if (!isScriptAuthoring()) {
+              <!-- Backtest preview panel — synchronous, server-bounded (≤90d, ≤6000
                  candles, 60s deadline). Operators see real Sharpe / win-rate / max DD
                  before saving. Single-symbol only; multi-symbol previews are too noisy
                  to interpret in one panel. -->
-            <div class="preview-panel">
-              <div class="preview-controls">
-                <label class="form-label" style="margin:0;">
-                  Backtest preview window
-                  <select
-                    class="form-input preview-window-select"
-                    [value]="previewLookbackDays()"
-                    (change)="previewLookbackDays.set(+$any($event.target).value)"
-                  >
-                    <option [value]="7">7 days</option>
-                    <option [value]="14">14 days</option>
-                    <option [value]="30">30 days</option>
-                    <option [value]="60">60 days</option>
-                    <option [value]="90">90 days</option>
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  class="btn btn-secondary preview-run-btn"
-                  (click)="runBacktestPreview()"
-                  [disabled]="runningPreview() || form.invalid"
-                >
-                  @if (runningPreview()) {
-                    <span class="spinner-sm"></span> Running…
-                  } @else {
-                    Run preview
-                  }
-                </button>
-              </div>
-              @if (previewError(); as err) {
-                <div class="preview-error">{{ err }}</div>
-              }
-              @if (previewResult(); as r) {
-                <div class="preview-stats">
-                  <div class="preview-stat">
-                    <span class="preview-stat-label">Trades</span>
-                    <span class="preview-stat-value mono">{{ r.totalTrades }}</span>
-                    <span class="preview-stat-sub"
-                      >{{ r.winningTrades }}W / {{ r.losingTrades }}L</span
+              <div class="preview-panel">
+                <div class="preview-controls">
+                  <label class="form-label" style="margin:0;">
+                    Backtest preview window
+                    <select
+                      class="form-input preview-window-select"
+                      [value]="previewLookbackDays()"
+                      (change)="previewLookbackDays.set(+$any($event.target).value)"
                     >
-                  </div>
-                  <div class="preview-stat">
-                    <span class="preview-stat-label">Win rate</span>
-                    <span
-                      class="preview-stat-value mono"
-                      [class.positive]="r.winRate >= 50"
-                      [class.negative]="r.winRate < 50 && r.totalTrades > 0"
-                      >{{ r.winRate.toFixed(1) }}%</span
-                    >
-                  </div>
-                  <div class="preview-stat">
-                    <span class="preview-stat-label">Sharpe</span>
-                    <span
-                      class="preview-stat-value mono"
-                      [class.positive]="r.sharpeRatio >= 1"
-                      [class.negative]="r.sharpeRatio < 0"
-                      >{{ r.sharpeRatio.toFixed(2) }}</span
-                    >
-                  </div>
-                  <div class="preview-stat">
-                    <span class="preview-stat-label">Profit factor</span>
-                    <span
-                      class="preview-stat-value mono"
-                      [class.positive]="r.profitFactor >= 1.5"
-                      [class.negative]="r.profitFactor < 1 && r.totalTrades > 0"
-                      >{{ r.profitFactor.toFixed(2) }}</span
-                    >
-                  </div>
-                  <div class="preview-stat">
-                    <span class="preview-stat-label">Max DD</span>
-                    <span class="preview-stat-value mono" [class.negative]="r.maxDrawdownPct >= 10"
-                      >{{ r.maxDrawdownPct.toFixed(1) }}%</span
-                    >
-                  </div>
-                  <div class="preview-stat">
-                    <span class="preview-stat-label">Return</span>
-                    <span
-                      class="preview-stat-value mono"
-                      [class.positive]="r.totalReturn > 0"
-                      [class.negative]="r.totalReturn < 0"
-                      >{{ r.totalReturn.toFixed(1) }}%</span
-                    >
-                  </div>
-                </div>
-                @if (r.equityCurve && r.equityCurve.length > 1) {
-                  <div class="equity-sparkline">
-                    <span class="muted small">Equity curve</span>
-                    <svg width="100%" height="80" preserveAspectRatio="none" viewBox="0 0 400 80">
-                      <polyline
-                        [attr.points]="equitySparklinePoints(r.equityCurve, 400, 80)"
-                        fill="none"
-                        [attr.stroke]="r.finalBalance >= r.initialBalance ? '#248A3D' : '#D70015'"
-                        stroke-width="1.5"
-                      />
-                      <line
-                        [attr.x1]="0"
-                        [attr.x2]="400"
-                        [attr.y1]="equityBaselineY(r.equityCurve, r.initialBalance, 80)"
-                        [attr.y2]="equityBaselineY(r.equityCurve, r.initialBalance, 80)"
-                        stroke="rgba(0,0,0,0.15)"
-                        stroke-dasharray="2,3"
-                        stroke-width="1"
-                      />
-                    </svg>
-                  </div>
-                }
-                <div class="preview-meta">
-                  {{ r.candlesAnalyzed | number }} candles analysed · final balance &#36;{{
-                    r.finalBalance.toFixed(0)
-                  }}
-                  @if (r.note) {
-                    · <em>{{ r.note }}</em>
-                  }
+                      <option [value]="7">7 days</option>
+                      <option [value]="14">14 days</option>
+                      <option [value]="30">30 days</option>
+                      <option [value]="60">60 days</option>
+                      <option [value]="90">90 days</option>
+                    </select>
+                  </label>
                   <button
                     type="button"
-                    class="btn btn-link preview-snapshot-btn"
-                    (click)="snapshotPreview()"
-                    title="Save this preview to compare against later runs"
+                    class="btn btn-secondary preview-run-btn"
+                    (click)="runBacktestPreview()"
+                    [disabled]="runningPreview() || form.invalid"
                   >
-                    📌 Snapshot
+                    @if (runningPreview()) {
+                      <span class="spinner-sm"></span> Running…
+                    } @else {
+                      Run preview
+                    }
                   </button>
                 </div>
-              }
-              @if (previewSnapshots().length > 0) {
-                <div class="preview-snapshots">
-                  <div class="preview-snapshots-head">
-                    <span class="muted small"
-                      >Saved snapshots ({{ previewSnapshots().length }})</span
-                    >
-                    <span class="muted small">·</span>
-                    <button
-                      type="button"
-                      class="btn btn-link"
-                      (click)="toggleSnapshotFilter()"
-                      [title]="
-                        snapshotFilterMode() === 'matching'
-                          ? 'Currently matching this config — click to show all configs'
-                          : 'Currently all configs — click to filter to this config'
-                      "
-                    >
-                      {{ snapshotFilterMode() === 'matching' ? 'this config' : 'all configs' }}
-                    </button>
-                    <span class="muted small">·</span>
-                    <button
-                      type="button"
-                      class="btn btn-link"
-                      (click)="toggleSnapshotScope()"
-                      [title]="
-                        snapshotScope() === 'mine'
-                          ? 'Currently your snapshots — click to include other operators'
-                          : 'Currently every operator — click to filter to yours'
-                      "
-                    >
-                      {{ snapshotScope() === 'mine' ? 'yours' : 'everyone' }}
-                    </button>
+                @if (previewError(); as err) {
+                  <div class="preview-error">{{ err }}</div>
+                }
+                @if (previewResult(); as r) {
+                  <div class="preview-stats">
+                    <div class="preview-stat">
+                      <span class="preview-stat-label">Trades</span>
+                      <span class="preview-stat-value mono">{{ r.totalTrades }}</span>
+                      <span class="preview-stat-sub"
+                        >{{ r.winningTrades }}W / {{ r.losingTrades }}L</span
+                      >
+                    </div>
+                    <div class="preview-stat">
+                      <span class="preview-stat-label">Win rate</span>
+                      <span
+                        class="preview-stat-value mono"
+                        [class.positive]="r.winRate >= 50"
+                        [class.negative]="r.winRate < 50 && r.totalTrades > 0"
+                        >{{ r.winRate.toFixed(1) }}%</span
+                      >
+                    </div>
+                    <div class="preview-stat">
+                      <span class="preview-stat-label">Sharpe</span>
+                      <span
+                        class="preview-stat-value mono"
+                        [class.positive]="r.sharpeRatio >= 1"
+                        [class.negative]="r.sharpeRatio < 0"
+                        >{{ r.sharpeRatio.toFixed(2) }}</span
+                      >
+                    </div>
+                    <div class="preview-stat">
+                      <span class="preview-stat-label">Profit factor</span>
+                      <span
+                        class="preview-stat-value mono"
+                        [class.positive]="r.profitFactor >= 1.5"
+                        [class.negative]="r.profitFactor < 1 && r.totalTrades > 0"
+                        >{{ r.profitFactor.toFixed(2) }}</span
+                      >
+                    </div>
+                    <div class="preview-stat">
+                      <span class="preview-stat-label">Max DD</span>
+                      <span
+                        class="preview-stat-value mono"
+                        [class.negative]="r.maxDrawdownPct >= 10"
+                        >{{ r.maxDrawdownPct.toFixed(1) }}%</span
+                      >
+                    </div>
+                    <div class="preview-stat">
+                      <span class="preview-stat-label">Return</span>
+                      <span
+                        class="preview-stat-value mono"
+                        [class.positive]="r.totalReturn > 0"
+                        [class.negative]="r.totalReturn < 0"
+                        >{{ r.totalReturn.toFixed(1) }}%</span
+                      >
+                    </div>
                   </div>
-                  <table class="preview-snapshot-table">
-                    <thead>
-                      <tr>
-                        <th>Captured</th>
-                        <th>Strategy</th>
-                        <th>Sharpe</th>
-                        <th>Win %</th>
-                        <th>Max DD</th>
-                        <th>Return</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (s of previewSnapshots(); track s.id) {
-                        <tr>
-                          <td>{{ s.capturedAt | date: 'MM-dd HH:mm' }}</td>
-                          <td class="mono" [title]="s.label ?? ''">
-                            {{ s.symbol }}/{{ s.timeframe }} · {{ s.strategyType }}
-                          </td>
-                          <td class="mono">{{ s.sharpeRatio.toFixed(2) }}</td>
-                          <td class="mono">{{ s.winRate.toFixed(1) }}%</td>
-                          <td class="mono">{{ s.maxDrawdownPct.toFixed(1) }}%</td>
-                          <td class="mono">{{ s.totalReturn.toFixed(1) }}%</td>
-                          <td>
-                            <button
-                              type="button"
-                              class="btn btn-link"
-                              (click)="toggleSnapshotNotes(s)"
-                              [title]="s.notes ? 'Edit notes — currently: ' + s.notes : 'Add notes'"
-                            >
-                              📝
-                            </button>
-                            <button
-                              type="button"
-                              class="btn btn-link"
-                              (click)="deleteSnapshot(s)"
-                              [disabled]="deletingSnapshotId() === s.id"
-                              title="Delete this saved snapshot"
-                            >
-                              🗑
-                            </button>
-                          </td>
-                        </tr>
-                        @if (editingNotesId() === s.id) {
-                          <tr class="snapshot-notes-row">
-                            <td colspan="7">
-                              <textarea
-                                class="form-input form-textarea"
-                                rows="2"
-                                placeholder="Notes (optional)…"
-                                [value]="editingNotesText()"
-                                (input)="editingNotesText.set($any($event.target).value)"
-                              ></textarea>
-                              <div
-                                style="margin-top:4px;display:flex;gap:8px;justify-content:flex-end;"
-                              >
-                                <button
-                                  type="button"
-                                  class="btn btn-link"
-                                  (click)="editingNotesId.set(null)"
-                                >
-                                  Cancel
-                                </button>
-                                <button
-                                  type="button"
-                                  class="btn btn-link"
-                                  (click)="saveSnapshotNotes(s)"
-                                >
-                                  Save notes
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        }
-                      }
-                    </tbody>
-                  </table>
-                  @if (overlayCurves().length > 0) {
-                    <div class="overlay-chart">
-                      <div class="overlay-chart-head">
-                        <span class="muted small">
-                          Equity-curve overlay · {{ visibleCurves().length }}/{{
-                            overlayCurves().length
-                          }}
-                          series
-                        </span>
-                        <label
-                          class="dsl-checkbox"
-                          title="Plot all curves on a shared y-axis to compare absolute returns instead of just shape"
-                        >
-                          <input
-                            type="checkbox"
-                            [checked]="overlaySharedY()"
-                            (change)="overlaySharedY.set($any($event.target).checked)"
-                          />
-                          <span class="muted small">shared y-axis</span>
-                        </label>
-                        <button
-                          type="button"
-                          class="btn btn-link"
-                          (click)="exportOverlayPng()"
-                          title="Download the overlay chart as a PNG"
-                        >
-                          📥 PNG
-                        </button>
-                      </div>
-                      <div class="overlay-svg-wrap">
-                        @if (overlaySharedY() && overlayBounds(); as b) {
-                          <span class="overlay-y-max muted small">{{
-                            b.max | number: '1.0-0'
-                          }}</span>
-                          <span class="overlay-y-min muted small">{{
-                            b.min | number: '1.0-0'
-                          }}</span>
-                        }
-                        <svg
-                          #overlaySvg
-                          class="overlay-svg"
-                          viewBox="0 0 320 80"
-                          preserveAspectRatio="none"
-                        >
-                          @for (c of visibleCurves(); track c.id) {
-                            <polyline
-                              fill="none"
-                              [attr.stroke]="c.color"
-                              stroke-width="1.4"
-                              [attr.points]="c.points"
-                            />
-                          }
-                        </svg>
-                      </div>
-                      <div class="overlay-legend">
-                        @for (c of overlayCurves(); track c.id) {
-                          <button
-                            type="button"
-                            class="overlay-legend-item"
-                            [class.is-hidden]="hiddenCurves().has(c.id)"
-                            (click)="toggleCurveVisibility(c.id)"
-                            [title]="
-                              hiddenCurves().has(c.id) ? 'Show ' + c.label : 'Hide ' + c.label
-                            "
-                          >
-                            <span class="overlay-legend-swatch" [style.background]="c.color"></span>
-                            <span class="overlay-legend-text">{{ c.label }}</span>
-                            @if (c.metrics) {
-                              <span class="overlay-legend-metrics muted small">{{
-                                c.metrics
-                              }}</span>
-                            }
-                          </button>
-                        }
-                      </div>
+                  @if (r.equityCurve && r.equityCurve.length > 1) {
+                    <div class="equity-sparkline">
+                      <span class="muted small">Equity curve</span>
+                      <svg width="100%" height="80" preserveAspectRatio="none" viewBox="0 0 400 80">
+                        <polyline
+                          [attr.points]="equitySparklinePoints(r.equityCurve, 400, 80)"
+                          fill="none"
+                          [attr.stroke]="r.finalBalance >= r.initialBalance ? '#248A3D' : '#D70015'"
+                          stroke-width="1.5"
+                        />
+                        <line
+                          [attr.x1]="0"
+                          [attr.x2]="400"
+                          [attr.y1]="equityBaselineY(r.equityCurve, r.initialBalance, 80)"
+                          [attr.y2]="equityBaselineY(r.equityCurve, r.initialBalance, 80)"
+                          stroke="rgba(0,0,0,0.15)"
+                          stroke-dasharray="2,3"
+                          stroke-width="1"
+                        />
+                      </svg>
                     </div>
                   }
-                </div>
-              }
-            </div>
+                  <div class="preview-meta">
+                    {{ r.candlesAnalyzed | number }} candles analysed · final balance &#36;{{
+                      r.finalBalance.toFixed(0)
+                    }}
+                    @if (r.note) {
+                      · <em>{{ r.note }}</em>
+                    }
+                    <button
+                      type="button"
+                      class="btn btn-link preview-snapshot-btn"
+                      (click)="snapshotPreview()"
+                      title="Save this preview to compare against later runs"
+                    >
+                      📌 Snapshot
+                    </button>
+                  </div>
+                }
+                @if (previewSnapshots().length > 0) {
+                  <div class="preview-snapshots">
+                    <div class="preview-snapshots-head">
+                      <span class="muted small"
+                        >Saved snapshots ({{ previewSnapshots().length }})</span
+                      >
+                      <span class="muted small">·</span>
+                      <button
+                        type="button"
+                        class="btn btn-link"
+                        (click)="toggleSnapshotFilter()"
+                        [title]="
+                          snapshotFilterMode() === 'matching'
+                            ? 'Currently matching this config — click to show all configs'
+                            : 'Currently all configs — click to filter to this config'
+                        "
+                      >
+                        {{ snapshotFilterMode() === 'matching' ? 'this config' : 'all configs' }}
+                      </button>
+                      <span class="muted small">·</span>
+                      <button
+                        type="button"
+                        class="btn btn-link"
+                        (click)="toggleSnapshotScope()"
+                        [title]="
+                          snapshotScope() === 'mine'
+                            ? 'Currently your snapshots — click to include other operators'
+                            : 'Currently every operator — click to filter to yours'
+                        "
+                      >
+                        {{ snapshotScope() === 'mine' ? 'yours' : 'everyone' }}
+                      </button>
+                    </div>
+                    <table class="preview-snapshot-table">
+                      <thead>
+                        <tr>
+                          <th>Captured</th>
+                          <th>Strategy</th>
+                          <th>Sharpe</th>
+                          <th>Win %</th>
+                          <th>Max DD</th>
+                          <th>Return</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (s of previewSnapshots(); track s.id) {
+                          <tr>
+                            <td>{{ s.capturedAt | date: 'MM-dd HH:mm' }}</td>
+                            <td class="mono" [title]="s.label ?? ''">
+                              {{ s.symbol }}/{{ s.timeframe }} · {{ s.strategyType }}
+                            </td>
+                            <td class="mono">{{ s.sharpeRatio.toFixed(2) }}</td>
+                            <td class="mono">{{ s.winRate.toFixed(1) }}%</td>
+                            <td class="mono">{{ s.maxDrawdownPct.toFixed(1) }}%</td>
+                            <td class="mono">{{ s.totalReturn.toFixed(1) }}%</td>
+                            <td>
+                              <button
+                                type="button"
+                                class="btn btn-link"
+                                (click)="toggleSnapshotNotes(s)"
+                                [title]="
+                                  s.notes ? 'Edit notes — currently: ' + s.notes : 'Add notes'
+                                "
+                              >
+                                📝
+                              </button>
+                              <button
+                                type="button"
+                                class="btn btn-link"
+                                (click)="deleteSnapshot(s)"
+                                [disabled]="deletingSnapshotId() === s.id"
+                                title="Delete this saved snapshot"
+                              >
+                                🗑
+                              </button>
+                            </td>
+                          </tr>
+                          @if (editingNotesId() === s.id) {
+                            <tr class="snapshot-notes-row">
+                              <td colspan="7">
+                                <textarea
+                                  class="form-input form-textarea"
+                                  rows="2"
+                                  placeholder="Notes (optional)…"
+                                  [value]="editingNotesText()"
+                                  (input)="editingNotesText.set($any($event.target).value)"
+                                ></textarea>
+                                <div
+                                  style="margin-top:4px;display:flex;gap:8px;justify-content:flex-end;"
+                                >
+                                  <button
+                                    type="button"
+                                    class="btn btn-link"
+                                    (click)="editingNotesId.set(null)"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    class="btn btn-link"
+                                    (click)="saveSnapshotNotes(s)"
+                                  >
+                                    Save notes
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          }
+                        }
+                      </tbody>
+                    </table>
+                    @if (overlayCurves().length > 0) {
+                      <div class="overlay-chart">
+                        <div class="overlay-chart-head">
+                          <span class="muted small">
+                            Equity-curve overlay · {{ visibleCurves().length }}/{{
+                              overlayCurves().length
+                            }}
+                            series
+                          </span>
+                          <label
+                            class="dsl-checkbox"
+                            title="Plot all curves on a shared y-axis to compare absolute returns instead of just shape"
+                          >
+                            <input
+                              type="checkbox"
+                              [checked]="overlaySharedY()"
+                              (change)="overlaySharedY.set($any($event.target).checked)"
+                            />
+                            <span class="muted small">shared y-axis</span>
+                          </label>
+                          <button
+                            type="button"
+                            class="btn btn-link"
+                            (click)="exportOverlayPng()"
+                            title="Download the overlay chart as a PNG"
+                          >
+                            📥 PNG
+                          </button>
+                        </div>
+                        <div class="overlay-svg-wrap">
+                          @if (overlaySharedY() && overlayBounds(); as b) {
+                            <span class="overlay-y-max muted small">{{
+                              b.max | number: '1.0-0'
+                            }}</span>
+                            <span class="overlay-y-min muted small">{{
+                              b.min | number: '1.0-0'
+                            }}</span>
+                          }
+                          <svg
+                            #overlaySvg
+                            class="overlay-svg"
+                            viewBox="0 0 320 80"
+                            preserveAspectRatio="none"
+                          >
+                            @for (c of visibleCurves(); track c.id) {
+                              <polyline
+                                fill="none"
+                                [attr.stroke]="c.color"
+                                stroke-width="1.4"
+                                [attr.points]="c.points"
+                              />
+                            }
+                          </svg>
+                        </div>
+                        <div class="overlay-legend">
+                          @for (c of overlayCurves(); track c.id) {
+                            <button
+                              type="button"
+                              class="overlay-legend-item"
+                              [class.is-hidden]="hiddenCurves().has(c.id)"
+                              (click)="toggleCurveVisibility(c.id)"
+                              [title]="
+                                hiddenCurves().has(c.id) ? 'Show ' + c.label : 'Hide ' + c.label
+                              "
+                            >
+                              <span
+                                class="overlay-legend-swatch"
+                                [style.background]="c.color"
+                              ></span>
+                              <span class="overlay-legend-text">{{ c.label }}</span>
+                              @if (c.metrics) {
+                                <span class="overlay-legend-metrics muted small">{{
+                                  c.metrics
+                                }}</span>
+                              }
+                            </button>
+                          }
+                        </div>
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            }
 
             @if (strategy(); as s) {
               <div class="version-history">
@@ -1909,6 +1954,11 @@ const TIMEFRAME_LABELS: Record<string, string> = {
         padding: 6px 4px;
         background: var(--bg-secondary, #fafbfc);
       }
+      /* UI-IDE: script mode needs room for the editor beside its side panel. */
+      .dialog.dialog-wide {
+        max-width: min(1320px, 96vw);
+        max-height: 94vh;
+      }
     `,
   ],
 })
@@ -2069,7 +2119,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     // them now so the offending nodes light up next to the error.
     if (!this.submitError()) return;
     untracked(() => {
-      if (!this.form || !this.isDslType()) return;
+      if (!this.form || !this.isDslType() || this.isScriptAuthoring()) return;
       this.dslServer.set(null);
       this.scheduleDslCheck(true);
     });
@@ -2492,7 +2542,13 @@ export class StrategyFormComponent implements OnInit, OnChanges {
       this.dslTimer = null;
     }
     const json = this.paramsJson();
-    if (!this.isDslType() || !json.trim() || !parseDsl(json).ok || this.dslServerFresh()) {
+    if (
+      !this.isDslType() ||
+      this.isScriptAuthoring() ||
+      !json.trim() ||
+      !parseDsl(json).ok ||
+      this.dslServerFresh()
+    ) {
       this.dslChecking.set(false);
       return;
     }
@@ -3142,9 +3198,12 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     });
   }
 
-  /** True while rule errors stand: Save stays disabled until they are fixed. */
+  /**
+   * True while rule errors stand: Save stays disabled until they are fixed.
+   * A script-authored strategy has no rules — its compile gate is the script panel's.
+   */
   saveBlocked(): boolean {
-    return this.isDslType() && this.dslErrorCount() > 0;
+    return !this.isScriptAuthoring() && this.isDslType() && this.dslErrorCount() > 0;
   }
 
   /** Why Save is disabled, for its tooltip; null when it is not. */
@@ -3318,5 +3377,101 @@ export class StrategyFormComponent implements OnInit, OnChanges {
 
   onCancel(): void {
     this.cancelled.emit();
+  }
+
+  // ── Pine script authoring (UI-IDE) ──────────────────────────────────────
+  // RuleBased strategies are authored as rules (the DSL above) or as a Pine v6
+  // script. The mode and the script draft are re-derived whenever the form
+  // opens or is pointed at another strategy; the draft lives here so the
+  // script panel keeps it across the form's tab switches.
+  //
+  // Script mode submits through submitScript(): create posts scriptSource /
+  // scriptInputs / executionPolicy (contract §8) through the ordinary
+  // `submitted` output; edit saves the script itself with
+  // PUT strategy/{id}/script (compile + version capture + live restart) and
+  // then emits the ordinary metadata update only when the form changed.
+
+  readonly authoringMode = linkedAuthoringMode(
+    () => this.strategy(),
+    () => this.open(),
+  );
+  readonly scriptDraft = linkedScriptDraft(
+    () => this.strategy(),
+    () => this.open(),
+  );
+  private scriptSubmitting = false;
+  @ViewChild(ScriptAuthoringComponent) private scriptAuthoring?: ScriptAuthoringComponent;
+
+  /** The strategy being edited — or the type being created — is RuleBased. */
+  isRuleBased(): boolean {
+    const type = this.strategy()?.strategyType ?? this.form?.get('strategyType')?.value;
+    return type === 'RuleBased';
+  }
+
+  /** The form is authoring a Pine script (RuleBased in script mode). */
+  isScriptAuthoring(): boolean {
+    return this.authoringMode() === 'script' && this.isRuleBased();
+  }
+
+  /** The symbol the script compiles and previews against (the first one typed, when creating). */
+  scriptSymbol(): string | null {
+    return this.strategy()?.symbol ?? this.parsedSymbols()[0] ?? null;
+  }
+
+  scriptTimeframe(): string | null {
+    return this.strategy()?.timeframe ?? this.form?.get('timeframe')?.value ?? null;
+  }
+
+  /** Submit in script mode — see the block comment above. */
+  async submitScript(): Promise<void> {
+    const panel = this.scriptAuthoring;
+    if (!panel || this.scriptSubmitting || this.form.invalid) return;
+    this.scriptSubmitting = true;
+    try {
+      const script = await panel.prepareSubmit();
+      if (!script) return;
+      const val = this.form.getRawValue();
+      const common = {
+        name: val.name,
+        description: val.description || '',
+        riskProfileId: val.riskProfileId || null,
+        riskOverridesJson: val.riskOverridesJson || null,
+        sizingConfigJson: val.sizingConfigJson || null,
+        sessionFilterJson: val.sessionFilterJson || null,
+        regimeGateJson: val.regimeGateJson || null,
+        multiTimeframeGateJson: val.multiTimeframeGateJson || null,
+      };
+      const existing = this.strategy();
+      if (!existing) {
+        const symbols = this.parsedSymbols();
+        const create: CreateStrategyRequest & { symbols: string[] } = {
+          ...common,
+          strategyType: 'RuleBased',
+          symbol: symbols[0] ?? val.symbol,
+          symbols,
+          timeframe: val.timeframe,
+          scriptSource: script.source,
+          scriptInputs: script.inputs,
+          executionPolicy: script.executionPolicy,
+        };
+        this.submitted.emit(create);
+        return;
+      }
+      const scriptChanged = panel.isDirty();
+      if (scriptChanged && !(await panel.saveScript(existing.id, script))) return;
+      if (this.form.dirty) {
+        // Metadata only: the script went through its own endpoint, and
+        // parametersJson is left out so the (empty) rules stay untouched.
+        const update = { ...common, changeReason: this.updateChangeReason()?.trim() || null };
+        this.submitted.emit(update);
+      } else {
+        if (scriptChanged) {
+          this.notifications.success('Script saved — live sessions pick it up at the next bar');
+        }
+        this.cancelled.emit();
+      }
+    } finally {
+      this.scriptSubmitting = false;
+    }
   }
 }

@@ -56,6 +56,7 @@ import { StrategyCapacityCardComponent } from '../../components/strategy-capacit
 import { StrategyPromotionReviewsTabComponent } from '../../components/strategy-promotion-reviews-tab/strategy-promotion-reviews-tab.component';
 import { RejectionDistributionDrawerComponent } from '../../components/rejection-distribution-drawer/rejection-distribution-drawer.component';
 import { RationaleInlineComponent } from '@features/llm/components/rationale-inline/rationale-inline.component';
+import { StrategyScriptCardComponent } from '@features/scripting/components/strategy-script-card/strategy-script-card.component';
 
 @Component({
   selector: 'app-strategy-detail-page',
@@ -80,6 +81,7 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
     RejectionDistributionDrawerComponent,
     RationaleInlineComponent,
     RouterLink,
+    StrategyScriptCardComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -322,6 +324,12 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
                   </div>
                 }
               </div>
+
+              <!-- Pine script (UI-IDE): script strategies show their source, declaration
+                   and saved inputs read-only; Edit opens the form in script mode. -->
+              @if (strategy()!.authoringMode === 'Script' || strategy()!.scriptSource) {
+                <app-strategy-script-card [strategy]="strategy()!" (editRequested)="openEdit()" />
+              }
 
               <!-- Recent signals + Recent orders mini-feed -->
               <div class="cfg-2col">

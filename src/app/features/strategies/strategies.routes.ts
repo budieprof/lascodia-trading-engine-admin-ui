@@ -49,6 +49,15 @@ export const STRATEGIES_ROUTES: Routes = [
       ),
   },
   {
+    // Pine script libraries (ADR-0027 §7). Declared before ':id' so it is never read as an id.
+    path: 'libraries',
+    data: { breadcrumb: 'Pine Libraries' },
+    loadComponent: () =>
+      import('@features/scripting/pages/libraries-page/libraries-page.component').then(
+        (m) => m.LibrariesPageComponent,
+      ),
+  },
+  {
     path: ':id/analytics',
     component: StrategyAnalyticsPageComponent,
     data: { breadcrumb: 'Analytics' },

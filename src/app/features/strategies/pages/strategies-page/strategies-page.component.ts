@@ -49,6 +49,7 @@ import { patchDslFields } from '../../dsl/dsl-model';
 import { failureMessage } from '../../util/api-failure';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
+import { ImportScriptButtonComponent } from '@features/scripting/components/import-script-dialog/import-script-dialog.component';
 
 @Component({
   selector: 'app-strategies-page',
@@ -64,6 +65,7 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
     StrategyFormComponent,
     CloneStrategyDialogComponent,
     DecimalPipe,
+    ImportScriptButtonComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -72,6 +74,8 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
         <!-- Strategy List Tab -->
         @if (activeTab() === 'list') {
           <app-page-header title="Strategies" subtitle="Manage trading strategies">
+            <!-- UI-IDE: create a strategy from a Pine v6 file (POST strategy/import). -->
+            <app-import-script-button />
             <button
               class="btn btn-secondary"
               (click)="openTemplatePanel()"
