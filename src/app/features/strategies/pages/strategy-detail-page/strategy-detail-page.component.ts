@@ -48,7 +48,9 @@ import { PageContextService } from '@core/assistant/page-context.service';
 
 import { StrategyFormComponent } from '../../components/strategy-form/strategy-form.component';
 import { CloneStrategyDialogComponent } from '../../components/clone-strategy-dialog/clone-strategy-dialog.component';
+import { SubmitForApprovalDialogComponent } from '../../components/submit-for-approval-dialog/submit-for-approval-dialog.component';
 import { failureMessage } from '../../util/api-failure';
+import { activationRefusalMessage, isDraftActivationRefusal } from '../../util/activation';
 import { PromotionReadinessCardComponent } from '../../components/promotion-readiness-card/promotion-readiness-card.component';
 import { PromotionGateHistoryCardComponent } from '../../components/promotion-gate-history-card/promotion-gate-history-card.component';
 import { StrategyVariantsTabComponent } from '../../components/strategy-variants-tab/strategy-variants-tab.component';
@@ -79,6 +81,7 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
     RelativeTimePipe,
     StrategyFormComponent,
     CloneStrategyDialogComponent,
+    SubmitForApprovalDialogComponent,
     PromotionReadinessCardComponent,
     PromotionGateHistoryCardComponent,
     StrategyVariantsTabComponent,
@@ -100,8 +103,23 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
         <app-page-header [title]="strategy()!.name ?? ''" [subtitle]="headerSubtitle()">
           <span slot="title-after" class="head-chips">
             <app-status-badge [status]="strategy()!.status" type="strategy" />
+            @if (strategy()!.lifecycleStage; as stage) {
+              <span class="stage-chip" title="Lifecycle stage">
+                <app-status-badge [status]="stage" type="lifecycle" />
+              </span>
+            }
             <app-presence-badge [routeKey]="'strategy:' + strategyId" />
           </span>
+          @if (strategy()!.lifecycleStage === 'Draft') {
+            <button
+              type="button"
+              class="btn btn-primary"
+              (click)="openApproval()"
+              title="Run the promotion gates; on a pass the strategy moves to Approved and paper-trades"
+            >
+              Submit for approval
+            </button>
+          }
           @if (strategy()!.status === 'Paused' || strategy()!.status === 'Stopped') {
             <button class="btn btn-success" (click)="onActivate()" [disabled]="actionLoading()">
               Activate
@@ -147,6 +165,25 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
           through to /llm/rationales filtered by EventId=strategyId.
         -->
         <app-rationale-inline eventType="StrategyActivated" [eventId]="strategyId" />
+
+        @if (activationHint(); as hint) {
+          <div class="activation-hint" role="alert">
+            <span>{{ hint }}</span>
+            @if (strategy()!.lifecycleStage === 'Draft') {
+              <button type="button" class="btn btn-primary" (click)="openApproval()">
+                Submit for approval
+              </button>
+            }
+            <button
+              type="button"
+              class="btn btn-ghost"
+              (click)="activationHint.set(null)"
+              aria-label="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+        }
 
         @if (latestSnapshot(); as s) {
           <div class="health-strip">
@@ -335,10 +372,15 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
                 }
               </div>
 
-              <!-- Pine script (UI-IDE): script strategies show their source, declaration
-                   and saved inputs read-only; Edit opens the form in script mode. -->
-              @if (strategy()!.authoringMode === 'Script' || strategy()!.scriptSource) {
-                <app-strategy-script-card [strategy]="strategy()!" (editRequested)="openEdit()" />
+              <!-- Pine script: a script strategy's source, declaration and saved inputs,
+                   read-only; Edit opens the form in script mode, the policy / bindings chips
+                   open the Execution tab where they are changed. -->
+              @if (isScript()) {
+                <app-strategy-script-card
+                  [strategy]="strategy()!"
+                  (editRequested)="openEdit()"
+                  (executionRequested)="openExecutionTab()"
+                />
               }
 
               <!-- Recent signals + Recent orders mini-feed -->
@@ -472,9 +514,13 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
             @if (isScript()) {
               <!-- Script strategies: symbol / timeframe / input overrides, deep mode and
                    the bar magnifier (ADR-0027 §4). -->
-              <app-script-backtest-launcher [strategy]="strategy()!" />
+              <app-script-backtest-launcher
+                [strategy]="strategy()!"
+                (queued)="backtestTable?.loadData()"
+              />
             }
             <app-data-table
+              #backtestTable
               [columnDefs]="backtestColumns"
               [fetchData]="fetchBacktests"
               (rowClick)="onBacktestRowClick($event)"
@@ -622,6 +668,16 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
         (submitted)="onUpdate($event)"
         (cancelled)="closeEdit()"
         (strategyChanged)="loadStrategy()"
+        (executionRequested)="openExecutionTab()"
+      />
+
+      <!-- Always in the template: an evaluation keeps running (and reports back) after the
+           operator closes the dialog. -->
+      <app-submit-for-approval-dialog
+        [strategy]="approvalTarget()"
+        (closed)="approvalTarget.set(null)"
+        (changed)="onApprovalChanged($event)"
+        (historyRequested)="openPromotionHistory()"
       />
 
       <app-clone-strategy-dialog [strategy]="cloneTarget()" (closed)="cloneTarget.set(null)" />
@@ -781,6 +837,24 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
         display: inline-flex;
         align-items: center;
         gap: var(--space-2);
+      }
+      .stage-chip {
+        display: inline-flex;
+      }
+      .activation-hint {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        margin: 0 0 var(--space-4);
+        padding: var(--space-3) var(--space-4);
+        border-radius: var(--radius-md);
+        border: 1px solid rgba(255, 149, 0, 0.4);
+        background: rgba(255, 149, 0, 0.08);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+      .activation-hint > span {
+        flex: 1;
       }
       .card-title .muted {
         margin-left: var(--space-2);
@@ -1228,6 +1302,8 @@ export class StrategyDetailPageComponent implements OnInit {
   ];
 
   @ViewChild('optimizationTable') optimizationTable?: DataTableComponent<OptimizationRunDto>;
+  /** Refreshed when the script launcher queues a run, so the new row shows at once. */
+  @ViewChild('backtestTable') backtestTable?: DataTableComponent<BacktestRunDto>;
 
   private readonly pageContext = inject(PageContextService);
 
@@ -1264,6 +1340,10 @@ export class StrategyDetailPageComponent implements OnInit {
   updateError = signal<string | null>(null);
   /** Strategy whose clone dialog is open (this one); null when closed. */
   cloneTarget = signal<StrategyDto | null>(null);
+  /** The Draft whose "Submit for approval" dialog is open. */
+  readonly approvalTarget = signal<StrategyDto | null>(null);
+  /** Why the last activation was refused, shown under the header until dismissed. */
+  readonly activationHint = signal<string | null>(null);
   showRejectionDrawer = signal(false);
   optimizationLoading = signal(false);
 
@@ -1485,6 +1565,30 @@ export class StrategyDetailPageComponent implements OnInit {
   /** Bindings or execution policy changed: re-read the strategy. */
   onExecutionChanged(): void {
     this.loadStrategy();
+  }
+
+  /** The execution policy and the account bindings are changed on the Execution tab. */
+  openExecutionTab(): void {
+    this.showEditForm.set(false);
+    this.updateError.set(null);
+    this.activeTab.set('execution');
+  }
+
+  // ── Submit for approval (ADR-0027 DEC-10) ────────────────────────────────
+  openApproval(): void {
+    this.activationHint.set(null);
+    this.approvalTarget.set(this.strategy());
+  }
+
+  /** A verdict landed: the lifecycle stage may have moved (Draft → Approved). */
+  onApprovalChanged(strategyId: number): void {
+    if (strategyId === this.strategyId) this.loadStrategy();
+  }
+
+  /** The Promotion tab's gate history records every evaluation, including a lost response's. */
+  openPromotionHistory(): void {
+    this.approvalTarget.set(null);
+    this.activeTab.set('promotion');
   }
 
   readonly signalColumns: ColDef[] = [
@@ -1852,6 +1956,8 @@ export class StrategyDetailPageComponent implements OnInit {
       this.showDeleteConfirm.set(false);
       this.showRejectionDrawer.set(false);
       this.cloneTarget.set(null);
+      this.approvalTarget.set(null);
+      this.activationHint.set(null);
       this.updateError.set(null);
       this.activeTab.set('config');
     }
@@ -1991,19 +2097,38 @@ export class StrategyDetailPageComponent implements OnInit {
     }
   });
 
+  /**
+   * `PUT strategy/{id}/activate`. The engine answers `data: "Activated"` (not the strategy), and
+   * refuses with HTTP 200 + `status: false` — a Draft's refusal points at Submit for approval.
+   */
   onActivate(): void {
     this.actionLoading.set(true);
-    this.strategiesService.activate(this.strategyId).subscribe({
+    this.activationHint.set(null);
+    this.strategiesService.activate(this.strategyId, false, { silent: true }).subscribe({
       next: (res) => {
-        if (res.data) this.strategy.set(res.data);
+        this.actionLoading.set(false);
+        if (!res?.status) {
+          this.refuseActivation(failureMessage(res, 'The engine did not activate the strategy.'));
+          return;
+        }
         this.notifications.success('Strategy activated');
-        this.actionLoading.set(false);
+        this.loadStrategy();
       },
-      error: () => {
-        this.notifications.error('Failed to activate strategy');
+      error: (err) => {
         this.actionLoading.set(false);
+        this.refuseActivation(failureMessage(err, 'Activating the strategy failed.'));
       },
     });
+  }
+
+  /** Says why activation was refused; a Draft also gets the banner with "Submit for approval". */
+  private refuseActivation(reason: string): void {
+    const stage = this.strategy()?.lifecycleStage ?? null;
+    const message = activationRefusalMessage(reason, stage);
+    this.notifications.error(message);
+    if (isDraftActivationRefusal(reason, stage)) {
+      this.activationHint.set(message);
+    }
   }
 
   /**
@@ -2019,9 +2144,14 @@ export class StrategyDetailPageComponent implements OnInit {
     this.actionLoading.set(true);
     this.strategiesService.pause(this.strategyId).subscribe({
       next: (res) => {
-        if (res.data) this.strategy.set(res.data);
-        this.notifications.success('Strategy paused');
         this.actionLoading.set(false);
+        if (!res?.status) {
+          this.notifications.error(failureMessage(res, 'The engine did not pause the strategy.'));
+          return;
+        }
+        // The engine answers `data: "Paused"`, not the strategy — re-read it.
+        this.notifications.success('Strategy paused');
+        this.loadStrategy();
       },
       error: () => {
         this.notifications.error('Failed to pause strategy');

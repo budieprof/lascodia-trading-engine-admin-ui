@@ -38,6 +38,7 @@ import {
   BacktestPreviewSnapshotDto,
   SaveBacktestPreviewSnapshotRequest,
   PromotionGatesDto,
+  StrategyApprovalResultDto,
   LlmProposalDto,
   LlmProposalStatusDto,
   StrategyProposalCycleResult,
@@ -176,9 +177,30 @@ export class StrategiesService {
    * have never paper-traded). Adversarial robustness + edge-posterior + CPCV
    * + TCA + correlation gates always run regardless. Default false.
    */
-  activate(id: number, bypassPaperGate = false): Observable<ResponseData<StrategyDto>> {
+  activate(
+    id: number,
+    bypassPaperGate = false,
+    opts?: ApiCallOptions,
+  ): Observable<ResponseData<string>> {
     const qs = bypassPaperGate ? '?bypassPaperGate=true' : '';
-    return this.api.put(`/strategy/${id}/activate${qs}`);
+    return this.api.put(`/strategy/${id}/activate${qs}`, {}, opts);
+  }
+
+  /**
+   * Submit a Draft for approval (ADR-0027 DEC-10): runs every promotion gate — the paper gate is
+   * bypassed, a Draft has no paper history — and moves Draft → Approved on a pass, which starts
+   * paper trading. Synchronous and potentially slow (CPCV; the engine bounds it, 600 s by
+   * default); the verdict is recorded either way and readable from the gate history.
+   *
+   * A rejection is `status: true, approved: false`; an evaluation that timed out or failed is
+   * `status: false` (`-12`) with an `evaluation` gate row saying why; a non-Draft is `-11`. Every
+   * shape carries the result in `data`.
+   */
+  submitForApproval(
+    id: number,
+    opts?: ApiCallOptions,
+  ): Observable<ResponseData<StrategyApprovalResultDto>> {
+    return this.api.post(`/strategy/${id}/submit-for-approval`, {}, opts);
   }
 
   /**
@@ -193,7 +215,7 @@ export class StrategiesService {
     return this.api.get(`/strategy/${id}/promotion-gates${qs}`);
   }
 
-  pause(id: number): Observable<ResponseData<StrategyDto>> {
+  pause(id: number): Observable<ResponseData<string>> {
     return this.api.put(`/strategy/${id}/pause`);
   }
 

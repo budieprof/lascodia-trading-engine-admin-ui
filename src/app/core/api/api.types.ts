@@ -272,6 +272,26 @@ export interface PromotionGatesDto {
   diagnostics: string[];
 }
 
+/** One promotion gate's verdict from `POST strategy/{id}/submit-for-approval` (skipped gates pass, with the reason). */
+export interface StrategyApprovalGateDto {
+  name: string;
+  passed: boolean;
+  detail: string;
+}
+
+/**
+ * `POST strategy/{id}/submit-for-approval` (ADR-0027 DEC-10): the operator's path from Draft to
+ * Approved. Every promotion gate runs (the paper gate is bypassed — a Draft has no paper history);
+ * on a pass the strategy is Approved + Paused, i.e. paper trading, until `PUT strategy/{id}/activate`.
+ */
+export interface StrategyApprovalResultDto {
+  approved: boolean;
+  /** The lifecycle stage after the call. */
+  stage: StrategyLifecycleStage | string;
+  /** Every gate's verdict; a gate named `evaluation` means the run was not judged (timeout / error). */
+  gates: StrategyApprovalGateDto[];
+}
+
 /**
  * Promotion-ladder stage. Auto-advanced by `StrategyPromotionWorker`:
  * `BacktestQualified → Approved` after observation passes health gates,
