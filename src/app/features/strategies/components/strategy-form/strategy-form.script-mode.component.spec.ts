@@ -75,6 +75,8 @@ describe('StrategyFormComponent — Pine script authoring', () => {
   let host: HTMLElement;
   let submitted: any[];
   let cancelled: number;
+  let changed: number;
+  let executionRequests: number;
   let notify: Record<string, ReturnType<typeof vi.fn>>;
 
   function create(strategy: StrategyDto | null): void {
@@ -85,8 +87,12 @@ describe('StrategyFormComponent — Pine script authoring', () => {
     (cmp as any).open = signal(true);
     submitted = [];
     cancelled = 0;
+    changed = 0;
+    executionRequests = 0;
     cmp.submitted.subscribe((v) => submitted.push(v));
     cmp.cancelled.subscribe(() => cancelled++);
+    cmp.strategyChanged.subscribe(() => changed++);
+    cmp.executionRequested.subscribe(() => executionRequests++);
     fixture.detectChanges(); // runs ngOnInit (builds the form)
     // Seed the form from the strategy (a changes map, whichever ngOnChanges signature is in play).
     (cmp as any).ngOnChanges({ strategy: {}, open: {} });
@@ -218,7 +224,8 @@ describe('StrategyFormComponent — Pine script authoring', () => {
       expect(submitted).toHaveLength(1);
       expect(submitted[0]).toEqual({
         name: 'Pine EMA',
-        description: '',
+        // The engine requires a description; the name stands in for a blank one.
+        description: 'Pine EMA',
         riskProfileId: 3,
         riskOverridesJson: null,
         sizingConfigJson: null,
@@ -278,6 +285,8 @@ describe('StrategyFormComponent — Pine script authoring', () => {
       expect(submitted).toEqual([]);
       expect(cancelled).toBe(1);
       expect(notify['success']).toHaveBeenCalled();
+      // The host re-reads the strategy, so its script card and tabs show the saved script.
+      expect(changed).toBe(1);
     });
 
     it('then emits the metadata update — never the script, never parametersJson', async () => {
@@ -295,7 +304,11 @@ describe('StrategyFormComponent — Pine script authoring', () => {
         name: 'Renamed',
         riskProfileId: 5,
         changeReason: 'tighter stop',
+        // Same semantics as a rules edit: '' clears a sub-config, null would leave it unchanged.
+        riskOverridesJson: '',
       });
+      // Not re-read yet: the pending update would otherwise be overwritten mid-flight.
+      expect(changed).toBe(0);
       for (const key of [
         'parametersJson',
         'scriptSource',
@@ -317,6 +330,28 @@ describe('StrategyFormComponent — Pine script authoring', () => {
       await cmp.submitScript();
       expect(stub.saveScript).not.toHaveBeenCalled();
       expect(submitted[0]).toMatchObject({ description: 'new description' });
+    });
+
+    it('reports the saved script on cancel when the metadata update after it was refused', async () => {
+      panel({ source: `${SCRIPT}// y\n`, inputs: {}, executionPolicy: 'Direct' }, true);
+      cmp.form.markAsDirty();
+      await cmp.submitScript();
+      expect(submitted).toHaveLength(1);
+      expect(changed).toBe(0);
+      cmp.onCancel();
+      expect(changed).toBe(1);
+      expect(cancelled).toBe(1);
+    });
+
+    it('asks the host for the Execution tab to change the policy — unless the edit is unsaved', () => {
+      panel({ source: SCRIPT, inputs: { in_3_len: 20 }, executionPolicy: 'Direct' }, false);
+      cmp.onExecutionRequested();
+      expect(executionRequests).toBe(1);
+      cmp.form.patchValue({ name: 'Renamed' });
+      cmp.form.markAsDirty();
+      cmp.onExecutionRequested();
+      expect(executionRequests).toBe(1);
+      expect(notify['info']).toHaveBeenCalledWith(expect.stringContaining('Execution tab'));
     });
 
     it('stays open when the engine refuses the script', async () => {

@@ -16,9 +16,9 @@ import type {
   ScriptCompileResult,
   ScriptExecutionPolicy,
   ScriptInputValues,
-  ScriptRunResult,
 } from '@core/api/scripting.types';
 import { ScriptingService, toScriptingError } from '@core/services/scripting.service';
+import { EXITS_NEVER_BLOCKED, POLICY_DESCRIPTIONS } from '../../execution/execution.model';
 import { inputOverrides, resolveInputValues } from '../../pine/pine-inputs';
 import { DeclarationSummaryComponent } from '../declaration-summary/declaration-summary.component';
 import { InputsFormComponent } from '../inputs-form/inputs-form.component';
@@ -27,7 +27,7 @@ import { ScriptWorkbenchComponent } from '../script-workbench/script-workbench.c
 import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
 import { draftFor, type ScriptDraft } from './authoring-mode';
 
-type SideTab = 'inputs' | 'properties' | 'preview';
+type SideTab = 'inputs' | 'properties';
 
 function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
   const ka = Object.keys(a);
@@ -38,7 +38,12 @@ function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
 /**
  * "Script (Pine v6)" authoring for a RuleBased strategy, inside the strategy form: the editor
  * with live compile diagnostics, the declaration read from `strategy()`, the inputs settings form,
- * the execution policy and a Preview run.
+ * the execution policy and, under them at full width, the Preview (chart, logs, trace, profiler,
+ * Bar Replay and the Strategy report of a run).
+ *
+ * A new strategy's execution policy is picked here; an existing one's is changed on its detail
+ * page's Execution tab (`PUT strategy/{id}/execution-policy`), which `executionRequested` asks the
+ * host to open.
  *
  * The draft lives in the parent form (two-way `draft`), so it survives the form's tab switches.
  * The form calls {@link prepareSubmit} before creating a strategy and {@link saveScript} to save
@@ -92,16 +97,6 @@ function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
           >
             Properties
           </button>
-          <button
-            type="button"
-            role="tab"
-            class="side-tab"
-            [class.is-active]="tab() === 'preview'"
-            [attr.aria-selected]="tab() === 'preview'"
-            (click)="tab.set('preview')"
-          >
-            Preview
-          </button>
         </div>
 
         <div class="side-body">
@@ -127,9 +122,14 @@ function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
                 <label class="policy-label" for="script-execution-policy">Execution policy</label>
                 @if (strategy()) {
                   <span class="chip chip-accent">{{ draft().executionPolicy }}</span>
-                  <span class="muted small"
-                    >Changed from the strategy's bindings &amp; policy settings.</span
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-sm"
+                    (click)="executionRequested.emit()"
+                    title="The policy and the account bindings are changed on the strategy's Execution tab"
                   >
+                    Change on the Execution tab…
+                  </button>
                 } @else {
                   <select
                     id="script-execution-policy"
@@ -146,23 +146,9 @@ function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
                   </select>
                 }
                 <p class="muted small policy-help">
-                  Direct keeps live trading equal to the backtest: only kill switches, EA safety,
-                  the risk checker and account caps apply. Exits are never blocked by entry gates.
+                  {{ policyText(draft().executionPolicy) }} {{ exitsNote }}
                 </p>
               </div>
-            }
-            @case ('preview') {
-              <app-script-preview
-                [source]="draft().source"
-                [inputs]="draft().inputs"
-                [symbol]="symbol()"
-                [timeframe]="timeframe()"
-                [kind]="shown()?.declaration?.kind ?? null"
-                (reveal)="workbench?.reveal($event.line, $event.column)"
-                (result)="previewResult.emit($event)"
-              >
-                <ng-content select="[scriptChartOverlay]" />
-              </app-script-preview>
             }
           }
         </div>
@@ -178,6 +164,20 @@ function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
         }
       </div>
     </div>
+
+    <!-- Preview at full width under the editor: a chart needs the room, and the inputs beside
+         the editor stay in view while a run is compared against them. -->
+    <section class="preview-section" aria-label="Preview">
+      <h4 class="preview-title">Preview</h4>
+      <app-script-preview
+        [source]="draft().source"
+        [inputs]="draft().inputs"
+        [symbol]="symbol()"
+        [timeframe]="timeframe()"
+        [kind]="shown()?.declaration?.kind ?? null"
+        (reveal)="workbench?.reveal($event.line, $event.column)"
+      />
+    </section>
   `,
   styles: [
     SCRIPTING_UI_STYLES,
@@ -262,6 +262,19 @@ function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
         gap: 6px;
         margin: 0;
       }
+      .preview-section {
+        margin-top: 16px;
+        padding-top: 12px;
+        border-top: 1px solid var(--border);
+      }
+      .preview-title {
+        margin: 0 0 8px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-secondary);
+      }
     `,
   ],
 })
@@ -273,8 +286,8 @@ export class ScriptAuthoringComponent {
   /** The strategy's symbol and timeframe — used to refine warnings and to run previews. */
   readonly symbol = input<string | null>(null);
   readonly timeframe = input<string | null>(null);
-  /** Every preview run's result — for the chart overlay. */
-  readonly previewResult = output<ScriptRunResult>();
+  /** Edit mode: the operator wants to change the policy (on the detail page's Execution tab). */
+  readonly executionRequested = output<void>();
 
   @ViewChild(ScriptWorkbenchComponent) workbench?: ScriptWorkbenchComponent;
 
@@ -304,6 +317,12 @@ export class ScriptAuthoringComponent {
 
   setInputs(inputs: ScriptInputValues): void {
     this.draft.update((d) => ({ ...d, inputs }));
+  }
+
+  readonly exitsNote = EXITS_NEVER_BLOCKED;
+
+  policyText(policy: ScriptExecutionPolicy): string {
+    return (POLICY_DESCRIPTIONS[policy] ?? POLICY_DESCRIPTIONS.Direct).summary;
   }
 
   setPolicy(policy: ScriptExecutionPolicy): void {

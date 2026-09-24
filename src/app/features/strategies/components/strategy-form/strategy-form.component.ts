@@ -35,7 +35,7 @@ import {
   RiskProfileDto,
   CurrencyPairDto,
 } from '@core/api/api.types';
-// ── Pine script authoring (UI-IDE) — see the "Pine script authoring" block at the end of the class.
+// ── Pine script authoring — see the "Pine script authoring" block at the end of the class.
 import { AuthoringModeSwitchComponent } from '@features/scripting/components/script-authoring/authoring-mode-switch.component';
 import { ScriptAuthoringComponent } from '@features/scripting/components/script-authoring/script-authoring.component';
 import {
@@ -365,7 +365,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                 ></textarea>
               </div>
 
-              <!-- ── Pine script authoring (UI-IDE) ─────────────────────────────
+              <!-- ── Pine script authoring ──────────────────────────────────────
                    RuleBased strategies are authored either with the rule builder
                    (Parameters JSON below) or as a Pine v6 script. In script mode the
                    panel replaces the rules block and the DSL backtest preview. -->
@@ -378,6 +378,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                   [strategy]="strategy()"
                   [symbol]="scriptSymbol()"
                   [timeframe]="scriptTimeframe()"
+                  (executionRequested)="onExecutionRequested()"
                 />
               }
 
@@ -441,7 +442,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                 </div>
               }
 
-              <!-- UI-IDE: rules block hidden in script mode (body deliberately not re-indented). -->
+              <!-- Script mode replaces the rules block with the script panel above. -->
               @if (!isScriptAuthoring()) {
                 <div class="form-group">
                   <label class="form-label">
@@ -656,8 +657,8 @@ const TIMEFRAME_LABELS: Record<string, string> = {
               </div>
             }
 
-            <!-- UI-IDE: a script previews through its own panel (scripting/run); this
-                 DSL preview is hidden in script mode (body deliberately not re-indented). -->
+            <!-- A script previews through its own panel (scripting/run); this DSL
+                 preview is hidden in script mode. -->
             @if (!isScriptAuthoring()) {
               <!-- Backtest preview panel — synchronous, server-bounded (≤90d, ≤6000
                  candles, 60s deadline). Operators see real Sharpe / win-rate / max DD
@@ -1954,7 +1955,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
         padding: 6px 4px;
         background: var(--bg-secondary, #fafbfc);
       }
-      /* UI-IDE: script mode needs room for the editor beside its side panel. */
+      /* Script mode needs room for the editor beside its side panel, and the preview under them. */
       .dialog.dialog-wide {
         max-width: min(1320px, 96vw);
         max-height: 94vh;
@@ -1997,8 +1998,10 @@ export class StrategyFormComponent implements OnInit, OnChanges {
 
   submitted = output<CreateStrategyRequest | UpdateStrategyRequest>();
   cancelled = output<void>();
-  /** The saved strategy changed from inside the form (DSL upgrade): re-read it. */
+  /** The saved strategy changed from inside the form (DSL upgrade, script save): re-read it. */
   strategyChanged = output<void>();
+  /** Edit mode: open the strategy's Execution tab (execution policy, account bindings). */
+  executionRequested = output<void>();
 
   savingTemplate = signal(false);
   /** Name being typed for "Save as template…"; null while that panel is closed. */
@@ -2986,6 +2989,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     // resetting then would throw away exactly the edits a refused save needs
     // the operator to fix.
     if (changes['strategy'] || changes['open']) this.applyStrategy();
+    if (changes['open'] && this.open()) this.scriptSaveUnreported = false;
   }
 
   /** Seeds the form from the bound strategy (edit) or resets it (create). */
@@ -3277,20 +3281,9 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     const val = this.form.getRawValue();
     const s = this.strategy();
     if (s) {
-      // Symbol, timeframe and type are immutable — never sent. Null leaves a
-      // field unchanged, so the sub-configs go as strings ('' clears one) and
-      // a removed risk profile goes as the engine's 0 sentinel.
       const update: UpdateStrategyRequest = {
-        name: val.name,
-        description: val.description ?? '',
+        ...this.metadataUpdate(s),
         parametersJson: (val.parametersJson as string)?.trim() ? val.parametersJson : '{}',
-        riskProfileId: val.riskProfileId ?? (s.riskProfileId != null ? 0 : null),
-        riskOverridesJson: val.riskOverridesJson ?? '',
-        sizingConfigJson: val.sizingConfigJson ?? '',
-        sessionFilterJson: val.sessionFilterJson ?? '',
-        regimeGateJson: val.regimeGateJson ?? '',
-        multiTimeframeGateJson: val.multiTimeframeGateJson ?? '',
-        changeReason: this.updateChangeReason()?.trim() || null,
       };
       this.submitted.emit(update);
       return;
@@ -3305,8 +3298,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
       .filter((x) => x.length > 0);
     const data: any = {
       name: val.name,
-      // The engine requires a description; the name stands in for a blank one.
-      description: (val.description as string)?.trim() || val.name,
+      description: this.createDescription(),
       strategyType: val.strategyType,
       // For single-symbol back-compat the request still carries `symbol`. For
       // multi-symbol the parent component reads the new `symbols` field and
@@ -3323,6 +3315,32 @@ export class StrategyFormComponent implements OnInit, OnChanges {
       multiTimeframeGateJson: val.multiTimeframeGateJson || null,
     };
     this.submitted.emit(data);
+  }
+
+  /**
+   * `PUT strategy/{id}` fields shared by the rules and script modes. Symbol, timeframe and type
+   * are immutable — never sent. Null leaves a field unchanged, so the sub-configs go as strings
+   * ('' clears one) and a removed risk profile goes as the engine's 0 sentinel.
+   */
+  private metadataUpdate(s: StrategyDto): UpdateStrategyRequest {
+    const val = this.form.getRawValue();
+    return {
+      name: val.name,
+      description: val.description ?? '',
+      riskProfileId: val.riskProfileId ?? (s.riskProfileId != null ? 0 : null),
+      riskOverridesJson: val.riskOverridesJson ?? '',
+      sizingConfigJson: val.sizingConfigJson ?? '',
+      sessionFilterJson: val.sessionFilterJson ?? '',
+      regimeGateJson: val.regimeGateJson ?? '',
+      multiTimeframeGateJson: val.multiTimeframeGateJson ?? '',
+      changeReason: this.updateChangeReason()?.trim() || null,
+    };
+  }
+
+  /** The engine requires a description on create; the name stands in for a blank one. */
+  private createDescription(): string {
+    const val = this.form.getRawValue();
+    return (val.description as string)?.trim() || val.name;
   }
 
   // ── Clone / DSL upgrade ─────────────────────────────────────────────────
@@ -3376,10 +3394,16 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   }
 
   onCancel(): void {
+    if (this.scriptSaveUnreported) {
+      // The script was saved but the metadata update after it was refused: the host still
+      // shows the old script until it re-reads the strategy.
+      this.scriptSaveUnreported = false;
+      this.strategyChanged.emit();
+    }
     this.cancelled.emit();
   }
 
-  // ── Pine script authoring (UI-IDE) ──────────────────────────────────────
+  // ── Pine script authoring ───────────────────────────────────────────────
   // RuleBased strategies are authored as rules (the DSL above) or as a Pine v6
   // script. The mode and the script draft are re-derived whenever the form
   // opens or is pointed at another strategy; the draft lives here so the
@@ -3389,7 +3413,8 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   // scriptInputs / executionPolicy (contract §8) through the ordinary
   // `submitted` output; edit saves the script itself with
   // PUT strategy/{id}/script (compile + version capture + live restart) and
-  // then emits the ordinary metadata update only when the form changed.
+  // then emits the ordinary metadata update only when the form changed. An
+  // existing strategy's execution policy is changed on its Execution tab.
 
   readonly authoringMode = linkedAuthoringMode(
     () => this.strategy(),
@@ -3400,6 +3425,8 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     () => this.open(),
   );
   private scriptSubmitting = false;
+  /** The script was saved in this edit, but the host has not re-read the strategy since. */
+  private scriptSaveUnreported = false;
   @ViewChild(ScriptAuthoringComponent) private scriptAuthoring?: ScriptAuthoringComponent;
 
   /** The strategy being edited — or the type being created — is RuleBased. */
@@ -3422,6 +3449,20 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     return this.strategy()?.timeframe ?? this.form?.get('timeframe')?.value ?? null;
   }
 
+  /**
+   * Edit mode: the policy lives on the strategy's Execution tab (it takes effect on the next
+   * signal and is confirmed there). Leaving would drop this edit, so unsaved changes stay put.
+   */
+  onExecutionRequested(): void {
+    if (this.formDirty() || this.scriptAuthoring?.isDirty()) {
+      this.notifications.info(
+        "Save or cancel this edit first — the execution policy is changed on the strategy's Execution tab.",
+      );
+      return;
+    }
+    this.executionRequested.emit();
+  }
+
   /** Submit in script mode — see the block comment above. */
   async submitScript(): Promise<void> {
     const panel = this.scriptAuthoring;
@@ -3431,21 +3472,18 @@ export class StrategyFormComponent implements OnInit, OnChanges {
       const script = await panel.prepareSubmit();
       if (!script) return;
       const val = this.form.getRawValue();
-      const common = {
-        name: val.name,
-        description: val.description || '',
-        riskProfileId: val.riskProfileId || null,
-        riskOverridesJson: val.riskOverridesJson || null,
-        sizingConfigJson: val.sizingConfigJson || null,
-        sessionFilterJson: val.sessionFilterJson || null,
-        regimeGateJson: val.regimeGateJson || null,
-        multiTimeframeGateJson: val.multiTimeframeGateJson || null,
-      };
       const existing = this.strategy();
       if (!existing) {
         const symbols = this.parsedSymbols();
         const create: CreateStrategyRequest & { symbols: string[] } = {
-          ...common,
+          name: val.name,
+          description: this.createDescription(),
+          riskProfileId: val.riskProfileId || null,
+          riskOverridesJson: val.riskOverridesJson || null,
+          sizingConfigJson: val.sizingConfigJson || null,
+          sessionFilterJson: val.sessionFilterJson || null,
+          regimeGateJson: val.regimeGateJson || null,
+          multiTimeframeGateJson: val.multiTimeframeGateJson || null,
           strategyType: 'RuleBased',
           symbol: symbols[0] ?? val.symbol,
           symbols,
@@ -3461,12 +3499,14 @@ export class StrategyFormComponent implements OnInit, OnChanges {
       if (scriptChanged && !(await panel.saveScript(existing.id, script))) return;
       if (this.form.dirty) {
         // Metadata only: the script went through its own endpoint, and
-        // parametersJson is left out so the (empty) rules stay untouched.
-        const update = { ...common, changeReason: this.updateChangeReason()?.trim() || null };
-        this.submitted.emit(update);
+        // parametersJson is left out so the (empty) rules stay untouched. The
+        // host re-reads the strategy once the update lands (or on cancel).
+        this.scriptSaveUnreported = scriptChanged;
+        this.submitted.emit(this.metadataUpdate(existing));
       } else {
         if (scriptChanged) {
           this.notifications.success('Script saved — live sessions pick it up at the next bar');
+          this.strategyChanged.emit();
         }
         this.cancelled.emit();
       }

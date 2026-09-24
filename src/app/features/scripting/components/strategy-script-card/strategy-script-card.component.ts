@@ -29,7 +29,8 @@ import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
 /**
  * A script strategy's Pine source on its detail page: read-only editor, the compiled declaration
  * and the inputs with their saved values, plus Edit (opens the strategy form in script mode) and
- * Export (`GET strategy/{id}/export` → a `.pine` download).
+ * Export (`GET strategy/{id}/export` → a `.pine` download). The execution-policy and binding chips
+ * open the Execution tab, the one place both are changed.
  */
 @Component({
   selector: 'app-strategy-script-card',
@@ -42,24 +43,33 @@ import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
         <h3 class="card-title">Pine script</h3>
         <span class="chip chip-accent">Pine v{{ current().scriptLanguageVersion ?? 6 }}</span>
         @if (current().executionPolicy; as p) {
-          <span class="chip" [title]="'Execution policy: ' + p">{{ p }} policy</span>
+          <button
+            type="button"
+            class="chip chip-link"
+            [title]="'Execution policy: ' + p + ' — change it on the Execution tab'"
+            (click)="executionRequested.emit()"
+          >
+            {{ p }} policy
+          </button>
         }
         @if (
           current().accountBindingCount !== null && current().accountBindingCount !== undefined
         ) {
-          <span
-            class="chip"
+          <button
+            type="button"
+            class="chip chip-link"
             [class.chip-warn]="current().accountBindingCount === 0"
             [title]="
-              current().accountBindingCount === 0
+              (current().accountBindingCount === 0
                 ? 'Not bound to any account — runs on the emulator only'
-                : 'Trades live on the bound accounts'
+                : 'Trades live on the bound accounts') + ' — manage them on the Execution tab'
             "
+            (click)="executionRequested.emit()"
           >
             {{ current().accountBindingCount }} account binding{{
               current().accountBindingCount === 1 ? '' : 's'
             }}
-          </span>
+          </button>
         }
         <span class="spacer"></span>
         <button type="button" class="btn btn-ghost btn-sm" (click)="copy()">Copy</button>
@@ -174,6 +184,14 @@ import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
         padding-left: 16px;
         font-size: 12px;
       }
+      .chip-link {
+        border: none;
+        font-family: inherit;
+        cursor: pointer;
+      }
+      .chip-link:hover {
+        text-decoration: underline;
+      }
     `,
   ],
 })
@@ -181,6 +199,8 @@ export class StrategyScriptCardComponent {
   readonly strategy = input.required<StrategyDto>();
   /** Open the strategy form on the script. */
   readonly editRequested = output<void>();
+  /** Open the Execution tab (execution policy, account bindings). */
+  readonly executionRequested = output<void>();
 
   private readonly scripting = inject(ScriptingService);
   private readonly strategies = inject(StrategiesService);

@@ -14,26 +14,35 @@ import type {
   ScriptDiagnostic,
   ScriptInputValues,
   ScriptKind,
+  ScriptRunRequest,
   ScriptRunResult,
 } from '@core/api/scripting.types';
 import { ScriptingService, toScriptingError } from '@core/services/scripting.service';
+import type { PineLineJump } from '@shared/pine-chart/panes/pine-logs-pane.component';
+import { PinePreviewComponent } from '../../pine-preview/pine-preview.component';
+import { StrategyReportComponent } from '../../report/strategy-report.component';
+import { normalizeStrategyReport } from '../../report/strategy-report.model';
 import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
 
 const BAR_CHOICES = [500, 1000, 2000, 5000, 10000] as const;
 
+/** What the result area shows: the chart, or (strategy scripts) the Strategy report. */
+export type PreviewView = 'chart' | 'report';
+
 /**
- * "Preview": runs the script over recent history through `POST scripting/run` and summarises
- * what came back — compile and runtime errors (click to jump to the line), the Strategy Tester's
- * headline numbers and the log count.
+ * "Preview": runs the script over recent history through `POST scripting/run` and shows the run —
+ * the Pine chart with every output, Pine Logs, the "why didn't it fire?" trace, the profiler and
+ * Bar Replay (`app-pine-preview`) and, for a strategy, the Strategy report of the same run.
  *
- * The chart itself is the chart-overlay stream's: it receives every result through `result`,
- * and renders into the `[scriptChartOverlay]` slot projected here.
+ * A script that does not compile lists its errors instead of a chart. Every jump to a source line
+ * (a compile error, a log, a traced expression, a profiled line, a runtime error) comes out of
+ * `reveal` for the editor.
  */
 @Component({
   selector: 'app-script-preview',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DecimalPipe],
+  imports: [DecimalPipe, PinePreviewComponent, StrategyReportComponent],
   template: `
     <div class="preview">
       <div class="controls">
@@ -50,6 +59,15 @@ const BAR_CHOICES = [500, 1000, 2000, 5000, 10000] as const;
           </select>
         </label>
         <span class="muted small target">{{ symbol() || '—' }} · {{ timeframe() || '—' }}</span>
+        @if (lastResult(); as r) {
+          <span class="muted small meta">
+            {{ barCount() | number }} bars · {{ logCount() }} log{{ logCount() === 1 ? '' : 's' }} ·
+            {{ alertCount() }} alert{{ alertCount() === 1 ? '' : 's' }}
+            @if (r.elapsedMs !== undefined && r.elapsedMs !== null) {
+              · {{ r.elapsedMs | number }} ms
+            }
+          </span>
+        }
         <span class="spacer"></span>
         <button
           type="button"
@@ -61,7 +79,7 @@ const BAR_CHOICES = [500, 1000, 2000, 5000, 10000] as const;
           @if (running()) {
             <span class="spinner"></span> Running…
           } @else {
-            Preview
+            {{ lastResult() ? 'Run again' : 'Preview' }}
           }
         </button>
       </div>
@@ -70,125 +88,79 @@ const BAR_CHOICES = [500, 1000, 2000, 5000, 10000] as const;
         <div class="error-box" role="alert">{{ e }}</div>
       }
 
-      @if (lastResult(); as r) {
-        @if (compileErrors().length) {
-          <div class="section">
-            <h5 class="section-title">Compile errors</h5>
-            <ul class="issues">
-              @for (d of compileErrors(); track $index) {
-                <li>
-                  <button
-                    type="button"
-                    class="issue"
-                    (click)="reveal.emit({ line: d.line, column: d.column })"
-                  >
-                    <span class="code">{{ d.code }}</span> {{ d.message }}
-                    <span class="pos">Ln {{ d.line }}</span>
-                  </button>
-                </li>
-              }
-            </ul>
-          </div>
-        }
-        @if (r.runtimeError; as rt) {
-          <div class="section">
-            <h5 class="section-title">Runtime error</h5>
-            <button
-              type="button"
-              class="issue is-runtime"
-              [disabled]="!rt.line"
-              (click)="reveal.emit({ line: rt.line ?? 1, column: rt.column ?? 1 })"
-            >
-              <span class="code">{{ rt.code }}</span> {{ rt.message }}
-              @if (rt.line) {
-                <span class="pos">Ln {{ rt.line }}</span>
-              }
-              @if (rt.barIndex !== null && rt.barIndex !== undefined) {
-                <span class="pos">bar {{ rt.barIndex }}</span>
-              }
-            </button>
-          </div>
-        }
-        @if (report(); as rep) {
-          <div class="kpis">
-            <div class="kpi">
-              <span class="kpi-label">Net profit</span>
-              <span
-                class="kpi-value"
-                [class.pos]="rep.netProfit > 0"
-                [class.neg]="rep.netProfit < 0"
-              >
-                {{ rep.netProfit | number: '1.2-2' }}
-                @if (rep.netProfitPercent !== null && rep.netProfitPercent !== undefined) {
-                  <small>({{ rep.netProfitPercent | number: '1.2-2' }}%)</small>
-                }
-              </span>
-            </div>
-            <div class="kpi">
-              <span class="kpi-label">Closed trades</span>
-              <span class="kpi-value">{{ rep.totalClosedTrades }}</span>
-            </div>
-            <div class="kpi">
-              <span class="kpi-label">Profitable</span>
-              <span class="kpi-value">
-                @if (rep.percentProfitable !== null && rep.percentProfitable !== undefined) {
-                  {{ rep.percentProfitable | number: '1.1-1' }}%
-                } @else {
-                  —
-                }
-              </span>
-            </div>
-            <div class="kpi">
-              <span class="kpi-label">Profit factor</span>
-              <span class="kpi-value">
-                @if (rep.profitFactor !== null && rep.profitFactor !== undefined) {
-                  {{ rep.profitFactor | number: '1.2-2' }}
-                } @else {
-                  —
-                }
-              </span>
-            </div>
-            <div class="kpi">
-              <span class="kpi-label">Max drawdown</span>
-              <span class="kpi-value neg">
-                {{ rep.maxDrawdown | number: '1.2-2' }}
-                @if (rep.maxDrawdownPercent !== undefined) {
-                  <small>({{ rep.maxDrawdownPercent | number: '1.2-2' }}%)</small>
-                }
-              </span>
-            </div>
-            <div class="kpi">
-              <span class="kpi-label">Sharpe</span>
-              <span class="kpi-value">
-                @if (rep.sharpe !== null && rep.sharpe !== undefined) {
-                  {{ rep.sharpe | number: '1.2-2' }}
-                } @else {
-                  —
-                }
-              </span>
-            </div>
-          </div>
-          @if (rep.warnings.length) {
-            <ul class="warnings">
-              @for (w of rep.warnings; track $index) {
-                <li>{{ w }}</li>
-              }
-            </ul>
-          }
-        }
-        <p class="meta muted small">
-          {{ barCount() | number }} bars · {{ logCount() }} log{{ logCount() === 1 ? '' : 's' }} ·
-          {{ alertCount() }} alert{{ alertCount() === 1 ? '' : 's' }}
-          @if (r.elapsedMs !== undefined) {
-            · {{ r.elapsedMs | number }} ms
-          }
+      @if (compileErrors().length) {
+        <div class="section">
+          <h5 class="section-title">Compile errors</h5>
+          <ul class="issues">
+            @for (d of compileErrors(); track $index) {
+              <li>
+                <button
+                  type="button"
+                  class="issue"
+                  (click)="reveal.emit({ line: d.line, column: d.column })"
+                >
+                  <span class="code">{{ d.code }}</span> {{ d.message }}
+                  <span class="pos">Ln {{ d.line }}</span>
+                </button>
+              </li>
+            }
+          </ul>
+        </div>
+      }
+
+      @if (!lastResult() && !running() && !error()) {
+        <p class="hint muted small">
+          Runs the script over recent bars of the strategy's symbol and timeframe: the chart shows
+          every plot, shape, drawing and table, with Pine Logs, the "why didn't it fire?" trace, the
+          profiler and Bar Replay{{ kind() === 'strategy' ? ' — and the Strategy report' : '' }}.
         </p>
       }
 
-      <!-- Chart overlay slot: the chart stream projects its renderer here and reads (result). -->
-      <div class="chart-slot" data-slot="script-chart-overlay">
-        <ng-content select="[scriptChartOverlay]" />
-      </div>
+      @if (hasReport()) {
+        <div class="result-tabs" role="tablist" aria-label="Preview result">
+          <button
+            type="button"
+            role="tab"
+            class="result-tab"
+            [class.is-active]="view() === 'chart'"
+            [attr.aria-selected]="view() === 'chart'"
+            (click)="showView('chart')"
+          >
+            Chart
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="result-tab"
+            [class.is-active]="view() === 'report'"
+            [attr.aria-selected]="view() === 'report'"
+            (click)="showView('report')"
+          >
+            Strategy report
+            <span class="count">{{ tradeCount() }}</span>
+          </button>
+        </div>
+      }
+
+      <!-- The chart slot: the run on the Pine chart. Kept alive (hidden) while the report shows,
+           so switching back keeps the chart's zoom and the dock's state. -->
+      @if (chartRun(); as run) {
+        <div class="chart-slot" data-slot="script-chart-overlay" [hidden]="view() !== 'chart'">
+          <app-pine-preview
+            [result]="run"
+            [request]="lastRequest()"
+            [source]="lastRequest()?.source ?? null"
+            [symbol]="symbol() ?? ''"
+            [timeframe]="timeframe() ?? ''"
+            (jumpToLine)="onJump($event)"
+          />
+        </div>
+      }
+      @if (hasReport() && view() === 'report') {
+        <div class="report-slot" role="tabpanel">
+          <app-strategy-report [report]="chartRun()!.report" />
+        </div>
+      }
     </div>
   `,
   styles: [
@@ -215,6 +187,9 @@ const BAR_CHOICES = [500, 1000, 2000, 5000, 10000] as const;
       }
       .spacer {
         flex: 1;
+      }
+      .hint {
+        margin: 0;
       }
       .section-title {
         margin: 0 0 4px;
@@ -244,9 +219,6 @@ const BAR_CHOICES = [500, 1000, 2000, 5000, 10000] as const;
         cursor: pointer;
         margin-bottom: 2px;
       }
-      .issue:disabled {
-        cursor: default;
-      }
       .code,
       .pos {
         font-family: ui-monospace, 'SF Mono', Menlo, monospace;
@@ -256,53 +228,42 @@ const BAR_CHOICES = [500, 1000, 2000, 5000, 10000] as const;
       .pos {
         margin-left: auto;
       }
-      .kpis {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
-        gap: 6px;
-      }
-      .kpi {
+      .result-tabs {
         display: flex;
-        flex-direction: column;
         gap: 2px;
-        padding: 6px 8px;
-        border-radius: 8px;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
       }
-      .kpi-label {
-        font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+      .result-tab {
+        padding: 6px 12px;
+        border: none;
+        border-bottom: 2px solid transparent;
+        background: transparent;
         color: var(--text-secondary);
-      }
-      .kpi-value {
-        font-size: 14px;
-        font-weight: 600;
-        font-variant-numeric: tabular-nums;
-      }
-      .kpi-value small {
-        font-size: 11px;
+        font: inherit;
+        font-size: 13px;
         font-weight: 500;
+        cursor: pointer;
+      }
+      .result-tab.is-active {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+      }
+      .count {
+        font-size: 10px;
+        padding: 0 5px;
+        border-radius: 999px;
+        background: var(--bg-tertiary);
         color: var(--text-secondary);
       }
-      .kpi-value.pos {
-        color: #1f8a3b;
+      .chart-slot {
+        height: 560px;
+        min-width: 0;
       }
-      .kpi-value.neg {
-        color: var(--loss);
-      }
-      .warnings {
-        margin: 0;
-        padding-left: 18px;
-        font-size: 12px;
-        color: #b25e00;
-      }
-      .meta {
-        margin: 0;
-      }
-      .chart-slot:empty {
+      .chart-slot[hidden] {
         display: none;
+      }
+      .report-slot {
+        min-width: 0;
       }
     `,
   ],
@@ -312,12 +273,10 @@ export class ScriptPreviewComponent {
   readonly inputs = input<ScriptInputValues>({});
   readonly symbol = input<string | null>(null);
   readonly timeframe = input<string | null>(null);
-  /** The declaration kind: strategies run in backtest mode (the report is what matters). */
+  /** The declaration kind: strategies run in backtest mode (their report comes with the run). */
   readonly kind = input<ScriptKind | null>(null);
   readonly disabled = input(false);
 
-  /** Every run result — the chart overlay renders from it. */
-  readonly result = output<ScriptRunResult>();
   /** Jump the editor to a line. */
   readonly reveal = output<{ line: number; column: number }>();
 
@@ -327,6 +286,9 @@ export class ScriptPreviewComponent {
   readonly running = signal(false);
   readonly error = signal<string | null>(null);
   readonly lastResult = signal<ScriptRunResult | null>(null);
+  /** The request behind `lastResult` — the chart re-runs it for a trace window, a profile or a replay. */
+  readonly lastRequest = signal<ScriptRunRequest | null>(null);
+  private readonly selectedView = signal<PreviewView>('chart');
 
   readonly canRun = computed(
     () => !this.disabled() && !!this.source().trim() && !!this.symbol() && !!this.timeframe(),
@@ -343,22 +305,17 @@ export class ScriptPreviewComponent {
       .filter((d) => d.severity === 'error')
       .slice(0, 20),
   );
-  readonly report = computed(() => {
-    const r = this.lastResult()?.report;
-    if (!r) return null;
-    const all = r.performance?.all ?? {};
-    return {
-      netProfit: all.netProfit ?? 0,
-      netProfitPercent: all.netProfitPercent ?? null,
-      totalClosedTrades: all.totalClosedTrades ?? 0,
-      percentProfitable: all.percentProfitable ?? null,
-      profitFactor: all.profitFactor ?? null,
-      maxDrawdown: r.equity?.maxDrawdown ?? 0,
-      maxDrawdownPercent: r.equity?.maxDrawdownPercent,
-      sharpe: r.returns?.sharpeRatio ?? null,
-      warnings: r.warnings ?? [],
-    };
+  /** The run on the chart — null until a run compiles (a compile failure lists its errors instead). */
+  readonly chartRun = computed<ScriptRunResult | null>(() => {
+    const r = this.lastResult();
+    return r && r.compile?.success !== false ? r : null;
   });
+  readonly hasReport = computed(() => !!this.chartRun()?.report);
+  /** Chart unless the run has a report and the operator picked it. */
+  readonly view = computed<PreviewView>(() => (this.hasReport() ? this.selectedView() : 'chart'));
+  readonly tradeCount = computed(
+    () => normalizeStrategyReport(this.chartRun()?.report)?.trades.length ?? 0,
+  );
   readonly barCount = computed(
     () => this.lastResult()?.bars?.length ?? this.lastResult()?.report?.meta?.bars ?? 0,
   );
@@ -373,25 +330,32 @@ export class ScriptPreviewComponent {
 
   async run(): Promise<void> {
     if (!this.canRun() || this.running()) return;
+    const request: ScriptRunRequest = {
+      source: this.source(),
+      symbol: this.symbol()!,
+      timeframe: this.timeframe()!,
+      lastBars: this.bars(),
+      inputs: this.inputs(),
+      mode: this.kind() === 'strategy' ? 'backtest' : 'preview',
+    };
     this.running.set(true);
     this.error.set(null);
     try {
-      const r = await firstValueFrom(
-        this.scripting.run({
-          source: this.source(),
-          symbol: this.symbol()!,
-          timeframe: this.timeframe()!,
-          lastBars: this.bars(),
-          inputs: this.inputs(),
-          mode: this.kind() === 'strategy' ? 'backtest' : 'preview',
-        }),
-      );
+      const r = await firstValueFrom(this.scripting.run(request));
+      this.lastRequest.set(request);
       this.lastResult.set(r);
-      this.result.emit(r);
     } catch (err) {
       this.error.set(toScriptingError(err, 'The preview failed.').message);
     } finally {
       this.running.set(false);
     }
+  }
+
+  showView(view: PreviewView): void {
+    this.selectedView.set(view);
+  }
+
+  onJump(jump: PineLineJump): void {
+    this.reveal.emit({ line: jump.line, column: jump.column ?? 1 });
   }
 }
