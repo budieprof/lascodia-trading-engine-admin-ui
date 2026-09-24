@@ -54,6 +54,7 @@ export const PINE_EDITOR_LOADER = new InjectionToken<() => Promise<PineEditorMod
       [class.is-readonly]="readOnly()"
       [style.height]="height()"
       [attr.data-state]="state()"
+      (focusin)="revealSelf()"
     >
       <div #host class="pine-editor-host" [hidden]="state() === 'failed'"></div>
       @if (state() === 'loading') {
@@ -64,6 +65,7 @@ export const PINE_EDITOR_LOADER = new InjectionToken<() => Promise<PineEditorMod
           class="pine-editor-fallback"
           spellcheck="false"
           [attr.aria-label]="ariaLabel()"
+          [attr.placeholder]="placeholder()"
           [readOnly]="readOnly()"
           [value]="value()"
           (input)="value.set($any($event.target).value)"
@@ -79,6 +81,8 @@ export const PINE_EDITOR_LOADER = new InjectionToken<() => Promise<PineEditorMod
       }
       .pine-editor {
         position: relative;
+        /* Room for a sticky footer (the strategy dialog's actions) when focusing scrolls it in. */
+        scroll-margin: 12px 0 88px;
         border: 1px solid var(--border);
         border-radius: 10px;
         overflow: hidden;
@@ -122,6 +126,8 @@ export class PineEditorComponent implements AfterViewInit, OnDestroy {
   readonly diagnostics = input<readonly ScriptDiagnostic[]>([]);
   readonly height = input('420px');
   readonly ariaLabel = input('Pine Script editor');
+  /** Shown while the editor is empty. */
+  readonly placeholder = input<string | null>(null);
 
   /** 1-based cursor position. */
   readonly cursorChange = output<{ line: number; column: number }>();
@@ -181,6 +187,7 @@ export class PineEditorComponent implements AfterViewInit, OnDestroy {
             catalog: this.language.catalog(),
             libraries: this.language.libraries(),
             ariaLabel: this.ariaLabel(),
+            ...(this.placeholder() ? { placeholder: this.placeholder()! } : {}),
             onChange: (doc) => this.zone.run(() => this.value.set(doc)),
             onCursor: (line, column) =>
               this.zone.run(() => this.cursorChange.emit({ line, column })),
@@ -200,6 +207,21 @@ export class PineEditorComponent implements AfterViewInit, OnDestroy {
     this.destroyed = true;
     this.handle?.destroy();
     this.handle = null;
+  }
+
+  /**
+   * Focusing the editor scrolls all of it into view. CodeMirror only keeps the cursor inside its
+   * own box, which may sit partly under a sticky footer (the strategy dialog's actions) — typing
+   * on the last lines would then happen out of sight.
+   */
+  revealSelf(): void {
+    const el = this.host?.nativeElement.parentElement;
+    // `nearest` with the element's scroll-margin: nothing moves when it is already in view.
+    // Instant, not smooth — CodeMirror's own scrolling on the first keystroke would cancel an
+    // animation half way.
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ block: 'nearest' });
+    }
   }
 
   /** Moves the cursor to a 1-based line/column and focuses the editor. */

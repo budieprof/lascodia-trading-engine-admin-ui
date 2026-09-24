@@ -20,7 +20,7 @@ import { ScriptingService, toScriptingError } from '@core/services/scripting.ser
 import { StrategiesService } from '@core/services/strategies.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { downloadTextFile } from '@shared/utils/download';
-import { parseSavedInputs } from '../../pine/pine-inputs';
+import { inputOverrides, parseSavedInputs, resolveInputValues } from '../../pine/pine-inputs';
 import { DeclarationSummaryComponent } from '../declaration-summary/declaration-summary.component';
 import { InputsFormComponent } from '../inputs-form/inputs-form.component';
 import { PineEditorComponent } from '../pine-editor/pine-editor.component';
@@ -191,7 +191,16 @@ export class StrategyScriptCardComponent {
   readonly source = computed(() => this.current().scriptSource ?? '');
   readonly savedInputs = computed(() => parseSavedInputs(this.current().scriptInputs));
   readonly savedEntries = computed(() => Object.entries(this.savedInputs()));
-  readonly overrideCount = computed(() => this.savedEntries().length);
+  /**
+   * Overrides that still apply: once the script is compiled, only those naming an input it
+   * declares (coerced to its range) — an override of a removed input changes nothing.
+   */
+  readonly overrideCount = computed(() => {
+    const c = this.compiled();
+    if (!c?.declaration) return this.savedEntries().length;
+    return Object.keys(inputOverrides(c.inputs, resolveInputValues(c.inputs, this.savedInputs())))
+      .length;
+  });
   readonly compiled = signal<ScriptCompileResult | null>(null);
   readonly compileError = signal<string | null>(null);
   readonly exporting = signal(false);

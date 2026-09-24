@@ -25,6 +25,7 @@ import {
   highlightSpecialChars,
   keymap,
   lineNumbers,
+  placeholder,
   rectangularSelection,
 } from '@codemirror/view';
 
@@ -50,6 +51,8 @@ export interface PineEditorOptions {
   catalog: PineCatalog | null;
   libraries: readonly ScriptLibraryDto[];
   ariaLabel?: string;
+  /** Shown while the document is empty. */
+  placeholder?: string;
   onChange(doc: string): void;
   /** 1-based line and column of the main cursor. */
   onCursor(line: number, column: number): void;
@@ -137,6 +140,9 @@ export function createPineEditor(parent: HTMLElement, opts: PineEditorOptions): 
     pineTooltips(),
     pineColorSwatches,
     EditorView.contentAttributes.of({ 'aria-label': opts.ariaLabel ?? 'Pine Script editor' }),
+    // A little air below the cursor when typing on the last visible lines.
+    EditorView.scrollMargins.of(() => ({ bottom: 24 })),
+    ...(opts.placeholder ? [placeholder(opts.placeholder)] : []),
     EditorView.updateListener.of((u) => {
       if (u.docChanged) opts.onChange(u.state.doc.toString());
       if (u.docChanged || u.selectionSet) {

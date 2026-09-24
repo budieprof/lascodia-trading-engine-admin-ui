@@ -100,6 +100,7 @@ const TIMEFRAMES = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] as const;
               [symbol]="symbol() || null"
               [timeframe]="timeframe()"
               label="Paste the script, or open a .pine file"
+              placeholder="Paste a Pine Script v6 strategy here — or use Open… to load a .pine file."
               fileName="import.pine"
               editorHeight="340px"
               (compiled)="compiled.set($event)"

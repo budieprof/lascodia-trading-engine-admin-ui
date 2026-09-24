@@ -35,7 +35,7 @@ import { countDiagnostics, sortDiagnostics } from '../../pine/pine-diagnostics';
           <span class="count is-info">{{ counts().infos }} info</span>
         }
         @if (sorted().length === 0) {
-          <span class="count is-clean">{{ emptyLabel() }}</span>
+          <span class="count" [class.is-clean]="compiled()">{{ emptyLabel() }}</span>
         }
       </button>
       @if (!collapsed() && sorted().length > 0) {
@@ -173,6 +173,8 @@ export class ProblemsPanelComponent {
   readonly diagnostics = input<readonly ScriptDiagnostic[]>([]);
   /** Shown when there is nothing to list (e.g. "No problems" / "Not compiled yet"). */
   readonly emptyLabel = input('No problems');
+  /** A compile has run — an empty list is then a clean bill, shown in green. */
+  readonly compiled = input(true);
   readonly selected = output<ScriptDiagnostic>();
 
   readonly collapsed = signal(false);

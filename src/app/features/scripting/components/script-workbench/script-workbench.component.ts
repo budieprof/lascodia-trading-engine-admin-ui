@@ -96,6 +96,7 @@ export const COMPILE_DEBOUNCE_MS = 700;
         [diagnostics]="editorDiagnostics()"
         [height]="editorHeight()"
         [ariaLabel]="label()"
+        [placeholder]="placeholder()"
         (cursorChange)="cursor.set($event)"
         (saveRequested)="compileNow(true)"
       />
@@ -112,6 +113,7 @@ export const COMPILE_DEBOUNCE_MS = 700;
         <app-problems-panel
           [diagnostics]="diagnostics()"
           [emptyLabel]="result() ? 'No problems' : 'Not compiled yet'"
+          [compiled]="!!result()"
           (selected)="reveal($event.line, $event.column)"
         />
       }
@@ -165,6 +167,8 @@ export class ScriptWorkbenchComponent {
   /** Compile in the background as the source changes. */
   readonly autoCompile = input(true);
   readonly showValidate = input(true);
+  /** Shown while the editor is empty. */
+  readonly placeholder = input<string | null>(null);
   readonly showProblems = input(true);
 
   /** Every compile result applied to the current source. */

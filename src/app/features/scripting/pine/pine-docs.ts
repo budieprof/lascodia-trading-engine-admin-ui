@@ -1,5 +1,6 @@
 import { formatOverload, overloadsFor } from './pine-signature';
 import type { PineResolved } from './pine-resolve';
+import { PINE_NAMESPACE_DOCS } from './pine-lexicon';
 
 /**
  * A hover / completion-info document for a resolved name, as plain data: the editor renders it,
@@ -77,8 +78,25 @@ export function docViewFor(resolved: PineResolved, text: string): PineDocView {
         doc: resolved.constant.doc ?? null,
         notes: [],
       };
-    case 'namespace':
-      return { kind: 'namespace', code: [`${resolved.path}.*`], doc: null, notes: [] };
+    case 'namespace': {
+      const m = resolved.members;
+      const parts = m
+        ? [
+            [m.functions, 'function'],
+            [m.variables, 'variable'],
+            [m.constants, 'constant'],
+            [m.namespaces, 'namespace'],
+          ]
+            .filter(([n]) => (n as number) > 0)
+            .map(([n, what]) => `${n} ${what}${n === 1 ? '' : 's'}`)
+        : [];
+      return {
+        kind: 'namespace',
+        code: [`${resolved.path}.*`],
+        doc: PINE_NAMESPACE_DOCS[resolved.path] ?? null,
+        notes: parts.length ? [parts.join(' · ')] : [],
+      };
+    }
     case 'keyword':
       return { kind: 'keyword', code: [resolved.name], doc: resolved.doc, notes: [] };
     case 'type-keyword':

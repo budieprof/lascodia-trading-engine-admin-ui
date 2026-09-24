@@ -30,7 +30,11 @@ export type PineResolved =
       fns: readonly PineCatalogFunction[];
       receiverType?: string;
     }
-  | { kind: 'namespace'; path: string }
+  | {
+      kind: 'namespace';
+      path: string;
+      members?: { functions: number; variables: number; constants: number; namespaces: number };
+    }
   | { kind: 'keyword'; name: string; doc: string | null }
   | { kind: 'type-keyword'; name: string; doc: string | null }
   | { kind: 'user-function'; fn: PineFunctionSymbol }
@@ -166,7 +170,16 @@ export function resolvePinePath(
       doc: index.types.get(clean)?.doc ?? PINE_KEYWORD_DOCS[clean] ?? null,
     };
   }
-  if (builtin?.kind === 'namespace') return { kind: 'namespace', path: clean };
+  if (builtin?.kind === 'namespace') {
+    const members = { functions: 0, variables: 0, constants: 0, namespaces: 0 };
+    for (const m of index.membersOf(clean)) {
+      if (m.kind === 'function') members.functions++;
+      else if (m.kind === 'variable') members.variables++;
+      else if (m.kind === 'constant') members.constants++;
+      else members.namespaces++;
+    }
+    return { kind: 'namespace', path: clean, members };
+  }
   if (segments.length < 2) return null;
 
   const head = segments[0];
