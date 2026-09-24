@@ -363,7 +363,9 @@ export class PineChartComponent implements OnDestroy {
 
   readonly dataSections = computed(() => {
     const m = this.renderModel();
-    return this.dataWindow() && m ? dataWindowAt(m, this.legendBar(), this.timezone()) : [];
+    return this.dataWindow() && m
+      ? dataWindowAt(m, this.legendBar(), this.timezone(), this.symbol() || 'Bar')
+      : [];
   });
 
   readonly dataWindowTop = computed(() => (this.rects()[0]?.top ?? 0) + 6);

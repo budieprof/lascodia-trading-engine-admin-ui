@@ -119,7 +119,30 @@ export class FixtureReplayApi implements ReplayApi {
       bars,
       outputsDelta: this.run.outputs ? sliceOutputs(this.run.outputs, fromBar, toBar) : null,
       report: sliceReport(this.run.report, toBar),
-      position: null,
+      position: this.positionAt(toBar),
+    };
+  }
+
+  /** The position the fixture's trades hold after `toBar` (the engine reports its own). */
+  private positionAt(toBar: number): PineReplayFrame['position'] {
+    const first = this.run.outputs?.bars.firstIndex ?? 0;
+    const close = this.run.bars[toBar - first]?.c;
+    let size = 0;
+    let cost = 0;
+    let open = 0;
+    for (const t of this.run.report?.trades ?? []) {
+      const exit = t.exitBarIndex ?? Infinity;
+      if (t.entryBarIndex > toBar || exit <= toBar) continue;
+      const signed = t.direction === 'short' ? -t.qty : t.qty;
+      size += signed;
+      cost += t.entryPrice * Math.abs(signed);
+      if (close !== undefined) open += (close - t.entryPrice) * signed * 100_000;
+    }
+    if (!this.run.report) return null;
+    return {
+      size,
+      avgPrice: size !== 0 ? Math.round((cost / Math.abs(size)) * 1e5) / 1e5 : null,
+      openProfit: size !== 0 ? Math.round(open * 100) / 100 : 0,
     };
   }
 

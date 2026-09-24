@@ -33,6 +33,8 @@ describe('ReplaySession', () => {
     expect(data.bars).toHaveLength(61);
     expect(data.outputs!.bars.times).toHaveLength(61);
     expect(data.declaration).toBe(decl);
+    // The frame's strategy position is kept for the controls' readout.
+    expect(session.position()).toMatchObject({ size: expect.any(Number) });
   });
 
   it('steps 1, 5 and 20 bars, appending bars and outputs', async () => {

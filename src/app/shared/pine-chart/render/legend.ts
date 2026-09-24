@@ -131,6 +131,7 @@ export function dataWindowAt(
   model: PineRenderModel,
   logical: number,
   timeZone = 'UTC',
+  barTitle = 'Bar',
 ): DataWindowSection[] {
   const sections: DataWindowSection[] = [];
   const b = model.bars;
@@ -161,7 +162,7 @@ export function dataWindowAt(
         { label: 'Volume', value: formatVolume(b.volume[i]), color: null },
       );
     }
-    sections.push({ title: 'Bar', rows });
+    sections.push({ title: barTitle, rows });
   }
 
   const rows: Array<{ id: number; rows: DataWindowRow[] }> = [];
