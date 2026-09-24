@@ -1,14 +1,18 @@
 import {
   Component,
   ChangeDetectionStrategy,
+  DestroyRef,
   ElementRef,
+  effect,
   input,
   output,
   signal,
   computed,
   inject,
+  untracked,
   OnInit,
   OnChanges,
+  SimpleChanges,
   ViewChild,
 } from '@angular/core';
 import { ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
@@ -35,7 +39,28 @@ import { StrategiesService } from '@core/services/strategies.service';
 import { RiskProfilesService } from '@core/services/risk-profiles.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { DslBuilderComponent } from '../dsl-builder/dsl-builder.component';
+import { CloneStrategyDialogComponent } from '../clone-strategy-dialog/clone-strategy-dialog.component';
+import { StrategyVersionDiffComponent } from '../strategy-version-diff/strategy-version-diff.component';
+import {
+  CONDITION_TYPES,
+  DslIssue,
+  INDICATORS,
+  effectiveDslVersion,
+  emitDsl,
+  parseDsl,
+  patchDslFields,
+  upgradeDocToV2,
+  validateDslJson,
+} from '../../dsl/dsl-model';
+import { DSL_EXAMPLES, exampleJsonFor } from '../../dsl/dsl-examples';
+import { DslCheckResult, normaliseDslCheck } from '../../dsl/dsl-check';
+import { failureMessage } from '../../util/api-failure';
+import type { StrategyVersionFields } from '../../util/version-diff';
+
+/** Strategy types whose Parameters JSON is the rule DSL. */
+const DSL_STRATEGY_TYPES: readonly string[] = ['RuleBased', 'LlmProposal'];
 
 const STRATEGY_TYPES: StrategyType[] = [
   'MovingAverageCrossover',
@@ -86,233 +111,6 @@ interface OverlayCurve {
   metrics: string;
 }
 
-/**
- * Curated DSL examples shown in the Parameters JSON tab when Strategy Type is
- * RuleBased / LlmProposal. Operators pick from a dropdown, click "Insert", and
- * the modal fills the JSON textarea with a working example they can edit. This
- * is the v1 of a visual DSL builder — operators get scaffolded JSON for the
- * common patterns without having to memorise the schema.
- */
-const DSL_EXAMPLES: ReadonlyArray<{ id: string; label: string; json: string }> = [
-  {
-    id: 'rsi-oversold-trend',
-    label: 'RSI oversold + EMA200 trend filter',
-    json: JSON.stringify(
-      {
-        Name: 'RSI oversold (above EMA200)',
-        Symbol: 'EURUSD',
-        Timeframe: 'H1',
-        Direction: 'Buy',
-        EntryConditionsRoot: {
-          Op: 'And',
-          Children: [
-            {
-              Leaf: {
-                Type: 'IndicatorThreshold',
-                indicatorThreshold: {
-                  indicator: 'Rsi',
-                  period: 14,
-                  operator: 'LessThan',
-                  value: 30,
-                },
-              },
-            },
-            { Leaf: { Type: 'PriceVsMa', priceVsMa: { maPeriod: 200, operator: 'GreaterThan' } } },
-          ],
-        },
-        StopLossAtrMultiplier: 1.5,
-        TakeProfitAtrMultiplier: 2.5,
-        AtrPeriod: 14,
-        BaseConfidence: 0.6,
-      },
-      null,
-      2,
-    ),
-  },
-  {
-    id: 'ema-cross-confirmed',
-    label: 'EMA(20)/EMA(50) crossover, ADX>25',
-    json: JSON.stringify(
-      {
-        Name: 'EMA20/50 cross with trend confirmation',
-        Symbol: 'EURUSD',
-        Timeframe: 'H1',
-        Direction: 'Buy',
-        EntryConditionsRoot: {
-          Op: 'And',
-          Children: [
-            {
-              Leaf: {
-                Type: 'IndicatorCrossover',
-                indicatorCrossover: {
-                  leftIndicator: 'Ema',
-                  leftPeriod: 20,
-                  rightIndicator: 'Ema',
-                  rightPeriod: 50,
-                },
-              },
-            },
-            {
-              Leaf: {
-                Type: 'IndicatorThreshold',
-                indicatorThreshold: {
-                  indicator: 'Adx',
-                  period: 14,
-                  operator: 'GreaterThan',
-                  value: 25,
-                },
-              },
-            },
-          ],
-        },
-        StopLossAtrMultiplier: 2.0,
-        TakeProfitAtrMultiplier: 3.0,
-        BaseConfidence: 0.55,
-      },
-      null,
-      2,
-    ),
-  },
-  {
-    id: 'breakout-volume',
-    label: 'Bollinger breakout + volume burst',
-    json: JSON.stringify(
-      {
-        Name: 'BB upper breakout with volume confirmation',
-        Symbol: 'EURUSD',
-        Timeframe: 'H1',
-        Direction: 'Buy',
-        EntryConditionsRoot: {
-          Op: 'And',
-          Children: [
-            {
-              Leaf: {
-                Type: 'IndicatorComparison',
-                indicatorComparison: {
-                  leftIndicator: 'BollingerBandUpper',
-                  leftPeriod: 20,
-                  rightIndicator: 'Sma',
-                  rightPeriod: 20,
-                  operator: 'LessThan',
-                },
-              },
-            },
-            {
-              Leaf: {
-                Type: 'VolumeRatio',
-                volumeRatio: { lookbackBars: 20, operator: 'GreaterThan', threshold: 1.5 },
-              },
-            },
-          ],
-        },
-        StopLossAtrMultiplier: 1.5,
-        TakeProfitAtrMultiplier: 2.0,
-        BaseConfidence: 0.5,
-      },
-      null,
-      2,
-    ),
-  },
-  {
-    id: 'pinbar-london',
-    label: 'Bullish pin bar in London session',
-    json: JSON.stringify(
-      {
-        Name: 'Bullish pin bar (London)',
-        Symbol: 'GBPUSD',
-        Timeframe: 'H1',
-        Direction: 'Buy',
-        EntryConditionsRoot: {
-          Op: 'And',
-          Children: [
-            {
-              Leaf: { Type: 'CandlePattern', candlePattern: { pattern: 'PinBar', bullish: true } },
-            },
-            { Leaf: { Type: 'HourWindow', hourWindow: { startHourUtc: 8, endHourUtc: 16 } } },
-          ],
-        },
-        StopLossAtrMultiplier: 1.0,
-        TakeProfitAtrMultiplier: 2.5,
-        BaseConfidence: 0.55,
-      },
-      null,
-      2,
-    ),
-  },
-  {
-    id: 'htf-confirmed',
-    label: 'H1 entry confirmed by D1 trend',
-    json: JSON.stringify(
-      {
-        Name: 'H1 RSI oversold confirmed by D1 EMA200',
-        Symbol: 'EURUSD',
-        Timeframe: 'H1',
-        Direction: 'Buy',
-        EntryConditionsRoot: {
-          Op: 'And',
-          Children: [
-            {
-              Leaf: {
-                Type: 'IndicatorThreshold',
-                indicatorThreshold: {
-                  indicator: 'Rsi',
-                  period: 14,
-                  operator: 'LessThan',
-                  value: 30,
-                },
-              },
-            },
-            {
-              Leaf: {
-                Type: 'HtfIndicatorThreshold',
-                htfIndicatorThreshold: {
-                  higherTimeframe: 'D1',
-                  indicator: 'Ema',
-                  period: 200,
-                  operator: 'GreaterThan',
-                  value: 0,
-                },
-              },
-            },
-          ],
-        },
-        StopLossAtrMultiplier: 1.5,
-        TakeProfitAtrMultiplier: 3.0,
-        BaseConfidence: 0.6,
-      },
-      null,
-      2,
-    ),
-  },
-  {
-    id: 'math-range-expansion',
-    label: 'Range-expansion via math expression',
-    json: JSON.stringify(
-      {
-        Name: 'Range-expansion entry',
-        Symbol: 'EURUSD',
-        Timeframe: 'H1',
-        Direction: 'Both',
-        EntryConditionsRoot: {
-          Leaf: {
-            Type: 'MathExpression',
-            mathExpression: {
-              expression: '(High - Low) / Atr(14)',
-              operator: 'GreaterThan',
-              threshold: 1.5,
-            },
-          },
-        },
-        StopLossAtrMultiplier: 2.0,
-        TakeProfitAtrMultiplier: 3.0,
-        BaseConfidence: 0.5,
-      },
-      null,
-      2,
-    ),
-  },
-];
-
 const TIMEFRAMES: Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
 
 const TIMEFRAME_LABELS: Record<string, string> = {
@@ -327,7 +125,15 @@ const TIMEFRAME_LABELS: Record<string, string> = {
 @Component({
   selector: 'app-strategy-form',
   standalone: true,
-  imports: [ReactiveFormsModule, DatePipe, DecimalPipe, DslBuilderComponent],
+  imports: [
+    ReactiveFormsModule,
+    DatePipe,
+    DecimalPipe,
+    DslBuilderComponent,
+    CloneStrategyDialogComponent,
+    StrategyVersionDiffComponent,
+    ConfirmDialogComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (open()) {
@@ -438,57 +244,82 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                     <span class="form-error">Name is required</span>
                   }
                 </div>
-                <div class="form-group">
-                  <label class="form-label">
-                    Symbol(s) <span class="required">*</span>
-                    @if (parsedSymbols().length > 1) {
-                      <span class="multi-symbol-hint">
-                        — {{ parsedSymbols().length }} pairs detected
-                      </span>
-                    }
-                  </label>
-                  <input
-                    type="text"
-                    formControlName="symbol"
-                    list="strategy-form-symbols"
-                    class="form-input"
-                    placeholder="e.g. EURUSD or EURUSD, GBPUSD, USDJPY"
-                  />
-                  <datalist id="strategy-form-symbols">
-                    @for (p of currencyPairs(); track p.id) {
-                      @if (p.symbol) {
-                        <option [value]="p.symbol">{{ p.symbol }}</option>
+                @if (!strategy()) {
+                  <div class="form-group">
+                    <label class="form-label">
+                      Symbol(s) <span class="required">*</span>
+                      @if (parsedSymbols().length > 1) {
+                        <span class="multi-symbol-hint">
+                          — {{ parsedSymbols().length }} pairs detected
+                        </span>
                       }
+                    </label>
+                    <input
+                      type="text"
+                      formControlName="symbol"
+                      list="strategy-form-symbols"
+                      class="form-input"
+                      placeholder="e.g. EURUSD or EURUSD, GBPUSD, USDJPY"
+                    />
+                    <datalist id="strategy-form-symbols">
+                      @for (p of currencyPairs(); track p.id) {
+                        @if (p.symbol) {
+                          <option [value]="p.symbol">{{ p.symbol }}</option>
+                        }
+                      }
+                    </datalist>
+                    <span class="form-hint">
+                      Pick from the dropdown or keep typing — comma-separate to bulk-create one
+                      strategy per symbol with the same parameters.
+                    </span>
+                    @if (form.get('symbol')?.touched && form.get('symbol')?.hasError('required')) {
+                      <span class="form-error">Symbol is required</span>
                     }
-                  </datalist>
-                  <span class="form-hint">
-                    Pick from the dropdown or keep typing — comma-separate to bulk-create one
-                    strategy per symbol with the same parameters.
-                  </span>
-                  @if (form.get('symbol')?.touched && form.get('symbol')?.hasError('required')) {
-                    <span class="form-error">Symbol is required</span>
-                  }
-                </div>
+                  </div>
+                }
               </div>
 
-              <div class="form-row">
+              @if (strategy(); as s) {
+                <!-- Symbol, timeframe and type are fixed once a strategy exists: the
+                     engine rejects a change to any of them. Moving a strategy is a
+                     clone. -->
                 <div class="form-group">
-                  <label class="form-label">Timeframe</label>
-                  <select formControlName="timeframe" class="form-input">
-                    @for (tf of timeframes; track tf) {
-                      <option [value]="tf">{{ timeframeLabels[tf] }}</option>
-                    }
-                  </select>
+                  <label class="form-label">Symbol · Timeframe · Type</label>
+                  <div class="readonly-identity">
+                    <span class="mono">{{ s.symbol }}</span>
+                    <span>·</span>
+                    <span>{{ timeframeLabels[s.timeframe] }}</span>
+                    <span>·</span>
+                    <span>{{ formatType(s.strategyType) }}</span>
+                    <button type="button" class="btn btn-link clone-link" (click)="openClone()">
+                      Clone to another symbol/timeframe…
+                    </button>
+                  </div>
+                  <span class="form-hint">
+                    Fixed for an existing strategy. Clone it to run the same configuration on
+                    another symbol or timeframe — the copy starts as a Paused draft.
+                  </span>
                 </div>
-                <div class="form-group">
-                  <label class="form-label">Strategy Type</label>
-                  <select formControlName="strategyType" class="form-input">
-                    @for (st of strategyTypes; track st) {
-                      <option [value]="st">{{ formatType(st) }}</option>
-                    }
-                  </select>
+              } @else {
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label">Timeframe</label>
+                    <select formControlName="timeframe" class="form-input">
+                      @for (tf of timeframes; track tf) {
+                        <option [value]="tf">{{ timeframeLabels[tf] }}</option>
+                      }
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Strategy Type</label>
+                    <select formControlName="strategyType" class="form-input">
+                      @for (st of strategyTypes; track st) {
+                        <option [value]="st">{{ formatType(st) }}</option>
+                      }
+                    </select>
+                  </div>
                 </div>
-              </div>
+              }
 
               <div class="form-group">
                 <label class="form-label">Risk Profile</label>
@@ -582,7 +413,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
 
               <div class="form-group">
                 <label class="form-label">
-                  Parameters JSON
+                  {{ isDslType() ? 'Rules (DSL JSON)' : 'Parameters JSON' }}
                   <span class="dsl-example-loader">
                     <button
                       type="button"
@@ -592,61 +423,113 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                     >
                       Format
                     </button>
-                    <select
-                      class="dsl-example-select"
-                      (change)="
-                        loadDslExample($any($event.target).value); $any($event.target).value = ''
-                      "
-                    >
-                      <option value="">Insert DSL example…</option>
-                      @for (ex of dslExamples; track ex.id) {
-                        <option [value]="ex.id">{{ ex.label }}</option>
-                      }
-                    </select>
+                    @if (!strategy() || isDslType()) {
+                      <select
+                        class="dsl-example-select"
+                        [title]="
+                          strategy()
+                            ? 'Replaces the current rules'
+                            : 'Loads a complete v2 rule and sets the type to RuleBased'
+                        "
+                        (change)="
+                          loadDslExample($any($event.target).value); $any($event.target).value = ''
+                        "
+                      >
+                        <option value="">Insert DSL example…</option>
+                        @for (ex of dslExamples; track ex.id) {
+                          <option [value]="ex.id">{{ ex.label }}</option>
+                        }
+                      </select>
+                    }
                   </span>
                 </label>
-                @if (
-                  form.get('strategyType')?.value === 'RuleBased' ||
-                  form.get('strategyType')?.value === 'LlmProposal'
-                ) {
+                @if (isDslType()) {
                   <app-dsl-builder
-                    [parametersJson]="$any(form.get('parametersJson'))?.value ?? ''"
+                    [parametersJson]="paramsJson()"
+                    [timeframe]="formTimeframe()"
+                    [symbol]="primarySymbol()"
+                    [strategyName]="formName()"
+                    [issues]="dslIssues()"
+                    [isNew]="!strategy()"
+                    [canUpgrade]="canUpgradeDsl()"
                     (parametersJsonChange)="onDslBuilderChange($event)"
+                    (upgradeRequested)="askUpgrade()"
                   />
                 }
                 <textarea
                   formControlName="parametersJson"
                   class="form-input form-textarea form-mono"
                   rows="8"
-                  placeholder='{"period": 14, "threshold": 0.5}'
+                  [placeholder]="paramsPlaceholder()"
                 ></textarea>
-                @if (dslChecking()) {
-                  <span class="form-hint dsl-checking">Validating DSL…</span>
-                }
-                @if (dslSummary(); as summary) {
-                  <span class="dsl-summary">📖 {{ summary }}</span>
-                }
-                @if (dslError(); as err) {
-                  <span class="dsl-error">⚠ {{ err }}</span>
+                @if (isDslType()) {
+                  <div class="dsl-status" aria-live="polite">
+                    @if (dslChecking()) {
+                      <span class="form-hint dsl-checking">Validating with the engine…</span>
+                    } @else if (dslCheckFailed(); as why) {
+                      <span class="form-hint">
+                        Engine validation unavailable ({{ why }}) — showing this console's own
+                        checks.
+                      </span>
+                    }
+                    @if (dslSummary(); as summary) {
+                      <span class="dsl-summary">📖 {{ summary }}</span>
+                    }
+                    @if (dslIssues().length > 0) {
+                      <div class="dsl-issue-list" [class.has-errors]="dslErrorCount() > 0">
+                        <div class="dsl-issue-list-head">
+                          @if (dslErrorCount() > 0) {
+                            <strong>
+                              {{ dslErrorCount() }} error{{ dslErrorCount() === 1 ? '' : 's' }} —
+                              fix before saving
+                            </strong>
+                          }
+                          @if (dslWarningCount() > 0) {
+                            <span>
+                              {{ dslWarningCount() }} warning{{
+                                dslWarningCount() === 1 ? '' : 's'
+                              }}
+                            </span>
+                          }
+                          <span class="muted">{{ dslIssueSource() }}</span>
+                        </div>
+                        <ul>
+                          @for (i of dslIssues(); track $index) {
+                            <li [class.warning]="i.severity === 'warning'">
+                              {{ i.message }}
+                              @if (i.path) {
+                                <code class="dsl-issue-path">{{ i.path }}</code>
+                              }
+                            </li>
+                          }
+                        </ul>
+                      </div>
+                    }
+                  </div>
                 }
 
                 <span class="form-hint">
-                  Strategy-type-specific tuning. For RuleBased / LlmProposal, paste the condition
-                  DSL here. Supports a boolean tree (<code>EntryConditionsRoot</code> with
-                  <code>And</code> / <code>Or</code> / <code>Not</code>) plus 9 condition types:
-                  <code>IndicatorThreshold</code>, <code>PriceVsMa</code>, <code>RegimeMatch</code>,
-                  <code>HourWindow</code>, <code>IndicatorComparison</code>,
-                  <code>IndicatorCrossover</code>, <code>IndicatorCrossunder</code>,
-                  <code>VolumeRatio</code>, <code>BarsSince</code>. Indicators: <code>Rsi</code>,
-                  <code>Atr</code>, <code>AtrRatio</code>, <code>Adx</code>, <code>Momentum</code>,
-                  <code>Sma</code>, <code>Ema</code>, <code>Macd</code>, <code>MacdSignal</code>,
-                  <code>MacdHistogram</code>, <code>BollingerBandWidth</code>,
-                  <code>BollingerBandUpper</code>, <code>BollingerBandLower</code>,
-                  <code>StochasticK</code>, <code>StochasticD</code>, <code>Cci</code>,
-                  <code>Vwap</code>. Optional <code>ExitConditionsRoot</code> for per-strategy exit
-                  logic; <code>Offset</code> on IndicatorThreshold/IndicatorComparison reads N bars
-                  ago. The flat <code>EntryConditions</code> form still works as an implicit
-                  <code>And</code> for backward compatibility.
+                  @if (isDslType()) {
+                    The rules are one JSON document: an <code>entryConditionsRoot</code> tree of
+                    <code>And</code> / <code>Or</code> / <code>Not</code> groups over
+                    {{ conditionTypes.length }} condition types —
+                    @for (t of conditionTypes; track t.type; let lastType = $last) {
+                      <code [title]="t.description">{{ t.type }}</code
+                      >{{ lastType ? '.' : ',' }}
+                    }
+                    Indicators:
+                    @for (ind of indicatorCatalogue; track ind.kind; let lastInd = $last) {
+                      <code [title]="ind.hint">{{ ind.kind }}</code
+                      >{{ lastInd ? '.' : ',' }}
+                    }
+                    An optional <code>exitConditionsRoot</code> closes the strategy's open position
+                    when it holds. <code>dslVersion: 2</code> selects Pine-exact indicator math; new
+                    strategies are created on it. Keys may be camelCase or PascalCase — the builder
+                    writes camelCase. A legacy flat <code>entryConditions</code> list still reads as
+                    an implicit <code>And</code>.
+                  } @else {
+                    Strategy-type-specific tuning parameters.
+                  }
                 </span>
               </div>
             }
@@ -1106,6 +989,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                         <tr>
                           <th>v</th>
                           <th>Captured</th>
+                          <th>By</th>
                           <th>Reason</th>
                           <th></th>
                         </tr>
@@ -1115,6 +999,13 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                           <tr>
                             <td class="mono">v{{ v.versionNumber }}</td>
                             <td>{{ v.capturedAt | date: 'yyyy-MM-dd HH:mm:ss' }}</td>
+                            <td
+                              class="small"
+                              [class.muted]="!v.createdBy"
+                              [title]="v.createdBy ? '' : 'Author not recorded for this version'"
+                            >
+                              {{ v.createdBy || '—' }}
+                            </td>
                             <td class="muted small">{{ v.changeReason ?? '' }}</td>
                             <td>
                               <button
@@ -1140,88 +1031,170 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                       </tbody>
                     </table>
                     @if (diffVersion(); as dv) {
-                      <div class="version-diff">
-                        <div class="version-diff-head">
-                          <strong>Diff: v{{ dv.versionNumber }} → current</strong>
-                          <button
-                            type="button"
-                            class="btn btn-link"
-                            (click)="diffVersion.set(null)"
-                          >
-                            close
-                          </button>
-                        </div>
-                        @if (diffRows().length === 0) {
-                          <p class="muted small">
-                            No differences — current state matches v{{ dv.versionNumber }}.
-                          </p>
-                        } @else {
-                          <table class="version-diff-table">
-                            <thead>
-                              <tr>
-                                <th>Field</th>
-                                <th>v{{ dv.versionNumber }}</th>
-                                <th>Current</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              @for (d of diffRows(); track d.field) {
-                                <tr>
-                                  <td class="mono small">{{ d.field }}</td>
-                                  <td class="mono small">{{ d.before }}</td>
-                                  <td class="mono small">{{ d.after }}</td>
-                                </tr>
-                              }
-                            </tbody>
-                          </table>
-                        }
-                      </div>
+                      <app-strategy-version-diff
+                        [version]="dv"
+                        [current]="currentVersionFields()"
+                        (closed)="diffVersion.set(null)"
+                      />
                     }
                   }
                 }
               </div>
             }
 
+            <!-- Sticky footer: the engine's refusal and the template-name panel
+                 live here so they are visible wherever the body is scrolled. -->
             <div class="dialog-actions">
-              @if (!strategy()) {
+              @if (submitError(); as err) {
+                <div class="submit-error" role="alert">
+                  <strong>
+                    {{
+                      strategy()
+                        ? 'The engine refused the update:'
+                        : 'The engine refused to create the strategy:'
+                    }}
+                  </strong>
+                  {{ err }}
+                </div>
+              }
+
+              @if (templateNameDraft() !== null) {
+                <div class="template-save-panel">
+                  <label class="form-label" for="strategy-form-template-name">Template name</label>
+                  <div class="template-save-row">
+                    <input
+                      id="strategy-form-template-name"
+                      class="form-input"
+                      type="text"
+                      maxlength="120"
+                      [value]="templateNameDraft()"
+                      (input)="templateNameDraft.set($any($event.target).value)"
+                      (keydown.enter)="$event.preventDefault(); confirmSaveTemplate()"
+                    />
+                    <button
+                      type="button"
+                      class="btn btn-secondary"
+                      (click)="cancelSaveTemplate()"
+                      [disabled]="savingTemplate()"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-primary"
+                      (click)="confirmSaveTemplate()"
+                      [disabled]="savingTemplate() || !templateNameDraft()?.trim()"
+                    >
+                      @if (savingTemplate()) {
+                        <span class="spinner"></span>
+                      } @else {
+                        Save template
+                      }
+                    </button>
+                  </div>
+                  @if (templateError(); as terr) {
+                    <span class="form-error" role="alert">{{ terr }}</span>
+                  }
+                </div>
+              }
+
+              <div class="dialog-buttons">
+                @if (!strategy() && templateNameDraft() === null) {
+                  <button
+                    type="button"
+                    class="btn btn-link save-template-btn"
+                    (click)="saveAsTemplate()"
+                    [disabled]="form.invalid || savingTemplate()"
+                    title="Save the current configuration as a reusable template"
+                  >
+                    Save as template…
+                  </button>
+                }
+                @if (strategy()) {
+                  <input
+                    class="form-input change-reason"
+                    type="text"
+                    maxlength="200"
+                    placeholder="Reason for this change (optional)"
+                    title="Recorded on the version captured before this edit"
+                    [value]="updateChangeReason()"
+                    (input)="updateChangeReason.set($any($event.target).value)"
+                  />
+                }
                 <button
                   type="button"
-                  class="btn btn-link save-template-btn"
-                  (click)="saveAsTemplate()"
-                  [disabled]="form.invalid || savingTemplate()"
-                  title="Save the current configuration as a reusable template"
+                  class="btn btn-secondary"
+                  (click)="onCancel()"
+                  [disabled]="busy()"
                 >
-                  @if (savingTemplate()) {
-                    <span class="spinner-sm"></span>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  class="btn btn-primary"
+                  [disabled]="form.invalid || busy() || saveBlocked()"
+                  [title]="saveBlockedReason() ?? ''"
+                >
+                  @if (busy()) {
+                    <span class="spinner"></span>
                   } @else {
-                    Save as template…
+                    {{ strategy() ? 'Update' : 'Create' }}
                   }
                 </button>
-              }
-              <button
-                type="button"
-                class="btn btn-secondary"
-                (click)="onCancel()"
-                [disabled]="submitting()"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                class="btn btn-primary"
-                [disabled]="form.invalid || submitting()"
-              >
-                @if (submitting()) {
-                  <span class="spinner"></span>
-                } @else {
-                  {{ strategy() ? 'Update' : 'Create' }}
-                }
-              </button>
+              </div>
             </div>
           </form>
         </div>
       </div>
     }
+
+    <!-- Outside the modal box so their fixed overlays are never clipped by it. -->
+    <app-clone-strategy-dialog
+      [strategy]="cloneOpen() ? strategy() : null"
+      (closed)="cloneOpen.set(false)"
+      (cloned)="onCloned()"
+    />
+    <app-confirm-dialog
+      [open]="upgradeConfirmOpen()"
+      title="Upgrade to Pine-exact math (v2)?"
+      message="The engine rewrites this strategy's saved rules as dslVersion 2 and saves them straight away. What changes:"
+      confirmLabel="Upgrade"
+      [loading]="upgrading()"
+      (confirm)="confirmUpgrade()"
+      (cancelled)="closeUpgrade()"
+    >
+      <ul class="upgrade-changes">
+        <li>
+          RSI, ATR and ADX switch to Wilder smoothing, as TradingView's <code>ta.rsi</code> /
+          <code>ta.atr</code> / <code>ta.adx</code> compute them — values move, so conditions can
+          fire on different bars.
+        </li>
+        <li>VWAP resets each session instead of averaging the last N bars.</li>
+        <li>
+          MACD, Bollinger Bands and Stochastic take their full settings (fast / slow / signal
+          periods, band multiplier, %K / %D smoothing, price source) through optional indicator
+          params.
+        </li>
+        <li>
+          Spread becomes the real bid/ask spread. Existing Spread conditions are rewritten as
+          BarRange, which keeps measuring the bar's high − low.
+        </li>
+        <li>
+          <strong>
+            Backtests, walk-forward runs and paper results for this strategy were computed on v1
+            math and no longer describe the upgraded rules — re-run them before relying on it.
+          </strong>
+        </li>
+        @if (upgradeConfirmOpen() && formDirty()) {
+          <li class="upgrade-warn">
+            Unsaved changes in this form are discarded — the upgrade starts from the saved rules.
+          </li>
+        }
+      </ul>
+      @if (upgradeError(); as uerr) {
+        <p class="form-error" role="alert">{{ uerr }}</p>
+      }
+    </app-confirm-dialog>
   `,
   styles: [
     `
@@ -1379,9 +1352,15 @@ const TIMEFRAME_LABELS: Record<string, string> = {
 
       .dialog-actions {
         display: flex;
-        justify-content: flex-end;
-        gap: var(--space-3);
+        flex-direction: column;
+        gap: var(--space-2);
         padding-top: var(--space-2);
+      }
+      .dialog-buttons {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: var(--space-3);
       }
 
       .btn {
@@ -1663,15 +1642,98 @@ const TIMEFRAME_LABELS: Record<string, string> = {
         line-height: 1.4;
         color: #1d4d1d;
       }
-      .dsl-error {
-        display: block;
+      .dsl-issue-list {
         margin-top: 6px;
-        padding: 8px 10px;
-        background: rgba(255, 59, 48, 0.08);
-        border-left: 3px solid #d70015;
+        padding: 6px 10px;
+        background: rgba(255, 149, 0, 0.07);
+        border-left: 3px solid #ff9500;
         border-radius: 4px;
         font-size: 12px;
+      }
+      .dsl-issue-list.has-errors {
+        background: rgba(255, 59, 48, 0.07);
+        border-left-color: #d70015;
+      }
+      .dsl-issue-list-head {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: baseline;
+      }
+      .dsl-issue-list ul {
+        margin: 4px 0 0;
+        padding-left: 18px;
         color: #8e1010;
+      }
+      .dsl-issue-list li.warning {
+        color: #8a4b00;
+      }
+      .dsl-issue-path {
+        margin-left: 6px;
+        font-size: 10.5px;
+        color: var(--text-tertiary, #8e8e93);
+        overflow-wrap: anywhere;
+      }
+      .readonly-identity {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        min-height: 36px;
+        padding: 0 var(--space-3);
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-sm);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+      .btn.clone-link {
+        margin-left: auto;
+        height: 28px;
+        padding: 0 10px;
+        font-size: 12px;
+        background: transparent;
+        color: var(--accent);
+      }
+      .mono {
+        font-family: 'SF Mono', Menlo, monospace;
+      }
+      .submit-error {
+        padding: 8px 12px;
+        background: rgba(255, 59, 48, 0.08);
+        border: 1px solid rgba(255, 59, 48, 0.3);
+        border-radius: 6px;
+        font-size: 12px;
+        color: #8e1010;
+        white-space: pre-line;
+        max-height: 120px;
+        overflow-y: auto;
+      }
+      .template-save-row {
+        display: flex;
+        gap: 8px;
+      }
+      .template-save-row .form-input {
+        flex: 1;
+      }
+      .change-reason {
+        flex: 1;
+        min-width: 160px;
+        max-width: 280px;
+        height: 32px;
+        font-size: 12px;
+      }
+      .upgrade-changes {
+        margin: 0;
+        padding-left: 18px;
+        font-size: 13px;
+        text-align: left;
+        line-height: 1.45;
+      }
+      .upgrade-changes li + li {
+        margin-top: 6px;
+      }
+      .upgrade-warn {
+        color: #c93400;
       }
       .equity-sparkline {
         display: block;
@@ -1829,34 +1891,6 @@ const TIMEFRAME_LABELS: Record<string, string> = {
       .version-table tr:last-child td {
         border-bottom: none;
       }
-      .version-diff {
-        margin-top: 10px;
-        padding: 8px 10px;
-        background: var(--bg-primary, #fff);
-        border: 1px solid var(--border, #e4e7eb);
-        border-radius: 4px;
-      }
-      .version-diff-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 6px;
-      }
-      .version-diff-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 11px;
-      }
-      .version-diff-table th,
-      .version-diff-table td {
-        text-align: left;
-        padding: 3px 6px;
-        border-bottom: 1px solid var(--border-subtle, #eef0f3);
-        word-break: break-word;
-      }
-      .version-diff-table tr:last-child td {
-        border-bottom: none;
-      }
       .version-manual-capture {
         display: flex;
         gap: 6px;
@@ -1885,6 +1919,13 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   private readonly currencyPairsService = inject(CurrencyPairsService);
   private readonly notifications = inject(NotificationService);
 
+  constructor() {
+    // A pending debounced rule check must not fire after the form is gone.
+    inject(DestroyRef).onDestroy(() => {
+      if (this.dslTimer !== null) clearTimeout(this.dslTimer);
+    });
+  }
+
   /// Available risk profiles for the dropdown — lazy-loaded on first ngOnInit.
   riskProfiles = signal<RiskProfileDto[]>([]);
   /// Available active currency pairs for the symbol picker — drives the
@@ -1899,12 +1940,27 @@ export class StrategyFormComponent implements OnInit, OnChanges {
 
   open = input(false);
   strategy = input<StrategyDto | null>(null);
+  /** The parent's create/update request is in flight. */
+  saving = input(false);
+  /** Why the parent's last create/update was refused; shown above the actions. */
+  submitError = input<string | null>(null);
 
   submitted = output<CreateStrategyRequest | UpdateStrategyRequest>();
   cancelled = output<void>();
+  /** The saved strategy changed from inside the form (DSL upgrade): re-read it. */
+  strategyChanged = output<void>();
 
-  submitting = signal(false);
   savingTemplate = signal(false);
+  /** Name being typed for "Save as template…"; null while that panel is closed. */
+  templateNameDraft = signal<string | null>(null);
+  templateError = signal<string | null>(null);
+  cloneOpen = signal(false);
+  upgradeConfirmOpen = signal(false);
+  upgrading = signal(false);
+  upgradeError = signal<string | null>(null);
+  /** The pre-submit DSL check is running. */
+  validatingForSubmit = signal(false);
+  readonly busy = computed(() => this.saving() || this.validatingForSubmit());
   activeTab = signal<FormTab>('inputs');
   availableTemplates = signal<StrategyTemplateDto[]>([]);
   selectedTemplateId = signal<number | null>(null);
@@ -1929,15 +1985,95 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   parameterSchema = signal<StrategyParameterSchemaDto | null>(null);
   parameterValues = signal<Record<string, unknown>>({});
 
-  // ── Real-time DSL validation / summary ──────────────────────────────────
-  // When StrategyType is RuleBased / LlmProposal, the Parameters JSON field
-  // is the DSL. As the operator types we POST it to the summariser endpoint
-  // (debounced 600ms) and show either a human-readable summary or the parse
-  // error inline — no submit-time surprises.
-  dslSummary = signal<string | null>(null);
-  dslError = signal<string | null>(null);
-  dslChecking = signal(false);
-  private dslSummaryTimer: ReturnType<typeof setTimeout> | null = null;
+  // ── Form values mirrored as signals (the reactive form is not signal-based) ─
+  readonly paramsJson = signal('');
+  readonly strategyTypeValue = signal('MovingAverageCrossover');
+  readonly formTimeframe = signal<string | null>('H1');
+  readonly formName = signal<string | null>(null);
+  private readonly formValue = signal<Record<string, any>>({});
+  /** The symbol the rules should name: the strategy's, or the first one typed. */
+  readonly primarySymbol = computed<string | null>(
+    () => this.strategy()?.symbol ?? this.parsedSymbols()[0] ?? null,
+  );
+  readonly isDslType = computed(() => DSL_STRATEGY_TYPES.includes(this.strategyTypeValue()));
+  readonly paramsPlaceholder = computed(() =>
+    this.isDslType()
+      ? 'Rule DSL JSON — build it above or insert an example'
+      : '{"period": 14, "threshold": 0.5}',
+  );
+
+  // ── Rule (DSL) validation ───────────────────────────────────────────────
+  // For RuleBased / LlmProposal the Parameters JSON is the rule DSL. Each
+  // edit is checked at once by this console (dsl-model) and, debounced, by
+  // the engine (POST /strategy/dsl/summarise). The engine's verdict wins
+  // whenever it describes exactly the JSON and timeframe on screen; until
+  // then the console's own checks show. Every issue carries an engine path,
+  // so the builder pins it to the node it is about. Save is disabled while
+  // any error stands, and a save always waits for the engine's verdict on
+  // the exact JSON being saved.
+  private readonly dslServer = signal<{ key: string; result: DslCheckResult } | null>(null);
+  readonly dslChecking = signal(false);
+  /** Set when the engine's check could not run (transport error). */
+  readonly dslCheckFailed = signal<string | null>(null);
+  private dslTimer: ReturnType<typeof setTimeout> | null = null;
+  private dslRequestKey: string | null = null;
+  private readonly dslKey = computed(
+    () => `${this.formTimeframe() ?? ''}\u0000${this.paramsJson()}`,
+  );
+  readonly dslServerFresh = computed(() => this.dslServer()?.key === this.dslKey());
+  private readonly dslClientIssues = computed<DslIssue[]>(() => {
+    if (!this.isDslType()) return [];
+    const json = this.paramsJson();
+    if (!json.trim()) {
+      return [
+        {
+          path: '',
+          message: 'No rules yet — start one in the builder or insert an example',
+          severity: 'error',
+        },
+      ];
+    }
+    return validateDslJson(json, {
+      timeframe: this.formTimeframe(),
+      symbol: this.primarySymbol(),
+    });
+  });
+  readonly dslIssues = computed<DslIssue[]>(() => {
+    if (!this.isDslType()) return [];
+    const server = this.dslServer();
+    if (server && this.dslServerFresh() && this.paramsJson().trim()) {
+      return [...server.result.errors, ...server.result.warnings];
+    }
+    return this.dslClientIssues();
+  });
+  readonly dslErrorCount = computed(
+    () => this.dslIssues().filter((i) => i.severity === 'error').length,
+  );
+  readonly dslWarningCount = computed(() => this.dslIssues().length - this.dslErrorCount());
+  readonly dslSummary = computed(() =>
+    this.dslServerFresh() ? (this.dslServer()?.result.summary ?? null) : null,
+  );
+  readonly dslIssueSource = computed(() =>
+    this.dslServerFresh() ? 'checked by the engine' : 'checked in this console',
+  );
+  /** A saved v1 DSL strategy: the engine-side upgrade applies. */
+  readonly canUpgradeDsl = computed(() => {
+    const s = this.strategy();
+    if (!s || !DSL_STRATEGY_TYPES.includes(s.strategyType)) return false;
+    const r = parseDsl(s.parametersJson ?? '');
+    return r.ok && effectiveDslVersion(r.doc) < 2;
+  });
+
+  private readonly revalidateOnRejection = effect(() => {
+    // A refused save may be about the rules: fetch the engine's verdict on
+    // them now so the offending nodes light up next to the error.
+    if (!this.submitError()) return;
+    untracked(() => {
+      if (!this.form || !this.isDslType()) return;
+      this.dslServer.set(null);
+      this.scheduleDslCheck(true);
+    });
+  });
 
   // ── Backtest preview state ──────────────────────────────────────────────
   // Synchronous preview backtest of the unsaved configuration. Bounded by
@@ -2130,28 +2266,22 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   editingNotesText = signal('');
   // Currently-selected version for the diff panel. Null when no diff open.
   diffVersion = signal<StrategyVersionDto | null>(null);
-  /// Field-by-field changes between the selected version and the current
-  /// form state. Recomputes whenever either side changes.
-  diffRows = computed<{ field: string; before: string; after: string }[]>(() => {
-    const v = this.diffVersion();
-    if (!v) return [];
-    const fv = this.form?.value ?? {};
-    const fields: [string, any, any][] = [
-      ['name', v.name, fv.name],
-      ['description', v.description, fv.description],
-      ['parametersJson', v.parametersJson, fv.parametersJson],
-      ['riskProfileId', v.riskProfileId, fv.riskProfileId],
-      ['riskOverridesJson', v.riskOverridesJson, fv.riskOverridesJson],
-      ['sizingConfigJson', v.sizingConfigJson, fv.sizingConfigJson],
-      ['sessionFilterJson', v.sessionFilterJson, fv.sessionFilterJson],
-      ['regimeGateJson', v.regimeGateJson, fv.regimeGateJson],
-      ['multiTimeframeGateJson', v.multiTimeframeGateJson, fv.multiTimeframeGateJson],
-    ];
-    const fmt = (x: any) =>
-      x == null || x === '' ? '∅' : String(x).slice(0, 80) + (String(x).length > 80 ? '…' : '');
-    return fields
-      .filter(([, b, a]) => (b ?? '') !== (a ?? ''))
-      .map(([k, b, a]) => ({ field: k, before: fmt(b), after: fmt(a) }));
+  /// The form's current values in the shape a captured version records —
+  /// what the version-diff panel compares the selected version against.
+  readonly currentVersionFields = computed<StrategyVersionFields>(() => {
+    const v = this.formValue();
+    const text = (x: unknown) => (typeof x === 'string' ? x : null);
+    return {
+      name: text(v['name']),
+      description: text(v['description']),
+      parametersJson: text(v['parametersJson']),
+      riskProfileId: typeof v['riskProfileId'] === 'number' ? v['riskProfileId'] : null,
+      riskOverridesJson: text(v['riskOverridesJson']),
+      sizingConfigJson: text(v['sizingConfigJson']),
+      sessionFilterJson: text(v['sessionFilterJson']),
+      regimeGateJson: text(v['regimeGateJson']),
+      multiTimeframeGateJson: text(v['multiTimeframeGateJson']),
+    };
   });
 
   readonly strategyTypes = STRATEGY_TYPES;
@@ -2159,15 +2289,35 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   readonly timeframeLabels = TIMEFRAME_LABELS;
   readonly placeholders = SUB_CONFIG_PLACEHOLDERS;
   readonly dslExamples = DSL_EXAMPLES;
+  /** Single source of truth for the help text's condition-type and indicator lists. */
+  readonly conditionTypes = CONDITION_TYPES;
+  readonly indicatorCatalogue = INDICATORS;
 
+  /**
+   * Loads a curated example with this strategy's symbol and timeframe written
+   * in. In create mode it also switches the type to RuleBased (and fills an
+   * empty Symbol from the example); an existing strategy's type is fixed.
+   */
   loadDslExample(id: string): void {
     if (!id) return;
     const example = this.dslExamples.find((e) => e.id === id);
     if (!example) return;
-    this.form.patchValue({
-      strategyType: 'RuleBased',
-      parametersJson: example.json,
-    });
+    const s = this.strategy();
+    const symbol = s?.symbol ?? this.parsedSymbols()[0] ?? null;
+    const timeframe = s?.timeframe ?? (this.form.get('timeframe')?.value as string) ?? null;
+    const patch: Record<string, unknown> = {
+      parametersJson: exampleJsonFor(example, { symbol, timeframe }),
+    };
+    if (!s) {
+      patch['strategyType'] = 'RuleBased';
+      if (!symbol) {
+        const parsed = parseDsl(example.json);
+        if (parsed.ok && typeof parsed.doc.fields['symbol'] === 'string') {
+          patch['symbol'] = parsed.doc.fields['symbol'];
+        }
+      }
+    }
+    this.form.patchValue(patch);
     this.notifications.success(`Loaded DSL example: ${example.label}`);
   }
 
@@ -2207,9 +2357,23 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     this.form.get('symbol')?.valueChanges.subscribe((value: string) => {
       this.symbolInputValue.set(value ?? '');
       this.refreshAutoName();
+      this.syncDslIdentity();
     });
-    this.form.get('strategyType')?.valueChanges.subscribe(() => this.refreshAutoName());
-    this.form.get('timeframe')?.valueChanges.subscribe(() => this.refreshAutoName());
+    this.form.get('strategyType')?.valueChanges.subscribe((value: string) => {
+      this.strategyTypeValue.set(value ?? '');
+      this.refreshAutoName();
+      this.scheduleDslCheck();
+    });
+    this.form.get('timeframe')?.valueChanges.subscribe((value: string) => {
+      this.formTimeframe.set(value ?? null);
+      this.refreshAutoName();
+      this.syncDslIdentity();
+      this.scheduleDslCheck();
+    });
+    this.form
+      .get('name')
+      ?.valueChanges.subscribe((value: string) => this.formName.set(value ?? null));
+    this.form.valueChanges.subscribe((value) => this.formValue.set(value ?? {}));
 
     // Lazy-load risk profiles + currency pairs for the Inputs-tab pickers.
     // 200-row caps are plenty for the catalogue sizes operators see in
@@ -2225,20 +2389,11 @@ export class StrategyFormComponent implements OnInit, OnChanges {
         error: () => this.currencyPairs.set([]),
       });
 
-    // Wire the DSL summariser — debounced revalidation as operators edit JSON.
+    // Every Parameters JSON change re-validates the rules (client-side at
+    // once through the computed issues; engine-side debounced).
     this.form.get('parametersJson')?.valueChanges.subscribe((raw: string) => {
-      const type = this.form.get('strategyType')?.value;
-      if (type !== 'RuleBased' && type !== 'LlmProposal') {
-        this.dslSummary.set(null);
-        this.dslError.set(null);
-        return;
-      }
-      if (!raw || raw.trim().length === 0) {
-        this.dslSummary.set(null);
-        this.dslError.set(null);
-        return;
-      }
-      this.scheduleDslCheck(raw);
+      this.paramsJson.set(raw ?? '');
+      this.scheduleDslCheck();
     });
 
     // Re-fetch the typed parameter schema whenever the StrategyType changes.
@@ -2271,6 +2426,42 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     // Trigger once for the initial StrategyType.
     const initialType = this.form.get('strategyType')?.value;
     if (initialType) this.form.get('strategyType')?.setValue(initialType);
+
+    // A strategy bound before the form existed (ngOnChanges runs before
+    // ngOnInit) is applied now.
+    this.applyStrategy();
+  }
+
+  /** Copies the form's values into the signals the template and checks read. */
+  private syncSignalsFromForm(): void {
+    const v = this.form.getRawValue();
+    this.paramsJson.set(v.parametersJson ?? '');
+    this.strategyTypeValue.set(v.strategyType ?? '');
+    this.formTimeframe.set(v.timeframe ?? null);
+    this.formName.set(v.name ?? null);
+    this.symbolInputValue.set(v.symbol ?? '');
+    this.formValue.set(v);
+  }
+
+  /**
+   * Create mode: keeps the rules' own symbol/timeframe in step with the
+   * strategy's as the operator picks them. An existing strategy's are fixed,
+   * and a mismatch there is flagged by the validator instead.
+   */
+  private syncDslIdentity(): void {
+    if (this.strategy() || !this.isDslType()) return;
+    const json = this.form.get('parametersJson')?.value as string;
+    if (!json?.trim()) return;
+    const parsed = parseDsl(json);
+    if (!parsed.ok) return;
+    const patch: Record<string, unknown> = {};
+    const symbol = this.parsedSymbols()[0];
+    if (symbol && parsed.doc.fields['symbol'] !== symbol) patch['symbol'] = symbol;
+    const tf = this.form.get('timeframe')?.value as string;
+    if (tf && parsed.doc.fields['timeframe'] !== tf) patch['timeframe'] = tf;
+    if (Object.keys(patch).length === 0) return;
+    const next = patchDslFields(json, patch);
+    if (next && next !== json) this.form.patchValue({ parametersJson: next });
   }
 
   /**
@@ -2290,34 +2481,55 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   }
 
   /**
-   * Debounced DSL validate-and-summarise. Triggered by ParametersJson
-   * valueChanges — the 600ms wait coalesces typing bursts into a single
-   * round-trip. Endpoint is pure-function so we don't have to worry about
-   * server-side side-effects from the chatty calls.
+   * Asks the engine to validate the rules on screen — debounced 600 ms so a
+   * typing burst costs one round-trip (the endpoint is a pure function).
+   * Skipped when the verdict for exactly this JSON + timeframe is already in,
+   * and for JSON that does not parse (the console reports that itself).
    */
-  private scheduleDslCheck(raw: string): void {
-    if (this.dslSummaryTimer !== null) clearTimeout(this.dslSummaryTimer);
+  private scheduleDslCheck(immediate = false): void {
+    if (this.dslTimer !== null) {
+      clearTimeout(this.dslTimer);
+      this.dslTimer = null;
+    }
+    const json = this.paramsJson();
+    if (!this.isDslType() || !json.trim() || !parseDsl(json).ok || this.dslServerFresh()) {
+      this.dslChecking.set(false);
+      return;
+    }
     this.dslChecking.set(true);
-    this.dslSummaryTimer = setTimeout(() => {
-      this.dslSummaryTimer = null;
-      this.strategiesService.summariseDsl(raw).subscribe({
-        next: (res) => {
+    if (immediate) this.runDslCheck();
+    else {
+      this.dslTimer = setTimeout(() => {
+        this.dslTimer = null;
+        this.runDslCheck();
+      }, 600);
+    }
+  }
+
+  /** One engine check of the current rules; `done` runs after its verdict is applied. */
+  private runDslCheck(done?: () => void): void {
+    const json = this.paramsJson();
+    const key = this.dslKey();
+    this.dslRequestKey = key;
+    this.dslChecking.set(true);
+    this.strategiesService.summariseDsl(json, this.formTimeframe()).subscribe({
+      next: (res) => {
+        // A verdict for JSON that has since changed is stale — drop it.
+        if (key === this.dslKey()) {
+          this.dslServer.set({ key, result: normaliseDslCheck(res) });
+          this.dslCheckFailed.set(null);
+        }
+        if (key === this.dslRequestKey) this.dslChecking.set(false);
+        done?.();
+      },
+      error: (err) => {
+        if (key === this.dslRequestKey) {
           this.dslChecking.set(false);
-          if (res?.status && res.data) {
-            this.dslSummary.set(res.data);
-            this.dslError.set(null);
-          } else {
-            this.dslSummary.set(null);
-            this.dslError.set(res?.message ?? 'DSL invalid');
-          }
-        },
-        error: () => {
-          this.dslChecking.set(false);
-          this.dslSummary.set(null);
-          this.dslError.set('DSL check failed');
-        },
-      });
-    }, 600);
+          this.dslCheckFailed.set(failureMessage(err, 'request failed'));
+        }
+        done?.();
+      },
+    });
   }
 
   /**
@@ -2344,7 +2556,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
       const parsed = JSON.parse(raw);
       this.form.patchValue({ parametersJson: JSON.stringify(parsed, null, 2) });
       this.notifications.success('Formatted');
-    } catch (e) {
+    } catch {
       this.notifications.error('JSON parse error — fix the syntax first');
     }
   }
@@ -2712,12 +2924,28 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     });
   }
 
-  ngOnChanges(): void {
+  ngOnChanges(changes: SimpleChanges): void {
+    // Only a new strategy or the modal opening/closing re-seeds the form. The
+    // parent-driven `saving` / `submitError` inputs change mid-edit, and
+    // resetting then would throw away exactly the edits a refused save needs
+    // the operator to fix.
+    if (changes['strategy'] || changes['open']) this.applyStrategy();
+  }
+
+  /** Seeds the form from the bound strategy (edit) or resets it (create). */
+  private applyStrategy(): void {
     const s = this.strategy();
     // Reset version-history drawer when the focused strategy changes — stale
     // versions from a previously edited row would mislead the operator.
     this.showVersionHistory.set(false);
     this.versions.set([]);
+    this.diffVersion.set(null);
+    this.templateNameDraft.set(null);
+    this.templateError.set(null);
+    this.updateChangeReason.set('');
+    this.cloneOpen.set(false);
+    this.upgradeConfirmOpen.set(false);
+    this.upgradeError.set(null);
     if (s && this.form) {
       // Edit mode: keep the strategy's existing name; auto-generation off.
       this.nameAutoGenerated.set(false);
@@ -2754,6 +2982,10 @@ export class StrategyFormComponent implements OnInit, OnChanges {
       });
       this.activeTab.set('inputs');
       this.selectedTemplateId.set(null);
+    }
+    if (this.form) {
+      this.form.markAsPristine();
+      this.syncSignalsFromForm();
     }
   }
 
@@ -2853,20 +3085,29 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   }
 
   /**
-   * Persist the current form values as a reusable template. Operators are
-   * prompted for the template name (via the strategy name field as default,
-   * augmented with " template" so saving an "EURUSD MA Cross" strategy gives
-   * "EURUSD MA Cross template").
+   * Opens the inline "Save as template" panel, pre-filled with the strategy
+   * name + " template" (so "EURUSD MA Cross" proposes "EURUSD MA Cross
+   * template"). The engine's verdict — e.g. a name clash — shows in the panel.
    */
   saveAsTemplate(): void {
     if (this.form.invalid) return;
-    const val = this.form.value;
-    const baseName = (val.name as string)?.trim() || 'Untitled';
-    const proposed = window.prompt('Template name (must be unique):', `${baseName} template`);
-    if (!proposed || !proposed.trim()) return;
+    const baseName = (this.form.value.name as string)?.trim() || 'Untitled';
+    this.templateError.set(null);
+    this.templateNameDraft.set(`${baseName} template`);
+  }
 
+  cancelSaveTemplate(): void {
+    if (this.savingTemplate()) return;
+    this.templateNameDraft.set(null);
+    this.templateError.set(null);
+  }
+
+  confirmSaveTemplate(): void {
+    const name = this.templateNameDraft()?.trim();
+    if (!name || this.savingTemplate()) return;
+    const val = this.form.getRawValue();
     const data: CreateStrategyTemplateRequest = {
-      name: proposed.trim(),
+      name,
       description: val.description || null,
       strategyType: val.strategyType,
       parametersJson: val.parametersJson || '{}',
@@ -2879,40 +3120,134 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     };
 
     this.savingTemplate.set(true);
-    this.strategiesService.createTemplate(data).subscribe({
+    this.templateError.set(null);
+    this.strategiesService.createTemplate(data, { silent: true }).subscribe({
       next: (res) => {
         this.savingTemplate.set(false);
         if (res?.status) {
-          this.notifications.success(`Template '${proposed}' saved`);
+          this.notifications.success(`Template '${name}' saved`);
+          this.templateNameDraft.set(null);
           // Refresh dropdown so the new template appears immediately.
           this.strategiesService.listTemplates().subscribe({
             next: (list) => this.availableTemplates.set(list?.data ?? []),
           });
         } else {
-          this.notifications.error(res?.message ?? 'Failed to save template');
+          this.templateError.set(failureMessage(res, 'The engine did not save the template.'));
         }
       },
-      error: () => {
+      error: (err) => {
         this.savingTemplate.set(false);
-        this.notifications.error('Failed to save template');
+        this.templateError.set(failureMessage(err, 'Saving the template failed.'));
       },
     });
   }
 
+  /** True while rule errors stand: Save stays disabled until they are fixed. */
+  saveBlocked(): boolean {
+    return this.isDslType() && this.dslErrorCount() > 0;
+  }
+
+  /** Why Save is disabled, for its tooltip; null when it is not. */
+  saveBlockedReason(): string | null {
+    if (this.saveBlocked()) {
+      const n = this.dslErrorCount();
+      return `Fix ${n} rule error${n === 1 ? '' : 's'} before saving`;
+    }
+    if (this.form?.invalid) return 'Fill in the required fields';
+    return null;
+  }
+
+  /** True when the form holds edits that are not saved yet. */
+  formDirty(): boolean {
+    const s = this.strategy();
+    if (!s || !this.form) return false;
+    return this.form.dirty || this.paramsJson() !== (s.parametersJson ?? '');
+  }
+
   onSubmit(): void {
-    if (this.form.invalid) return;
-    const val = this.form.value;
+    if (this.form.invalid || this.busy() || this.saveBlocked()) return;
+    if (!this.isDslType()) {
+      this.emitSubmit();
+      return;
+    }
+    if (!this.strategy()) this.defaultNewRuleToV2();
+    if (this.dslServerFresh() || !parseDsl(this.paramsJson()).ok) {
+      if (this.dslErrorCount() === 0) this.emitSubmit();
+      return;
+    }
+    // Save exactly what the engine has checked: validate the rules as they
+    // stand now, then submit only if they pass.
+    if (this.dslTimer !== null) {
+      clearTimeout(this.dslTimer);
+      this.dslTimer = null;
+    }
+    this.validatingForSubmit.set(true);
+    this.runDslCheck(() => {
+      this.validatingForSubmit.set(false);
+      const n = this.dslErrorCount();
+      if (n > 0) {
+        this.notifications.error(`Fix ${n} rule error${n === 1 ? '' : 's'} before saving`);
+        return;
+      }
+      this.emitSubmit();
+    });
+  }
+
+  /**
+   * New strategies default to Pine-exact math. A rule with no `dslVersion`
+   * (absent = v1 to the engine) is stamped v2 on create, converting v1 Spread
+   * conditions (bar range) to BarRange so their meaning is kept. An explicit
+   * `dslVersion: 1` is the operator's choice and is left alone.
+   */
+  private defaultNewRuleToV2(): void {
+    const json = this.paramsJson();
+    const parsed = parseDsl(json);
+    if (!parsed.ok) return;
+    const v = parsed.doc.fields['dslVersion'];
+    if (v !== undefined && v !== null) return;
+    const converted = upgradeDocToV2(parsed.doc);
+    this.form.patchValue({ parametersJson: emitDsl(parsed.doc) });
+    if (converted > 0) {
+      this.notifications.info(
+        `Created on Pine-exact math (v2): ${converted} Spread condition${converted === 1 ? '' : 's'} became BarRange.`,
+      );
+    }
+  }
+
+  private emitSubmit(): void {
+    const val = this.form.getRawValue();
+    const s = this.strategy();
+    if (s) {
+      // Symbol, timeframe and type are immutable — never sent. Null leaves a
+      // field unchanged, so the sub-configs go as strings ('' clears one) and
+      // a removed risk profile goes as the engine's 0 sentinel.
+      const update: UpdateStrategyRequest = {
+        name: val.name,
+        description: val.description ?? '',
+        parametersJson: (val.parametersJson as string)?.trim() ? val.parametersJson : '{}',
+        riskProfileId: val.riskProfileId ?? (s.riskProfileId != null ? 0 : null),
+        riskOverridesJson: val.riskOverridesJson ?? '',
+        sizingConfigJson: val.sizingConfigJson ?? '',
+        sessionFilterJson: val.sessionFilterJson ?? '',
+        regimeGateJson: val.regimeGateJson ?? '',
+        multiTimeframeGateJson: val.multiTimeframeGateJson ?? '',
+        changeReason: this.updateChangeReason()?.trim() || null,
+      };
+      this.submitted.emit(update);
+      return;
+    }
     // The Symbol field accepts comma-separated values; split here rather than
     // at submit time downstream so the parent can decide whether to fan-out
     // to N create calls or send a single one. The Strategy entity itself is
-    // single-symbol — bulk create is N round-trips, parallelised.
+    // single-symbol — bulk create is N round-trips.
     const symbols = (val.symbol as string)
       .split(',')
-      .map((s) => s.trim().toUpperCase())
-      .filter((s) => s.length > 0);
+      .map((x) => x.trim().toUpperCase())
+      .filter((x) => x.length > 0);
     const data: any = {
       name: val.name,
-      description: val.description || '',
+      // The engine requires a description; the name stands in for a blank one.
+      description: (val.description as string)?.trim() || val.name,
       strategyType: val.strategyType,
       // For single-symbol back-compat the request still carries `symbol`. For
       // multi-symbol the parent component reads the new `symbols` field and
@@ -2927,11 +3262,58 @@ export class StrategyFormComponent implements OnInit, OnChanges {
       sessionFilterJson: val.sessionFilterJson || null,
       regimeGateJson: val.regimeGateJson || null,
       multiTimeframeGateJson: val.multiTimeframeGateJson || null,
-      // Only meaningful for edit mode — annotates the auto-captured pre-edit
-      // snapshot. Parent ignores it for create. Reset after submit.
-      changeReason: this.updateChangeReason()?.trim() || null,
     };
     this.submitted.emit(data);
+  }
+
+  // ── Clone / DSL upgrade ─────────────────────────────────────────────────
+
+  openClone(): void {
+    this.cloneOpen.set(true);
+  }
+
+  /** The clone dialog opened the new strategy; this modal is done. */
+  onCloned(): void {
+    this.cloneOpen.set(false);
+    this.cancelled.emit();
+  }
+
+  askUpgrade(): void {
+    this.upgradeError.set(null);
+    this.upgradeConfirmOpen.set(true);
+  }
+
+  closeUpgrade(): void {
+    if (this.upgrading()) return;
+    this.upgradeConfirmOpen.set(false);
+  }
+
+  /** Engine-side v1 → v2 upgrade of the saved rules (`POST /strategy/{id}/dsl/upgrade`). */
+  confirmUpgrade(): void {
+    const s = this.strategy();
+    if (!s || this.upgrading()) return;
+    this.upgrading.set(true);
+    this.upgradeError.set(null);
+    this.strategiesService.upgradeDsl(s.id, { silent: true }).subscribe({
+      next: (res) => {
+        this.upgrading.set(false);
+        if (res?.status && typeof res.data === 'string' && res.data.trim()) {
+          this.upgradeConfirmOpen.set(false);
+          this.form.patchValue({ parametersJson: res.data });
+          this.notifications.success(
+            'Upgraded to Pine-exact math (v2). Re-run backtests before relying on this strategy.',
+          );
+          this.strategyChanged.emit();
+          if (this.showVersionHistory()) this.refreshVersionHistory();
+        } else {
+          this.upgradeError.set(failureMessage(res, 'The engine did not upgrade the rules.'));
+        }
+      },
+      error: (err) => {
+        this.upgrading.set(false);
+        this.upgradeError.set(failureMessage(err, 'The upgrade failed.'));
+      },
+    });
   }
 
   onCancel(): void {

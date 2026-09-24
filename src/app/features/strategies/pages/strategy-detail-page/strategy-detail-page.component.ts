@@ -11,7 +11,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { filter, map, throttleTime } from 'rxjs';
+import { distinctUntilChanged, filter, map, of, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 
 import { StrategiesService } from '@core/services/strategies.service';
@@ -47,6 +47,8 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
 import { PageContextService } from '@core/assistant/page-context.service';
 
 import { StrategyFormComponent } from '../../components/strategy-form/strategy-form.component';
+import { CloneStrategyDialogComponent } from '../../components/clone-strategy-dialog/clone-strategy-dialog.component';
+import { failureMessage } from '../../util/api-failure';
 import { PromotionReadinessCardComponent } from '../../components/promotion-readiness-card/promotion-readiness-card.component';
 import { PromotionGateHistoryCardComponent } from '../../components/promotion-gate-history-card/promotion-gate-history-card.component';
 import { StrategyVariantsTabComponent } from '../../components/strategy-variants-tab/strategy-variants-tab.component';
@@ -69,6 +71,7 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
     EnumLabelPipe,
     RelativeTimePipe,
     StrategyFormComponent,
+    CloneStrategyDialogComponent,
     PromotionReadinessCardComponent,
     PromotionGateHistoryCardComponent,
     StrategyVariantsTabComponent,
@@ -97,7 +100,15 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
               Pause
             </button>
           }
-          <button class="btn btn-secondary" (click)="showEditForm.set(true)">Edit</button>
+          <button class="btn btn-secondary" (click)="openEdit()">Edit</button>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            (click)="cloneTarget.set(strategy())"
+            title="Copy this strategy onto another symbol or timeframe as a Paused draft"
+          >
+            Clone…
+          </button>
           <button class="btn btn-secondary" (click)="openAnalytics()">Open analytics →</button>
           <button
             type="button"
@@ -563,9 +574,14 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
       <app-strategy-form
         [open]="showEditForm()"
         [strategy]="strategy()"
+        [saving]="updateSaving()"
+        [submitError]="updateError()"
         (submitted)="onUpdate($event)"
-        (cancelled)="showEditForm.set(false)"
+        (cancelled)="closeEdit()"
+        (strategyChanged)="loadStrategy()"
       />
+
+      <app-clone-strategy-dialog [strategy]="cloneTarget()" (closed)="cloneTarget.set(null)" />
 
       @if (showRejectionDrawer()) {
         <app-rejection-distribution-drawer
@@ -1199,6 +1215,12 @@ export class StrategyDetailPageComponent implements OnInit {
   showDeleteConfirm = signal(false);
   deleteLoading = signal(false);
   showEditForm = signal(false);
+  /** The edit form's update request is in flight. */
+  updateSaving = signal(false);
+  /** Why the engine refused the last update; shown inside the still-open form. */
+  updateError = signal<string | null>(null);
+  /** Strategy whose clone dialog is open (this one); null when closed. */
+  cloneTarget = signal<StrategyDto | null>(null);
   showRejectionDrawer = signal(false);
   optimizationLoading = signal(false);
 
@@ -1717,11 +1739,17 @@ export class StrategyDetailPageComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.strategyId = +this.route.snapshot.paramMap.get('id')!;
-    this.loadStrategy();
-    this.loadLatestSnapshot();
-    this.loadWeekAgoSnapshot();
-    this.loadConfigRollups();
+    // Follow the route, not just its first snapshot: Angular reuses this
+    // component when only :id changes (a clone opening, a lineage link), and
+    // reading the snapshot once left the page showing the previous strategy.
+    (this.route.paramMap ?? of(this.route.snapshot.paramMap))
+      .pipe(
+        map((p) => Number(p.get('id'))),
+        filter((id) => Number.isFinite(id) && id > 0),
+        distinctUntilChanged(),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((id) => this.showStrategy(id));
 
     // Push refresh: filter to events for this strategy id, throttle to 5s so
     // a chatty 60s-cadence worker can't pile up if the page sits open. The
@@ -1736,6 +1764,49 @@ export class StrategyDetailPageComponent implements OnInit {
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(() => this.loadLatestSnapshot());
+  }
+
+  /** Loads the page for strategy `id` — first visit, or a move to another strategy. */
+  private showStrategy(id: number): void {
+    const switching = this.strategyId !== undefined && this.strategyId !== id;
+    this.strategyId = id;
+    if (switching) {
+      // Clearing the strategy tears down the tabbed body, so every table and
+      // card in it re-initialises against the new id.
+      this.strategy.set(null);
+      this.loadError.set(false);
+      this.latestSnapshot.set(null);
+      this.weekAgoSnapshot.set(null);
+      this.lineage.set(null);
+      this.totalSignals.set(null);
+      this.totalOrders.set(null);
+      this.totalOptimizations.set(null);
+      this.totalBacktests.set(null);
+      this.totalWalkForwards.set(null);
+      this.recentSignals.set([]);
+      this.recentOrders.set([]);
+      this.showEditForm.set(false);
+      this.showDeleteConfirm.set(false);
+      this.showRejectionDrawer.set(false);
+      this.cloneTarget.set(null);
+      this.updateError.set(null);
+      this.activeTab.set('config');
+    }
+    this.loadStrategy();
+    this.loadLatestSnapshot();
+    this.loadWeekAgoSnapshot();
+    this.loadConfigRollups();
+  }
+
+  openEdit(): void {
+    this.updateError.set(null);
+    this.showEditForm.set(true);
+  }
+
+  closeEdit(): void {
+    if (this.updateSaving()) return;
+    this.showEditForm.set(false);
+    this.updateError.set(null);
   }
 
   private fetchLineage(): void {
@@ -1912,15 +1983,33 @@ export class StrategyDetailPageComponent implements OnInit {
     });
   }
 
+  /**
+   * Saves the edit form. A refusal — HTTP 200 with `status: false` (an
+   * immutable field, invalid rules) or an HTTP 400 — keeps the form open with
+   * the engine's reason; it used to report success and close.
+   */
   onUpdate(data: any): void {
-    this.strategiesService.update(this.strategyId, data as UpdateStrategyRequest).subscribe({
-      next: (res) => {
-        if (res.data) this.strategy.set(res.data);
-        this.notifications.success('Strategy updated');
-        this.showEditForm.set(false);
-      },
-      error: () => this.notifications.error('Failed to update strategy'),
-    });
+    this.updateSaving.set(true);
+    this.updateError.set(null);
+    this.strategiesService
+      .update(this.strategyId, data as UpdateStrategyRequest, { silent: true })
+      .subscribe({
+        next: (res) => {
+          this.updateSaving.set(false);
+          if (!res?.status) {
+            this.updateError.set(failureMessage(res, 'The engine did not apply the update.'));
+            return;
+          }
+          this.notifications.success('Strategy updated');
+          this.showEditForm.set(false);
+          // The engine answers `data: true`, not the strategy — re-read it.
+          this.loadStrategy();
+        },
+        error: (err) => {
+          this.updateSaving.set(false);
+          this.updateError.set(failureMessage(err, 'The update failed.'));
+        },
+      });
   }
 
   onTriggerOptimization(): void {
@@ -1958,7 +2047,7 @@ export class StrategyDetailPageComponent implements OnInit {
     });
   }
 
-  private loadStrategy(): void {
+  protected loadStrategy(): void {
     this.strategiesService.getById(this.strategyId).subscribe({
       next: (res) => {
         if (res.data) {
