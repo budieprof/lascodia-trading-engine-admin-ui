@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { TestBed, type ComponentFixture } from '@angular/core/testing';
+import { DeferBlockBehavior, TestBed, type ComponentFixture } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideRouter } from '@angular/router';
@@ -115,6 +115,8 @@ describe('StrategyFormComponent — Pine script authoring', () => {
     notify = { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() };
     TestBed.configureTestingModule({
       imports: [StrategyFormComponent],
+      // The script panel's preview (chart + report) is a deferred chunk: keep it on its placeholder.
+      deferBlockBehavior: DeferBlockBehavior.Manual,
       providers: [
         provideHttpClient(),
         provideHttpClientTesting(),
@@ -187,6 +189,16 @@ describe('StrategyFormComponent — Pine script authoring', () => {
       expect(host.querySelector('.preview-panel')).toBeNull();
       expect(host.querySelector('.dialog.dialog-wide')).toBeTruthy();
       expect(cmp.scriptDraft().source).toBe(DEFAULT_STRATEGY_SCRIPT);
+    });
+
+    it('defers the script preview: the chart and the report are not part of the strategies route', async () => {
+      cmp.form.patchValue({ strategyType: 'RuleBased' });
+      cmp.authoringMode.set('script');
+      fixture.detectChanges();
+      expect(host.querySelector('app-script-authoring')).toBeTruthy();
+      expect(host.querySelector('app-script-authoring .preview-placeholder')).toBeTruthy();
+      expect(host.querySelector('app-script-preview')).toBeNull();
+      expect(await fixture.getDeferBlocks()).toHaveLength(1);
     });
 
     it('never authors a script for another strategy type', () => {

@@ -622,9 +622,14 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
           }
 
           <!-- Live Tab (script strategies) — the live session's emulator state, divergences
-               from the bound accounts and the live Strategy report. -->
+               from the bound accounts and the live Strategy report. Deferred: the panel and the
+               report are fetched when the tab opens, not with the strategies route. -->
           @if (activeTab() === 'live' && isScript()) {
-            <app-script-live-panel [strategyId]="strategyId" />
+            @defer (on immediate) {
+              <app-script-live-panel [strategyId]="strategyId" />
+            } @loading (minimum 150ms) {
+              <p class="muted small"><span class="spinner"></span> Loading the live session…</p>
+            }
           }
 
           <!-- Alerts Tab (script strategies) — alertcondition / alert() / order-fill bindings. -->

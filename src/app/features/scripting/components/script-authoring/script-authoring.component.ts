@@ -166,17 +166,27 @@ function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
     </div>
 
     <!-- Preview at full width under the editor: a chart needs the room, and the inputs beside
-         the editor stay in view while a run is compared against them. -->
+         the editor stay in view while a run is compared against them. Deferred: the chart, the
+         preview and the report are a chunk of their own, fetched once the page is idle — the
+         routes that host this panel (the strategies pages) do not carry the chart. -->
     <section class="preview-section" aria-label="Preview">
       <h4 class="preview-title">Preview</h4>
-      <app-script-preview
-        [source]="draft().source"
-        [inputs]="draft().inputs"
-        [symbol]="symbol()"
-        [timeframe]="timeframe()"
-        [kind]="shown()?.declaration?.kind ?? null"
-        (reveal)="workbench?.reveal($event.line, $event.column)"
-      />
+      @defer (on idle) {
+        <app-script-preview
+          [source]="draft().source"
+          [inputs]="draft().inputs"
+          [symbol]="symbol()"
+          [timeframe]="timeframe()"
+          [kind]="shown()?.declaration?.kind ?? null"
+          (reveal)="workbench?.reveal($event.line, $event.column)"
+        />
+      } @placeholder {
+        <div class="preview-placeholder muted small">The preview loads here.</div>
+      } @loading (minimum 150ms) {
+        <div class="preview-placeholder muted small">
+          <span class="spinner"></span> Loading the chart…
+        </div>
+      }
     </section>
   `,
   styles: [
@@ -274,6 +284,15 @@ function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
         text-transform: uppercase;
         letter-spacing: 0.05em;
         color: var(--text-secondary);
+      }
+      .preview-placeholder {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        min-height: 120px;
+        border: 1px dashed var(--border);
+        border-radius: 8px;
       }
     `,
   ],
