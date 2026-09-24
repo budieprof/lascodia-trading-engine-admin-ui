@@ -886,7 +886,9 @@ export function defaultConfig(type: string, ctx: DslDefaultsContext = {}): Recor
       return { expression: '(High - Low) / Atr(14)', operator: 'GreaterThan', threshold: 1.5 };
     case 'HtfIndicatorThreshold':
       return {
-        higherTimeframe: higherTimeframes(ctx.timeframe)[0] ?? 'D1',
+        // The next timeframe up from the strategy's; D1 when that is unknown.
+        higherTimeframe:
+          timeframeRank(ctx.timeframe) >= 0 ? (higherTimeframes(ctx.timeframe)[0] ?? 'D1') : 'D1',
         indicator: 'Rsi',
         period: 14,
         operator: 'GreaterThan',

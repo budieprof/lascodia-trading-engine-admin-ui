@@ -1914,8 +1914,9 @@ export class StrategyDetailPageComponent implements OnInit {
 
   onUpdate(data: any): void {
     this.strategiesService.update(this.strategyId, data as UpdateStrategyRequest).subscribe({
-      next: (res) => {
-        if (res.data) this.strategy.set(res.data);
+      next: () => {
+        // The engine answers `data: true`, not the strategy — re-read it.
+        this.loadStrategy();
         this.notifications.success('Strategy updated');
         this.showEditForm.set(false);
       },

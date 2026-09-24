@@ -1,7 +1,9 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { ApiService } from '@core/api/api.service';
+import { ApiCallOptions, ApiService } from '@core/api/api.service';
 import {
+  CloneStrategyRequest,
+  DslSummaryDto,
   ResponseData,
   PagedData,
   PagerRequest,
@@ -58,8 +60,29 @@ export class StrategiesService {
     return this.api.post(`/strategy/list`, params);
   }
 
-  create(data: CreateStrategyRequest): Observable<ResponseData<StrategyDto>> {
-    return this.api.post(`/strategy`, data);
+  /** Creates a Paused strategy; `data` is the new id. */
+  create(data: CreateStrategyRequest, opts?: ApiCallOptions): Observable<ResponseData<number>> {
+    return this.api.post(`/strategy`, data, opts);
+  }
+
+  /**
+   * Copies a strategy — optionally onto another symbol and/or timeframe — as a
+   * new Paused draft. `data` is the new strategy's id.
+   */
+  clone(
+    id: number,
+    body: CloneStrategyRequest,
+    opts?: ApiCallOptions,
+  ): Observable<ResponseData<number>> {
+    return this.api.post(`/strategy/${id}/clone`, body, opts);
+  }
+
+  /**
+   * Moves a v1 DSL strategy to Pine-exact math (`dslVersion: 2`) and saves it;
+   * `data` is the upgraded ParametersJson.
+   */
+  upgradeDsl(id: number, opts?: ApiCallOptions): Observable<ResponseData<string>> {
+    return this.api.post(`/strategy/${id}/dsl/upgrade`, {}, opts);
   }
 
   // ── Strategy templates (TradingView-style presets) ──
@@ -67,8 +90,25 @@ export class StrategiesService {
     return this.api.get(`/strategy/templates`);
   }
 
-  createTemplate(data: CreateStrategyTemplateRequest): Observable<ResponseData<number>> {
-    return this.api.post(`/strategy/templates`, data);
+  createTemplate(
+    data: CreateStrategyTemplateRequest,
+    opts?: ApiCallOptions,
+  ): Observable<ResponseData<number>> {
+    return this.api.post(`/strategy/templates`, data, opts);
+  }
+
+  /** Replaces a template's fields (same body as create). */
+  updateTemplate(
+    id: number,
+    data: CreateStrategyTemplateRequest,
+    opts?: ApiCallOptions,
+  ): Observable<ResponseData<unknown>> {
+    return this.api.put(`/strategy/templates/${id}`, data, opts);
+  }
+
+  /** Deletes a template. Strategies already created from it are not touched. */
+  deleteTemplate(id: number, opts?: ApiCallOptions): Observable<ResponseData<unknown>> {
+    return this.api.delete(`/strategy/templates/${id}`, opts);
   }
 
   applyTemplate(
@@ -96,12 +136,33 @@ export class StrategiesService {
     return this.api.post(`/strategy/backtest-preview`, data);
   }
 
-  summariseDsl(dslJson: string): Observable<ResponseData<string | null>> {
-    return this.api.post(`/strategy/dsl/summarise`, { dslJson });
+  /**
+   * Validates DSL JSON and renders its plain-English summary. `timeframe` (the
+   * strategy's own) lets the engine check higher-timeframe conditions.
+   *
+   * `data` is a {@link DslSummaryDto}; engines built before that shape return
+   * the summary string (or null with the error in `message`), so callers go
+   * through `normaliseDslCheck`. `dslJson` is the old request field, sent
+   * alongside `parametersJson` so either engine build answers.
+   */
+  summariseDsl(
+    parametersJson: string,
+    timeframe?: string | null,
+  ): Observable<ResponseData<DslSummaryDto | string | null>> {
+    return this.api.post(
+      `/strategy/dsl/summarise`,
+      { parametersJson, dslJson: parametersJson, timeframe: timeframe || null },
+      { silent: true },
+    );
   }
 
-  update(id: number, data: UpdateStrategyRequest): Observable<ResponseData<StrategyDto>> {
-    return this.api.put(`/strategy/${id}`, data);
+  /** Engine answers `data: true`; symbol/timeframe/type changes are refused with `-11`. */
+  update(
+    id: number,
+    data: UpdateStrategyRequest,
+    opts?: ApiCallOptions,
+  ): Observable<ResponseData<boolean>> {
+    return this.api.put(`/strategy/${id}`, data, opts);
   }
 
   delete(id: number): Observable<ResponseData<void>> {

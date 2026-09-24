@@ -2987,6 +2987,32 @@ export interface StrategyParameterSchemaDto {
   fields: StrategyParameterFieldDto[];
 }
 
+/** One DSL problem reported by `POST /strategy/dsl/summarise`. */
+export interface DslIssueDto {
+  /** Engine path to the offending node/field, e.g. `entryConditionsRoot.children[1].children[0].leaf`. */
+  path: string;
+  message: string;
+}
+
+/**
+ * `POST /strategy/dsl/summarise` result: every error and warning plus the
+ * plain-English summary (null when the DSL does not validate). Engines built
+ * before this shape answered with the summary string alone.
+ */
+export interface DslSummaryDto {
+  summary: string | null;
+  isValid: boolean;
+  errors: DslIssueDto[];
+  warnings: DslIssueDto[];
+}
+
+/** Body for `POST /strategy/{id}/clone`. Omitted fields copy the source strategy's value. */
+export interface CloneStrategyRequest {
+  name?: string | null;
+  symbol?: string | null;
+  timeframe?: Timeframe | null;
+}
+
 export interface RunBacktestPreviewRequest {
   symbol: string;
   timeframe: string;
@@ -4519,14 +4545,23 @@ export interface ApplyStrategyTemplateResult {
   skippedReasons: string[];
 }
 
+/**
+ * Body for `PUT /strategy/{id}`. Symbol, timeframe and strategy type are
+ * immutable — the engine rejects a change with `-11` — so the edit form never
+ * sends them; `POST /strategy/{id}/clone` moves a strategy instead.
+ * Null means "leave unchanged"; an empty sub-config string clears it;
+ * `riskProfileId: 0` detaches the risk profile.
+ */
 export interface UpdateStrategyRequest {
   name?: string | null;
   description?: string | null;
-  strategyType?: string | null;
-  symbol?: string | null;
-  timeframe?: string | null;
   parametersJson?: string | null;
   riskProfileId?: number | null;
+  riskOverridesJson?: string | null;
+  sizingConfigJson?: string | null;
+  sessionFilterJson?: string | null;
+  regimeGateJson?: string | null;
+  multiTimeframeGateJson?: string | null;
   /** Optional free-text reason annotating the auto-captured pre-edit snapshot. */
   changeReason?: string | null;
 }
@@ -4546,6 +4581,8 @@ export interface StrategyVersionDto {
   multiTimeframeGateJson: string | null;
   capturedAt: string;
   changeReason: string | null;
+  /** Operator whose edit produced this version; null for system captures and older rows. */
+  createdBy?: string | null;
 }
 
 export interface StrategyLineageNodeDto {
