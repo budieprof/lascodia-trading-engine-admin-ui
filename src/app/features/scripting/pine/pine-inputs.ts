@@ -5,6 +5,8 @@ import type {
 } from '@core/api/scripting.types';
 import { PINE_SOURCES } from './pine-lexicon';
 
+export { parseSavedInputs } from './pine-saved-inputs';
+
 /**
  * Pure helpers behind the inputs form: default values, coercion of widget values into the §9 wire
  * shape, override maps, the Pine "Settings/Inputs" layout (groups and inline rows), and the
@@ -379,20 +381,6 @@ export function isInputActive(input: ScriptInputDto, values: ScriptInputValues):
   if (!gate) return true;
   if (!Object.prototype.hasOwnProperty.call(values, gate)) return true;
   return values[gate] === true;
-}
-
-/** Parses a strategy's `scriptInputs`, which older engines may send as JSON text. */
-export function parseSavedInputs(raw: unknown): ScriptInputValues {
-  if (!raw) return {};
-  if (typeof raw === 'string') {
-    try {
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-    } catch {
-      return {};
-    }
-  }
-  return typeof raw === 'object' && !Array.isArray(raw) ? (raw as ScriptInputValues) : {};
 }
 
 // ── Layout ─────────────────────────────────────────────────────────────────

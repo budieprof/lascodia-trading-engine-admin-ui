@@ -2,7 +2,7 @@ import { linkedSignal, type WritableSignal } from '@angular/core';
 
 import type { StrategyDto } from '@core/api/api.types';
 import type { ScriptExecutionPolicy, ScriptInputValues } from '@core/api/scripting.types';
-import { parseSavedInputs } from '../../pine/pine-inputs';
+import { parseSavedInputs } from '../../pine/pine-saved-inputs';
 
 /** How a RuleBased strategy is authored: the visual rule builder (JSON DSL) or a Pine v6 script. */
 export type AuthoringMode = 'rules' | 'script';

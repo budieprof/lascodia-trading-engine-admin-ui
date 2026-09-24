@@ -7,7 +7,6 @@ import type { ScriptCompileResult } from '@core/api/scripting.types';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { ScriptingService, toScriptingError } from '@core/services/scripting.service';
-import { readDeclarationHeader } from '../../pine/pine-scan';
 import { ScriptWorkbenchComponent } from '../script-workbench/script-workbench.component';
 import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
 
@@ -259,8 +258,14 @@ export class ImportScriptButtonComponent {
   readonly pairs = signal<CurrencyPairDto[]>([]);
   private pairsLoaded = false;
 
+  /** The script's own title — from the compile, or read straight from `strategy("…")`. */
   readonly suggestedName = computed(
-    () => this.compiled()?.declaration?.title ?? readDeclarationHeader(this.content())?.title ?? '',
+    () =>
+      this.compiled()?.declaration?.title ??
+      /(?:^|\n)\s*(?:strategy|indicator)\s*\(\s*(?:title\s*=\s*)?"([^"]*)"/.exec(
+        this.content(),
+      )?.[1] ??
+      '',
   );
   readonly errorCount = computed(
     () => (this.compiled()?.diagnostics ?? []).filter((d) => d.severity === 'error').length,
