@@ -4,6 +4,10 @@
     "chart-annotations": {
       "enabled": true,
       "roles": ["Admin", "Operator", "Trader"]
+    },
+    "pine-chart-lab": {
+      "enabled": false,
+      "roles": ["Admin"]
     }
   }
 }
