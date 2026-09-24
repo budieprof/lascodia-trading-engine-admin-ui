@@ -206,6 +206,12 @@ export const PAGE_CATALOG: readonly PageCommand[] = [
   },
   {
     group: 'Analysis',
+    label: 'Pine Screener',
+    route: '/pine-screener',
+    keywords: 'pine script screener scan symbols indicator plots alerts tradingview',
+  },
+  {
+    group: 'Analysis',
     label: 'Strategy Portfolio',
     route: '/strategy-portfolio',
     keywords: 'allocations donut fwer multiple-testing throttled',

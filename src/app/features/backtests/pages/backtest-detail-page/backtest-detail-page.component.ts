@@ -22,6 +22,11 @@ import {
   TradeReplayDialogComponent,
   type ReplayTrade,
 } from '../../components/trade-replay-dialog/trade-replay-dialog.component';
+import { StrategyReportComponent } from '@features/scripting/report/strategy-report.component';
+import {
+  extractStrategyReport,
+  type StrategyReport,
+} from '@features/scripting/report/strategy-report.model';
 
 // ── Result shape ──────────────────────────────────────────────────────────
 // Mirrors LascodiaTradingEngine.Application.Backtesting.Models.BacktestResult.
@@ -111,6 +116,7 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
     StatusBadgeComponent,
     ErrorStateComponent,
     TradeReplayDialogComponent,
+    StrategyReportComponent,
     RouterLink,
     DatePipe,
     DecimalPipe,
@@ -126,6 +132,13 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
       </app-page-header>
 
       @if (backtest(); as bt) {
+        <!-- A script strategy's run carries a Strategy report (ADR-0027) instead of the
+             JSON-DSL BacktestResult: it gets the report view; every other run keeps the
+             DSL analytics below untouched. -->
+        @if (scriptReport(); as report) {
+          <app-strategy-report [report]="report" [backtestRunId]="bt.id" />
+        }
+
         @if (parseError()) {
           <div class="note warning">
             Couldn't parse result payload — showing denormalised fields only. ({{ parseError() }})
@@ -138,30 +151,36 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
              (profit factor with no losses, Calmar / recovery with no
              drawdown, Sortino with no downside) are passed as null so the
              tile reads "-" instead of the engine's 9999 sentinel. ─────── -->
-        <div class="kpi-strip">
-          <app-metric-card
-            label="Total return"
-            [value]="primary().totalReturn"
-            format="percent"
-            [colorByValue]="true"
-          />
-          <app-metric-card label="Win rate" [value]="primary().winRate" format="percent" />
-          <app-metric-card label="Profit factor" [value]="ratios().profitFactor" format="number" />
-          <app-metric-card
-            label="Sharpe ratio"
-            [value]="primary().sharpe"
-            format="number"
-            [colorByValue]="true"
-          />
-          <app-metric-card
-            label="Max drawdown"
-            [value]="primary().maxDrawdown"
-            format="percent"
-            [colorByValue]="true"
-            [invertColor]="true"
-          />
-          <app-metric-card label="Total trades" [value]="primary().totalTrades" format="number" />
-        </div>
+        @if (!scriptReport()) {
+          <div class="kpi-strip">
+            <app-metric-card
+              label="Total return"
+              [value]="primary().totalReturn"
+              format="percent"
+              [colorByValue]="true"
+            />
+            <app-metric-card label="Win rate" [value]="primary().winRate" format="percent" />
+            <app-metric-card
+              label="Profit factor"
+              [value]="ratios().profitFactor"
+              format="number"
+            />
+            <app-metric-card
+              label="Sharpe ratio"
+              [value]="primary().sharpe"
+              format="number"
+              [colorByValue]="true"
+            />
+            <app-metric-card
+              label="Max drawdown"
+              [value]="primary().maxDrawdown"
+              format="percent"
+              [colorByValue]="true"
+              [invertColor]="true"
+            />
+            <app-metric-card label="Total trades" [value]="primary().totalTrades" format="number" />
+          </div>
+        }
 
         @if (parsed(); as p) {
           <!-- ── Secondary metrics strip ─────────────────────────────── -->
@@ -203,27 +222,29 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
         }
 
         <!-- ── Equity (+ drawdown when there is a sample) ──────────────── -->
-        <div class="charts-grid">
-          <app-chart-card
-            [class.span-2]="!hasSample()"
-            title="Equity curve"
-            [subtitle]="
-              hasSample()
-                ? 'Account balance and high-water mark over the trade timeline'
-                : 'Account balance over the trade timeline'
-            "
-            [options]="equityCurveOptions()"
-            height="340px"
-          />
-          @if (hasSample()) {
+        @if (!scriptReport()) {
+          <div class="charts-grid">
             <app-chart-card
-              title="Drawdown"
-              subtitle="Underwater equity — distance below the high-water mark"
-              [options]="drawdownOptions()"
+              [class.span-2]="!hasSample()"
+              title="Equity curve"
+              [subtitle]="
+                hasSample()
+                  ? 'Account balance and high-water mark over the trade timeline'
+                  : 'Account balance over the trade timeline'
+              "
+              [options]="equityCurveOptions()"
               height="340px"
             />
-          }
-        </div>
+            @if (hasSample()) {
+              <app-chart-card
+                title="Drawdown"
+                subtitle="Underwater equity — distance below the high-water mark"
+                [options]="drawdownOptions()"
+                height="340px"
+              />
+            }
+          </div>
+        }
 
         @if (hasSample()) {
           <!-- ── Distribution row ──────────────────────────────────────── -->
@@ -917,6 +938,8 @@ export class BacktestDetailPageComponent implements OnInit {
   readonly id = signal<number | null>(null);
   readonly backtest = signal<BacktestRunDto | null>(null);
   readonly parsed = signal<BacktestResultData | null>(null);
+  /** Set when the run is a script strategy's: its resultJson is a Strategy report (ADR-0027). */
+  readonly scriptReport = signal<StrategyReport | null>(null);
   readonly parseError = signal<string | null>(null);
   /** Set when the run itself could not be fetched (distinct from a payload that parsed badly). */
   readonly loadError = signal<string | null>(null);
@@ -1594,6 +1617,10 @@ export class BacktestDetailPageComponent implements OnInit {
         }
         const data = res.data as BacktestRunDto;
         this.backtest.set(data);
+        // Script strategies' runs carry a Strategy report, not the DSL BacktestResult.
+        const report = extractStrategyReport(data.resultJson);
+        this.scriptReport.set(report);
+        if (report) return;
         if (data.resultJson) {
           try {
             const parsed = JSON.parse(data.resultJson) as BacktestResultData;
