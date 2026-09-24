@@ -3142,11 +3142,12 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     });
   }
 
-  /** Why Save is disabled, for its tooltip; null when it is not. */
+  /** True while rule errors stand: Save stays disabled until they are fixed. */
   saveBlocked(): boolean {
     return this.isDslType() && this.dslErrorCount() > 0;
   }
 
+  /** Why Save is disabled, for its tooltip; null when it is not. */
   saveBlockedReason(): string | null {
     if (this.saveBlocked()) {
       const n = this.dslErrorCount();
