@@ -534,6 +534,7 @@ export function buildMarker(m: PineMarkerOutput, pane: PaneKey, ctx: BuildContex
     up[i] = p.direction === 'up' || (p.direction !== 'down' && v > 0) ? 1 : 0;
   }
   if (n) ctx.maxLogical = Math.max(ctx.maxLogical, logicals[n - 1]);
+  // plotchar's default is ★; an explicit "" draws nothing (the "value in the data window only" idiom).
   const dfltChar = '★';
   return {
     type: 'marker',
@@ -544,7 +545,7 @@ export function buildMarker(m: PineMarkerOutput, pane: PaneKey, ctx: BuildContex
     display: parseDisplay(m.display),
     kind,
     shape: oneOf(m.shape, SHAPES, 'xcross'),
-    char: m.char && m.char.length ? m.char : dfltChar,
+    char: m.char ?? dfltChar,
     location: oneOf(m.location, LOCATIONS, 'abovebar'),
     size: oneOf(m.size, SIZES, 'auto'),
     text: m.text ?? '',

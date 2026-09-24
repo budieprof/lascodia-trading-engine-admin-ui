@@ -95,7 +95,9 @@ export function paintTrades(
   const headW = Math.max(7, Math.min(12, p.barSpacing * 0.9));
   const tickW = Math.max(4, Math.min(16, p.barSpacing * 0.8));
   ctx.font = cssFont(TEXT_PX, FONT_DEFAULT);
+  const inView = (x: number | null) => x !== null && x >= p.from && x <= p.to;
   for (const t of trades) {
+    if (!inView(t.entryX) && !inView(t.exitX)) continue;
     for (const m of tradeMarkers(t)) {
       if (m.logical < p.from || m.logical > p.to) continue;
       const bar = Math.round(m.logical);

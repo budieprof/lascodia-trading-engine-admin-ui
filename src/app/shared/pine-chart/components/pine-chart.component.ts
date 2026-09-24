@@ -122,6 +122,7 @@ interface PaneOverlay {
         class="data-window"
         [style.top.px]="dataWindowTop()"
         [style.right.px]="toolbarRight()"
+        [style.max-height.px]="dataWindowMaxHeight()"
         [sections]="dataSections()"
         (closed)="dataWindow.set(false)"
       />
@@ -223,7 +224,6 @@ interface PaneOverlay {
       .data-window {
         position: absolute;
         z-index: 3;
-        max-height: calc(100% - 48px);
       }
       .tooltip {
         position: absolute;
@@ -344,6 +344,11 @@ export class PineChartComponent implements OnDestroy {
   });
 
   readonly dataWindowTop = computed(() => (this.rects()[0]?.top ?? 0) + 6);
+  /** The data window ends above the toolbar so its toggle stays reachable. */
+  readonly dataWindowMaxHeight = computed(() => {
+    const el = this.surface().nativeElement;
+    return Math.max(120, el.clientHeight - this.dataWindowTop() - this.toolbarBottom() - 34);
+  });
   readonly toolbarBottom = computed(() => {
     const rects = this.rects();
     const last = rects[rects.length - 1];

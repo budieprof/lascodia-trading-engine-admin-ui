@@ -142,8 +142,8 @@ type DockTab = 'logs' | 'trace' | 'profiler';
           @switch (tab()) {
             @case ('logs') {
               <app-pine-logs-pane
-                [logs]="current()?.outputs?.logs ?? []"
-                [droppedLogs]="current()?.outputs?.droppedLogs ?? 0"
+                [logs]="shownOutputs()?.logs ?? []"
+                [droppedLogs]="shownOutputs()?.droppedLogs ?? 0"
                 [runtimeError]="current()?.runtimeError ?? null"
                 [timezone]="timezone()"
                 (barJump)="goToBar($event)"
@@ -349,8 +349,10 @@ export class PinePreviewComponent {
   /** The run on screen: the preview's own latest run, else the host's. */
   readonly current = computed<PineRunResult | null>(() => this.ownResult() ?? this.result() ?? null);
   readonly chartData = computed<PineChartData | PineRunResult | null>(() => this.replayData() ?? this.current());
-  readonly logCount = computed(() => this.current()?.outputs?.logs.length ?? 0);
-  readonly hasErrors = computed(() => (this.current()?.outputs?.logs ?? []).some((l) => l.level === 'error'));
+  /** Outputs on the chart: the replay's as of its bar while replaying (logs follow it), else the run's. */
+  readonly shownOutputs = computed(() => (this.replayData() ?? this.current())?.outputs ?? null);
+  readonly logCount = computed(() => this.shownOutputs()?.logs.length ?? 0);
+  readonly hasErrors = computed(() => (this.shownOutputs()?.logs ?? []).some((l) => l.level === 'error'));
   readonly compileError = computed(() => {
     const c = this.current()?.compile;
     if (!c || c.success) return null;
