@@ -1,3 +1,9 @@
+import type {
+  ScriptExecutionPolicy,
+  ScriptInputValues,
+  StrategyAuthoringMode,
+} from './scripting.types';
+
 // ============================================================
 // Response Wrappers
 // ============================================================
@@ -517,6 +523,15 @@ export interface StrategyDto {
   sessionFilterJson: string | null;
   regimeGateJson: string | null;
   multiTimeframeGateJson: string | null;
+  // ── Script strategies (ADR-0027) — RuleBased strategies, from `GET strategy/{id}` ──
+  /** `Script` = Pine v6 source in `scriptSource`; `Dsl` = the JSON rule DSL in `parametersJson`. */
+  authoringMode?: StrategyAuthoringMode | null;
+  scriptSource?: string | null;
+  /** Operator input overrides `{ inputId: value }` (an older engine may send the raw JSON text). */
+  scriptInputs?: ScriptInputValues | string | null;
+  scriptLanguageVersion?: number | null;
+  executionPolicy?: ScriptExecutionPolicy | null;
+  accountBindingCount?: number | null;
 }
 
 export interface TradeSignalDto {
@@ -2968,6 +2983,12 @@ export interface CreateStrategyRequest {
   sessionFilterJson?: string | null;
   regimeGateJson?: string | null;
   multiTimeframeGateJson?: string | null;
+  /** RuleBased script strategy (ADR-0027 §8): Pine v6 source instead of `parametersJson`. */
+  scriptSource?: string | null;
+  /** Input overrides `{ inputId: value }` for the script. */
+  scriptInputs?: ScriptInputValues | null;
+  /** The engine defaults scripts to `Direct`. */
+  executionPolicy?: ScriptExecutionPolicy | null;
 }
 
 export interface StrategyParameterFieldDto {
