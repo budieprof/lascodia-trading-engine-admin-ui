@@ -54,6 +54,10 @@ import { StrategyCapacityCardComponent } from '../../components/strategy-capacit
 import { StrategyPromotionReviewsTabComponent } from '../../components/strategy-promotion-reviews-tab/strategy-promotion-reviews-tab.component';
 import { RejectionDistributionDrawerComponent } from '../../components/rejection-distribution-drawer/rejection-distribution-drawer.component';
 import { RationaleInlineComponent } from '@features/llm/components/rationale-inline/rationale-inline.component';
+// ADR-0027 script strategies: execution (bindings + policy), live session, alerts, backtests.
+import { StrategyExecutionPanelComponent } from '@features/scripting/execution/strategy-execution-panel.component';
+import { ScriptLivePanelComponent } from '@features/scripting/live/script-live-panel.component';
+import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
 
 @Component({
   selector: 'app-strategy-detail-page',
@@ -76,6 +80,8 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
     StrategyPromotionReviewsTabComponent,
     RejectionDistributionDrawerComponent,
     RationaleInlineComponent,
+    StrategyExecutionPanelComponent,
+    ScriptLivePanelComponent,
     RouterLink,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -182,7 +188,7 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
           </div>
         }
 
-        <ui-tabs [tabs]="detailTabs" [(activeTab)]="activeTab">
+        <ui-tabs [tabs]="visibleDetailTabs()" [(activeTab)]="activeTab">
           <!-- Config Tab -->
           @if (activeTab() === 'config') {
             <div class="detail-layout">
@@ -530,6 +536,21 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
                 <p class="muted">Lineage unavailable.</p>
               }
             </section>
+          }
+
+          <!-- Execution Tab (every strategy type) — account bindings and execution policy
+               (ADR-0027 DEC-05 / DEC-06). -->
+          @if (activeTab() === 'execution') {
+            <app-strategy-execution-panel
+              [strategy]="strategy()"
+              (changed)="onExecutionChanged()"
+            />
+          }
+
+          <!-- Live Tab (script strategies) — the live session's emulator state, divergences
+               from the bound accounts and the live Strategy report. -->
+          @if (activeTab() === 'live' && isScript()) {
+            <app-script-live-panel [strategyId]="strategyId" />
           }
         </ui-tabs>
       } @else if (loadError()) {
@@ -1393,6 +1414,8 @@ export class StrategyDetailPageComponent implements OnInit {
     { label: 'Promotion', value: 'promotion' },
     { label: 'Signals', value: 'signals' },
     { label: 'Orders', value: 'orders' },
+    { label: 'Execution', value: 'execution' },
+    { label: 'Live', value: 'live' },
     { label: 'Optimization', value: 'optimization' },
     { label: 'Backtests', value: 'backtests' },
     { label: 'Walk-Forward', value: 'walkforward' },
@@ -1401,6 +1424,23 @@ export class StrategyDetailPageComponent implements OnInit {
     { label: 'Reviews', value: 'reviews' },
     { label: 'Lineage', value: 'lineage' },
   ];
+
+  // ── ADR-0027 script strategies ─────────────────────────────────────────
+  /** Pine-script strategy (authoringMode Script): shows the Live and Alerts tabs. */
+  readonly isScript = computed(() => isScriptStrategy(this.strategy()));
+  private static readonly SCRIPT_ONLY_TABS: readonly string[] = ['live', 'alerts'];
+  readonly visibleDetailTabs = computed<TabItem[]>(() =>
+    this.isScript()
+      ? this.detailTabs
+      : this.detailTabs.filter(
+          (t) => !StrategyDetailPageComponent.SCRIPT_ONLY_TABS.includes(t.value),
+        ),
+  );
+
+  /** Bindings or execution policy changed: re-read the strategy. */
+  onExecutionChanged(): void {
+    this.loadStrategy();
+  }
 
   readonly signalColumns: ColDef[] = [
     { field: 'id', headerName: 'ID', width: 70 },

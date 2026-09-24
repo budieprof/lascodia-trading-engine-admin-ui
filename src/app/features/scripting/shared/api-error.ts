@@ -45,7 +45,13 @@ function messageFromBody(body: unknown): string | null {
   return title || null;
 }
 
-/** True when an envelope reports success (the engine answers refusals with HTTP 200). */
-export function isOk<T>(res: ResponseData<T> | null | undefined): res is ResponseData<T> {
+/**
+ * True when an envelope reports success (the engine answers refusals with HTTP 200). The guard
+ * narrows to the success shape only, so the `false` branch still sees an envelope it can read
+ * `message` / `responseCode` from.
+ */
+export function isOk<T>(
+  res: ResponseData<T> | null | undefined,
+): res is ResponseData<T> & { status: true } {
   return !!res && res.status === true;
 }
