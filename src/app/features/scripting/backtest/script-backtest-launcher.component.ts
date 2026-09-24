@@ -89,7 +89,14 @@ export function validateBacktestForm(f: {
       }
 
       @if (open()) {
-        <form [id]="uid + '-form'" class="form" (submit)="$event.preventDefault(); submit()">
+        <!-- novalidate: validateBacktestForm() owns validation; a browser step mismatch on the
+             balance or an input would otherwise block the submit without a word. -->
+        <form
+          [id]="uid + '-form'"
+          class="form"
+          novalidate
+          (submit)="$event.preventDefault(); submit()"
+        >
           <div class="grid">
             <label class="field">
               <span>From</span>
@@ -112,7 +119,7 @@ export function validateBacktestForm(f: {
               <input
                 type="number"
                 min="1"
-                step="100"
+                step="any"
                 [value]="initialBalance()"
                 (change)="initialBalance.set($any($event.target).value)"
               />

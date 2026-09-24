@@ -132,8 +132,9 @@ describe('AccountBindingsEditorComponent', () => {
   function clickAdd(): void {
     const button = el.querySelector<HTMLButtonElement>('.add button[type="submit"]')!;
     expect(button.disabled).toBe(false);
-    // jsdom does not run a submit button's activation behaviour; submit the form directly.
-    el.querySelector('form.add')!.dispatchEvent(new Event('submit', { cancelable: true }));
+    // requestSubmit() runs the browser's constraint validation first — a step / min mismatch on
+    // the multiplier once blocked this submit in Chromium without any visible error.
+    el.querySelector<HTMLFormElement>('form.add')!.requestSubmit(button);
     fixture.detectChanges();
   }
 
@@ -323,6 +324,15 @@ describe('AccountBindingsEditorComponent', () => {
     expect(dialog()).toBeNull();
     expect(flushSave()).toEqual([]);
     flushLoad([]);
+  });
+
+  it('never lets native validation block the add form', () => {
+    render([]);
+    const form = el.querySelector<HTMLFormElement>('form.add')!;
+    expect(form.noValidate).toBe(true);
+    const mult = form.querySelector<HTMLInputElement>('input[type="number"]')!;
+    mult.value = '1';
+    expect(mult.checkValidity()).toBe(true);
   });
 
   it('refuses a lot multiplier above 10', () => {

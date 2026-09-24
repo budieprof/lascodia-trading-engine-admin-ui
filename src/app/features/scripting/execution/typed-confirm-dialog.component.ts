@@ -129,6 +129,7 @@ let nextDialogUid = 0;
         color: var(--text-primary);
       }
       .details {
+        list-style: disc;
         margin: var(--space-2) 0 0;
         padding-left: var(--space-5);
         font-size: var(--text-sm);

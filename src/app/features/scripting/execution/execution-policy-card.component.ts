@@ -177,6 +177,7 @@ let nextPolicyUid = 0;
         color: var(--text-secondary);
       }
       ul {
+        list-style: disc;
         margin: 0;
         padding-left: var(--space-5);
         font-size: var(--text-sm);

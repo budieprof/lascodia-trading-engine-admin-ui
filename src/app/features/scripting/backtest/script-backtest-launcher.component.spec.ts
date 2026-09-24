@@ -81,7 +81,8 @@ describe('ScriptBacktestLauncherComponent', () => {
   }
 
   function submit(): void {
-    el.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+    // requestSubmit() applies native constraint validation, as a click in a browser does.
+    el.querySelector<HTMLFormElement>('form')!.requestSubmit();
     fixture.detectChanges();
   }
 
@@ -154,6 +155,16 @@ describe('ScriptBacktestLauncherComponent', () => {
     expect(status.querySelector('a')!.getAttribute('href')).toBe('/backtests/812');
   });
 
+  it('does not let the browser’s step checks block the form', () => {
+    render();
+    openForm();
+    const form = el.querySelector<HTMLFormElement>('form')!;
+    expect(form.noValidate).toBe(true);
+    const balance = field('Initial balance') as HTMLInputElement;
+    expect(balance.getAttribute('step')).toBe('any');
+    expect(balance.checkValidity()).toBe(true);
+  });
+
   it('sends a plain run without any override fields', () => {
     render();
     openForm();
@@ -178,14 +189,12 @@ describe('ScriptBacktestLauncherComponent', () => {
     render();
     openForm();
     submit();
-    http
-      .expectOne(`${BASE}/backtest`)
-      .flush({
-        data: 0,
-        status: false,
-        message: 'TimeframeOverride must be one of: M1, M5, M15, H1, H4, D1',
-        responseCode: '-11',
-      });
+    http.expectOne(`${BASE}/backtest`).flush({
+      data: 0,
+      status: false,
+      message: 'TimeframeOverride must be one of: M1, M5, M15, H1, H4, D1',
+      responseCode: '-11',
+    });
     fixture.detectChanges();
     expect(el.querySelector('[role="alert"]')!.textContent).toContain('TimeframeOverride must be');
     expect(queued).toEqual([]);

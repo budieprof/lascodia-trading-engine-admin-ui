@@ -467,6 +467,14 @@ interface StrategyOption {
       .stale {
         opacity: 0.55;
       }
+      /* enableCellTextSelection wraps each value in a .ag-cell-wrapper that shrinks to its
+         content, so the cell's text-align cannot move it: stretch the wrapper across the cell
+         and push the value to its end for right-aligned (numeric) columns. */
+      :host ::ng-deep .ag-right-aligned-cell .ag-cell-wrapper {
+        flex: 1 1 auto;
+        width: 100%;
+        justify-content: flex-end;
+      }
       :host ::ng-deep .scr-error-row {
         background: rgba(255, 59, 48, 0.05);
       }

@@ -266,8 +266,10 @@ export class ReportOverviewComponent {
 
   readonly chartSubtitle = computed(() => {
     const hasBuyHold = this.report().equityCurve.some((p) => p.buyHoldEquity !== null);
+    const cur = this.currency();
     return (
       (hasBuyHold ? 'Strategy vs buy & hold' : 'Strategy equity') +
+      (cur ? ` (${cur})` : '') +
       ' · underwater drawdown · position size · shaded: largest drawdown (UTC)'
     );
   });

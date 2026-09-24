@@ -144,7 +144,7 @@ interface AccountOption {
                         type="number"
                         min="0.01"
                         [attr.max]="maxMultiplier"
-                        step="0.1"
+                        step="0.01"
                         inputmode="decimal"
                         [id]="'mult-' + row.tradingAccountId"
                         [value]="row.lotMultiplier"
@@ -185,7 +185,9 @@ interface AccountOption {
           </div>
         }
 
-        <form class="add" (submit)="$event.preventDefault(); addBinding()">
+        <!-- novalidate: the component validates (and explains) the multiplier itself; the
+             browser's step check would silently block the submit. -->
+        <form class="add" novalidate (submit)="$event.preventDefault(); addBinding()">
           <label class="add-field grow">
             <span>Add account</span>
             <select
@@ -218,7 +220,7 @@ interface AccountOption {
               type="number"
               min="0.01"
               [attr.max]="maxMultiplier"
-              step="0.1"
+              step="0.01"
               inputmode="decimal"
               [value]="addMultiplier()"
               [attr.aria-invalid]="!!addMultiplierError()"
@@ -531,6 +533,7 @@ interface AccountOption {
         font-weight: var(--font-semibold);
       }
       .pending ul {
+        list-style: disc;
         margin: 0;
         padding-left: var(--space-5);
         color: var(--text-secondary);

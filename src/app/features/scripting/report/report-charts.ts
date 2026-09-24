@@ -32,6 +32,9 @@ export interface ReportPalette {
   /** Primary text colours for light and dark fills. */
   inkOnLight: string;
   inkOnDark: string;
+  /** Text tokens for chart labels (labels never wear a series colour). */
+  text: string;
+  textMuted: string;
 }
 
 export function reportPalette(theme: 'light' | 'dark'): ReportPalette {
@@ -46,6 +49,8 @@ export function reportPalette(theme: 'light' | 'dark'): ReportPalette {
         surface: '#1C1C1E',
         inkOnLight: '#1D1D1F',
         inkOnDark: '#F5F5F7',
+        text: '#F5F5F7',
+        textMuted: '#A1A1A6',
       }
     : {
         accent: '#0071E3',
@@ -57,6 +62,8 @@ export function reportPalette(theme: 'light' | 'dark'): ReportPalette {
         surface: '#F5F5F7',
         inkOnLight: '#1D1D1F',
         inkOnDark: '#FFFFFF',
+        text: '#1D1D1F',
+        textMuted: '#6E6E73',
       };
 }
 
@@ -135,7 +142,13 @@ export function buildEquityChartOptions(
       ? {
           silent: true,
           itemStyle: { color: withAlpha(palette.lossPole, 0.08) },
-          label: { show: true, position: 'insideTop' as const, fontSize: 10 },
+          // Bottom of the window: the run-up pin always sits at a peak near the top.
+          label: {
+            show: true,
+            position: 'insideBottom' as const,
+            fontSize: 10,
+            color: palette.textMuted,
+          },
           data: [
             [
               { xAxis: curve[dd.fromIndex].time!, name: 'Max drawdown' },
@@ -156,10 +169,15 @@ export function buildEquityChartOptions(
             borderColor: palette.surface,
             borderWidth: 2,
           },
+          // The label sits on the side with room, so a pin near the right edge is not clipped.
           label: {
             show: true,
-            position: 'top' as const,
+            position: (ru.toIndex > curve.length / 2 ? 'left' : 'right') as 'left' | 'right',
+            distance: 8,
             fontSize: 10,
+            fontWeight: 600,
+            color: palette.text,
+            textBorderWidth: 0,
             formatter: `Max run-up ${formatMoney(ru.amount, '', { signed: true, decimals: 0 })}`,
           },
           data: [{ coord: [curve[ru.toIndex].time!, curve[ru.toIndex].equity!] }] as any,
@@ -175,16 +193,19 @@ export function buildEquityChartOptions(
   };
   const yAxisBase = {
     splitLine: { lineStyle: { color: palette.gridLine, type: 'solid' as const } },
-    nameTextStyle: { fontSize: 10, align: 'left' as const },
+    nameTextStyle: { fontSize: 10, align: 'left' as const, color: palette.textMuted },
   };
 
   return {
     animation: !large,
+    // Top-right, clear of the panel names on the left; short line keys mirror the line marks.
     legend: {
       top: 0,
-      left: 0,
-      itemWidth: 16,
-      itemHeight: 2,
+      right: 24,
+      icon: 'rect',
+      itemWidth: 14,
+      itemHeight: 3,
+      textStyle: { color: palette.textMuted, fontSize: 11 },
       data: hasBuyHold ? ['Equity', 'Buy & hold'] : ['Equity'],
       show: hasBuyHold,
     },
@@ -234,20 +255,18 @@ export function buildEquityChartOptions(
       { ...xAxisBase, gridIndex: 2, axisLabel: { hideOverlap: true } },
     ],
     yAxis: [
-      {
-        ...yAxisBase,
-        gridIndex: 0,
-        type: 'value',
-        scale: true,
-        name: `Equity${currency ? ` (${currency})` : ''}`,
-      },
+      // No axis name on the equity panel: the legend names its lines, and a name here collides
+      // with the legend on narrow screens. The currency is in the card subtitle.
+      { ...yAxisBase, gridIndex: 0, type: 'value', scale: true },
       {
         ...yAxisBase,
         gridIndex: 1,
         type: 'value',
         max: 0,
         name: 'Drawdown',
-        axisLabel: { formatter: '{value}%' },
+        // An 80px panel fits three labelled ticks; more collide.
+        splitNumber: 2,
+        axisLabel: { formatter: '{value}%', hideOverlap: true },
       },
       { ...yAxisBase, gridIndex: 2, type: 'value', name: 'Position', splitNumber: 2 },
     ],
@@ -374,7 +393,7 @@ export function buildProfitDistributionOptions(
     `${formatMoney(b.from, '', { decimals: 0 })} … ${formatMoney(b.to, '', { decimals: 0 })}`;
 
   return {
-    grid: { left: 48, right: 16, top: 16, bottom: 56 },
+    grid: { left: 48, right: 16, top: 32, bottom: 56 },
     tooltip: {
       trigger: 'item',
       confine: true,
@@ -393,6 +412,7 @@ export function buildProfitDistributionOptions(
       name: `Profit per trade${currency ? ` (${currency})` : ''}`,
       nameLocation: 'middle',
       nameGap: 36,
+      nameTextStyle: { color: palette.textMuted, fontSize: 11 },
       axisLabel: { hideOverlap: true, fontSize: 10 },
       axisTick: { alignWithLabel: true },
     },
@@ -400,6 +420,7 @@ export function buildProfitDistributionOptions(
       type: 'value',
       minInterval: 1,
       name: 'Trades',
+      nameTextStyle: { color: palette.textMuted, fontSize: 11 },
       splitLine: { lineStyle: { color: palette.gridLine } },
     },
     series: [

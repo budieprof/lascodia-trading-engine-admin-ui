@@ -80,6 +80,7 @@ import { ExecutionPolicyCardComponent } from './execution-policy-card.component'
         font-weight: var(--font-semibold);
       }
       .banner ul {
+        list-style: disc;
         margin: 0;
         padding-left: var(--space-5);
       }
