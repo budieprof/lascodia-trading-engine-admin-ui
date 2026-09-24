@@ -155,7 +155,7 @@ function stdev(src: readonly number[], len: number): (number | null)[] {
 
 const baseSeries = { editable: true, showLast: null, display: ['all'], forceOverlay: false, offset: 0 };
 
-function plot(p: Partial<PinePlotOutput> & Pick<PinePlotOutput, 'id' | 'values'>): PinePlotOutput {
+export function plot(p: Partial<PinePlotOutput> & Pick<PinePlotOutput, 'id' | 'values'>): PinePlotOutput {
   return {
     ...baseSeries,
     title: null,
@@ -174,7 +174,7 @@ function plot(p: Partial<PinePlotOutput> & Pick<PinePlotOutput, 'id' | 'values'>
   };
 }
 
-function marker(m: Partial<PineMarkerOutput> & Pick<PineMarkerOutput, 'id' | 'points'>): PineMarkerOutput {
+export function marker(m: Partial<PineMarkerOutput> & Pick<PineMarkerOutput, 'id' | 'points'>): PineMarkerOutput {
   return {
     ...baseSeries,
     title: null,
@@ -193,13 +193,13 @@ function marker(m: Partial<PineMarkerOutput> & Pick<PineMarkerOutput, 'id' | 'po
   };
 }
 
-const x = (barIndex: number, times: readonly number[], step: number) => ({
+export const x = (barIndex: number, times: readonly number[], step: number) => ({
   value: barIndex,
   barIndex,
   time: barIndex < times.length ? times[barIndex] : times[times.length - 1] + (barIndex - times.length + 1) * step,
 });
 
-function label(l: Partial<PineLabelOutput> & Pick<PineLabelOutput, 'id' | 'x'>): PineLabelOutput {
+export function label(l: Partial<PineLabelOutput> & Pick<PineLabelOutput, 'id' | 'x'>): PineLabelOutput {
   return {
     y: null,
     xloc: 'bar_index',
@@ -221,7 +221,7 @@ function label(l: Partial<PineLabelOutput> & Pick<PineLabelOutput, 'id' | 'x'>):
   };
 }
 
-function cell(c: Partial<PineTableCellOutput> & Pick<PineTableCellOutput, 'column' | 'row'>): PineTableCellOutput {
+export function cell(c: Partial<PineTableCellOutput> & Pick<PineTableCellOutput, 'column' | 'row'>): PineTableCellOutput {
   return {
     columnSpan: 1,
     rowSpan: 1,
@@ -242,7 +242,7 @@ function cell(c: Partial<PineTableCellOutput> & Pick<PineTableCellOutput, 'colum
   };
 }
 
-function emptyOutputs(times: number[], firstIndex = 0, timeframe = '60'): PineScriptOutputs {
+export function emptyOutputs(times: number[], firstIndex = 0, timeframe = '60'): PineScriptOutputs {
   return {
     schemaVersion: 1,
     bars: { firstIndex, times, timeframe },
@@ -452,6 +452,8 @@ export function overlayStrategyFixture(n = 600, seed = 7): PineRunResult {
     },
   );
 
+  // Drawings sit relative to the last bar; `ix` keeps them on the data for short runs.
+  const ix = (back: number) => Math.max(0, n - back);
   // Labels — every style.
   const labelStyles = [
     'label_down', 'label_up', 'label_left', 'label_right', 'label_lower_left', 'label_lower_right',
@@ -460,7 +462,7 @@ export function overlayStrategyFixture(n = 600, seed = 7): PineRunResult {
   ];
   let did = 1;
   labelStyles.forEach((style, k) => {
-    const bi = n - 230 + k * 10;
+    const bi = ix(230) + k * 10;
     if (bi < 0 || bi >= n) return;
     out.labels.push(
       label({
@@ -483,20 +485,20 @@ export function overlayStrategyFixture(n = 600, seed = 7): PineRunResult {
     );
   });
   out.labels.push(
-    label({ id: did++, x: x(n - 12, times, step), yloc: 'abovebar', text: 'abovebar', style: 'label_down', color: PINE.red, createdBar: n - 12 }),
-    label({ id: did++, x: x(n - 6, times, step), yloc: 'belowbar', text: 'belowbar', style: 'label_up', color: PINE.green, createdBar: n - 6 }),
+    label({ id: did++, x: x(ix(12), times, step), yloc: 'abovebar', text: 'abovebar', style: 'label_down', color: PINE.red, createdBar: ix(12) }),
+    label({ id: did++, x: x(ix(6), times, step), yloc: 'belowbar', text: 'belowbar', style: 'label_up', color: PINE.green, createdBar: ix(6) }),
     label({
       id: did++,
-      x: { value: times[n - 20], barIndex: n - 20, time: times[n - 20] + 1_800_000 },
+      x: { value: times[ix(20)], barIndex: ix(20), time: times[ix(20)] + 1_800_000 },
       xloc: 'bar_time',
-      y: round(bars[n - 20].l - 0.002),
+      y: round(bars[ix(20)].l - 0.002),
       text: 'bar_time +30m',
       style: 'label_upper_left',
       color: tr(PINE.navy, 20),
       tooltip: 'xloc.bar_time half a bar after the open',
-      createdBar: n - 20,
+      createdBar: ix(20),
     }),
-    label({ id: did++, x: x(n + 5, times, step), y: round(close[n - 1]), text: 'future +5', style: 'label_left', color: PINE.gray, createdBar: n - 1 }),
+    label({ id: did++, x: x(n + 5, times, step), y: round(close[ix(1)]), text: 'future +5', style: 'label_left', color: PINE.gray, createdBar: ix(1) }),
   );
 
   // Lines: trend with extend right, arrows, dotted extend left, dashed support extend both.
@@ -508,18 +510,18 @@ export function overlayStrategyFixture(n = 600, seed = 7): PineRunResult {
     style: 'solid',
     width: 1,
     forceOverlay: false,
-    createdBar: n - 1,
+    createdBar: ix(1),
     ...p,
   });
-  const lineA = l({ x1: x(n - 120, times, step), y1: bars[n - 120].l, x2: x(n - 60, times, step), y2: bars[n - 60].l, extend: 'right', color: PINE.teal, width: 2 });
-  const lineB = l({ x1: x(n - 120, times, step), y1: bars[n - 120].h, x2: x(n - 60, times, step), y2: bars[n - 60].h, extend: 'right', color: PINE.maroon, width: 2 });
+  const lineA = l({ x1: x(ix(120), times, step), y1: bars[ix(120)].l, x2: x(ix(60), times, step), y2: bars[ix(60)].l, extend: 'right', color: PINE.teal, width: 2 });
+  const lineB = l({ x1: x(ix(120), times, step), y1: bars[ix(120)].h, x2: x(ix(60), times, step), y2: bars[ix(60)].h, extend: 'right', color: PINE.maroon, width: 2 });
   out.lines.push(
     lineA,
     lineB,
-    l({ x1: x(n - 90, times, step), y1: bars[n - 90].h + 0.003, x2: x(n - 70, times, step), y2: bars[n - 70].h + 0.003, style: 'arrow_both', color: PINE.purple, width: 2 }),
-    l({ x1: x(n - 50, times, step), y1: bars[n - 50].c, x2: x(n - 40, times, step), y2: bars[n - 40].c, style: 'arrow_right', color: PINE.orange, width: 3 }),
-    l({ x1: x(n - 45, times, step), y1: bars[n - 45].c - 0.004, x2: x(n - 35, times, step), y2: bars[n - 35].c - 0.004, style: 'dotted', extend: 'left', color: PINE.gray }),
-    l({ x1: x(n - 30, times, step), y1: roundLevel - 0.005, x2: x(n - 29, times, step), y2: roundLevel - 0.005, style: 'dashed', extend: 'both', color: PINE.red, width: 1 }),
+    l({ x1: x(ix(90), times, step), y1: bars[ix(90)].h + 0.003, x2: x(ix(70), times, step), y2: bars[ix(70)].h + 0.003, style: 'arrow_both', color: PINE.purple, width: 2 }),
+    l({ x1: x(ix(50), times, step), y1: bars[ix(50)].c, x2: x(ix(40), times, step), y2: bars[ix(40)].c, style: 'arrow_right', color: PINE.orange, width: 3 }),
+    l({ x1: x(ix(45), times, step), y1: bars[ix(45)].c - 0.004, x2: x(ix(35), times, step), y2: bars[ix(35)].c - 0.004, style: 'dotted', extend: 'left', color: PINE.gray }),
+    l({ x1: x(ix(30), times, step), y1: roundLevel - 0.005, x2: x(ix(29), times, step), y2: roundLevel - 0.005, style: 'dashed', extend: 'both', color: PINE.red, width: 1 }),
   );
   out.linefills.push({ id: did++, line1: lineA.id, line2: lineB.id, color: tr(PINE.aqua, 90) } as PineLinefillOutput);
 
@@ -543,20 +545,20 @@ export function overlayStrategyFixture(n = 600, seed = 7): PineRunResult {
     bold: false,
     italic: false,
     forceOverlay: false,
-    createdBar: n - 1,
+    createdBar: ix(1),
     ...b,
   });
   const hiOf = (a: number, b: number) => Math.max(...bars.slice(a, b + 1).map((q) => q.h));
   const loOf = (a: number, b: number) => Math.min(...bars.slice(a, b + 1).map((q) => q.l));
   out.boxes.push(
-    box({ left: x(n - 160, times, step), right: x(n - 130, times, step), top: hiOf(n - 160, n - 130), bottom: loOf(n - 160, n - 130), text: 'Range box with wrapped text that is long enough to wrap inside the box', textWrap: 'auto', textVAlign: 'top', textHAlign: 'left', textSize: 'small', textSizePoints: 10, borderStyle: 'dashed' }),
-    box({ left: x(n - 26, times, step), right: x(n - 18, times, step), top: hiOf(n - 26, n - 18), bottom: loOf(n - 26, n - 18), extend: 'right', bgColor: tr(PINE.orange, 88), borderColor: PINE.orange, text: 'extend.right', textHAlign: 'right', textVAlign: 'bottom', textSizePoints: 10, textSize: 'small', bold: true }),
-    box({ left: x(n - 75, times, step), right: x(n - 66, times, step), top: hiOf(n - 75, n - 66), bottom: loOf(n - 75, n - 66), text: 'AUTO', bgColor: tr(PINE.purple, 80), borderColor: PINE.purple, borderWidth: 2, borderStyle: 'dotted', textColor: PINE.white, italic: true }),
+    box({ left: x(ix(160), times, step), right: x(ix(130), times, step), top: hiOf(ix(160), ix(130)), bottom: loOf(ix(160), ix(130)), text: 'Range box with wrapped text that is long enough to wrap inside the box', textWrap: 'auto', textVAlign: 'top', textHAlign: 'left', textSize: 'small', textSizePoints: 10, borderStyle: 'dashed' }),
+    box({ left: x(ix(26), times, step), right: x(ix(18), times, step), top: hiOf(ix(26), ix(18)), bottom: loOf(ix(26), ix(18)), extend: 'right', bgColor: tr(PINE.orange, 88), borderColor: PINE.orange, text: 'extend.right', textHAlign: 'right', textVAlign: 'bottom', textSizePoints: 10, textSize: 'small', bold: true }),
+    box({ left: x(ix(75), times, step), right: x(ix(66), times, step), top: hiOf(ix(75), ix(66)), bottom: loOf(ix(75), ix(66)), text: 'AUTO', bgColor: tr(PINE.purple, 80), borderColor: PINE.purple, borderWidth: 2, borderStyle: 'dotted', textColor: PINE.white, italic: true }),
   );
 
   // Polylines: zigzag through swing points (straight), a curved closed shape with fill.
   const zig: number[] = [];
-  for (let i = n - 200; i < n - 10; i += 15) zig.push(i);
+  for (let i = ix(200); i < ix(10); i += 15) zig.push(i);
   out.polylines.push(
     {
       id: did++,
@@ -569,13 +571,13 @@ export function overlayStrategyFixture(n = 600, seed = 7): PineRunResult {
       lineStyle: 'solid',
       lineWidth: 2,
       forceOverlay: false,
-      createdBar: n - 1,
+      createdBar: ix(1),
     } as PinePolylineOutput,
     {
       id: did++,
       points: [0, 1, 2, 3, 4, 5].map((k) => {
-        const i = n - 100 + Math.round(8 * Math.cos((k * Math.PI) / 3));
-        return { time: times[i], barIndex: i, price: round(close[n - 100] + 0.004 + 0.002 * Math.sin((k * Math.PI) / 3)) };
+        const i = ix(100) + Math.round(8 * Math.cos((k * Math.PI) / 3));
+        return { time: times[i], barIndex: i, price: round(close[ix(100)] + 0.004 + 0.002 * Math.sin((k * Math.PI) / 3)) };
       }),
       curved: true,
       closed: true,
@@ -585,7 +587,7 @@ export function overlayStrategyFixture(n = 600, seed = 7): PineRunResult {
       lineStyle: 'dashed',
       lineWidth: 2,
       forceOverlay: false,
-      createdBar: n - 1,
+      createdBar: ix(1),
     } as PinePolylineOutput,
   );
 
@@ -593,7 +595,7 @@ export function overlayStrategyFixture(n = 600, seed = 7): PineRunResult {
   const trades: PineReportTrade[] = [];
   let open: { dir: 'long' | 'short'; bar: number; price: number } | null = null;
   let cum = 0;
-  for (let i = 1; i < n - 1; i++) {
+  for (let i = 1; i < ix(1); i++) {
     const flip = crossUp[i] ? 'long' : crossDn[i] ? 'short' : null;
     if (!flip) continue;
     const fillBar = i + 1;
@@ -624,7 +626,7 @@ export function overlayStrategyFixture(n = 600, seed = 7): PineRunResult {
     open = { dir: flip, bar: fillBar, price };
   }
   if (open) {
-    const last = close[n - 1];
+    const last = close[ix(1)];
     const profit = round((open.dir === 'long' ? last - open.price : open.price - last) * 100_000, 2);
     trades.push({
       number: trades.length + 1,
@@ -678,7 +680,7 @@ export function overlayStrategyFixture(n = 600, seed = 7): PineRunResult {
       borderWidth: 0,
       forceOverlay: false,
       cells: Array.from({ length: 10 }, (_, k) =>
-        cell({ column: k, row: 0, text: ' ', bgColor: close[n - 1] > close[n - 1 - (k + 1) * 5] ? tr(PINE.green, k * 9) : tr(PINE.red, k * 9), tooltip: `vs ${(k + 1) * 5} bars ago` }),
+        cell({ column: k, row: 0, text: ' ', bgColor: close[ix(1)] > close[Math.max(0, ix(1) - (k + 1) * 5)] ? tr(PINE.green, k * 9) : tr(PINE.red, k * 9), tooltip: `vs ${(k + 1) * 5} bars ago` }),
       ),
     },
   );
