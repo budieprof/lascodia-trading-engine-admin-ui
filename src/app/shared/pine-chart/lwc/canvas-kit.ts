@@ -136,7 +136,14 @@ export function drawTextBlock(
 }
 
 /** Rounded rectangle path (no fill/stroke). */
-export function roundRectPath(ctx: Ctx, x: number, y: number, w: number, h: number, r: number): void {
+export function roundRectPath(
+  ctx: Ctx,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): void {
   const rr = Math.max(0, Math.min(r, w / 2, h / 2));
   ctx.moveTo(x + rr, y);
   ctx.lineTo(x + w - rr, y);
@@ -154,7 +161,14 @@ export function roundRectPath(ctx: Ctx, x: number, y: number, w: number, h: numb
  * Draws a Pine shape centred on (cx, cy) with an overall size of `size` px. labelup/labeldown are
  * drawn by the label painters (they carry text), so here they fall back to their pointer triangle.
  */
-export function drawShape(ctx: Ctx, shape: PineShape | string, cx: number, cy: number, size: number, color: string): void {
+export function drawShape(
+  ctx: Ctx,
+  shape: PineShape | string,
+  cx: number,
+  cy: number,
+  size: number,
+  color: string,
+): void {
   const s = Math.max(2, size);
   const h = s / 2;
   ctx.save();
@@ -255,7 +269,14 @@ export function drawShape(ctx: Ctx, shape: PineShape | string, cx: number, cy: n
  * A filled arrow from `tailY` to `tipY` at x = cx (vertical). `width` is the head width; the shaft is
  * a third of it.
  */
-export function drawArrow(ctx: Ctx, cx: number, tipY: number, tailY: number, width: number, color: string): void {
+export function drawArrow(
+  ctx: Ctx,
+  cx: number,
+  tipY: number,
+  tailY: number,
+  width: number,
+  color: string,
+): void {
   const len = Math.abs(tailY - tipY);
   if (len < 1) return;
   const dir = tailY > tipY ? 1 : -1; // +1: arrow points up (tail below)
@@ -276,7 +297,15 @@ export function drawArrow(ctx: Ctx, cx: number, tipY: number, tailY: number, wid
 }
 
 /** Arrowhead at (x, y) pointing along the direction from (fromX, fromY). */
-export function drawArrowHead(ctx: Ctx, fromX: number, fromY: number, x: number, y: number, width: number, color: string): void {
+export function drawArrowHead(
+  ctx: Ctx,
+  fromX: number,
+  fromY: number,
+  x: number,
+  y: number,
+  width: number,
+  color: string,
+): void {
   const angle = Math.atan2(y - fromY, x - fromX);
   const len = 6 + width * 2;
   const spread = Math.PI / 7;
@@ -295,7 +324,12 @@ export function drawArrowHead(ctx: Ctx, fromX: number, fromY: number, x: number,
  * Catmull-Rom spline through the points as cubic Bézier segments (what `polyline.new(curved = true)`
  * draws). `closed` wraps the control points around.
  */
-export function curvePath(ctx: Ctx, xs: ArrayLike<number>, ys: ArrayLike<number>, closed: boolean): void {
+export function curvePath(
+  ctx: Ctx,
+  xs: ArrayLike<number>,
+  ys: ArrayLike<number>,
+  closed: boolean,
+): void {
   const n = xs.length;
   if (n < 2) return;
   const px = (i: number) => (closed ? xs[(i + n) % n] : xs[Math.max(0, Math.min(n - 1, i))]);

@@ -8,14 +8,21 @@ import { Input, Output, type Type } from '@angular/core';
  */
 const done = new WeakMap<object, Set<string>>();
 
-export function declareSignalIo(type: Type<unknown>, io: { inputs?: readonly string[]; outputs?: readonly string[] }): void {
+export function declareSignalIo(
+  type: Type<unknown>,
+  io: { inputs?: readonly string[]; outputs?: readonly string[] },
+): void {
   const proto = type.prototype as object;
   const seen = done.get(proto) ?? new Set<string>();
   done.set(proto, seen);
   for (const name of io.inputs ?? []) {
     if (seen.has(`i:${name}`)) continue;
     seen.add(`i:${name}`);
-    (Input as unknown as (o: object) => PropertyDecorator)({ isSignal: true, alias: name, required: false })(proto, name);
+    (Input as unknown as (o: object) => PropertyDecorator)({
+      isSignal: true,
+      alias: name,
+      required: false,
+    })(proto, name);
   }
   for (const name of io.outputs ?? []) {
     if (seen.has(`o:${name}`)) continue;

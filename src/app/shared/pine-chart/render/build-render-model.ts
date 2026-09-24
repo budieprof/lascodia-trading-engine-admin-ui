@@ -71,8 +71,10 @@ export interface BuildOptions {
 /** Pine draws at most 500 bars into the future. */
 export const MAX_FUTURE_SLOTS = 500;
 
-export const FONT_DEFAULT = "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
-export const FONT_MONOSPACE = "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace";
+export const FONT_DEFAULT =
+  "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
+export const FONT_MONOSPACE =
+  "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace";
 
 const PLOT_STYLES: readonly PinePlotStyle[] = [
   'line',
@@ -146,12 +148,17 @@ const POSITIONS: readonly PineTablePosition[] = [
   'bottom_right',
 ];
 
-function oneOf<T extends string>(value: string | null | undefined, allowed: readonly T[], dflt: T): T {
+function oneOf<T extends string>(
+  value: string | null | undefined,
+  allowed: readonly T[],
+  dflt: T,
+): T {
   const v = (value ?? '').toLowerCase();
   return (allowed as readonly string[]).includes(v) ? (v as T) : dflt;
 }
 
-const finite = (v: number | null | undefined): v is number => typeof v === 'number' && Number.isFinite(v);
+const finite = (v: number | null | undefined): v is number =>
+  typeof v === 'number' && Number.isFinite(v);
 
 export interface BuildContext {
   timeline: BarTimeline;
@@ -261,7 +268,12 @@ export function buildRenderModel(input: PineChartInput, opts: BuildOptions = {})
       const a = lineById.get(f.line1);
       const b = lineById.get(f.line2);
       if (!a || !b || a.pane !== b.pane) continue;
-      a.pane.drawings.linefills.push({ id: f.id, line1: a.line, line2: b.line, color: cssColor(f.color) });
+      a.pane.drawings.linefills.push({
+        id: f.id,
+        line1: a.line,
+        line2: b.line,
+        color: cssColor(f.color),
+      });
     }
     for (const t of outputs.tables) {
       const layout = buildTableLayout(t, paneOf(t.forceOverlay).key);
@@ -334,13 +346,15 @@ function isPaneEmpty(p: PaneModel): boolean {
 // ── bars and timeline ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Price bars as typed arrays. Lightweight Charts rejects out-of-order or duplicate times, so an
- * unsorted payload is sorted and de-duplicated (last write wins) rather than taking the chart down.
+ * Price bars as typed arrays. Bars that share an open time are kept — Renko, Kagi and Point & Figure
+ * bricks do, and the outputs are aligned to them by position (the renderer spaces equal times apart
+ * for the library). Only a payload that goes back in time is repaired: sorted, and exact duplicates
+ * de-duplicated, rather than taking the chart down.
  */
 export function buildPriceBars(input: readonly PineBar[]): PriceBars {
   let src = input;
   for (let i = 1; i < src.length; i++) {
-    if (!(src[i].t > src[i - 1].t)) {
+    if (src[i].t < src[i - 1].t) {
       const byTime = new Map<number, PineBar>();
       for (const b of input) byTime.set(b.t, b);
       src = [...byTime.values()].sort((a, b) => a.t - b.t);
@@ -381,8 +395,7 @@ export function buildPriceBars(input: readonly PineBar[]): PriceBars {
 export function buildTimeline(times: Float64Array, outputs: PineScriptOutputs | null): BarTimeline {
   const outTimes = outputs?.bars.times ?? [];
   const src = times.length ? times : Float64Array.from(outTimes);
-  const step =
-    timeframeMs(outputs?.bars.timeframe) ?? typicalStepMs(src) ?? 60_000;
+  const step = timeframeMs(outputs?.bars.timeframe) ?? typicalStepMs(src) ?? 60_000;
   let firstBarIndex = outputs?.bars.firstIndex ?? 0;
   if (outputs && outTimes.length && src.length) {
     const probe = new BarTimeline(src, 0, step);
@@ -511,7 +524,10 @@ export function buildCandle(c: PineCandleOutput, pane: PaneKey, ctx: BuildContex
 
 export function buildMarker(m: PineMarkerOutput, pane: PaneKey, ctx: BuildContext): MarkerLayer {
   const kind = oneOf<'shape' | 'char' | 'arrow'>(m.kind, ['shape', 'char', 'arrow'], 'shape');
-  const showFromBar = finite(m.showLast) && m.showLast >= 0 ? ctx.lastBarIndex - Math.floor(m.showLast) + 1 : -Infinity;
+  const showFromBar =
+    finite(m.showLast) && m.showLast >= 0
+      ? ctx.lastBarIndex - Math.floor(m.showLast) + 1
+      : -Infinity;
   const offset = Math.trunc(m.offset || 0);
   const kept = m.points
     .filter((p) => p.barIndex >= showFromBar)
@@ -639,7 +655,11 @@ export function buildFill(
   ctx: BuildContext,
 ): FillLayer | null {
   const display = parseDisplay(f.display);
-  const kind = oneOf<'plots' | 'hlines' | 'gradient'>(f.kind, ['plots', 'hlines', 'gradient'], 'plots');
+  const kind = oneOf<'plots' | 'hlines' | 'gradient'>(
+    f.kind,
+    ['plots', 'hlines', 'gradient'],
+    'plots',
+  );
   let upper: FillEdge;
   let lower: FillEdge;
   let pane: PaneKey;
@@ -723,13 +743,22 @@ export function fontFamilyCss(family: string | null | undefined): string {
 }
 
 function noteX(ctx: BuildContext, ...xs: number[]): void {
-  for (const x of xs) if (Number.isFinite(x)) ctx.maxLogical = Math.max(ctx.maxLogical, Math.min(x, ctx.timeline.length - 1 + MAX_FUTURE_SLOTS));
+  for (const x of xs)
+    if (Number.isFinite(x))
+      ctx.maxLogical = Math.max(
+        ctx.maxLogical,
+        Math.min(x, ctx.timeline.length - 1 + MAX_FUTURE_SLOTS),
+      );
 }
 
 export function buildLabel(l: PineLabelOutput, ctx: BuildContext): LabelDrawing | null {
   const x = drawingX(l.x, l.xloc, ctx.timeline);
   if (x === null) return null;
-  const yloc = oneOf<'price' | 'abovebar' | 'belowbar'>(l.yloc, ['price', 'abovebar', 'belowbar'], 'price');
+  const yloc = oneOf<'price' | 'abovebar' | 'belowbar'>(
+    l.yloc,
+    ['price', 'abovebar', 'belowbar'],
+    'price',
+  );
   if (yloc === 'price' && !finite(l.y)) return null;
   noteX(ctx, x);
   return {
@@ -930,7 +959,10 @@ export const TRADE_COLORS = {
 } as const;
 
 export function buildTrades(report: PineStrategyReport, timeline: BarTimeline): TradeDrawing[] {
-  const at = (barIndex: number | null | undefined, time: number | null | undefined): number | null => {
+  const at = (
+    barIndex: number | null | undefined,
+    time: number | null | undefined,
+  ): number | null => {
     if (finite(barIndex)) return timeline.logicalOfBarIndex(barIndex);
     if (finite(time)) {
       const l = timeline.logicalOfTime(time);
@@ -958,7 +990,8 @@ export function buildTrades(report: PineStrategyReport, timeline: BarTimeline): 
       qty: finite(t.qty) ? t.qty : 0,
       profit,
       profitPercent: finite(t.profitPercent) ? t.profitPercent : null,
-      lineColor: profit > 0 ? TRADE_COLORS.profit : profit < 0 ? TRADE_COLORS.loss : TRADE_COLORS.even,
+      lineColor:
+        profit > 0 ? TRADE_COLORS.profit : profit < 0 ? TRADE_COLORS.loss : TRADE_COLORS.even,
     });
   }
   return out.sort((a, b) => a.entryX - b.entryX || a.number - b.number);

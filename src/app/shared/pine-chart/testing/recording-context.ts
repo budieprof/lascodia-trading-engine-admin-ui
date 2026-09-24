@@ -109,7 +109,13 @@ export class RecordingContext {
   }
 
   stroke(): void {
-    this.ops.push({ op: 'stroke', style: String(this.strokeStyle), width: this.lineWidth, dash: [...this.dash], path: [...this.path] });
+    this.ops.push({
+      op: 'stroke',
+      style: String(this.strokeStyle),
+      width: this.lineWidth,
+      dash: [...this.dash],
+      path: [...this.path],
+    });
   }
 
   fill(): void {
@@ -140,7 +146,15 @@ export class RecordingContext {
 
   createLinearGradient(x0: number, y0: number, x1: number, y1: number) {
     const stops: Array<[number, string]> = [];
-    return { kind: 'gradient', x0, y0, x1, y1, stops, addColorStop: (o: number, c: string) => stops.push([o, c]) };
+    return {
+      kind: 'gradient',
+      x0,
+      y0,
+      x1,
+      y1,
+      stops,
+      addColorStop: (o: number, c: string) => stops.push([o, c]),
+    };
   }
 
   /** Typed as the real context for the painters. */
@@ -149,15 +163,24 @@ export class RecordingContext {
   }
 
   strokes(style?: string): Extract<DrawOp, { op: 'stroke' }>[] {
-    return this.ops.filter((o): o is Extract<DrawOp, { op: 'stroke' }> => o.op === 'stroke' && (style === undefined || o.style === style));
+    return this.ops.filter(
+      (o): o is Extract<DrawOp, { op: 'stroke' }> =>
+        o.op === 'stroke' && (style === undefined || o.style === style),
+    );
   }
 
   fills(style?: string): Extract<DrawOp, { op: 'fill' }>[] {
-    return this.ops.filter((o): o is Extract<DrawOp, { op: 'fill' }> => o.op === 'fill' && (style === undefined || o.style === style));
+    return this.ops.filter(
+      (o): o is Extract<DrawOp, { op: 'fill' }> =>
+        o.op === 'fill' && (style === undefined || o.style === style),
+    );
   }
 
   rects(style?: string): Extract<DrawOp, { op: 'fillRect' }>[] {
-    return this.ops.filter((o): o is Extract<DrawOp, { op: 'fillRect' }> => o.op === 'fillRect' && (style === undefined || o.style === style));
+    return this.ops.filter(
+      (o): o is Extract<DrawOp, { op: 'fillRect' }> =>
+        o.op === 'fillRect' && (style === undefined || o.style === style),
+    );
   }
 
   texts(): Extract<DrawOp, { op: 'fillText' }>[] {
@@ -167,5 +190,7 @@ export class RecordingContext {
 
 /** Points (M/L) of a recorded path, as [x, y] pairs. */
 export function pathPoints(path: readonly PathCmd[]): Array<[number, number]> {
-  return path.filter((p): p is Extract<PathCmd, { c: 'M' | 'L' }> => p.c === 'M' || p.c === 'L').map((p) => [p.x, p.y]);
+  return path
+    .filter((p): p is Extract<PathCmd, { c: 'M' | 'L' }> => p.c === 'M' || p.c === 'L')
+    .map((p) => [p.x, p.y]);
 }

@@ -21,8 +21,12 @@ import {
   template: `
     <div class="summary">
       @if (rows().length) {
-        <span><b>{{ rows().length }}</b> significant lines</span>
-        <span>· total <b>{{ micros(totalMicros()) }}</b></span>
+        <span
+          ><b>{{ rows().length }}</b> significant lines</span
+        >
+        <span
+          >· total <b>{{ micros(totalMicros()) }}</b></span
+        >
         @if (elapsedMs() !== null) {
           <span>· run {{ elapsedMs() }} ms</span>
         }
@@ -38,7 +42,9 @@ import {
               type="button"
               role="columnheader"
               [class.active]="sort().key === c.key"
-              [attr.aria-sort]="sort().key === c.key ? (sort().dir === 'asc' ? 'ascending' : 'descending') : 'none'"
+              [attr.aria-sort]="
+                sort().key === c.key ? (sort().dir === 'asc' ? 'ascending' : 'descending') : 'none'
+              "
               (click)="sortBy(c.key)"
             >
               {{ c.label }}
@@ -50,18 +56,37 @@ import {
           <span role="columnheader" class="code-head">Code</span>
         </div>
         @for (r of sorted(); track r.line) {
-          <div class="tr" role="row" tabindex="0" (click)="lineJump.emit({ line: r.line })" (keydown.enter)="lineJump.emit({ line: r.line })" [title]="'Go to line ' + r.line">
+          <div
+            class="tr"
+            role="row"
+            tabindex="0"
+            (click)="lineJump.emit({ line: r.line })"
+            (keydown.enter)="lineJump.emit({ line: r.line })"
+            [title]="'Go to line ' + r.line"
+          >
             <span class="num" role="cell">
               {{ r.line }}
               @if (r.flame) {
-                <svg class="flame" viewBox="0 0 24 24" [attr.aria-label]="'Costliest line #' + r.flame"><path d="M12 2c1 3.5-1.5 5.2-1.5 7.6 0 1.4.9 2.4 2 2.4 1.9 0 2.5-2 1.9-4.2C16.9 9.9 19 12.9 19 16a7 7 0 1 1-14 0c0-3.3 2.2-5.8 4.3-7.7C11 6.7 12.4 4.8 12 2z" /></svg>
+                <svg
+                  class="flame"
+                  viewBox="0 0 24 24"
+                  [attr.aria-label]="'Costliest line #' + r.flame"
+                >
+                  <path
+                    d="M12 2c1 3.5-1.5 5.2-1.5 7.6 0 1.4.9 2.4 2 2.4 1.9 0 2.5-2 1.9-4.2C16.9 9.9 19 12.9 19 16a7 7 0 1 1-14 0c0-3.3 2.2-5.8 4.3-7.7C11 6.7 12.4 4.8 12 2z"
+                  />
+                </svg>
               }
             </span>
             <span class="num" role="cell">{{ r.executions.toLocaleString() }}</span>
             <span class="num" role="cell">{{ micros(r.totalMicros) }}</span>
             <span class="num" role="cell">{{ micros(r.avgMicros) }}</span>
             <span class="pct" role="cell">
-              <span class="heat" [style.width.%]="r.heat * 100" [style.background]="heat(r.heat)"></span>
+              <span
+                class="heat"
+                [style.width.%]="r.heat * 100"
+                [style.background]="heat(r.heat)"
+              ></span>
               <span class="pct-text">{{ r.percent.toFixed(1) }}%</span>
             </span>
             <code class="code" role="cell">{{ r.source ?? '' }}</code>
@@ -200,7 +225,9 @@ export class PineProfilerPaneComponent {
   sortBy(key: ProfilerSortKey): void {
     const cur = this.sort();
     this.sort.set(
-      cur.key === key ? { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'line' ? 'asc' : 'desc' },
+      cur.key === key
+        ? { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: key === 'line' ? 'asc' : 'desc' },
     );
   }
 

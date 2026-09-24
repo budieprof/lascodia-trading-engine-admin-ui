@@ -72,7 +72,13 @@ export function paintDrawings(
  * extend.left the ray from point 2 through point 1, both the whole line. Rays are cut at a distance
  * that is always past the pane, so the canvas clips them.
  */
-export function extendedSegment(a: Point, b: Point, extend: string, width: number, height: number): [Point, Point] {
+export function extendedSegment(
+  a: Point,
+  b: Point,
+  extend: string,
+  width: number,
+  height: number,
+): [Point, Point] {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const len = Math.hypot(dx, dy);
@@ -80,7 +86,10 @@ export function extendedSegment(a: Point, b: Point, extend: string, width: numbe
   const ux = dx / len;
   const uy = dy / len;
   const reach = (from: Point) =>
-    Math.hypot(Math.max(Math.abs(from.x), Math.abs(width - from.x)), Math.max(Math.abs(from.y), Math.abs(height - from.y))) + 10;
+    Math.hypot(
+      Math.max(Math.abs(from.x), Math.abs(width - from.x)),
+      Math.max(Math.abs(from.y), Math.abs(height - from.y)),
+    ) + 10;
   let p1 = a;
   let p2 = b;
   if (extend === 'right' || extend === 'both') {
@@ -94,7 +103,10 @@ export function extendedSegment(a: Point, b: Point, extend: string, width: numbe
   return [p1, p2];
 }
 
-function lineEnds(p: Projection, l: LineDrawing): { a: Point; b: Point; seg: [Point, Point] } | null {
+function lineEnds(
+  p: Projection,
+  l: LineDrawing,
+): { a: Point; b: Point; seg: [Point, Point] } | null {
   const a = { x: p.x(l.x1), y: p.y(l.y1) };
   const b = { x: p.x(l.x2), y: p.y(l.y2) };
   if (![a.x, a.y, b.x, b.y].every(Number.isFinite)) return null;
@@ -113,8 +125,10 @@ export function paintLine(ctx: Ctx, p: Projection, l: LineDrawing): void {
   ctx.moveTo(s.x, s.y);
   ctx.lineTo(e.x, e.y);
   ctx.stroke();
-  if (l.style === 'arrow_right' || l.style === 'arrow_both') drawArrowHead(ctx, ends.a.x, ends.a.y, ends.b.x, ends.b.y, l.width, l.color);
-  if (l.style === 'arrow_left' || l.style === 'arrow_both') drawArrowHead(ctx, ends.b.x, ends.b.y, ends.a.x, ends.a.y, l.width, l.color);
+  if (l.style === 'arrow_right' || l.style === 'arrow_both')
+    drawArrowHead(ctx, ends.a.x, ends.a.y, ends.b.x, ends.b.y, l.width, l.color);
+  if (l.style === 'arrow_left' || l.style === 'arrow_both')
+    drawArrowHead(ctx, ends.b.x, ends.b.y, ends.a.x, ends.a.y, l.width, l.color);
 }
 
 function segmentMayBeVisible(a: Point, b: Point, p: Projection): boolean {
@@ -125,7 +139,13 @@ function segmentMayBeVisible(a: Point, b: Point, p: Projection): boolean {
 }
 
 /** linefill: the polygon between two lines' drawn segments (extensions included). */
-export function paintLinefill(ctx: Ctx, p: Projection, l1: LineDrawing, l2: LineDrawing, color: string | null): void {
+export function paintLinefill(
+  ctx: Ctx,
+  p: Projection,
+  l1: LineDrawing,
+  l2: LineDrawing,
+  color: string | null,
+): void {
   if (!color) return;
   const e1 = lineEnds(p, l1);
   const e2 = lineEnds(p, l2);
@@ -242,7 +262,17 @@ function paintBoxText(ctx: Ctx, b: BoxDrawing, x: number, y: number, w: number, 
     ctx.rect(x, y, w, h);
     ctx.clip();
   }
-  drawTextBlock(ctx, block, x + BOX_PAD, y + BOX_PAD, innerW, innerH, b.hAlign, b.vAlign, b.textColor!);
+  drawTextBlock(
+    ctx,
+    block,
+    x + BOX_PAD,
+    y + BOX_PAD,
+    innerW,
+    innerH,
+    b.hAlign,
+    b.vAlign,
+    b.textColor!,
+  );
   if (clip) ctx.restore();
 }
 
@@ -290,7 +320,14 @@ export interface LabelGeometry {
  * label_center/none/text_outline centre on it, and shape styles put the shape on the anchor with the
  * text beneath (above for the downward shapes).
  */
-export function labelGeometry(style: string, ax: number, ay: number, textW: number, textH: number, fontSize: number): LabelGeometry {
+export function labelGeometry(
+  style: string,
+  ax: number,
+  ay: number,
+  textW: number,
+  textH: number,
+  fontSize: number,
+): LabelGeometry {
   const padX = Math.max(4, fontSize * 0.5);
   const padY = Math.max(2, fontSize * 0.3);
   const w = textW > 0 ? textW + 2 * padX : 0;
@@ -322,7 +359,11 @@ export function labelGeometry(style: string, ax: number, ay: number, textW: numb
       const x = ax - ptr - bw;
       return {
         box: { x, y: ay - bh / 2, w: bw, h: bh },
-        pointer: tri({ x: x + bw - 0.5, y: ay - ptr }, { x: ax, y: ay }, { x: x + bw - 0.5, y: ay + ptr }),
+        pointer: tri(
+          { x: x + bw - 0.5, y: ay - ptr },
+          { x: ax, y: ay },
+          { x: x + bw - 0.5, y: ay + ptr },
+        ),
         shape: null,
         bubble: true,
       };
@@ -342,7 +383,11 @@ export function labelGeometry(style: string, ax: number, ay: number, textW: numb
       const y = ay - ptr * 0.6 - bh;
       return {
         box: { x, y, w: bw, h: bh },
-        pointer: tri({ x: x + bw, y: y + bh - ptr }, { x: ax, y: ay }, { x: x + bw - ptr, y: y + bh }),
+        pointer: tri(
+          { x: x + bw, y: y + bh - ptr },
+          { x: ax, y: ay },
+          { x: x + bw - ptr, y: y + bh },
+        ),
         shape: null,
         bubble: true,
       };
@@ -368,10 +413,20 @@ export function labelGeometry(style: string, ax: number, ay: number, textW: numb
       };
     }
     case 'label_center':
-      return { box: { x: ax - bw / 2, y: ay - bh / 2, w: bw, h: bh }, pointer: null, shape: null, bubble: true };
+      return {
+        box: { x: ax - bw / 2, y: ay - bh / 2, w: bw, h: bh },
+        pointer: null,
+        shape: null,
+        bubble: true,
+      };
     case 'none':
     case 'text_outline':
-      return { box: { x: ax - w / 2, y: ay - h / 2, w, h }, pointer: null, shape: null, bubble: false };
+      return {
+        box: { x: ax - w / 2, y: ay - h / 2, w, h },
+        pointer: null,
+        shape: null,
+        bubble: false,
+      };
     default: {
       if (SHAPE_STYLES.has(style)) {
         const size = Math.max(8, Math.round(fontSize * 1.3));
@@ -388,7 +443,11 @@ export function labelGeometry(style: string, ax: number, ay: number, textW: numb
       const y = ay - ptr - bh;
       return {
         box: { x: ax - bw / 2, y, w: bw, h: bh },
-        pointer: tri({ x: ax - ptr, y: y + bh - 0.5 }, { x: ax, y: ay }, { x: ax + ptr, y: y + bh - 0.5 }),
+        pointer: tri(
+          { x: ax - ptr, y: y + bh - 0.5 },
+          { x: ax, y: ay },
+          { x: ax + ptr, y: y + bh - 0.5 },
+        ),
         shape: null,
         bubble: true,
       };
@@ -409,7 +468,13 @@ function labelAnchorY(p: Projection, l: LabelDrawing, bars: BarLookup | null): n
   return lo === lo ? p.y(lo) + 3 : NaN;
 }
 
-export function paintLabel(ctx: Ctx, p: Projection, l: LabelDrawing, bars: BarLookup | null, hits: HitRegion[]): void {
+export function paintLabel(
+  ctx: Ctx,
+  p: Projection,
+  l: LabelDrawing,
+  bars: BarLookup | null,
+  hits: HitRegion[],
+): void {
   const ax = p.x(l.x);
   if (!Number.isFinite(ax) || ax < -400 || ax > p.width + 400) return;
   const ay = labelAnchorY(p, l, bars);
@@ -441,7 +506,10 @@ export function paintLabel(ctx: Ctx, p: Projection, l: LabelDrawing, bars: BarLo
   if (lines.length && l.textColor) {
     ctx.font = cssFont(l.fontSize, l.fontFamily, l.bold, l.italic);
     const padX = g.bubble ? Math.max(4, l.fontSize * 0.5) : 0;
-    const outline = style === 'text_outline' && l.color ? { color: l.color, width: Math.max(2, l.fontSize / 5) } : null;
+    const outline =
+      style === 'text_outline' && l.color
+        ? { color: l.color, width: Math.max(2, l.fontSize / 5) }
+        : null;
     drawTextBlock(
       ctx,
       block,
@@ -458,7 +526,12 @@ export function paintLabel(ctx: Ctx, p: Projection, l: LabelDrawing, bars: BarLo
 
   if (l.tooltip) {
     const r = g.shape
-      ? { x: g.shape.cx - g.shape.size / 2, y: g.shape.cy - g.shape.size / 2, w: g.shape.size, h: g.shape.size }
+      ? {
+          x: g.shape.cx - g.shape.size / 2,
+          y: g.shape.cy - g.shape.size / 2,
+          w: g.shape.size,
+          h: g.shape.size,
+        }
       : g.box;
     const pad = 2;
     hits.push({

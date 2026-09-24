@@ -28,7 +28,13 @@ import { REPLAY_SPEEDS, ReplaySession, type ReplayApi } from './replay-session';
   template: `
     @switch (mode()) {
       @case ('off') {
-        <button type="button" class="primary" (click)="arm()" [disabled]="!request()" title="Replay the script bar by bar from a bar you pick">
+        <button
+          type="button"
+          class="primary"
+          (click)="arm()"
+          [disabled]="!request()"
+          title="Replay the script bar by bar from a bar you pick"
+        >
           ⏪ Bar Replay
         </button>
       }
@@ -36,24 +42,51 @@ import { REPLAY_SPEEDS, ReplaySession, type ReplayApi } from './replay-session';
         <span class="hint">Click a bar on the chart to start, or</span>
         <label class="start">
           start at bar
-          <input type="number" min="0" [value]="typedStart() ?? ''" (input)="typedStart.set(+$any($event.target).value)" aria-label="Start bar" />
+          <input
+            type="number"
+            min="0"
+            [value]="typedStart() ?? ''"
+            (input)="typedStart.set(+$any($event.target).value)"
+            aria-label="Start bar"
+          />
         </label>
-        <button type="button" (click)="startAt(typedStart())" [disabled]="typedStart() === null">Start</button>
+        <button type="button" (click)="startAt(typedStart())" [disabled]="typedStart() === null">
+          Start
+        </button>
         <button type="button" (click)="disarm()">Cancel</button>
       }
       @default {
         @if (session.status() === 'playing') {
-          <button type="button" class="primary" (click)="session.pause()" title="Pause">❚❚ Pause</button>
+          <button type="button" class="primary" (click)="session.pause()" title="Pause">
+            ❚❚ Pause
+          </button>
         } @else {
-          <button type="button" class="primary" (click)="session.play()" [disabled]="!canStep()" title="Play">▶ Play</button>
+          <button
+            type="button"
+            class="primary"
+            (click)="session.play()"
+            [disabled]="!canStep()"
+            title="Play"
+          >
+            ▶ Play
+          </button>
         }
         @for (n of stepSizes; track n) {
-          <button type="button" (click)="session.step(n)" [disabled]="!canStep() || session.status() === 'playing'" [title]="'Step ' + n + ' bar' + (n > 1 ? 's' : '')">
+          <button
+            type="button"
+            (click)="session.step(n)"
+            [disabled]="!canStep() || session.status() === 'playing'"
+            [title]="'Step ' + n + ' bar' + (n > 1 ? 's' : '')"
+          >
             +{{ n }}
           </button>
         }
         <label class="speed">
-          <select [value]="session.speed()" (change)="session.setSpeed(+$any($event.target).value)" aria-label="Replay speed">
+          <select
+            [value]="session.speed()"
+            (change)="session.setSpeed(+$any($event.target).value)"
+            aria-label="Replay speed"
+          >
             @for (s of speeds; track s) {
               <option [value]="s">{{ s }} bar/s</option>
             }
@@ -75,7 +108,9 @@ import { REPLAY_SPEEDS, ReplaySession, type ReplayApi } from './replay-session';
             }
           }
         </span>
-        <button type="button" (click)="stop()" title="Stop the replay and return to the full run">■ Stop</button>
+        <button type="button" (click)="stop()" title="Stop the replay and return to the full run">
+          ■ Stop
+        </button>
       }
     }
   `,

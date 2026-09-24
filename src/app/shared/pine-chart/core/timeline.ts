@@ -74,12 +74,19 @@ export class BarTimeline {
     return t1 > t0 ? i + (t - t0) / (t1 - t0) : i;
   }
 
-  /** Index of the bar opening exactly at `t`, or -1. */
+  /**
+   * Index of the first bar opening exactly at `t`, or -1. Renko / Kagi / Point & Figure bricks can
+   * share an open time, so this is the first of them, not any.
+   */
   indexOfTime(t: number): number {
-    const n = this.times.length;
-    if (n === 0) return -1;
-    const i = this.floorIndex(t);
-    return i >= 0 && this.times[i] === t ? i : -1;
+    let lo = 0;
+    let hi = this.times.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this.times[mid] < t) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo < this.times.length && this.times[lo] === t ? lo : -1;
   }
 
   /** Largest index whose time is <= t (-1 when t precedes the first bar). */

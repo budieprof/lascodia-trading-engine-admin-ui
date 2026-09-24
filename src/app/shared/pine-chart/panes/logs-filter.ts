@@ -69,7 +69,9 @@ export interface Matcher {
 }
 
 /** A matcher for the search box, or `{ error }` for an invalid regex. Null query matches all. */
-export function buildMatcher(filter: Pick<LogFilter, 'query' | 'matchCase' | 'wholeWord' | 'regex'>): Matcher | { error: string } | null {
+export function buildMatcher(
+  filter: Pick<LogFilter, 'query' | 'matchCase' | 'wholeWord' | 'regex'>,
+): Matcher | { error: string } | null {
   const q = filter.query;
   if (!q) return null;
   let source = filter.regex ? q : q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -106,10 +108,15 @@ export function buildMatcher(filter: Pick<LogFilter, 'query' | 'matchCase' | 'wh
   };
 }
 
-export function filterLogs(logs: readonly PineLogOutput[], filter: LogFilter, timeZone = 'UTC'): LogFilterResult {
+export function filterLogs(
+  logs: readonly PineLogOutput[],
+  filter: LogFilter,
+  timeZone = 'UTC',
+): LogFilterResult {
   const counts: Record<LogLevel, number> = { info: 0, warning: 0, error: 0 };
   const matcher = buildMatcher(filter);
-  if (matcher && 'error' in matcher) return { rows: [], counts: countLevels(logs), error: matcher.error };
+  if (matcher && 'error' in matcher)
+    return { rows: [], counts: countLevels(logs), error: matcher.error };
   const rows: LogRow[] = [];
   for (let i = 0; i < logs.length; i++) {
     const log = logs[i];

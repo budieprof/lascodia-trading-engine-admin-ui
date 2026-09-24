@@ -93,7 +93,13 @@ export class TraceNavigator {
     const prevByKey = new Map<string, string>();
     for (const it of prev?.items ?? []) prevByKey.set(spanKey(it), it.value);
     return [...t.items]
-      .sort((a, b) => a.line - b.line || a.column - b.column || a.endLine - b.endLine || a.endColumn - b.endColumn)
+      .sort(
+        (a, b) =>
+          a.line - b.line ||
+          a.column - b.column ||
+          a.endLine - b.endLine ||
+          a.endColumn - b.endColumn,
+      )
       .map((it) => {
         const before = prevByKey.get(spanKey(it));
         return {

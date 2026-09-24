@@ -141,7 +141,9 @@ function paintShapes(
 ): void {
   const side = sideOf(layer.location, bars);
   const isChar = layer.kind === 'char';
-  const size = isChar ? charSizePx(layer.size, p.barSpacing) : shapeSizePx(layer.size, p.barSpacing);
+  const size = isChar
+    ? charSizePx(layer.size, p.barSpacing)
+    : shapeSizePx(layer.size, p.barSpacing);
   const bubble = !isChar && (layer.shape === 'labelup' || layer.shape === 'labeldown');
   ctx.font = cssFont(TEXT_PX, FONT_DEFAULT);
   const textLines = splitLines(layer.text);
@@ -196,7 +198,17 @@ function paintShapes(
     }
 
     if (bubble) {
-      drawBubble(ctx, layer.shape === 'labelup', x, shapeTop, boxW, boxH, color, textBlock, textColor);
+      drawBubble(
+        ctx,
+        layer.shape === 'labelup',
+        x,
+        shapeTop,
+        boxW,
+        boxH,
+        color,
+        textBlock,
+        textColor,
+      );
     } else if (isChar) {
       if (color) {
         ctx.save();
@@ -213,7 +225,17 @@ function paintShapes(
 
     if (textBlock && textTop !== null && textColor) {
       ctx.font = cssFont(TEXT_PX, FONT_DEFAULT);
-      drawTextBlock(ctx, textBlock, x - textBlock.width / 2, textTop, textBlock.width, textBlock.height, 'center', 'top', textColor);
+      drawTextBlock(
+        ctx,
+        textBlock,
+        x - textBlock.width / 2,
+        textTop,
+        textBlock.width,
+        textBlock.height,
+        'center',
+        'top',
+        textColor,
+      );
     }
   }
 }

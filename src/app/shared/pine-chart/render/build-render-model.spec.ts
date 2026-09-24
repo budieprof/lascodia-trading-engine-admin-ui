@@ -14,14 +14,26 @@ import {
   plot,
   x,
 } from '../testing/pine-fixtures';
-import { buildRenderModel, MAX_FUTURE_SLOTS, TRADE_COLORS, type PineChartInput } from './build-render-model';
+import {
+  buildRenderModel,
+  MAX_FUTURE_SLOTS,
+  TRADE_COLORS,
+  type PineChartInput,
+} from './build-render-model';
 import type { MarkerLayer, PlotLayer } from './render-model';
 
 const H = 3_600_000;
 const T0 = Date.UTC(2026, 0, 5);
 
 function bars(n: number, start = T0): PineBar[] {
-  return Array.from({ length: n }, (_, i) => ({ t: start + i * H, o: 10 + i, h: 11 + i, l: 9 + i, c: 10.5 + i, v: 100 }));
+  return Array.from({ length: n }, (_, i) => ({
+    t: start + i * H,
+    o: 10 + i,
+    h: 11 + i,
+    l: 9 + i,
+    c: 10.5 + i,
+    v: 100,
+  }));
 }
 
 function input(outputs: PineScriptOutputs | null, b: PineBar[], overlay = true): PineChartInput {
@@ -29,22 +41,40 @@ function input(outputs: PineScriptOutputs | null, b: PineBar[], overlay = true):
     bars: b,
     outputs,
     report: null,
-    declaration: { kind: 'indicator', title: 'Test', shortTitle: 'T', overlay, format: null, precision: null },
+    declaration: {
+      kind: 'indicator',
+      title: 'Test',
+      shortTitle: 'T',
+      overlay,
+      format: null,
+      precision: null,
+    },
   };
 }
 
 function fromRun(run: PineRunResult) {
   const r = normalizeRunResult(run)!;
-  return buildRenderModel({ bars: r.bars, outputs: r.outputs, report: r.report, declaration: r.compile?.declaration ?? null });
+  return buildRenderModel({
+    bars: r.bars,
+    outputs: r.outputs,
+    report: r.report,
+    declaration: r.compile?.declaration ?? null,
+  });
 }
 
-const plotLayer = (m: ReturnType<typeof buildRenderModel>, id: number, pane: 'main' | 'script' = 'main') =>
-  (m.panes[pane]!.series.find((s) => s.id === id) as PlotLayer | undefined)!;
+const plotLayer = (
+  m: ReturnType<typeof buildRenderModel>,
+  id: number,
+  pane: 'main' | 'script' = 'main',
+) => (m.panes[pane]!.series.find((s) => s.id === id) as PlotLayer | undefined)!;
 
 describe('buildRenderModel — timeline and bars', () => {
   it('aligns the chart bars to bar_index through the outputs window', () => {
     const b = bars(10);
-    const out = emptyOutputs(b.slice(4).map((q) => q.t), 104);
+    const out = emptyOutputs(
+      b.slice(4).map((q) => q.t),
+      104,
+    );
     const m = buildRenderModel(input(out, b));
     // outputs.bars.times[0] is chart bar 4 → chart bar 0 is bar_index 100.
     expect(m.timeline.firstBarIndex).toBe(100);
@@ -57,6 +87,27 @@ describe('buildRenderModel — timeline and bars', () => {
     const m = buildRenderModel(input(null, [b[2], b[0], b[1], { ...b[1], c: 99 }]));
     expect(Array.from(m.bars.time)).toEqual([b[0].t, b[1].t, b[2].t]);
     expect(m.bars.close[1]).toBe(99);
+  });
+
+  it('keeps Renko-style bricks that share an open time and aligns outputs to them by position', () => {
+    const t = T0;
+    const bricks: PineBar[] = [t, t, t, t + H, t + 2 * H].map((tt, i) => ({
+      t: tt,
+      o: 1 + i,
+      h: 2 + i,
+      l: 1 + i,
+      c: 2 + i,
+      v: 0,
+    }));
+    const out = emptyOutputs(
+      bricks.map((b) => b.t),
+      50,
+    );
+    out.plots.push(plot({ id: 0, values: [10, 11, 12, 13, 14] }));
+    const m = buildRenderModel(input(out, bricks));
+    expect(m.bars.time.length).toBe(5);
+    expect(m.timeline.firstBarIndex).toBe(50);
+    expect(plotLayer(m, 0).values[2]).toBe(12);
   });
 
   it('infers the price precision from the bars and honours an override', () => {
@@ -108,7 +159,9 @@ describe('buildRenderModel — plots', () => {
 
   it('show_last = 1 with offset -99999 leaves only the track-price line', () => {
     const out = emptyOutputs(times);
-    out.plots.push(plot({ id: 0, values: b.map(() => 200), showLast: 1, offset: -99999, trackPrice: true }));
+    out.plots.push(
+      plot({ id: 0, values: b.map(() => 200), showLast: 1, offset: -99999, trackPrice: true }),
+    );
     const p = plotLayer(buildRenderModel(input(out, b)), 0);
     expect(p.valid.length).toBe(0);
   });
@@ -120,15 +173,31 @@ describe('buildRenderModel — plots', () => {
       plot({ id: 1, values, display: ['data_window', 'status_line'] }),
     );
     const m = buildRenderModel(input(out, b));
-    expect(plotLayer(m, 0).display).toEqual({ pane: false, dataWindow: false, priceScale: false, statusLine: false });
-    expect(plotLayer(m, 1).display).toEqual({ pane: false, dataWindow: true, priceScale: false, statusLine: true });
+    expect(plotLayer(m, 0).display).toEqual({
+      pane: false,
+      dataWindow: false,
+      priceScale: false,
+      statusLine: false,
+    });
+    expect(plotLayer(m, 1).display).toEqual({
+      pane: false,
+      dataWindow: true,
+      priceScale: false,
+      statusLine: true,
+    });
   });
 
   it('turns uniform and per-bar colors into color tracks, and unknown styles into line', () => {
     const out = emptyOutputs(times);
     out.plots.push(
       plot({ id: 0, values, color: '#FF000080' }),
-      plot({ id: 1, values, color: null, colors: b.map((_, i) => (i % 2 ? PINE.red : null)), style: 'unheard-of' }),
+      plot({
+        id: 1,
+        values,
+        color: null,
+        colors: b.map((_, i) => (i % 2 ? PINE.red : null)),
+        style: 'unheard-of',
+      }),
     );
     const m = buildRenderModel(input(out, b));
     expect(trackColor(plotLayer(m, 0).colors, 7)).toBe('rgba(255, 0, 0, 0.502)');
@@ -143,7 +212,13 @@ describe('buildRenderModel — plots', () => {
     const styles = ['area', 'areabr', 'columns', 'histogram', 'line'];
     styles.forEach((style, id) => out.plots.push(plot({ id, values, style, histBase: -5 })));
     const m = buildRenderModel(input(out, b));
-    expect(styles.map((_, id) => plotLayer(m, id).includeBaseInScale)).toEqual([true, false, true, true, false]);
+    expect(styles.map((_, id) => plotLayer(m, id).includeBaseInScale)).toEqual([
+      true,
+      false,
+      true,
+      true,
+      false,
+    ]);
   });
 });
 
@@ -162,7 +237,9 @@ describe('buildRenderModel — panes', () => {
     expect(script.series.map((s) => s.title)).toContain('RSI');
     expect(script.hlines.map((h) => h.price)).toEqual([70, 30, 50]);
     const main = m.panes.main;
-    expect(main.series.map((s) => s.title)).toEqual(expect.arrayContaining(['SMA 50', 'Heikin-Ashi']));
+    expect(main.series.map((s) => s.title)).toEqual(
+      expect.arrayContaining(['SMA 50', 'Heikin-Ashi']),
+    );
     expect(main.drawings.labels.map((l) => l.text)).toContain('force_overlay');
     expect(main.tables.map((t) => t.position)).toEqual(['top_center']);
     expect(script.tables.map((t) => t.position)).toEqual(['middle_right']);
@@ -182,8 +259,24 @@ describe('buildRenderModel — per-bar outputs', () => {
   it('barcolor: later outputs win on a bar, offsets shift, na keeps the default colors', () => {
     const out = emptyOutputs(times);
     out.barColors.push(
-      { id: 0, title: null, offset: 0, showLast: null, display: ['all'], forceOverlay: false, colors: times.map((_, i) => (i < 6 ? PINE.red : null)) },
-      { id: 1, title: null, offset: 2, showLast: null, display: ['all'], forceOverlay: false, colors: times.map((_, i) => (i === 1 ? PINE.blue : null)) },
+      {
+        id: 0,
+        title: null,
+        offset: 0,
+        showLast: null,
+        display: ['all'],
+        forceOverlay: false,
+        colors: times.map((_, i) => (i < 6 ? PINE.red : null)),
+      },
+      {
+        id: 1,
+        title: null,
+        offset: 2,
+        showLast: null,
+        display: ['all'],
+        forceOverlay: false,
+        colors: times.map((_, i) => (i === 1 ? PINE.blue : null)),
+      },
     );
     const m = buildRenderModel(input(out, b));
     expect(m.bars.colors![0]).toBe('rgb(242, 54, 69)');
@@ -194,8 +287,24 @@ describe('buildRenderModel — per-bar outputs', () => {
   it('bgcolor honours offset and show_last and skips display.none', () => {
     const out = emptyOutputs(times);
     out.backgrounds.push(
-      { id: 0, title: 'bg', offset: 1, showLast: 4, display: ['all'], forceOverlay: false, colors: times.map(() => PINE.teal) },
-      { id: 1, title: 'hidden', offset: 0, showLast: null, display: ['none'], forceOverlay: false, colors: times.map(() => PINE.red) },
+      {
+        id: 0,
+        title: 'bg',
+        offset: 1,
+        showLast: 4,
+        display: ['all'],
+        forceOverlay: false,
+        colors: times.map(() => PINE.teal),
+      },
+      {
+        id: 1,
+        title: 'hidden',
+        offset: 0,
+        showLast: null,
+        display: ['none'],
+        forceOverlay: false,
+        colors: times.map(() => PINE.red),
+      },
     );
     const m = buildRenderModel(input(out, b));
     expect(m.panes.main.backgrounds.length).toBe(1);
@@ -210,8 +319,25 @@ describe('buildRenderModel — per-bar outputs', () => {
   it('markers: offset, show_last and sort by logical; arrows record their direction', () => {
     const out = emptyOutputs(times);
     out.markers.push(
-      marker({ id: 0, offset: 2, showLast: 5, points: [9, 2, 11, 7].map((i) => ({ barIndex: i, time: times[i], value: 1, color: PINE.red })) }),
-      marker({ id: 1, kind: 'arrow', points: [{ barIndex: 3, time: times[3], value: -2, color: PINE.red, direction: 'down' }, { barIndex: 4, time: times[4], value: 5, color: PINE.teal, direction: 'up' }] }),
+      marker({
+        id: 0,
+        offset: 2,
+        showLast: 5,
+        points: [9, 2, 11, 7].map((i) => ({
+          barIndex: i,
+          time: times[i],
+          value: 1,
+          color: PINE.red,
+        })),
+      }),
+      marker({
+        id: 1,
+        kind: 'arrow',
+        points: [
+          { barIndex: 3, time: times[3], value: -2, color: PINE.red, direction: 'down' },
+          { barIndex: 4, time: times[4], value: 5, color: PINE.teal, direction: 'up' },
+        ],
+      }),
     );
     const m = buildRenderModel(input(out, b));
     const [shapes, arrows] = m.panes.main.markers as MarkerLayer[];
@@ -223,9 +349,24 @@ describe('buildRenderModel — per-bar outputs', () => {
   it('plotcandle: a bar with any na OHLC is skipped; high/low normalised', () => {
     const out = emptyOutputs(times);
     out.candles.push({
-      id: 0, title: 'c', offset: 0, showLast: null, display: ['all'], forceOverlay: false, plotNumber: 0, kind: 'candle', format: null, precision: null,
-      open: times.map((_, i) => (i === 2 ? null : 5)), high: times.map(() => 4), low: times.map(() => 6), close: times.map(() => 5.5),
-      color: PINE.teal, colors: null, wickColors: null, borderColors: null,
+      id: 0,
+      title: 'c',
+      offset: 0,
+      showLast: null,
+      display: ['all'],
+      forceOverlay: false,
+      plotNumber: 0,
+      kind: 'candle',
+      format: null,
+      precision: null,
+      open: times.map((_, i) => (i === 2 ? null : 5)),
+      high: times.map(() => 4),
+      low: times.map(() => 6),
+      close: times.map(() => 5.5),
+      color: PINE.teal,
+      colors: null,
+      wickColors: null,
+      borderColors: null,
     });
     const c = buildRenderModel(input(out, b)).panes.main.series[0];
     expect(c.type).toBe('candle');
@@ -244,14 +385,26 @@ describe('buildRenderModel — hlines and fills', () => {
     expect(fills[0].upper.kind).toBe('plot');
     expect(fills[1].gradient?.topValues.length).toBe(200);
     const pane = fromRun(paneIndicatorFixture(200)).panes.script!;
-    expect(pane.fills[0]).toMatchObject({ kind: 'hlines', upper: { kind: 'price', price: 70 }, lower: { kind: 'price', price: 30 } });
+    expect(pane.fills[0]).toMatchObject({
+      kind: 'hlines',
+      upper: { kind: 'price', price: 70 },
+      lower: { kind: 'price', price: 30 },
+    });
   });
 
   it('drops a fill that references a missing output', () => {
     const b = bars(5);
     const out = emptyOutputs(b.map((q) => q.t));
     out.plots.push(plot({ id: 0, values: [1, 2, 3, 4, 5] }));
-    out.fills.push({ id: 0, kind: 'plots', from: 0, to: 9, fillGaps: false, display: ['all'], color: PINE.red });
+    out.fills.push({
+      id: 0,
+      kind: 'plots',
+      from: 0,
+      to: 9,
+      fillGaps: false,
+      display: ['all'],
+      color: PINE.red,
+    });
     expect(buildRenderModel(input(out, b)).panes.main.fills).toEqual([]);
   });
 });
@@ -264,7 +417,12 @@ describe('buildRenderModel — drawings', () => {
     const out = emptyOutputs(times);
     out.labels.push(
       label({ id: 1, x: x(10, times, H), y: 12 }),
-      label({ id: 2, x: { value: times[4] + H / 2, barIndex: 4, time: times[4] + H / 2 }, xloc: 'bar_time', y: 12 }),
+      label({
+        id: 2,
+        x: { value: times[4] + H / 2, barIndex: 4, time: times[4] + H / 2 },
+        xloc: 'bar_time',
+        y: 12,
+      }),
       label({ id: 3, x: { value: null, barIndex: null, time: null }, y: 12 }),
       label({ id: 4, x: x(5, times, H), y: null }), // yloc.price needs a y
       label({ id: 5, x: x(6, times, H), y: null, yloc: 'abovebar' }),
@@ -277,19 +435,51 @@ describe('buildRenderModel — drawings', () => {
 
   it('extends the time scale for future drawings (capped at 500 bars)', () => {
     const out = emptyOutputs(times);
-    out.labels.push(label({ id: 1, x: x(29 + 25, times, H), y: 1 }), label({ id: 2, x: x(29 + 5000, times, H), y: 1 }));
+    out.labels.push(
+      label({ id: 1, x: x(29 + 25, times, H), y: 1 }),
+      label({ id: 2, x: x(29 + 5000, times, H), y: 1 }),
+    );
     expect(buildRenderModel(input(out, b)).futureSlots).toBe(MAX_FUTURE_SLOTS);
   });
 
   it('normalises boxes (top/bottom and left/right order) and maps text sizes', () => {
     const out = emptyOutputs(times);
     out.boxes.push({
-      id: 1, left: x(20, times, H), right: x(10, times, H), top: 5, bottom: 9, xloc: 'bar_index', borderColor: PINE.blue, borderWidth: 2,
-      borderStyle: 'dashed', extend: 'right', bgColor: null, text: 'hi', textSize: 'large', textSizePoints: 0, textColor: PINE.black,
-      textHAlign: 'left', textVAlign: 'top', textWrap: 'auto', fontFamily: 'monospace', bold: true, italic: false, forceOverlay: false, createdBar: 0,
+      id: 1,
+      left: x(20, times, H),
+      right: x(10, times, H),
+      top: 5,
+      bottom: 9,
+      xloc: 'bar_index',
+      borderColor: PINE.blue,
+      borderWidth: 2,
+      borderStyle: 'dashed',
+      extend: 'right',
+      bgColor: null,
+      text: 'hi',
+      textSize: 'large',
+      textSizePoints: 0,
+      textColor: PINE.black,
+      textHAlign: 'left',
+      textVAlign: 'top',
+      textWrap: 'auto',
+      fontFamily: 'monospace',
+      bold: true,
+      italic: false,
+      forceOverlay: false,
+      createdBar: 0,
     });
     const box = buildRenderModel(input(out, b)).panes.main.drawings.boxes[0];
-    expect(box).toMatchObject({ left: 10, right: 20, top: 9, bottom: 5, fontSize: 20, wrap: true, extend: 'right', borderStyle: 'dashed' });
+    expect(box).toMatchObject({
+      left: 10,
+      right: 20,
+      top: 9,
+      bottom: 5,
+      fontSize: 20,
+      wrap: true,
+      extend: 'right',
+      borderStyle: 'dashed',
+    });
     expect(box.fontFamily).toContain('monospace');
   });
 
@@ -312,7 +502,15 @@ describe('buildRenderModel — tables', () => {
     const b = bars(3);
     const out = emptyOutputs(b.map((q) => q.t));
     out.tables.push({
-      id: 7, position: 'bottom_center', columns: 3, rows: 2, bgColor: PINE.white, frameColor: null, frameWidth: 0, borderColor: null, borderWidth: 0,
+      id: 7,
+      position: 'bottom_center',
+      columns: 3,
+      rows: 2,
+      bgColor: PINE.white,
+      frameColor: null,
+      frameWidth: 0,
+      borderColor: null,
+      borderWidth: 0,
       forceOverlay: false,
       cells: [
         cell({ column: 0, row: 0, columnSpan: 9, text: 'header' }),
@@ -337,7 +535,9 @@ describe('buildRenderModel — strategy trades', () => {
     expect(trades.length).toBe(run.report!.trades.length);
     const closed = trades.filter((t) => !t.isOpen);
     for (const t of closed) {
-      expect(t.lineColor).toBe(t.profit > 0 ? TRADE_COLORS.profit : t.profit < 0 ? TRADE_COLORS.loss : TRADE_COLORS.even);
+      expect(t.lineColor).toBe(
+        t.profit > 0 ? TRADE_COLORS.profit : t.profit < 0 ? TRADE_COLORS.loss : TRADE_COLORS.even,
+      );
       expect(t.exitX).not.toBeNull();
     }
     const open = trades.filter((t) => t.isOpen);
@@ -347,7 +547,15 @@ describe('buildRenderModel — strategy trades', () => {
 
   it('can leave trades off', () => {
     const run = normalizeRunResult(overlayStrategyFixture(200))!;
-    const m = buildRenderModel({ bars: run.bars, outputs: run.outputs, report: run.report, declaration: run.compile!.declaration }, { trades: false });
+    const m = buildRenderModel(
+      {
+        bars: run.bars,
+        outputs: run.outputs,
+        report: run.report,
+        declaration: run.compile!.declaration,
+      },
+      { trades: false },
+    );
     expect(m.panes.main.trades).toEqual([]);
   });
 });
@@ -356,9 +564,13 @@ describe('buildRenderModel — fixtures', () => {
   it('the overlay fixture exercises every plot style and shape', () => {
     const m = fromRun(overlayStrategyFixture(400));
     const plots = m.panes.main.series.filter((s): s is PlotLayer => s.type === 'plot');
-    expect(new Set(plots.map((p) => p.style))).toEqual(new Set(['line', 'linebr', 'stepline', 'stepline_diamond', 'steplinebr', 'circles', 'cross']));
+    expect(new Set(plots.map((p) => p.style))).toEqual(
+      new Set(['line', 'linebr', 'stepline', 'stepline_diamond', 'steplinebr', 'circles', 'cross']),
+    );
     const pane = fromRun(paneIndicatorFixture(300)).panes.script!;
-    const paneStyles = pane.series.filter((s): s is PlotLayer => s.type === 'plot').map((p) => p.style);
+    const paneStyles = pane.series
+      .filter((s): s is PlotLayer => s.type === 'plot')
+      .map((p) => p.style);
     expect(paneStyles).toEqual(expect.arrayContaining(['histogram', 'columns', 'area', 'areabr']));
     const shapes = m.panes.main.markers.filter((mk) => mk.kind === 'shape').map((mk) => mk.shape);
     expect(new Set(shapes).size).toBe(12);
@@ -369,7 +581,12 @@ describe('buildRenderModel — fixtures', () => {
   it('builds 20,000 bars × 40 plots quickly', () => {
     const run = normalizeRunResult(largeFixture(20_000, 40))!;
     const t0 = performance.now();
-    const m = buildRenderModel({ bars: run.bars, outputs: run.outputs, report: null, declaration: run.compile!.declaration });
+    const m = buildRenderModel({
+      bars: run.bars,
+      outputs: run.outputs,
+      report: null,
+      declaration: run.compile!.declaration,
+    });
     const ms = performance.now() - t0;
     expect(m.panes.main.series.length).toBe(40);
     expect(m.timeline.length).toBe(20_000);

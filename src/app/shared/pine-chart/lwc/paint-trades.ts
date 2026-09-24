@@ -32,7 +32,9 @@ function qtyText(q: number): string {
 export function tradeMarkers(t: TradeDrawing, currency = ''): TradeMarker[] {
   const long = t.direction === 'long';
   const profit = `${t.profit >= 0 ? '+' : ''}${t.profit.toFixed(2)}${currency ? ' ' + currency : ''}${
-    t.profitPercent !== null ? ` (${t.profitPercent >= 0 ? '+' : ''}${t.profitPercent.toFixed(2)}%)` : ''
+    t.profitPercent !== null
+      ? ` (${t.profitPercent >= 0 ? '+' : ''}${t.profitPercent.toFixed(2)}%)`
+      : ''
   }`;
   const out: TradeMarker[] = [
     {
@@ -114,15 +116,45 @@ export function paintTrades(
         const base = (lo === lo ? p.y(lo) : py) + 4 + stacks.take('below', bar, footprint);
         drawArrow(ctx, x, base, base + ARROW_LEN, headW, m.color);
         const textTop = base + ARROW_LEN + 2;
-        drawTextBlock(ctx, block, x - block.width / 2, textTop, block.width, block.height, 'center', 'top', m.color);
-        region = { x: x - Math.max(headW, block.width) / 2, y: base, w: Math.max(headW, block.width), h: footprint };
+        drawTextBlock(
+          ctx,
+          block,
+          x - block.width / 2,
+          textTop,
+          block.width,
+          block.height,
+          'center',
+          'top',
+          m.color,
+        );
+        region = {
+          x: x - Math.max(headW, block.width) / 2,
+          y: base,
+          w: Math.max(headW, block.width),
+          h: footprint,
+        };
       } else {
         const hi = bars.high(bar);
         const base = (hi === hi ? p.y(hi) : py) - 4 - stacks.take('above', bar, footprint);
         drawArrow(ctx, x, base, base - ARROW_LEN, headW, m.color);
         const textTop = base - ARROW_LEN - 2 - block.height;
-        drawTextBlock(ctx, block, x - block.width / 2, textTop, block.width, block.height, 'center', 'top', m.color);
-        region = { x: x - Math.max(headW, block.width) / 2, y: textTop, w: Math.max(headW, block.width), h: footprint };
+        drawTextBlock(
+          ctx,
+          block,
+          x - block.width / 2,
+          textTop,
+          block.width,
+          block.height,
+          'center',
+          'top',
+          m.color,
+        );
+        region = {
+          x: x - Math.max(headW, block.width) / 2,
+          y: textTop,
+          w: Math.max(headW, block.width),
+          h: footprint,
+        };
       }
       hits.push({ ...region, tooltip: m.tooltip });
     }

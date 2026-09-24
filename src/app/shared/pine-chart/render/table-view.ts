@@ -29,7 +29,8 @@ export function tableView(t: TableLayout, paneWidth: number, paneHeight: number)
     'grid-template-rows': `repeat(${t.rows}, auto)`,
     background: t.bgColor ?? 'transparent',
   };
-  if (t.frameWidth > 0 && t.frameColor) containerStyle['border'] = `${t.frameWidth}px solid ${t.frameColor}`;
+  if (t.frameWidth > 0 && t.frameColor)
+    containerStyle['border'] = `${t.frameWidth}px solid ${t.frameColor}`;
 
   const covered = new Uint8Array(t.columns * t.rows);
   const defined = new Map<string, TableCellLayout>();
@@ -40,7 +41,8 @@ export function tableView(t: TableLayout, paneWidth: number, paneHeight: number)
         if (r !== c.row || k !== c.column) covered[r * t.columns + k] = 1;
   }
 
-  const border = t.borderWidth > 0 && t.borderColor ? `${t.borderWidth}px solid ${t.borderColor}` : null;
+  const border =
+    t.borderWidth > 0 && t.borderColor ? `${t.borderWidth}px solid ${t.borderColor}` : null;
   const cells: TableCellView[] = [];
   for (let row = 0; row < t.rows; row++) {
     for (let col = 0; col < t.columns; col++) {
@@ -64,10 +66,17 @@ export function tableView(t: TableLayout, paneWidth: number, paneHeight: number)
         style['justify-content'] = JUSTIFY[c.hAlign] ?? 'center';
         style['align-items'] = ALIGN[c.vAlign] ?? 'center';
         style['text-align'] = c.hAlign;
-        if (c.widthPct > 0 && paneWidth > 0) style['width'] = `${Math.round((paneWidth * c.widthPct) / 100)}px`;
-        if (c.heightPct > 0 && paneHeight > 0) style['height'] = `${Math.round((paneHeight * c.heightPct) / 100)}px`;
+        if (c.widthPct > 0 && paneWidth > 0)
+          style['width'] = `${Math.round((paneWidth * c.widthPct) / 100)}px`;
+        if (c.heightPct > 0 && paneHeight > 0)
+          style['height'] = `${Math.round((paneHeight * c.heightPct) / 100)}px`;
       }
-      cells.push({ key: `${t.id}:${row}:${col}`, text: c?.text ?? '', tooltip: c?.tooltip ?? null, style });
+      cells.push({
+        key: `${t.id}:${row}:${col}`,
+        text: c?.text ?? '',
+        tooltip: c?.tooltip ?? null,
+        style,
+      });
     }
   }
   return { id: t.id, position: t.position, containerStyle, cells };

@@ -43,7 +43,11 @@ export function mergeOutputs(
   for (let i = 0; i < bLen; i++) times[i + bShift] = base.bars.times[i];
   for (let i = 0; i < dLen; i++) times[i + dShift] = delta.bars.times[i];
 
-  const splice = <T>(a: readonly T[] | null | undefined, b: readonly T[] | null | undefined, fill: T): T[] => {
+  const splice = <T>(
+    a: readonly T[] | null | undefined,
+    b: readonly T[] | null | undefined,
+    fill: T,
+  ): T[] => {
     const out = new Array<T>(n).fill(fill);
     if (a) for (let i = 0; i < a.length && i < bLen; i++) out[i + bShift] = a[i];
     if (b) for (let i = 0; i < b.length && i < dLen; i++) out[i + dShift] = b[i];
@@ -65,7 +69,8 @@ export function mergeOutputs(
     return { color: null, colors: splice(expandA, expandB, null) };
   };
 
-  const byId = <T extends { id: number }>(items: readonly T[]) => new Map(items.map((x) => [x.id, x]));
+  const byId = <T extends { id: number }>(items: readonly T[]) =>
+    new Map(items.map((x) => [x.id, x]));
 
   const mergeList = <T extends { id: number }>(
     a: readonly T[],
@@ -80,7 +85,12 @@ export function mergeOutputs(
 
   const plots = mergeList<PinePlotOutput>(base.plots, delta.plots, (a, b) => {
     const src = (b ?? a)!;
-    const colors = mergeColors(a?.color, a ? (a.colors ?? null) : [], b?.color, b ? (b.colors ?? null) : []);
+    const colors = mergeColors(
+      a?.color,
+      a ? (a.colors ?? null) : [],
+      b?.color,
+      b ? (b.colors ?? null) : [],
+    );
     return {
       ...src,
       values: splice(a?.values, b?.values, null),
@@ -90,9 +100,16 @@ export function mergeOutputs(
 
   const candles = mergeList<PineCandleOutput>(base.candles, delta.candles, (a, b) => {
     const src = (b ?? a)!;
-    const colors = mergeColors(a?.color, a ? (a.colors ?? null) : [], b?.color, b ? (b.colors ?? null) : []);
-    const optional = (x: readonly (string | null)[] | null | undefined, y: readonly (string | null)[] | null | undefined) =>
-      x || y ? splice(x ?? null, y ?? null, null) : null;
+    const colors = mergeColors(
+      a?.color,
+      a ? (a.colors ?? null) : [],
+      b?.color,
+      b ? (b.colors ?? null) : [],
+    );
+    const optional = (
+      x: readonly (string | null)[] | null | undefined,
+      y: readonly (string | null)[] | null | undefined,
+    ) => (x || y ? splice(x ?? null, y ?? null, null) : null);
     return {
       ...src,
       open: splice(a?.open, b?.open, null),
@@ -105,7 +122,10 @@ export function mergeOutputs(
     };
   });
 
-  const colorSeries = (a: PineColorSeriesOutput | undefined, b: PineColorSeriesOutput | undefined) => ({
+  const colorSeries = (
+    a: PineColorSeriesOutput | undefined,
+    b: PineColorSeriesOutput | undefined,
+  ) => ({
     ...(b ?? a)!,
     colors: splice(a?.colors, b?.colors, null),
   });
@@ -113,8 +133,11 @@ export function mergeOutputs(
   const fills = mergeList<PineFillOutput>(base.fills, delta.fills, (a, b) => {
     const src = (b ?? a)!;
     const gradient = src.kind === 'gradient';
-    const opt = <T>(x: readonly T[] | null | undefined, y: readonly T[] | null | undefined, fill: T) =>
-      x || y ? splice(x ?? null, y ?? null, fill) : null;
+    const opt = <T>(
+      x: readonly T[] | null | undefined,
+      y: readonly T[] | null | undefined,
+      fill: T,
+    ) => (x || y ? splice(x ?? null, y ?? null, fill) : null);
     const colors = gradient
       ? { color: null, colors: null }
       : mergeColors(a?.color, a ? (a.colors ?? null) : [], b?.color, b ? (b.colors ?? null) : []);

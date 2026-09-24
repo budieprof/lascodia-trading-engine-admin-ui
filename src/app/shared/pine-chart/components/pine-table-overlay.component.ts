@@ -14,7 +14,13 @@ import { tableView, type TableView } from '../render/table-view';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @for (t of views(); track t.id) {
-      <div class="pine-table" [attr.data-position]="t.position" [style]="t.containerStyle" role="table" [attr.aria-label]="'Script table ' + t.id">
+      <div
+        class="pine-table"
+        [attr.data-position]="t.position"
+        [style]="t.containerStyle"
+        role="table"
+        [attr.aria-label]="'Script table ' + t.id"
+      >
         @for (c of t.cells; track c.key) {
           <div
             class="cell"
@@ -22,7 +28,9 @@ import { tableView, type TableView } from '../render/table-view';
             [style]="c.style"
             [class.has-tip]="!!c.tooltip"
             [attr.title]="c.tooltip"
-          >{{ c.text }}</div>
+          >
+            {{ c.text }}
+          </div>
         }
       </div>
     }

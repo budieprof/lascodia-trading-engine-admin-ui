@@ -2,11 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { map, type Observable } from 'rxjs';
 import { ApiService } from '@core/api/api.service';
 import { ApiError, type ResponseData } from '@core/api/api.types';
-import {
-  normalizeReplayFrame,
-  normalizeReplayStart,
-  normalizeRunResult,
-} from '../model/normalize';
+import { normalizeReplayFrame, normalizeReplayStart, normalizeRunResult } from '../model/normalize';
 import type {
   PineReplayFrame,
   PineReplayStartRequest,
@@ -59,7 +55,13 @@ export class ScriptingRunApiService {
     return this.api.postEnvelope<unknown>('/scripting/replay', request, SILENT).pipe(
       map((data) => {
         const start = normalizeReplayStart(data);
-        if (!start) throw new ApiError('UNKNOWN', 'The engine did not return a replay session.', { data, status: false, message: null, responseCode: null });
+        if (!start)
+          throw new ApiError('UNKNOWN', 'The engine did not return a replay session.', {
+            data,
+            status: false,
+            message: null,
+            responseCode: null,
+          });
         return start;
       }),
     );
@@ -69,7 +71,11 @@ export class ScriptingRunApiService {
   stepReplay(sessionId: string, request: PineReplayStepRequest): Observable<PineReplayFrame> {
     const bars = Math.max(1, Math.min(500, Math.trunc(request.bars)));
     return this.api
-      .postEnvelope<unknown>(`/scripting/replay/${encodeURIComponent(sessionId)}/step`, { ...request, bars }, SILENT)
+      .postEnvelope<unknown>(
+        `/scripting/replay/${encodeURIComponent(sessionId)}/step`,
+        { ...request, bars },
+        SILENT,
+      )
       .pipe(map((data) => normalizeReplayFrame(data)));
   }
 

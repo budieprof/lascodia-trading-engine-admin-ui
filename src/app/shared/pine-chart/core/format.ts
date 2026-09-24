@@ -177,7 +177,8 @@ function zonedParts(ms: number, timeZone: string): ZonedParts {
     };
   }
   const out: Record<string, string> = {};
-  for (const part of formatterFor(timeZone).formatToParts(new Date(ms))) out[part.type] = part.value;
+  for (const part of formatterFor(timeZone).formatToParts(new Date(ms)))
+    out[part.type] = part.value;
   return {
     year: out['year'] ?? '',
     month: out['month'] ?? '',
@@ -188,10 +189,22 @@ function zonedParts(ms: number, timeZone: string): ZonedParts {
   };
 }
 
-/** Offset of an IANA zone from UTC at an instant, in minutes (DST-aware). */
+const offsetCache = new Map<string, number>();
+
+/**
+ * Offset of an IANA zone from UTC at an instant, in minutes (DST-aware). Memoised per zone and
+ * 15-minute bucket — zone transitions fall on quarter hours — because shifting 20,000 bar times
+ * through Intl one by one is a visible pause.
+ */
 export function zoneOffsetMinutes(ms: number, timeZone: string): number {
   if (timeZone === 'UTC' || !Number.isFinite(ms)) return 0;
+  const key = `${timeZone}|${Math.floor(ms / 900_000)}`;
+  const hit = offsetCache.get(key);
+  if (hit !== undefined) return hit;
   const p = zonedParts(ms, timeZone);
   const asUtc = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
-  return Math.round((asUtc - Math.floor(ms / 1000) * 1000) / 60_000);
+  const offset = Math.round((asUtc - Math.floor(ms / 1000) * 1000) / 60_000);
+  if (offsetCache.size > 100_000) offsetCache.clear();
+  offsetCache.set(key, offset);
+  return offset;
 }

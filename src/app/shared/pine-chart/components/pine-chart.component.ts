@@ -74,7 +74,11 @@ interface PaneOverlay {
         [style.width.px]="o.rect.width"
         [style.height.px]="o.rect.height"
       >
-        <app-pine-table-overlay [tables]="o.tables" [paneWidth]="o.rect.width" [paneHeight]="o.rect.height" />
+        <app-pine-table-overlay
+          [tables]="o.tables"
+          [paneWidth]="o.rect.width"
+          [paneHeight]="o.rect.height"
+        />
         <div class="status">
           @if (o.key === 'main' && ohlc(); as b) {
             <div class="status-row">
@@ -105,16 +109,33 @@ interface PaneOverlay {
     }
 
     <!-- Bottom-right of the last pane, shown on hover: tables own the pane corners at rest. -->
-    <div class="toolbar" [class.pinned]="dataWindow()" [style.bottom.px]="toolbarBottom()" [style.right.px]="toolbarRight()">
+    <div
+      class="toolbar"
+      [class.pinned]="dataWindow()"
+      [style.bottom.px]="toolbarBottom()"
+      [style.right.px]="toolbarRight()"
+    >
       @if (hasTrades()) {
-        <button type="button" [class.on]="tradesOn()" (click)="tradesOn.set(!tradesOn())" title="Show strategy trades on the chart">
+        <button
+          type="button"
+          [class.on]="tradesOn()"
+          (click)="tradesOn.set(!tradesOn())"
+          title="Show strategy trades on the chart"
+        >
           Trades
         </button>
       }
-      <button type="button" [class.on]="dataWindow()" (click)="dataWindow.set(!dataWindow())" title="Data window">
+      <button
+        type="button"
+        [class.on]="dataWindow()"
+        (click)="dataWindow.set(!dataWindow())"
+        title="Data window"
+      >
         Data
       </button>
-      <button type="button" (click)="resetView()" title="Reset the view to the newest bars">Reset</button>
+      <button type="button" (click)="resetView()" title="Reset the view to the newest bars">
+        Reset
+      </button>
     </div>
 
     @if (dataWindow() && !empty()) {
@@ -129,7 +150,9 @@ interface PaneOverlay {
     }
 
     @if (tooltip(); as t) {
-      <div class="tooltip" role="tooltip" [style.left.px]="t.left" [style.top.px]="t.top">{{ t.text }}</div>
+      <div class="tooltip" role="tooltip" [style.left.px]="t.left" [style.top.px]="t.top">
+        {{ t.text }}
+      </div>
     }
 
     @if (empty()) {
@@ -436,7 +459,11 @@ export class PineChartComponent implements OnDestroy {
   private ref(logical: number): PineBarRef | null {
     const m = this.renderModel();
     if (!m) return null;
-    return { barIndex: m.timeline.barIndexOfLogical(logical), logical, time: m.timeline.timeOfLogical(logical) };
+    return {
+      barIndex: m.timeline.barIndexOfLogical(logical),
+      logical,
+      time: m.timeline.timeOfLogical(logical),
+    };
   }
 
   private onCrosshair(e: CrosshairEvent): void {
@@ -449,10 +476,16 @@ export class PineChartComponent implements OnDestroy {
     if (e.point && e.paneIndex !== null && this.renderer) {
       const hit = this.renderer.hitAt(e.paneIndex, e.point.x, e.point.y);
       const rect = untracked(this.rects)[e.paneIndex];
-      if (hit && rect) tip = { text: hit.tooltip, left: rect.left + e.point.x + 14, top: rect.top + e.point.y + 14 };
+      if (hit && rect)
+        tip = {
+          text: hit.tooltip,
+          left: rect.left + e.point.x + 14,
+          top: rect.top + e.point.y + 14,
+        };
     }
     const cur = untracked(this.tooltip);
-    if (cur?.text !== tip?.text || cur?.left !== tip?.left || cur?.top !== tip?.top) this.tooltip.set(tip);
+    if (cur?.text !== tip?.text || cur?.left !== tip?.left || cur?.top !== tip?.top)
+      this.tooltip.set(tip);
   }
 
   private onClick(logical: number): void {
@@ -469,7 +502,10 @@ export class PineChartComponent implements OnDestroy {
         next.length === cur.length &&
         next.every(
           (r, i) =>
-            r.top === cur[i].top && r.left === cur[i].left && r.width === cur[i].width && r.height === cur[i].height,
+            r.top === cur[i].top &&
+            r.left === cur[i].left &&
+            r.width === cur[i].width &&
+            r.height === cur[i].height,
         );
       if (!same) this.rects.set(next);
     });

@@ -188,7 +188,15 @@ export class PineLayersPrimitive implements ISeriesPrimitive<Time> {
       paintDrawings(ctx, p, pane.drawings, bars, hits);
       if (pane.trades.length && bars && this.hooks.showTrades()) {
         const close = model.bars.close;
-        paintTrades(ctx, p, pane.trades, bars, close.length ? close[close.length - 1] : NaN, stacks, hits);
+        paintTrades(
+          ctx,
+          p,
+          pane.trades,
+          bars,
+          close.length ? close[close.length - 1] : NaN,
+          stacks,
+          hits,
+        );
       }
     });
   }

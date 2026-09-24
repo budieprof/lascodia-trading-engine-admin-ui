@@ -28,7 +28,10 @@ export interface ProfilerSort {
   dir: 'asc' | 'desc';
 }
 
-export function profilerRows(profile: readonly PineProfileLine[], source?: string | null): ProfilerRow[] {
+export function profilerRows(
+  profile: readonly PineProfileLine[],
+  source?: string | null,
+): ProfilerRow[] {
   const lines = source ? source.split(/\r?\n/) : null;
   // One row per line even if the engine reports a line twice (e.g. a block header and its body).
   const byLine = new Map<number, { executions: number; totalMicros: number }>();

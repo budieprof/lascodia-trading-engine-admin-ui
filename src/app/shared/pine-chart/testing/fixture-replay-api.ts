@@ -17,7 +17,11 @@ import type { ReplayApi } from '../replay/replay-session';
  * does: per-bar series are sliced to the window, markers keep the points inside it, and drawings,
  * tables, logs and alerts are exported whole — here "whole as of `toBar`" (created by then).
  */
-export function sliceOutputs(o: PineScriptOutputs, fromBar: number, toBar: number): PineScriptOutputs {
+export function sliceOutputs(
+  o: PineScriptOutputs,
+  fromBar: number,
+  toBar: number,
+): PineScriptOutputs {
   const first = o.bars.firstIndex;
   const n = o.bars.times.length;
   const a = Math.max(fromBar, first);
@@ -25,13 +29,17 @@ export function sliceOutputs(o: PineScriptOutputs, fromBar: number, toBar: numbe
   const s = a - first;
   const e = Math.max(s, b - first + 1);
   const cut = <T>(arr: readonly T[]): T[] => arr.slice(s, e);
-  const cutOpt = <T>(arr: readonly T[] | null | undefined): T[] | null => (arr ? arr.slice(s, e) : null);
+  const cutOpt = <T>(arr: readonly T[] | null | undefined): T[] | null =>
+    arr ? arr.slice(s, e) : null;
   const inWindow = (bar: number) => bar >= a && bar <= b;
   return {
     ...o,
     bars: { firstIndex: a, times: cut(o.bars.times), timeframe: o.bars.timeframe },
     plots: o.plots.map((p) => ({ ...p, values: cut(p.values), colors: cutOpt(p.colors) })),
-    markers: o.markers.map((m) => ({ ...m, points: m.points.filter((pt) => inWindow(pt.barIndex)) })),
+    markers: o.markers.map((m) => ({
+      ...m,
+      points: m.points.filter((pt) => inWindow(pt.barIndex)),
+    })),
     candles: o.candles.map((c) => ({
       ...c,
       open: cut(c.open),
@@ -63,16 +71,28 @@ export function sliceOutputs(o: PineScriptOutputs, fromBar: number, toBar: numbe
 }
 
 /** The report as of `toBar`: later trades dropped, trades still running then reported open. */
-export function sliceReport(r: PineStrategyReport | null, toBar: number): PineStrategyReport | null {
+export function sliceReport(
+  r: PineStrategyReport | null,
+  toBar: number,
+): PineStrategyReport | null {
   if (!r) return null;
   const trades: PineReportTrade[] = [];
   for (const t of r.trades) {
     if (t.entryBarIndex > toBar) continue;
-    const closedBy = t.exitBarIndex !== null && t.exitBarIndex !== undefined && t.exitBarIndex <= toBar;
+    const closedBy =
+      t.exitBarIndex !== null && t.exitBarIndex !== undefined && t.exitBarIndex <= toBar;
     trades.push(
       closedBy && !t.isOpen
         ? t
-        : { ...t, isOpen: true, exitId: null, exitSignal: null, exitTime: null, exitBarIndex: null, exitPrice: null },
+        : {
+            ...t,
+            isOpen: true,
+            exitId: null,
+            exitSignal: null,
+            exitTime: null,
+            exitBarIndex: null,
+            exitPrice: null,
+          },
     );
   }
   return { ...r, trades };
@@ -121,11 +141,20 @@ export class FixtureReplayApi implements ReplayApi {
 
   stepReplay(sessionId: string, request: PineReplayStepRequest): Observable<PineReplayFrame> {
     const s = this.sessions.get(sessionId);
-    if (!s) return throwError(() => new HttpErrorResponse({ status: 404, statusText: 'Not Found' }));
+    if (!s)
+      return throwError(() => new HttpErrorResponse({ status: 404, statusText: 'Not Found' }));
     const from = s.pos + 1;
     const to = Math.min(this.lastBar, s.pos + Math.max(1, request.bars));
     if (from > this.lastBar) {
-      return this.latency(of<PineReplayFrame>({ barIndex: s.pos, bars: [], outputsDelta: null, report: null, position: null }));
+      return this.latency(
+        of<PineReplayFrame>({
+          barIndex: s.pos,
+          bars: [],
+          outputsDelta: null,
+          report: null,
+          position: null,
+        }),
+      );
     }
     s.pos = to;
     return this.latency(of(this.frame(from, to)));

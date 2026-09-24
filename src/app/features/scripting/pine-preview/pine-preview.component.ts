@@ -15,11 +15,17 @@ import { HttpErrorResponse } from '@angular/common/http';
 import type { Subscription } from 'rxjs';
 import { ApiError } from '@core/api/api.types';
 import { ScriptingRunApiService } from '@shared/pine-chart/api/scripting-run-api.service';
-import { PineChartComponent, type PineBarRef } from '@shared/pine-chart/components/pine-chart.component';
+import {
+  PineChartComponent,
+  type PineBarRef,
+} from '@shared/pine-chart/components/pine-chart.component';
 import type { PineChartData } from '@shared/pine-chart/model/chart-data';
 import { normalizeRunResult } from '@shared/pine-chart/model/normalize';
 import type { PineRunRequest, PineRunResult } from '@shared/pine-chart/model/pine-outputs.types';
-import { PineLogsPaneComponent, type PineLineJump } from '@shared/pine-chart/panes/pine-logs-pane.component';
+import {
+  PineLogsPaneComponent,
+  type PineLineJump,
+} from '@shared/pine-chart/panes/pine-logs-pane.component';
 import { PineProfilerPaneComponent } from '@shared/pine-chart/panes/pine-profiler-pane.component';
 import { PineTracePaneComponent } from '@shared/pine-chart/panes/pine-trace-pane.component';
 import { PineReplayComponent } from '@shared/pine-chart/replay/pine-replay.component';
@@ -44,7 +50,13 @@ type DockTab = 'logs' | 'trace' | 'profiler';
   selector: 'app-pine-preview',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PineChartComponent, PineLogsPaneComponent, PineTracePaneComponent, PineProfilerPaneComponent, PineReplayComponent],
+  imports: [
+    PineChartComponent,
+    PineLogsPaneComponent,
+    PineTracePaneComponent,
+    PineProfilerPaneComponent,
+    PineReplayComponent,
+  ],
   template: `
     <div class="chart-bar">
       <span class="meta">
@@ -82,7 +94,9 @@ type DockTab = 'logs' | 'trace' | 'profiler';
       <div class="banner error" role="alert">
         The script does not compile — {{ d.message }}
         @if (d.line) {
-          <button type="button" (click)="jumpToLine.emit({ line: d.line, column: d.column })">Line {{ d.line }}:{{ d.column }}</button>
+          <button type="button" (click)="jumpToLine.emit({ line: d.line, column: d.column })">
+            Line {{ d.line }}:{{ d.column }}
+          </button>
         }
       </div>
     }
@@ -90,7 +104,9 @@ type DockTab = 'logs' | 'trace' | 'profiler';
       <div class="banner runtime" role="alert">
         <b>{{ err.code || 'Runtime error' }}</b> {{ err.message }}
         @if (err.line) {
-          <button type="button" (click)="jumpToLine.emit({ line: err.line, column: err.column })">Line {{ err.line }}</button>
+          <button type="button" (click)="jumpToLine.emit({ line: err.line, column: err.column })">
+            Line {{ err.line }}
+          </button>
         }
         @if (err.barIndex !== null && err.barIndex !== undefined) {
           <button type="button" (click)="goToBar(err.barIndex)">Bar {{ err.barIndex }}</button>
@@ -109,31 +125,63 @@ type DockTab = 'logs' | 'trace' | 'profiler';
       [timeframe]="timeframe() || effectiveRequest()?.timeframe || ''"
       [timezone]="timezone()"
       [highlightBar]="highlight()"
-      [emptyText]="running() ? 'Running the script…' : 'Run the script to see its outputs on the chart.'"
+      [emptyText]="
+        running() ? 'Running the script…' : 'Run the script to see its outputs on the chart.'
+      "
       (barClick)="onBarClick($event)"
     />
 
-    <div class="resizer" (pointerdown)="startResize($event)" title="Drag to resize" aria-hidden="true"></div>
+    <div
+      class="resizer"
+      (pointerdown)="startResize($event)"
+      title="Drag to resize"
+      aria-hidden="true"
+    ></div>
 
     <div class="dock" [style.height.px]="dockOpen() ? dockHeight() : 32">
       <div class="tabs" role="tablist">
-        <button type="button" role="tab" [attr.aria-selected]="tab() === 'logs'" [class.active]="tab() === 'logs'" (click)="selectTab('logs')">
+        <button
+          type="button"
+          role="tab"
+          [attr.aria-selected]="tab() === 'logs'"
+          [class.active]="tab() === 'logs'"
+          (click)="selectTab('logs')"
+        >
           Pine Logs
           @if (logCount()) {
             <span class="badge" [class.err]="hasErrors()">{{ logCount() }}</span>
           }
         </button>
-        <button type="button" role="tab" [attr.aria-selected]="tab() === 'trace'" [class.active]="tab() === 'trace'" (click)="selectTab('trace')">
+        <button
+          type="button"
+          role="tab"
+          [attr.aria-selected]="tab() === 'trace'"
+          [class.active]="tab() === 'trace'"
+          (click)="selectTab('trace')"
+        >
           Why didn't it fire?
         </button>
-        <button type="button" role="tab" [attr.aria-selected]="tab() === 'profiler'" [class.active]="tab() === 'profiler'" (click)="selectTab('profiler')">
+        <button
+          type="button"
+          role="tab"
+          [attr.aria-selected]="tab() === 'profiler'"
+          [class.active]="tab() === 'profiler'"
+          (click)="selectTab('profiler')"
+        >
           Profiler
         </button>
         <span class="spacer"></span>
         @if (tab() === 'profiler' && effectiveRequest()) {
-          <button type="button" class="action" (click)="runProfile()" [disabled]="running()">Profile run</button>
+          <button type="button" class="action" (click)="runProfile()" [disabled]="running()">
+            Profile run
+          </button>
         }
-        <button type="button" class="action" (click)="dockOpen.set(!dockOpen())" [attr.aria-label]="dockOpen() ? 'Collapse panel' : 'Expand panel'">
+        <button
+          type="button"
+          class="action"
+          (click)="dockOpen.set(!dockOpen())"
+          [attr.aria-label]="dockOpen() ? 'Collapse panel' : 'Expand panel'"
+        >
           {{ dockOpen() ? '▾' : '▴' }}
         </button>
       </div>
@@ -347,16 +395,28 @@ export class PinePreviewComponent {
   });
 
   /** The run on screen: the preview's own latest run, else the host's. */
-  readonly current = computed<PineRunResult | null>(() => this.ownResult() ?? this.result() ?? null);
-  readonly chartData = computed<PineChartData | PineRunResult | null>(() => this.replayData() ?? this.current());
+  readonly current = computed<PineRunResult | null>(
+    () => this.ownResult() ?? this.result() ?? null,
+  );
+  readonly chartData = computed<PineChartData | PineRunResult | null>(
+    () => this.replayData() ?? this.current(),
+  );
   /** Outputs on the chart: the replay's as of its bar while replaying (logs follow it), else the run's. */
   readonly shownOutputs = computed(() => (this.replayData() ?? this.current())?.outputs ?? null);
   readonly logCount = computed(() => this.shownOutputs()?.logs.length ?? 0);
-  readonly hasErrors = computed(() => (this.shownOutputs()?.logs ?? []).some((l) => l.level === 'error'));
+  readonly hasErrors = computed(() =>
+    (this.shownOutputs()?.logs ?? []).some((l) => l.level === 'error'),
+  );
   readonly compileError = computed(() => {
     const c = this.current()?.compile;
     if (!c || c.success) return null;
-    return c.diagnostics.find((d) => d.severity === 'error') ?? { message: 'Compilation failed', line: 0, column: 0 };
+    return (
+      c.diagnostics.find((d) => d.severity === 'error') ?? {
+        message: 'Compilation failed',
+        line: 0,
+        column: 0,
+      }
+    );
   });
 
   constructor() {
@@ -397,7 +457,11 @@ export class PinePreviewComponent {
   runTrace(window: { fromBar: number; toBar: number }): void {
     const req = this.effectiveRequest();
     if (!req) return;
-    this.run({ ...req, trace: window, profile: req.profile || (this.current()?.profile.length ?? 0) > 0 });
+    this.run({
+      ...req,
+      trace: window,
+      profile: req.profile || (this.current()?.profile.length ?? 0) > 0,
+    });
   }
 
   runProfile(): void {
@@ -436,7 +500,8 @@ export class PinePreviewComponent {
     const start = this.dockHeight();
     const host = (e.target as HTMLElement).parentElement;
     const max = Math.max(160, (host?.clientHeight ?? 800) * 0.7);
-    const move = (ev: PointerEvent) => this.dockHeight.set(Math.max(96, Math.min(max, start + (startY - ev.clientY))));
+    const move = (ev: PointerEvent) =>
+      this.dockHeight.set(Math.max(96, Math.min(max, start + (startY - ev.clientY))));
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
@@ -453,7 +518,9 @@ function runErrorMessage(e: unknown): string {
   if (e instanceof HttpErrorResponse) {
     if (e.status === 0) return 'The engine is unreachable.';
     const body = e.error as { message?: string } | null;
-    return body?.message ? `${body.message} (HTTP ${e.status})` : `The run failed (HTTP ${e.status}).`;
+    return body?.message
+      ? `${body.message} (HTTP ${e.status})`
+      : `The run failed (HTTP ${e.status}).`;
   }
   return e instanceof Error ? e.message : 'The run failed.';
 }

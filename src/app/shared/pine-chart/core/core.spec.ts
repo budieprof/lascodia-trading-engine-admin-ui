@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { buildColorTrack, contrastText, cssColor, parsePineColor, trackColor, withAlpha } from './color';
+import {
+  buildColorTrack,
+  contrastText,
+  cssColor,
+  parsePineColor,
+  trackColor,
+  withAlpha,
+} from './color';
 import { DISPLAY_ALL, DISPLAY_NONE, isDisplayedAnywhere, parseDisplay } from './display';
 import {
   formatBarTime,
@@ -37,7 +44,13 @@ describe('color', () => {
   });
 
   it('builds palette-indexed tracks with a shift and a keep filter', () => {
-    const t = buildColorTrack(null, ['#FF0000FF', null, '#FF0000FF', '#0000FFFF'], 5, 1, (i) => i !== 2);
+    const t = buildColorTrack(
+      null,
+      ['#FF0000FF', null, '#FF0000FF', '#0000FFFF'],
+      5,
+      1,
+      (i) => i !== 2,
+    );
     expect(t.palette).toEqual(['', 'rgb(255, 0, 0)', 'rgb(0, 0, 255)']);
     expect(trackColor(t, 0)).toBeNull();
     expect(trackColor(t, 1)).toBe('rgb(255, 0, 0)');
@@ -53,15 +66,26 @@ describe('display', () => {
     expect(parseDisplay(['all'])).toBe(DISPLAY_ALL);
     expect(parseDisplay(undefined)).toBe(DISPLAY_ALL);
     expect(parseDisplay(['none'])).toBe(DISPLAY_NONE);
-    expect(parseDisplay(['pane', 'status_line'])).toEqual({ pane: true, dataWindow: false, priceScale: false, statusLine: true });
+    expect(parseDisplay(['pane', 'status_line'])).toEqual({
+      pane: true,
+      dataWindow: false,
+      priceScale: false,
+      statusLine: true,
+    });
     expect(isDisplayedAnywhere(parseDisplay(['pine_screener']))).toBe(false);
   });
 });
 
 describe('format', () => {
   it('an output format and precision win over the declaration, then the symbol', () => {
-    expect(resolveFormat({ format: 'percent' }, { format: 'price', precision: 4 }, 5)).toEqual({ format: 'percent', precision: 4 });
-    expect(resolveFormat({}, { format: 'inherit', precision: null }, 5)).toEqual({ format: 'price', precision: 5 });
+    expect(resolveFormat({ format: 'percent' }, { format: 'price', precision: 4 }, 5)).toEqual({
+      format: 'percent',
+      precision: 4,
+    });
+    expect(resolveFormat({}, { format: 'inherit', precision: null }, 5)).toEqual({
+      format: 'price',
+      precision: 5,
+    });
     expect(resolveFormat({ precision: 1 }, null, 5)).toEqual({ format: 'price', precision: 1 });
     expect(resolveFormat({ format: 'volume' }, null, 5).format).toBe('volume');
   });
@@ -96,7 +120,7 @@ describe('BlockMinMax', () => {
   it('matches a brute-force scan on random ranges, ignoring na', () => {
     const n = 1000;
     let seed = 42;
-    const rand = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+    const rand = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
     const lows = Float64Array.from({ length: n }, () => (rand() < 0.1 ? NaN : rand() * 100));
     const highs = Float64Array.from(lows, (v) => v + 5);
     const mm = new BlockMinMax(lows, highs, 16);
@@ -122,7 +146,9 @@ describe('BlockMinMax', () => {
 describe('BarTimeline', () => {
   const H = 3_600_000;
   // Friday 20:00..23:00, then Monday 00:00.. (a weekend gap).
-  const times = [0, 1, 2, 3].map((i) => Date.UTC(2026, 5, 5, 20 + i)).concat([0, 1].map((i) => Date.UTC(2026, 5, 8, i)));
+  const times = [0, 1, 2, 3]
+    .map((i) => Date.UTC(2026, 5, 5, 20 + i))
+    .concat([0, 1].map((i) => Date.UTC(2026, 5, 8, i)));
   const tl = new BarTimeline(times, 1000, H);
 
   it('converts between bar_index and logical index', () => {

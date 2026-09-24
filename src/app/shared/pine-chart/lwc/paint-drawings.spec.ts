@@ -1,12 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import { FONT_DEFAULT } from '../render/build-render-model';
-import type { BoxDrawing, DrawingSet, LabelDrawing, LineDrawing, PolylineDrawing } from '../render/render-model';
+import type {
+  BoxDrawing,
+  DrawingSet,
+  LabelDrawing,
+  LineDrawing,
+  PolylineDrawing,
+} from '../render/render-model';
 import { RecordingContext, pathPoints } from '../testing/recording-context';
 import { extendedSegment, labelGeometry, paintDrawings, type HitRegion } from './paint-drawings';
 import { linearProjection } from './projection';
 
-const proj = () => linearProjection({ barSpacing: 10, y0: 100, pxPerUnit: -1, width: 400, height: 200, from: -1, to: 60, lastLogical: 50 });
-const set = (d: Partial<DrawingSet>): DrawingSet => ({ labels: [], lines: [], boxes: [], polylines: [], linefills: [], ...d });
+const proj = () =>
+  linearProjection({
+    barSpacing: 10,
+    y0: 100,
+    pxPerUnit: -1,
+    width: 400,
+    height: 200,
+    from: -1,
+    to: 60,
+    lastLogical: 50,
+  });
+const set = (d: Partial<DrawingSet>): DrawingSet => ({
+  labels: [],
+  lines: [],
+  boxes: [],
+  polylines: [],
+  linefills: [],
+  ...d,
+});
 const bars = { high: () => 20, low: () => 10 };
 
 function lbl(extra: Partial<LabelDrawing> = {}): LabelDrawing {
@@ -122,7 +145,18 @@ describe('paintDrawings', () => {
   it('anchors yloc.abovebar at the bar high and flips label_down to label_up for belowbar', () => {
     const ctx = new RecordingContext();
     const hits: HitRegion[] = [];
-    paintDrawings(ctx.asCtx(), proj(), set({ labels: [lbl({ yloc: 'abovebar', y: null, tooltip: 'a' }), lbl({ id: 2, yloc: 'belowbar', y: null, tooltip: 'b' })] }), bars, hits);
+    paintDrawings(
+      ctx.asCtx(),
+      proj(),
+      set({
+        labels: [
+          lbl({ yloc: 'abovebar', y: null, tooltip: 'a' }),
+          lbl({ id: 2, yloc: 'belowbar', y: null, tooltip: 'b' }),
+        ],
+      }),
+      bars,
+      hits,
+    );
     // high 20 → y 80; low 10 → y 90.
     expect(hits[0].y + hits[0].h).toBeLessThanOrEqual(80);
     expect(hits[1].y).toBeGreaterThanOrEqual(90);
@@ -136,7 +170,17 @@ describe('paintDrawings', () => {
   });
 
   it('draws lines with style, width and arrowheads', () => {
-    const line: LineDrawing = { id: 1, x1: 0, y1: 10, x2: 10, y2: 20, extend: 'none', color: 'rgb(1, 2, 3)', style: 'arrow_both', width: 2 };
+    const line: LineDrawing = {
+      id: 1,
+      x1: 0,
+      y1: 10,
+      x2: 10,
+      y2: 20,
+      extend: 'none',
+      color: 'rgb(1, 2, 3)',
+      style: 'arrow_both',
+      width: 2,
+    };
     const ctx = new RecordingContext();
     paintDrawings(ctx.asCtx(), proj(), set({ lines: [line] }), null, []);
     const s = ctx.strokes('rgb(1, 2, 3)')[0];
@@ -181,15 +225,37 @@ describe('paintDrawings', () => {
     // 40 px wide: the text wraps onto several lines.
     expect(narrow.texts().length).toBeGreaterThan(3);
     const unwrapped = new RecordingContext();
-    paintDrawings(unwrapped.asCtx(), proj(), set({ boxes: [{ ...box, extend: 'none', wrap: false }] }), null, []);
+    paintDrawings(
+      unwrapped.asCtx(),
+      proj(),
+      set({ boxes: [{ ...box, extend: 'none', wrap: false }] }),
+      null,
+      [],
+    );
     expect(unwrapped.texts().length).toBe(1);
   });
 
   it('auto-sizes box text to fit', () => {
     const box: BoxDrawing = {
-      id: 1, left: 0, right: 4, top: 60, bottom: 40, borderColor: null, borderWidth: 0, borderStyle: 'solid', extend: 'none',
-      bgColor: null, text: 'AUTO', fontSize: 0, textColor: 'rgb(0, 0, 0)', hAlign: 'center', vAlign: 'center', wrap: false,
-      fontFamily: FONT_DEFAULT, bold: false, italic: false,
+      id: 1,
+      left: 0,
+      right: 4,
+      top: 60,
+      bottom: 40,
+      borderColor: null,
+      borderWidth: 0,
+      borderStyle: 'solid',
+      extend: 'none',
+      bgColor: null,
+      text: 'AUTO',
+      fontSize: 0,
+      textColor: 'rgb(0, 0, 0)',
+      hAlign: 'center',
+      vAlign: 'center',
+      wrap: false,
+      fontFamily: FONT_DEFAULT,
+      bold: false,
+      italic: false,
     };
     const ctx = new RecordingContext();
     paintDrawings(ctx.asCtx(), proj(), set({ boxes: [box] }), null, []);
@@ -221,10 +287,29 @@ describe('paintDrawings', () => {
   });
 
   it('fills a linefill between two lines', () => {
-    const l1: LineDrawing = { id: 1, x1: 0, y1: 50, x2: 10, y2: 60, extend: 'none', color: 'rgb(0, 0, 0)', style: 'solid', width: 1 };
+    const l1: LineDrawing = {
+      id: 1,
+      x1: 0,
+      y1: 50,
+      x2: 10,
+      y2: 60,
+      extend: 'none',
+      color: 'rgb(0, 0, 0)',
+      style: 'solid',
+      width: 1,
+    };
     const l2: LineDrawing = { ...l1, id: 2, y1: 30, y2: 35 };
     const ctx = new RecordingContext();
-    paintDrawings(ctx.asCtx(), proj(), set({ lines: [l1, l2], linefills: [{ id: 3, line1: l1, line2: l2, color: 'rgba(0, 255, 0, 0.1)' }] }), null, []);
+    paintDrawings(
+      ctx.asCtx(),
+      proj(),
+      set({
+        lines: [l1, l2],
+        linefills: [{ id: 3, line1: l1, line2: l2, color: 'rgba(0, 255, 0, 0.1)' }],
+      }),
+      null,
+      [],
+    );
     const poly = pathPoints(ctx.fills('rgba(0, 255, 0, 0.1)')[0].path);
     expect(poly).toEqual([
       [0, 50],

@@ -14,7 +14,15 @@ const CSS_BLUE = 'rgb(0, 0, 255)';
 
 /** x = logical × 10, y = 100 − price. */
 const proj = (extra: Partial<Parameters<typeof linearProjection>[0]> = {}) =>
-  linearProjection({ barSpacing: 10, y0: 100, pxPerUnit: -1, from: -1, to: 100, lastLogical: 100, ...extra });
+  linearProjection({
+    barSpacing: 10,
+    y0: 100,
+    pxPerUnit: -1,
+    from: -1,
+    to: 100,
+    lastLogical: 100,
+    ...extra,
+  });
 
 function plotLayer(
   values: (number | null)[],
@@ -44,7 +52,9 @@ function plotLayer(
     format: { format: 'price', precision: 2 },
     scale: new BlockMinMax(v),
     includeBaseInScale: false,
-    last: valid.length ? { slot: valid[valid.length - 1], value: v[valid[valid.length - 1]], color: CSS_RED } : null,
+    last: valid.length
+      ? { slot: valid[valid.length - 1], value: v[valid[valid.length - 1]], color: CSS_RED }
+      : null,
     ...opts,
   } as PlotLayer;
 }
@@ -80,7 +90,11 @@ describe('paintPlot — lines', () => {
 
   it('colors a segment by the bar it goes into; na color hides that segment', () => {
     const ctx = new RecordingContext();
-    paintPlot(ctx.asCtx(), proj(), plotLayer([1, 2, 3, 4], { colors: [RED, BLUE, null, RED], color: undefined }));
+    paintPlot(
+      ctx.asCtx(),
+      proj(),
+      plotLayer([1, 2, 3, 4], { colors: [RED, BLUE, null, RED], color: undefined }),
+    );
     const blue = ctx.strokes(CSS_BLUE).map((s) => pathPoints(s.path));
     const red = ctx.strokes(CSS_RED).map((s) => pathPoints(s.path));
     expect(blue).toEqual([
@@ -108,7 +122,11 @@ describe('paintPlot — lines', () => {
 
   it('draws nothing when the display excludes the pane', () => {
     const ctx = new RecordingContext();
-    paintPlot(ctx.asCtx(), proj(), plotLayer([1, 2, 3], { display: { ...DISPLAY_ALL, pane: false } }));
+    paintPlot(
+      ctx.asCtx(),
+      proj(),
+      plotLayer([1, 2, 3], { display: { ...DISPLAY_ALL, pane: false } }),
+    );
     expect(ctx.ops).toEqual([]);
   });
 
@@ -162,7 +180,11 @@ describe('paintPlot — step lines', () => {
 
   it('stepline does not draw the jump into a bar after an na-colored bar', () => {
     const ctx = new RecordingContext();
-    paintPlot(ctx.asCtx(), proj(), plotLayer([2, 2, 5], { style: 'stepline', colors: [RED, null, RED], color: undefined }));
+    paintPlot(
+      ctx.asCtx(),
+      proj(),
+      plotLayer([2, 2, 5], { style: 'stepline', colors: [RED, null, RED], color: undefined }),
+    );
     const pts = ctx.strokes(CSS_RED).flatMap((s) => pathPoints(s.path));
     expect(pts.some(([xx, yy]) => xx === 15 && yy === 98)).toBe(false);
   });
@@ -194,7 +216,11 @@ describe('paintPlot — areas, bars, points', () => {
 
   it('histogram bars are linewidth px wide and start at histbase', () => {
     const ctx = new RecordingContext();
-    paintPlot(ctx.asCtx(), proj(), plotLayer([5, -5], { style: 'histogram', lineWidth: 4, histBase: 0 }));
+    paintPlot(
+      ctx.asCtx(),
+      proj(),
+      plotLayer([5, -5], { style: 'histogram', lineWidth: 4, histBase: 0 }),
+    );
     const rects = ctx.rects(CSS_RED);
     expect(rects.map((r) => r.w)).toEqual([4, 4]);
     expect(rects[0]).toMatchObject({ y: 95, h: 5 }); // from 5 down to 0
@@ -211,7 +237,11 @@ describe('paintPlot — areas, bars, points', () => {
 
   it('circles draw one point per value, joined by a 1px line with join = true', () => {
     const ctx = new RecordingContext();
-    paintPlot(ctx.asCtx(), proj(), plotLayer([1, null, 3], { style: 'circles', join: true, lineWidth: 2 }));
+    paintPlot(
+      ctx.asCtx(),
+      proj(),
+      plotLayer([1, null, 3], { style: 'circles', join: true, lineWidth: 2 }),
+    );
     const joins = ctx.strokes(CSS_RED);
     expect(joins.length).toBe(1);
     expect(joins[0].width).toBe(1);
@@ -335,7 +365,15 @@ describe('paintFill', () => {
 
   it('fills between hlines across the whole pane', () => {
     const ctx = new RecordingContext();
-    paintFill(ctx.asCtx(), proj({ width: 500 }), fill({ kind: 'hlines', upper: { kind: 'price', price: 70 }, lower: { kind: 'price', price: 30 } }));
+    paintFill(
+      ctx.asCtx(),
+      proj({ width: 500 }),
+      fill({
+        kind: 'hlines',
+        upper: { kind: 'price', price: 70 },
+        lower: { kind: 'price', price: 30 },
+      }),
+    );
     expect(ctx.rects(CSS_BLUE)[0]).toMatchObject({ x: 0, w: 500, y: 30, h: 40 });
   });
 
@@ -350,12 +388,23 @@ describe('paintFill', () => {
         kind: 'gradient',
         upper: { kind: 'plot', layer: b },
         lower: { kind: 'plot', layer: plotLayer([0, 0, 0, 0]) },
-        gradient: { start: 0, topValues: Float64Array.of(4, 4, 4, 4), bottomValues: Float64Array.of(0, 0, 0, 0), topColors: top, bottomColors: bottom },
+        gradient: {
+          start: 0,
+          topValues: Float64Array.of(4, 4, 4, 4),
+          bottomValues: Float64Array.of(0, 0, 0, 0),
+          topColors: top,
+          bottomColors: bottom,
+        },
       }),
     );
     const fills = ctx.fills();
     expect(fills.length).toBe(3);
-    const g = fills[0].style as { kind: string; stops: Array<[number, string]>; y0: number; y1: number };
+    const g = fills[0].style as {
+      kind: string;
+      stops: Array<[number, string]>;
+      y0: number;
+      y1: number;
+    };
     expect(g.kind).toBe('gradient');
     expect(g.stops).toEqual([
       [0, CSS_RED],
@@ -366,7 +415,11 @@ describe('paintFill', () => {
 
   it('respects show_last through visibleFrom', () => {
     const ctx = new RecordingContext();
-    paintFill(ctx.asCtx(), proj(), fill({ upper: { kind: 'plot', layer: plotLayer([5, 6, 7, 8]) }, visibleFrom: 2 }));
+    paintFill(
+      ctx.asCtx(),
+      proj(),
+      fill({ upper: { kind: 'plot', layer: plotLayer([5, 6, 7, 8]) }, visibleFrom: 2 }),
+    );
     const xs = ctx.fills(CSS_BLUE).flatMap((f) => pathPoints(f.path).map(([xx]) => xx));
     expect(Math.min(...xs)).toBe(10);
   });

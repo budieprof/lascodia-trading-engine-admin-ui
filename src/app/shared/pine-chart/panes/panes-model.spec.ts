@@ -5,7 +5,12 @@ import { formatMicros, heatColor, profilerRows, sortProfilerRows } from './profi
 import { TraceNavigator, traceValueKind, traceWindowAround } from './trace-model';
 
 const T = Date.UTC(2026, 8, 1, 9, 0);
-const log = (level: string, message: string, i: number, line: number | null = null): PineLogOutput => ({
+const log = (
+  level: string,
+  message: string,
+  i: number,
+  line: number | null = null,
+): PineLogOutput => ({
   level,
   message,
   barIndex: i,
@@ -21,7 +26,11 @@ const logs: PineLogOutput[] = [
   log('info', 'multi\nline message', 3),
   log('info', 'confirmed again', 4),
 ];
-const filter = (p: Partial<LogFilter>): LogFilter => ({ ...DEFAULT_LOG_FILTER, levels: { ...DEFAULT_LOG_FILTER.levels }, ...p });
+const filter = (p: Partial<LogFilter>): LogFilter => ({
+  ...DEFAULT_LOG_FILTER,
+  levels: { ...DEFAULT_LOG_FILTER.levels },
+  ...p,
+});
 
 describe('Pine Logs filtering', () => {
   it('counts levels and filters them out by checkbox', () => {
@@ -41,8 +50,12 @@ describe('Pine Logs filtering', () => {
   });
 
   it('match case and whole word narrow the search as in the Pine Logs pane', () => {
-    expect(filterLogs(logs, filter({ query: 'Confirmed', matchCase: true })).rows.map((x) => x.index)).toEqual([0]);
-    expect(filterLogs(logs, filter({ query: 'confirmed', wholeWord: true })).rows.map((x) => x.index)).toEqual([0, 4]);
+    expect(
+      filterLogs(logs, filter({ query: 'Confirmed', matchCase: true })).rows.map((x) => x.index),
+    ).toEqual([0]);
+    expect(
+      filterLogs(logs, filter({ query: 'confirmed', wholeWord: true })).rows.map((x) => x.index),
+    ).toEqual([0, 4]);
     // ":" is a word separator: "average" matches as a whole word before it.
     expect(filterLogs(logs, filter({ query: 'average', wholeWord: true })).rows).toHaveLength(2);
   });
@@ -69,13 +82,18 @@ describe('Pine Logs filtering', () => {
 
   it('shows the first line of a multi-line message and carries the source line', () => {
     const r = filterLogs(logs, DEFAULT_LOG_FILTER);
-    expect(r.rows[3]).toMatchObject({ multiline: true, segments: [{ text: 'multi', match: false }] });
+    expect(r.rows[3]).toMatchObject({
+      multiline: true,
+      segments: [{ text: 'multi', match: false }],
+    });
     expect(r.rows[0].line).toBe(12);
     expect(r.rows[1].line).toBeNull();
   });
 
   it('a null matcher means no search', () => {
-    expect(buildMatcher({ query: '', matchCase: false, wholeWord: false, regex: false })).toBeNull();
+    expect(
+      buildMatcher({ query: '', matchCase: false, wholeWord: false, regex: false }),
+    ).toBeNull();
   });
 });
 
@@ -84,8 +102,22 @@ describe('trace navigation', () => {
     bar,
     timeMs: T + bar,
     items: [
-      { line: 9, column: 6, endLine: 9, endColumn: 30, text: 'ta.crossover(fast, slow)', value: bar === 12 ? 'true' : 'false' },
-      { line: 5, column: 8, endLine: 5, endColumn: 30, text: 'ta.ema(close, 9)', value: bar === 15 ? 'na' : String(1 + bar / 100) },
+      {
+        line: 9,
+        column: 6,
+        endLine: 9,
+        endColumn: 30,
+        text: 'ta.crossover(fast, slow)',
+        value: bar === 12 ? 'true' : 'false',
+      },
+      {
+        line: 5,
+        column: 8,
+        endLine: 5,
+        endColumn: 30,
+        text: 'ta.ema(close, 9)',
+        value: bar === 15 ? 'na' : String(1 + bar / 100),
+      },
     ],
   }));
   const nav = new TraceNavigator(trace);
@@ -112,7 +144,14 @@ describe('trace navigation', () => {
   });
 
   it('classifies values', () => {
-    expect(['true', 'false', 'na', '1.5e-3', '-2', 'EURUSD'].map(traceValueKind)).toEqual(['true', 'false', 'na', 'number', 'number', 'text']);
+    expect(['true', 'false', 'na', '1.5e-3', '-2', 'EURUSD'].map(traceValueKind)).toEqual([
+      'true',
+      'false',
+      'na',
+      'number',
+      'number',
+      'text',
+    ]);
   });
 
   it('asks for a window centred on a bar', () => {
@@ -129,17 +168,27 @@ describe('profiler', () => {
     { line: 12, executions: 20, totalMicros: 600 },
     { line: 5, executions: 0, totalMicros: 200 },
   ];
-  const source = 'l1\nl2\nl3\nl4\nfast = ta.ema(close, 9)\n  slow = ta.ema(close, 21)\nl7\ndev = ta.stdev(close, 20)\n';
+  const source =
+    'l1\nl2\nl3\nl4\nfast = ta.ema(close, 9)\n  slow = ta.ema(close, 21)\nl7\ndev = ta.stdev(close, 20)\n';
 
   it('merges repeated lines, computes shares, heat and flames on the top three', () => {
     const rows = profilerRows(profile, source);
     expect(rows.map((r) => r.line)).toEqual([5, 6, 8, 12]);
     const five = rows[0];
-    expect(five).toMatchObject({ executions: 600, totalMicros: 1000, source: 'fast = ta.ema(close, 9)' });
+    expect(five).toMatchObject({
+      executions: 600,
+      totalMicros: 1000,
+      source: 'fast = ta.ema(close, 9)',
+    });
     expect(five.avgMicros).toBeCloseTo(1000 / 600);
     expect(rows.reduce((s, r) => s + r.percent, 0)).toBeCloseTo(100);
     expect(rows.find((r) => r.line === 8)).toMatchObject({ heat: 1, flame: 1 });
-    expect(rows.filter((r) => r.flame > 0).map((r) => r.line).sort()).toEqual([5, 6, 8]);
+    expect(
+      rows
+        .filter((r) => r.flame > 0)
+        .map((r) => r.line)
+        .sort(),
+    ).toEqual([5, 6, 8]);
   });
 
   it('shows no flames with fewer than four lines', () => {
@@ -148,13 +197,22 @@ describe('profiler', () => {
 
   it('sorts by any column', () => {
     const rows = profilerRows(profile);
-    expect(sortProfilerRows(rows, { key: 'total', dir: 'desc' }).map((r) => r.line)).toEqual([8, 5, 6, 12]);
-    expect(sortProfilerRows(rows, { key: 'executions', dir: 'asc' }).map((r) => r.line)).toEqual([12, 5, 6, 8]);
+    expect(sortProfilerRows(rows, { key: 'total', dir: 'desc' }).map((r) => r.line)).toEqual([
+      8, 5, 6, 12,
+    ]);
+    expect(sortProfilerRows(rows, { key: 'executions', dir: 'asc' }).map((r) => r.line)).toEqual([
+      12, 5, 6, 8,
+    ]);
     expect(sortProfilerRows(rows, { key: 'avg', dir: 'desc' })[0].line).toBe(12);
   });
 
   it('formats times and heat colors', () => {
-    expect([formatMicros(5.25), formatMicros(812), formatMicros(1234), formatMicros(2_510_000)]).toEqual(['5.3 µs', '812 µs', '1.23 ms', '2.51 s']);
+    expect([
+      formatMicros(5.25),
+      formatMicros(812),
+      formatMicros(1234),
+      formatMicros(2_510_000),
+    ]).toEqual(['5.3 µs', '812 µs', '1.23 ms', '2.51 s']);
     expect(heatColor(1)).toBe('hsla(0, 90%, 50%, 0.90)');
     expect(heatColor(0)).toBe('hsla(45, 90%, 50%, 0.25)');
   });

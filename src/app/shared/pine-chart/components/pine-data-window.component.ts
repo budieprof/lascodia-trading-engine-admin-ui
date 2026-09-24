@@ -9,7 +9,9 @@ import type { DataWindowSection } from '../render/legend';
   template: `
     <header>
       <span>Data window</span>
-      <button type="button" class="close" (click)="closed.emit()" aria-label="Close data window">×</button>
+      <button type="button" class="close" (click)="closed.emit()" aria-label="Close data window">
+        ×
+      </button>
     </header>
     <div class="body">
       @for (s of sections(); track s.title) {

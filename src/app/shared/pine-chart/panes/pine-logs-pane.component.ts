@@ -71,13 +71,38 @@ const OVERSCAN = 12;
           [value]="filter().query"
           (input)="patch({ query: $any($event.target).value })"
         />
-        <button type="button" [class.on]="filter().matchCase" (click)="patch({ matchCase: !filter().matchCase })" title="Match case">Aa</button>
-        <button type="button" [class.on]="filter().wholeWord" (click)="patch({ wholeWord: !filter().wholeWord })" title="Whole word">ab</button>
-        <button type="button" [class.on]="filter().regex" (click)="patch({ regex: !filter().regex })" title="Regex">.*</button>
+        <button
+          type="button"
+          [class.on]="filter().matchCase"
+          (click)="patch({ matchCase: !filter().matchCase })"
+          title="Match case"
+        >
+          Aa
+        </button>
+        <button
+          type="button"
+          [class.on]="filter().wholeWord"
+          (click)="patch({ wholeWord: !filter().wholeWord })"
+          title="Whole word"
+        >
+          ab
+        </button>
+        <button
+          type="button"
+          [class.on]="filter().regex"
+          (click)="patch({ regex: !filter().regex })"
+          title="Regex"
+        >
+          .*
+        </button>
       </div>
       <label class="from" title="Only logs from this time on">
         From
-        <input type="datetime-local" [value]="fromInput()" (change)="setFrom($any($event.target).value)" />
+        <input
+          type="datetime-local"
+          [value]="fromInput()"
+          (change)="setFrom($any($event.target).value)"
+        />
       </label>
       <span class="summary">
         @if (result().error; as e) {
@@ -91,7 +116,14 @@ const OVERSCAN = 12;
       </span>
     </div>
 
-    <div class="viewport" #viewport (scroll)="onScroll()" tabindex="0" aria-label="Pine logs" role="list">
+    <div
+      class="viewport"
+      #viewport
+      (scroll)="onScroll()"
+      tabindex="0"
+      aria-label="Pine logs"
+      role="list"
+    >
       <div class="spacer" [style.height.px]="window().total">
         <div class="rows" [style.transform]="'translateY(' + window().offset + 'px)'">
           @for (r of window().rows; track r.index) {
@@ -100,7 +132,9 @@ const OVERSCAN = 12;
               role="listitem"
               [class]="r.level"
               [class.selected]="selected() === r.index"
+              tabindex="0"
               (click)="select(r)"
+              (keydown.enter)="select(r)"
             >
               <span class="dot"></span>
               <span class="time">{{ r.timeText }}</span>
@@ -118,10 +152,22 @@ const OVERSCAN = 12;
               </span>
               <span class="actions">
                 @if (r.barIndex >= 0) {
-                  <button type="button" (click)="$event.stopPropagation(); barJump.emit(r.barIndex)" title="Scroll to bar">Bar {{ r.barIndex }}</button>
+                  <button
+                    type="button"
+                    (click)="$event.stopPropagation(); barJump.emit(r.barIndex)"
+                    title="Scroll to bar"
+                  >
+                    Bar {{ r.barIndex }}
+                  </button>
                 }
                 @if (r.line) {
-                  <button type="button" (click)="$event.stopPropagation(); lineJump.emit({ line: r.line })" title="Source code">Line {{ r.line }}</button>
+                  <button
+                    type="button"
+                    (click)="$event.stopPropagation(); lineJump.emit({ line: r.line })"
+                    title="Source code"
+                  >
+                    Line {{ r.line }}
+                  </button>
                 }
               </span>
             </div>
@@ -129,7 +175,13 @@ const OVERSCAN = 12;
         </div>
       </div>
       @if (!result().rows.length) {
-        <div class="empty">{{ logs().length ? 'No logs match the filters.' : 'No logs. Call log.info(), log.warning() or log.error() to log.' }}</div>
+        <div class="empty">
+          {{
+            logs().length
+              ? 'No logs match the filters.'
+              : 'No logs. Call log.info(), log.warning() or log.error() to log.'
+          }}
+        </div>
       }
     </div>
 
@@ -344,7 +396,10 @@ export class PineLogsPaneComponent implements OnDestroy {
   readonly lineJump = output<PineLineJump>();
 
   protected readonly levels: readonly LogLevel[] = ['info', 'warning', 'error'];
-  readonly filter = signal<LogFilter>({ ...DEFAULT_LOG_FILTER, levels: { ...DEFAULT_LOG_FILTER.levels } });
+  readonly filter = signal<LogFilter>({
+    ...DEFAULT_LOG_FILTER,
+    levels: { ...DEFAULT_LOG_FILTER.levels },
+  });
   readonly selected = signal<number | null>(null);
   private readonly scrollTop = signal(0);
   private readonly viewportHeight = signal(240);
@@ -356,7 +411,10 @@ export class PineLogsPaneComponent implements OnDestroy {
   readonly window = computed(() => {
     const rows = this.result().rows;
     const start = Math.max(0, Math.floor(this.scrollTop() / ROW_H) - OVERSCAN);
-    const end = Math.min(rows.length, Math.ceil((this.scrollTop() + this.viewportHeight()) / ROW_H) + OVERSCAN);
+    const end = Math.min(
+      rows.length,
+      Math.ceil((this.scrollTop() + this.viewportHeight()) / ROW_H) + OVERSCAN,
+    );
     return { rows: rows.slice(start, end), offset: start * ROW_H, total: rows.length * ROW_H };
   });
 
@@ -376,7 +434,9 @@ export class PineLogsPaneComponent implements OnDestroy {
       if (!el) return;
       this.viewportHeight.set(el.clientHeight || 240);
       if (typeof ResizeObserver !== 'undefined') {
-        this.resizeObserver = new ResizeObserver(() => this.viewportHeight.set(el.clientHeight || 240));
+        this.resizeObserver = new ResizeObserver(() =>
+          this.viewportHeight.set(el.clientHeight || 240),
+        );
         this.resizeObserver.observe(el);
       }
       this.scrollToEnd();

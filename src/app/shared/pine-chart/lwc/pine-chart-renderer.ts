@@ -140,7 +140,12 @@ export class PineChartRenderer {
       },
       grid: { vertLines: { color: c.grid }, horzLines: { color: c.grid } },
       rightPriceScale: { borderColor: c.border, scaleMargins: { top: 0.12, bottom: 0.1 } },
-      timeScale: { borderColor: c.border, timeVisible: true, secondsVisible: false, rightOffset: 8 },
+      timeScale: {
+        borderColor: c.border,
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: 8,
+      },
       crosshair: {
         mode: CrosshairMode.Normal,
         vertLine: { color: c.border, labelBackgroundColor: c.border, style: LineStyle.Dashed },
@@ -227,7 +232,13 @@ export class PineChartRenderer {
         data[i] = { time: times[i] };
         continue;
       }
-      const d: CandlestickData<Time> = { time: times[i], open: b.open[i], high: b.high[i], low: b.low[i], close: b.close[i] };
+      const d: CandlestickData<Time> = {
+        time: times[i],
+        open: b.open[i],
+        high: b.high[i],
+        low: b.low[i],
+        close: b.close[i],
+      };
       const color = b.colors?.[i];
       if (color) {
         d.color = color;
@@ -447,7 +458,11 @@ export class PineChartRenderer {
       .panes()
       .map((p) => p.getHTMLElement())
       .filter((r): r is HTMLElement => !!r);
-    if (rows.length === this.observedRows.length && rows.every((r, i) => r === this.observedRows[i])) return;
+    if (
+      rows.length === this.observedRows.length &&
+      rows.every((r, i) => r === this.observedRows[i])
+    )
+      return;
     this.paneObserver?.disconnect();
     this.paneObserver = new ResizeObserver(() => this.events.layout?.());
     for (const r of rows) this.paneObserver.observe(r);

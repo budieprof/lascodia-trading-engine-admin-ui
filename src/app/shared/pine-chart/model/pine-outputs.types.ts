@@ -557,7 +557,13 @@ export interface PineRunResult {
 
 // ── §3 request ───────────────────────────────────────────────────────────────────────────────────
 
-export type PineChartType = 'standard' | 'heikinashi' | 'renko' | 'linebreak' | 'kagi' | 'pointfigure';
+export type PineChartType =
+  | 'standard'
+  | 'heikinashi'
+  | 'renko'
+  | 'linebreak'
+  | 'kagi'
+  | 'pointfigure';
 
 export type PineInputValue = number | boolean | string;
 

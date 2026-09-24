@@ -20,15 +20,31 @@ interface Fixture {
 }
 
 const FIXTURES: Record<FixtureKey, Fixture> = {
-  overlay: { label: 'Overlay strategy — every output kind', result: () => overlayStrategyFixture(), source: OVERLAY_STRATEGY_SOURCE },
-  pane: { label: 'Indicator in its own pane', result: () => paneIndicatorFixture(), source: PANE_INDICATOR_SOURCE },
+  overlay: {
+    label: 'Overlay strategy — every output kind',
+    result: () => overlayStrategyFixture(),
+    source: OVERLAY_STRATEGY_SOURCE,
+  },
+  pane: {
+    label: 'Indicator in its own pane',
+    result: () => paneIndicatorFixture(),
+    source: PANE_INDICATOR_SOURCE,
+  },
   large: { label: '20,000 bars × 40 plots', result: () => largeFixture(), source: null },
   empty: {
     label: 'Compile error',
     result: () => ({
       compile: {
         success: false,
-        diagnostics: [{ code: 'PS2003', severity: 'error', message: 'Undeclared identifier "clsoe"', line: 4, column: 12 }],
+        diagnostics: [
+          {
+            code: 'PS2003',
+            severity: 'error',
+            message: 'Undeclared identifier "clsoe"',
+            line: 4,
+            column: 12,
+          },
+        ],
         declaration: null,
       },
       bars: [],
@@ -58,7 +74,10 @@ const FIXTURES: Record<FixtureKey, Fixture> = {
       <header>
         <div>
           <h1>Pine chart lab</h1>
-          <p class="sub">Renders a script run's outputs: plots, shapes, fills, drawings, tables, trades, logs, trace, profile and Bar Replay.</p>
+          <p class="sub">
+            Renders a script run's outputs: plots, shapes, fills, drawings, tables, trades, logs,
+            trace, profile and Bar Replay.
+          </p>
         </div>
         <div class="controls">
           <label>
@@ -71,17 +90,44 @@ const FIXTURES: Record<FixtureKey, Fixture> = {
             </select>
           </label>
           @if (lastJump(); as j) {
-            <span class="jump">Editor would jump to line {{ j.line }}{{ j.column ? ':' + j.column : '' }}</span>
+            <span class="jump"
+              >Editor would jump to line {{ j.line }}{{ j.column ? ':' + j.column : '' }}</span
+            >
           }
         </div>
       </header>
 
       @if (mode() === 'live') {
         <form class="live" (submit)="$event.preventDefault(); runLive()">
-          <label>Symbol <input name="symbol" [value]="liveSymbol()" (input)="liveSymbol.set($any($event.target).value)" /></label>
-          <label>Timeframe <input name="tf" [value]="liveTimeframe()" (input)="liveTimeframe.set($any($event.target).value)" /></label>
-          <label>Bars <input name="bars" type="number" [value]="liveBars()" (input)="liveBars.set(+$any($event.target).value)" /></label>
-          <textarea name="source" rows="6" spellcheck="false" [value]="liveSource()" (input)="liveSource.set($any($event.target).value)"></textarea>
+          <label
+            >Symbol
+            <input
+              name="symbol"
+              [value]="liveSymbol()"
+              (input)="liveSymbol.set($any($event.target).value)"
+          /></label>
+          <label
+            >Timeframe
+            <input
+              name="tf"
+              [value]="liveTimeframe()"
+              (input)="liveTimeframe.set($any($event.target).value)"
+          /></label>
+          <label
+            >Bars
+            <input
+              name="bars"
+              type="number"
+              [value]="liveBars()"
+              (input)="liveBars.set(+$any($event.target).value)"
+          /></label>
+          <textarea
+            name="source"
+            rows="6"
+            spellcheck="false"
+            [value]="liveSource()"
+            (input)="liveSource.set($any($event.target).value)"
+          ></textarea>
           <button type="submit">Run</button>
         </form>
       }
@@ -91,7 +137,7 @@ const FIXTURES: Record<FixtureKey, Fixture> = {
         [result]="mode() === 'live' ? undefined : fixtureResult()"
         [request]="mode() === 'live' ? liveRequest() : fixtureRequest()"
         [autoRun]="mode() === 'live'"
-        [source]="mode() === 'live' ? liveSource() : fixture()?.source ?? null"
+        [source]="mode() === 'live' ? liveSource() : (fixture()?.source ?? null)"
         [symbol]="mode() === 'live' ? '' : 'EURUSD'"
         [timeframe]="mode() === 'live' ? '' : '60'"
         [replayApi]="replayApi()"
@@ -169,7 +215,7 @@ const FIXTURES: Record<FixtureKey, Fixture> = {
     `,
   ],
 })
-export class PineChartLabPage {
+export class PineChartLabPageComponent {
   protected readonly fixtures = FIXTURES;
   protected readonly keys = Object.keys(FIXTURES) as FixtureKey[];
 
@@ -188,7 +234,9 @@ export class PineChartLabPage {
   readonly fixtureResult = computed(() => this.fixture()?.result() ?? null);
   /** Fixtures replay from themselves; a request is needed to arm the replay. */
   readonly fixtureRequest = computed<PineRunRequest | null>(() =>
-    this.fixtureResult()?.bars.length ? { source: this.fixture()?.source ?? '', symbol: 'EURUSD', timeframe: '60' } : null,
+    this.fixtureResult()?.bars.length
+      ? { source: this.fixture()?.source ?? '', symbol: 'EURUSD', timeframe: '60' }
+      : null,
   );
   readonly replayApi = computed(() => {
     const r = this.fixtureResult();
@@ -196,7 +244,9 @@ export class PineChartLabPage {
   });
 
   setMode(value: string): void {
-    this.mode.set(value === 'live' || value in FIXTURES ? (value as FixtureKey | 'live') : 'overlay');
+    this.mode.set(
+      value === 'live' || value in FIXTURES ? (value as FixtureKey | 'live') : 'overlay',
+    );
   }
 
   runLive(): void {

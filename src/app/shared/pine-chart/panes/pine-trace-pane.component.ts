@@ -26,8 +26,17 @@ import { TraceNavigator, traceWindowAround } from './trace-model';
   host: { '(keydown)': 'onKey($event)', tabindex: '0' },
   template: `
     <div class="toolbar">
-      <button type="button" (click)="go(-1000000)" [disabled]="nav().empty" title="First traced bar">⏮</button>
-      <button type="button" (click)="go(-1)" [disabled]="nav().empty" title="Previous bar (←)">◀</button>
+      <button
+        type="button"
+        (click)="go(-1000000)"
+        [disabled]="nav().empty"
+        title="First traced bar"
+      >
+        ⏮
+      </button>
+      <button type="button" (click)="go(-1)" [disabled]="nav().empty" title="Previous bar (←)">
+        ◀
+      </button>
       <label class="bar">
         Bar
         <input
@@ -38,7 +47,9 @@ import { TraceNavigator, traceWindowAround } from './trace-model';
         />
       </label>
       <button type="button" (click)="go(1)" [disabled]="nav().empty" title="Next bar (→)">▶</button>
-      <button type="button" (click)="go(1000000)" [disabled]="nav().empty" title="Last traced bar">⏭</button>
+      <button type="button" (click)="go(1000000)" [disabled]="nav().empty" title="Last traced bar">
+        ⏭
+      </button>
       @if (current() !== null && nav().timeOf(current()!); as t) {
         <span class="time">{{ time(t) }}</span>
       }
@@ -60,7 +71,14 @@ import { TraceNavigator, traceWindowAround } from './trace-model';
           <span role="columnheader">Previous bar</span>
         </div>
         @for (r of list; track $index) {
-          <div class="tr" role="row" tabindex="0" (click)="jump(r.line, r.column)" (keydown.enter)="jump(r.line, r.column)" [title]="'Go to line ' + r.line">
+          <div
+            class="tr"
+            role="row"
+            tabindex="0"
+            (click)="jump(r.line, r.column)"
+            (keydown.enter)="jump(r.line, r.column)"
+            [title]="'Go to line ' + r.line"
+          >
             <span class="pos" role="cell">{{ r.line }}:{{ r.column }}</span>
             <code class="expr" role="cell">{{ r.text }}</code>
             <span class="val" role="cell" [class]="r.kind">{{ r.value }}</span>
@@ -76,10 +94,14 @@ import { TraceNavigator, traceWindowAround } from './trace-model';
           Click a bar on the chart to see why the script's conditions did or did not fire there.
         } @else if (nav().empty) {
           This run has no trace.
-          <button type="button" (click)="requestTrace.emit(windowFor(current()!))">Trace around bar {{ current() }}</button>
+          <button type="button" (click)="requestTrace.emit(windowFor(current()!))">
+            Trace around bar {{ current() }}
+          </button>
         } @else {
           Bar {{ current() }} is outside the traced window ({{ nav().first }}–{{ nav().last }}).
-          <button type="button" (click)="requestTrace.emit(windowFor(current()!))">Trace around bar {{ current() }}</button>
+          <button type="button" (click)="requestTrace.emit(windowFor(current()!))">
+            Trace around bar {{ current() }}
+          </button>
         }
       </div>
     }

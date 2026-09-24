@@ -1,24 +1,68 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeRunResult } from '../model/normalize';
 import type { PineBar } from '../model/pine-outputs.types';
-import { PINE, cell, emptyOutputs, marker, paneIndicatorFixture, plot } from '../testing/pine-fixtures';
+import {
+  PINE,
+  cell,
+  emptyOutputs,
+  marker,
+  paneIndicatorFixture,
+  plot,
+} from '../testing/pine-fixtures';
 import { buildRenderModel, buildTableLayout } from './build-render-model';
 import { dataWindowAt, legendLogical, statusLines } from './legend';
 import { tableView } from './table-view';
 
-const bars: PineBar[] = Array.from({ length: 6 }, (_, i) => ({ t: Date.UTC(2026, 0, 5, i), o: 1, h: 2, l: 0.5, c: 1 + i / 10, v: 1500 }));
+const bars: PineBar[] = Array.from({ length: 6 }, (_, i) => ({
+  t: Date.UTC(2026, 0, 5, i),
+  o: 1,
+  h: 2,
+  l: 0.5,
+  c: 1 + i / 10,
+  v: 1500,
+}));
 const times = bars.map((b) => b.t);
 
 function model() {
   const out = emptyOutputs(times);
   out.plots.push(
-    plot({ id: 0, title: 'Fast', values: [1, 2, 3, null, 5, 6], colors: [PINE.red, PINE.red, PINE.blue, null, PINE.blue, PINE.blue], color: null, precision: 1 }),
+    plot({
+      id: 0,
+      title: 'Fast',
+      values: [1, 2, 3, null, 5, 6],
+      colors: [PINE.red, PINE.red, PINE.blue, null, PINE.blue, PINE.blue],
+      color: null,
+      precision: 1,
+    }),
     plot({ id: 1, title: 'Hidden', values: [1, 1, 1, 1, 1, 1], display: ['data_window'] }),
-    plot({ id: 3, title: 'Pct', values: [10, 20, 30, 40, 50, 60], format: 'percent', precision: 0 }),
+    plot({
+      id: 3,
+      title: 'Pct',
+      values: [10, 20, 30, 40, 50, 60],
+      format: 'percent',
+      precision: 0,
+    }),
   );
-  out.markers.push(marker({ id: 2, title: 'Sig', points: [{ barIndex: 4, time: times[4], value: 1, color: PINE.teal }] }));
+  out.markers.push(
+    marker({
+      id: 2,
+      title: 'Sig',
+      points: [{ barIndex: 4, time: times[4], value: 1, color: PINE.teal }],
+    }),
+  );
   return buildRenderModel(
-    { bars, outputs: out, report: null, declaration: { kind: 'indicator', title: 'Test', overlay: true, format: null, precision: null } },
+    {
+      bars,
+      outputs: out,
+      report: null,
+      declaration: {
+        kind: 'indicator',
+        title: 'Test',
+        overlay: true,
+        format: null,
+        precision: null,
+      },
+    },
     { pricePrecision: 5 },
   );
 }
@@ -50,7 +94,16 @@ describe('status line', () => {
 describe('data window', () => {
   it('lists the bar, then every output shown in the data window', () => {
     const [bar, script] = dataWindowAt(model(), 1);
-    expect(bar.rows.map((r) => r.label)).toEqual(['Date', 'Time', 'Open', 'High', 'Low', 'Close', 'Change', 'Volume']);
+    expect(bar.rows.map((r) => r.label)).toEqual([
+      'Date',
+      'Time',
+      'Open',
+      'High',
+      'Low',
+      'Close',
+      'Change',
+      'Volume',
+    ]);
     expect(bar.rows.find((r) => r.label === 'Close')?.value).toBe('1.10000');
     expect(bar.rows.find((r) => r.label === 'Change')?.value).toBe('10.00%');
     expect(bar.rows.find((r) => r.label === 'Volume')?.value).toBe('1.5K');
@@ -60,10 +113,20 @@ describe('data window', () => {
 
   it('shows plotbar/plotcandle as four rows', () => {
     const run = normalizeRunResult(paneIndicatorFixture(80))!;
-    const m = buildRenderModel({ bars: run.bars, outputs: run.outputs, report: null, declaration: run.compile!.declaration });
+    const m = buildRenderModel({
+      bars: run.bars,
+      outputs: run.outputs,
+      report: null,
+      declaration: run.compile!.declaration,
+    });
     const script = dataWindowAt(m, 60)[1];
     expect(script.rows.map((r) => r.label)).toEqual(
-      expect.arrayContaining(['RSI bars (open)', 'RSI bars (high)', 'RSI bars (low)', 'RSI bars (close)']),
+      expect.arrayContaining([
+        'RSI bars (open)',
+        'RSI bars (high)',
+        'RSI bars (low)',
+        'RSI bars (close)',
+      ]),
     );
     // display: ["status_line"] only → not in the data window.
     expect(script.rows.map((r) => r.label)).not.toContain('Status only');
@@ -84,8 +147,26 @@ describe('tableView', () => {
       borderWidth: 1,
       forceOverlay: false,
       cells: [
-        cell({ column: 0, row: 0, columnSpan: 2, text: 'merged', bold: true, bgColor: '#FF0000FF', textHAlign: 'left', textVAlign: 'top' }),
-        cell({ column: 2, row: 1, text: 'w', width: 25, height: 10, tooltip: 'tip', italic: true, fontFamily: 'monospace' }),
+        cell({
+          column: 0,
+          row: 0,
+          columnSpan: 2,
+          text: 'merged',
+          bold: true,
+          bgColor: '#FF0000FF',
+          textHAlign: 'left',
+          textVAlign: 'top',
+        }),
+        cell({
+          column: 2,
+          row: 1,
+          text: 'w',
+          width: 25,
+          height: 10,
+          tooltip: 'tip',
+          italic: true,
+          fontFamily: 'monospace',
+        }),
       ],
     },
     'main',
@@ -120,4 +201,3 @@ describe('tableView', () => {
     expect(v.cells[0].style['border-bottom']).toBe('1px solid rgb(136, 136, 136)');
   });
 });
-

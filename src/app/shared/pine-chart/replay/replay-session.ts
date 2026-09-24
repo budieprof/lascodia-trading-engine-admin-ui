@@ -22,7 +22,14 @@ export interface ReplayApi {
   stopReplay(sessionId: string): Observable<unknown>;
 }
 
-export type ReplayStatus = 'idle' | 'starting' | 'ready' | 'stepping' | 'playing' | 'ended' | 'error';
+export type ReplayStatus =
+  | 'idle'
+  | 'starting'
+  | 'ready'
+  | 'stepping'
+  | 'playing'
+  | 'ended'
+  | 'error';
 
 /** Bars per second while playing. */
 export const REPLAY_SPEEDS = [1, 2, 5, 10, 20] as const;
@@ -81,14 +88,20 @@ export class ReplaySession {
     return this.sessionId !== null;
   }
 
-  async start(request: PineRunRequest, startBar: number, declaration: PineDeclaration | null): Promise<void> {
+  async start(
+    request: PineRunRequest,
+    startBar: number,
+    declaration: PineDeclaration | null,
+  ): Promise<void> {
     this.stop();
     const gen = ++this.generation;
     this.status.set('starting');
     this.error.set(null);
     this.startBar.set(startBar);
     try {
-      const res = await firstValueFrom(this.api.startReplay({ ...request, startBar: Math.max(0, Math.trunc(startBar)) }));
+      const res = await firstValueFrom(
+        this.api.startReplay({ ...request, startBar: Math.max(0, Math.trunc(startBar)) }),
+      );
       if (gen !== this.generation) {
         this.api.stopReplay(res.sessionId).subscribe({ error: () => undefined });
         return;
@@ -119,7 +132,9 @@ export class ReplaySession {
     this.busy = true;
     if (!playing) this.status.set('stepping');
     try {
-      const frame = await firstValueFrom(this.api.stepReplay(id, { bars: Math.max(1, Math.min(500, Math.trunc(bars))) }));
+      const frame = await firstValueFrom(
+        this.api.stepReplay(id, { bars: Math.max(1, Math.min(500, Math.trunc(bars))) }),
+      );
       if (gen !== this.generation) return false;
       if (frame.bars.length === 0) {
         this.clearTimer();
@@ -218,7 +233,8 @@ function isExpired(e: unknown): boolean {
 }
 
 export function replayErrorMessage(e: unknown): string {
-  if (isExpired(e)) return 'The replay session expired (sessions end after 30 minutes idle). Start it again.';
+  if (isExpired(e))
+    return 'The replay session expired (sessions end after 30 minutes idle). Start it again.';
   if (e instanceof ApiError) return e.message || 'The engine rejected the replay request.';
   if (e instanceof HttpErrorResponse) {
     if (e.status === 0) return 'The engine is unreachable.';

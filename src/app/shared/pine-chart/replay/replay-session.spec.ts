@@ -103,7 +103,8 @@ describe('ReplaySession', () => {
 
   it('reports an expired session', async () => {
     const api: ReplayApi = {
-      startReplay: () => of({ sessionId: 's1', frame: { barIndex: 5, bars: [], outputsDelta: null } }),
+      startReplay: () =>
+        of({ sessionId: 's1', frame: { barIndex: 5, bars: [], outputsDelta: null } }),
       stepReplay: () => throwError(() => new HttpErrorResponse({ status: 404 })),
       stopReplay: vi.fn(() => of(true)),
     };
@@ -120,7 +121,15 @@ describe('ReplaySession', () => {
   it('ignores a frame that lands after stop', async () => {
     const pending = new Subject<PineReplayFrame>();
     const api: ReplayApi = {
-      startReplay: () => of({ sessionId: 's1', frame: { barIndex: 5, bars: [{ t: 1, o: 1, h: 1, l: 1, c: 1, v: 1 }], outputsDelta: null } }),
+      startReplay: () =>
+        of({
+          sessionId: 's1',
+          frame: {
+            barIndex: 5,
+            bars: [{ t: 1, o: 1, h: 1, l: 1, c: 1, v: 1 }],
+            outputsDelta: null,
+          },
+        }),
       stepReplay: () => pending,
       stopReplay: () => of(true),
     };
@@ -128,7 +137,11 @@ describe('ReplaySession', () => {
     await session.start(request, 5, null);
     const stepping = session.step(1);
     session.stop();
-    pending.next({ barIndex: 6, bars: [{ t: 2, o: 1, h: 1, l: 1, c: 1, v: 1 }], outputsDelta: null });
+    pending.next({
+      barIndex: 6,
+      bars: [{ t: 2, o: 1, h: 1, l: 1, c: 1, v: 1 }],
+      outputsDelta: null,
+    });
     pending.complete();
     expect(await stepping).toBe(false);
     expect(session.data()).toBeNull();
@@ -139,7 +152,8 @@ describe('ReplaySession', () => {
     const pending = new Subject<PineReplayFrame>();
     const stepReplay = vi.fn(() => pending);
     const api: ReplayApi = {
-      startReplay: () => of({ sessionId: 's1', frame: { barIndex: 5, bars: [], outputsDelta: null } }),
+      startReplay: () =>
+        of({ sessionId: 's1', frame: { barIndex: 5, bars: [], outputsDelta: null } }),
       stepReplay,
       stopReplay: () => of(true),
     };
@@ -148,7 +162,11 @@ describe('ReplaySession', () => {
     void session.step(1);
     expect(await session.step(1)).toBe(false);
     expect(stepReplay).toHaveBeenCalledTimes(1);
-    pending.next({ barIndex: 6, bars: [{ t: 2, o: 1, h: 1, l: 1, c: 1, v: 1 }], outputsDelta: null });
+    pending.next({
+      barIndex: 6,
+      bars: [{ t: 2, o: 1, h: 1, l: 1, c: 1, v: 1 }],
+      outputsDelta: null,
+    });
     pending.complete();
     await flush();
     expect(session.barIndex()).toBe(6);

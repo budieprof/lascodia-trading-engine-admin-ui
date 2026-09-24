@@ -1,5 +1,11 @@
 import { trackColor } from '../core/color';
-import { formatBarTime, formatValue, formatVolume, NA_TEXT, type ValueFormat } from '../core/format';
+import {
+  formatBarTime,
+  formatValue,
+  formatVolume,
+  NA_TEXT,
+  type ValueFormat,
+} from '../core/format';
 import type {
   CandleLayer,
   MarkerLayer,
@@ -62,7 +68,11 @@ export function markerIndexAt(layer: MarkerLayer, logical: number): number {
   return -1;
 }
 
-function candleText(layer: CandleLayer, logical: number, fmt: ValueFormat): { text: string; color: string | null } {
+function candleText(
+  layer: CandleLayer,
+  logical: number,
+  fmt: ValueFormat,
+): { text: string; color: string | null } {
   const s = logical - layer.start;
   if (s < 0 || s >= layer.open.length || !(layer.close[s] === layer.close[s])) {
     return { text: `O${NA_TEXT} H${NA_TEXT} L${NA_TEXT} C${NA_TEXT}`, color: null };
@@ -103,7 +113,12 @@ export function statusLineValues(pane: PaneModel, logical: number): LegendValue[
     if (i < 0) continue;
     items.push({
       id: m.id,
-      value: { key: m.key, title: m.title, text: formatValue(m.values[i], m.format), color: m.colors[i] },
+      value: {
+        key: m.key,
+        title: m.title,
+        text: formatValue(m.values[i], m.format),
+        color: m.colors[i],
+      },
     });
   }
   items.sort((a, b) => a.id - b.id);
@@ -138,7 +153,11 @@ export function dataWindowAt(
         { label: 'High', value: formatValue(b.high[i], priceFmt), color: null },
         { label: 'Low', value: formatValue(b.low[i], priceFmt), color: null },
         { label: 'Close', value: formatValue(b.close[i], priceFmt), color: null },
-        { label: 'Change', value: change === change ? `${change.toFixed(2)}%` : NA_TEXT, color: null },
+        {
+          label: 'Change',
+          value: change === change ? `${change.toFixed(2)}%` : NA_TEXT,
+          color: null,
+        },
         { label: 'Volume', value: formatVolume(b.volume[i]), color: null },
       );
     }
@@ -206,6 +225,7 @@ export function statusLines(
   const out: Array<{ pane: PaneKey; values: LegendValue[] }> = [
     { pane: 'main', values: statusLineValues(model.panes.main, logical) },
   ];
-  if (model.panes.script) out.push({ pane: 'script', values: statusLineValues(model.panes.script, logical) });
+  if (model.panes.script)
+    out.push({ pane: 'script', values: statusLineValues(model.panes.script, logical) });
   return out;
 }
