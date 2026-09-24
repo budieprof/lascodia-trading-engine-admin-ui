@@ -40,9 +40,12 @@ interface EditableEntry extends LlmConfigEntryDto {
  *   - OpenAi.ReasoningEffort                 → "high | medium | low"
  *   - Google.ThinkingLevel                   → "high | medium | minimal"
  *   - DeepSeek.ReasoningEffort               → "high | medium | low" (placeholder)
+ *   - ClaudeCode.DeepEffort / QuickEffort    → the CLI's --effort levels (ClaudeCodeLlmClient.EffortLevels)
  *
  * Anything not in this map renders as a free-text input.
  */
+const CLAUDE_CODE_EFFORT = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+
 const OPTION_CATALOG: Record<string, readonly string[]> = {
   'Llm:DeepProvider': ['anthropic', 'openai', 'google', 'deepseek', 'claudecode'],
   'Llm:QuickProvider': ['anthropic', 'openai', 'google', 'deepseek', 'claudecode'],
@@ -50,6 +53,8 @@ const OPTION_CATALOG: Record<string, readonly string[]> = {
   'Llm:OpenAi:ReasoningEffort': ['high', 'medium', 'low'],
   'Llm:Google:ThinkingLevel': ['high', 'medium', 'minimal'],
   'Llm:DeepSeek:ReasoningEffort': ['high', 'medium', 'low'],
+  'Llm:ClaudeCode:DeepEffort': CLAUDE_CODE_EFFORT,
+  'Llm:ClaudeCode:QuickEffort': CLAUDE_CODE_EFFORT,
 };
 
 /**
