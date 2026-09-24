@@ -1221,17 +1221,18 @@ export class DslBuilderComponent {
   /** Parameters toggled open, by condition identity. */
   private readonly openParams = new WeakSet<DslCondition>();
 
-  /** Last value emitted upstream: skips the re-parse that would reset uids and focus. */
-  private lastEmitted: string | null = null;
   /**
-   * The JSON the builder currently shows. History records this rather than
-   * the input, which only catches up after the parent's next change detection.
+   * The JSON the builder currently shows. An input equal to it is the parent
+   * echoing the builder's own emit, so it is not re-parsed (a re-parse resets
+   * uids and focus); anything else — typing in the JSON textarea, an example,
+   * a rollback — is. History records this rather than the input, which only
+   * catches up after the parent's next change detection.
    */
-  private currentJson = '';
+  private currentJson: string | null = null;
 
   private readonly hydrate = effect(() => {
     const raw = this.parametersJson();
-    if (raw === this.lastEmitted) return;
+    if (raw === this.currentJson) return;
     untracked(() => this.load(raw));
   });
 
@@ -1268,7 +1269,7 @@ export class DslBuilderComponent {
     const d = this.doc();
     if (!d) return;
     const next = emitDsl(d);
-    const prev = this.currentJson;
+    const prev = this.currentJson ?? '';
     if (prev !== next) {
       this.historyPast.push(prev);
       if (this.historyPast.length > 50) this.historyPast.shift();
@@ -1277,30 +1278,27 @@ export class DslBuilderComponent {
       this.canRedo.set(false);
     }
     this.currentJson = next;
-    this.lastEmitted = next;
     this.parametersJsonChange.emit(next);
   }
 
   undo(): void {
     if (this.historyPast.length === 0) return;
     const prev = this.historyPast.pop()!;
-    this.historyFuture.push(this.currentJson);
+    this.historyFuture.push(this.currentJson ?? '');
     this.canUndo.set(this.historyPast.length > 0);
     this.canRedo.set(true);
-    this.lastEmitted = prev;
-    this.parametersJsonChange.emit(prev);
     this.load(prev);
+    this.parametersJsonChange.emit(prev);
   }
 
   redo(): void {
     if (this.historyFuture.length === 0) return;
     const next = this.historyFuture.pop()!;
-    this.historyPast.push(this.currentJson);
+    this.historyPast.push(this.currentJson ?? '');
     this.canUndo.set(true);
     this.canRedo.set(this.historyFuture.length > 0);
-    this.lastEmitted = next;
-    this.parametersJsonChange.emit(next);
     this.load(next);
+    this.parametersJsonChange.emit(next);
   }
 
   /** Cmd/Ctrl+Z undo, Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y redo. */

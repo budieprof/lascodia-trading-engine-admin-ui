@@ -1,6 +1,7 @@
 import {
   Component,
   ChangeDetectionStrategy,
+  DestroyRef,
   ElementRef,
   effect,
   input,
@@ -1917,6 +1918,13 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   private readonly riskProfilesService = inject(RiskProfilesService);
   private readonly currencyPairsService = inject(CurrencyPairsService);
   private readonly notifications = inject(NotificationService);
+
+  constructor() {
+    // A pending debounced rule check must not fire after the form is gone.
+    inject(DestroyRef).onDestroy(() => {
+      if (this.dslTimer !== null) clearTimeout(this.dslTimer);
+    });
+  }
 
   /// Available risk profiles for the dropdown — lazy-loaded on first ngOnInit.
   riskProfiles = signal<RiskProfileDto[]>([]);
