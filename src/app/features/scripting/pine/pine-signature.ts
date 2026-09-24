@@ -1,6 +1,11 @@
 import type { PineCatalogOverload, ScriptExportDto } from '@core/api/scripting.types';
 import { resolvePinePath, type PineResolveEnv, type PineResolved } from './pine-resolve';
-import { findCallContext, splitTopLevel, type PineFunctionSymbol, type PineParam } from './pine-scan';
+import {
+  findCallContext,
+  splitTopLevel,
+  type PineFunctionSymbol,
+  type PineParam,
+} from './pine-scan';
 
 export interface SignatureParamView {
   name: string;
@@ -32,7 +37,11 @@ export interface SignatureHelpInfo {
   openParen: number;
 }
 
-function fromCatalogOverload(label: string, o: PineCatalogOverload, dropReceiver: boolean): SignatureOverloadView {
+function fromCatalogOverload(
+  label: string,
+  o: PineCatalogOverload,
+  dropReceiver: boolean,
+): SignatureOverloadView {
   const params = (dropReceiver ? o.params.slice(1) : o.params).map((p) => ({
     name: p.name,
     ...(p.type ? { type: p.type } : {}),
@@ -48,7 +57,11 @@ function fromCatalogOverload(label: string, o: PineCatalogOverload, dropReceiver
   };
 }
 
-function fromUserFunction(label: string, fn: PineFunctionSymbol, dropReceiver: boolean): SignatureOverloadView {
+function fromUserFunction(
+  label: string,
+  fn: PineFunctionSymbol,
+  dropReceiver: boolean,
+): SignatureOverloadView {
   const params = (dropReceiver ? fn.params.slice(1) : fn.params).map((p: PineParam) => ({
     name: p.name,
     ...(p.type ? { type: p.type } : {}),
@@ -59,7 +72,10 @@ function fromUserFunction(label: string, fn: PineFunctionSymbol, dropReceiver: b
 }
 
 /** Parses a library export's display signature, e.g. `midpoint(float a, float b) → float`. */
-export function parseExportSignature(exp: ScriptExportDto, label: string): SignatureOverloadView | null {
+export function parseExportSignature(
+  exp: ScriptExportDto,
+  label: string,
+): SignatureOverloadView | null {
   const sig = exp.signature ?? '';
   const open = sig.indexOf('(');
   const close = sig.lastIndexOf(')');
@@ -83,7 +99,10 @@ export function parseExportSignature(exp: ScriptExportDto, label: string): Signa
 }
 
 /** The overload views for a resolved callee. */
-export function overloadsFor(resolved: PineResolved, calleeText: string): { overloads: SignatureOverloadView[]; doc: string | null } {
+export function overloadsFor(
+  resolved: PineResolved,
+  calleeText: string,
+): { overloads: SignatureOverloadView[]; doc: string | null } {
   switch (resolved.kind) {
     case 'builtin-function':
       return {
@@ -101,7 +120,10 @@ export function overloadsFor(resolved: PineResolved, calleeText: string): { over
       return { overloads, doc: resolved.fns[0]?.doc ?? null };
     }
     case 'user-function':
-      return { overloads: [fromUserFunction(resolved.fn.name, resolved.fn, false)], doc: resolved.fn.doc ?? null };
+      return {
+        overloads: [fromUserFunction(resolved.fn.name, resolved.fn, false)],
+        doc: resolved.fn.doc ?? null,
+      };
     case 'user-method':
       return {
         overloads: resolved.methods.map((m) => fromUserFunction(calleeText, m, true)),

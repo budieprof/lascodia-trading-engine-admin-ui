@@ -10,8 +10,25 @@ import { InputsFormComponent } from './inputs-form.component';
 // the strategy-form specs use).
 
 const INPUTS: ScriptInputDto[] = [
-  { id: 'len', kind: 'int', title: 'Length', defaultValue: 14, minValue: 1, maxValue: 200, step: 1, group: 'Main' },
-  { id: 'mult', kind: 'float', title: 'Multiplier', defaultValue: 1.5, minValue: 0, step: 0.1, group: 'Main' },
+  {
+    id: 'len',
+    kind: 'int',
+    title: 'Length',
+    defaultValue: 14,
+    minValue: 1,
+    maxValue: 200,
+    step: 1,
+    group: 'Main',
+  },
+  {
+    id: 'mult',
+    kind: 'float',
+    title: 'Multiplier',
+    defaultValue: 1.5,
+    minValue: 0,
+    step: 0.1,
+    group: 'Main',
+  },
   { id: 'show', kind: 'bool', title: 'Show bands', defaultValue: true, group: 'Main' },
   {
     id: 'bandLen',
@@ -21,15 +38,37 @@ const INPUTS: ScriptInputDto[] = [
     group: 'Main',
     activeWhenInputId: 'show',
   },
-  { id: 'mode', kind: 'string', title: 'Mode', defaultValue: 'A', options: ['A', 'B'], inline: 'm', group: 'Style' },
-  { id: 'col', kind: 'color', title: 'Colour', defaultValue: '#089981FF', inline: 'm', group: 'Style', tooltip: 'Line colour' },
+  {
+    id: 'mode',
+    kind: 'string',
+    title: 'Mode',
+    defaultValue: 'A',
+    options: ['A', 'B'],
+    inline: 'm',
+    group: 'Style',
+  },
+  {
+    id: 'col',
+    kind: 'color',
+    title: 'Colour',
+    defaultValue: '#089981FF',
+    inline: 'm',
+    group: 'Style',
+    tooltip: 'Line colour',
+  },
   { id: 'note', kind: 'textArea', title: 'Notes', defaultValue: '' },
   { id: 'label', kind: 'string', title: 'Label', defaultValue: 'x' },
   { id: 'sym', kind: 'symbol', title: 'Symbol', defaultValue: '' },
   { id: 'tf', kind: 'timeframe', title: 'Timeframe', defaultValue: '1D' },
   { id: 'sess', kind: 'session', title: 'Session', defaultValue: '0800-1700' },
   { id: 'src', kind: 'source', title: 'Source', defaultValue: 'close', defaultText: 'close' },
-  { id: 'start', kind: 'time', title: 'Start', defaultValue: Date.UTC(2024, 0, 1, 0, 0), confirm: true },
+  {
+    id: 'start',
+    kind: 'time',
+    title: 'Start',
+    defaultValue: Date.UTC(2024, 0, 1, 0, 0),
+    confirm: true,
+  },
   { id: 'level', kind: 'price', title: 'Level', defaultValue: 1.1 },
   {
     id: 'dir',
@@ -49,8 +88,13 @@ describe('InputsFormComponent', () => {
   let host: HTMLElement;
 
   const field = (id: string) => host.querySelector(`[data-input-id="${id}"]`) as HTMLElement;
-  const control = <T extends Element>(id: string, sel: string) => field(id).querySelector(sel) as unknown as T;
-  const change = (el: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, value: string, event = 'change') => {
+  const control = <T extends Element>(id: string, sel: string) =>
+    field(id).querySelector(sel) as unknown as T;
+  const change = (
+    el: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
+    value: string,
+    event = 'change',
+  ) => {
     el.value = value;
     el.dispatchEvent(new Event(event));
     fixture.detectChanges();
@@ -72,10 +116,9 @@ describe('InputsFormComponent', () => {
     const groups = [...host.querySelectorAll('.in-group')].map((g) => g.textContent?.trim());
     expect(groups).toEqual(['Main', 'Style']);
     const inline = host.querySelector('.in-row.is-inline')!;
-    expect([...inline.querySelectorAll('[data-input-id]')].map((e) => e.getAttribute('data-input-id'))).toEqual([
-      'mode',
-      'col',
-    ]);
+    expect(
+      [...inline.querySelectorAll('[data-input-id]')].map((e) => e.getAttribute('data-input-id')),
+    ).toEqual(['mode', 'col']);
     expect(inline.querySelector('.in-tip')?.getAttribute('title')).toBe('Line colour');
   });
 
@@ -93,15 +136,16 @@ describe('InputsFormComponent', () => {
     expect(control<HTMLSelectElement>('tf', 'select').options.length).toBeGreaterThan(10);
     expect(field('sess').querySelectorAll('input[type=time]').length).toBe(2);
     expect(field('sess').querySelectorAll('.day').length).toBe(7);
-    expect([...control<HTMLSelectElement>('src', 'select').options].map((o) => o.value)).toContain('hlc3');
+    expect([...control<HTMLSelectElement>('src', 'select').options].map((o) => o.value)).toContain(
+      'hlc3',
+    );
     expect(control<HTMLInputElement>('start', 'input').type).toBe('datetime-local');
     expect(control<HTMLInputElement>('start', 'input').value).toBe('2024-01-01T00:00');
     expect(field('start').querySelector('.chip')?.textContent).toContain('confirm');
     expect(field('level').querySelector('.pick')).toBeTruthy();
-    expect([...control<HTMLSelectElement>('dir', 'select').options].map((o) => o.textContent?.trim())).toEqual([
-      'Long only',
-      'Short only',
-    ]);
+    expect(
+      [...control<HTMLSelectElement>('dir', 'select').options].map((o) => o.textContent?.trim()),
+    ).toEqual(['Long only', 'Short only']);
   });
 
   it('starts every widget at the default and stores nothing', () => {
@@ -167,7 +211,9 @@ describe('InputsFormComponent', () => {
     fixture.detectChanges();
     expect(control<HTMLInputElement>('len', 'input').value).toBe('30');
     expect(control<HTMLInputElement>('col', 'input[type=range]').value).toBe('0');
-    const reset = [...host.querySelectorAll('button')].find((b) => b.textContent?.includes('Reset to defaults'))!;
+    const reset = [...host.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Reset to defaults'),
+    )!;
     expect(reset.disabled).toBe(false);
     reset.click();
     fixture.detectChanges();
@@ -183,6 +229,8 @@ describe('InputsFormComponent', () => {
     expect(control<HTMLInputElement>('len', 'input').disabled).toBe(true);
     cmp.set(INPUTS[0], 50);
     expect(overrides()).toEqual({});
-    expect([...host.querySelectorAll('button')].some((b) => b.textContent?.includes('Reset'))).toBe(false);
+    expect([...host.querySelectorAll('button')].some((b) => b.textContent?.includes('Reset'))).toBe(
+      false,
+    );
   });
 });

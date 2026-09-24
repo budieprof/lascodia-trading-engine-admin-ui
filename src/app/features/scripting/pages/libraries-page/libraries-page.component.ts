@@ -149,7 +149,9 @@ interface LibraryDraft {
                 @if (isBuiltin(lib)) {
                   <span class="chip chip-accent">Built-in</span>
                 } @else {
-                  <span class="chip" [class.chip-ok]="lib.visibility === 'Shared'">{{ lib.visibility }}</span>
+                  <span class="chip" [class.chip-ok]="lib.visibility === 'Shared'">{{
+                    lib.visibility
+                  }}</span>
                 }
                 @if (lib.exports?.length) {
                   <span class="muted small">{{ lib.exports!.length }} exports</span>
@@ -190,8 +192,12 @@ interface LibraryDraft {
                     class="field-input"
                     (change)="patchDraft({ visibility: $any($event.target).value })"
                   >
-                    <option value="Private" [selected]="d.visibility === 'Private'">Private — only me</option>
-                    <option value="Shared" [selected]="d.visibility === 'Shared'">Shared — every operator</option>
+                    <option value="Private" [selected]="d.visibility === 'Private'">
+                      Private — only me
+                    </option>
+                    <option value="Shared" [selected]="d.visibility === 'Shared'">
+                      Shared — every operator
+                    </option>
                   </select>
                 </label>
                 <label class="field wide">
@@ -217,7 +223,9 @@ interface LibraryDraft {
                 <div class="exports-preview">
                   <span class="muted small">Exports:</span>
                   @for (e of draftCompile()!.exports!; track e.name) {
-                    <span class="chip" [title]="e.signature ?? e.kind">{{ e.kind }} {{ e.name }}</span>
+                    <span class="chip" [title]="e.signature ?? e.kind"
+                      >{{ e.kind }} {{ e.name }}</span
+                    >
                   }
                 </div>
               }
@@ -257,8 +265,12 @@ interface LibraryDraft {
                 }
                 <span class="grow"></span>
                 @if (!isBuiltin(lib)) {
-                  <button type="button" class="btn btn-sm" (click)="startNewVersion(lib)">New version</button>
-                  <button type="button" class="btn btn-danger btn-sm" (click)="askDelete(lib)">Delete</button>
+                  <button type="button" class="btn btn-sm" (click)="startNewVersion(lib)">
+                    New version
+                  </button>
+                  <button type="button" class="btn btn-danger btn-sm" (click)="askDelete(lib)">
+                    Delete
+                  </button>
                 }
               </div>
               @if (lib.description) {
@@ -266,7 +278,9 @@ interface LibraryDraft {
               }
               <div class="import-line">
                 <code class="mono">{{ importLine(lib) }}</code>
-                <button type="button" class="btn btn-ghost btn-sm" (click)="copyImport(lib)">Copy</button>
+                <button type="button" class="btn btn-ghost btn-sm" (click)="copyImport(lib)">
+                  Copy
+                </button>
               </div>
               <div class="detail-tabs" role="tablist">
                 <button
@@ -292,7 +306,11 @@ interface LibraryDraft {
                 @if (loadingDetail()) {
                   <p class="muted small">Loading source…</p>
                 } @else {
-                  <app-pine-editor [value]="detail()?.source ?? ''" [readOnly]="true" height="480px" />
+                  <app-pine-editor
+                    [value]="detail()?.source ?? ''"
+                    [readOnly]="true"
+                    height="480px"
+                  />
                 }
               } @else {
                 @if (exportsOf(lib).length === 0) {
@@ -331,7 +349,8 @@ interface LibraryDraft {
             <div class="panel empty">
               <p>Select a library to read its source and exports, or publish a new one.</p>
               <p class="muted small">
-                Scripts import a version with <code class="mono">import publisher/name/version as alias</code>.
+                Scripts import a version with
+                <code class="mono">import publisher/name/version as alias</code>.
               </p>
             </div>
           }
@@ -571,7 +590,9 @@ export class LibrariesPageComponent implements OnInit {
   readonly myPublisher = signal<string | null>(null);
 
   readonly selectedId = signal<number | null>(null);
-  readonly selected = computed(() => this.libraries().find((l) => l.id === this.selectedId()) ?? null);
+  readonly selected = computed(
+    () => this.libraries().find((l) => l.id === this.selectedId()) ?? null,
+  );
   readonly detail = signal<ScriptLibraryDetailDto | null>(null);
   readonly loadingDetail = signal(false);
   readonly detailError = signal<string | null>(null);
@@ -590,7 +611,9 @@ export class LibrariesPageComponent implements OnInit {
   readonly isBuiltin = isBuiltin;
   readonly importLine = importLine;
 
-  readonly suggestedName = computed(() => readDeclarationHeader(this.draft()?.source ?? '')?.title ?? '');
+  readonly suggestedName = computed(
+    () => readDeclarationHeader(this.draft()?.source ?? '')?.title ?? '',
+  );
   readonly draftKindWarning = computed(() => {
     const kind = this.draftCompile()?.declaration?.kind;
     return kind && kind !== 'library'
@@ -603,7 +626,8 @@ export class LibrariesPageComponent implements OnInit {
     if (!(d.name.trim() || this.suggestedName())) return 'Give the library a name';
     if (!d.source.trim()) return 'Write the library source';
     const c = this.draftCompile();
-    if (c && c.diagnostics.some((x) => x.severity === 'error')) return 'Fix the compile errors first';
+    if (c && c.diagnostics.some((x) => x.severity === 'error'))
+      return 'Fix the compile errors first';
     if (this.draftKindWarning()) return 'The script must declare library()';
     return null;
   });
@@ -629,7 +653,10 @@ export class LibrariesPageComponent implements OnInit {
     this.listError.set(null);
     try {
       const list = await firstValueFrom(
-        this.scripting.listLibraries({ publisher: this.publisherFilter(), name: this.nameFilter() }),
+        this.scripting.listLibraries({
+          publisher: this.publisherFilter(),
+          name: this.nameFilter(),
+        }),
       );
       // Built-in first, then by publisher / name / newest version.
       list.sort(
@@ -658,7 +685,11 @@ export class LibrariesPageComponent implements OnInit {
     this.detail.set(null);
     this.detailError.set(null);
     this.detailTab.set('source');
-    void this.router.navigate([], { queryParams: { id }, replaceUrl: true, queryParamsHandling: 'merge' });
+    void this.router.navigate([], {
+      queryParams: { id },
+      replaceUrl: true,
+      queryParamsHandling: 'merge',
+    });
     this.loadingDetail.set(true);
     try {
       const d = await firstValueFrom(this.scripting.getLibrary(id));

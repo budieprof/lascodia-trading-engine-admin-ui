@@ -70,7 +70,9 @@ const yesNo = (b: boolean | undefined) => (b ? 'Yes' : 'No');
           }
         </dl>
         @if (d.strategyAlertMessage) {
-          <p class="alert-msg"><span class="muted">Default alert message:</span> {{ d.strategyAlertMessage }}</p>
+          <p class="alert-msg">
+            <span class="muted">Default alert message:</span> {{ d.strategyAlertMessage }}
+          </p>
         }
       </div>
     } @else {
@@ -198,7 +200,8 @@ export class DeclarationSummaryComponent {
       );
     }
     if (d.timeframe) rows.push({ label: 'Timeframe', value: d.timeframe, set: true });
-    if (d.format && d.format !== 'inherit') rows.push({ label: 'Format', value: d.format, set: true });
+    if (d.format && d.format !== 'inherit')
+      rows.push({ label: 'Format', value: d.format, set: true });
     if (d.precision !== null && d.precision !== undefined)
       rows.push({ label: 'Precision', value: String(d.precision), set: true });
     const maxBarsBack = p?.maxBarsBack || d.maxBarsBack;

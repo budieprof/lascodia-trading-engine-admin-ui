@@ -15,7 +15,11 @@ import {
 import { firstValueFrom } from 'rxjs';
 
 import type { ScriptCompileResult, ScriptDiagnostic } from '@core/api/scripting.types';
-import { ScriptingService, normaliseCompile, toScriptingError } from '@core/services/scripting.service';
+import {
+  ScriptingService,
+  normaliseCompile,
+  toScriptingError,
+} from '@core/services/scripting.service';
 import { downloadTextFile, readTextFile } from '@shared/utils/download';
 import { PineEditorComponent } from '../pine-editor/pine-editor.component';
 import { ProblemsPanelComponent } from '../problems-panel/problems-panel.component';
@@ -174,7 +178,9 @@ export class ScriptWorkbenchComponent {
   readonly cursor = signal<{ line: number; column: number } | null>(null);
 
   readonly stale = computed(() => this.result() !== null && this.resultSource() !== this.source());
-  readonly diagnostics = computed<readonly ScriptDiagnostic[]>(() => this.result()?.diagnostics ?? []);
+  readonly diagnostics = computed<readonly ScriptDiagnostic[]>(
+    () => this.result()?.diagnostics ?? [],
+  );
   /** Markers only for the text they were computed on; edits since are mapped by the editor. */
   readonly editorDiagnostics = computed<readonly ScriptDiagnostic[]>(() =>
     this.resultSource() === null ? [] : this.diagnostics(),

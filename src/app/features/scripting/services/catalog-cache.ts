@@ -46,7 +46,10 @@ function openDb(): Promise<IDBDatabase | null> {
   });
 }
 
-function idbRequest<T>(run: (store: IDBObjectStore) => IDBRequest<T>, mode: IDBTransactionMode): Promise<T | null> {
+function idbRequest<T>(
+  run: (store: IDBObjectStore) => IDBRequest<T>,
+  mode: IDBTransactionMode,
+): Promise<T | null> {
   return openDb().then(
     (db) =>
       new Promise<T | null>((resolve) => {

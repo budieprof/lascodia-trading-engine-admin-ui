@@ -11,7 +11,11 @@ import {
   type LexicalRange,
   type PineDocSymbols,
 } from '../pine/pine-scan';
-import { FALLBACK_CONSTANTS, FALLBACK_FUNCTIONS, FALLBACK_VARIABLES } from './pine-builtins-fallback';
+import {
+  FALLBACK_CONSTANTS,
+  FALLBACK_FUNCTIONS,
+  FALLBACK_VARIABLES,
+} from './pine-builtins-fallback';
 
 /**
  * What the editor's intelligence (completion, signature help, hover, highlighting) knows beyond
@@ -26,7 +30,11 @@ let fallbackIndex: PineCatalogIndex | null = null;
 
 /** The offline index built from the bundled v6 names — until (or unless) the catalog loads. */
 export function fallbackCatalogIndex(): PineCatalogIndex {
-  fallbackIndex ??= PineCatalogIndex.fromNames(FALLBACK_FUNCTIONS, FALLBACK_VARIABLES, FALLBACK_CONSTANTS);
+  fallbackIndex ??= PineCatalogIndex.fromNames(
+    FALLBACK_FUNCTIONS,
+    FALLBACK_VARIABLES,
+    FALLBACK_CONSTANTS,
+  );
   return fallbackIndex;
 }
 

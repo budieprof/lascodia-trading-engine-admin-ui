@@ -1,11 +1,4 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  input,
-  model,
-  output,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, model, output } from '@angular/core';
 
 import type {
   ScriptInputDto,
@@ -117,7 +110,10 @@ const OPTION_KINDS = new Set(['int', 'float', 'string', 'enum', 'source', 'timef
                             [attr.step]="inp.step ?? (inp.kind === 'int' ? 1 : 'any')"
                             [value]="values()[inp.id]"
                             [disabled]="locked(inp)"
-                            (change)="set(inp, $any($event.target).value); $any($event.target).value = values()[inp.id]"
+                            (change)="
+                              set(inp, $any($event.target).value);
+                              $any($event.target).value = values()[inp.id]
+                            "
                           />
                           @if (inp.kind === 'price') {
                             <button
@@ -252,7 +248,11 @@ const OPTION_KINDS = new Set(['int', 'float', 'string', 'enum', 'source', 'timef
                   </div>
                 }
                 @if (row.tooltip) {
-                  <span class="in-tip" tabindex="0" [title]="row.tooltip" [attr.aria-label]="row.tooltip"
+                  <span
+                    class="in-tip"
+                    tabindex="0"
+                    [title]="row.tooltip"
+                    [attr.aria-label]="row.tooltip"
                     >?</span
                   >
                 }
@@ -409,9 +409,12 @@ const OPTION_KINDS = new Set(['int', 'float', 'string', 'enum', 'source', 'timef
         border-radius: 5px;
         border: 1px solid var(--border);
         overflow: hidden;
-        background-image: linear-gradient(var(--swatch), var(--swatch)),
+        background-image:
+          linear-gradient(var(--swatch), var(--swatch)),
           repeating-conic-gradient(#c8c8c8 0% 25%, #fff 0% 50%);
-        background-size: auto, 8px 8px;
+        background-size:
+          auto,
+          8px 8px;
       }
       .swatch input {
         position: absolute;
@@ -479,7 +482,9 @@ export class InputsFormComponent {
   readonly sections = computed(() => layoutInputs(this.inputs()));
   /** Every input's current value (override or default). */
   readonly values = computed(() => resolveInputValues(this.inputs(), this.overrides()));
-  private readonly normalisedOverrides = computed(() => inputOverrides(this.inputs(), this.values()));
+  private readonly normalisedOverrides = computed(() =>
+    inputOverrides(this.inputs(), this.values()),
+  );
   readonly hasOverrides = computed(() => Object.keys(this.normalisedOverrides()).length > 0);
   readonly overrideCount = computed(() => Object.keys(this.normalisedOverrides()).length);
   private readonly options = computed(() => {

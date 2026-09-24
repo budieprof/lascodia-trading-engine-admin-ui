@@ -41,7 +41,9 @@ import type { AuthoringMode } from './authoring-mode';
       @if (locked()) {
         <span class="hint">Fixed for an existing strategy.</span>
       } @else if (mode() === 'script') {
-        <span class="hint">Write the strategy in Pine Script v6 — compiled and run by the engine.</span>
+        <span class="hint"
+          >Write the strategy in Pine Script v6 — compiled and run by the engine.</span
+        >
       }
     </div>
   `,

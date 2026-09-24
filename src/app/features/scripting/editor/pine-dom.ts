@@ -42,9 +42,7 @@ export function renderDocView(view: PineDocView, className = 'cm-pine-hover'): H
 export function renderSignatureHelp(info: SignatureHelpInfo): HTMLElement {
   const root = el('div', 'cm-pine-sig');
   if (info.overloads.length > 1) {
-    root.appendChild(
-      el('div', 'cm-pine-sig-count', `${info.overloads.length} overloads`),
-    );
+    root.appendChild(el('div', 'cm-pine-sig-count', `${info.overloads.length} overloads`));
   }
   info.overloads.forEach((o, i) => {
     const active = i === info.activeOverload;
@@ -52,7 +50,8 @@ export function renderSignatureHelp(info: SignatureHelpInfo): HTMLElement {
     line.appendChild(document.createTextNode(`${o.label}(`));
     o.params.forEach((p, j) => {
       if (j > 0) line.appendChild(document.createTextNode(', '));
-      if (active && j === info.activeParam) line.appendChild(el('span', 'cm-pine-sig-param', p.name));
+      if (active && j === info.activeParam)
+        line.appendChild(el('span', 'cm-pine-sig-param', p.name));
       else line.appendChild(document.createTextNode(p.name));
     });
     if (o.variadic) line.appendChild(document.createTextNode(', …'));

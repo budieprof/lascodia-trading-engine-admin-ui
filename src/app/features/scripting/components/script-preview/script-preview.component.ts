@@ -39,7 +39,11 @@ const BAR_CHOICES = [500, 1000, 2000, 5000, 10000] as const;
       <div class="controls">
         <label class="ctl">
           <span class="muted small">Bars</span>
-          <select class="field-input" [value]="bars()" (change)="bars.set(+$any($event.target).value)">
+          <select
+            class="field-input"
+            [value]="bars()"
+            (change)="bars.set(+$any($event.target).value)"
+          >
             @for (b of barChoices; track b) {
               <option [value]="b" [selected]="b === bars()">{{ b | number }}</option>
             }
@@ -66,14 +70,18 @@ const BAR_CHOICES = [500, 1000, 2000, 5000, 10000] as const;
         <div class="error-box" role="alert">{{ e }}</div>
       }
 
-      @if (result(); as r) {
+      @if (lastResult(); as r) {
         @if (compileErrors().length) {
           <div class="section">
             <h5 class="section-title">Compile errors</h5>
             <ul class="issues">
               @for (d of compileErrors(); track $index) {
                 <li>
-                  <button type="button" class="issue" (click)="reveal.emit({ line: d.line, column: d.column })">
+                  <button
+                    type="button"
+                    class="issue"
+                    (click)="reveal.emit({ line: d.line, column: d.column })"
+                  >
                     <span class="code">{{ d.code }}</span> {{ d.message }}
                     <span class="pos">Ln {{ d.line }}</span>
                   </button>
@@ -105,7 +113,11 @@ const BAR_CHOICES = [500, 1000, 2000, 5000, 10000] as const;
           <div class="kpis">
             <div class="kpi">
               <span class="kpi-label">Net profit</span>
-              <span class="kpi-value" [class.pos]="rep.netProfit > 0" [class.neg]="rep.netProfit < 0">
+              <span
+                class="kpi-value"
+                [class.pos]="rep.netProfit > 0"
+                [class.neg]="rep.netProfit < 0"
+              >
                 {{ rep.netProfit | number: '1.2-2' }}
                 @if (rep.netProfitPercent !== null && rep.netProfitPercent !== undefined) {
                   <small>({{ rep.netProfitPercent | number: '1.2-2' }}%)</small>
@@ -305,7 +317,7 @@ export class ScriptPreviewComponent {
   readonly disabled = input(false);
 
   /** Every run result — the chart overlay renders from it. */
-  readonly result$ = output<ScriptRunResult>({ alias: 'result' });
+  readonly result = output<ScriptRunResult>();
   /** Jump the editor to a line. */
   readonly reveal = output<{ line: number; column: number }>();
 
@@ -314,7 +326,7 @@ export class ScriptPreviewComponent {
   readonly bars = signal<number>(2000);
   readonly running = signal(false);
   readonly error = signal<string | null>(null);
-  readonly result = signal<ScriptRunResult | null>(null);
+  readonly lastResult = signal<ScriptRunResult | null>(null);
 
   readonly canRun = computed(
     () => !this.disabled() && !!this.source().trim() && !!this.symbol() && !!this.timeframe(),
@@ -327,10 +339,12 @@ export class ScriptPreviewComponent {
         : 'Preview unavailable',
   );
   readonly compileErrors = computed<ScriptDiagnostic[]>(() =>
-    (this.result()?.compile?.diagnostics ?? []).filter((d) => d.severity === 'error').slice(0, 20),
+    (this.lastResult()?.compile?.diagnostics ?? [])
+      .filter((d) => d.severity === 'error')
+      .slice(0, 20),
   );
   readonly report = computed(() => {
-    const r = this.result()?.report;
+    const r = this.lastResult()?.report;
     if (!r) return null;
     const all = r.performance?.all ?? {};
     return {
@@ -345,13 +359,15 @@ export class ScriptPreviewComponent {
       warnings: r.warnings ?? [],
     };
   });
-  readonly barCount = computed(() => this.result()?.bars?.length ?? this.result()?.report?.meta?.bars ?? 0);
+  readonly barCount = computed(
+    () => this.lastResult()?.bars?.length ?? this.lastResult()?.report?.meta?.bars ?? 0,
+  );
   readonly logCount = computed(() => {
-    const logs = this.result()?.outputs?.logs;
+    const logs = this.lastResult()?.outputs?.logs;
     return Array.isArray(logs) ? logs.length : 0;
   });
   readonly alertCount = computed(() => {
-    const alerts = this.result()?.outputs?.alerts;
+    const alerts = this.lastResult()?.outputs?.alerts;
     return Array.isArray(alerts) ? alerts.length : 0;
   });
 
@@ -370,8 +386,8 @@ export class ScriptPreviewComponent {
           mode: this.kind() === 'strategy' ? 'backtest' : 'preview',
         }),
       );
-      this.result.set(r);
-      this.result$.emit(r);
+      this.lastResult.set(r);
+      this.result.emit(r);
     } catch (err) {
       this.error.set(toScriptingError(err, 'The preview failed.').message);
     } finally {

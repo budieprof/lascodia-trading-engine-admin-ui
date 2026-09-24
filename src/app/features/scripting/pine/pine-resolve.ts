@@ -24,7 +24,12 @@ export type PineResolved =
   | { kind: 'builtin-function'; path: string; fn: PineCatalogFunction }
   | { kind: 'builtin-variable'; path: string; variable: PineCatalogVariable }
   | { kind: 'builtin-constant'; path: string; constant: PineCatalogConstant }
-  | { kind: 'builtin-method'; name: string; fns: readonly PineCatalogFunction[]; receiverType?: string }
+  | {
+      kind: 'builtin-method';
+      name: string;
+      fns: readonly PineCatalogFunction[];
+      receiverType?: string;
+    }
   | { kind: 'namespace'; path: string }
   | { kind: 'keyword'; name: string; doc: string | null }
   | { kind: 'type-keyword'; name: string; doc: string | null }
@@ -57,7 +62,22 @@ const KEYWORD_SET = new Set(PINE_KEYWORDS);
 export function methodNamespace(type: string): string | null {
   const t = stripGeneric(type.trim()).replace(/\[\]$/, '');
   if (t === 'string') return 'str';
-  if (['array', 'matrix', 'map', 'line', 'label', 'box', 'table', 'polyline', 'linefill', 'chart.point', 'footprint', 'volume_row'].includes(t))
+  if (
+    [
+      'array',
+      'matrix',
+      'map',
+      'line',
+      'label',
+      'box',
+      'table',
+      'polyline',
+      'linefill',
+      'chart.point',
+      'footprint',
+      'volume_row',
+    ].includes(t)
+  )
     return t;
   if (type.trim().endsWith('[]')) return 'array';
   return null;
@@ -107,7 +127,8 @@ export function resolvePinePath(
 
   if (segments.length === 1) {
     const name = segments[0];
-    if (KEYWORD_SET.has(name)) return { kind: 'keyword', name, doc: PINE_KEYWORD_DOCS[name] ?? null };
+    if (KEYWORD_SET.has(name))
+      return { kind: 'keyword', name, doc: PINE_KEYWORD_DOCS[name] ?? null };
     const userFn = symbols.functions.find((f) => f.name === name);
     if (userFn && (preferCall || !variablesInScope(symbols, line).some((v) => v.name === name))) {
       return { kind: 'user-function', fn: userFn };
@@ -132,13 +153,18 @@ export function resolvePinePath(
   // Built-ins by their full path.
   const builtin = index.lookup(clean, preferCall);
   if (builtin && builtin.kind !== 'namespace') {
-    if (builtin.kind === 'function') return { kind: 'builtin-function', path: clean, fn: builtin.fn };
+    if (builtin.kind === 'function')
+      return { kind: 'builtin-function', path: clean, fn: builtin.fn };
     if (builtin.kind === 'variable')
       return { kind: 'builtin-variable', path: clean, variable: builtin.variable };
     return { kind: 'builtin-constant', path: clean, constant: builtin.constant };
   }
   if (clean === 'chart.point') {
-    return { kind: 'type-keyword', name: clean, doc: index.types.get(clean)?.doc ?? PINE_KEYWORD_DOCS[clean] ?? null };
+    return {
+      kind: 'type-keyword',
+      name: clean,
+      doc: index.types.get(clean)?.doc ?? PINE_KEYWORD_DOCS[clean] ?? null,
+    };
   }
   if (builtin?.kind === 'namespace') return { kind: 'namespace', path: clean };
   if (segments.length < 2) return null;
@@ -196,11 +222,21 @@ export function resolvePinePath(
 
   const userMethods = symbols.methods.filter((m) => m.name === member);
   if (userMethods.length) {
-    return { kind: 'user-method', name: member, methods: userMethods, ...(type ? { receiverType: type } : {}) };
+    return {
+      kind: 'user-method',
+      name: member,
+      methods: userMethods,
+      ...(type ? { receiverType: type } : {}),
+    };
   }
   const builtinMethods = index.methodsNamed(member);
   if (builtinMethods.length) {
-    return { kind: 'builtin-method', name: member, fns: builtinMethods, ...(type ? { receiverType: type } : {}) };
+    return {
+      kind: 'builtin-method',
+      name: member,
+      fns: builtinMethods,
+      ...(type ? { receiverType: type } : {}),
+    };
   }
   return null;
 }

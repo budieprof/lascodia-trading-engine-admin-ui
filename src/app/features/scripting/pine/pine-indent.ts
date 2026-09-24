@@ -63,7 +63,11 @@ interface StatementState {
  * the bracket depth. A safe start is a column-0 line not preceded by an open continuation; the
  * walk is capped so pathological documents stay fast.
  */
-function statementAt(read: LineReader, line: number, maskLine: (i: number) => string): StatementState {
+function statementAt(
+  read: LineReader,
+  line: number,
+  maskLine: (i: number) => string,
+): StatementState {
   let from = line;
   const floor = Math.max(0, line - 400);
   while (from > floor) {
@@ -118,8 +122,7 @@ export function computePineIndent(read: LineReader, line: number): number {
     return stmtIndent + (st.depth > 0 ? PINE_INDENT_UNIT : CONTINUATION);
   }
 
-  const opens =
-    opensBlockHeader(maskLine(st.start)) || /=>\s*$/.test(maskLine(prev).trimEnd());
+  const opens = opensBlockHeader(maskLine(st.start)) || /=>\s*$/.test(maskLine(prev).trimEnd());
   let indent = opens ? stmtIndent + PINE_INDENT_UNIT : stmtIndent;
 
   if (/^else\b/.test(own)) {

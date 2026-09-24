@@ -44,7 +44,9 @@ import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
         @if (current().executionPolicy; as p) {
           <span class="chip" [title]="'Execution policy: ' + p">{{ p }} policy</span>
         }
-        @if (current().accountBindingCount !== null && current().accountBindingCount !== undefined) {
+        @if (
+          current().accountBindingCount !== null && current().accountBindingCount !== undefined
+        ) {
           <span
             class="chip"
             [class.chip-warn]="current().accountBindingCount === 0"
@@ -61,7 +63,12 @@ import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
         }
         <span class="spacer"></span>
         <button type="button" class="btn btn-ghost btn-sm" (click)="copy()">Copy</button>
-        <button type="button" class="btn btn-ghost btn-sm" (click)="export()" [disabled]="exporting()">
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          (click)="export()"
+          [disabled]="exporting()"
+        >
           Export .pine
         </button>
         <button type="button" class="btn btn-primary btn-sm" (click)="editRequested.emit()">
@@ -203,7 +210,11 @@ export class StrategyScriptCardComponent {
       .subscribe((id) => void this.reload(id));
   }
 
-  private async compileSource(source: string, symbol: string | null, timeframe: string | null): Promise<void> {
+  private async compileSource(
+    source: string,
+    symbol: string | null,
+    timeframe: string | null,
+  ): Promise<void> {
     if (!source.trim()) {
       this.compiled.set(null);
       return;

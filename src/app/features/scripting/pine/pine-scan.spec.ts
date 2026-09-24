@@ -82,7 +82,14 @@ describe('scanPineSymbols', () => {
 
   it('collects imports with their alias', () => {
     expect(s.imports).toEqual([
-      { kind: 'import', publisher: 'alice', libraryName: 'tools', version: 2, alias: 'tools', line: 2 },
+      {
+        kind: 'import',
+        publisher: 'alice',
+        libraryName: 'tools',
+        version: 2,
+        alias: 'tools',
+        line: 2,
+      },
     ]);
   });
 
@@ -157,7 +164,11 @@ describe('findCallContext', () => {
   };
 
   it('finds the callee and the argument index', () => {
-    expect(at('x = ta.ema(close, |')).toMatchObject({ callee: 'ta.ema', argIndex: 1, namedArg: null });
+    expect(at('x = ta.ema(close, |')).toMatchObject({
+      callee: 'ta.ema',
+      argIndex: 1,
+      namedArg: null,
+    });
     expect(at('x = ta.ema(|')).toMatchObject({ callee: 'ta.ema', argIndex: 0 });
   });
 
@@ -176,7 +187,12 @@ describe('findCallContext', () => {
 
   it('reports named arguments', () => {
     const ctx = at('plot(close, title = "x", color = |');
-    expect(ctx).toMatchObject({ callee: 'plot', argIndex: 2, namedArg: 'color', usedNamedArgs: ['title'] });
+    expect(ctx).toMatchObject({
+      callee: 'plot',
+      argIndex: 2,
+      namedArg: 'color',
+      usedNamedArgs: ['title'],
+    });
   });
 
   it('ignores keyword parentheses and returns null outside calls', () => {
@@ -189,7 +205,9 @@ describe('identifierPathAt / inferInitType / readDeclarationHeader', () => {
   it('returns the dotted path up to the hovered segment', () => {
     const text = 'x = strategy.risk.allow_entry_in(strategy.direction.long)';
     expect(identifierPathAt(text, text.indexOf('risk') + 1)?.path).toBe('strategy.risk');
-    expect(identifierPathAt(text, text.indexOf('allow') + 2)?.path).toBe('strategy.risk.allow_entry_in');
+    expect(identifierPathAt(text, text.indexOf('allow') + 2)?.path).toBe(
+      'strategy.risk.allow_entry_in',
+    );
     expect(identifierPathAt(text, 1)?.path).toBe('x');
     expect(identifierPathAt('a = 12', 5)).toBeNull();
   });
@@ -200,16 +218,25 @@ describe('identifierPathAt / inferInitType / readDeclarationHeader', () => {
     expect(inferInitType('"s"')).toEqual({ type: 'string' });
     expect(inferInitType('#FF0000')).toEqual({ type: 'color' });
     expect(inferInitType('array.new<int>(3)')).toEqual({ type: 'array<int>', callee: 'array.new' });
-    expect(inferInitType('array.new_float(0)')).toEqual({ type: 'array<float>', callee: 'array.new_float' });
+    expect(inferInitType('array.new_float(0)')).toEqual({
+      type: 'array<float>',
+      callee: 'array.new_float',
+    });
     expect(inferInitType('Point.new(1)')).toEqual({ type: 'Point', callee: 'Point.new' });
     expect(inferInitType('line.new(a, b, c, d)')).toEqual({ type: 'line', callee: 'line.new' });
-    expect(inferInitType('input.enum(Dir.long, "D")')).toEqual({ type: 'Dir', callee: 'input.enum' });
+    expect(inferInitType('input.enum(Dir.long, "D")')).toEqual({
+      type: 'Dir',
+      callee: 'input.enum',
+    });
     expect(inferInitType('ta.rsi(close, 14)')).toEqual({ callee: 'ta.rsi' });
   });
 
   it('reads the declaration kind and title without compiling', () => {
     expect(readDeclarationHeader(SCRIPT)).toEqual({ kind: 'strategy', title: 'Demo' });
-    expect(readDeclarationHeader('//@version=6\nindicator(title = "RSI")')).toEqual({ kind: 'indicator', title: 'RSI' });
+    expect(readDeclarationHeader('//@version=6\nindicator(title = "RSI")')).toEqual({
+      kind: 'indicator',
+      title: 'RSI',
+    });
     expect(readDeclarationHeader('// strategy("x")\nplot(1)')).toBeNull();
   });
 });

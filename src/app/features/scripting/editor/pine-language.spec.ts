@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { StringStream, getIndentation, IndentContext, foldable } from '@codemirror/language';
 import { EditorState } from '@codemirror/state';
 
-import { createPineStreamParser, pineLanguageSupport, type PineTokenizerNames } from './pine-language';
+import {
+  createPineStreamParser,
+  pineLanguageSupport,
+  type PineTokenizerNames,
+} from './pine-language';
 import { PineCatalogIndex } from '../pine/pine-catalog-index';
 import { TEST_CATALOG } from '../testing/pine-test-catalog';
 
@@ -163,7 +167,10 @@ describe('Pine stream tokenizer', () => {
 
 describe('Pine language support (indentation + folding)', () => {
   const state = (doc: string) =>
-    EditorState.create({ doc, extensions: [pineLanguageSupport(names), EditorState.tabSize.of(4)] });
+    EditorState.create({
+      doc,
+      extensions: [pineLanguageSupport(names), EditorState.tabSize.of(4)],
+    });
 
   /** Indentation for a new line typed at the end of `doc` (what Enter does). */
   const enterIndent = (doc: string) => {

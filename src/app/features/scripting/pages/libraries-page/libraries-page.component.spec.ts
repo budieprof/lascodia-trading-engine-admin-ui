@@ -28,9 +28,27 @@ const STD: ScriptLibraryDto = {
   description: 'Built-in helpers',
   exports: [{ kind: 'function', name: 'pips', signature: 'pips(float price) → float' }],
 };
-const MINE_V1: ScriptLibraryDto = { id: 10, publisher: 'ola', name: 'Tools', version: 1, visibility: 'Private' };
-const MINE_V2: ScriptLibraryDto = { id: 11, publisher: 'ola', name: 'Tools', version: 2, visibility: 'Private' };
-const OTHER: ScriptLibraryDto = { id: 20, publisher: 'amy', name: 'Bands', version: 3, visibility: 'Shared' };
+const MINE_V1: ScriptLibraryDto = {
+  id: 10,
+  publisher: 'ola',
+  name: 'Tools',
+  version: 1,
+  visibility: 'Private',
+};
+const MINE_V2: ScriptLibraryDto = {
+  id: 11,
+  publisher: 'ola',
+  name: 'Tools',
+  version: 2,
+  visibility: 'Private',
+};
+const OTHER: ScriptLibraryDto = {
+  id: 20,
+  publisher: 'amy',
+  name: 'Bands',
+  version: 3,
+  visibility: 'Shared',
+};
 
 const LIBRARY_SOURCE = '//@version=6\nlibrary("Tools")\nexport f(float x) => x\n';
 
@@ -60,7 +78,10 @@ describe('LibrariesPageComponent', () => {
     api = {
       listLibraries: vi.fn().mockReturnValue(of([MINE_V1, OTHER, MINE_V2, STD])),
       getLibrary: vi.fn((id: number) =>
-        of({ ...[STD, MINE_V1, MINE_V2, OTHER].find((l) => l.id === id)!, source: LIBRARY_SOURCE } as ScriptLibraryDetailDto),
+        of({
+          ...[STD, MINE_V1, MINE_V2, OTHER].find((l) => l.id === id)!,
+          source: LIBRARY_SOURCE,
+        } as ScriptLibraryDetailDto),
       ),
       createLibrary: vi.fn().mockReturnValue(of({ ...MINE_V2, id: 12, version: 3 })),
       deleteLibrary: vi.fn().mockReturnValue(of(undefined)),
@@ -73,9 +94,15 @@ describe('LibrariesPageComponent', () => {
       imports: [LibrariesPageComponent],
       providers: [
         { provide: ScriptingService, useValue: api },
-        { provide: PineCatalogService, useValue: { ...language, catalog: signal(null), libraries: signal([]) } },
+        {
+          provide: PineCatalogService,
+          useValue: { ...language, catalog: signal(null), libraries: signal([]) },
+        },
         { provide: NotificationService, useValue: notify },
-        { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap: convertToParamMap({}) } } },
+        {
+          provide: ActivatedRoute,
+          useValue: { snapshot: { queryParamMap: convertToParamMap({}) } },
+        },
         { provide: Router, useValue: { navigate } },
       ],
     });
@@ -113,7 +140,10 @@ describe('LibrariesPageComponent', () => {
       expect(api['getLibrary']).toHaveBeenCalledWith(1);
       expect(cmp.detail()?.source).toBe(LIBRARY_SOURCE);
       expect(cmp.exportsOf(STD).map((e) => e.name)).toEqual(['pips']);
-      expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { id: 1 } }));
+      expect(navigate).toHaveBeenCalledWith(
+        [],
+        expect.objectContaining({ queryParams: { id: 1 } }),
+      );
     });
 
     it('builds and copies the import line', async () => {
@@ -158,7 +188,12 @@ describe('LibrariesPageComponent', () => {
     it('publishes a new version under the same name, from the current source', async () => {
       await cmp.select(11);
       cmp.startNewVersion(MINE_V2);
-      expect(cmp.draft()).toMatchObject({ baseId: 11, name: 'Tools', source: LIBRARY_SOURCE, visibility: 'Private' });
+      expect(cmp.draft()).toMatchObject({
+        baseId: 11,
+        name: 'Tools',
+        source: LIBRARY_SOURCE,
+        visibility: 'Private',
+      });
       cmp.patchDraft({ source: `${LIBRARY_SOURCE}export g(float x) => x * 2\n` });
       await cmp.publish();
       expect(api['createLibrary']).toHaveBeenCalledWith(
@@ -170,12 +205,27 @@ describe('LibrariesPageComponent', () => {
       cmp.startNew();
       cmp.draftCompile.set({
         success: false,
-        diagnostics: [{ code: 'PS1001', severity: 'error', message: 'x', line: 1, column: 1, endLine: 1, endColumn: 2 }],
+        diagnostics: [
+          {
+            code: 'PS1001',
+            severity: 'error',
+            message: 'x',
+            line: 1,
+            column: 1,
+            endLine: 1,
+            endColumn: 2,
+          },
+        ],
         declaration: null,
         inputs: [],
       });
       expect(cmp.publishBlockedReason()).toBe('Fix the compile errors first');
-      cmp.draftCompile.set({ success: true, diagnostics: [], declaration: { kind: 'indicator', title: 'I' }, inputs: [] });
+      cmp.draftCompile.set({
+        success: true,
+        diagnostics: [],
+        declaration: { kind: 'indicator', title: 'I' },
+        inputs: [],
+      });
       expect(cmp.canPublish()).toBe(false);
       expect(cmp.draftKindWarning()).toContain('indicator()');
     });
@@ -218,7 +268,9 @@ describe('LibrariesPageComponent', () => {
     });
 
     it('shows any other refusal in the dialog', async () => {
-      api['deleteLibrary'].mockReturnValueOnce(refuse(new ScriptingApiError('Forbidden', null, null, 403)));
+      api['deleteLibrary'].mockReturnValueOnce(
+        refuse(new ScriptingApiError('Forbidden', null, null, 403)),
+      );
       cmp.askDelete(OTHER);
       await cmp.confirmDelete();
       expect(cmp.deleteError()).toBe('Forbidden');

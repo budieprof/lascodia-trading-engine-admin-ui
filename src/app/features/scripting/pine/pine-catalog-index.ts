@@ -70,7 +70,11 @@ export class PineCatalogIndex {
     for (const v of variables) this.variables.set(v.name, v);
     for (const c of constants) this.constants.set(c.name, c);
     for (const ns of namespaces) this.namespaces.add(ns);
-    for (const name of [...this.functions.keys(), ...this.variables.keys(), ...this.constants.keys()]) {
+    for (const name of [
+      ...this.functions.keys(),
+      ...this.variables.keys(),
+      ...this.constants.keys(),
+    ]) {
       const parts = name.split('.');
       for (let i = 1; i < parts.length; i++) this.namespaces.add(parts.slice(0, i).join('.'));
     }

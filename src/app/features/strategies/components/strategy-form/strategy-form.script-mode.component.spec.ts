@@ -124,8 +124,14 @@ describe('StrategyFormComponent — Pine script authoring', () => {
             getVersions: () => of({ status: true, data: [] }),
           },
         },
-        { provide: RiskProfilesService, useValue: { list: () => of({ status: true, data: { data: [] } }) } },
-        { provide: CurrencyPairsService, useValue: { list: () => of({ status: true, data: { data: [] } }) } },
+        {
+          provide: RiskProfilesService,
+          useValue: { list: () => of({ status: true, data: { data: [] } }) },
+        },
+        {
+          provide: CurrencyPairsService,
+          useValue: { list: () => of({ status: true, data: { data: [] } }) },
+        },
         { provide: NotificationService, useValue: notify },
         {
           provide: PineCatalogService,
@@ -253,11 +259,19 @@ describe('StrategyFormComponent — Pine script authoring', () => {
 
     it('opens a script strategy in script mode with its saved script, inputs and policy', () => {
       expect(cmp.isScriptAuthoring()).toBe(true);
-      expect(cmp.scriptDraft()).toEqual({ source: SCRIPT, inputs: { in_3_len: 20 }, executionPolicy: 'Direct' });
+      expect(cmp.scriptDraft()).toEqual({
+        source: SCRIPT,
+        inputs: { in_3_len: 20 },
+        executionPolicy: 'Direct',
+      });
     });
 
     it('saves a changed script through the panel and closes when the form is unchanged', async () => {
-      const draft: ScriptDraft = { source: `${SCRIPT}// x\n`, inputs: { in_3_len: 20 }, executionPolicy: 'Direct' };
+      const draft: ScriptDraft = {
+        source: `${SCRIPT}// x\n`,
+        inputs: { in_3_len: 20 },
+        executionPolicy: 'Direct',
+      };
       const stub = panel(draft, true);
       await cmp.submitScript();
       expect(stub.saveScript).toHaveBeenCalledWith(42, draft);
@@ -267,21 +281,37 @@ describe('StrategyFormComponent — Pine script authoring', () => {
     });
 
     it('then emits the metadata update — never the script, never parametersJson', async () => {
-      const stub = panel({ source: SCRIPT, inputs: { in_3_len: 25 }, executionPolicy: 'Direct' }, true);
+      const stub = panel(
+        { source: SCRIPT, inputs: { in_3_len: 25 }, executionPolicy: 'Direct' },
+        true,
+      );
       cmp.form.patchValue({ name: 'Renamed' });
       cmp.form.markAsDirty();
       cmp.updateChangeReason.set('  tighter stop  ');
       await cmp.submitScript();
       expect(stub.saveScript).toHaveBeenCalled();
       expect(submitted).toHaveLength(1);
-      expect(submitted[0]).toMatchObject({ name: 'Renamed', riskProfileId: 5, changeReason: 'tighter stop' });
-      for (const key of ['parametersJson', 'scriptSource', 'scriptInputs', 'strategyType', 'symbol']) {
+      expect(submitted[0]).toMatchObject({
+        name: 'Renamed',
+        riskProfileId: 5,
+        changeReason: 'tighter stop',
+      });
+      for (const key of [
+        'parametersJson',
+        'scriptSource',
+        'scriptInputs',
+        'strategyType',
+        'symbol',
+      ]) {
         expect(key in submitted[0]).toBe(false);
       }
     });
 
     it('skips the script endpoint when only the metadata changed', async () => {
-      const stub = panel({ source: SCRIPT, inputs: { in_3_len: 20 }, executionPolicy: 'Direct' }, false);
+      const stub = panel(
+        { source: SCRIPT, inputs: { in_3_len: 20 }, executionPolicy: 'Direct' },
+        false,
+      );
       cmp.form.patchValue({ description: 'new description' });
       cmp.form.markAsDirty();
       await cmp.submitScript();

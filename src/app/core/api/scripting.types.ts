@@ -219,7 +219,13 @@ export interface ScriptCompileResult {
 
 // ── §3 Run / preview — POST scripting/run ─────────────────────────────────
 
-export type ScriptChartType = 'standard' | 'heikinashi' | 'renko' | 'linebreak' | 'kagi' | 'pointfigure';
+export type ScriptChartType =
+  | 'standard'
+  | 'heikinashi'
+  | 'renko'
+  | 'linebreak'
+  | 'kagi'
+  | 'pointfigure';
 
 export interface ScriptRunRequest {
   source?: string;

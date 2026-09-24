@@ -1,6 +1,12 @@
 import type { PineCatalog, PineCatalogParam } from '@core/api/scripting.types';
 
-const p = (name: string, type: string, optional = false, doc = '', defaultText: string | null = null): PineCatalogParam => ({
+const p = (
+  name: string,
+  type: string,
+  optional = false,
+  doc = '',
+  defaultText: string | null = null,
+): PineCatalogParam => ({
   name,
   type,
   qualifier: type.split(' ')[0],
@@ -13,7 +19,35 @@ const p = (name: string, type: string, optional = false, doc = '', defaultText: 
 export const TEST_CATALOG: PineCatalog = {
   version: 'test-v1',
   languageVersion: 6,
-  keywords: ['and', 'or', 'not', 'if', 'else', 'switch', 'for', 'to', 'by', 'in', 'while', 'var', 'varip', 'import', 'export', 'as', 'enum', 'type', 'method', 'break', 'continue', 'true', 'false', 'na', 'series', 'simple', 'const'],
+  keywords: [
+    'and',
+    'or',
+    'not',
+    'if',
+    'else',
+    'switch',
+    'for',
+    'to',
+    'by',
+    'in',
+    'while',
+    'var',
+    'varip',
+    'import',
+    'export',
+    'as',
+    'enum',
+    'type',
+    'method',
+    'break',
+    'continue',
+    'true',
+    'false',
+    'na',
+    'series',
+    'simple',
+    'const',
+  ],
   types: [
     { name: 'float', doc: 'Floating point type.' },
     { name: 'array', doc: 'Array type.', generic: true },
@@ -27,7 +61,10 @@ export const TEST_CATALOG: PineCatalog = {
       overloads: [
         {
           signature: 'ta.ema(source, length) → series float',
-          params: [p('source', 'series int/float', false, 'Series of values to process.'), p('length', 'simple int', false, 'Number of bars.')],
+          params: [
+            p('source', 'series int/float', false, 'Series of values to process.'),
+            p('length', 'simple int', false, 'Number of bars.'),
+          ],
           returns: 'series float',
           flags: ['RequiresEveryBar'],
         },
@@ -77,7 +114,11 @@ export const TEST_CATALOG: PineCatalog = {
       overloads: [
         {
           signature: 'strategy(title, shorttitle, overlay) → void',
-          params: [p('title', 'const string'), p('shorttitle', 'const string', true), p('overlay', 'const bool', true)],
+          params: [
+            p('title', 'const string'),
+            p('shorttitle', 'const string', true),
+            p('overlay', 'const bool', true),
+          ],
           returns: 'void',
         },
       ],
@@ -88,7 +129,11 @@ export const TEST_CATALOG: PineCatalog = {
       overloads: [
         {
           signature: 'strategy.entry(id, direction, qty) → void',
-          params: [p('id', 'series string'), p('direction', 'series strategy_direction'), p('qty', 'series int/float', true)],
+          params: [
+            p('id', 'series string'),
+            p('direction', 'series strategy_direction'),
+            p('qty', 'series int/float', true),
+          ],
           returns: 'void',
         },
       ],
@@ -97,8 +142,18 @@ export const TEST_CATALOG: PineCatalog = {
       name: 'math.max',
       doc: 'Greatest of multiple values.',
       overloads: [
-        { signature: 'math.max(number0, number1) → int', params: [p('number0', 'int'), p('number1', 'int')], returns: 'int', variadic: true },
-        { signature: 'math.max(number0, number1) → float', params: [p('number0', 'float'), p('number1', 'float')], returns: 'float', variadic: true },
+        {
+          signature: 'math.max(number0, number1) → int',
+          params: [p('number0', 'int'), p('number1', 'int')],
+          returns: 'int',
+          variadic: true,
+        },
+        {
+          signature: 'math.max(number0, number1) → float',
+          params: [p('number0', 'float'), p('number1', 'float')],
+          returns: 'float',
+          variadic: true,
+        },
       ],
     },
     {
@@ -107,7 +162,12 @@ export const TEST_CATALOG: PineCatalog = {
       overloads: [
         {
           signature: 'input.int(defval, title, minval, maxval) → input int',
-          params: [p('defval', 'const int'), p('title', 'const string', true), p('minval', 'const int', true), p('maxval', 'const int', true)],
+          params: [
+            p('defval', 'const int'),
+            p('title', 'const string', true),
+            p('minval', 'const int', true),
+            p('maxval', 'const int', true),
+          ],
           returns: 'input int',
         },
       ],
@@ -140,7 +200,12 @@ export const TEST_CATALOG: PineCatalog = {
       name: 'array.size',
       doc: 'Number of elements.',
       overloads: [
-        { signature: 'array.size(id) → series int', params: [p('id', 'any array type')], returns: 'series int', method: true },
+        {
+          signature: 'array.size(id) → series int',
+          params: [p('id', 'any array type')],
+          returns: 'series int',
+          method: true,
+        },
       ],
     },
     {
@@ -149,7 +214,11 @@ export const TEST_CATALOG: PineCatalog = {
       overloads: [
         {
           signature: 'request.security(symbol, timeframe, expression) → series <type>',
-          params: [p('symbol', 'series string'), p('timeframe', 'series string'), p('expression', 'variable')],
+          params: [
+            p('symbol', 'series string'),
+            p('timeframe', 'series string'),
+            p('expression', 'variable'),
+          ],
           returns: 'series <type>',
         },
       ],
@@ -158,14 +227,23 @@ export const TEST_CATALOG: PineCatalog = {
       name: 'str.tostring',
       doc: 'Converts a value to a string.',
       overloads: [
-        { signature: 'str.tostring(value) → series string', params: [p('value', 'series int/float')], returns: 'series string', method: true },
+        {
+          signature: 'str.tostring(value) → series string',
+          params: [p('value', 'series int/float')],
+          returns: 'series string',
+          method: true,
+        },
       ],
     },
     {
       name: 'time',
       doc: 'Bar open time for a timeframe/session.',
       overloads: [
-        { signature: 'time(timeframe, session) → series int', params: [p('timeframe', 'series string'), p('session', 'series string', true)], returns: 'series int' },
+        {
+          signature: 'time(timeframe, session) → series int',
+          params: [p('timeframe', 'series string'), p('session', 'series string', true)],
+          returns: 'series int',
+        },
       ],
     },
   ],

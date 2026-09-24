@@ -43,11 +43,14 @@ export function docViewFor(resolved: PineResolved, text: string): PineDocView {
         notes.push(`Returns — ${resolved.fn.returnsDoc}`);
       }
       if (resolved.kind === 'user-function' || resolved.kind === 'user-method') {
-        const line = resolved.kind === 'user-function' ? resolved.fn.line : resolved.methods[0].line;
+        const line =
+          resolved.kind === 'user-function' ? resolved.fn.line : resolved.methods[0].line;
         notes.push(`Declared on line ${line + 1}.`);
       }
       if (resolved.kind === 'library-export') {
-        notes.push(`From ${resolved.imp.publisher}/${resolved.imp.libraryName}/${resolved.imp.version}.`);
+        notes.push(
+          `From ${resolved.imp.publisher}/${resolved.imp.libraryName}/${resolved.imp.version}.`,
+        );
       }
       const code = overloads.length
         ? overloads.map(formatOverload)
@@ -112,7 +115,8 @@ export function docViewFor(resolved: PineResolved, text: string): PineDocView {
         code: [
           `type ${t.name}`,
           ...t.fields.map(
-            (f) => `    ${f.varip ? 'varip ' : ''}${f.type ?? ''} ${f.name}${f.defaultText ? ` = ${f.defaultText}` : ''}`,
+            (f) =>
+              `    ${f.varip ? 'varip ' : ''}${f.type ?? ''} ${f.name}${f.defaultText ? ` = ${f.defaultText}` : ''}`,
           ),
         ],
         doc: t.doc ?? null,
@@ -131,7 +135,9 @@ export function docViewFor(resolved: PineResolved, text: string): PineDocView {
         kind: 'enum',
         code: [
           `enum ${resolved.enumSymbol.name}`,
-          ...resolved.enumSymbol.members.map((m) => `    ${m.name}${m.title ? ` = "${m.title}"` : ''}`),
+          ...resolved.enumSymbol.members.map(
+            (m) => `    ${m.name}${m.title ? ` = "${m.title}"` : ''}`,
+          ),
         ],
         doc: resolved.enumSymbol.doc ?? null,
         notes: [],

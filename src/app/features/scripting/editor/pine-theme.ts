@@ -85,7 +85,11 @@ const DARK: Palette = {
 function highlightStyle(p: Palette, dark: boolean): HighlightStyle {
   return HighlightStyle.define(
     [
-      { tag: [t.keyword, t.definitionKeyword, t.operatorKeyword], color: p.keyword, fontWeight: '600' },
+      {
+        tag: [t.keyword, t.definitionKeyword, t.operatorKeyword],
+        color: p.keyword,
+        fontWeight: '600',
+      },
       { tag: t.controlKeyword, color: p.control, fontWeight: '600' },
       { tag: t.modifier, color: p.keyword, fontStyle: 'italic' },
       { tag: t.typeName, color: p.type },
@@ -168,14 +172,24 @@ function chrome(dark: boolean): Extension {
         boxShadow: 'var(--shadow-md)',
         overflow: 'hidden',
       },
-      '.cm-tooltip.cm-tooltip-autocomplete > ul': { fontFamily: MONO, fontSize: '12.5px', maxHeight: '18em' },
+      '.cm-tooltip.cm-tooltip-autocomplete > ul': {
+        fontFamily: MONO,
+        fontSize: '12.5px',
+        maxHeight: '18em',
+      },
       '.cm-tooltip.cm-tooltip-autocomplete > ul > li': { padding: '2px 8px' },
       '.cm-tooltip-autocomplete ul li[aria-selected]': {
         backgroundColor: 'var(--accent)',
         color: '#fff',
       },
-      '.cm-completionDetail': { color: 'var(--text-tertiary)', fontStyle: 'normal', marginLeft: '8px' },
-      '.cm-tooltip-autocomplete ul li[aria-selected] .cm-completionDetail': { color: 'rgba(255,255,255,0.8)' },
+      '.cm-completionDetail': {
+        color: 'var(--text-tertiary)',
+        fontStyle: 'normal',
+        marginLeft: '8px',
+      },
+      '.cm-tooltip-autocomplete ul li[aria-selected] .cm-completionDetail': {
+        color: 'rgba(255,255,255,0.8)',
+      },
       '.cm-completionInfo': {
         padding: '8px 10px',
         maxWidth: '420px',
@@ -214,11 +228,23 @@ function chrome(dark: boolean): Extension {
         fontSize: '12.5px',
         lineHeight: '1.5',
       },
-      '.cm-pine-sig-overload': { fontFamily: MONO, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' },
+      '.cm-pine-sig-overload': {
+        fontFamily: MONO,
+        color: 'var(--text-secondary)',
+        whiteSpace: 'pre-wrap',
+      },
       '.cm-pine-sig-overload.is-active': { color: 'var(--text-primary)' },
       '.cm-pine-sig-overload + .cm-pine-sig-overload': { marginTop: '2px' },
-      '.cm-pine-sig-param': { color: 'var(--accent)', fontWeight: '700', textDecoration: 'underline' },
-      '.cm-pine-sig-count': { color: 'var(--text-tertiary)', fontSize: '11px', marginBottom: '4px' },
+      '.cm-pine-sig-param': {
+        color: 'var(--accent)',
+        fontWeight: '700',
+        textDecoration: 'underline',
+      },
+      '.cm-pine-sig-count': {
+        color: 'var(--text-tertiary)',
+        fontSize: '11px',
+        marginBottom: '4px',
+      },
       '.cm-pine-doc': { marginTop: '6px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' },
       '.cm-pine-doc code': { fontFamily: MONO, fontSize: '12px' },
       '.cm-pine-code': { fontFamily: MONO, whiteSpace: 'pre-wrap' },

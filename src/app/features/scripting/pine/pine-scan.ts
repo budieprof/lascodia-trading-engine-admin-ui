@@ -10,7 +10,8 @@ const IDENT = '[A-Za-z_][A-Za-z0-9_]*';
 /** A type expression: `float`, `chart.point`, `array<float>`, `map<string, array<int>>`, `MyType`, `float[]`. */
 const TYPE_EXPR = `${IDENT}(?:\\.${IDENT})*(?:\\s*<[^<>=()]*(?:<[^<>=()]*>[^<>=()]*)*>)?(?:\\[\\])?`;
 
-const IMPORT_RE = /^import\s+([A-Za-z0-9_\-]+)\s*\/\s*([A-Za-z0-9_\-]+)\s*\/\s*(\d+)(?:\s+as\s+([A-Za-z_]\w*))?/;
+const IMPORT_RE =
+  /^import\s+([A-Za-z0-9_-]+)\s*\/\s*([A-Za-z0-9_-]+)\s*\/\s*(\d+)(?:\s+as\s+([A-Za-z_]\w*))?/;
 const TYPE_DECL_RE = /^(export\s+)?type\s+([A-Za-z_]\w*)\s*$/;
 const ENUM_DECL_RE = /^(export\s+)?enum\s+([A-Za-z_]\w*)\s*$/;
 const METHOD_HEAD_RE = /^(export\s+)?method\s+([A-Za-z_]\w*)\s*\(/;
@@ -336,7 +337,8 @@ function readDocBlock(lines: string[], line: number): DocBlock {
   return block;
 }
 
-const GENERIC_RE = /^<\s*[A-Za-z_][\w.]*(?:\s*<[^<>]*>)?(?:\s*,\s*[A-Za-z_][\w.]*(?:\s*<[^<>]*>)?)?\s*>/;
+const GENERIC_RE =
+  /^<\s*[A-Za-z_][\w.]*(?:\s*<[^<>]*>)?(?:\s*,\s*[A-Za-z_][\w.]*(?:\s*<[^<>]*>)?)?\s*>/;
 
 /**
  * End index of a generic argument list (`<float>`, `<string, array<int>>`) starting at `i`, or -1
@@ -551,7 +553,12 @@ export function scanPineSymbols(text: string): PineDocSymbols {
             type: f[2].replace(/\s+/g, ' '),
             ...(f[1] ? { varip: true } : {}),
             ...(f[4] !== undefined && eq >= 0
-              ? { defaultText: lines[j].slice(eq + 1).split('//')[0].trim() }
+              ? {
+                  defaultText: lines[j]
+                    .slice(eq + 1)
+                    .split('//')[0]
+                    .trim(),
+                }
               : {}),
             ...(docs.fields[f[3]] ? { doc: docs.fields[f[3]] } : {}),
           });
@@ -601,7 +608,10 @@ export function scanPineSymbols(text: string): PineDocSymbols {
             );
             const headerEndLine = lineOf(lineStarts, closeAbs + arrow[0].length);
             const bodyText = text
-              .slice(closeAbs + 1 + arrow[0].length, lineStarts[headerEndLine] + lines[headerEndLine].length)
+              .slice(
+                closeAbs + 1 + arrow[0].length,
+                lineStarts[headerEndLine] + lines[headerEndLine].length,
+              )
               .split('//')[0]
               .trim();
             const end = bodyText ? headerEndLine : blockEnd(lines, masked, headerEndLine, 0);
@@ -643,9 +653,7 @@ export function scanPineSymbols(text: string): PineDocSymbols {
     const forTo = forIn ? null : FOR_RE.exec(trimmed);
     if (forIn || forTo) {
       const end = blockEnd(lines, masked, i, indent);
-      const names = forIn
-        ? (forIn[1] ?? forIn[2]).split(',').map((s) => s.trim())
-        : [forTo![1]];
+      const names = forIn ? (forIn[1] ?? forIn[2]).split(',').map((s) => s.trim()) : [forTo![1]];
       for (const name of names) {
         if (!/^[A-Za-z_]\w*$/.test(name)) continue;
         out.variables.push({
@@ -661,7 +669,8 @@ export function scanPineSymbols(text: string): PineDocSymbols {
       continue;
     }
 
-    const scopeEnd = indent === 0 ? Number.POSITIVE_INFINITY : blockEnd(lines, masked, i, indent - 1);
+    const scopeEnd =
+      indent === 0 ? Number.POSITIVE_INFINITY : blockEnd(lines, masked, i, indent - 1);
     const tuple = TUPLE_DECL_RE.exec(trimmed);
     if (tuple) {
       for (const part of tuple[1].split(',')) {
@@ -681,7 +690,11 @@ export function scanPineSymbols(text: string): PineDocSymbols {
       out.variables.push({
         kind: 'variable',
         name: v[5],
-        ...(v[4] ? { type: v[4].replace(/\s+/g, ' ') } : inferred.type ? { type: inferred.type } : {}),
+        ...(v[4]
+          ? { type: v[4].replace(/\s+/g, ' ') }
+          : inferred.type
+            ? { type: inferred.type }
+            : {}),
         ...(v[3] ? { qualifier: v[3] } : {}),
         ...(v[2] ? { declKeyword: v[2] as 'var' | 'varip' } : {}),
         ...(v[1] ? { exported: true } : {}),

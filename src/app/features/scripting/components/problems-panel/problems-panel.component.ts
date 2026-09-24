@@ -22,7 +22,9 @@ import { countDiagnostics, sortDiagnostics } from '../../pine/pine-diagnostics';
         <span class="caret" aria-hidden="true">{{ collapsed() ? '▸' : '▾' }}</span>
         <span class="title">Problems</span>
         @if (counts().errors) {
-          <span class="count is-error">{{ counts().errors }} error{{ counts().errors === 1 ? '' : 's' }}</span>
+          <span class="count is-error"
+            >{{ counts().errors }} error{{ counts().errors === 1 ? '' : 's' }}</span
+          >
         }
         @if (counts().warnings) {
           <span class="count is-warning">

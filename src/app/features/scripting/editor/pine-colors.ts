@@ -74,8 +74,7 @@ function openPicker(view: EditorView, swatch: HTMLElement): void {
     const range = at();
     if (!range) return;
     const hex = input.value.toUpperCase();
-    const literal =
-      range.to - range.from === 9 ? formatColor({ hex, alpha: range.alpha }) : hex;
+    const literal = range.to - range.from === 9 ? formatColor({ hex, alpha: range.alpha }) : hex;
     view.dispatch({
       changes: { from: range.from, to: range.to, insert: literal },
       userEvent: 'input.color',
@@ -110,7 +109,11 @@ function buildSwatches(view: EditorView): DecorationSet {
     }
     found.sort((a, b) => a.pos - b.pos);
     for (const f of found) {
-      builder.add(f.pos, f.pos, Decoration.widget({ widget: new SwatchWidget(f.color, f.editable), side: -1 }));
+      builder.add(
+        f.pos,
+        f.pos,
+        Decoration.widget({ widget: new SwatchWidget(f.color, f.editable), side: -1 }),
+      );
     }
   }
   return builder.finish();

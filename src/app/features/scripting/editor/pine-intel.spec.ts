@@ -22,7 +22,12 @@ const LIBRARIES: ScriptLibraryDto[] = [
     visibility: 'Shared',
     description: 'Helpers',
     exports: [
-      { kind: 'function', name: 'clamp', signature: 'clamp(float x, float lo = 0, float hi = 1) → float', doc: 'Clamps x.' },
+      {
+        kind: 'function',
+        name: 'clamp',
+        signature: 'clamp(float x, float lo = 0, float hi = 1) → float',
+        doc: 'Clamps x.',
+      },
       { kind: 'type', name: 'Box2', signature: null, doc: null },
     ],
   },
@@ -42,7 +47,9 @@ function stateAt(docWithCursor: string, idx = index): { state: EditorState; pos:
 
 function complete(docWithCursor: string, explicit = false): CompletionResult | null {
   const { state, pos } = stateAt(docWithCursor);
-  return pineCompletionSource(new CompletionContext(state, pos, explicit)) as CompletionResult | null;
+  return pineCompletionSource(
+    new CompletionContext(state, pos, explicit),
+  ) as CompletionResult | null;
 }
 
 const labels = (r: CompletionResult | null) => (r?.options ?? []).map((o) => o.label);
@@ -77,15 +84,23 @@ describe('pine completion', () => {
   it('narrows by the typed prefix position and nested namespaces', () => {
     const r = complete(`${SCRIPT_HEAD}x = ta.cr|`);
     expect(r!.from).toBe(`${SCRIPT_HEAD}x = ta.`.length);
-    expect(labels(complete(`${SCRIPT_HEAD}strategy.|`))).toEqual(expect.arrayContaining(['entry', 'long', 'short']));
-    expect(complete(`${SCRIPT_HEAD}c = color.|`)!.options.find((o) => o.label === 'red')!.detail).toBe('#F23645');
+    expect(labels(complete(`${SCRIPT_HEAD}strategy.|`))).toEqual(
+      expect.arrayContaining(['entry', 'long', 'short']),
+    );
+    expect(
+      complete(`${SCRIPT_HEAD}c = color.|`)!.options.find((o) => o.label === 'red')!.detail,
+    ).toBe('#F23645');
   });
 
   it('offers the user own declarations, keywords, types and top-level built-ins', () => {
     const r = complete(`${SCRIPT_HEAD}y = |`, true);
     const l = labels(r);
-    expect(l).toEqual(expect.arrayContaining(['length', 'vals', 'pt', 'mid', 'grow', 'Point', 'Dir', 'tools']));
-    expect(l).toEqual(expect.arrayContaining(['if', 'var', 'float', 'array', 'close', 'plot', 'ta', 'strategy']));
+    expect(l).toEqual(
+      expect.arrayContaining(['length', 'vals', 'pt', 'mid', 'grow', 'Point', 'Dir', 'tools']),
+    );
+    expect(l).toEqual(
+      expect.arrayContaining(['if', 'var', 'float', 'array', 'close', 'plot', 'ta', 'strategy']),
+    );
     expect(r!.options.find((o) => o.label === 'Point')!.type).toBe('class');
     expect(r!.options.find((o) => o.label === 'tools')!.type).toBe('namespace');
   });
@@ -130,7 +145,9 @@ describe('pine completion', () => {
   it('offers snippets, statement ones only at the start of a line', () => {
     const snippets = (r: CompletionResult | null) =>
       (r?.options ?? []).filter((o) => o.type === 'text').map((o) => o.label);
-    expect(snippets(complete('str|'))).toEqual(expect.arrayContaining(['strategy skeleton', 'strategy.entry']));
+    expect(snippets(complete('str|'))).toEqual(
+      expect.arrayContaining(['strategy skeleton', 'strategy.entry']),
+    );
     expect(snippets(complete('x = f|'))).not.toContain('for');
     expect(snippets(complete('x = f|'))).toContain('input.float');
     expect(snippets(complete('fo|'))).toContain('for');
@@ -201,7 +218,9 @@ describe('pine hover docs', () => {
     expect(fn.view.code).toEqual(['ta.ema(source, length) → series float']);
     expect(fn.view.doc).toBe('Exponential moving average.');
     expect(hover(`${SCRIPT_HEAD}x = cl|ose`)!.view.code).toEqual(['close : series float']);
-    expect(hover(`${SCRIPT_HEAD}c = color.r|ed`)!.view.code).toEqual(['color.red : const color = #F23645']);
+    expect(hover(`${SCRIPT_HEAD}c = color.r|ed`)!.view.code).toEqual([
+      'color.red : const color = #F23645',
+    ]);
   });
 
   it('documents the user own symbols', () => {
@@ -246,14 +265,24 @@ describe('diagnostics → lint markers', () => {
     const [empty] = toEditorDiagnostics(doc, [d({ column: 5, endColumn: 5, severity: 'warning' })]);
     expect(doc.sliceString(empty.from, empty.to)).toBe('ta.ema');
     expect(empty.severity).toBe('warning');
-    const [past] = toEditorDiagnostics(doc, [d({ line: 99, column: 99, endLine: 99, endColumn: 120 })]);
+    const [past] = toEditorDiagnostics(doc, [
+      d({ line: 99, column: 99, endLine: 99, endColumn: 120 }),
+    ]);
     expect(past.from).toBeLessThanOrEqual(doc.length);
     expect(past.to).toBeLessThanOrEqual(doc.length);
   });
 
   it('keeps every severity and counts them', () => {
-    const list = [d({ severity: 'info', line: 3 }), d({}), d({ severity: 'warning', line: 1, column: 1 })];
-    expect(toEditorDiagnostics(doc, list).map((x) => x.severity)).toEqual(['warning', 'error', 'info']);
+    const list = [
+      d({ severity: 'info', line: 3 }),
+      d({}),
+      d({ severity: 'warning', line: 1, column: 1 }),
+    ];
+    expect(toEditorDiagnostics(doc, list).map((x) => x.severity)).toEqual([
+      'warning',
+      'error',
+      'info',
+    ]);
     expect(countDiagnostics(list)).toEqual({ errors: 1, warnings: 1, infos: 1 });
     expect(sortDiagnostics(list).map((x) => x.line)).toEqual([1, 2, 3]);
   });

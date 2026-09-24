@@ -30,13 +30,24 @@ const CATALOG: PineCatalog = {
 const COMPILE: ScriptCompileResult = {
   success: false,
   diagnostics: [
-    { code: 'PS2003', severity: 'Error' as any, message: 'm', line: 1, column: 1, endLine: 1, endColumn: 2 },
+    {
+      code: 'PS2003',
+      severity: 'Error' as any,
+      message: 'm',
+      line: 1,
+      column: 1,
+      endLine: 1,
+      endColumn: 2,
+    },
   ],
   declaration: { kind: 'Strategy' as any, title: 'S' },
   inputs: [{ id: 'a', kind: 'TextArea' as any, title: 'A', defaultValue: '' }],
 };
 
-function make(api: Partial<Record<keyof ApiService, unknown>>, http: Partial<HttpClient> = {}): ScriptingService {
+function make(
+  api: Partial<Record<keyof ApiService, unknown>>,
+  http: Partial<HttpClient> = {},
+): ScriptingService {
   const injector = Injector.create({
     providers: [
       { provide: RUNTIME_CONFIG, useValue: { apiBaseUrl: 'http://engine' } },
@@ -50,9 +61,11 @@ function make(api: Partial<Record<keyof ApiService, unknown>>, http: Partial<Htt
 
 describe('ScriptingService — catalog', () => {
   it('sends If-None-Match with the cached version and reads a 304 as "keep the cache"', async () => {
-    const get = vi.fn().mockReturnValue(
-      throwError(() => new HttpErrorResponse({ status: 304, statusText: 'Not Modified' })),
-    );
+    const get = vi
+      .fn()
+      .mockReturnValue(
+        throwError(() => new HttpErrorResponse({ status: 304, statusText: 'Not Modified' })),
+      );
     const svc = make({}, { get } as any);
     expect(await firstValueFrom(svc.getCatalog('v1'))).toBeNull();
     const [url, options] = get.mock.calls[0];
@@ -62,9 +75,16 @@ describe('ScriptingService — catalog', () => {
   });
 
   it('returns a changed catalog out of its envelope and sends no header without a cache', async () => {
-    const get = vi.fn().mockReturnValue(
-      of(new HttpResponse({ status: 200, body: { status: true, data: CATALOG, message: null, responseCode: '00' } })),
-    );
+    const get = vi
+      .fn()
+      .mockReturnValue(
+        of(
+          new HttpResponse({
+            status: 200,
+            body: { status: true, data: CATALOG, message: null, responseCode: '00' },
+          }),
+        ),
+      );
     const svc = make({}, { get } as any);
     expect(await firstValueFrom(svc.getCatalog(null))).toEqual(CATALOG);
     expect((get.mock.calls[0][1].headers as HttpHeaders).has('If-None-Match')).toBe(false);
@@ -73,7 +93,11 @@ describe('ScriptingService — catalog', () => {
 
 describe('ScriptingService — compile', () => {
   it('treats a compile with errors as a result, even in a refused envelope, and normalises casing', async () => {
-    const post = vi.fn().mockReturnValue(of({ status: false, data: COMPILE, message: 'PS2003: m', responseCode: '-11' }));
+    const post = vi
+      .fn()
+      .mockReturnValue(
+        of({ status: false, data: COMPILE, message: 'PS2003: m', responseCode: '-11' }),
+      );
     const svc = make({ post } as any);
     const r = await firstValueFrom(svc.compile({ source: 'x' }));
     expect(post).toHaveBeenCalledWith('/scripting/compile', { source: 'x' }, { silent: true });
@@ -98,7 +122,9 @@ describe('ScriptingService — compile', () => {
 
   it('rejects a transport failure with a readable error', async () => {
     const post = vi.fn().mockReturnValue(throwError(() => new HttpErrorResponse({ status: 0 })));
-    await expect(firstValueFrom(make({ post } as any).compile({ source: 'x' }))).rejects.toMatchObject({
+    await expect(
+      firstValueFrom(make({ post } as any).compile({ source: 'x' })),
+    ).rejects.toMatchObject({
       message: 'The engine could not be reached.',
       httpStatus: 0,
     });
@@ -107,8 +133,12 @@ describe('ScriptingService — compile', () => {
 
 describe('ScriptingService — libraries and strategy scripts', () => {
   it('builds the library URLs', async () => {
-    const get = vi.fn().mockReturnValue(of({ status: true, data: [], message: null, responseCode: '00' }));
-    const del = vi.fn().mockReturnValue(of({ status: true, data: true, message: null, responseCode: '00' }));
+    const get = vi
+      .fn()
+      .mockReturnValue(of({ status: true, data: [], message: null, responseCode: '00' }));
+    const del = vi
+      .fn()
+      .mockReturnValue(of({ status: true, data: true, message: null, responseCode: '00' }));
     const svc = make({ get, delete: del } as any);
     await firstValueFrom(svc.listLibraries({ publisher: ' ola ', name: '' }));
     expect(get).toHaveBeenCalledWith('/scripting/libraries?publisher=ola', { silent: true });
@@ -117,33 +147,59 @@ describe('ScriptingService — libraries and strategy scripts', () => {
   });
 
   it('surfaces a delete conflict as isConflict', async () => {
-    const del = vi.fn().mockReturnValue(of({ status: false, data: null, message: 'in use', responseCode: '-409' }));
-    await expect(firstValueFrom(make({ delete: del } as any).deleteLibrary(5))).rejects.toMatchObject({
+    const del = vi
+      .fn()
+      .mockReturnValue(of({ status: false, data: null, message: 'in use', responseCode: '-409' }));
+    await expect(
+      firstValueFrom(make({ delete: del } as any).deleteLibrary(5)),
+    ).rejects.toMatchObject({
       isConflict: true,
       message: 'in use',
     });
   });
 
   it('attaches the compile result to a refused script save', async () => {
-    const put = vi.fn().mockReturnValue(of({ status: false, data: COMPILE, message: 'PS2003: m', responseCode: '-11' }));
+    const put = vi
+      .fn()
+      .mockReturnValue(
+        of({ status: false, data: COMPILE, message: 'PS2003: m', responseCode: '-11' }),
+      );
     const svc = make({ put } as any);
-    const err = await firstValueFrom(svc.updateStrategyScript(3, { source: 's', inputs: {} })).catch((e) => e);
-    expect(put).toHaveBeenCalledWith('/strategy/3/script', { source: 's', inputs: {} }, { silent: true });
+    const err = await firstValueFrom(
+      svc.updateStrategyScript(3, { source: 's', inputs: {} }),
+    ).catch((e) => e);
+    expect(put).toHaveBeenCalledWith(
+      '/strategy/3/script',
+      { source: 's', inputs: {} },
+      { silent: true },
+    );
     expect(err).toBeInstanceOf(ScriptingApiError);
     expect(err.code).toBe('-11');
     expect(err.compile).toBe(COMPILE);
   });
 
   it('imports and exports strategies', async () => {
-    const post = vi.fn().mockReturnValue(of({ status: true, data: 99, message: null, responseCode: '00' }));
-    const get = vi.fn().mockReturnValue(
-      of({ status: true, data: { fileName: 'a.pine', content: 'x' }, message: null, responseCode: '00' }),
-    );
+    const post = vi
+      .fn()
+      .mockReturnValue(of({ status: true, data: 99, message: null, responseCode: '00' }));
+    const get = vi
+      .fn()
+      .mockReturnValue(
+        of({
+          status: true,
+          data: { fileName: 'a.pine', content: 'x' },
+          message: null,
+          responseCode: '00',
+        }),
+      );
     const svc = make({ post, get } as any);
     const body = { content: 'x', symbol: 'EURUSD', timeframe: 'H1', name: null };
     expect(await firstValueFrom(svc.importStrategy(body))).toBe(99);
     expect(post).toHaveBeenCalledWith('/strategy/import', body, { silent: true });
-    expect(await firstValueFrom(svc.exportStrategy(4))).toEqual({ fileName: 'a.pine', content: 'x' });
+    expect(await firstValueFrom(svc.exportStrategy(4))).toEqual({
+      fileName: 'a.pine',
+      content: 'x',
+    });
     expect(get).toHaveBeenCalledWith('/strategy/4/export', { silent: true });
   });
 });

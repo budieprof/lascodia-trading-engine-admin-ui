@@ -203,7 +203,9 @@ export function createPineStreamParser(names: PineTokenizerNames): StreamParser<
     if (!/^\s*\(/.test(rest)) return 'pineVariable';
     // `name(params) =>` at the start of a line defines a function; anywhere else it is a call.
     const atLineStart = /^(?:export\s+)?$/.test(stream.string.slice(0, stream.start));
-    return atLineStart && FUNC_DEF_AHEAD_RE.test(rest) ? 'pineFunctionDefinition' : 'pineFunctionCall';
+    return atLineStart && FUNC_DEF_AHEAD_RE.test(rest)
+      ? 'pineFunctionDefinition'
+      : 'pineFunctionCall';
   };
 
   return {
@@ -240,7 +242,8 @@ export function createPineStreamParser(names: PineTokenizerNames): StreamParser<
       }
 
       if (state.lineComment) {
-        if (state.pendingDocName && stream.eatSpace()) return state.lineComment === 'doc' ? 'pineDocComment' : 'pineComment';
+        if (state.pendingDocName && stream.eatSpace())
+          return state.lineComment === 'doc' ? 'pineDocComment' : 'pineComment';
         if (state.pendingDocName && stream.match(IDENT_RE)) {
           state.pendingDocName = false;
           return 'pineVariable';

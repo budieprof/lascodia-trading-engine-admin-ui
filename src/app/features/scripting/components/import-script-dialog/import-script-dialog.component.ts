@@ -1,10 +1,4 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  inject,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 
@@ -119,7 +113,9 @@ const TIMEFRAMES = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] as const;
             }
           </div>
           <footer class="dialog-foot">
-            <button type="button" class="btn" (click)="close()" [disabled]="importing()">Cancel</button>
+            <button type="button" class="btn" (click)="close()" [disabled]="importing()">
+              Cancel
+            </button>
             <button
               type="button"
               class="btn btn-primary"

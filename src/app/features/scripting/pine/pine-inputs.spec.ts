@@ -23,7 +23,9 @@ import {
   utcInputToMs,
 } from './pine-inputs';
 
-const input = (partial: Partial<ScriptInputDto> & Pick<ScriptInputDto, 'id' | 'kind'>): ScriptInputDto => ({
+const input = (
+  partial: Partial<ScriptInputDto> & Pick<ScriptInputDto, 'id' | 'kind'>,
+): ScriptInputDto => ({
   title: partial.id,
   defaultValue: null,
   ...partial,
@@ -57,11 +59,18 @@ describe('input defaults and coercion — every kind', () => {
 
   it('string / textArea / symbol / session: strings', () => {
     expect(coerceInputValue(input({ id: 's', kind: 'string', defaultValue: 'A' }), 'B')).toBe('B');
-    expect(coerceInputValue(input({ id: 't', kind: 'textArea', defaultValue: '' }), 'a\nb')).toBe('a\nb');
-    expect(coerceInputValue(input({ id: 'y', kind: 'symbol', defaultValue: '' }), 'EURUSD')).toBe('EURUSD');
-    expect(coerceInputValue(input({ id: 'x', kind: 'session', defaultValue: '0930-1600' }), '0800-1700:23456')).toBe(
-      '0800-1700:23456',
+    expect(coerceInputValue(input({ id: 't', kind: 'textArea', defaultValue: '' }), 'a\nb')).toBe(
+      'a\nb',
     );
+    expect(coerceInputValue(input({ id: 'y', kind: 'symbol', defaultValue: '' }), 'EURUSD')).toBe(
+      'EURUSD',
+    );
+    expect(
+      coerceInputValue(
+        input({ id: 'x', kind: 'session', defaultValue: '0930-1600' }),
+        '0800-1700:23456',
+      ),
+    ).toBe('0800-1700:23456');
   });
 
   it('timeframe: normalises D/W/M', () => {
@@ -173,7 +182,11 @@ describe('color / session / time / timeframe helpers', () => {
   });
 
   it('parses and formats sessions', () => {
-    expect(parseSession('0930-1600:23456')).toEqual({ start: '09:30', end: '16:00', days: '23456' });
+    expect(parseSession('0930-1600:23456')).toEqual({
+      start: '09:30',
+      end: '16:00',
+      days: '23456',
+    });
     expect(parseSession('24x7')).toEqual({ start: '00:00', end: '00:00', days: null });
     expect(formatSession({ start: '08:00', end: '17:30', days: '6542' })).toBe('0800-1730:2456');
     expect(formatSession({ start: '08:00', end: '17:30', days: null })).toBe('0800-1730');

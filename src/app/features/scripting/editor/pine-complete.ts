@@ -13,7 +13,13 @@ import type { PineCatalogFunction } from '@core/api/scripting.types';
 import { stripGeneric, type PineCatalogIndex, type PineMember } from '../pine/pine-catalog-index';
 import { docViewFor } from '../pine/pine-docs';
 import { PINE_ANNOTATIONS, PINE_KEYWORDS, PINE_TYPES } from '../pine/pine-lexicon';
-import { libraryFor, methodNamespace, resolvePinePath, variableType, type PineResolveEnv } from '../pine/pine-resolve';
+import {
+  libraryFor,
+  methodNamespace,
+  resolvePinePath,
+  variableType,
+  type PineResolveEnv,
+} from '../pine/pine-resolve';
 import {
   EMPTY_SYMBOLS,
   findCallContext,
@@ -83,7 +89,12 @@ function builtinMemberCompletion(m: PineMember, index: PineCatalogIndex): Comple
     }
     case 'variable': {
       const v = index.variables.get(m.path);
-      return { label: m.name, type: 'variable', detail: v?.type || undefined, info: infoFor(m.path, env, false) };
+      return {
+        label: m.name,
+        type: 'variable',
+        detail: v?.type || undefined,
+        info: infoFor(m.path, env, false),
+      };
     }
     case 'constant': {
       const c = index.constants.get(m.path);
@@ -95,7 +106,12 @@ function builtinMemberCompletion(m: PineMember, index: PineCatalogIndex): Comple
       };
     }
     default:
-      return { label: m.name, type: 'namespace', detail: 'namespace', apply: namespaceApply(m.name) };
+      return {
+        label: m.name,
+        type: 'namespace',
+        detail: 'namespace',
+        apply: namespaceApply(m.name),
+      };
   }
 }
 
@@ -116,7 +132,13 @@ export function memberCompletions(receiver: string, env: PineResolveEnv): Comple
       const isFn = e.kind === 'function' || e.kind === 'method';
       out.push({
         label: e.name,
-        type: isFn ? 'function' : e.kind === 'type' ? 'class' : e.kind === 'enum' ? 'enum' : 'constant',
+        type: isFn
+          ? 'function'
+          : e.kind === 'type'
+            ? 'class'
+            : e.kind === 'enum'
+              ? 'enum'
+              : 'constant',
         detail: e.signature ?? e.kind,
         info: e.doc ?? undefined,
         ...(isFn ? { apply: callApply(e.name, true) } : {}),
@@ -134,12 +156,22 @@ export function memberCompletions(receiver: string, env: PineResolveEnv): Comple
       apply: callApply('new', udt.fields.length > 0),
       boost: 10,
     });
-    out.push({ label: 'copy', type: 'function', detail: `(object) → ${udt.name}`, apply: callApply('copy', true) });
+    out.push({
+      label: 'copy',
+      type: 'function',
+      detail: `(object) → ${udt.name}`,
+      apply: callApply('copy', true),
+    });
   }
   const en = symbols.enums.find((e) => e.name === clean);
   if (en) {
     for (const m of en.members) {
-      out.push({ label: m.name, type: 'enum', detail: m.title ? `"${m.title}"` : en.name, info: m.doc });
+      out.push({
+        label: m.name,
+        type: 'enum',
+        detail: m.title ? `"${m.title}"` : en.name,
+        info: m.doc,
+      });
     }
   }
   if (out.length) return out;
@@ -154,7 +186,14 @@ export function memberCompletions(receiver: string, env: PineResolveEnv): Comple
   }
   if (!type) {
     // Unknown receiver type: the user's methods still apply.
-    return symbols.methods.map((m) => userFunctionCompletion(m.name, m.params.slice(1).map((p) => p.name), 'method', m.doc));
+    return symbols.methods.map((m) =>
+      userFunctionCompletion(
+        m.name,
+        m.params.slice(1).map((p) => p.name),
+        'method',
+        m.doc,
+      ),
+    );
   }
 
   const typeName = stripGeneric(type);
@@ -163,11 +202,23 @@ export function memberCompletions(receiver: string, env: PineResolveEnv): Comple
     for (const f of userType.fields) {
       out.push({ label: f.name, type: 'property', detail: f.type, info: f.doc, boost: 5 });
     }
-    out.push({ label: 'copy', type: 'method', detail: `() → ${userType.name}`, apply: callApply('copy', false) });
+    out.push({
+      label: 'copy',
+      type: 'method',
+      detail: `() → ${userType.name}`,
+      apply: callApply('copy', false),
+    });
   }
   for (const m of symbols.methods) {
     if (m.receiverType && stripGeneric(m.receiverType) !== typeName) continue;
-    out.push(userFunctionCompletion(m.name, m.params.slice(1).map((p) => p.name), 'method', m.doc));
+    out.push(
+      userFunctionCompletion(
+        m.name,
+        m.params.slice(1).map((p) => p.name),
+        'method',
+        m.doc,
+      ),
+    );
   }
   if (methodNamespace(type)) {
     for (const fn of index.methodsForType(type)) {
@@ -176,7 +227,12 @@ export function memberCompletions(receiver: string, env: PineResolveEnv): Comple
       out.push({
         label: name,
         type: 'method',
-        detail: o ? `(${o.params.slice(1).map((p) => p.name).join(', ')})${o.returns ? ` → ${o.returns}` : ''}` : undefined,
+        detail: o
+          ? `(${o.params
+              .slice(1)
+              .map((p) => p.name)
+              .join(', ')})${o.returns ? ` → ${o.returns}` : ''}`
+          : undefined,
         info: infoFor(`${receiver}.${name}`, env, true),
         apply: callApply(name, !o || o.params.length > 1),
       });
@@ -185,7 +241,12 @@ export function memberCompletions(receiver: string, env: PineResolveEnv): Comple
   return out;
 }
 
-function userFunctionCompletion(name: string, params: string[], type: 'function' | 'method', doc?: string): Completion {
+function userFunctionCompletion(
+  name: string,
+  params: string[],
+  type: 'function' | 'method',
+  doc?: string,
+): Completion {
   return {
     label: name,
     type,
@@ -209,10 +270,19 @@ function userCompletions(symbols: PineDocSymbols, env: PineResolveEnv): Completi
     });
   }
   for (const f of [...symbols.functions, ...symbols.methods]) {
-    out.push(userFunctionCompletion(f.name, f.params.map((p) => p.name), 'function', f.doc));
+    out.push(
+      userFunctionCompletion(
+        f.name,
+        f.params.map((p) => p.name),
+        'function',
+        f.doc,
+      ),
+    );
   }
-  for (const t of symbols.types) out.push({ label: t.name, type: 'class', detail: 'type', info: t.doc, boost: 3 });
-  for (const e of symbols.enums) out.push({ label: e.name, type: 'enum', detail: 'enum', info: e.doc, boost: 3 });
+  for (const t of symbols.types)
+    out.push({ label: t.name, type: 'class', detail: 'type', info: t.doc, boost: 3 });
+  for (const e of symbols.enums)
+    out.push({ label: e.name, type: 'enum', detail: 'enum', info: e.doc, boost: 3 });
   for (const i of symbols.imports) {
     out.push({
       label: i.alias,
@@ -323,7 +393,10 @@ export function pineCompletionSource(context: CompletionContext): CompletionResu
     };
   }
 
-  const member = /([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\.([A-Za-z_][A-Za-z0-9_]*)?$/.exec(before);
+  const member =
+    /([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\.([A-Za-z_][A-Za-z0-9_]*)?$/.exec(
+      before,
+    );
   if (member) {
     const partial = member[2] ?? '';
     const options = memberCompletions(member[1], env);

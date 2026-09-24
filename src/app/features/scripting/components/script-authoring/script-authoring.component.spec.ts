@@ -25,7 +25,9 @@ const compile = (partial: Partial<ScriptCompileResult> = {}): ScriptCompileResul
   success: true,
   diagnostics: [],
   declaration: { kind: 'strategy', title: 'S' },
-  inputs: [{ id: 'len', kind: 'int', title: 'Length', defaultValue: 14, minValue: 1, maxValue: 50 }],
+  inputs: [
+    { id: 'len', kind: 'int', title: 'Length', defaultValue: 14, minValue: 1, maxValue: 50 },
+  ],
   ...partial,
 });
 
@@ -51,7 +53,11 @@ describe('ScriptAuthoringComponent', () => {
   let cmp: ScriptAuthoringComponent;
   let draft: WritableSignal<ScriptDraft>;
   let http: HttpTestingController;
-  let workbench: { compileNow: ReturnType<typeof vi.fn>; reveal: ReturnType<typeof vi.fn>; showResult: ReturnType<typeof vi.fn> };
+  let workbench: {
+    compileNow: ReturnType<typeof vi.fn>;
+    reveal: ReturnType<typeof vi.fn>;
+    showResult: ReturnType<typeof vi.fn>;
+  };
 
   function setup(strategy: StrategyDto | null, result: ScriptCompileResult | null): void {
     const fixture = TestBed.createComponent(ScriptAuthoringComponent);
@@ -85,13 +91,32 @@ describe('ScriptAuthoringComponent', () => {
     });
 
     it('refuses compile errors, jumps to the first one and says why', async () => {
-      setup(null, compile({
-        success: false,
-        diagnostics: [
-          { code: 'PS1001', severity: 'warning', message: 'w', line: 1, column: 1, endLine: 1, endColumn: 2 },
-          { code: 'PS2002', severity: 'error', message: 'Undeclared x', line: 4, column: 3, endLine: 4, endColumn: 4 },
-        ],
-      }));
+      setup(
+        null,
+        compile({
+          success: false,
+          diagnostics: [
+            {
+              code: 'PS1001',
+              severity: 'warning',
+              message: 'w',
+              line: 1,
+              column: 1,
+              endLine: 1,
+              endColumn: 2,
+            },
+            {
+              code: 'PS2002',
+              severity: 'error',
+              message: 'Undeclared x',
+              line: 4,
+              column: 3,
+              endLine: 4,
+              endColumn: 4,
+            },
+          ],
+        }),
+      );
       expect(await cmp.prepareSubmit()).toBeNull();
       expect(workbench.reveal).toHaveBeenCalledWith(4, 3);
       expect(cmp.message()).toContain('line 4: Undeclared x');
@@ -115,7 +140,11 @@ describe('ScriptAuthoringComponent', () => {
       setup(STRATEGY, compile());
       const saved: number[] = [];
       TestBed.inject(ScriptingService).strategyScriptSaved$.subscribe((id) => saved.push(id));
-      const done = cmp.saveScript(7, { source: SCRIPT, inputs: { len: 25 }, executionPolicy: 'Direct' });
+      const done = cmp.saveScript(7, {
+        source: SCRIPT,
+        inputs: { len: 25 },
+        executionPolicy: 'Direct',
+      });
       await tick();
       const req = http.expectOne(`${BASE}/strategy/7/script`);
       expect(req.request.method).toBe('PUT');
@@ -129,7 +158,17 @@ describe('ScriptAuthoringComponent', () => {
       setup(STRATEGY, compile());
       const refused = compile({
         success: false,
-        diagnostics: [{ code: 'PS2003', severity: 'error', message: 'Bad', line: 2, column: 1, endLine: 2, endColumn: 3 }],
+        diagnostics: [
+          {
+            code: 'PS2003',
+            severity: 'error',
+            message: 'Bad',
+            line: 2,
+            column: 1,
+            endLine: 2,
+            endColumn: 3,
+          },
+        ],
       });
       const done = cmp.saveScript(7);
       await tick();
@@ -145,7 +184,9 @@ describe('ScriptAuthoringComponent', () => {
       setup(STRATEGY, compile());
       const done = cmp.saveScript(7);
       await tick();
-      http.expectOne(`${BASE}/strategy/7/script`).flush(null, { status: 0, statusText: 'Unknown Error' });
+      http
+        .expectOne(`${BASE}/strategy/7/script`)
+        .flush(null, { status: 0, statusText: 'Unknown Error' });
       expect(await done).toBe(false);
       expect(cmp.message()).toContain('could not be reached');
     });
@@ -200,6 +241,8 @@ describe('AuthoringModeSwitchComponent', () => {
     expect(buttons()[0].disabled).toBe(true);
     cmp.choose('rules');
     expect(mode()).toBe('script');
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Fixed for an existing strategy');
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain(
+      'Fixed for an existing strategy',
+    );
   });
 });

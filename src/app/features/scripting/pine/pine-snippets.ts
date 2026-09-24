@@ -106,7 +106,11 @@ export const PINE_SNIPPETS: readonly PineSnippet[] = [
     detail: 'Multi-line text input',
     template: 'input.text_area("${}", "${Notes}")',
   },
-  { label: 'input.source', detail: 'Source input', template: 'input.source(${close}, "${Source}")${}' },
+  {
+    label: 'input.source',
+    detail: 'Source input',
+    template: 'input.source(${close}, "${Source}")${}',
+  },
   {
     label: 'input.timeframe',
     detail: 'Timeframe input',

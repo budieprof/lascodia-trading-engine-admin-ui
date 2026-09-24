@@ -23,7 +23,10 @@ const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n
  * exclusive; positions past the document (the source changed since the compile) are clamped, and
  * an empty range is widened to the word at its start so it can be seen and hovered.
  */
-export function toEditorDiagnostics(doc: DocLike, diagnostics: readonly ScriptDiagnostic[]): EditorDiagnostic[] {
+export function toEditorDiagnostics(
+  doc: DocLike,
+  diagnostics: readonly ScriptDiagnostic[],
+): EditorDiagnostic[] {
   const out: EditorDiagnostic[] = [];
   for (const d of diagnostics) {
     if (doc.lines === 0) break;

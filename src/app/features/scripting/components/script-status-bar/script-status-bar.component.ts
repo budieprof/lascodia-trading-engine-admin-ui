@@ -28,7 +28,9 @@ export const PINE_MAX_REQUESTS = 40;
             <span class="dot"></span> {{ failureMessage() || 'Compile unavailable' }}
           }
           @case ('errors') {
-            <span class="dot"></span> {{ counts().errors }} error{{ counts().errors === 1 ? '' : 's' }}
+            <span class="dot"></span> {{ counts().errors }} error{{
+              counts().errors === 1 ? '' : 's'
+            }}
             @if (counts().warnings) {
               · {{ counts().warnings }} warning{{ counts().warnings === 1 ? '' : 's' }}
             }
@@ -56,7 +58,11 @@ export const PINE_MAX_REQUESTS = 40;
       <span class="spacer"></span>
       @if (result(); as r) {
         @if (r.plotSlots !== undefined && r.plotSlots !== null) {
-          <span class="meter" [class.is-high]="r.plotSlots > maxPlots * 0.9" title="Plot slots used">
+          <span
+            class="meter"
+            [class.is-high]="r.plotSlots > maxPlots * 0.9"
+            title="Plot slots used"
+          >
             Plots {{ r.plotSlots }}/{{ maxPlots }}
           </span>
         }

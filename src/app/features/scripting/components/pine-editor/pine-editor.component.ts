@@ -182,7 +182,8 @@ export class PineEditorComponent implements AfterViewInit, OnDestroy {
             libraries: this.language.libraries(),
             ariaLabel: this.ariaLabel(),
             onChange: (doc) => this.zone.run(() => this.value.set(doc)),
-            onCursor: (line, column) => this.zone.run(() => this.cursorChange.emit({ line, column })),
+            onCursor: (line, column) =>
+              this.zone.run(() => this.cursorChange.emit({ line, column })),
             onSave: () => this.zone.run(() => this.saveRequested.emit()),
           });
           this.handle.setDiagnostics(this.diagnostics());

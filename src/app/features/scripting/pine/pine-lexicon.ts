@@ -182,7 +182,8 @@ export const PINE_KEYWORD_DOCS: Readonly<Record<string, string>> = {
   varip:
     'Like `var`, but the value also persists across realtime updates of the same bar (no rollback).',
   import: 'Loads a published library: `import publisher/name/version as alias`.',
-  export: 'Makes a library function, method, type, enum or constant available to importing scripts.',
+  export:
+    'Makes a library function, method, type, enum or constant available to importing scripts.',
   as: 'Names the alias of an imported library.',
   enum: 'Declares an enumeration of named members, each with a `const string` title.',
   type: 'Declares a user-defined type (UDT) with fields; instantiate with `TypeName.new()`.',

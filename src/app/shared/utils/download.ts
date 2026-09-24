@@ -24,7 +24,8 @@ export function downloadTextFile(
 
 /** Strips characters no filesystem accepts; never returns an empty name. */
 export function sanitiseFileName(name: string): string {
-  const cleaned = (name ?? '').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_').trim();
+  const printable = [...(name ?? '')].filter((ch) => ch.charCodeAt(0) >= 32).join('');
+  const cleaned = printable.replace(/[\\/:*?"<>|]+/g, '_').trim();
   return cleaned || 'download.txt';
 }
 

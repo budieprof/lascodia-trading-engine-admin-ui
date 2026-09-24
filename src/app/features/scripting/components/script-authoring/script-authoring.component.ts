@@ -115,7 +115,9 @@ function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
                 [overrides]="draft().inputs"
                 (overridesChange)="setInputs($event)"
                 [emptyText]="
-                  shown() ? 'This script declares no inputs.' : 'Inputs appear once the script compiles.'
+                  shown()
+                    ? 'This script declares no inputs.'
+                    : 'Inputs appear once the script compiles.'
                 "
               />
             }
@@ -125,7 +127,9 @@ function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
                 <label class="policy-label" for="script-execution-policy">Execution policy</label>
                 @if (strategy()) {
                   <span class="chip chip-accent">{{ draft().executionPolicy }}</span>
-                  <span class="muted small">Changed from the strategy's bindings &amp; policy settings.</span>
+                  <span class="muted small"
+                    >Changed from the strategy's bindings &amp; policy settings.</span
+                  >
                 } @else {
                   <select
                     id="script-execution-policy"
@@ -303,7 +307,10 @@ export class ScriptAuthoringComponent {
   }
 
   setPolicy(policy: ScriptExecutionPolicy): void {
-    this.draft.update((d) => ({ ...d, executionPolicy: policy === 'Standard' ? 'Standard' : 'Direct' }));
+    this.draft.update((d) => ({
+      ...d,
+      executionPolicy: policy === 'Standard' ? 'Standard' : 'Direct',
+    }));
   }
 
   onCompiled(result: ScriptCompileResult): void {
@@ -311,7 +318,10 @@ export class ScriptAuthoringComponent {
     if (!result.declaration) return;
     this.lastGood.set(result);
     // Keep only overrides the compiled script still declares, coerced to its current ranges.
-    const normalised = inputOverrides(result.inputs, resolveInputValues(result.inputs, this.draft().inputs));
+    const normalised = inputOverrides(
+      result.inputs,
+      resolveInputValues(result.inputs, this.draft().inputs),
+    );
     if (!sameInputs(normalised, this.draft().inputs)) this.setInputs(normalised);
   }
 
@@ -334,7 +344,9 @@ export class ScriptAuthoringComponent {
     try {
       const result = await wb.compileNow();
       if (!result) {
-        this.message.set('The engine could not compile the script — it may be unreachable. Try again.');
+        this.message.set(
+          'The engine could not compile the script — it may be unreachable. Try again.',
+        );
         return null;
       }
       const errors = result.diagnostics.filter((d) => d.severity === 'error');
@@ -353,7 +365,10 @@ export class ScriptAuthoringComponent {
         );
         return null;
       }
-      const inputs = inputOverrides(result.inputs, resolveInputValues(result.inputs, this.draft().inputs));
+      const inputs = inputOverrides(
+        result.inputs,
+        resolveInputValues(result.inputs, this.draft().inputs),
+      );
       return { ...this.draft(), inputs };
     } finally {
       this.phase.set('idle');
@@ -369,13 +384,18 @@ export class ScriptAuthoringComponent {
     this.message.set(null);
     try {
       await firstValueFrom(
-        this.scripting.updateStrategyScript(strategyId, { source: draft.source, inputs: draft.inputs }),
+        this.scripting.updateStrategyScript(strategyId, {
+          source: draft.source,
+          inputs: draft.inputs,
+        }),
       );
       return true;
     } catch (err) {
       const e = toScriptingError(err, 'Saving the script failed.');
       if (e.compile) this.workbench?.showResult(e.compile);
-      this.message.set(e.code || e.compile ? `The engine refused the script: ${e.message}` : e.message);
+      this.message.set(
+        e.code || e.compile ? `The engine refused the script: ${e.message}` : e.message,
+      );
       return false;
     } finally {
       this.phase.set('idle');

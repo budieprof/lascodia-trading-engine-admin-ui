@@ -145,7 +145,9 @@ export class ScriptingService {
       })
       .pipe(
         map((res: HttpResponse<ResponseData<PineCatalog>>) =>
-          res.status === 304 ? null : envelopeData(res.body, 'The language catalog is unavailable.'),
+          res.status === 304
+            ? null
+            : envelopeData(res.body, 'The language catalog is unavailable.'),
         ),
         catchError((err) =>
           err instanceof HttpErrorResponse && err.status === 304
@@ -232,14 +234,12 @@ export class ScriptingService {
    * version 1, or the next version of that name.
    */
   createLibrary(req: CreateScriptLibraryRequest): Observable<ScriptLibraryDto> {
-    return this.api
-      .post<ResponseData<ScriptLibraryDto>>('/scripting/libraries', req, SILENT)
-      .pipe(
-        map((res) => envelopeData(res, 'The engine did not publish the library.')),
-        catchError((err) =>
-          throwError(() => toScriptingError(err, 'Publishing the library failed.')),
-        ),
-      );
+    return this.api.post<ResponseData<ScriptLibraryDto>>('/scripting/libraries', req, SILENT).pipe(
+      map((res) => envelopeData(res, 'The engine did not publish the library.')),
+      catchError((err) =>
+        throwError(() => toScriptingError(err, 'Publishing the library failed.')),
+      ),
+    );
   }
 
   /**
@@ -248,7 +248,9 @@ export class ScriptingService {
    */
   deleteLibrary(id: number, force = false): Observable<void> {
     return this.api
-      .delete<ResponseData<unknown>>(`/scripting/libraries/${id}${force ? '?force=true' : ''}`, SILENT)
+      .delete<
+        ResponseData<unknown>
+      >(`/scripting/libraries/${id}${force ? '?force=true' : ''}`, SILENT)
       .pipe(
         map((res) => {
           if (res && !res.status) {
@@ -336,7 +338,11 @@ export function normaliseInputKind(kind: unknown): ScriptInputKind {
 
 function normaliseSeverity(s: unknown): ScriptDiagnosticSeverity {
   const v = String(s ?? '').toLowerCase();
-  return v === 'warning' || v === 'info' ? v : v === 'information' || v === 'hint' ? 'info' : 'error';
+  return v === 'warning' || v === 'info'
+    ? v
+    : v === 'information' || v === 'hint'
+      ? 'info'
+      : 'error';
 }
 
 /**
@@ -361,6 +367,8 @@ export function normaliseCompile(r: ScriptCompileResult): ScriptCompileResult {
     declaration,
     inputs,
     success:
-      typeof r?.success === 'boolean' ? r.success : !diagnostics.some((d) => d.severity === 'error'),
+      typeof r?.success === 'boolean'
+        ? r.success
+        : !diagnostics.some((d) => d.severity === 'error'),
   };
 }
