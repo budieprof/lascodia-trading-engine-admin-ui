@@ -27,16 +27,18 @@ describe('status line', () => {
   it('shows each output with a status-line flag at the hovered bar, in its color, in id order', () => {
     const m = model();
     const [main] = statusLines(m, 2);
-    expect(main.values.map((v) => v.title)).toEqual(['Fast', 'Sig', 'Pct']);
+    // No marker is drawn on bar 2, so the marker stays out of the status line there.
+    expect(main.values.map((v) => v.title)).toEqual(['Fast', 'Pct']);
     expect(main.values[0]).toMatchObject({ text: '3.0', color: 'rgb(41, 98, 255)' });
-    expect(main.values[1].text).toBe('∅'); // no marker on bar 2
-    expect(main.values[2].text).toBe('30%');
+    expect(main.values[1].text).toBe('30%');
   });
 
   it('shows ∅ for na and the marker value where it is drawn', () => {
     const [main] = statusLines(model(), 3);
     expect(main.values[0].text).toBe('∅');
-    expect(statusLines(model(), 4)[0].values[1]).toMatchObject({ text: '1.00000', color: 'rgb(8, 153, 129)' });
+    const at4 = statusLines(model(), 4)[0].values;
+    expect(at4.map((v) => v.title)).toEqual(['Fast', 'Sig', 'Pct']);
+    expect(at4[1]).toMatchObject({ text: '1.00000', color: 'rgb(8, 153, 129)' });
   });
 
   it('rests on the last bar when nothing is hovered', () => {

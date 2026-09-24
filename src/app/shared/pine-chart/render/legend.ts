@@ -97,15 +97,13 @@ export function statusLineValues(pane: PaneModel, logical: number): LegendValue[
   }
   for (const m of pane.markers) {
     if (!m.display.statusLine) continue;
+    // Markers are exported only where drawn: a bar without one says nothing in the status line
+    // (the data window still lists it, as ∅), so twenty plotshape() calls do not bury the plots.
     const i = markerIndexAt(m, logical);
+    if (i < 0) continue;
     items.push({
       id: m.id,
-      value: {
-        key: m.key,
-        title: m.title,
-        text: i >= 0 ? formatValue(m.values[i], m.format) : NA_TEXT,
-        color: i >= 0 ? m.colors[i] : null,
-      },
+      value: { key: m.key, title: m.title, text: formatValue(m.values[i], m.format), color: m.colors[i] },
     });
   }
   items.sort((a, b) => a.id - b.id);

@@ -104,7 +104,8 @@ interface PaneOverlay {
       </div>
     }
 
-    <div class="toolbar" [style.top.px]="toolbarTop()" [style.right.px]="toolbarRight()">
+    <!-- Bottom-right of the last pane, shown on hover: tables own the pane corners at rest. -->
+    <div class="toolbar" [class.pinned]="dataWindow()" [style.bottom.px]="toolbarBottom()" [style.right.px]="toolbarRight()">
       @if (hasTrades()) {
         <button type="button" [class.on]="tradesOn()" (click)="tradesOn.set(!tradesOn())" title="Show strategy trades on the chart">
           Trades
@@ -119,7 +120,7 @@ interface PaneOverlay {
     @if (dataWindow() && !empty()) {
       <app-pine-data-window
         class="data-window"
-        [style.top.px]="toolbarTop() + 30"
+        [style.top.px]="dataWindowTop()"
         [style.right.px]="toolbarRight()"
         [sections]="dataSections()"
         (closed)="dataWindow.set(false)"
@@ -146,9 +147,12 @@ interface PaneOverlay {
       .surface {
         position: absolute;
         inset: 0;
+        /* The library z-indexes its canvases: contain them so the overlays stay on top. */
+        z-index: 0;
       }
       .pane-overlay {
         position: absolute;
+        z-index: 1;
         pointer-events: none;
         overflow: hidden;
       }
@@ -194,6 +198,13 @@ interface PaneOverlay {
         display: flex;
         gap: 4px;
         z-index: 3;
+        opacity: 0;
+        transition: opacity var(--dur-fast, 0.15s);
+      }
+      :host(:hover) .toolbar,
+      .toolbar:focus-within,
+      .toolbar.pinned {
+        opacity: 1;
       }
       .toolbar button {
         font: inherit;
@@ -230,6 +241,7 @@ interface PaneOverlay {
       .empty {
         position: absolute;
         inset: 0;
+        z-index: 2;
         display: grid;
         place-items: center;
         color: var(--text-tertiary, #86868b);
@@ -331,7 +343,13 @@ export class PineChartComponent implements OnDestroy {
     return this.dataWindow() && m ? dataWindowAt(m, this.legendBar(), this.timezone()) : [];
   });
 
-  readonly toolbarTop = computed(() => (this.rects()[0]?.top ?? 0) + 4);
+  readonly dataWindowTop = computed(() => (this.rects()[0]?.top ?? 0) + 6);
+  readonly toolbarBottom = computed(() => {
+    const rects = this.rects();
+    const last = rects[rects.length - 1];
+    const el = this.surface().nativeElement;
+    return last ? Math.max(4, el.clientHeight - (last.top + last.height) + 6) : 34;
+  });
   readonly toolbarRight = computed(() => {
     const r = this.rects()[0];
     const el = this.surface().nativeElement;

@@ -975,7 +975,9 @@ export function largeFixture(bars = 20_000, plots = 40, seed = 3): PineRunResult
   const times = b.map((q) => q.t);
   const close = b.map((q) => q.c);
   const out = emptyOutputs(times);
-  const styles = ['line', 'linebr', 'stepline', 'area', 'circles', 'cross', 'line', 'line'];
+  // Overlay-friendly styles (an area or columns plot fills down to its histbase, which on a price
+  // chart is a wall of color, exactly as it would be in Pine).
+  const styles = ['line', 'linebr', 'stepline', 'steplinebr', 'circles', 'cross', 'stepline_diamond', 'line'];
   for (let k = 0; k < plots; k++) {
     const len = 5 + k * 3;
     const e = ema(close, len);
@@ -985,7 +987,6 @@ export function largeFixture(bars = 20_000, plots = 40, seed = 3): PineRunResult
         id: k,
         title: `EMA ${len}`,
         style,
-        histBase: style === 'area' ? e[0] : 0,
         values: style === 'linebr' ? e.map((v, i) => (i % 10 < 7 ? v : null)) : e,
         colors: e.map((v, i) => (v >= close[i] ? PINE.red : PINE.teal)),
         color: null,

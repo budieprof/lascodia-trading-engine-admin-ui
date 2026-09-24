@@ -289,7 +289,8 @@ export class PineChartRenderer {
       this.anchor.priceScale().applyOptions({ scaleMargins: { top: 0.1, bottom: 0.08 } });
       this.anchor.attachPrimitive(this.scriptLayers);
       const panes = chart.panes();
-      panes[0]?.setStretchFactor(3);
+      // TradingView gives an indicator pane roughly a third of the chart.
+      panes[0]?.setStretchFactor(2.2);
       panes[1]?.setStretchFactor(1);
     }
     const fmt = model.format;
