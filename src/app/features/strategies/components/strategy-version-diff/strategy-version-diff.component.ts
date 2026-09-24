@@ -21,8 +21,10 @@ import { StrategyVersionFields, diffStrategyVersion } from '../../util/version-d
       <div class="vd-head">
         <strong>v{{ version().versionNumber }} → current</strong>
         <span class="muted">
-          captured {{ version().capturedAt | date: 'yyyy-MM-dd HH:mm' }} by
-          {{ version().createdBy || 'system' }}
+          captured {{ version().capturedAt | date: 'yyyy-MM-dd HH:mm' }}
+          @if (version().createdBy; as author) {
+            by {{ author }}
+          }
         </span>
         @if (rowCount() > 0) {
           <span class="vd-counts">

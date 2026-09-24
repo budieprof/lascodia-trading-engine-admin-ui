@@ -998,8 +998,12 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                           <tr>
                             <td class="mono">v{{ v.versionNumber }}</td>
                             <td>{{ v.capturedAt | date: 'yyyy-MM-dd HH:mm:ss' }}</td>
-                            <td class="small" [class.muted]="!v.createdBy">
-                              {{ v.createdBy || 'system' }}
+                            <td
+                              class="small"
+                              [class.muted]="!v.createdBy"
+                              [title]="v.createdBy ? '' : 'Author not recorded for this version'"
+                            >
+                              {{ v.createdBy || '—' }}
                             </td>
                             <td class="muted small">{{ v.changeReason ?? '' }}</td>
                             <td>
