@@ -23,6 +23,7 @@ import {
   type ReplayTrade,
 } from '../../components/trade-replay-dialog/trade-replay-dialog.component';
 import { StrategyReportComponent } from '@features/scripting/report/strategy-report.component';
+import { ScriptRunChartComponent } from '@features/scripting/backtest/script-run-chart.component';
 import {
   extractStrategyReport,
   type StrategyReport,
@@ -117,6 +118,7 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
     ErrorStateComponent,
     TradeReplayDialogComponent,
     StrategyReportComponent,
+    ScriptRunChartComponent,
     RouterLink,
     DatePipe,
     DecimalPipe,
@@ -133,10 +135,13 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
 
       @if (backtest(); as bt) {
         <!-- A script strategy's run carries a Strategy report (ADR-0027) instead of the
-             JSON-DSL BacktestResult: it gets the report view; every other run keeps the
-             DSL analytics below untouched. -->
+             JSON-DSL BacktestResult: it gets the chart of the run and the report view;
+             every other run keeps the DSL analytics below untouched. -->
         @if (scriptReport(); as report) {
-          <app-strategy-report [report]="report" [backtestRunId]="bt.id" />
+          <div class="script-run">
+            <app-script-run-chart [run]="bt" [report]="report" />
+            <app-strategy-report [report]="report" [backtestRunId]="bt.id" />
+          </div>
         }
 
         @if (parseError()) {
@@ -926,6 +931,11 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
       }
       .nowrap {
         white-space: nowrap;
+      }
+      .script-run {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
       }
     `,
   ],
