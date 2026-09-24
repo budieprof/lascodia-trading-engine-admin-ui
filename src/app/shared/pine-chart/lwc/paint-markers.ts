@@ -1,3 +1,4 @@
+import { contrastText } from '../core/color';
 import type { MarkerLayer } from '../render/render-model';
 import { FONT_DEFAULT } from '../render/build-render-model';
 import {
@@ -198,17 +199,10 @@ function paintShapes(
     }
 
     if (bubble) {
-      drawBubble(
-        ctx,
-        layer.shape === 'labelup',
-        x,
-        shapeTop,
-        boxW,
-        boxH,
-        color,
-        textBlock,
-        textColor,
-      );
+      // Text inside a label shape: the text color the script gave, else one that reads on the
+      // bubble — the shape color would make it invisible.
+      const inside = layer.textColors[i] ?? (color ? contrastText(color) : null);
+      drawBubble(ctx, layer.shape === 'labelup', x, shapeTop, boxW, boxH, color, textBlock, inside);
     } else if (isChar) {
       if (color) {
         ctx.save();

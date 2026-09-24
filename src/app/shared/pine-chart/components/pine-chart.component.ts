@@ -41,6 +41,15 @@ export interface PineBarRef {
   time: number;
 }
 
+interface ChartTooltip {
+  text: string;
+  left: number;
+  top: number;
+  /** Anchored by its right / bottom edge (near the chart's right / bottom). */
+  flipX: boolean;
+  flipY: boolean;
+}
+
 interface PaneOverlay {
   key: PaneKey;
   rect: PaneRect;
@@ -150,7 +159,14 @@ interface PaneOverlay {
     }
 
     @if (tooltip(); as t) {
-      <div class="tooltip" role="tooltip" [style.left.px]="t.left" [style.top.px]="t.top">
+      <div
+        class="tooltip"
+        role="tooltip"
+        [class.flip-x]="t.flipX"
+        [class.flip-y]="t.flipY"
+        [style.left.px]="t.left"
+        [style.top.px]="t.top"
+      >
         {{ t.text }}
       </div>
     }
@@ -261,6 +277,15 @@ interface PaneOverlay {
         white-space: pre-wrap;
         pointer-events: none;
       }
+      .tooltip.flip-x {
+        transform: translateX(-100%);
+      }
+      .tooltip.flip-y {
+        transform: translateY(-100%);
+      }
+      .tooltip.flip-x.flip-y {
+        transform: translate(-100%, -100%);
+      }
       .empty {
         position: absolute;
         inset: 0;
@@ -311,7 +336,7 @@ export class PineChartComponent implements OnDestroy {
   });
 
   readonly tradesOn = linkedSignal(() => this.showTrades());
-  readonly tooltip = signal<{ text: string; left: number; top: number } | null>(null);
+  readonly tooltip = signal<ChartTooltip | null>(null);
   private readonly hovered = signal<number | null>(null);
   private readonly rects = signal<PaneRect[]>([]);
   private readonly ready = signal(false);
@@ -474,16 +499,25 @@ export class PineChartComponent implements OnDestroy {
       const ref = e.logical === null ? null : this.ref(e.logical);
       this.zone.run(() => this.crosshairBar.emit(ref));
     }
-    let tip: { text: string; left: number; top: number } | null = null;
+    let tip: ChartTooltip | null = null;
     if (e.point && e.paneIndex !== null && this.renderer) {
       const hit = this.renderer.hitAt(e.paneIndex, e.point.x, e.point.y);
       const rect = untracked(this.rects)[e.paneIndex];
-      if (hit && rect)
+      if (hit && rect) {
+        const el = this.surface().nativeElement;
+        const x = rect.left + e.point.x;
+        const y = rect.top + e.point.y;
+        // Open toward the free side so a tooltip near the right or bottom edge is not clipped.
+        const flipX = x > el.clientWidth - 340;
+        const flipY = y > el.clientHeight - 120;
         tip = {
           text: hit.tooltip,
-          left: rect.left + e.point.x + 14,
-          top: rect.top + e.point.y + 14,
+          left: x + (flipX ? -14 : 14),
+          top: y + (flipY ? -14 : 14),
+          flipX,
+          flipY,
         };
+      }
     }
     const cur = untracked(this.tooltip);
     if (cur?.text !== tip?.text || cur?.left !== tip?.left || cur?.top !== tip?.top)
