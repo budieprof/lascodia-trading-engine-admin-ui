@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   computed,
   effect,
   inject,
@@ -10,13 +11,18 @@ import {
   untracked,
 } from '@angular/core';
 
-import type { ResponseData, StrategyApprovalResultDto, StrategyDto } from '@core/api/api.types';
+import type { ResponseData, StrategyApprovalJobDto, StrategyDto } from '@core/api/api.types';
 import { StrategiesService } from '@core/services/strategies.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { failureMessage } from '../../util/api-failure';
-import { readApprovalOutcome, type ApprovalOutcome } from '../../util/approval';
+import { readApprovalJob, type ApprovalOutcome } from '../../util/approval';
 
 type Phase = 'confirm' | 'running' | 'result' | 'failed';
+
+/** How often a running approval job is polled. */
+export const APPROVAL_POLL_MS = 3000;
+/** Consecutive failed polls (backing off) before the dialog gives up on the job. */
+export const APPROVAL_MAX_POLL_FAILURES = 5;
 
 /**
  * "Submit for approval" (ADR-0027 DEC-10): the operator's path from Draft to Approved for a
@@ -24,10 +30,13 @@ type Phase = 'confirm' | 'running' | 'result' | 'failed';
  * Draft has no paper history) and shows the verdict gate by gate. Approved + Paused paper-trades;
  * going live is still Activate.
  *
- * The evaluation can take minutes (CPCV) and is not cancelled by closing the dialog: the engine
- * records the verdict either way. So the component stays alive while hidden — the host keeps it
- * in its template and opens it by setting `strategy` — and still reports the verdict (`changed`)
- * when it lands after the operator closed the dialog.
+ * The evaluation can take minutes (CPCV) — longer than a request may last — so the engine runs it as
+ * a job: submitting starts it (or returns the one already running for the strategy) and the dialog
+ * polls it until it is `done` or `failed`. Closing the dialog does not stop it: the component stays
+ * alive while hidden — the host keeps it in its template and opens it by setting `strategy` — keeps
+ * polling, and still reports the verdict (`changed`, a toast) when it lands. "No verdict came back"
+ * is only for real failures: the engine unreachable when submitting, or the job unreadable after
+ * several tries.
  */
 @Component({
   selector: 'app-submit-for-approval-dialog',
@@ -132,8 +141,8 @@ type Phase = 'confirm' | 'running' | 'result' | 'failed';
                   <span>{{ failure() }}</span>
                 </div>
                 <p>
-                  A long evaluation can outlast the connection. If it reached the engine it keeps
-                  running and records its verdict — the Promotion tab's gate history shows it.
+                  The engine could not be reached. If the evaluation started it keeps running and
+                  records its verdict — the Promotion tab's gate history shows it.
                 </p>
               }
             }
@@ -367,6 +376,8 @@ export class SubmitForApprovalDialogComponent {
   readonly failure = signal<string | null>(null);
   /** The strategy whose evaluation is in flight or shown. */
   private subjectId: number | null = null;
+  /** The next poll of each strategy's running job (an evaluation keeps reporting after the page moves on). */
+  private readonly polls = new Map<number, ReturnType<typeof setTimeout>>();
 
   constructor() {
     // Opened for another strategy (the page moved on): start from the confirmation. An
@@ -376,6 +387,11 @@ export class SubmitForApprovalDialogComponent {
       untracked(() => {
         if (s && this.subjectId !== null && this.subjectId !== s.id) this.reset();
       });
+    });
+    // Leaving the page stops polling; the verdict is still recorded in the gate history.
+    inject(DestroyRef).onDestroy(() => {
+      for (const timer of this.polls.values()) clearTimeout(timer);
+      this.polls.clear();
     });
   }
 
@@ -417,22 +433,69 @@ export class SubmitForApprovalDialogComponent {
     this.failure.set(null);
     const id = s.id;
     this.strategies.submitForApproval(id, { silent: true }).subscribe({
-      next: (res) => this.settle(id, readApprovalOutcome(res), res),
+      next: (res) => this.onJob(id, res, 0),
       error: (err: unknown) => {
-        // A refusal can arrive as an HTTP error that still carries the result envelope.
+        // A refusal can arrive as an HTTP error that still carries the envelope.
         const body = (err as { error?: unknown } | null)?.error as
-          | ResponseData<StrategyApprovalResultDto>
+          | ResponseData<StrategyApprovalJobDto>
           | undefined;
-        const outcome = readApprovalOutcome(body);
-        if (outcome) {
-          this.settle(id, outcome, body ?? null);
+        if (body?.data && typeof body.data === 'object') {
+          this.onJob(id, body, 0);
           return;
         }
-        if (this.subjectId !== id) return;
-        this.phase.set('failed');
-        this.failure.set(failureMessage(err, 'The request failed.'));
+        this.fail(id, failureMessage(err, 'The request failed.'));
       },
     });
+  }
+
+  /** A submit or poll answer: keep polling a running job, settle a finished (or refused) one. */
+  private onJob(
+    id: number,
+    res: ResponseData<StrategyApprovalJobDto> | null | undefined,
+    failures: number,
+  ): void {
+    const job = res?.data;
+    if (!job || typeof job !== 'object') {
+      this.fail(id, failureMessage(res, 'The engine returned no job.'));
+      return;
+    }
+    if (job.status === 'running') {
+      if (job.jobId) this.schedulePoll(id, job.jobId, failures);
+      else this.fail(id, 'The engine returned a job without an id.');
+      return;
+    }
+    // Finished — or refused before a job started, when the envelope's message says why.
+    this.settle(id, readApprovalJob({ ...job, message: job.message ?? res?.message ?? null }));
+  }
+
+  private schedulePoll(id: number, jobId: string, failures: number): void {
+    const pending = this.polls.get(id);
+    if (pending !== undefined) clearTimeout(pending);
+    const delay = Math.min(APPROVAL_POLL_MS * 2 ** failures, 30_000);
+    this.polls.set(
+      id,
+      setTimeout(() => {
+        this.polls.delete(id);
+        this.strategies.getApprovalJob(id, jobId, { silent: true }).subscribe({
+          next: (res) => {
+            if (res?.data && typeof res.data === 'object') this.onJob(id, res, 0);
+            else
+              this.retry(id, jobId, failures, failureMessage(res, 'The engine returned no job.'));
+          },
+          error: (err: unknown) =>
+            this.retry(id, jobId, failures, failureMessage(err, 'The request failed.')),
+        });
+      }, delay),
+    );
+  }
+
+  /** A poll that failed: try again, backing off, and give up only after several in a row. */
+  private retry(id: number, jobId: string, failures: number, why: string): void {
+    if (failures + 1 >= APPROVAL_MAX_POLL_FAILURES) {
+      this.fail(id, why);
+      return;
+    }
+    this.schedulePoll(id, jobId, failures + 1);
   }
 
   close(): void {
@@ -446,15 +509,23 @@ export class SubmitForApprovalDialogComponent {
     this.historyRequested.emit();
   }
 
-  private settle(
-    id: number,
-    outcome: ApprovalOutcome | null,
-    res: ResponseData<StrategyApprovalResultDto> | null,
-  ): void {
+  /** No verdict came back: a real failure (the engine unreachable, the job unreadable). */
+  private fail(id: number, why: string): void {
+    if (this.subjectId !== id) {
+      if (!this.strategy() || this.strategy()?.id !== id) {
+        this.notifications.warning(
+          `Strategy #${id}: no approval verdict came back — see its gate history.`,
+        );
+      }
+      return;
+    }
+    this.phase.set('failed');
+    this.failure.set(why);
+  }
+
+  private settle(id: number, outcome: ApprovalOutcome | null): void {
     if (!outcome) {
-      if (this.subjectId !== id) return;
-      this.phase.set('failed');
-      this.failure.set(failureMessage(res, 'The engine returned no verdict.'));
+      this.fail(id, 'The engine returned no verdict.');
       return;
     }
     this.changed.emit(id);

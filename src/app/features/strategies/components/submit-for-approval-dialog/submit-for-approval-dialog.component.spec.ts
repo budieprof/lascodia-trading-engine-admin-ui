@@ -1,16 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Subject, of, throwError } from 'rxjs';
+import { of, throwError } from 'rxjs';
 
-import type { ResponseData, StrategyApprovalResultDto, StrategyDto } from '@core/api/api.types';
+import type {
+  ResponseData,
+  StrategyApprovalJobDto,
+  StrategyApprovalResultDto,
+  StrategyDto,
+} from '@core/api/api.types';
 import { StrategiesService } from '@core/services/strategies.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
-import { SubmitForApprovalDialogComponent } from './submit-for-approval-dialog.component';
+import {
+  APPROVAL_MAX_POLL_FAILURES,
+  APPROVAL_POLL_MS,
+  SubmitForApprovalDialogComponent,
+} from './submit-for-approval-dialog.component';
 
-// "Submit for approval" (ADR-0027 DEC-10): the confirm → run → verdict flow, the gate table, and
-// an evaluation that outlives the dialog (closing it does not stop the engine).
+// "Submit for approval" (ADR-0027 DEC-10, engine D88): confirm → start the job → poll it → the
+// verdict gate by gate; refusals; an evaluation that outlives the dialog; "no verdict" only for real
+// failures.
 
 declareSignalIo(SubmitForApprovalDialogComponent, {
   inputs: ['strategy'],
@@ -18,19 +28,42 @@ declareSignalIo(SubmitForApprovalDialogComponent, {
 });
 
 const DRAFT = { id: 7, name: 'Pine EMA', lifecycleStage: 'Draft' } as StrategyDto;
+const JOB_ID = '1790253600000';
+
+function job(
+  status: StrategyApprovalJobDto['status'],
+  result: StrategyApprovalResultDto | null = null,
+  message: string | null = null,
+  responseCode: string | null = status === 'running' ? null : '00',
+  jobId: string | null = JOB_ID,
+): StrategyApprovalJobDto {
+  return {
+    jobId,
+    strategyId: 7,
+    status,
+    startedAtUtc: '2026-09-24T12:00:00Z',
+    finishedAtUtc: status === 'running' ? null : '2026-09-24T12:03:00Z',
+    result,
+    message,
+    responseCode,
+  };
+}
 
 const envelope = (
-  data: StrategyApprovalResultDto | null,
+  data: StrategyApprovalJobDto | null,
   status = true,
   message = 'Successful',
   responseCode = '00',
-): ResponseData<StrategyApprovalResultDto> =>
-  ({ data, status, message, responseCode }) as ResponseData<StrategyApprovalResultDto>;
+): ResponseData<StrategyApprovalJobDto> =>
+  ({ data, status, message, responseCode }) as ResponseData<StrategyApprovalJobDto>;
+
+const RUNNING = envelope(job('running'), true, 'Evaluating every promotion gate for strategy 7.');
 
 describe('SubmitForApprovalDialogComponent', () => {
   let fixture: ComponentFixture<SubmitForApprovalDialogComponent>;
   let el: HTMLElement;
   let submit: ReturnType<typeof vi.fn>;
+  let poll: ReturnType<typeof vi.fn>;
   let notify: Record<string, ReturnType<typeof vi.fn>>;
   let changed: number[];
   let history: number;
@@ -50,13 +83,24 @@ describe('SubmitForApprovalDialogComponent', () => {
     fixture.detectChanges();
   }
 
+  /** One poll interval passes (plus the backoff after `failures` failed polls in a row). */
+  function tick(failures = 0): void {
+    vi.advanceTimersByTime(Math.min(APPROVAL_POLL_MS * 2 ** failures, 30_000));
+    fixture.detectChanges();
+  }
+
   beforeEach(() => {
+    vi.useFakeTimers();
     submit = vi.fn();
+    poll = vi.fn();
     notify = { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() };
     TestBed.configureTestingModule({
       imports: [SubmitForApprovalDialogComponent],
       providers: [
-        { provide: StrategiesService, useValue: { submitForApproval: submit } },
+        {
+          provide: StrategiesService,
+          useValue: { submitForApproval: submit, getApprovalJob: poll },
+        },
         { provide: NotificationService, useValue: notify },
       ],
     });
@@ -68,7 +112,10 @@ describe('SubmitForApprovalDialogComponent', () => {
     fixture.componentInstance.historyRequested.subscribe(() => history++);
   });
 
-  afterEach(() => fixture.destroy());
+  afterEach(() => {
+    fixture.destroy();
+    vi.useRealTimers();
+  });
 
   it('renders nothing until a strategy is set, then explains what submitting does', () => {
     fixture.detectChanges();
@@ -80,45 +127,66 @@ describe('SubmitForApprovalDialogComponent', () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
-  it('runs the gates and shows an approval; the host re-reads the strategy', () => {
-    submit.mockReturnValue(
+  it('starts the job, polls it while it runs, then shows an approval; the host re-reads the strategy', () => {
+    submit.mockReturnValue(of(RUNNING));
+    poll.mockReturnValueOnce(of(envelope(job('running'))));
+    poll.mockReturnValueOnce(
       of(
         envelope(
-          {
-            approved: true,
-            stage: 'Approved',
-            gates: [{ name: 'DSR', passed: true, detail: 'DSR=0.97' }],
-          },
-          true,
-          'Approved. Strategy 7 now paper-trades (Approved + Paused).',
+          job(
+            'done',
+            {
+              approved: true,
+              stage: 'Approved',
+              gates: [{ name: 'DSR', passed: true, detail: 'DSR=0.97' }],
+            },
+            'Approved. Strategy 7 now paper-trades (Approved + Paused).',
+          ),
         ),
       ),
     );
     open();
     run();
     expect(submit).toHaveBeenCalledWith(7, { silent: true });
+    expect(el.querySelector('.running')).not.toBeNull();
+    expect(poll).not.toHaveBeenCalled(); // nothing to ask before the first interval
+
+    tick();
+    expect(poll).toHaveBeenCalledWith(7, JOB_ID, { silent: true });
+    expect(el.querySelector('.running')).not.toBeNull();
+    expect(changed).toEqual([]);
+
+    tick();
+    expect(poll).toHaveBeenCalledTimes(2);
     expect(el.querySelector('.verdict')!.getAttribute('data-verdict')).toBe('approved');
     expect(el.querySelector('.verdict')!.textContent).toContain('Approved');
     expect(el.querySelectorAll('.gates tbody tr')).toHaveLength(1);
     expect(changed).toEqual([7]);
     expect(button('Open gate history')).toBeUndefined();
+
+    tick();
+    expect(poll).toHaveBeenCalledTimes(2); // a finished job is not polled again
   });
 
   it('shows a rejection gate by gate, failed gates marked, with the way to the gate history', () => {
-    submit.mockReturnValue(
+    submit.mockReturnValue(of(RUNNING));
+    poll.mockReturnValue(
       of(
-        envelope({
-          approved: false,
-          stage: 'Draft',
-          gates: [
-            { name: 'DSR', passed: true, detail: 'DSR=0.97' },
-            { name: 'CPCV', passed: false, detail: 'median Sharpe 0.21 < 0.5' },
-          ],
-        }),
+        envelope(
+          job('done', {
+            approved: false,
+            stage: 'Draft',
+            gates: [
+              { name: 'DSR', passed: true, detail: 'DSR=0.97' },
+              { name: 'CPCV', passed: false, detail: 'median Sharpe 0.21 < 0.5' },
+            ],
+          }),
+        ),
       ),
     );
     open();
     run();
+    tick();
     expect(el.querySelector('.verdict')!.getAttribute('data-verdict')).toBe('rejected');
     expect(el.querySelector('.verdict')!.textContent).toContain('1 of 2 gates failed');
     const rows = [...el.querySelectorAll('.gates tbody tr')];
@@ -129,45 +197,81 @@ describe('SubmitForApprovalDialogComponent', () => {
   });
 
   it('reads a timed-out evaluation as not judged, never as a rejection', () => {
-    submit.mockReturnValue(
+    submit.mockReturnValue(of(RUNNING));
+    poll.mockReturnValue(
       of(
         envelope(
-          {
-            approved: false,
-            stage: 'Draft',
-            gates: [{ name: 'evaluation', passed: false, detail: 'TimedOut' }],
-          },
-          false,
-          'Not judged (TimedOut): budget exhausted',
-          '-12',
+          job(
+            'failed',
+            {
+              approved: false,
+              stage: 'Draft',
+              gates: [{ name: 'evaluation', passed: false, detail: 'TimedOut' }],
+            },
+            'Not judged (TimedOut): budget exhausted',
+            '-12',
+          ),
         ),
       ),
     );
     open();
     run();
+    tick();
     expect(el.querySelector('.verdict')!.getAttribute('data-verdict')).toBe('not-judged');
     expect(el.textContent).toContain('Not judged (TimedOut)');
   });
 
-  it('says so when no verdict came back, and points at the gate history', () => {
-    submit.mockReturnValue(throwError(() => new HttpErrorResponse({ status: 524 })));
+  it('reads a job interrupted by an engine restart as not judged, with the engine’s reason', () => {
+    submit.mockReturnValue(of(RUNNING));
+    poll.mockReturnValue(
+      of(
+        envelope(
+          job(
+            'failed',
+            { approved: false, stage: 'Draft', gates: [] },
+            'No verdict was recorded for job 1790253600000: the engine restarted before the evaluation finished.',
+            '-12',
+          ),
+        ),
+      ),
+    );
     open();
     run();
-    expect(el.querySelector('[role="alert"]')!.textContent).toContain('No verdict came back');
-    expect(button('Open gate history')).toBeDefined();
-    expect(changed).toEqual([]);
+    tick();
+    expect(el.querySelector('.verdict')!.getAttribute('data-verdict')).toBe('not-judged');
+    expect(el.textContent).toContain('the engine restarted');
+    expect(el.querySelector('[role="alert"]')).toBeNull(); // the engine answered: not a lost request
   });
 
-  it('reads a refusal that arrives as an HTTP error with the result envelope', () => {
+  it('shows a refusal from the submit at once, without polling', () => {
+    submit.mockReturnValue(
+      of(
+        envelope(
+          job('failed', { approved: true, stage: 'Approved', gates: [] }, null, '-11', null),
+          false,
+          'Only a Draft can be submitted for approval — strategy 7 is Approved.',
+          '-11',
+        ),
+      ),
+    );
+    open();
+    run();
+    expect(el.querySelector('.verdict')!.getAttribute('data-verdict')).toBe('refused');
+    expect(el.textContent).toContain('Only a Draft');
+    tick();
+    expect(poll).not.toHaveBeenCalled();
+  });
+
+  it('reads a refusal that arrives as an HTTP error with the envelope', () => {
     submit.mockReturnValue(
       throwError(
         () =>
           new HttpErrorResponse({
             status: 400,
             error: envelope(
-              { approved: false, stage: 'Draft', gates: [] },
+              job('failed', { approved: false, stage: 'Draft', gates: [] }, null, '-11', null),
               false,
-              'An approval evaluation for strategy 7 is already running',
+              'Strategy 7 is Active; only a Paused Draft can be approved',
               '-11',
             ),
           }),
@@ -176,12 +280,53 @@ describe('SubmitForApprovalDialogComponent', () => {
     open();
     run();
     expect(el.querySelector('.verdict')!.getAttribute('data-verdict')).toBe('refused');
-    expect(el.textContent).toContain('already running');
+    expect(el.textContent).toContain('only a Paused Draft');
   });
 
-  it('keeps an evaluation going after the dialog closes and reports its verdict', () => {
-    const response = new Subject<ResponseData<StrategyApprovalResultDto>>();
-    submit.mockReturnValue(response);
+  it('says no verdict came back only when the submit itself fails', () => {
+    submit.mockReturnValue(throwError(() => new HttpErrorResponse({ status: 524 })));
+    open();
+    run();
+    expect(el.querySelector('[role="alert"]')!.textContent).toContain('No verdict came back');
+    expect(button('Open gate history')).toBeDefined();
+    expect(changed).toEqual([]);
+  });
+
+  it('rides out failed polls, backing off, and gives up only after several in a row', () => {
+    submit.mockReturnValue(of(RUNNING));
+    const down = () => throwError(() => new HttpErrorResponse({ status: 502 }));
+    for (let i = 0; i < APPROVAL_MAX_POLL_FAILURES - 1; i++) poll.mockReturnValueOnce(down());
+    poll.mockReturnValueOnce(
+      of(envelope(job('done', { approved: true, stage: 'Approved', gates: [] }, 'Approved.'))),
+    );
+    open();
+    run();
+    for (let i = 0; i < APPROVAL_MAX_POLL_FAILURES - 1; i++) {
+      tick(i);
+      expect(el.querySelector('[role="alert"]')).toBeNull();
+      expect(el.querySelector('.running')).not.toBeNull();
+    }
+    tick(APPROVAL_MAX_POLL_FAILURES - 1);
+    expect(el.querySelector('.verdict')!.getAttribute('data-verdict')).toBe('approved');
+  });
+
+  it('shows the fallback once every poll in a row has failed', () => {
+    submit.mockReturnValue(of(RUNNING));
+    poll.mockImplementation(() => throwError(() => new HttpErrorResponse({ status: 502 })));
+    open();
+    run();
+    for (let i = 0; i < APPROVAL_MAX_POLL_FAILURES; i++) tick(i);
+    expect(poll).toHaveBeenCalledTimes(APPROVAL_MAX_POLL_FAILURES);
+    expect(el.querySelector('[role="alert"]')!.textContent).toContain('No verdict came back');
+    tick(APPROVAL_MAX_POLL_FAILURES);
+    expect(poll).toHaveBeenCalledTimes(APPROVAL_MAX_POLL_FAILURES); // it stopped
+  });
+
+  it('keeps polling after the dialog closes and reports the verdict when it lands', () => {
+    submit.mockReturnValue(of(RUNNING));
+    poll.mockReturnValue(
+      of(envelope(job('done', { approved: true, stage: 'Approved', gates: [] }, 'Approved.'))),
+    );
     open();
     run();
     expect(el.querySelector('.running')).not.toBeNull();
@@ -189,11 +334,21 @@ describe('SubmitForApprovalDialogComponent', () => {
     open(null); // the host closes it
     expect(el.querySelector('[role="dialog"]')).toBeNull();
 
-    response.next(envelope({ approved: true, stage: 'Approved', gates: [] }));
+    tick();
     expect(changed).toEqual([7]);
     expect(notify['success']).toHaveBeenCalledWith(expect.stringContaining('approved'));
     // Reopened, it shows the verdict it got.
     open();
     expect(el.querySelector('.verdict')!.getAttribute('data-verdict')).toBe('approved');
+  });
+
+  it('stops polling when it is destroyed', () => {
+    submit.mockReturnValue(of(RUNNING));
+    poll.mockReturnValue(of(envelope(job('running'))));
+    open();
+    run();
+    fixture.destroy();
+    vi.advanceTimersByTime(APPROVAL_POLL_MS * 10);
+    expect(poll).not.toHaveBeenCalled();
   });
 });

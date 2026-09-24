@@ -38,7 +38,7 @@ import {
   BacktestPreviewSnapshotDto,
   SaveBacktestPreviewSnapshotRequest,
   PromotionGatesDto,
-  StrategyApprovalResultDto,
+  StrategyApprovalJobDto,
   LlmProposalDto,
   LlmProposalStatusDto,
   StrategyProposalCycleResult,
@@ -187,20 +187,31 @@ export class StrategiesService {
   }
 
   /**
-   * Submit a Draft for approval (ADR-0027 DEC-10): runs every promotion gate — the paper gate is
-   * bypassed, a Draft has no paper history — and moves Draft → Approved on a pass, which starts
-   * paper trading. Synchronous and potentially slow (CPCV; the engine bounds it, 600 s by
-   * default); the verdict is recorded either way and readable from the gate history.
-   *
-   * A rejection is `status: true, approved: false`; an evaluation that timed out or failed is
-   * `status: false` (`-12`) with an `evaluation` gate row saying why; a non-Draft is `-11`. Every
-   * shape carries the result in `data`.
+   * Submit a Draft for approval (ADR-0027 DEC-10): starts evaluating every promotion gate — the
+   * paper gate is bypassed, a Draft has no paper history — and answers at once with a job
+   * (`status: 'running'`; the job already evaluating this strategy if there is one). Poll it with
+   * {@link getApprovalJob}. A pass moves Draft → Approved, which starts paper trading. A strategy
+   * that cannot be submitted is refused here (`status: false`, `-11`/`-14`, `data.jobId` null, the
+   * stage in `data.result`).
    */
   submitForApproval(
     id: number,
     opts?: ApiCallOptions,
-  ): Observable<ResponseData<StrategyApprovalResultDto>> {
+  ): Observable<ResponseData<StrategyApprovalJobDto>> {
     return this.api.post(`/strategy/${id}/submit-for-approval`, {}, opts);
+  }
+
+  /**
+   * A Submit-for-approval job: `running`, `done` (`result` is the verdict) or `failed` (no verdict —
+   * the evaluation timed out or failed, with an `evaluation` gate row, or an engine restart
+   * interrupted it). A verdict reached before a restart is still answered.
+   */
+  getApprovalJob(
+    id: number,
+    jobId: string,
+    opts?: ApiCallOptions,
+  ): Observable<ResponseData<StrategyApprovalJobDto>> {
+    return this.api.get(`/strategy/${id}/submit-for-approval/${encodeURIComponent(jobId)}`, opts);
   }
 
   /**

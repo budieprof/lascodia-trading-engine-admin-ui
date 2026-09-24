@@ -280,16 +280,41 @@ export interface StrategyApprovalGateDto {
 }
 
 /**
- * `POST strategy/{id}/submit-for-approval` (ADR-0027 DEC-10): the operator's path from Draft to
- * Approved. Every promotion gate runs (the paper gate is bypassed — a Draft has no paper history);
- * on a pass the strategy is Approved + Paused, i.e. paper trading, until `PUT strategy/{id}/activate`.
+ * The verdict of Submit for approval (ADR-0027 DEC-10): the operator's path from Draft to Approved.
+ * Every promotion gate runs (the paper gate is bypassed — a Draft has no paper history); on a pass the
+ * strategy is Approved + Paused, i.e. paper trading, until `PUT strategy/{id}/activate`.
  */
 export interface StrategyApprovalResultDto {
   approved: boolean;
-  /** The lifecycle stage after the call. */
+  /** The lifecycle stage after the evaluation. */
   stage: StrategyLifecycleStage | string;
   /** Every gate's verdict; a gate named `evaluation` means the run was not judged (timeout / error). */
   gates: StrategyApprovalGateDto[];
+}
+
+/** `running`; `done` — a verdict (approved or rejected); `failed` — no verdict. */
+export type StrategyApprovalJobStatus = 'running' | 'done' | 'failed';
+
+/**
+ * A Submit-for-approval job (engine D88). `POST strategy/{id}/submit-for-approval` starts the
+ * evaluation — it can take minutes, longer than a request may last — and returns the job at once
+ * (`status: 'running'`, or the job already evaluating that strategy); `GET
+ * strategy/{id}/submit-for-approval/{jobId}` is polled until it is `done` or `failed`. A strategy
+ * that cannot be submitted (not a Paused Draft, `-11`; unknown, `-14`) is refused by the POST with
+ * `jobId: null` and the stage in `result`.
+ */
+export interface StrategyApprovalJobDto {
+  jobId: string | null;
+  strategyId: number;
+  status: StrategyApprovalJobStatus;
+  startedAtUtc: string | null;
+  finishedAtUtc: string | null;
+  /** The verdict payload (`done`), or what is known of a failed attempt; null while running. */
+  result: StrategyApprovalResultDto | null;
+  /** The engine's sentence about the verdict. */
+  message: string | null;
+  /** The verdict's code: `00` a verdict, `-12` not judged (timeout / error / interrupted), `-11`/`-14` refused. */
+  responseCode: string | null;
 }
 
 /**
@@ -1393,6 +1418,12 @@ export interface PromotionGateEvaluationDto {
 
   /** One entry per gate that ran — including passes and auto-skips, with reasons. */
   diagnostics: string[];
+
+  /**
+   * Every gate's verdict in evaluation order, as Submit for approval shows them. Empty for attempts
+   * that reached no verdict and for attempts recorded before the engine stored them.
+   */
+  gates?: StrategyApprovalGateDto[];
 
   /** The breached gates, split out of the summary for listing. */
   failures: string[];

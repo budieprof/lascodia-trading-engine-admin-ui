@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { readApprovalOutcome } from './approval';
+import { readApprovalJob, readApprovalOutcome } from './approval';
 
 const GATES = [
   { name: 'DSR', passed: true, detail: 'DSR=0.97' },
@@ -79,5 +79,77 @@ describe('readApprovalOutcome', () => {
       data: { approved: false, stage: 'Draft', gates: GATES },
     });
     expect(o?.message).toBeNull();
+  });
+});
+
+describe('readApprovalJob', () => {
+  const base = {
+    jobId: '1790253600000',
+    strategyId: 7,
+    startedAtUtc: '2026-09-24T12:00:00Z',
+    finishedAtUtc: '2026-09-24T12:03:00Z',
+  };
+
+  it('is null while the job runs', () => {
+    expect(
+      readApprovalJob({
+        ...base,
+        status: 'running',
+        result: null,
+        message: null,
+        responseCode: null,
+      }),
+    ).toBeNull();
+    expect(readApprovalJob(null)).toBeNull();
+  });
+
+  it('reads a done job as the verdict it carries', () => {
+    const approved = readApprovalJob({
+      ...base,
+      status: 'done',
+      result: { approved: true, stage: 'Approved', gates: [GATES[0]] },
+      message: 'Approved. Strategy 7 now paper-trades.',
+      responseCode: '00',
+    });
+    expect(approved).toEqual({
+      verdict: 'approved',
+      stage: 'Approved',
+      gates: [GATES[0]],
+      message: 'Approved. Strategy 7 now paper-trades.',
+    });
+    const rejected = readApprovalJob({
+      ...base,
+      status: 'done',
+      result: { approved: false, stage: 'Draft', gates: GATES },
+      message: 'Not approved — promotion gates failed: CPCV',
+      responseCode: '00',
+    });
+    expect(rejected?.verdict).toBe('rejected');
+  });
+
+  it('reads a failed job as not judged — even with no gate — unless the strategy was refused', () => {
+    const interrupted = readApprovalJob({
+      ...base,
+      status: 'failed',
+      result: { approved: false, stage: 'Draft', gates: [] },
+      message: 'No verdict was recorded for job 1790253600000: the engine restarted …',
+      responseCode: '-12',
+    });
+    expect(interrupted).toEqual({
+      verdict: 'not-judged',
+      stage: 'Draft',
+      gates: [],
+      message: 'No verdict was recorded for job 1790253600000: the engine restarted …',
+    });
+    const refused = readApprovalJob({
+      ...base,
+      jobId: null,
+      status: 'failed',
+      result: { approved: true, stage: 'Approved', gates: [] },
+      message: 'Only a Draft can be submitted for approval — strategy 7 is Approved.',
+      responseCode: '-11',
+    });
+    expect(refused?.verdict).toBe('refused');
+    expect(refused?.stage).toBe('Approved');
   });
 });
