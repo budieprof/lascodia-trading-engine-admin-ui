@@ -31,6 +31,13 @@ import {
   RiskProfileDto,
   CurrencyPairDto,
 } from '@core/api/api.types';
+// ── Pine script authoring (UI-IDE) — see the "Pine script authoring" block at the end of the class.
+import { AuthoringModeSwitchComponent } from '@features/scripting/components/script-authoring/authoring-mode-switch.component';
+import { ScriptAuthoringComponent } from '@features/scripting/components/script-authoring/script-authoring.component';
+import {
+  linkedAuthoringMode,
+  linkedScriptDraft,
+} from '@features/scripting/components/script-authoring/authoring-mode';
 import { StrategiesService } from '@core/services/strategies.service';
 import { RiskProfilesService } from '@core/services/risk-profiles.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
@@ -327,7 +334,14 @@ const TIMEFRAME_LABELS: Record<string, string> = {
 @Component({
   selector: 'app-strategy-form',
   standalone: true,
-  imports: [ReactiveFormsModule, DatePipe, DecimalPipe, DslBuilderComponent],
+  imports: [
+    ReactiveFormsModule,
+    DatePipe,
+    DecimalPipe,
+    DslBuilderComponent,
+    AuthoringModeSwitchComponent,
+    ScriptAuthoringComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (open()) {
@@ -343,6 +357,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
           role="dialog"
           aria-modal="true"
           tabindex="-1"
+          [class.dialog-wide]="isScriptAuthoring()"
           (click)="$event.stopPropagation()"
           (keydown)="$event.stopPropagation()"
         >
@@ -367,7 +382,11 @@ const TIMEFRAME_LABELS: Record<string, string> = {
               ×
             </button>
           </div>
-          <form [formGroup]="form" (ngSubmit)="onSubmit()" class="dialog-body">
+          <form
+            [formGroup]="form"
+            (ngSubmit)="isScriptAuthoring() ? submitScript() : onSubmit()"
+            class="dialog-body"
+          >
             <!-- Tab strip — TradingView-style — splits the modal into discrete config sections -->
             <div class="tab-strip" role="tablist">
               <button
@@ -520,6 +539,22 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                 ></textarea>
               </div>
 
+              <!-- ── Pine script authoring (UI-IDE) ─────────────────────────────
+                   RuleBased strategies are authored either with the rule builder
+                   (Parameters JSON below) or as a Pine v6 script. In script mode the
+                   panel replaces the rules block and the DSL backtest preview. -->
+              @if (isRuleBased()) {
+                <app-authoring-mode-switch [(mode)]="authoringMode" [locked]="!!strategy()" />
+              }
+              @if (isScriptAuthoring()) {
+                <app-script-authoring
+                  [(draft)]="scriptDraft"
+                  [strategy]="strategy()"
+                  [symbol]="scriptSymbol()"
+                  [timeframe]="scriptTimeframe()"
+                />
+              }
+
               <!-- Typed parameter form (v1) — drives the Parameters JSON textarea
                    below for strategy types with a registered schema. Operators on
                    types without a schema see only the textarea (legacy behaviour). -->
@@ -580,6 +615,8 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                 </div>
               }
 
+              <!-- UI-IDE: rules block hidden in script mode (body deliberately not re-indented). -->
+              @if (!isScriptAuthoring()) {
               <div class="form-group">
                 <label class="form-label">
                   Parameters JSON
@@ -649,6 +686,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                   <code>And</code> for backward compatibility.
                 </span>
               </div>
+              }
             }
 
             <!-- ========== RISK OVERRIDES TAB ========== -->
@@ -739,6 +777,9 @@ const TIMEFRAME_LABELS: Record<string, string> = {
               </div>
             }
 
+            <!-- UI-IDE: a script previews through its own panel (scripting/run); this
+                 DSL preview is hidden in script mode (body deliberately not re-indented). -->
+            @if (!isScriptAuthoring()) {
             <!-- Backtest preview panel — synchronous, server-bounded (≤90d, ≤6000
                  candles, 60s deadline). Operators see real Sharpe / win-rate / max DD
                  before saving. Single-symbol only; multi-symbol previews are too noisy
@@ -1056,6 +1097,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                 </div>
               }
             </div>
+            }
 
             @if (strategy(); as s) {
               <div class="version-history">
@@ -1874,6 +1916,11 @@ const TIMEFRAME_LABELS: Record<string, string> = {
       .snapshot-notes-row td {
         padding: 6px 4px;
         background: var(--bg-secondary, #fafbfc);
+      }
+      /* UI-IDE: script mode needs room for the editor beside its side panel. */
+      .dialog.dialog-wide {
+        max-width: min(1320px, 96vw);
+        max-height: 94vh;
       }
     `,
   ],
@@ -2936,5 +2983,101 @@ export class StrategyFormComponent implements OnInit, OnChanges {
 
   onCancel(): void {
     this.cancelled.emit();
+  }
+
+  // ── Pine script authoring (UI-IDE) ──────────────────────────────────────
+  // RuleBased strategies are authored as rules (the DSL above) or as a Pine v6
+  // script. The mode and the script draft are re-derived whenever the form
+  // opens or is pointed at another strategy; the draft lives here so the
+  // script panel keeps it across the form's tab switches.
+  //
+  // Script mode submits through submitScript(): create posts scriptSource /
+  // scriptInputs / executionPolicy (contract §8) through the ordinary
+  // `submitted` output; edit saves the script itself with
+  // PUT strategy/{id}/script (compile + version capture + live restart) and
+  // then emits the ordinary metadata update only when the form changed.
+
+  readonly authoringMode = linkedAuthoringMode(
+    () => this.strategy(),
+    () => this.open(),
+  );
+  readonly scriptDraft = linkedScriptDraft(
+    () => this.strategy(),
+    () => this.open(),
+  );
+  private scriptSubmitting = false;
+  @ViewChild(ScriptAuthoringComponent) private scriptAuthoring?: ScriptAuthoringComponent;
+
+  /** The strategy being edited — or the type being created — is RuleBased. */
+  isRuleBased(): boolean {
+    const type = this.strategy()?.strategyType ?? this.form?.get('strategyType')?.value;
+    return type === 'RuleBased';
+  }
+
+  /** The form is authoring a Pine script (RuleBased in script mode). */
+  isScriptAuthoring(): boolean {
+    return this.authoringMode() === 'script' && this.isRuleBased();
+  }
+
+  /** The symbol the script compiles and previews against (the first one typed, when creating). */
+  scriptSymbol(): string | null {
+    return this.strategy()?.symbol ?? this.parsedSymbols()[0] ?? null;
+  }
+
+  scriptTimeframe(): string | null {
+    return this.strategy()?.timeframe ?? this.form?.get('timeframe')?.value ?? null;
+  }
+
+  /** Submit in script mode — see the block comment above. */
+  async submitScript(): Promise<void> {
+    const panel = this.scriptAuthoring;
+    if (!panel || this.scriptSubmitting || this.form.invalid) return;
+    this.scriptSubmitting = true;
+    try {
+      const script = await panel.prepareSubmit();
+      if (!script) return;
+      const val = this.form.getRawValue();
+      const common = {
+        name: val.name,
+        description: val.description || '',
+        riskProfileId: val.riskProfileId || null,
+        riskOverridesJson: val.riskOverridesJson || null,
+        sizingConfigJson: val.sizingConfigJson || null,
+        sessionFilterJson: val.sessionFilterJson || null,
+        regimeGateJson: val.regimeGateJson || null,
+        multiTimeframeGateJson: val.multiTimeframeGateJson || null,
+      };
+      const existing = this.strategy();
+      if (!existing) {
+        const symbols = this.parsedSymbols();
+        const create: CreateStrategyRequest & { symbols: string[] } = {
+          ...common,
+          strategyType: 'RuleBased',
+          symbol: symbols[0] ?? val.symbol,
+          symbols,
+          timeframe: val.timeframe,
+          scriptSource: script.source,
+          scriptInputs: script.inputs,
+          executionPolicy: script.executionPolicy,
+        };
+        this.submitted.emit(create);
+        return;
+      }
+      const scriptChanged = panel.isDirty();
+      if (scriptChanged && !(await panel.saveScript(existing.id, script))) return;
+      if (this.form.dirty) {
+        // Metadata only: the script went through its own endpoint, and
+        // parametersJson is left out so the (empty) rules stay untouched.
+        const update = { ...common, changeReason: this.updateChangeReason()?.trim() || null };
+        this.submitted.emit(update);
+      } else {
+        if (scriptChanged) {
+          this.notifications.success('Script saved — live sessions pick it up at the next bar');
+        }
+        this.cancelled.emit();
+      }
+    } finally {
+      this.scriptSubmitting = false;
+    }
   }
 }

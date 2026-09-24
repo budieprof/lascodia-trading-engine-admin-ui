@@ -87,6 +87,12 @@ export const PAGE_CATALOG: readonly PageCommand[] = [
     keywords: 'template apply bulk symbols multi pair',
   },
   {
+    group: 'Strategy',
+    label: 'Strategies — Pine Libraries',
+    route: '/strategies/libraries',
+    keywords: 'pine script library libraries import export publish version tradingview code',
+  },
+  {
     group: 'Ops',
     label: 'Auto-Tune — Proposals',
     route: '/auto-tune',

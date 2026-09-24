@@ -98,7 +98,7 @@ export function docViewFor(resolved: PineResolved, text: string): PineDocView {
     }
     case 'user-type': {
       const t = resolved.type;
-      if (resolved.constructor) {
+      if (resolved.ctor) {
         const { overloads } = overloadsFor(resolved, text);
         return {
           kind: 'constructor',

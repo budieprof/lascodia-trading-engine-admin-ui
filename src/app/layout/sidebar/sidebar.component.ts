@@ -458,6 +458,7 @@ export class SidebarComponent {
           icon: '⚙',
           policy: 'Operator',
         },
+        { label: 'Pine Libraries', route: '/strategies/libraries', icon: '📚' },
         { label: 'Accounts', route: '/trading-accounts', icon: '🏦' },
         { label: 'Brokers', route: '/brokers', icon: '🔗' },
         { label: 'Risk Profiles', route: '/risk-profiles', icon: '🛡' },

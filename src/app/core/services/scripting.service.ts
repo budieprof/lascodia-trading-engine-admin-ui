@@ -6,7 +6,7 @@ import {
   HttpHeaders,
   HttpResponse,
 } from '@angular/common/http';
-import { Observable, catchError, map, of, throwError } from 'rxjs';
+import { Observable, Subject, catchError, map, of, tap, throwError } from 'rxjs';
 
 import { ApiService, SUPPRESS_ERROR_TOAST } from '@core/api/api.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
@@ -122,6 +122,10 @@ export class ScriptingService {
   private readonly api = inject(ApiService);
   private readonly http = inject(HttpClient);
   private readonly baseUrl = `${inject(RUNTIME_CONFIG).apiBaseUrl}/api/v1/lascodia-trading-engine`;
+  private readonly scriptSaved = new Subject<number>();
+
+  /** Ids of strategies whose script was just saved — views showing that script re-read it. */
+  readonly strategyScriptSaved$ = this.scriptSaved.asObservable();
 
   // ── §1 Catalog ──────────────────────────────────────────────────────────
 
@@ -285,6 +289,7 @@ export class ScriptingService {
           );
         }
       }),
+      tap(() => this.scriptSaved.next(id)),
       catchError((err) => throwError(() => toScriptingError(err, 'Saving the script failed.'))),
     );
   }

@@ -108,7 +108,7 @@ export function overloadsFor(resolved: PineResolved, calleeText: string): { over
         doc: resolved.methods[0]?.doc ?? null,
       };
     case 'user-type':
-      if (resolved.constructor === 'new') {
+      if (resolved.ctor === 'new') {
         return {
           overloads: [
             {

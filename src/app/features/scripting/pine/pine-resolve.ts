@@ -31,7 +31,7 @@ export type PineResolved =
   | { kind: 'user-function'; fn: PineFunctionSymbol }
   | { kind: 'user-method'; name: string; methods: PineFunctionSymbol[]; receiverType?: string }
   | { kind: 'user-variable'; variable: PineVariableSymbol; type: string | null }
-  | { kind: 'user-type'; type: PineTypeSymbol; constructor?: 'new' | 'copy' }
+  | { kind: 'user-type'; type: PineTypeSymbol; ctor?: 'new' | 'copy' }
   | { kind: 'user-type-field'; type: PineTypeSymbol; field: PineTypeField }
   | { kind: 'user-enum'; enumSymbol: PineEnumSymbol }
   | { kind: 'user-enum-member'; enumSymbol: PineEnumSymbol; member: PineEnumMember }
@@ -157,7 +157,7 @@ export function resolvePinePath(
   const userType = findUserType(symbols, head);
   if (userType && segments.length === 2) {
     if (member === 'new' || member === 'copy') {
-      return { kind: 'user-type', type: userType, constructor: member };
+      return { kind: 'user-type', type: userType, ctor: member };
     }
   }
   const userEnum = symbols.enums.find((e) => e.name === head);
