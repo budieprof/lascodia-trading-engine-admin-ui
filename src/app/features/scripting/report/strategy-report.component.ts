@@ -16,7 +16,7 @@ import { describeFailure } from '../shared/api-error';
 import { saveBlob } from '../shared/download';
 import { normalizeStrategyReport, reportCurrency } from './strategy-report.model';
 import { buildProfitDistributionOptions, reportPalette } from './report-charts';
-import { formatDate, formatInteger, formatQty } from './report-format';
+import { formatDate, formatInteger, formatUnits } from './report-format';
 import {
   CAPITAL_GROUPS,
   PERFORMANCE_GROUPS,
@@ -456,7 +456,7 @@ export class StrategyReportComponent {
     if (calls > 0) {
       out.push({
         level: 'warning',
-        text: `${formatInteger(calls)} margin call${calls === 1 ? '' : 's'}: the emulated broker liquidated ${formatQty(r.capital.liquidatedQty)} contracts for lack of margin.`,
+        text: `${formatInteger(calls)} margin call${calls === 1 ? '' : 's'}: the emulated broker liquidated ${formatUnits(r.capital.liquidatedQty)} for lack of margin.`,
       });
     }
     const trimmed = r.meta.trimmedTrades ?? 0;

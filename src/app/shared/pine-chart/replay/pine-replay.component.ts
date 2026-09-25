@@ -13,7 +13,7 @@ import {
 import { ScriptingRunService } from '../api/scripting-run.service';
 import type { PineChartData } from '../model/chart-data';
 import type { PineDeclaration, PineRunRequest } from '../model/pine-outputs.types';
-import { REPLAY_SPEEDS, ReplaySession, type ReplayApi } from './replay-session';
+import { REPLAY_SPEEDS, ReplaySession, replayPositionText, type ReplayApi } from './replay-session';
 
 /**
  * Bar Replay controls: arm, then click a bar on the chart (the host binds the chart's `barClick` to
@@ -193,19 +193,8 @@ export class PineReplayComponent implements OnDestroy {
   readonly mode = computed<'off' | 'armed' | 'on'>(() =>
     this.session.status() !== 'idle' ? 'on' : this.armed() ? 'armed' : 'off',
   );
-  /** The strategy position after the replayed bar, when the frame carries one. */
-  readonly positionText = computed(() => {
-    const p = this.session.position();
-    if (!p) return null;
-    const size = typeof p.size === 'number' ? p.size : null;
-    if (size === null) return null;
-    if (size === 0) return 'flat';
-    const parts = [`${size > 0 ? 'long' : 'short'} ${Math.abs(size)}`];
-    if (typeof p.avgPrice === 'number') parts.push(`@ ${p.avgPrice}`);
-    if (typeof p.openProfit === 'number')
-      parts.push(`P/L ${p.openProfit >= 0 ? '+' : ''}${p.openProfit.toFixed(2)}`);
-    return parts.join(' ');
-  });
+  /** The strategy position after the replayed bar, when the frame carries one (size in Pine units). */
+  readonly positionText = computed(() => replayPositionText(this.session.position()));
   readonly canStep = computed(() => {
     const s = this.session.status();
     return s === 'ready' || s === 'playing';

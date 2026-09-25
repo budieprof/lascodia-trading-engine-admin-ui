@@ -75,7 +75,7 @@ const TABLE_ROWS = 120;
                 <th scope="col" class="num">Buy &amp; hold</th>
                 <th scope="col" class="num">Drawdown</th>
                 <th scope="col" class="num">Drawdown %</th>
-                <th scope="col" class="num">Position</th>
+                <th scope="col" class="num">Position (units)</th>
               </tr>
             </thead>
             <tbody>
@@ -270,7 +270,7 @@ export class ReportOverviewComponent {
     return (
       (hasBuyHold ? 'Strategy vs buy & hold' : 'Strategy equity') +
       (cur ? ` (${cur})` : '') +
-      ' · underwater drawdown · position size · shaded: largest drawdown (UTC)'
+      ' · underwater drawdown · position size in units · shaded: largest drawdown (UTC)'
     );
   });
 

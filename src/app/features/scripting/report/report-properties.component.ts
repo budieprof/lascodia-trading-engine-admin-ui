@@ -8,6 +8,7 @@ import {
   formatMoney,
   formatNumber,
   formatPercent,
+  formatUnits,
 } from './report-format';
 
 interface PropRow {
@@ -16,10 +17,19 @@ interface PropRow {
 }
 
 const QTY_TYPE_LABELS: Record<string, string> = {
-  Fixed: 'Fixed contracts',
+  Fixed: 'Fixed',
   Cash: 'Cash amount',
   PercentOfEquity: '% of equity',
 };
+
+/** "100,000 units · Fixed" — a fixed order size is a Pine quantity, in units of the underlying. */
+function orderSizeText(p: ReportStrategyProperties): string {
+  if (p.defaultQtyValue === null) return NA;
+  const type = p.defaultQtyType ?? '';
+  const size =
+    type === 'Fixed' ? formatUnits(p.defaultQtyValue) : formatNumber(p.defaultQtyValue, 2);
+  return `${size} · ${QTY_TYPE_LABELS[type] ?? (type || NA)}`;
+}
 
 const COMMISSION_LABELS: Record<string, string> = {
   Percent: '% of order value',
@@ -163,15 +173,8 @@ export class ReportPropertiesComponent {
   readonly propertyRows = computed<PropRow[]>(() => {
     const p = this.report().meta.properties;
     if (!p) return [];
-    const qtyType = p.defaultQtyType ?? '';
     return [
-      {
-        label: 'Order size',
-        value:
-          p.defaultQtyValue === null
-            ? NA
-            : `${formatNumber(p.defaultQtyValue, qtyType === 'Fixed' ? 4 : 2)} · ${QTY_TYPE_LABELS[qtyType] ?? (qtyType || NA)}`,
-      },
+      { label: 'Order size', value: orderSizeText(p) },
       { label: 'Pyramiding', value: formatInteger(p.pyramiding) },
       { label: 'Commission', value: commissionText(p) },
       { label: 'Slippage (ticks)', value: formatInteger(p.slippage) },

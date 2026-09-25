@@ -5,7 +5,7 @@ import { normalizeOutputs } from '../model/normalize';
 import type { PineReplayFrame, PineRunRequest } from '../model/pine-outputs.types';
 import { FixtureReplayApi } from '../testing/fixture-replay-api';
 import { overlayStrategyFixture } from '../testing/pine-fixtures';
-import { ReplaySession, appendBars, type ReplayApi } from './replay-session';
+import { ReplaySession, appendBars, replayPositionText, type ReplayApi } from './replay-session';
 
 const request: PineRunRequest = { source: 'x', symbol: 'EURUSD', timeframe: '60' };
 const decl = { kind: 'strategy', title: 'EMA X', overlay: true };
@@ -185,5 +185,23 @@ describe('appendBars', () => {
       [2, 9],
       [3, 1],
     ]);
+  });
+});
+
+describe('replayPositionText', () => {
+  it('reads the emulator position in Pine units', () => {
+    expect(replayPositionText({ size: 100_000, avgPrice: 1.17012, openProfit: 12.4 })).toBe(
+      'long 100,000 units @ 1.17012 P/L +12.40',
+    );
+    expect(replayPositionText({ size: -1, avgPrice: 1.2, openProfit: -3 })).toBe(
+      'short 1 unit @ 1.2 P/L -3.00',
+    );
+    expect(replayPositionText({ size: 2500.5 })).toBe('long 2,500.5 units');
+  });
+
+  it('is flat at zero and silent without a size', () => {
+    expect(replayPositionText({ size: 0, avgPrice: null })).toBe('flat');
+    expect(replayPositionText({ avgPrice: 1.1 })).toBeNull();
+    expect(replayPositionText(null)).toBeNull();
   });
 });

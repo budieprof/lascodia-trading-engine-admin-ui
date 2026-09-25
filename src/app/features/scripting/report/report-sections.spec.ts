@@ -92,4 +92,15 @@ describe('formatting', () => {
   it('uses three decimals for ratios', () => {
     expect(formatMetricValue(pf, 6.9665, '')).toBe('6.967');
   });
+
+  it('prints Pine quantities in units, never lots', () => {
+    const maxHeld = PERFORMANCE_GROUPS[0].rows.find((r) => r.label === 'Max contracts held')!;
+    const liquidated = CAPITAL_GROUPS.flatMap((g) => g.rows).find(
+      (r) => r.label === 'Liquidated quantity',
+    )!;
+    expect(maxHeld.kind).toBe('units');
+    expect(formatMetricValue(maxHeld, 100_000, 'USD')).toBe('100,000 units');
+    expect(formatMetricValue(liquidated, 1, 'USD')).toBe('1 unit');
+    expect(formatMetricValue(liquidated, null, 'USD')).toBe('—');
+  });
 });

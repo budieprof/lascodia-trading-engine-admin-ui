@@ -1,3 +1,4 @@
+import { formatUnits } from '../core/quantity';
 import { TRADE_COLORS, FONT_DEFAULT } from '../render/build-render-model';
 import type { TradeDrawing } from '../render/render-model';
 import { cssFont, drawArrow, drawTextBlock, measureBlock, type Ctx } from './canvas-kit';
@@ -9,7 +10,7 @@ import type { Projection } from './projection';
  * Strategy trades as TradingView draws them: an arrow per fill — orders that buy (long entries,
  * short exits) point up from under the bar, orders that sell point down from over it — labelled with
  * the order's signal and signed quantity, a tick at the exact fill price, and a dashed line from entry
- * to exit colored by the trade's profit.
+ * to exit colored by the trade's profit. Quantities are Pine units ("+100,000 units"), never lots.
  */
 
 export interface TradeMarker {
@@ -23,9 +24,9 @@ export interface TradeMarker {
   tooltip: string;
 }
 
+/** The size without its sign: "100,000 units". */
 function qtyText(q: number): string {
-  const abs = Math.abs(q);
-  return Number.isInteger(abs) ? String(abs) : String(+abs.toFixed(6));
+  return formatUnits(Math.abs(q));
 }
 
 /** The fill markers of one trade (entry, plus exit when closed). */

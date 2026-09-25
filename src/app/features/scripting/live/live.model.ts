@@ -1,3 +1,5 @@
+import { formatLots } from '@shared/pine-chart/core/quantity';
+
 import { toCamelCase } from '../report/strategy-report.model';
 import {
   NA,
@@ -5,14 +7,22 @@ import {
   formatMoney,
   formatNumber,
   formatPrice,
-  formatQty,
+  formatUnits,
 } from '../report/report-format';
-import type { ScriptDivergence, ScriptLiveStatus } from '../api/scripting-api.types';
+import type {
+  ScriptDivergence,
+  ScriptLiveStatus,
+  ScriptOrphanedPosition,
+} from '../api/scripting-api.types';
 
 /**
  * View model for `GET strategy/{id}/script/live`. The contract fixes the top-level fields; the
  * position, open trades and pending orders are the emulator's own state objects and are read
  * defensively — known fields get proper formatting and order, anything else is still shown.
+ *
+ * Two kinds of quantity meet on the live tab: the emulator's, in Pine units of the underlying
+ * (100,000 units = one EURUSD lot), and the bound accounts' positions, in broker lots. Every
+ * quantity is printed with its unit so they are never read as the same number.
  */
 
 type Json = Record<string, unknown>;
@@ -34,6 +44,26 @@ function num(v: unknown): number | null {
     return Number.isFinite(n) ? n : null;
   }
   return null;
+}
+
+function text(v: unknown): string {
+  return typeof v === 'string' ? v : v === null || v === undefined ? '' : String(v);
+}
+
+function orphanedPosition(p: Json): ScriptOrphanedPosition {
+  const account = p['accountId'];
+  return {
+    positionId: num(p['positionId']),
+    accountId: typeof account === 'number' || typeof account === 'string' ? account : null,
+    symbol: text(p['symbol']),
+    direction: text(p['direction']).toLowerCase(),
+    lots: num(p['lots']),
+    entryId: typeof p['entryId'] === 'string' ? (p['entryId'] as string) : null,
+    stopLoss: num(p['stopLoss']),
+    takeProfit: num(p['takeProfit']),
+    status: text(p['status']),
+    orphanedAtUtc: text(p['orphanedAtUtc']),
+  };
 }
 
 /** Normalises the live payload's casing and container types. Null when it is not an object. */
@@ -65,6 +95,7 @@ export function normalizeLiveStatus(raw: unknown): ScriptLiveStatus | null {
             : JSON.stringify(d['detail'] ?? ''),
       }),
     ),
+    orphanedPositions: rows(o['orphanedPositions']).map(orphanedPosition),
   };
 }
 
@@ -96,7 +127,11 @@ export function humanize(key: string): string {
   return withAcronyms.charAt(0).toUpperCase() + withAcronyms.slice(1);
 }
 
-/** Formats an emulator field by what its name says it holds. */
+/**
+ * Formats an emulator field by what its name says it holds. The emulator's quantities (qty, size,
+ * contracts) are Pine units — "10,000 units"; `lots` is the engine's conversion of one of them to
+ * broker lots (DEC-18) — "0.10 lots".
+ */
 export function formatLiveValue(
   key: string,
   value: unknown,
@@ -107,7 +142,7 @@ export function formatLiveValue(
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   if (typeof value === 'string') {
     const n = num(value);
-    if (n === null || !/(price|qty|size|pnl|profit|equity|time|commission)/i.test(key))
+    if (n === null || !/(price|qty|size|lots|pnl|profit|equity|time|commission)/i.test(key))
       return value;
     value = n;
   }
@@ -121,9 +156,15 @@ export function formatLiveValue(
   if (/(pnl|profit|equity|commission|value|margin)/.test(k)) {
     return formatMoney(value, currency, { signed: /(pnl|profit)/.test(k) });
   }
-  if (/(qty|size|contracts|lots)/.test(k)) return formatQty(value);
+  if (k.endsWith('lots')) return formatLots(value);
+  if (/(qty|size|contracts)/.test(k)) return formatUnits(value);
   if (/(bar|index|count|seq|number)/.test(k)) return formatNumber(value, 0);
   return formatNumber(value, Number.isInteger(value) ? 0 : 4);
+}
+
+/** A quantity in broker lots: "0.50 lots", "1.00 lot". */
+export function formatBrokerLots(lots: number | null): string {
+  return lots === null ? NA : formatLots(lots);
 }
 
 const SIZE_KEYS = ['size', 'positionSize', 'netQty', 'qty', 'contracts'];
@@ -144,10 +185,14 @@ export interface PositionHeadline {
   pnl: number | null;
 }
 
-/** "Long 10,000 @ 1.17000" / "Flat" from whatever the emulator's position object carries. */
+/**
+ * "Long 100,000 units ≈ 1.00 lot @ 1.17000" / "Flat" from whatever the emulator's position object
+ * carries: the size in Pine units, and in broker lots when the engine sends them (`lots`, DEC-18).
+ */
 export function positionHeadline(position: Json | null, priceDecimals = 5): PositionHeadline {
   if (!position) return { side: 'flat', text: 'Flat — no open position', pnl: null };
   const size = firstNumber(position, SIZE_KEYS);
+  const lots = num(position['lots']);
   const price = firstNumber(position, PRICE_KEYS);
   const pnl = firstNumber(position, PNL_KEYS);
   const dir =
@@ -158,9 +203,10 @@ export function positionHeadline(position: Json | null, priceDecimals = 5): Posi
   if (size === 0) return { side: 'flat', text: 'Flat — no open position', pnl: null };
   const side: PositionHeadline['side'] =
     size !== null ? (size > 0 ? 'long' : 'short') : dir.startsWith('s') ? 'short' : 'long';
-  const qty = size !== null ? ` ${formatQty(Math.abs(size))}` : '';
+  const qty = size !== null ? ` ${formatUnits(Math.abs(size))}` : '';
+  const inLots = size !== null && lots !== null ? ` ≈ ${formatLots(Math.abs(lots))}` : '';
   const at = price !== null ? ` @ ${formatPrice(price, priceDecimals)}` : '';
-  return { side, text: `${side === 'long' ? 'Long' : 'Short'}${qty}${at}`, pnl };
+  return { side, text: `${side === 'long' ? 'Long' : 'Short'}${qty}${inLots}${at}`, pnl };
 }
 
 export interface LiveColumn {
@@ -186,16 +232,22 @@ export function deriveColumns(rows: readonly Json[], preferred: readonly string[
   return ordered.map((key) => ({ key, label: humanize(key) }));
 }
 
+/** Preferred order of an open trade's fields: the size in units, then in lots, then the rest. */
 export const OPEN_TRADE_COLUMNS = [
   'entryId',
   'direction',
   'qty',
+  'lots',
   'entryPrice',
   'entryTime',
+  'entryTimeMs',
   'profit',
   'openPnL',
+  'openProfit',
   'protectedStop',
+  'stopLoss',
   'protectedTarget',
+  'takeProfit',
   'entryComment',
 ];
 

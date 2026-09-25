@@ -112,6 +112,17 @@ describe('declarationRows', () => {
     expect(row(d, 'Pyramiding')!.set).toBe(true);
   });
 
+  it('sizes a fixed order in Pine units of the underlying', () => {
+    expect(
+      row(strategy({ defaultQtyType: 'Fixed', defaultQtyValue: 100_000 }), 'Order size')!.value,
+    ).toBe('100,000 units');
+    expect(row(strategy({}), 'Order size')!.value).toBe('1 unit');
+    expect(
+      row(strategy({ defaultQtyType: 'PercentOfEquity', defaultQtyValue: 10 }), 'Order size')!
+        .value,
+    ).toBe('10% of equity');
+  });
+
   it('has no strategy rows for an indicator, and none without a declaration', () => {
     expect(
       declarationRows({ kind: 'indicator', title: 'RSI', overlay: false }).map((r) => r.label),

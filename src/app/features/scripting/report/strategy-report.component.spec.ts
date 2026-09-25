@@ -119,7 +119,7 @@ describe('StrategyReportComponent', () => {
     expect(notices[0]).toContain('Halted');
     expect(notices[0]).toContain('max_drawdown(5%)');
     expect(notices[1]).toContain('2 margin calls');
-    expect(notices[1]).toContain('4,000 contracts');
+    expect(notices[1]).toContain('liquidated 4,000 units');
     expect(notices[2]).toContain('120 oldest closed trades');
     expect(notices[3]).toContain('PS9101');
   });
@@ -166,6 +166,8 @@ describe('StrategyReportComponent', () => {
     openTab('Capital efficiency');
     expect(el.textContent).toContain('Account size required');
     expect(el.textContent).toContain('412.45 USD');
+    // Max contracts held is a Pine quantity: units of the underlying.
+    expect(el.textContent).toContain('10,000 units');
     openTab('Monthly returns');
     const rows = el.querySelectorAll('.wrap tbody tr');
     expect(rows).toHaveLength(2);
@@ -173,6 +175,7 @@ describe('StrategyReportComponent', () => {
     expect(rows[0].textContent).toContain('+6.06%');
     openTab('Properties');
     expect(el.textContent).toContain('Cash per order');
+    expect(el.textContent).toContain('10,000 units · Fixed');
   });
 
   it('offers no export for a report that is not a backtest run', () => {

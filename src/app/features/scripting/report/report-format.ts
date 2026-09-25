@@ -1,3 +1,5 @@
+import { formatUnits as unitsText } from '@shared/pine-chart/core/quantity';
+
 import type { Num } from './strategy-report.model';
 
 /**
@@ -83,11 +85,20 @@ export function formatInteger(v: Num | undefined): string {
   return nf(0, 0).format(Math.round(v));
 }
 
-/** Contracts / lots: up to 4 decimals, trailing zeros dropped. */
+/** A bare quantity: up to 4 decimals, trailing zeros dropped. Its unit goes in the header. */
 export function formatQty(v: Num | undefined): string {
   if (!isNum(v)) return NA;
   const body = nf(0, 4).format(Math.abs(v));
   return v < 0 ? `${MINUS}${body}` : body;
+}
+
+/**
+ * A Pine quantity with its unit — "100,000 units", "1 unit" — for values that stand alone. A
+ * report's quantities are always units: one Pine contract is one unit of the underlying, and the
+ * engine converts to broker lots only where an order reaches a broker.
+ */
+export function formatUnits(v: Num | undefined): string {
+  return isNum(v) ? unitsText(v) : NA;
 }
 
 /** Bar counts that may be averages ("12.5"). */

@@ -5,8 +5,8 @@ import {
   formatInteger,
   formatMoney,
   formatPercent,
-  formatQty,
   formatRatio,
+  formatUnits,
 } from './report-format';
 
 /**
@@ -18,7 +18,8 @@ import {
  * `performance` section (see the spec) and the tabs stay declarative.
  */
 
-export type MetricKind = 'money' | 'percent' | 'ratio' | 'integer' | 'bars' | 'qty';
+/** `units` — a Pine quantity (1 contract = 1 unit of the underlying), printed with its unit. */
+export type MetricKind = 'money' | 'percent' | 'ratio' | 'integer' | 'bars' | 'units';
 
 /**
  * How a value is coloured:
@@ -122,7 +123,9 @@ export const PERFORMANCE_GROUPS: readonly SplitMetricGroup[] = [
         signed: true,
         hint: 'Unrealised profit of the trades still open at the last bar.',
       }),
-      splitRow('Max contracts held', 'maxContractsHeld', 'qty'),
+      splitRow('Max contracts held', 'maxContractsHeld', 'units', {
+        hint: 'Largest position held at once, in units of the underlying.',
+      }),
     ],
   },
   {
@@ -415,7 +418,7 @@ export const CAPITAL_GROUPS: readonly ReportMetricGroup[] = [
       { label: 'Commission paid', kind: 'money', value: (r) => r.performance.all.commissionPaid },
       {
         label: 'Max contracts held',
-        kind: 'qty',
+        kind: 'units',
         value: (r) => r.performance.all.maxContractsHeld,
       },
     ],
@@ -430,7 +433,7 @@ export const CAPITAL_GROUPS: readonly ReportMetricGroup[] = [
         value: (r) => r.capital.marginCalls,
         hint: 'Times the emulated broker liquidated part of the position for lack of margin.',
       },
-      { label: 'Liquidated quantity', kind: 'qty', value: (r) => r.capital.liquidatedQty },
+      { label: 'Liquidated quantity', kind: 'units', value: (r) => r.capital.liquidatedQty },
       { label: 'Max margin used', kind: 'money', value: (r) => r.capital.maxMarginUsed },
       { label: 'Avg margin per trade', kind: 'money', value: (r) => r.capital.avgMarginPerTrade },
       {
@@ -463,8 +466,8 @@ export function formatMetricValue(row: MetricRowBase, v: Num, currency: string):
       return formatInteger(shown);
     case 'bars':
       return formatBars(shown);
-    case 'qty':
-      return formatQty(shown);
+    case 'units':
+      return formatUnits(shown);
   }
 }
 

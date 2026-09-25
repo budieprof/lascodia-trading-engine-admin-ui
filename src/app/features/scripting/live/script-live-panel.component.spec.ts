@@ -132,7 +132,7 @@ describe('ScriptLivePanelComponent', () => {
     const status = el.querySelector('.status')!;
     expect(status.textContent).toContain('Running');
     expect(status.getAttribute('data-tone')).toBe('success');
-    expect(text()).toContain('Long 10,000 @ 1.17012');
+    expect(text()).toContain('Long 10,000 units @ 1.17012');
     expect(text()).toContain('Open P&L +35.40 USD');
     expect(text()).toContain('10,641.20 USD');
     expect(text()).toContain('30 min ago');
@@ -140,8 +140,13 @@ describe('ScriptLivePanelComponent', () => {
     const [trades, orders] = [...el.querySelectorAll('.table-wrap table')];
     expect(trades.querySelector('thead')!.textContent).toContain('Entry ID');
     expect(trades.querySelector('tbody')!.textContent).toContain('1.16512');
+    // The emulator's quantities are Pine units, never lots.
+    expect(trades.querySelector('tbody')!.textContent).toContain('10,000 units');
     expect(orders.querySelector('tbody')!.textContent).toContain('Exit');
     expect(orders.querySelector('tbody')!.textContent).toContain('1.18012');
+    expect(orders.querySelector('tbody')!.textContent).toContain('10,000 units');
+    // No account position is left over from an earlier script version.
+    expect(el.querySelector('#live-orphaned')).toBeNull();
 
     const report = fixture.debugElement.query((d) => d.name === 'app-strategy-report')
       .componentInstance as ReportStubComponent;
@@ -197,6 +202,84 @@ describe('ScriptLivePanelComponent', () => {
     fixture.detectChanges();
     expect(text()).toContain('Long 10,000');
     expect(text()).toContain('The last refresh failed');
+  });
+
+  it('shows the emulator in units ≈ lots, and earlier account positions in lots', () => {
+    render();
+    http.expectOne(LIVE_URL).flush(
+      ok({
+        ...liveSession(),
+        // The engine's DEC-18 status: sizes in Pine units, with the broker lots they come to.
+        position: { size: 100_000, lots: 1, avgPrice: 1.17012, openProfit: 35.4 },
+        openTrades: [
+          {
+            tradeKey: 7,
+            entryId: 'Long',
+            direction: 'long',
+            qty: 100_000,
+            lots: 1,
+            entryPrice: 1.17012,
+            entryTimeMs: Date.UTC(2026, 0, 5, 8),
+            stopLoss: 1.16512,
+          },
+        ],
+        orphanedPositions: [
+          {
+            positionId: 5012,
+            accountId: 27,
+            symbol: 'EURUSD',
+            direction: 'short',
+            lots: 0.5,
+            entryId: 'Short',
+            signalId: 88,
+            stopLoss: 1.1821,
+            takeProfit: null,
+            status: 'Open',
+            orphanedAtUtc: '2026-09-24T21:00:00Z',
+          },
+          {
+            positionId: 5013,
+            accountId: 99,
+            symbol: 'EURUSD',
+            direction: 'long',
+            lots: 1,
+            entryId: 'Long',
+            signalId: null,
+            stopLoss: null,
+            takeProfit: 1.19,
+            status: 'Closing',
+            orphanedAtUtc: '2026-09-24T21:05:00Z',
+          },
+        ],
+      }),
+    );
+    flushBindings();
+    fixture.detectChanges();
+
+    expect(el.querySelector('.fact-value[data-side="long"]')!.textContent).toContain(
+      'Long 100,000 units ≈ 1.00 lot @ 1.17012',
+    );
+    const trades = el.querySelector('#live-open-trades')!.closest('section')!;
+    const headers = [...trades.querySelectorAll('thead th')].map((th) => th.textContent!.trim());
+    expect(headers.slice(0, 4)).toEqual(['Entry ID', 'Direction', 'Qty', 'Lots']);
+    const cells = [...trades.querySelectorAll('tbody td')].map((td) => td.textContent!.trim());
+    expect(cells.slice(0, 4)).toEqual(['Long', 'long', '100,000 units', '1.00 lot']);
+
+    const section = el.querySelector('#live-orphaned')!.closest('section')!;
+    expect(section.textContent).toContain('Account positions from an earlier script version');
+    expect(section.textContent).toContain('broker lots');
+    const rows = section.querySelectorAll('tbody tr');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain('Exness Real 27 (#27)');
+    expect(rows[0].textContent).toContain('#5012');
+    expect(rows[0].textContent).toContain('Short');
+    expect(rows[0].textContent).toContain('0.50 lots');
+    expect(rows[0].textContent).toContain('1.18210');
+    expect(rows[0].textContent).toContain('2026-09-24 21:00');
+    expect(rows[1].textContent).toContain('Account #99');
+    expect(rows[1].textContent).toContain('1.00 lot');
+    expect(rows[1].textContent).not.toContain('units');
+    expect(rows[1].textContent).toContain('Closing');
   });
 
   it('shows a flat position', () => {

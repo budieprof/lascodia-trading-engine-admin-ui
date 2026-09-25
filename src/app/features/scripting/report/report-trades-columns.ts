@@ -176,11 +176,13 @@ export function buildTradeColumns(currency: string, priceDecimals: number): ColD
       filter: 'agNumberColumnFilter',
     },
     {
-      headerName: 'Qty',
+      // Pine units (1 contract = 1 unit of the underlying), not broker lots.
+      headerName: 'Qty (units)',
       field: 'qty',
-      width: 96,
+      width: 116,
       type: 'numericColumn',
       valueFormatter: (p) => formatQty(p.value ?? null),
+      headerTooltip: 'Units of the underlying — 100,000 units is one standard FX lot',
       filter: 'agNumberColumnFilter',
     },
     {

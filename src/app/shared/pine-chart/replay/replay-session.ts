@@ -2,6 +2,7 @@ import { signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { firstValueFrom, type Observable } from 'rxjs';
 import { ApiError } from '@core/api/api.types';
+import { formatUnits } from '../core/quantity';
 import type { PineChartData } from '../model/chart-data';
 import { mergeOutputs } from '../model/merge-outputs';
 import type {
@@ -33,6 +34,23 @@ export type ReplayStatus =
 
 /** Bars per second while playing. */
 export const REPLAY_SPEEDS = [1, 2, 5, 10, 20] as const;
+
+/**
+ * The strategy position after a replay frame, as the controls print it: "long 100,000 units @
+ * 1.17012 P/L +12.40", "flat", or null when the frame carries no size. The size is the emulator's,
+ * in Pine units — never broker lots.
+ */
+export function replayPositionText(p: PineReplayPosition | null | undefined): string | null {
+  if (!p) return null;
+  const size = typeof p.size === 'number' && Number.isFinite(p.size) ? p.size : null;
+  if (size === null) return null;
+  if (size === 0) return 'flat';
+  const parts = [`${size > 0 ? 'long' : 'short'} ${formatUnits(Math.abs(size))}`];
+  if (typeof p.avgPrice === 'number') parts.push(`@ ${p.avgPrice}`);
+  if (typeof p.openProfit === 'number')
+    parts.push(`P/L ${p.openProfit >= 0 ? '+' : ''}${p.openProfit.toFixed(2)}`);
+  return parts.join(' ');
+}
 
 export interface ReplayTimers {
   setTimeout(fn: () => void, ms: number): unknown;

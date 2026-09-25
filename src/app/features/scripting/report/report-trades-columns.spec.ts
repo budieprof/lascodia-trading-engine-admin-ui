@@ -25,7 +25,7 @@ describe('List of trades columns', () => {
       'Exit signal',
       'Exit time (UTC)',
       'Exit price',
-      'Qty',
+      'Qty (units)',
       'Profit',
       'Cum. profit',
       'Run-up (MFE)',
@@ -33,6 +33,14 @@ describe('List of trades columns', () => {
       'Bars',
       'Commission',
     ]);
+  });
+
+  it('sizes trades in Pine units, not broker lots', () => {
+    const qty = byHeader('Qty (units)');
+    expect(qty.field).toBe('qty');
+    expect(qty.headerTooltip).toContain('100,000 units is one standard FX lot');
+    const format = qty.valueFormatter as (p: any) => string;
+    expect(format({ value: 100_000 })).toBe('100,000');
   });
 
   it('is sortable and filterable column by column', () => {

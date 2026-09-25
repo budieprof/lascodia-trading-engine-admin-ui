@@ -203,7 +203,7 @@ describe('strategy trades', () => {
       side: 'buy',
       kind: 'entry',
       color: TRADE_COLORS.longEntry,
-      text: 'Long\n+2',
+      text: 'Long\n+2 units',
       logical: 5,
       price: 110,
     });
@@ -211,10 +211,20 @@ describe('strategy trades', () => {
       side: 'sell',
       kind: 'exit',
       color: TRADE_COLORS.exit,
-      text: 'TP\n-2',
+      text: 'TP\n-2 units',
       logical: 12,
     });
     expect(exit.tooltip).toContain('P/L +10.00');
+  });
+
+  it('labels quantities as Pine units, in the marker and its tooltip', () => {
+    const [entry, exit] = tradeMarkers(trade({ qty: 100_000 }));
+    expect(entry.text).toBe('Long\n+100,000 units');
+    expect(entry.tooltip).toContain('Long entry "Long" · 100,000 units @ 110');
+    expect(exit.text).toBe('TP\n-100,000 units');
+    expect(exit.tooltip).toContain('100,000 units @ 115');
+    expect(tradeMarkers(trade({ qty: 1 }))[0].text).toBe('Long\n+1 unit');
+    expect(tradeMarkers(trade({ qty: 2500.25 }))[0].text).toBe('Long\n+2,500.25 units');
   });
 
   it('a short trade sells in (red) and buys out', () => {
@@ -222,7 +232,7 @@ describe('strategy trades', () => {
     expect(entry).toMatchObject({
       side: 'sell',
       color: TRADE_COLORS.shortEntry,
-      text: 'Short\n-2',
+      text: 'Short\n-2 units',
     });
     expect(exit.side).toBe('buy');
   });
@@ -255,7 +265,7 @@ describe('strategy trades', () => {
     ]);
     expect(ctx.strokes(TRADE_COLORS.loss)).toHaveLength(1);
     expect(ctx.texts().map((t) => t.text)).toEqual(
-      expect.arrayContaining(['Long', '+2', 'TP', '-2']),
+      expect.arrayContaining(['Long', '+2 units', 'TP', '-2 units']),
     );
     expect(hits).toHaveLength(4);
   });

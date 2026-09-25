@@ -19,12 +19,19 @@ import type { ScriptDivergence } from '../api/scripting-api.types';
 import { describeFailure, isOk } from '../shared/api-error';
 import { StrategyReportComponent } from '../report/strategy-report.component';
 import { normalizeStrategyReport, reportCurrency } from '../report/strategy-report.model';
-import { NA, formatDateTime, formatMoney, inferPriceDecimals } from '../report/report-format';
+import {
+  NA,
+  formatDateTime,
+  formatMoney,
+  formatPrice,
+  inferPriceDecimals,
+} from '../report/report-format';
 import {
   OPEN_TRADE_COLUMNS,
   PENDING_ORDER_COLUMNS,
   barAgeMinutes,
   deriveColumns,
+  formatBrokerLots,
   formatAge,
   formatLiveValue,
   humanize,
@@ -41,8 +48,9 @@ const STALE_MINUTES = 240;
 
 /**
  * Live status of a script strategy's session (`GET strategy/{id}/script/live`): session state,
- * the emulator's position, open trades and pending orders, equity, the divergences between the
- * emulator and the bound accounts, and the live emulator's Strategy report.
+ * the emulator's position, open trades and pending orders, equity, account positions a previous
+ * script version left open, the divergences between the emulator and the bound accounts, and the
+ * live emulator's Strategy report. Emulator quantities read in units, account positions in lots.
  */
 @Component({
   selector: 'app-script-live-panel',
@@ -104,7 +112,7 @@ const STALE_MINUTES = 240;
             <span class="fact-value">{{ equityText() }}</span>
           </div>
           <div class="fact">
-            <span class="fact-label">Position</span>
+            <span class="fact-label">Position (emulator)</span>
             <span class="fact-value" [attr.data-side]="headline().side">{{ headline().text }}</span>
             @if (headline().pnl !== null) {
               <span
@@ -136,6 +144,53 @@ const STALE_MINUTES = 240;
               }
             </dl>
           </details>
+        }
+
+        @if (l.orphanedPositions.length > 0) {
+          <section class="block" aria-labelledby="live-orphaned">
+            <h4 class="block-title" id="live-orphaned">
+              Account positions from an earlier script version
+              <span class="count">{{ l.orphanedPositions.length }}</span>
+            </h4>
+            <p class="hint">
+              Opened on a bound account under a previous version of the script. The running script
+              never closes or manages them — the operator decides. Their sizes are broker lots; the
+              emulator's are units of the underlying.
+            </p>
+            <div class="table-wrap" tabindex="0" role="region" aria-labelledby="live-orphaned">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Account</th>
+                    <th scope="col">Position</th>
+                    <th scope="col">Side</th>
+                    <th scope="col">Size</th>
+                    <th scope="col">Stop loss</th>
+                    <th scope="col">Take profit</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Since (UTC)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (p of l.orphanedPositions; track p.positionId ?? $index) {
+                    <tr>
+                      <td>{{ accountLabel(p.accountId) }}</td>
+                      <td class="nowrap">
+                        {{ p.positionId !== null ? '#' + p.positionId : '—' }} ·
+                        {{ p.symbol || '—' }}
+                      </td>
+                      <td>{{ p.direction === 'short' ? 'Short' : 'Long' }}</td>
+                      <td class="nowrap">{{ lotsText(p.lots) }}</td>
+                      <td>{{ priceText(p.stopLoss) }}</td>
+                      <td>{{ priceText(p.takeProfit) }}</td>
+                      <td>{{ p.status || '—' }}</td>
+                      <td class="nowrap">{{ utcText(p.orphanedAtUtc) }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </section>
         }
 
         <section class="block" aria-labelledby="live-open-trades">
@@ -541,6 +596,7 @@ export class ScriptLivePanelComponent {
         if (/price|limit|stop/i.test(k) && typeof v === 'number') prices.push(v);
       }
     }
+    for (const p of l.orphanedPositions) prices.push(p.stopLoss, p.takeProfit);
     // The live report's trades carry the most quotes; they settle the symbol's precision.
     for (const t of this.report()?.trades ?? []) prices.push(t.entryPrice, t.exitPrice);
     return prices.some((p) => p !== null) ? inferPriceDecimals(prices) : 5;
@@ -632,8 +688,22 @@ export class ScriptLivePanelComponent {
   }
 
   divergenceTime(d: ScriptDivergence): string {
-    const t = Date.parse(d.timeUtc);
-    return Number.isFinite(t) ? formatDateTime(t) : d.timeUtc || NA;
+    return this.utcText(d.timeUtc);
+  }
+
+  /** An ISO time as "2026-01-07 09:30" (UTC), or the text as sent when it does not parse. */
+  utcText(iso: string): string {
+    const t = Date.parse(iso);
+    return Number.isFinite(t) ? formatDateTime(t) : iso || NA;
+  }
+
+  /** An account position's size — broker lots, never units. */
+  lotsText(lots: number | null): string {
+    return formatBrokerLots(lots);
+  }
+
+  priceText(price: number | null): string {
+    return formatPrice(price, this.priceDecimals());
   }
 
   accountLabel(id: number | string | null): string {

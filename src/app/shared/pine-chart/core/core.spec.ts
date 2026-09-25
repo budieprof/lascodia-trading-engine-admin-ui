@@ -17,6 +17,7 @@ import {
   resolveFormat,
   zoneOffsetMinutes,
 } from './format';
+import { formatLots, formatUnits } from './quantity';
 import { BlockMinMax } from './range-minmax';
 import { BarTimeline, timeframeMs, typicalStepMs } from './timeline';
 
@@ -185,5 +186,25 @@ describe('BarTimeline', () => {
     expect(timeframeMs('D1')).toBe(24 * H);
     expect(timeframeMs('bogus')).toBeNull();
     expect(typicalStepMs(times)).toBe(H);
+  });
+});
+
+describe('quantity', () => {
+  it('prints Pine quantities in units of the underlying', () => {
+    expect(formatUnits(100_000)).toBe('100,000 units');
+    expect(formatUnits(1)).toBe('1 unit');
+    expect(formatUnits(0.5)).toBe('0.5 units');
+    expect(formatUnits(1234.56789)).toBe('1,234.5679 units');
+    expect(formatUnits(-25_000)).toBe('\u221225,000 units');
+    expect(formatUnits(-0.00001)).toBe('0 units');
+    // 1.00004 prints as 1, and reads as one unit.
+    expect(formatUnits(1.00004)).toBe('1 unit');
+  });
+
+  it('prints broker quantities in lots', () => {
+    expect(formatLots(1)).toBe('1.00 lot');
+    expect(formatLots(0.5)).toBe('0.50 lots');
+    expect(formatLots(2.25)).toBe('2.25 lots');
+    expect(formatLots(-1)).toBe('\u22121.00 lot');
   });
 });

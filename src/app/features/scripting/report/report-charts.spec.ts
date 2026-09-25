@@ -64,6 +64,15 @@ describe('buildEquityChartOptions', () => {
     expect(html).toContain('10,099.80 USD');
   });
 
+  it('reads the position panel in Pine units, with compact axis ticks', () => {
+    const axis = opts.yAxis[2];
+    expect(axis.name).toBe('Position (units)');
+    expect(axis.axisLabel.formatter(100_000)).toBe('100K');
+    expect(axis.axisLabel.formatter(-1_500_000)).toBe('-1.5M');
+    const html: string = opts.tooltip.formatter([{ dataIndex: 4 }]);
+    expect(html).toContain('−10,000 units');
+  });
+
   it('returns null below two points so the card shows an empty state', () => {
     const single = { ...report, equityCurve: report.equityCurve.slice(0, 1) };
     expect(buildEquityChartOptions(single, light, 'USD')).toBeNull();

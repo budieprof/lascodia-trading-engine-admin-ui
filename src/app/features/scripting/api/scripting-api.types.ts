@@ -132,7 +132,12 @@ export interface ScriptStrategyFields {
 
 export type ScriptStrategyDto = StrategyDto & ScriptStrategyFields;
 
-/** `GET strategy/{id}/script/live`. Sub-objects are emulator state and loosely typed on purpose. */
+/**
+ * `GET strategy/{id}/script/live`. Sub-objects are emulator state and loosely typed on purpose.
+ * The emulator's quantities (`position.size`, `openTrades[].qty`, `pendingOrders[].qty`) are Pine
+ * units of the underlying; `position.lots` and `openTrades[].lots` are the broker lots they come
+ * to (engine DEC-18); `orphanedPositions` are broker positions, in lots.
+ */
 export interface ScriptLiveStatus {
   status: string;
   lastBarTimeMs: number | null;
@@ -143,6 +148,28 @@ export interface ScriptLiveStatus {
   /** The live emulator's StrategyReport. */
   report: unknown;
   divergences: ScriptDivergence[];
+  /** Account positions a previous script version opened, left to the operator (engine D90). */
+  orphanedPositions: ScriptOrphanedPosition[];
+}
+
+/**
+ * A broker position opened under a previous version of the script: the running script never
+ * closes or manages it — the operator decides (engine D90).
+ */
+export interface ScriptOrphanedPosition {
+  positionId: number | null;
+  accountId: number | string | null;
+  symbol: string;
+  /** `long` | `short`. */
+  direction: string;
+  /** Open size in broker lots. */
+  lots: number | null;
+  entryId: string | null;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  /** `Open` | `Closing`. */
+  status: string;
+  orphanedAtUtc: string;
 }
 
 export interface ScriptDivergence {

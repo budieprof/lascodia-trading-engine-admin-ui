@@ -1,4 +1,5 @@
 import type { ScriptDeclaration, ScriptStrategyProperties } from '@core/api/scripting.types';
+import { formatUnits } from '@shared/pine-chart/core/quantity';
 
 import {
   ENGINE_DEFAULT_CAPITAL_TEXT,
@@ -24,6 +25,7 @@ function enumText(value: string | number | undefined, names: string[]): string |
   return typeof value === 'number' ? (names[value] ?? String(value)) : value;
 }
 
+/** A fixed size is a Pine quantity: units of the underlying (100,000 = one EURUSD lot), not lots. */
 function qtyLabel(p: ScriptStrategyProperties): string {
   const type = enumText(p.defaultQtyType, QTY_TYPES) ?? 'Fixed';
   const v = p.defaultQtyValue ?? 1;
@@ -35,7 +37,7 @@ function qtyLabel(p: ScriptStrategyProperties): string {
     case 'strategypercentofequity':
       return `${v}% of equity`;
     default:
-      return `${v} (contracts/lots)`;
+      return formatUnits(v);
   }
 }
 

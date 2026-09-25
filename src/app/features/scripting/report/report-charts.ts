@@ -7,7 +7,7 @@ import {
   type ReportTrade,
   type StrategyReport,
 } from './strategy-report.model';
-import { formatDateTime, formatMoney, formatPercent, formatQty } from './report-format';
+import { formatDateTime, formatMoney, formatPercent, formatUnits } from './report-format';
 
 /**
  * ECharts options for the Strategy report — pure functions of the report and a theme palette so
@@ -112,6 +112,12 @@ function esc(text: string): string {
 }
 
 const LARGE_SERIES = 2000;
+
+/** Position axis ticks: a position in units runs to six or seven digits ("100K", "1.5M"). */
+const COMPACT_QTY = new Intl.NumberFormat('en-US', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+});
 
 /**
  * Equity (with buy & hold), underwater drawdown and position size as three stacked panels that
@@ -231,7 +237,7 @@ export function buildEquityChartOptions(
           'Drawdown',
           `${formatMoney(p.drawdown, currency)} (${formatPercent(underwaterPercent(p))})`,
         ]);
-        rows.push(['Position', formatQty(p.positionSize)]);
+        rows.push(['Position', formatUnits(p.positionSize)]);
         return (
           `<div style="font-weight:600;margin-bottom:4px">${esc(formatDateTime(p.time))} UTC</div>` +
           rows
@@ -268,7 +274,14 @@ export function buildEquityChartOptions(
         splitNumber: 2,
         axisLabel: { formatter: '{value}%', hideOverlap: true },
       },
-      { ...yAxisBase, gridIndex: 2, type: 'value', name: 'Position', splitNumber: 2 },
+      {
+        ...yAxisBase,
+        gridIndex: 2,
+        type: 'value',
+        name: 'Position (units)',
+        splitNumber: 2,
+        axisLabel: { formatter: (v: number) => COMPACT_QTY.format(v), hideOverlap: true },
+      },
     ],
     dataZoom: [
       { type: 'inside', xAxisIndex: [0, 1, 2] },
