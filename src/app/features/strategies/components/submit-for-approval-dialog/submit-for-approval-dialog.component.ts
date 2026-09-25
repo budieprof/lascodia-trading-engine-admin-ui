@@ -68,15 +68,29 @@ export const APPROVAL_MAX_POLL_FAILURES = 5;
           <div class="dialog-body">
             @switch (phase()) {
               @case ('confirm') {
-                <p>
-                  Runs every promotion gate against this Draft — the same qualification the engine
-                  runs before promoting a generated strategy. The paper-trade gate is skipped: a
-                  Draft has no paper history yet.
-                </p>
+                @if (fromPaper()) {
+                  <p data-testid="sfa-from-paper">
+                    Runs every promotion gate against this paper-trading script — the same
+                    qualification the engine runs before promoting a generated strategy. The
+                    paper-trade gate is skipped here: its paper trades count when it is activated,
+                    in the graduation gate.
+                  </p>
+                } @else {
+                  <p>
+                    Runs every promotion gate against this Draft — the same qualification the engine
+                    runs before promoting a generated strategy. The paper-trade gate is skipped: a
+                    Draft has no paper history yet.
+                  </p>
+                }
                 <ul class="facts">
                   <li>
-                    On a pass the strategy moves <strong>Draft → Approved</strong> and starts
-                    <strong>paper trading</strong> (Approved + Paused).
+                    @if (fromPaper()) {
+                      On a pass the strategy moves <strong>PaperTrading → Approved</strong> and
+                      keeps <strong>paper trading</strong> (Approved + Paused).
+                    } @else {
+                      On a pass the strategy moves <strong>Draft → Approved</strong> and starts
+                      <strong>paper trading</strong> (Approved + Paused).
+                    }
                   </li>
                   <li>
                     Going live is still <strong>Activate</strong>, once its paper trading satisfies
@@ -361,8 +375,14 @@ export class SubmitForApprovalDialogComponent {
   private readonly strategies = inject(StrategiesService);
   private readonly notifications = inject(NotificationService);
 
-  /** The Draft to submit; null keeps the dialog closed (an evaluation in flight carries on). */
+  /**
+   * The Draft — or paper-trading script (the PaperTrading stage) — to submit; null keeps the dialog
+   * closed (an evaluation in flight carries on).
+   */
   readonly strategy = input<StrategyDto | null>(null);
+
+  /** Submitted from a script's paper-only stage: it moves PaperTrading → Approved on a pass. */
+  readonly fromPaper = computed(() => this.strategy()?.lifecycleStage === 'PaperTrading');
 
   /** The operator closed the dialog. */
   readonly closed = output<void>();

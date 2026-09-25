@@ -192,6 +192,12 @@ so a new built-in needs no console change.
   default), and the form shows that capital read-only with its source.
 - **Submit for approval is a background job.** `POST strategy/{id}/submit-for-approval` returns a job id
   at once; poll `GET …/submit-for-approval/{jobId}`. A synchronous call died at the ~100 s tunnel cut-off.
+- **Paper-only stage.** A Paused Draft script gets "Start paper trading" on its detail page
+  (`PUT strategy/{id}/start-paper-trading`, Draft → PaperTrading: paper executions, no gates, nothing sent to
+  an account); "Stop paper trading" moves it back. A PaperTrading script is submitted for approval like a
+  Draft, and an activation refusal points it there too (`util/activation.ts`).
+- **Lifecycle actions answer HTTP 200 with `status: false` when refused** — read the envelope, not just the
+  transport. Delete is refused for a script strategy that still holds positions (engine D131).
 - `/pine-chart-lab` is a development page: always on under `ng serve`, and in a release only where the
   `pine-chart-lab` flag admits (Admin only, off in `config.json`).
 

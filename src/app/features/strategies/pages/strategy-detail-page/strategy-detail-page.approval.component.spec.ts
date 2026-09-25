@@ -111,6 +111,112 @@ describe('StrategyDetailPageComponent (approval and activation)', () => {
     expect(cmp.activeTab()).toBe('promotion');
   });
 
+  it('offers the paper-only stage to a Paused Draft script — not to a rules strategy', () => {
+    expect(cmp.canStartPaperTrading()).toBe(false); // DRAFT is a rules strategy
+    cmp.strategy.set({ ...DRAFT, authoringMode: 'Script' } as StrategyDto);
+    expect(cmp.isScript()).toBe(true);
+    expect(cmp.canStartPaperTrading()).toBe(true);
+    expect(cmp.canSubmitForApproval()).toBe(true);
+    expect(cmp.isPaperOnlyStage()).toBe(false);
+
+    cmp.strategy.set({
+      ...DRAFT,
+      authoringMode: 'Script',
+      lifecycleStage: 'PaperTrading',
+    } as StrategyDto);
+    expect(cmp.canStartPaperTrading()).toBe(false);
+    expect(cmp.isPaperOnlyStage()).toBe(true);
+    // Submitted for approval from its paper stage.
+    expect(cmp.canSubmitForApproval()).toBe(true);
+
+    cmp.strategy.set({ ...DRAFT, authoringMode: 'Script', status: 'Active' } as StrategyDto);
+    expect(cmp.canStartPaperTrading()).toBe(false);
+    cmp.strategy.set({
+      ...DRAFT,
+      authoringMode: 'Script',
+      lifecycleStage: 'Approved',
+    } as StrategyDto);
+    expect(cmp.canStartPaperTrading()).toBe(false);
+    expect(cmp.canSubmitForApproval()).toBe(false);
+  });
+
+  it('starts and stops paper trading, re-reading the strategy, and shows a refusal', () => {
+    cmp.strategy.set({ ...DRAFT, authoringMode: 'Script' } as StrategyDto);
+    cmp.onStartPaperTrading();
+    http
+      .expectOne((r) => r.method === 'PUT' && r.url === `${BASE}/strategy/41/start-paper-trading`)
+      .flush({ status: true, data: 'PaperTrading', message: 'Paper trading.', responseCode: '00' });
+    expect(notify['success']).toHaveBeenCalledWith(expect.stringContaining('Paper trading'));
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(cmp.actionLoading()).toBe(false);
+
+    cmp.onStopPaperTrading();
+    http
+      .expectOne((r) => r.method === 'PUT' && r.url === `${BASE}/strategy/41/stop-paper-trading`)
+      .flush({
+        status: true,
+        data: 'Draft',
+        message: 'Stopped paper trading.',
+        responseCode: '00',
+      });
+    expect(reload).toHaveBeenCalledTimes(2);
+
+    cmp.onStartPaperTrading();
+    http.expectOne(`${BASE}/strategy/41/start-paper-trading`).flush({
+      status: false,
+      data: null,
+      message: 'Strategy 41 still holds 1 open position it opened.',
+      responseCode: '-11',
+    });
+    expect(notify['error']).toHaveBeenCalledWith(
+      'Strategy 41 still holds 1 open position it opened.',
+    );
+    expect(reload).toHaveBeenCalledTimes(2);
+  });
+
+  it('points a paper-trading script whose activation is refused at "Submit for approval"', () => {
+    cmp.strategy.set({
+      ...DRAFT,
+      authoringMode: 'Script',
+      lifecycleStage: 'PaperTrading',
+    } as StrategyDto);
+    cmp.onActivate();
+    http.expectOne(`${BASE}/strategy/41/activate`).flush({
+      status: false,
+      data: null,
+      message: 'Strategy 41 is paper trading (the paper-only stage) and cannot be activated yet.',
+      responseCode: '-11',
+    });
+    expect(cmp.activationHint()).toContain('Submit for approval');
+  });
+
+  it('keeps the page and says why when the engine refuses a delete (D131)', () => {
+    const navigate = vi.spyOn((cmp as any).router, 'navigate');
+    cmp.showDeleteConfirm.set(true);
+    cmp.onDelete();
+    http
+      .expectOne((r) => r.method === 'DELETE' && r.url === `${BASE}/strategy/41`)
+      .flush({
+        status: false,
+        data: null,
+        message: 'Strategy 41 is a script strategy that still holds 1 open position.',
+        responseCode: '-11',
+      });
+    expect(notify['success']).not.toHaveBeenCalled();
+    expect(notify['error']).toHaveBeenCalledWith(
+      'Strategy 41 is a script strategy that still holds 1 open position.',
+    );
+    expect(navigate).not.toHaveBeenCalled();
+    expect(cmp.deleteLoading()).toBe(false);
+
+    cmp.onDelete();
+    http
+      .expectOne(`${BASE}/strategy/41`)
+      .flush({ status: true, data: null, message: 'Successful', responseCode: '00' });
+    expect(notify['success']).toHaveBeenCalledWith('Strategy deleted');
+    expect(navigate).toHaveBeenCalledWith(['/strategies']);
+  });
+
   it('takes the operator to the Execution tab from the editor or the script card', () => {
     cmp.openEdit();
     expect(cmp.showEditForm()).toBe(true);

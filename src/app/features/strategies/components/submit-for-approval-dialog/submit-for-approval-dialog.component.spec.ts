@@ -124,7 +124,16 @@ describe('SubmitForApprovalDialogComponent', () => {
     expect(el.querySelector('.dialog-sub')!.textContent).toContain('Pine EMA');
     expect(el.textContent).toContain('Draft → Approved');
     expect(el.textContent).toContain('paper trading');
+    expect(el.querySelector('[data-testid="sfa-from-paper"]')).toBeNull();
     expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('explains a submission from a script’s paper-only stage (PaperTrading → Approved)', () => {
+    open({ ...DRAFT, lifecycleStage: 'PaperTrading' } as StrategyDto);
+    expect(el.querySelector('[data-testid="sfa-from-paper"]')).not.toBeNull();
+    expect(el.textContent).toContain('PaperTrading → Approved');
+    expect(el.textContent).not.toContain('Draft → Approved');
+    expect(el.textContent).toContain('keeps');
   });
 
   it('starts the job, polls it while it runs, then shows an approval; the host re-reads the strategy', () => {

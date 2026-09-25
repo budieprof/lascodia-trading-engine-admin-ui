@@ -166,8 +166,12 @@ export class StrategiesService {
     return this.api.put(`/strategy/${id}`, data, opts);
   }
 
-  delete(id: number): Observable<ResponseData<void>> {
-    return this.api.delete(`/strategy/${id}`);
+  /**
+   * Soft-delete a strategy. The engine refuses with `status: false`, `-11` a script strategy that
+   * still holds positions or working orders (D131): its live session manages them.
+   */
+  delete(id: number, opts?: ApiCallOptions): Observable<ResponseData<void>> {
+    return this.api.delete(`/strategy/${id}`, opts);
   }
 
   /**
@@ -228,6 +232,21 @@ export class StrategiesService {
 
   pause(id: number): Observable<ResponseData<string>> {
     return this.api.put(`/strategy/${id}/pause`);
+  }
+
+  /**
+   * Start paper-trading a Pine script strategy before approval (Draft → PaperTrading): its live
+   * session records its trades as paper executions and sends nothing to an account, so no
+   * promotion gate runs. It is submitted for approval from there. Refused (`status: false`, `-11`)
+   * unless it is a Paused Draft script that compiles as `strategy()` and holds no positions.
+   */
+  startPaperTrading(id: number, opts?: ApiCallOptions): Observable<ResponseData<string>> {
+    return this.api.put(`/strategy/${id}/start-paper-trading`, {}, opts);
+  }
+
+  /** Stop a script's paper-only stage (PaperTrading → Draft); its paper executions are kept. */
+  stopPaperTrading(id: number, opts?: ApiCallOptions): Observable<ResponseData<string>> {
+    return this.api.put(`/strategy/${id}/stop-paper-trading`, {}, opts);
   }
 
   assignRiskProfile(

@@ -110,7 +110,7 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
             }
             <app-presence-badge [routeKey]="'strategy:' + strategyId" />
           </span>
-          @if (strategy()!.lifecycleStage === 'Draft') {
+          @if (canSubmitForApproval()) {
             <button
               type="button"
               class="btn btn-primary"
@@ -118,6 +118,30 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
               title="Run the promotion gates; on a pass the strategy moves to Approved and paper-trades"
             >
               Submit for approval
+            </button>
+          }
+          @if (canStartPaperTrading()) {
+            <button
+              type="button"
+              class="btn btn-secondary"
+              data-testid="start-paper-trading"
+              (click)="onStartPaperTrading()"
+              [disabled]="actionLoading()"
+              title="Paper-trade this script before approval: its trades are recorded as paper executions and nothing is sent to an account"
+            >
+              Start paper trading
+            </button>
+          }
+          @if (isPaperOnlyStage()) {
+            <button
+              type="button"
+              class="btn btn-secondary"
+              data-testid="stop-paper-trading"
+              (click)="onStopPaperTrading()"
+              [disabled]="actionLoading()"
+              title="Stop paper trading: the strategy goes back to Draft; its paper executions are kept"
+            >
+              Stop paper trading
             </button>
           }
           @if (strategy()!.status === 'Paused' || strategy()!.status === 'Stopped') {
@@ -169,7 +193,7 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
         @if (activationHint(); as hint) {
           <div class="activation-hint" role="alert">
             <span>{{ hint }}</span>
-            @if (strategy()!.lifecycleStage === 'Draft') {
+            @if (canSubmitForApproval()) {
               <button type="button" class="btn btn-primary" (click)="openApproval()">
                 Submit for approval
               </button>
@@ -1580,6 +1604,74 @@ export class StrategyDetailPageComponent implements OnInit {
   }
 
   // ── Submit for approval (ADR-0027 DEC-10) ────────────────────────────────
+  /** A Draft, or a script in its paper-only stage (submitted from there the same way). */
+  readonly canSubmitForApproval = computed(() => {
+    const stage = this.strategy()?.lifecycleStage;
+    return stage === 'Draft' || (stage === 'PaperTrading' && this.isScript());
+  });
+
+  // ── Paper-only stage for script strategies ───────────────────────────────
+  /** A Paused Draft script can paper-trade before approval (no gates: nothing reaches an account). */
+  readonly canStartPaperTrading = computed(() => {
+    const s = this.strategy();
+    return !!s && this.isScript() && s.lifecycleStage === 'Draft' && s.status === 'Paused';
+  });
+
+  /** The script is in its paper-only stage (PaperTrading). */
+  readonly isPaperOnlyStage = computed(
+    () => this.isScript() && this.strategy()?.lifecycleStage === 'PaperTrading',
+  );
+
+  /** `PUT strategy/{id}/start-paper-trading`: Draft → PaperTrading. */
+  onStartPaperTrading(): void {
+    this.setPaperTrading(true);
+  }
+
+  /** `PUT strategy/{id}/stop-paper-trading`: PaperTrading → Draft. */
+  onStopPaperTrading(): void {
+    this.setPaperTrading(false);
+  }
+
+  /** The engine answers the new stage's name, not the strategy, and refuses with `status: false` — re-read on success. */
+  private setPaperTrading(start: boolean): void {
+    this.actionLoading.set(true);
+    this.activationHint.set(null);
+    const call = start
+      ? this.strategiesService.startPaperTrading(this.strategyId, { silent: true })
+      : this.strategiesService.stopPaperTrading(this.strategyId, { silent: true });
+    call.subscribe({
+      next: (res) => {
+        this.actionLoading.set(false);
+        if (!res?.status) {
+          this.notifications.error(
+            failureMessage(
+              res,
+              start
+                ? 'The engine did not start paper trading.'
+                : 'The engine did not stop paper trading.',
+            ),
+          );
+          return;
+        }
+        this.notifications.success(
+          start
+            ? 'Paper trading — the script’s trades are recorded as paper executions; nothing is sent to an account'
+            : 'Paper trading stopped — the strategy is a Draft again',
+        );
+        this.loadStrategy();
+      },
+      error: (err) => {
+        this.actionLoading.set(false);
+        this.notifications.error(
+          failureMessage(
+            err,
+            start ? 'Starting paper trading failed.' : 'Stopping paper trading failed.',
+          ),
+        );
+      },
+    });
+  }
+
   openApproval(): void {
     this.activationHint.set(null);
     this.approvalTarget.set(this.strategy());
@@ -2165,17 +2257,26 @@ export class StrategyDetailPageComponent implements OnInit {
     });
   }
 
+  /**
+   * The engine refuses with HTTP 200 + `status: false` — e.g. a script strategy that still holds
+   * positions its live session manages (D131) — so the answer is read, not just the transport.
+   */
   onDelete(): void {
     this.deleteLoading.set(true);
-    this.strategiesService.delete(this.strategyId).subscribe({
-      next: () => {
-        this.notifications.success('Strategy deleted');
+    this.strategiesService.delete(this.strategyId, { silent: true }).subscribe({
+      next: (res) => {
         this.deleteLoading.set(false);
+        if (!res?.status) {
+          this.showDeleteConfirm.set(false);
+          this.notifications.error(failureMessage(res, 'The engine did not delete the strategy.'));
+          return;
+        }
+        this.notifications.success('Strategy deleted');
         this.showDeleteConfirm.set(false);
         this.router.navigate(['/strategies']);
       },
-      error: () => {
-        this.notifications.error('Failed to delete strategy');
+      error: (err) => {
+        this.notifications.error(failureMessage(err, 'Failed to delete strategy'));
         this.deleteLoading.set(false);
       },
     });
