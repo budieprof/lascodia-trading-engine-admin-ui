@@ -176,6 +176,25 @@ docs/         TUNNEL.md (tunnel/proxy runbook), specs and plans
 Path aliases: `@core/*`, `@shared/*`, `@features/*`, `@env/*` — set in `tsconfig.json` and mirrored
 in `vitest.config.mts`. Adding one means editing both.
 
+### Pine scripts (engine ADR-0027)
+
+Script strategies are authored, backtested and watched live in `features/scripting/`: the CodeMirror 6
+Pine mode and its catalog-driven autocomplete, hover and signature help (`pine/`, `components/pine-editor`),
+the inputs form, the Strategy report, script backtests, live status, alerts, the screener and the libraries
+page. `shared/pine-chart` draws every plot, drawing and table a script outputs. The wire contract is the
+engine's `docs/api/scripting-api.md`; the language catalog comes from `GET scripting/catalog` (ETag-cached),
+so a new built-in needs no console change.
+
+- **Units vs lots.** Pine quantities are TradingView units (`qty = 100000` = one EURUSD lot). The report,
+  replay and live emulator speak units; broker positions and backtest lot columns speak lots. Label which
+  one a number is — the live tab shows both.
+- **Script backtests send no `initialBalance`.** The engine takes the script's `initial_capital` (or its
+  default), and the form shows that capital read-only with its source.
+- **Submit for approval is a background job.** `POST strategy/{id}/submit-for-approval` returns a job id
+  at once; poll `GET …/submit-for-approval/{jobId}`. A synchronous call died at the ~100 s tunnel cut-off.
+- `/pine-chart-lab` is a development page: always on under `ng serve`, and in a release only where the
+  `pine-chart-lab` flag admits (Admin only, off in `config.json`).
+
 ## Gotchas that have cost real time
 
 - **Account-scoped effects need both `accountIdsKey` and `untracked`.** Either half alone leaves a

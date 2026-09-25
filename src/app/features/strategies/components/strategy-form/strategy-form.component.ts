@@ -589,20 +589,36 @@ const TIMEFRAME_LABELS: Record<string, string> = {
 
             <!-- ========== SIZING TAB ========== -->
             @if (activeTab() === 'sizing') {
-              <div class="form-group">
-                <label class="form-label">Sizing Config JSON</label>
-                <textarea
-                  formControlName="sizingConfigJson"
-                  class="form-input form-textarea form-mono"
-                  rows="6"
-                  [placeholder]="placeholders.sizing"
-                ></textarea>
-                <span class="form-hint">
-                  Optional. Position-sizing model. Modes:
-                  <code>FixedLot</code>, <code>PercentEquity</code>, <code>AtrBased</code>,
-                  <code>KellyFraction</code>. Leave blank to use the engine default lot size.
-                </span>
-              </div>
+              @if (isScriptAuthoring()) {
+                <!-- D126: a script sizes its own orders; the engine refuses a sizing config on one. -->
+                <div class="form-group" data-testid="script-sizing-note">
+                  <span class="form-hint">
+                    A Pine script sizes its own orders: <code>default_qty_type</code> /
+                    <code>default_qty_value</code> in its <code>strategy()</code> call, or
+                    <code>qty</code> on an order — in units of the underlying, as on TradingView
+                    (<code>qty = 100000</code> is one EURUSD lot). Every bound account trades that
+                    size, clamped by its risk profile. To trade more or less on one account, set
+                    that binding's lot multiplier on the strategy's Execution tab.
+                  </span>
+                </div>
+              } @else {
+                <div class="form-group">
+                  <label class="form-label">Sizing Config JSON</label>
+                  <textarea
+                    formControlName="sizingConfigJson"
+                    class="form-input form-textarea form-mono"
+                    rows="6"
+                    [placeholder]="placeholders.sizing"
+                  ></textarea>
+                  <span class="form-hint">
+                    Optional. Position-sizing model, clamped by the account's risk profile. Modes:
+                    <code>FixedLot</code>, <code>RiskPercentOfEquity</code>,
+                    <code>PercentOfEquity</code>, <code>Cash</code>, <code>AtrBased</code>,
+                    <code>BaseLotMultiplier</code>. Leave blank to size at the risk profile's risk
+                    per trade.
+                  </span>
+                </div>
+              }
             }
 
             <!-- ========== FILTERS TAB (session + news) ========== -->

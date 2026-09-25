@@ -209,6 +209,21 @@ describe('StrategyFormComponent — Pine script authoring', () => {
       expect(host.querySelector('app-script-authoring')).toBeNull();
     });
 
+    it('in script mode the Sizing tab explains the script sizes itself — no sizing config to type (D126)', () => {
+      cmp.form.patchValue({ strategyType: 'RuleBased' });
+      cmp.activeTab.set('sizing');
+      fixture.detectChanges();
+      expect(host.querySelector('textarea[formcontrolname="sizingConfigJson"]')).toBeTruthy();
+      expect(host.querySelector('[data-testid="script-sizing-note"]')).toBeNull();
+
+      cmp.authoringMode.set('script');
+      fixture.detectChanges();
+      expect(host.querySelector('textarea[formcontrolname="sizingConfigJson"]')).toBeNull();
+      const note = host.querySelector('[data-testid="script-sizing-note"]');
+      expect(note?.textContent).toContain('qty = 100000');
+      expect(note?.textContent).toContain('lot multiplier');
+    });
+
     it('passes the first typed symbol and the timeframe to the panel', () => {
       cmp.form.patchValue({ symbol: 'gbpusd, eurusd', timeframe: 'H4' });
       expect(cmp.scriptSymbol()).toBe('GBPUSD');
