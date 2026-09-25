@@ -1169,6 +1169,17 @@ const STATUS_FILTERS = [
         background: rgba(59, 130, 246, 0.16);
         color: var(--accent, #3b82f6);
       }
+      /* After a fire: the re-check asked to keep watching. Armed reads as the plan continuing;
+         refused is a plan the market already reached being dropped, so it is flagged like a
+         near-miss rather than greyed out as routine. */
+      .tl-kind[data-kind='Rearmed'] {
+        background: rgba(59, 130, 246, 0.16);
+        color: var(--accent, #3b82f6);
+      }
+      .tl-kind[data-kind='RearmRefused'] {
+        background: rgba(234, 179, 8, 0.18);
+        color: var(--warning);
+      }
       .tl-kind[data-kind='Invalidated'],
       .tl-kind[data-kind='EvalError'] {
         background: rgba(239, 68, 68, 0.18);
