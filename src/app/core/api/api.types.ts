@@ -502,7 +502,18 @@ export interface PositionDto {
   bumpedSlSnapshot: number | null;
   /** Short tag for why the bump was applied (e.g. SPREAD_SPIKE); null when no bump is active. */
   bumpReason: string | null;
+  /**
+   * The engine's reading of the spread-bump group (engine D120): `InForce` — the broker stop carries a bump of
+   * `spreadBumpOffset`; `ArmedNoOffset` — a group armed with no offset (a stop move carried the bump down to nothing:
+   * the stop is NOT widened); `Drifted` — the stop left the bumped level; `None` — no group. Absent on older engines.
+   */
+  spreadBumpStatus?: SpreadBumpStatus;
+  /** Signed offset of a bump in force (bumped SL − original SL); null otherwise. Absent on older engines. */
+  spreadBumpOffset?: number | null;
 }
+
+/** A position's spread-bump state as the engine reads it (engine D120, `SpreadBumpState`). */
+export type SpreadBumpStatus = 'None' | 'InForce' | 'ArmedNoOffset' | 'Drifted';
 
 /**
  * One row of a position's lifecycle audit trail (PRD-V2 FR-5.8). `eventType`
