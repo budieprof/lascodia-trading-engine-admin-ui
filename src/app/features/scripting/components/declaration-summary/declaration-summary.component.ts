@@ -1,51 +1,13 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 
-import type { ScriptDeclaration, ScriptStrategyProperties } from '@core/api/scripting.types';
+import type { ScriptDeclaration } from '@core/api/scripting.types';
 
-interface PropRow {
-  label: string;
-  value: string;
-  /** Differs from the Pine default — worth a second look. */
-  set?: boolean;
-}
-
-const QTY_TYPES = ['Fixed', 'Cash', 'PercentOfEquity'];
-const COMMISSION_TYPES = ['Percent', 'CashPerContract', 'CashPerOrder'];
-
-function enumText(value: string | number | undefined, names: string[]): string | undefined {
-  if (value === undefined || value === null) return undefined;
-  return typeof value === 'number' ? (names[value] ?? String(value)) : value;
-}
-
-function qtyLabel(p: ScriptStrategyProperties): string {
-  const type = enumText(p.defaultQtyType, QTY_TYPES) ?? 'Fixed';
-  const v = p.defaultQtyValue ?? 1;
-  switch (type.toLowerCase().replace(/[_\s.]/g, '')) {
-    case 'cash':
-    case 'strategycash':
-      return `${v} (cash)`;
-    case 'percentofequity':
-    case 'strategypercentofequity':
-      return `${v}% of equity`;
-    default:
-      return `${v} (contracts/lots)`;
-  }
-}
-
-function commissionLabel(p: ScriptStrategyProperties): string {
-  const v = p.commissionValue ?? 0;
-  if (!v) return 'None';
-  const type = (enumText(p.commissionType, COMMISSION_TYPES) ?? 'Percent').toLowerCase();
-  if (type.includes('contract')) return `${v} per contract`;
-  if (type.includes('order')) return `${v} per order`;
-  return `${v}%`;
-}
-
-const yesNo = (b: boolean | undefined) => (b ? 'Yes' : 'No');
+import { declarationRows } from './declaration-summary.model';
 
 /**
  * The script's declaration statement as compiled: kind and title, and for strategies every
- * `strategy()` property the backtest and the live emulator will use.
+ * `strategy()` property the backtest and the live emulator will use. The capital and the margins
+ * say whether the script declares them, as the compiler reports it (see `declarationRows`).
  */
 @Component({
   selector: 'app-declaration-summary',
@@ -63,7 +25,7 @@ const yesNo = (b: boolean | undefined) => (b ? 'Yes' : 'No');
         </div>
         <dl class="props">
           @for (row of rows(); track row.label) {
-            <div class="prop" [class.is-set]="row.set">
+            <div class="prop" [class.is-set]="row.set" [attr.title]="row.hint ?? null">
               <dt>{{ row.label }}</dt>
               <dd>{{ row.value }}</dd>
             </div>
@@ -155,65 +117,5 @@ export class DeclarationSummaryComponent {
   readonly declaration = input<ScriptDeclaration | null>(null);
   readonly emptyText = input('Compile the script to read its declaration.');
 
-  readonly rows = computed<PropRow[]>(() => {
-    const d = this.declaration();
-    if (!d) return [];
-    const rows: PropRow[] = [{ label: 'Overlay', value: yesNo(d.overlay) }];
-    const p = d.strategy;
-    if (d.kind === 'strategy' && p) {
-      const currency = !p.currency || p.currency === 'NONE' ? 'symbol currency' : p.currency;
-      rows.push(
-        {
-          label: 'Initial capital',
-          value: `${(p.initialCapital ?? 1_000_000).toLocaleString()} (${currency})`,
-          set: p.initialCapital !== undefined && p.initialCapital !== 1_000_000,
-        },
-        { label: 'Order size', value: qtyLabel(p) },
-        { label: 'Pyramiding', value: String(p.pyramiding ?? 0), set: (p.pyramiding ?? 0) > 1 },
-        { label: 'Commission', value: commissionLabel(p), set: !!p.commissionValue },
-        { label: 'Slippage', value: `${p.slippage ?? 0} ticks`, set: !!p.slippage },
-        {
-          label: 'Margin long / short',
-          value: `${p.marginLong ?? 100}% / ${p.marginShort ?? 100}%`,
-          set: (p.marginLong ?? 100) !== 100 || (p.marginShort ?? 100) !== 100,
-        },
-        {
-          label: 'Orders on close',
-          value: yesNo(p.processOrdersOnClose),
-          set: !!p.processOrdersOnClose,
-        },
-        { label: 'Every tick', value: yesNo(p.calcOnEveryTick), set: !!p.calcOnEveryTick },
-        { label: 'On order fills', value: yesNo(p.calcOnOrderFills), set: !!p.calcOnOrderFills },
-        { label: 'Close entries rule', value: p.closeEntriesRule ?? 'FIFO' },
-        { label: 'Bar magnifier', value: yesNo(p.useBarMagnifier), set: !!p.useBarMagnifier },
-        {
-          label: 'Fill on standard OHLC',
-          value: yesNo(p.fillOrdersOnStandardOhlc),
-          set: !!p.fillOrdersOnStandardOhlc,
-        },
-        {
-          label: 'Limit fill assumption',
-          value: `${p.backtestFillLimitsAssumption ?? 0} ticks`,
-          set: !!p.backtestFillLimitsAssumption,
-        },
-        { label: 'Risk-free rate', value: `${p.riskFreeRate ?? 2}%` },
-      );
-    }
-    if (d.timeframe) rows.push({ label: 'Timeframe', value: d.timeframe, set: true });
-    if (d.format && d.format !== 'inherit')
-      rows.push({ label: 'Format', value: d.format, set: true });
-    if (d.precision !== null && d.precision !== undefined)
-      rows.push({ label: 'Precision', value: String(d.precision), set: true });
-    const maxBarsBack = p?.maxBarsBack || d.maxBarsBack;
-    if (maxBarsBack) rows.push({ label: 'Max bars back', value: String(maxBarsBack), set: true });
-    const drawing = [d.maxLinesCount, d.maxLabelsCount, d.maxBoxesCount, d.maxPolylinesCount];
-    if (drawing.some((x) => x !== undefined && x !== 50)) {
-      rows.push({
-        label: 'Max lines / labels / boxes / polylines',
-        value: drawing.map((x) => x ?? 50).join(' / '),
-        set: true,
-      });
-    }
-    return rows;
-  });
+  readonly rows = computed(() => declarationRows(this.declaration()));
 }

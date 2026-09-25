@@ -120,6 +120,11 @@ export interface ScriptStrategyProperties {
   closeEntriesRule?: string;
   marginLong?: number;
   marginShort?: number;
+  /**
+   * Whether `strategy()` passes `margin_long` or `margin_short` (set by the compiler; null or
+   * absent: not reported). Pine: without one, `strategy.margin_liquidation_price` is na.
+   */
+  marginSpecified?: boolean | null;
   riskFreeRate?: number;
   useBarMagnifier?: boolean;
   fillOrdersOnStandardOhlc?: boolean;
