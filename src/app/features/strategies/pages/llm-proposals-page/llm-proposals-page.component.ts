@@ -21,6 +21,7 @@ import type {
 } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
+import { DslCheckResult, normaliseDslCheck } from '../../dsl/dsl-check';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
@@ -401,6 +402,13 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
                                 Summary unavailable — DSL summariser refused or the proposal is
                                 malformed. Inspect the raw JSON below.
                               </p>
+                              @if (summaryErrorsFor(p.id).length > 0) {
+                                <ul class="summary-errors">
+                                  @for (e of summaryErrorsFor(p.id); track $index) {
+                                    <li>{{ e }}</li>
+                                  }
+                                </ul>
+                              }
                             } @else if (summaryFor(p.id); as text) {
                               <p class="summary">{{ text }}</p>
                             }
@@ -929,6 +937,13 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
         border-color: var(--border);
         color: var(--text-tertiary);
       }
+      .summary-errors {
+        margin: 0 0 var(--space-3) 0;
+        padding-left: var(--space-4);
+        font-size: var(--text-xs);
+        font-family: var(--font-mono);
+        color: var(--loss);
+      }
       .json {
         background: var(--bg-secondary);
         padding: var(--space-3);
@@ -1220,22 +1235,34 @@ export class LlmProposalsPageComponent {
     this.strategies
       .summariseDsl(proposal.proposalJson)
       .pipe(
-        map((res) => res?.data ?? null),
-        catchError(() => of(null as string | null)),
+        map((res) => normaliseDslCheck(res)),
+        catchError(() => of(null as DslCheckResult | null)),
       )
-      .subscribe((text: string | null) => {
+      .subscribe((check) => {
+        const text = check?.summary ?? null;
         this.summaries.update((s) => ({
           ...s,
           [id]: text && text.trim().length > 0 ? text : 'error',
         }));
+        this.summaryErrors.update((e) => ({
+          ...e,
+          [id]: (check?.errors ?? []).map((i) => (i.path ? `${i.path}: ${i.message}` : i.message)),
+        }));
       });
   }
+
+  /** Why the DSL did not summarise — the validator's errors, keyed by proposal id. */
+  protected readonly summaryErrors = signal<Record<number, string[]>>({});
 
   /** Resolves the cached summary for a proposal — used by the template to
    *  render "Loading…" / the prose / a fallback chip without leaking the
    *  cache shape into the .html. */
   protected summaryFor(id: number): string | 'loading' | 'error' | undefined {
     return this.summaries()[id];
+  }
+
+  protected summaryErrorsFor(id: number): string[] {
+    return this.summaryErrors()[id] ?? [];
   }
 
   protected formatJson(json: string): string {

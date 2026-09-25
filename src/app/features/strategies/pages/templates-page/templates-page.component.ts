@@ -6,9 +6,14 @@ import { catchError, finalize, map, of } from 'rxjs';
 
 import { StrategiesService } from '@core/services/strategies.service';
 import { AuditTrailService } from '@core/services/audit-trail.service';
+import { RiskProfilesService } from '@core/services/risk-profiles.service';
+import { NotificationService } from '@core/notifications/notification.service';
 import type {
   ApplyStrategyTemplateResult,
+  CreateStrategyTemplateRequest,
+  RiskProfileDto,
   StrategyTemplateDto,
+  StrategyType,
   Timeframe,
 } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
@@ -18,9 +23,86 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { DslBuilderComponent } from '../../components/dsl-builder/dsl-builder.component';
+import { DslIssue, validateDslJson } from '../../dsl/dsl-model';
+import { failureMessage, failureMessages } from '../../util/api-failure';
 
 const TIMEFRAMES: readonly Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] as const;
+
+const TEMPLATE_STRATEGY_TYPES: readonly StrategyType[] = [
+  'MovingAverageCrossover',
+  'RSIReversion',
+  'BreakoutScalper',
+  'BollingerBandReversion',
+  'MACDDivergence',
+  'SessionBreakout',
+  'MomentumTrend',
+  'CompositeML',
+  'StatisticalArbitrage',
+  'VwapReversion',
+  'CalendarEffect',
+  'NewsFade',
+  'CarryTrade',
+  'WeekendGapFade',
+  'RoundNumberFade',
+  'WedgeBreakout',
+  'CrossAssetLeadLag',
+  'OrderFlowImbalance',
+  'SubMinuteEvent',
+  'RuleBased',
+  'LlmProposal',
+  'Custom',
+];
+
+type SubConfigKey =
+  | 'riskOverridesJson'
+  | 'sizingConfigJson'
+  | 'sessionFilterJson'
+  | 'regimeGateJson'
+  | 'multiTimeframeGateJson';
+
+/** The editable copy of a template while its edit dialog is open. */
+interface TemplateDraft {
+  name: string;
+  description: string;
+  strategyType: string;
+  parametersJson: string;
+  riskProfileId: number | null;
+  riskOverridesJson: string;
+  sizingConfigJson: string;
+  sessionFilterJson: string;
+  regimeGateJson: string;
+  multiTimeframeGateJson: string;
+}
+
+const SUB_CONFIG_FIELDS: ReadonlyArray<{ key: SubConfigKey; label: string; placeholder: string }> =
+  [
+    {
+      key: 'riskOverridesJson',
+      label: 'Risk overrides',
+      placeholder: '{"slMode":"Atr","slMultiplier":1.5,"tpMode":"Atr","tpMultiplier":2.5}',
+    },
+    {
+      key: 'sizingConfigJson',
+      label: 'Sizing',
+      placeholder: '{"mode":"PercentEquity","value":0.01}',
+    },
+    {
+      key: 'sessionFilterJson',
+      label: 'Session filter',
+      placeholder: '{"sessionStartUtc":"08:00","sessionEndUtc":"17:00"}',
+    },
+    { key: 'regimeGateJson', label: 'Regime gate', placeholder: '{"allowedRegimes":["Trending"]}' },
+    {
+      key: 'multiTimeframeGateJson',
+      label: 'Multi-timeframe gate',
+      placeholder: '{"timeframe":"D1","indicator":"EMA","period":200,"comparator":"PriceAbove"}',
+    },
+  ];
+
+const DSL_TYPES: readonly string[] = ['RuleBased', 'LlmProposal'];
 
 @Component({
   selector: 'app-templates-page',
@@ -35,6 +117,8 @@ const TIMEFRAMES: readonly Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] a
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
+    ConfirmDialogComponent,
+    DslBuilderComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -126,7 +210,7 @@ const TIMEFRAMES: readonly Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] a
                     <td class="time" [title]="t.createdAt | date: 'yyyy-MM-dd HH:mm:ss UTC'">
                       {{ t.createdAt | relativeTime }}
                     </td>
-                    <td>
+                    <td class="row-actions">
                       <button
                         type="button"
                         class="action"
@@ -134,6 +218,22 @@ const TIMEFRAMES: readonly Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] a
                         [disabled]="submitting()"
                       >
                         Apply →
+                      </button>
+                      <button
+                        type="button"
+                        class="action action--quiet"
+                        (click)="openEdit(t)"
+                        [title]="'Edit ' + (t.name ?? 'this template')"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        class="action action--danger"
+                        (click)="askDelete(t)"
+                        [title]="'Delete ' + (t.name ?? 'this template')"
+                      >
+                        Delete
                       </button>
                     </td>
                   </tr>
@@ -230,6 +330,180 @@ const TIMEFRAMES: readonly Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] a
           </div>
         </div>
       }
+
+      @if (draft(); as d) {
+        <div
+          class="modal-overlay"
+          role="presentation"
+          tabindex="-1"
+          (click)="closeEdit()"
+          (keydown.escape)="closeEdit()"
+        >
+          <div
+            class="modal modal--wide"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="template-edit-title"
+            tabindex="-1"
+            (click)="$event.stopPropagation()"
+            (keydown.escape)="closeEdit()"
+            (keydown)="$event.stopPropagation()"
+          >
+            <header class="modal-head">
+              <h2 id="template-edit-title">Edit template</h2>
+              <button type="button" class="close-btn" (click)="closeEdit()" aria-label="Close">
+                ×
+              </button>
+            </header>
+            <p class="modal-desc muted small">
+              Changes apply to strategies created from this template from now on — strategies
+              already created from it keep their own copy.
+            </p>
+
+            <div class="row">
+              <label class="field grow">
+                <span>Name *</span>
+                <input
+                  type="text"
+                  maxlength="120"
+                  [ngModel]="d.name"
+                  (ngModelChange)="patchDraft('name', $event)"
+                />
+              </label>
+              <label class="field grow">
+                <span>Strategy type</span>
+                <select
+                  [ngModel]="d.strategyType"
+                  (ngModelChange)="patchDraft('strategyType', $event)"
+                >
+                  @for (st of strategyTypeOptions(d.strategyType); track st) {
+                    <option [value]="st">{{ st }}</option>
+                  }
+                </select>
+              </label>
+            </div>
+            <label class="field">
+              <span>Description</span>
+              <textarea
+                rows="2"
+                [ngModel]="d.description"
+                (ngModelChange)="patchDraft('description', $event)"
+              ></textarea>
+            </label>
+            <label class="field">
+              <span>Risk profile</span>
+              <select
+                [ngModel]="d.riskProfileId"
+                (ngModelChange)="patchDraft('riskProfileId', $event)"
+              >
+                <option [ngValue]="null">— None —</option>
+                @for (p of riskProfiles(); track p.id) {
+                  <option [ngValue]="p.id">{{ p.name ?? '#' + p.id }}</option>
+                }
+                @if (d.riskProfileId !== null && !hasRiskProfile(d.riskProfileId)) {
+                  <option [ngValue]="d.riskProfileId">#{{ d.riskProfileId }}</option>
+                }
+              </select>
+            </label>
+
+            <div class="field">
+              <span>{{ draftIsDsl() ? 'Rules (DSL JSON)' : 'Parameters JSON' }}</span>
+              @if (draftIsDsl()) {
+                <app-dsl-builder
+                  [parametersJson]="d.parametersJson"
+                  [issues]="draftDslIssues()"
+                  (parametersJsonChange)="patchDraft('parametersJson', $event)"
+                />
+              }
+              <textarea
+                class="mono"
+                rows="8"
+                [ngModel]="d.parametersJson"
+                (ngModelChange)="patchDraft('parametersJson', $event)"
+              ></textarea>
+              @if (draftJsonErrors()['parametersJson']; as err) {
+                <span class="field-error">Invalid JSON: {{ err }}</span>
+              }
+              @if (draftDslIssues().length > 0) {
+                <ul class="issue-list">
+                  @for (i of draftDslIssues(); track $index) {
+                    <li [class.warning]="i.severity === 'warning'">
+                      {{ i.message }}
+                      @if (i.path) {
+                        <code>{{ i.path }}</code>
+                      }
+                    </li>
+                  }
+                </ul>
+              }
+            </div>
+
+            <details class="subconfigs" [open]="hasSubConfigs(d)">
+              <summary>Risk, sizing, session and gate overrides</summary>
+              @for (f of subConfigFields; track f.key) {
+                <label class="field">
+                  <span>{{ f.label }} JSON</span>
+                  <textarea
+                    class="mono"
+                    rows="3"
+                    [placeholder]="f.placeholder"
+                    [ngModel]="d[f.key]"
+                    (ngModelChange)="patchDraft(f.key, $event)"
+                  ></textarea>
+                  @if (draftJsonErrors()[f.key]; as err) {
+                    <span class="field-error">Invalid JSON: {{ err }}</span>
+                  }
+                </label>
+              }
+            </details>
+
+            @if (editErrors().length > 0) {
+              <div class="save-errors" role="alert">
+                <strong>The engine refused the change:</strong>
+                <ul>
+                  @for (e of editErrors(); track $index) {
+                    <li>{{ e }}</li>
+                  }
+                </ul>
+              </div>
+            }
+
+            <footer class="modal-foot">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                (click)="closeEdit()"
+                [disabled]="editSaving()"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary"
+                (click)="saveEdit()"
+                [disabled]="!canSaveDraft()"
+              >
+                {{ editSaving() ? 'Saving…' : 'Save template' }}
+              </button>
+            </footer>
+          </div>
+        </div>
+      }
+
+      <app-confirm-dialog
+        [open]="deleting() !== null"
+        title="Delete template"
+        [message]="deleteMessage()"
+        confirmLabel="Delete"
+        confirmVariant="destructive"
+        [loading]="deleteBusy()"
+        (confirm)="confirmDelete()"
+        (cancelled)="cancelDelete()"
+      >
+        @if (deleteError(); as err) {
+          <p class="field-error" role="alert">{{ err }}</p>
+        }
+      </app-confirm-dialog>
     </div>
   `,
   styles: [
@@ -488,14 +762,303 @@ const TIMEFRAMES: readonly Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] a
         background: var(--bg-tertiary, #d1d1d6);
         cursor: not-allowed;
       }
+      .row-actions {
+        display: flex;
+        gap: 6px;
+        justify-content: flex-end;
+        white-space: nowrap;
+      }
+      .action--quiet {
+        color: var(--text-primary);
+      }
+      .action--quiet:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+      .action--danger {
+        color: var(--loss);
+      }
+      .action--danger:hover:not(:disabled) {
+        background: var(--loss);
+        color: #fff;
+      }
+      .modal--wide {
+        max-width: 760px;
+        max-height: 90vh;
+        overflow-y: auto;
+      }
+      .field textarea.mono {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+      }
+      .field-error {
+        font-size: var(--text-xs);
+        color: var(--loss);
+      }
+      .issue-list {
+        margin: 0;
+        padding-left: var(--space-4);
+        font-size: var(--text-xs);
+        color: var(--loss);
+      }
+      .issue-list li.warning {
+        color: #c93400;
+      }
+      .issue-list code {
+        margin-left: 6px;
+        color: var(--text-tertiary);
+      }
+      .subconfigs {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .subconfigs summary {
+        cursor: pointer;
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        margin-bottom: var(--space-2);
+      }
+      .save-errors {
+        font-size: var(--text-sm);
+        color: #8e1010;
+        background: rgba(255, 59, 48, 0.08);
+        border: 1px solid rgba(255, 59, 48, 0.3);
+        border-radius: var(--radius-sm);
+        padding: var(--space-3);
+      }
+      .save-errors ul {
+        margin: var(--space-1) 0 0;
+        padding-left: var(--space-4);
+      }
     `,
   ],
 })
 export class TemplatesPageComponent {
   private readonly strategies = inject(StrategiesService);
   private readonly auditTrail = inject(AuditTrailService);
+  private readonly riskProfilesService = inject(RiskProfilesService);
+  private readonly notifications = inject(NotificationService);
 
   protected readonly TIMEFRAMES = TIMEFRAMES;
+  protected readonly subConfigFields = SUB_CONFIG_FIELDS;
+
+  // Edit dialog -------------------------------------------------------------
+  /** Template being edited; the dialog is open while set. */
+  protected readonly editing = signal<StrategyTemplateDto | null>(null);
+  protected readonly draft = signal<TemplateDraft | null>(null);
+  protected readonly editSaving = signal(false);
+  /** The engine's reasons for refusing the last save. */
+  protected readonly editErrors = signal<string[]>([]);
+  protected readonly riskProfiles = signal<RiskProfileDto[]>([]);
+  private riskProfilesLoaded = false;
+
+  protected readonly draftIsDsl = computed(() =>
+    DSL_TYPES.includes(this.draft()?.strategyType ?? ''),
+  );
+
+  /** JSON syntax errors per field — the engine refuses unparseable sub-configs. */
+  protected readonly draftJsonErrors = computed<Record<string, string>>(() => {
+    const d = this.draft();
+    const out: Record<string, string> = {};
+    if (!d) return out;
+    for (const key of ['parametersJson', ...SUB_CONFIG_FIELDS.map((f) => f.key)] as const) {
+      const raw = d[key];
+      if (!raw || !raw.trim()) continue;
+      try {
+        JSON.parse(raw);
+      } catch (e) {
+        out[key] = (e as Error).message;
+      }
+    }
+    return out;
+  });
+
+  /**
+   * The console's checks of a RuleBased / LlmProposal template's rules —
+   * advisory here: a template has no timeframe of its own, and the engine's
+   * answer to the save is what counts.
+   */
+  protected readonly draftDslIssues = computed<DslIssue[]>(() => {
+    const d = this.draft();
+    if (!d || !this.draftIsDsl() || !d.parametersJson.trim()) return [];
+    if (this.draftJsonErrors()['parametersJson']) return [];
+    return validateDslJson(d.parametersJson);
+  });
+
+  protected readonly canSaveDraft = computed(() => {
+    const d = this.draft();
+    return (
+      !!d &&
+      d.name.trim().length > 0 &&
+      Object.keys(this.draftJsonErrors()).length === 0 &&
+      !this.editSaving()
+    );
+  });
+
+  protected openEdit(t: StrategyTemplateDto): void {
+    this.editErrors.set([]);
+    this.editing.set(t);
+    this.draft.set({
+      name: t.name ?? '',
+      description: t.description ?? '',
+      strategyType: t.strategyType,
+      parametersJson: t.parametersJson ?? '',
+      riskProfileId: t.riskProfileId,
+      riskOverridesJson: t.riskOverridesJson ?? '',
+      sizingConfigJson: t.sizingConfigJson ?? '',
+      sessionFilterJson: t.sessionFilterJson ?? '',
+      regimeGateJson: t.regimeGateJson ?? '',
+      multiTimeframeGateJson: t.multiTimeframeGateJson ?? '',
+    });
+    this.loadRiskProfiles();
+  }
+
+  protected closeEdit(): void {
+    if (this.editSaving()) return;
+    this.editing.set(null);
+    this.draft.set(null);
+    this.editErrors.set([]);
+  }
+
+  protected patchDraft<K extends keyof TemplateDraft>(key: K, value: TemplateDraft[K]): void {
+    const d = this.draft();
+    if (!d) return;
+    this.draft.set({ ...d, [key]: value ?? (key === 'riskProfileId' ? null : '') });
+  }
+
+  protected strategyTypeOptions(current: string): readonly string[] {
+    return TEMPLATE_STRATEGY_TYPES.includes(current as StrategyType)
+      ? TEMPLATE_STRATEGY_TYPES
+      : [...TEMPLATE_STRATEGY_TYPES, current];
+  }
+
+  protected hasRiskProfile(id: number): boolean {
+    return this.riskProfiles().some((p) => p.id === id);
+  }
+
+  protected hasSubConfigs(d: TemplateDraft): boolean {
+    return SUB_CONFIG_FIELDS.some((f) => d[f.key].trim().length > 0);
+  }
+
+  private loadRiskProfiles(): void {
+    if (this.riskProfilesLoaded) return;
+    this.riskProfilesLoaded = true;
+    this.riskProfilesService.list({ currentPage: 1, itemCountPerPage: 200 }).subscribe({
+      next: (res) => this.riskProfiles.set(res?.data?.data ?? []),
+      error: () => {
+        this.riskProfilesLoaded = false;
+        this.riskProfiles.set([]);
+      },
+    });
+  }
+
+  /** PUT /strategy/templates/{id}; a refusal keeps the dialog open with the engine's reasons. */
+  protected saveEdit(): void {
+    const t = this.editing();
+    const d = this.draft();
+    if (!t || !d || !this.canSaveDraft()) return;
+    const body: CreateStrategyTemplateRequest = {
+      name: d.name.trim(),
+      description: d.description.trim() || null,
+      strategyType: d.strategyType,
+      parametersJson: d.parametersJson.trim() || '{}',
+      riskProfileId: d.riskProfileId,
+      riskOverridesJson: d.riskOverridesJson.trim() || null,
+      sizingConfigJson: d.sizingConfigJson.trim() || null,
+      sessionFilterJson: d.sessionFilterJson.trim() || null,
+      regimeGateJson: d.regimeGateJson.trim() || null,
+      multiTimeframeGateJson: d.multiTimeframeGateJson.trim() || null,
+    };
+    this.editSaving.set(true);
+    this.editErrors.set([]);
+    this.strategies.updateTemplate(t.id, body, { silent: true }).subscribe({
+      next: (res) => {
+        this.editSaving.set(false);
+        if (!res?.status) {
+          this.editErrors.set(failureMessages(res, 'The engine did not save the template.'));
+          return;
+        }
+        this.notifications.success(`Template '${body.name}' saved`);
+        this.recordDecision(t, 'StrategyTemplateUpdated', 'Updated', { name: body.name });
+        this.editing.set(null);
+        this.draft.set(null);
+        this.resource.refresh();
+      },
+      error: (err) => {
+        this.editSaving.set(false);
+        this.editErrors.set(failureMessages(err, 'Saving the template failed.'));
+      },
+    });
+  }
+
+  // Delete confirmation ------------------------------------------------------
+  protected readonly deleting = signal<StrategyTemplateDto | null>(null);
+  protected readonly deleteBusy = signal(false);
+  protected readonly deleteError = signal<string | null>(null);
+  protected readonly deleteMessage = computed(() => {
+    const t = this.deleting();
+    if (!t) return '';
+    const uses =
+      t.appliedCount > 0
+        ? ` It has been applied ${t.appliedCount} time${t.appliedCount === 1 ? '' : 's'}; those strategies keep running unchanged.`
+        : '';
+    return `Delete the template '${t.name ?? '#' + t.id}'? This cannot be undone.${uses}`;
+  });
+
+  protected askDelete(t: StrategyTemplateDto): void {
+    this.deleteError.set(null);
+    this.deleting.set(t);
+  }
+
+  protected cancelDelete(): void {
+    if (this.deleteBusy()) return;
+    this.deleting.set(null);
+    this.deleteError.set(null);
+  }
+
+  protected confirmDelete(): void {
+    const t = this.deleting();
+    if (!t || this.deleteBusy()) return;
+    this.deleteBusy.set(true);
+    this.deleteError.set(null);
+    this.strategies.deleteTemplate(t.id, { silent: true }).subscribe({
+      next: (res) => {
+        this.deleteBusy.set(false);
+        if (!res?.status) {
+          this.deleteError.set(failureMessage(res, 'The engine did not delete the template.'));
+          return;
+        }
+        this.notifications.success(`Template '${t.name ?? '#' + t.id}' deleted`);
+        this.recordDecision(t, 'StrategyTemplateDeleted', 'Deleted', {});
+        this.deleting.set(null);
+        this.resource.refresh();
+      },
+      error: (err) => {
+        this.deleteBusy.set(false);
+        this.deleteError.set(failureMessage(err, 'Deleting the template failed.'));
+      },
+    });
+  }
+
+  private recordDecision(
+    t: StrategyTemplateDto,
+    decisionType: string,
+    outcome: string,
+    extra: Record<string, unknown>,
+  ): void {
+    this.auditTrail
+      .create({
+        entityType: 'StrategyTemplate',
+        entityId: t.id,
+        decisionType,
+        outcome,
+        reason: null,
+        contextJson: JSON.stringify({ templateName: t.name, ...extra }),
+        source: 'AdminUI',
+      })
+      .subscribe({ error: () => undefined });
+  }
 
   protected readonly resource = createPolledResource(
     () =>

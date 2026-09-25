@@ -5,6 +5,7 @@ import { authGuard } from '@core/auth/auth.guard';
 import { requireRoles } from '@core/auth/role.guard';
 import { requirePermission } from '@core/auth/permission.guard';
 import { mustChangePasswordGuard } from '@core/auth/must-change-password.guard';
+import { devModeOrFeatureFlag } from '@core/feature-flags/feature-flag.guard';
 
 export const routes: Routes = [
   { path: 'login', component: LoginComponent },
@@ -246,6 +247,15 @@ export const routes: Routes = [
         data: { breadcrumb: 'Walk-Forward' },
         loadChildren: () =>
           import('@features/walk-forward/walk-forward.routes').then((m) => m.WALK_FORWARD_ROUTES),
+      },
+      {
+        // Pine screener (ADR-0027 §6): runs a script over many symbols' recent bars.
+        path: 'pine-screener',
+        data: { breadcrumb: 'Pine Screener' },
+        loadComponent: () =>
+          import('@features/scripting/screener/pine-screener-page.component').then(
+            (m) => m.PineScreenerPageComponent,
+          ),
       },
       {
         path: 'strategy-ensemble',
@@ -494,6 +504,17 @@ export const routes: Routes = [
         data: { breadcrumb: 'Account' },
         loadChildren: () =>
           import('@features/account/account.routes').then((m) => m.ACCOUNT_ROUTES),
+      },
+      {
+        // Pine chart renderer on fixtures or a live scripting/run — a development surface: on in
+        // dev builds, and in a release only where the `pine-chart-lab` flag admits (Admins).
+        path: 'pine-chart-lab',
+        data: { breadcrumb: 'Pine Chart Lab' },
+        canActivate: [devModeOrFeatureFlag('pine-chart-lab')],
+        loadChildren: () =>
+          import('@features/scripting/pine-chart-lab/pine-chart-lab.routes').then(
+            (m) => m.PINE_CHART_LAB_ROUTES,
+          ),
       },
       { path: '**', redirectTo: 'dashboard' },
     ],

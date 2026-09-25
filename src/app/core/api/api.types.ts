@@ -1,3 +1,9 @@
+import type {
+  ScriptExecutionPolicy,
+  ScriptInputValues,
+  StrategyAuthoringMode,
+} from './scripting.types';
+
 // ============================================================
 // Response Wrappers
 // ============================================================
@@ -266,6 +272,51 @@ export interface PromotionGatesDto {
   diagnostics: string[];
 }
 
+/** One promotion gate's verdict from `POST strategy/{id}/submit-for-approval` (skipped gates pass, with the reason). */
+export interface StrategyApprovalGateDto {
+  name: string;
+  passed: boolean;
+  detail: string;
+}
+
+/**
+ * The verdict of Submit for approval (ADR-0027 DEC-10): the operator's path from Draft to Approved.
+ * Every promotion gate runs (the paper gate is bypassed — a Draft has no paper history); on a pass the
+ * strategy is Approved + Paused, i.e. paper trading, until `PUT strategy/{id}/activate`.
+ */
+export interface StrategyApprovalResultDto {
+  approved: boolean;
+  /** The lifecycle stage after the evaluation. */
+  stage: StrategyLifecycleStage | string;
+  /** Every gate's verdict; a gate named `evaluation` means the run was not judged (timeout / error). */
+  gates: StrategyApprovalGateDto[];
+}
+
+/** `running`; `done` — a verdict (approved or rejected); `failed` — no verdict. */
+export type StrategyApprovalJobStatus = 'running' | 'done' | 'failed';
+
+/**
+ * A Submit-for-approval job (engine D88). `POST strategy/{id}/submit-for-approval` starts the
+ * evaluation — it can take minutes, longer than a request may last — and returns the job at once
+ * (`status: 'running'`, or the job already evaluating that strategy); `GET
+ * strategy/{id}/submit-for-approval/{jobId}` is polled until it is `done` or `failed`. A strategy
+ * that cannot be submitted (not a Paused Draft, `-11`; unknown, `-14`) is refused by the POST with
+ * `jobId: null` and the stage in `result`.
+ */
+export interface StrategyApprovalJobDto {
+  jobId: string | null;
+  strategyId: number;
+  status: StrategyApprovalJobStatus;
+  startedAtUtc: string | null;
+  finishedAtUtc: string | null;
+  /** The verdict payload (`done`), or what is known of a failed attempt; null while running. */
+  result: StrategyApprovalResultDto | null;
+  /** The engine's sentence about the verdict. */
+  message: string | null;
+  /** The verdict's code: `00` a verdict, `-12` not judged (timeout / error / interrupted), `-11`/`-14` refused. */
+  responseCode: string | null;
+}
+
 /**
  * Promotion-ladder stage. Auto-advanced by `StrategyPromotionWorker`:
  * `BacktestQualified → Approved` after observation passes health gates,
@@ -451,7 +502,18 @@ export interface PositionDto {
   bumpedSlSnapshot: number | null;
   /** Short tag for why the bump was applied (e.g. SPREAD_SPIKE); null when no bump is active. */
   bumpReason: string | null;
+  /**
+   * The engine's reading of the spread-bump group (engine D120): `InForce` — the broker stop carries a bump of
+   * `spreadBumpOffset`; `ArmedNoOffset` — a group armed with no offset (a stop move carried the bump down to nothing:
+   * the stop is NOT widened); `Drifted` — the stop left the bumped level; `None` — no group. Absent on older engines.
+   */
+  spreadBumpStatus?: SpreadBumpStatus;
+  /** Signed offset of a bump in force (bumped SL − original SL); null otherwise. Absent on older engines. */
+  spreadBumpOffset?: number | null;
 }
+
+/** A position's spread-bump state as the engine reads it (engine D120, `SpreadBumpState`). */
+export type SpreadBumpStatus = 'None' | 'InForce' | 'ArmedNoOffset' | 'Drifted';
 
 /**
  * One row of a position's lifecycle audit trail (PRD-V2 FR-5.8). `eventType`
@@ -517,6 +579,15 @@ export interface StrategyDto {
   sessionFilterJson: string | null;
   regimeGateJson: string | null;
   multiTimeframeGateJson: string | null;
+  // ── Script strategies (ADR-0027) — RuleBased strategies, from `GET strategy/{id}` ──
+  /** `Script` = Pine v6 source in `scriptSource`; `Dsl` = the JSON rule DSL in `parametersJson`. */
+  authoringMode?: StrategyAuthoringMode | null;
+  scriptSource?: string | null;
+  /** Operator input overrides `{ inputId: value }` (an older engine may send the raw JSON text). */
+  scriptInputs?: ScriptInputValues | string | null;
+  scriptLanguageVersion?: number | null;
+  executionPolicy?: ScriptExecutionPolicy | null;
+  accountBindingCount?: number | null;
 }
 
 export interface TradeSignalDto {
@@ -1358,6 +1429,12 @@ export interface PromotionGateEvaluationDto {
 
   /** One entry per gate that ran — including passes and auto-skips, with reasons. */
   diagnostics: string[];
+
+  /**
+   * Every gate's verdict in evaluation order, as Submit for approval shows them. Empty for attempts
+   * that reached no verdict and for attempts recorded before the engine stored them.
+   */
+  gates?: StrategyApprovalGateDto[];
 
   /** The breached gates, split out of the summary for listing. */
   failures: string[];
@@ -2968,6 +3045,12 @@ export interface CreateStrategyRequest {
   sessionFilterJson?: string | null;
   regimeGateJson?: string | null;
   multiTimeframeGateJson?: string | null;
+  /** RuleBased script strategy (ADR-0027 §8): Pine v6 source instead of `parametersJson`. */
+  scriptSource?: string | null;
+  /** Input overrides `{ inputId: value }` for the script. */
+  scriptInputs?: ScriptInputValues | null;
+  /** The engine defaults scripts to `Direct`. */
+  executionPolicy?: ScriptExecutionPolicy | null;
 }
 
 export interface StrategyParameterFieldDto {
@@ -2985,6 +3068,32 @@ export interface StrategyParameterFieldDto {
 export interface StrategyParameterSchemaDto {
   strategyType: string;
   fields: StrategyParameterFieldDto[];
+}
+
+/** One DSL problem reported by `POST /strategy/dsl/summarise`. */
+export interface DslIssueDto {
+  /** Engine path to the offending node/field, e.g. `entryConditionsRoot.children[1].children[0].leaf`. */
+  path: string;
+  message: string;
+}
+
+/**
+ * `POST /strategy/dsl/summarise` result: every error and warning plus the
+ * plain-English summary (null when the DSL does not validate). Engines built
+ * before this shape answered with the summary string alone.
+ */
+export interface DslSummaryDto {
+  summary: string | null;
+  isValid: boolean;
+  errors: DslIssueDto[];
+  warnings: DslIssueDto[];
+}
+
+/** Body for `POST /strategy/{id}/clone`. Omitted fields copy the source strategy's value. */
+export interface CloneStrategyRequest {
+  name?: string | null;
+  symbol?: string | null;
+  timeframe?: Timeframe | null;
 }
 
 export interface RunBacktestPreviewRequest {
@@ -4519,14 +4628,23 @@ export interface ApplyStrategyTemplateResult {
   skippedReasons: string[];
 }
 
+/**
+ * Body for `PUT /strategy/{id}`. Symbol, timeframe and strategy type are
+ * immutable — the engine rejects a change with `-11` — so the edit form never
+ * sends them; `POST /strategy/{id}/clone` moves a strategy instead.
+ * Null means "leave unchanged"; an empty sub-config string clears it;
+ * `riskProfileId: 0` detaches the risk profile.
+ */
 export interface UpdateStrategyRequest {
   name?: string | null;
   description?: string | null;
-  strategyType?: string | null;
-  symbol?: string | null;
-  timeframe?: string | null;
   parametersJson?: string | null;
   riskProfileId?: number | null;
+  riskOverridesJson?: string | null;
+  sizingConfigJson?: string | null;
+  sessionFilterJson?: string | null;
+  regimeGateJson?: string | null;
+  multiTimeframeGateJson?: string | null;
   /** Optional free-text reason annotating the auto-captured pre-edit snapshot. */
   changeReason?: string | null;
 }
@@ -4546,6 +4664,8 @@ export interface StrategyVersionDto {
   multiTimeframeGateJson: string | null;
   capturedAt: string;
   changeReason: string | null;
+  /** Operator whose edit produced this version; null for system captures and older rows. */
+  createdBy?: string | null;
 }
 
 export interface StrategyLineageNodeDto {

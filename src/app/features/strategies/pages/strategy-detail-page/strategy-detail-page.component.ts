@@ -11,7 +11,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { filter, map, throttleTime } from 'rxjs';
+import { distinctUntilChanged, filter, map, of, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 
 import { StrategiesService } from '@core/services/strategies.service';
@@ -47,6 +47,10 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
 import { PageContextService } from '@core/assistant/page-context.service';
 
 import { StrategyFormComponent } from '../../components/strategy-form/strategy-form.component';
+import { CloneStrategyDialogComponent } from '../../components/clone-strategy-dialog/clone-strategy-dialog.component';
+import { SubmitForApprovalDialogComponent } from '../../components/submit-for-approval-dialog/submit-for-approval-dialog.component';
+import { failureMessage } from '../../util/api-failure';
+import { activationRefusalMessage, isDraftActivationRefusal } from '../../util/activation';
 import { PromotionReadinessCardComponent } from '../../components/promotion-readiness-card/promotion-readiness-card.component';
 import { PromotionGateHistoryCardComponent } from '../../components/promotion-gate-history-card/promotion-gate-history-card.component';
 import { StrategyVariantsTabComponent } from '../../components/strategy-variants-tab/strategy-variants-tab.component';
@@ -54,6 +58,13 @@ import { StrategyCapacityCardComponent } from '../../components/strategy-capacit
 import { StrategyPromotionReviewsTabComponent } from '../../components/strategy-promotion-reviews-tab/strategy-promotion-reviews-tab.component';
 import { RejectionDistributionDrawerComponent } from '../../components/rejection-distribution-drawer/rejection-distribution-drawer.component';
 import { RationaleInlineComponent } from '@features/llm/components/rationale-inline/rationale-inline.component';
+import { StrategyScriptCardComponent } from '@features/scripting/components/strategy-script-card/strategy-script-card.component';
+// ADR-0027 script strategies: execution (bindings + policy), live session, alerts, backtests.
+import { StrategyExecutionPanelComponent } from '@features/scripting/execution/strategy-execution-panel.component';
+import { ScriptLivePanelComponent } from '@features/scripting/live/script-live-panel.component';
+import { ScriptAlertsTabComponent } from '@features/scripting/alerts/script-alerts-tab.component';
+import { ScriptBacktestLauncherComponent } from '@features/scripting/backtest/script-backtest-launcher.component';
+import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
 
 @Component({
   selector: 'app-strategy-detail-page',
@@ -69,6 +80,8 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
     EnumLabelPipe,
     RelativeTimePipe,
     StrategyFormComponent,
+    CloneStrategyDialogComponent,
+    SubmitForApprovalDialogComponent,
     PromotionReadinessCardComponent,
     PromotionGateHistoryCardComponent,
     StrategyVariantsTabComponent,
@@ -76,7 +89,12 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
     StrategyPromotionReviewsTabComponent,
     RejectionDistributionDrawerComponent,
     RationaleInlineComponent,
+    StrategyExecutionPanelComponent,
+    ScriptLivePanelComponent,
+    ScriptAlertsTabComponent,
+    ScriptBacktestLauncherComponent,
     RouterLink,
+    StrategyScriptCardComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -85,8 +103,23 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
         <app-page-header [title]="strategy()!.name ?? ''" [subtitle]="headerSubtitle()">
           <span slot="title-after" class="head-chips">
             <app-status-badge [status]="strategy()!.status" type="strategy" />
+            @if (strategy()!.lifecycleStage; as stage) {
+              <span class="stage-chip" title="Lifecycle stage">
+                <app-status-badge [status]="stage" type="lifecycle" />
+              </span>
+            }
             <app-presence-badge [routeKey]="'strategy:' + strategyId" />
           </span>
+          @if (strategy()!.lifecycleStage === 'Draft') {
+            <button
+              type="button"
+              class="btn btn-primary"
+              (click)="openApproval()"
+              title="Run the promotion gates; on a pass the strategy moves to Approved and paper-trades"
+            >
+              Submit for approval
+            </button>
+          }
           @if (strategy()!.status === 'Paused' || strategy()!.status === 'Stopped') {
             <button class="btn btn-success" (click)="onActivate()" [disabled]="actionLoading()">
               Activate
@@ -97,7 +130,15 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
               Pause
             </button>
           }
-          <button class="btn btn-secondary" (click)="showEditForm.set(true)">Edit</button>
+          <button class="btn btn-secondary" (click)="openEdit()">Edit</button>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            (click)="cloneTarget.set(strategy())"
+            title="Copy this strategy onto another symbol or timeframe as a Paused draft"
+          >
+            Clone…
+          </button>
           <button class="btn btn-secondary" (click)="openAnalytics()">Open analytics →</button>
           <button
             type="button"
@@ -124,6 +165,25 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
           through to /llm/rationales filtered by EventId=strategyId.
         -->
         <app-rationale-inline eventType="StrategyActivated" [eventId]="strategyId" />
+
+        @if (activationHint(); as hint) {
+          <div class="activation-hint" role="alert">
+            <span>{{ hint }}</span>
+            @if (strategy()!.lifecycleStage === 'Draft') {
+              <button type="button" class="btn btn-primary" (click)="openApproval()">
+                Submit for approval
+              </button>
+            }
+            <button
+              type="button"
+              class="btn btn-ghost"
+              (click)="activationHint.set(null)"
+              aria-label="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+        }
 
         @if (latestSnapshot(); as s) {
           <div class="health-strip">
@@ -182,7 +242,7 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
           </div>
         }
 
-        <ui-tabs [tabs]="detailTabs" [(activeTab)]="activeTab">
+        <ui-tabs [tabs]="visibleDetailTabs()" [(activeTab)]="activeTab">
           <!-- Config Tab -->
           @if (activeTab() === 'config') {
             <div class="detail-layout">
@@ -312,6 +372,17 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
                 }
               </div>
 
+              <!-- Pine script: a script strategy's source, declaration and saved inputs,
+                   read-only; Edit opens the form in script mode, the policy / bindings chips
+                   open the Execution tab where they are changed. -->
+              @if (isScript()) {
+                <app-strategy-script-card
+                  [strategy]="strategy()!"
+                  (editRequested)="openEdit()"
+                  (executionRequested)="openExecutionTab()"
+                />
+              }
+
               <!-- Recent signals + Recent orders mini-feed -->
               <div class="cfg-2col">
                 <div class="detail-card">
@@ -440,7 +511,16 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
                navigates to the backtest detail page (same view the global
                Backtests page links to). -->
           @if (activeTab() === 'backtests') {
+            @if (isScript()) {
+              <!-- Script strategies: symbol / timeframe / input overrides, deep mode and
+                   the bar magnifier (ADR-0027 §4). -->
+              <app-script-backtest-launcher
+                [strategy]="strategy()!"
+                (queued)="backtestTable?.loadData()"
+              />
+            }
             <app-data-table
+              #backtestTable
               [columnDefs]="backtestColumns"
               [fetchData]="fetchBacktests"
               (rowClick)="onBacktestRowClick($event)"
@@ -531,6 +611,31 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
               }
             </section>
           }
+
+          <!-- Execution Tab (every strategy type) — account bindings and execution policy
+               (ADR-0027 DEC-05 / DEC-06). -->
+          @if (activeTab() === 'execution') {
+            <app-strategy-execution-panel
+              [strategy]="strategy()"
+              (changed)="onExecutionChanged()"
+            />
+          }
+
+          <!-- Live Tab (script strategies) — the live session's emulator state, divergences
+               from the bound accounts and the live Strategy report. Deferred: the panel and the
+               report are fetched when the tab opens, not with the strategies route. -->
+          @if (activeTab() === 'live' && isScript()) {
+            @defer (on immediate) {
+              <app-script-live-panel [strategyId]="strategyId" />
+            } @loading (minimum 150ms) {
+              <p class="muted small"><span class="spinner"></span> Loading the live session…</p>
+            }
+          }
+
+          <!-- Alerts Tab (script strategies) — alertcondition / alert() / order-fill bindings. -->
+          @if (activeTab() === 'alerts' && isScript()) {
+            <app-script-alerts-tab [strategy]="strategy()!" />
+          }
         </ui-tabs>
       } @else if (loadError()) {
         <div class="error-state">
@@ -563,9 +668,24 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
       <app-strategy-form
         [open]="showEditForm()"
         [strategy]="strategy()"
+        [saving]="updateSaving()"
+        [submitError]="updateError()"
         (submitted)="onUpdate($event)"
-        (cancelled)="showEditForm.set(false)"
+        (cancelled)="closeEdit()"
+        (strategyChanged)="loadStrategy()"
+        (executionRequested)="openExecutionTab()"
       />
+
+      <!-- Always in the template: an evaluation keeps running (and reports back) after the
+           operator closes the dialog. -->
+      <app-submit-for-approval-dialog
+        [strategy]="approvalTarget()"
+        (closed)="approvalTarget.set(null)"
+        (changed)="onApprovalChanged($event)"
+        (historyRequested)="openPromotionHistory()"
+      />
+
+      <app-clone-strategy-dialog [strategy]="cloneTarget()" (closed)="cloneTarget.set(null)" />
 
       @if (showRejectionDrawer()) {
         <app-rejection-distribution-drawer
@@ -722,6 +842,24 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
         display: inline-flex;
         align-items: center;
         gap: var(--space-2);
+      }
+      .stage-chip {
+        display: inline-flex;
+      }
+      .activation-hint {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        margin: 0 0 var(--space-4);
+        padding: var(--space-3) var(--space-4);
+        border-radius: var(--radius-md);
+        border: 1px solid rgba(255, 149, 0, 0.4);
+        background: rgba(255, 149, 0, 0.08);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+      .activation-hint > span {
+        flex: 1;
       }
       .card-title .muted {
         margin-left: var(--space-2);
@@ -1169,6 +1307,8 @@ export class StrategyDetailPageComponent implements OnInit {
   ];
 
   @ViewChild('optimizationTable') optimizationTable?: DataTableComponent<OptimizationRunDto>;
+  /** Refreshed when the script launcher queues a run, so the new row shows at once. */
+  @ViewChild('backtestTable') backtestTable?: DataTableComponent<BacktestRunDto>;
 
   private readonly pageContext = inject(PageContextService);
 
@@ -1199,6 +1339,16 @@ export class StrategyDetailPageComponent implements OnInit {
   showDeleteConfirm = signal(false);
   deleteLoading = signal(false);
   showEditForm = signal(false);
+  /** The edit form's update request is in flight. */
+  updateSaving = signal(false);
+  /** Why the engine refused the last update; shown inside the still-open form. */
+  updateError = signal<string | null>(null);
+  /** Strategy whose clone dialog is open (this one); null when closed. */
+  cloneTarget = signal<StrategyDto | null>(null);
+  /** The Draft whose "Submit for approval" dialog is open. */
+  readonly approvalTarget = signal<StrategyDto | null>(null);
+  /** Why the last activation was refused, shown under the header until dismissed. */
+  readonly activationHint = signal<string | null>(null);
   showRejectionDrawer = signal(false);
   optimizationLoading = signal(false);
 
@@ -1393,6 +1543,9 @@ export class StrategyDetailPageComponent implements OnInit {
     { label: 'Promotion', value: 'promotion' },
     { label: 'Signals', value: 'signals' },
     { label: 'Orders', value: 'orders' },
+    { label: 'Execution', value: 'execution' },
+    { label: 'Live', value: 'live' },
+    { label: 'Alerts', value: 'alerts' },
     { label: 'Optimization', value: 'optimization' },
     { label: 'Backtests', value: 'backtests' },
     { label: 'Walk-Forward', value: 'walkforward' },
@@ -1401,6 +1554,47 @@ export class StrategyDetailPageComponent implements OnInit {
     { label: 'Reviews', value: 'reviews' },
     { label: 'Lineage', value: 'lineage' },
   ];
+
+  // ── ADR-0027 script strategies ─────────────────────────────────────────
+  /** Pine-script strategy (authoringMode Script): shows the Live and Alerts tabs. */
+  readonly isScript = computed(() => isScriptStrategy(this.strategy()));
+  private static readonly SCRIPT_ONLY_TABS: readonly string[] = ['live', 'alerts'];
+  readonly visibleDetailTabs = computed<TabItem[]>(() =>
+    this.isScript()
+      ? this.detailTabs
+      : this.detailTabs.filter(
+          (t) => !StrategyDetailPageComponent.SCRIPT_ONLY_TABS.includes(t.value),
+        ),
+  );
+
+  /** Bindings or execution policy changed: re-read the strategy. */
+  onExecutionChanged(): void {
+    this.loadStrategy();
+  }
+
+  /** The execution policy and the account bindings are changed on the Execution tab. */
+  openExecutionTab(): void {
+    this.showEditForm.set(false);
+    this.updateError.set(null);
+    this.activeTab.set('execution');
+  }
+
+  // ── Submit for approval (ADR-0027 DEC-10) ────────────────────────────────
+  openApproval(): void {
+    this.activationHint.set(null);
+    this.approvalTarget.set(this.strategy());
+  }
+
+  /** A verdict landed: the lifecycle stage may have moved (Draft → Approved). */
+  onApprovalChanged(strategyId: number): void {
+    if (strategyId === this.strategyId) this.loadStrategy();
+  }
+
+  /** The Promotion tab's gate history records every evaluation, including a lost response's. */
+  openPromotionHistory(): void {
+    this.approvalTarget.set(null);
+    this.activeTab.set('promotion');
+  }
 
   readonly signalColumns: ColDef[] = [
     { field: 'id', headerName: 'ID', width: 70 },
@@ -1717,11 +1911,17 @@ export class StrategyDetailPageComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.strategyId = +this.route.snapshot.paramMap.get('id')!;
-    this.loadStrategy();
-    this.loadLatestSnapshot();
-    this.loadWeekAgoSnapshot();
-    this.loadConfigRollups();
+    // Follow the route, not just its first snapshot: Angular reuses this
+    // component when only :id changes (a clone opening, a lineage link), and
+    // reading the snapshot once left the page showing the previous strategy.
+    (this.route.paramMap ?? of(this.route.snapshot.paramMap))
+      .pipe(
+        map((p) => Number(p.get('id'))),
+        filter((id) => Number.isFinite(id) && id > 0),
+        distinctUntilChanged(),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((id) => this.showStrategy(id));
 
     // Push refresh: filter to events for this strategy id, throttle to 5s so
     // a chatty 60s-cadence worker can't pile up if the page sits open. The
@@ -1736,6 +1936,51 @@ export class StrategyDetailPageComponent implements OnInit {
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(() => this.loadLatestSnapshot());
+  }
+
+  /** Loads the page for strategy `id` — first visit, or a move to another strategy. */
+  private showStrategy(id: number): void {
+    const switching = this.strategyId !== undefined && this.strategyId !== id;
+    this.strategyId = id;
+    if (switching) {
+      // Clearing the strategy tears down the tabbed body, so every table and
+      // card in it re-initialises against the new id.
+      this.strategy.set(null);
+      this.loadError.set(false);
+      this.latestSnapshot.set(null);
+      this.weekAgoSnapshot.set(null);
+      this.lineage.set(null);
+      this.totalSignals.set(null);
+      this.totalOrders.set(null);
+      this.totalOptimizations.set(null);
+      this.totalBacktests.set(null);
+      this.totalWalkForwards.set(null);
+      this.recentSignals.set([]);
+      this.recentOrders.set([]);
+      this.showEditForm.set(false);
+      this.showDeleteConfirm.set(false);
+      this.showRejectionDrawer.set(false);
+      this.cloneTarget.set(null);
+      this.approvalTarget.set(null);
+      this.activationHint.set(null);
+      this.updateError.set(null);
+      this.activeTab.set('config');
+    }
+    this.loadStrategy();
+    this.loadLatestSnapshot();
+    this.loadWeekAgoSnapshot();
+    this.loadConfigRollups();
+  }
+
+  openEdit(): void {
+    this.updateError.set(null);
+    this.showEditForm.set(true);
+  }
+
+  closeEdit(): void {
+    if (this.updateSaving()) return;
+    this.showEditForm.set(false);
+    this.updateError.set(null);
   }
 
   private fetchLineage(): void {
@@ -1857,19 +2102,38 @@ export class StrategyDetailPageComponent implements OnInit {
     }
   });
 
+  /**
+   * `PUT strategy/{id}/activate`. The engine answers `data: "Activated"` (not the strategy), and
+   * refuses with HTTP 200 + `status: false` — a Draft's refusal points at Submit for approval.
+   */
   onActivate(): void {
     this.actionLoading.set(true);
-    this.strategiesService.activate(this.strategyId).subscribe({
+    this.activationHint.set(null);
+    this.strategiesService.activate(this.strategyId, false, { silent: true }).subscribe({
       next: (res) => {
-        if (res.data) this.strategy.set(res.data);
+        this.actionLoading.set(false);
+        if (!res?.status) {
+          this.refuseActivation(failureMessage(res, 'The engine did not activate the strategy.'));
+          return;
+        }
         this.notifications.success('Strategy activated');
-        this.actionLoading.set(false);
+        this.loadStrategy();
       },
-      error: () => {
-        this.notifications.error('Failed to activate strategy');
+      error: (err) => {
         this.actionLoading.set(false);
+        this.refuseActivation(failureMessage(err, 'Activating the strategy failed.'));
       },
     });
+  }
+
+  /** Says why activation was refused; a Draft also gets the banner with "Submit for approval". */
+  private refuseActivation(reason: string): void {
+    const stage = this.strategy()?.lifecycleStage ?? null;
+    const message = activationRefusalMessage(reason, stage);
+    this.notifications.error(message);
+    if (isDraftActivationRefusal(reason, stage)) {
+      this.activationHint.set(message);
+    }
   }
 
   /**
@@ -1885,9 +2149,14 @@ export class StrategyDetailPageComponent implements OnInit {
     this.actionLoading.set(true);
     this.strategiesService.pause(this.strategyId).subscribe({
       next: (res) => {
-        if (res.data) this.strategy.set(res.data);
-        this.notifications.success('Strategy paused');
         this.actionLoading.set(false);
+        if (!res?.status) {
+          this.notifications.error(failureMessage(res, 'The engine did not pause the strategy.'));
+          return;
+        }
+        // The engine answers `data: "Paused"`, not the strategy — re-read it.
+        this.notifications.success('Strategy paused');
+        this.loadStrategy();
       },
       error: () => {
         this.notifications.error('Failed to pause strategy');
@@ -1912,15 +2181,33 @@ export class StrategyDetailPageComponent implements OnInit {
     });
   }
 
+  /**
+   * Saves the edit form. A refusal — HTTP 200 with `status: false` (an
+   * immutable field, invalid rules) or an HTTP 400 — keeps the form open with
+   * the engine's reason; it used to report success and close.
+   */
   onUpdate(data: any): void {
-    this.strategiesService.update(this.strategyId, data as UpdateStrategyRequest).subscribe({
-      next: (res) => {
-        if (res.data) this.strategy.set(res.data);
-        this.notifications.success('Strategy updated');
-        this.showEditForm.set(false);
-      },
-      error: () => this.notifications.error('Failed to update strategy'),
-    });
+    this.updateSaving.set(true);
+    this.updateError.set(null);
+    this.strategiesService
+      .update(this.strategyId, data as UpdateStrategyRequest, { silent: true })
+      .subscribe({
+        next: (res) => {
+          this.updateSaving.set(false);
+          if (!res?.status) {
+            this.updateError.set(failureMessage(res, 'The engine did not apply the update.'));
+            return;
+          }
+          this.notifications.success('Strategy updated');
+          this.showEditForm.set(false);
+          // The engine answers `data: true`, not the strategy — re-read it.
+          this.loadStrategy();
+        },
+        error: (err) => {
+          this.updateSaving.set(false);
+          this.updateError.set(failureMessage(err, 'The update failed.'));
+        },
+      });
   }
 
   onTriggerOptimization(): void {
@@ -1958,7 +2245,7 @@ export class StrategyDetailPageComponent implements OnInit {
     });
   }
 
-  private loadStrategy(): void {
+  protected loadStrategy(): void {
     this.strategiesService.getById(this.strategyId).subscribe({
       next: (res) => {
         if (res.data) {

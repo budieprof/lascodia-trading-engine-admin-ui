@@ -15,6 +15,7 @@ import {
   EATradeChartModalComponent,
   type TradeChartSelection,
 } from '../ea-trade-chart-modal/ea-trade-chart-modal.component';
+import { spreadBumpDisplay } from './spread-bump-display';
 
 /**
  * Phase-5b admin panel — renders the EA instance's currently-open
@@ -146,8 +147,13 @@ import {
                   <td class="num mono">
                     @if (p.stopLoss !== null) {
                       {{ p.stopLoss | number: '1.5-5' }}
-                      @if (p.bumpedAt !== null && p.originalStopLoss !== null) {
-                        <span class="bumped-tag" [title]="bumpTooltip(p)">bumped</span>
+                      @if (bumpDisplay(p); as bump) {
+                        <span
+                          class="bumped-tag"
+                          [class.bumped-tag--muted]="bump.tone === 'muted'"
+                          [title]="bump.title"
+                          >{{ bump.label }}</span
+                        >
                       }
                       <a
                         class="sl-history-link"
@@ -381,6 +387,11 @@ import {
         text-transform: uppercase;
         letter-spacing: 0.4px;
         cursor: help;
+      }
+      /* A bump group on file whose stop is not widened (armed with no offset, or drifted): informational only. */
+      .bumped-tag--muted {
+        background: color-mix(in srgb, var(--text-tertiary) 18%, transparent);
+        color: var(--text-secondary);
       }
       .sl-history-link {
         display: inline-block;
@@ -642,21 +653,8 @@ export class EAPositionsPanelComponent {
   }
 
   /**
-   * Tooltip text for the "bumped" pill on a row whose SL was widened by
-   * the spread-reactive subsystem. Surfaces the pre-bump original SL,
-   * the reason tag, and when the bump fired.
+   * The spread-bump pill for a row (engine D120): "bumped" only when the broker stop really carries a bump; a group armed
+   * with no offset (a stop move carried the bump down to nothing) or a drifted one shows as a muted, informational pill.
    */
-  protected bumpTooltip(p: {
-    originalStopLoss: number | null;
-    bumpedAt: string | null;
-    bumpedSpread: number | null;
-    bumpReason: string | null;
-  }): string {
-    const origin =
-      p.originalStopLoss !== null ? `original SL ${p.originalStopLoss}` : 'no original SL recorded';
-    const reason = p.bumpReason ?? 'SPREAD';
-    const when = p.bumpedAt ? new Date(p.bumpedAt).toISOString() : '—';
-    const spread = p.bumpedSpread !== null ? ` · spread at bump ${p.bumpedSpread}` : '';
-    return `${reason} bump — ${origin}${spread} · since ${when}`;
-  }
+  protected readonly bumpDisplay = spreadBumpDisplay;
 }

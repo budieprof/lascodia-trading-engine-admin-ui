@@ -9,6 +9,7 @@ type EntityType =
   | 'broker'
   | 'health'
   | 'run'
+  | 'lifecycle'
   | 'default';
 
 const STATUS_MAP: Record<string, Record<string, BadgeVariant>> = {
@@ -33,6 +34,16 @@ const STATUS_MAP: Record<string, Record<string, BadgeVariant>> = {
   broker: { Connected: 'success', Disconnected: 'error', Error: 'error' },
   health: { true: 'success', false: 'error' },
   run: { Queued: 'neutral', Running: 'info', Completed: 'success', Failed: 'error' },
+  // Strategy lifecycle stage: Draft → (BacktestQualified / PaperTrading / ShadowLive) → Approved → Active.
+  lifecycle: {
+    Draft: 'neutral',
+    BacktestQualified: 'info',
+    PaperTrading: 'info',
+    ShadowLive: 'info',
+    Approved: 'info',
+    Active: 'success',
+    PendingModel: 'warning',
+  },
 };
 
 const VARIANT_STYLES: Record<

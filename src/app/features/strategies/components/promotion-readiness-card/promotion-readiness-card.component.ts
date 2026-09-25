@@ -15,6 +15,7 @@ import { catchError, of } from 'rxjs';
 import { StrategiesService } from '@core/services/strategies.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { PromotionGatesDto } from '@core/api/api.types';
+import { activationRefusalMessage } from '../../util/activation';
 
 interface ParsedDiagnostic {
   raw: string;
@@ -453,7 +454,8 @@ export class PromotionReadinessCardComponent {
           this.activated.emit();
           this.reload();
         } else if (res) {
-          this.notifications.error(res.message ?? 'Activation refused');
+          // A Draft's refusal points at "Submit for approval" — its only way to Approved.
+          this.notifications.error(activationRefusalMessage(res.message ?? 'Activation refused'));
           this.reload();
         }
       });

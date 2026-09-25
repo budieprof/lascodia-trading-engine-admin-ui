@@ -44,8 +44,12 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 import { DecimalPipe } from '@angular/common';
 import { StrategyFormComponent } from '../../components/strategy-form/strategy-form.component';
+import { CloneStrategyDialogComponent } from '../../components/clone-strategy-dialog/clone-strategy-dialog.component';
+import { patchDslFields } from '../../dsl/dsl-model';
+import { failureMessage } from '../../util/api-failure';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
+import { ImportScriptButtonComponent } from '@features/scripting/components/import-script-dialog/import-script-dialog.component';
 
 @Component({
   selector: 'app-strategies-page',
@@ -59,7 +63,9 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
     ErrorStateComponent,
     TabsComponent,
     StrategyFormComponent,
+    CloneStrategyDialogComponent,
     DecimalPipe,
+    ImportScriptButtonComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -68,6 +74,8 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
         <!-- Strategy List Tab -->
         @if (activeTab() === 'list') {
           <app-page-header title="Strategies" subtitle="Manage trading strategies">
+            <!-- Create a strategy from a Pine v6 file (POST strategy/import). -->
+            <app-import-script-button />
             <button
               class="btn btn-secondary"
               (click)="openTemplatePanel()"
@@ -793,9 +801,12 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
       <app-strategy-form
         [open]="showCreateForm()"
         [strategy]="null"
+        [saving]="createSaving()"
+        [submitError]="createError()"
         (submitted)="onCreate($event)"
-        (cancelled)="showCreateForm.set(false)"
+        (cancelled)="closeCreateForm()"
       />
+      <app-clone-strategy-dialog [strategy]="cloneTarget()" (closed)="cloneTarget.set(null)" />
     </div>
   `,
   styles: [
@@ -1297,6 +1308,12 @@ export class StrategiesPageComponent {
 
   activeTab = signal('list');
   showCreateForm = signal(false);
+  /** A create request is in flight — drives the form's Save spinner. */
+  createSaving = signal(false);
+  /** Why the engine refused the last create; shown inside the still-open form. */
+  createError = signal<string | null>(null);
+  /** Row whose "Clone…" was clicked; the clone dialog is open while set. */
+  cloneTarget = signal<StrategyDto | null>(null);
   selectedStrategyId = signal<number | null>(null);
   strategiesList = signal<StrategyDto[]>([]);
   performance = signal<StrategyPerformanceSnapshotDto | null>(null);
@@ -1948,6 +1965,30 @@ export class StrategiesPageComponent {
       minWidth: 120,
       valueFormatter: (p: any) => this.relativeTime.transform(p.value),
     },
+    {
+      // Row action: copy the strategy onto another symbol/timeframe (or as a
+      // fresh draft). The table ignores row clicks that land on a button, so
+      // this does not also open the detail page.
+      colId: 'actions',
+      headerName: '',
+      width: 96,
+      minWidth: 96,
+      flex: 0,
+      sortable: false,
+      filter: false,
+      resizable: false,
+      pinned: 'right',
+      cellRenderer: (p: any) =>
+        p.data
+          ? `<button type="button" data-action="clone" data-no-row-click title="Clone #${p.data.id} to another symbol or timeframe" style="border:1px solid var(--border,#e5e5ea);background:var(--bg-primary,#fff);color:var(--accent,#0071e3);border-radius:6px;padding:0 10px;height:24px;font-size:12px;cursor:pointer">Clone…</button>`
+          : '',
+      onCellClicked: (params: any) => {
+        const target = params.event?.target as HTMLElement | undefined;
+        if (target?.closest?.('[data-action="clone"]') && params.data) {
+          this.cloneTarget.set(params.data as StrategyDto);
+        }
+      },
+    },
   ];
 
   readonly fetchStrategies = (params: PagerRequest) => {
@@ -2054,27 +2095,50 @@ export class StrategiesPageComponent {
       });
   }
 
+  closeCreateForm(): void {
+    if (this.createSaving()) return;
+    this.showCreateForm.set(false);
+    this.createError.set(null);
+  }
+
   onCreate(data: any): void {
     // Multi-symbol fan-out: when the modal's Symbol field contained multiple
-    // comma-separated values, fire one create per symbol in parallel. Single-
-    // symbol path stays a single round-trip. Each spawned strategy gets a
-    // disambiguating name suffix when the operator's Name doesn't already
-    // contain the symbol so the unique-name constraint isn't tripped.
+    // comma-separated values, fire one create per symbol. Single-symbol path
+    // stays a single round-trip. Each spawned strategy gets a disambiguating
+    // name suffix when the operator's Name doesn't already contain the symbol
+    // so the unique-name constraint isn't tripped.
+    //
+    // The engine answers a refused create with HTTP 200 + `status: false`
+    // (duplicate, invalid rules) or HTTP 400 (validation). Both used to be
+    // reported as success or as a bare "Failed"; the reason now shows in the
+    // still-open form so the operator can fix it and retry.
     const symbols: string[] =
       Array.isArray(data?.symbols) && data.symbols.length > 0
         ? (data.symbols as string[])
         : [data?.symbol].filter((s): s is string => !!s);
+    this.createError.set(null);
 
     if (symbols.length <= 1) {
       const single = { ...data } as CreateStrategyRequest;
       delete (single as any).symbols;
-      this.strategiesService.create(single).subscribe({
-        next: () => {
-          this.notifications.success('Strategy created successfully');
-          this.showCreateForm.set(false);
+      this.createSaving.set(true);
+      this.strategiesService.create(single, { silent: true }).subscribe({
+        next: (res) => {
+          this.createSaving.set(false);
+          if (!res?.status) {
+            this.createError.set(failureMessage(res, 'The engine did not create the strategy.'));
+            return;
+          }
+          this.notifications.success(
+            res.data ? `Strategy #${res.data} created (Paused)` : 'Strategy created (Paused)',
+          );
+          this.closeCreateForm();
           this.dataTable?.loadData();
         },
-        error: () => this.notifications.error('Failed to create strategy'),
+        error: (err) => {
+          this.createSaving.set(false);
+          this.createError.set(failureMessage(err, 'Creating the strategy failed.'));
+        },
       });
       return;
     }
@@ -2082,19 +2146,23 @@ export class StrategiesPageComponent {
     // Bulk fan-out path — one round-trip per symbol, sequential (Observable
     // chain) so name-collision errors are reported in order.
     let created = 0;
-    let failed = 0;
+    const failures: string[] = [];
     const baseName = (data?.name as string) ?? 'Strategy';
+    const isDsl = data?.strategyType === 'RuleBased' || data?.strategyType === 'LlmProposal';
+    this.createSaving.set(true);
     const submitOne = (idx: number): void => {
       if (idx >= symbols.length) {
-        const summary =
-          `Created ${created} strateg${created === 1 ? 'y' : 'ies'}` +
-          (failed > 0 ? ` (${failed} failed)` : '');
-        if (created > 0) this.notifications.success(summary);
-        else this.notifications.error('Failed to create any strategies');
-        if (created > 0) {
-          this.showCreateForm.set(false);
-          this.dataTable?.loadData();
+        this.createSaving.set(false);
+        if (created === 0) {
+          this.createError.set(failures.join('\n'));
+          return;
         }
+        this.notifications.success(`Created ${created} strateg${created === 1 ? 'y' : 'ies'}`);
+        if (failures.length > 0) {
+          this.notifications.error(`${failures.length} not created — ${failures.join('; ')}`);
+        }
+        this.closeCreateForm();
+        this.dataTable?.loadData();
         return;
       }
       const symbol = symbols[idx];
@@ -2102,19 +2170,26 @@ export class StrategiesPageComponent {
       // so each spawned strategy ends up with a unique, recognisable name.
       const includesSymbol = baseName.toUpperCase().includes(symbol);
       const name = includesSymbol ? baseName : `${baseName} ${symbol}`;
+      // Each copy's rules name its own symbol.
+      const parametersJson =
+        isDsl && typeof data?.parametersJson === 'string'
+          ? (patchDslFields(data.parametersJson, { symbol }) ?? data.parametersJson)
+          : data?.parametersJson;
       const req: CreateStrategyRequest = {
         ...data,
         name,
         symbol,
+        parametersJson,
       };
       delete (req as any).symbols;
-      this.strategiesService.create(req).subscribe({
-        next: () => {
-          created++;
+      this.strategiesService.create(req, { silent: true }).subscribe({
+        next: (res) => {
+          if (res?.status) created++;
+          else failures.push(`${symbol}: ${failureMessage(res, 'refused')}`);
           submitOne(idx + 1);
         },
-        error: () => {
-          failed++;
+        error: (err) => {
+          failures.push(`${symbol}: ${failureMessage(err, 'failed')}`);
           submitOne(idx + 1);
         },
       });

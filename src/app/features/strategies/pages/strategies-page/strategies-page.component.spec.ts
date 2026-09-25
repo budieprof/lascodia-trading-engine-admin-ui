@@ -112,3 +112,87 @@ describe('StrategiesPageComponent (bulk handlers)', () => {
     expect(cmp.pickerSelectedRows()).toEqual([]);
   });
 });
+
+describe('StrategiesPageComponent (create refusals, clone)', () => {
+  let cmp: StrategiesPageComponent;
+  let create: ReturnType<typeof vi.fn>;
+  let notifications: { success: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
+
+  beforeEach(() => {
+    create = vi.fn();
+    notifications = { success: vi.fn(), error: vi.fn() };
+    TestBed.configureTestingModule({
+      imports: [StrategiesPageComponent],
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        provideRouter([]),
+        { provide: RUNTIME_CONFIG, useValue: { apiBaseUrl: 'http://test' } },
+        { provide: StrategiesService, useValue: { create } },
+        {
+          provide: RiskProfilesService,
+          useValue: {
+            list: () => of({ status: true, data: { data: [] }, message: '', responseCode: '00' }),
+          },
+        },
+        { provide: NotificationService, useValue: notifications },
+      ],
+    });
+    cmp = TestBed.createComponent(StrategiesPageComponent).componentInstance;
+    cmp.showCreateForm.set(true);
+  });
+
+  it('keeps the form open with the engine’s reason when a create is refused with 200', () => {
+    create.mockReturnValue(
+      of({
+        status: false,
+        message: 'A strategy with identical parameters already exists',
+        responseCode: '-11',
+        data: 0,
+      }),
+    );
+    cmp.onCreate({ name: 'x', symbol: 'EURUSD', symbols: ['EURUSD'], strategyType: 'RuleBased' });
+    expect(cmp.showCreateForm()).toBe(true);
+    expect(cmp.createError()).toBe('A strategy with identical parameters already exists');
+    expect(notifications.success).not.toHaveBeenCalled();
+  });
+
+  it('closes and reports the new id on success', () => {
+    create.mockReturnValue(
+      of({ status: true, message: 'Successful', responseCode: '00', data: 99 }),
+    );
+    cmp.onCreate({ name: 'x', symbol: 'EURUSD', symbols: ['EURUSD'], strategyType: 'RuleBased' });
+    expect(cmp.showCreateForm()).toBe(false);
+    expect(notifications.success).toHaveBeenCalledWith('Strategy #99 created (Paused)');
+    expect(create).toHaveBeenCalledWith(
+      expect.not.objectContaining({ symbols: expect.anything() }),
+      { silent: true },
+    );
+  });
+
+  it('bulk create writes each symbol into its copy of the rules and lists the failures', () => {
+    create
+      .mockReturnValueOnce(of({ status: true, data: 1 }))
+      .mockReturnValueOnce(of({ status: false, message: 'duplicate' }));
+    const rules = JSON.stringify({ name: 'r', symbol: 'EURUSD', timeframe: 'H1' });
+    cmp.onCreate({
+      name: 'Rule',
+      symbol: 'EURUSD',
+      symbols: ['EURUSD', 'GBPUSD'],
+      strategyType: 'RuleBased',
+      parametersJson: rules,
+    });
+    expect(JSON.parse(create.mock.calls[0][0].parametersJson).symbol).toBe('EURUSD');
+    expect(JSON.parse(create.mock.calls[1][0].parametersJson).symbol).toBe('GBPUSD');
+    expect(notifications.error).toHaveBeenCalledWith('1 not created — GBPUSD: duplicate');
+    expect(cmp.showCreateForm()).toBe(false);
+  });
+
+  it('opens the clone dialog from the row action', () => {
+    const col = cmp.columns.find((c) => c.colId === 'actions')!;
+    const button = document.createElement('button');
+    button.setAttribute('data-action', 'clone');
+    (col.onCellClicked as any)({ event: { target: button }, data: { id: 5 } });
+    expect(cmp.cloneTarget()).toEqual({ id: 5 });
+  });
+});

@@ -458,6 +458,7 @@ export class SidebarComponent {
           icon: '⚙',
           policy: 'Operator',
         },
+        { label: 'Pine Libraries', route: '/strategies/libraries', icon: '📚' },
         { label: 'Accounts', route: '/trading-accounts', icon: '🏦' },
         { label: 'Brokers', route: '/brokers', icon: '🔗' },
         { label: 'Risk Profiles', route: '/risk-profiles', icon: '🛡' },
@@ -525,6 +526,7 @@ export class SidebarComponent {
         { label: 'Portfolio', route: '/strategy-portfolio', icon: '🥧' },
         { label: 'Compare', route: '/strategies/compare', icon: '🆚' },
         { label: 'Generation', route: '/strategy-generation', icon: '🧬' },
+        { label: 'Pine Screener', route: '/pine-screener', icon: '🔍', policy: 'Analyst' },
       ],
     },
     {
