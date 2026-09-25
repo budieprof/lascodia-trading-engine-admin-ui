@@ -21,17 +21,31 @@ declareSignalIo(InputOverridesEditorComponent, {
 });
 
 const BASE = 'http://test/api/v1/lascodia-trading-engine';
+const CAPITAL_CONFIG_URL = `${BASE}/config/ScriptBacktest:InitialCapital`;
 const ok = <T>(data: T) => ({ data, status: true, message: 'Successful', responseCode: '00' });
 
-const COMPILED = ok({
-  success: true,
-  diagnostics: [],
-  declaration: {
-    kind: 'strategy',
-    title: 'Breakout',
-    strategy: { initialCapital: 25000, useBarMagnifier: true },
-  },
-  inputs: [{ id: 'in_len', kind: 'int', title: 'Length', defaultValue: 20, minValue: 1 }],
+/** A compile whose `strategy()` carries the given properties. */
+function compiledWith(strategy: Record<string, unknown>) {
+  return ok({
+    success: true,
+    diagnostics: [],
+    declaration: { kind: 'strategy', title: 'Breakout', strategy },
+    inputs: [{ id: 'in_len', kind: 'int', title: 'Length', defaultValue: 20, minValue: 1 }],
+  });
+}
+
+/** The script declares its capital (`strategy(initial_capital = 25000)`). */
+const COMPILED = compiledWith({
+  initialCapital: 25000,
+  initialCapitalSpecified: true,
+  useBarMagnifier: true,
+});
+
+/** The script declares no capital: Pine's 1,000,000 compiled, the engine default applies. */
+const COMPILED_NO_CAPITAL = compiledWith({
+  initialCapital: 1_000_000,
+  initialCapitalSpecified: false,
+  useBarMagnifier: false,
 });
 
 describe('ScriptBacktestLauncherComponent', () => {
@@ -57,7 +71,7 @@ describe('ScriptBacktestLauncherComponent', () => {
     el = fixture.nativeElement as HTMLElement;
   }
 
-  function openForm(compile: unknown = COMPILED): void {
+  function openForm(compile: object = COMPILED): void {
     el.querySelector<HTMLButtonElement>('.head .btn')!.click();
     fixture.detectChanges();
     const req = http.expectOne(`${BASE}/scripting/compile`);
@@ -86,6 +100,8 @@ describe('ScriptBacktestLauncherComponent', () => {
     fixture.detectChanges();
   }
 
+  const capitalText = () => el.querySelector('.capital-value')!.textContent!.trim();
+
   beforeEach(() => {
     TestBed.configureTestingModule({
       imports: [ScriptBacktestLauncherComponent],
@@ -105,7 +121,7 @@ describe('ScriptBacktestLauncherComponent', () => {
     render();
     expect(el.querySelector('form')).toBeNull();
     openForm();
-    expect((field('Initial balance') as HTMLInputElement).value).toBe('25000');
+    expect(capitalText()).toBe('25,000 · declared by the script');
     expect(field('Bar magnifier').textContent).toContain('Script setting (on)');
     // The saved override (30) is what the inputs editor shows as the value in effect.
     expect(
@@ -139,7 +155,6 @@ describe('ScriptBacktestLauncherComponent', () => {
       timeframe: 'H1',
       fromDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       toDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
-      initialBalance: 25000,
       symbolOverride: 'GBPUSD',
       timeframeOverride: 'H4',
       inputs: { in_len: 40 },
@@ -158,20 +173,84 @@ describe('ScriptBacktestLauncherComponent', () => {
   it('does not let the browser’s step checks block the form', () => {
     render();
     openForm();
-    const form = el.querySelector<HTMLFormElement>('form')!;
-    expect(form.noValidate).toBe(true);
-    const balance = field('Initial balance') as HTMLInputElement;
-    expect(balance.getAttribute('step')).toBe('any');
-    expect(balance.checkValidity()).toBe(true);
+    expect(el.querySelector<HTMLFormElement>('form')!.noValidate).toBe(true);
   });
 
-  it('sends a plain run without any override fields', () => {
+  it('sends a plain run without any override fields — and without a balance', () => {
     render();
     openForm();
     submit();
     const body = http.expectOne(`${BASE}/backtest`).request.body;
     expect(Object.keys(body).sort()).toEqual(
-      ['fromDate', 'initialBalance', 'strategyId', 'symbol', 'timeframe', 'toDate'].sort(),
+      ['fromDate', 'strategyId', 'symbol', 'timeframe', 'toDate'].sort(),
+    );
+  });
+
+  it('shows the capital read-only: there is no balance to enter', () => {
+    render();
+    openForm();
+    const labels = [...el.querySelectorAll('.field span')].map((s) => s.textContent!.trim());
+    expect(labels).not.toContain('Initial balance');
+    expect(el.querySelector('.capital input')).toBeNull();
+    expect(el.querySelector('.capital-label')!.textContent!.trim()).toBe('Initial capital');
+    expect(el.querySelector('.capital')!.textContent).toContain('One capital for every run');
+  });
+
+  it('a declared capital is the script’s, even when it equals Pine’s default', () => {
+    render();
+    openForm(
+      compiledWith({ initialCapital: 1_000_000, initialCapitalSpecified: true, currency: 'JPY' }),
+    );
+    // Read from the compiler's flag, never the value: no engine default to look up.
+    http.expectNone(CAPITAL_CONFIG_URL);
+    expect(capitalText()).toBe('1,000,000 JPY · declared by the script');
+  });
+
+  it('a script without a capital shows the engine’s configured default', () => {
+    render();
+    openForm(COMPILED_NO_CAPITAL);
+    http.expectOne(CAPITAL_CONFIG_URL).flush(
+      ok({
+        id: 7,
+        key: 'ScriptBacktest:InitialCapital',
+        value: '10000',
+        description: 'Capital a script strategy’s account opens with…',
+        dataType: 'Decimal',
+        isHotReloadable: true,
+        lastUpdatedAt: '2026-09-25T09:00:00Z',
+      }),
+    );
+    fixture.detectChanges();
+    expect(capitalText()).toBe('10,000 · engine default (ScriptBacktest:InitialCapital)');
+
+    submit();
+    const body = http.expectOne(`${BASE}/backtest`).request.body;
+    expect(body).not.toHaveProperty('initialBalance');
+  });
+
+  it('names the engine default when its value cannot be read', () => {
+    render();
+    openForm(COMPILED_NO_CAPITAL);
+    http.expectOne(CAPITAL_CONFIG_URL).flush({
+      data: null,
+      status: false,
+      message: 'Config not found',
+      responseCode: '-14',
+    });
+    fixture.detectChanges();
+    expect(capitalText()).toBe('engine default (ScriptBacktest:InitialCapital)');
+  });
+
+  it('explains the rule when the compile cannot say where the capital comes from', () => {
+    render();
+    openForm({
+      data: null,
+      status: false,
+      message: 'PS2003: undeclared identifier',
+      responseCode: '-11',
+    });
+    expect(capitalText()).toBe(
+      "the script's initial_capital when it declares one, else the engine default (ScriptBacktest:InitialCapital)",
     );
   });
 
@@ -217,7 +296,6 @@ describe('validateBacktestForm', () => {
   const ok = {
     fromDate: '2025-01-01',
     toDate: '2026-01-01',
-    initialBalance: 10000,
     symbolOverride: '',
   };
 
@@ -225,9 +303,9 @@ describe('validateBacktestForm', () => {
     expect(validateBacktestForm(ok)).toBeNull();
   });
 
-  it('rejects bad dates, balances and symbols', () => {
+  it('rejects bad dates and symbols', () => {
     expect(validateBacktestForm({ ...ok, fromDate: '' })).toMatch(/start and an end/);
-    expect(validateBacktestForm({ ...ok, initialBalance: 0 })).toMatch(/above zero/);
+    expect(validateBacktestForm({ ...ok, toDate: '2024-12-31' })).toMatch(/after the start/);
     expect(validateBacktestForm({ ...ok, symbolOverride: 'EUR/USD' })).toMatch(/letters or digits/);
   });
 });

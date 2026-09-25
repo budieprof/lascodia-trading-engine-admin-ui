@@ -10,9 +10,11 @@ import {
   untracked,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { catchError, of } from 'rxjs';
 
 import type { StrategyDto } from '@core/api/api.types';
 import { NotificationService } from '@core/notifications/notification.service';
+import { ConfigService } from '@core/services/config.service';
 import { ScriptingService } from '@core/services/scripting.service';
 
 import { ScriptStrategyService } from '../api/script-strategy.service';
@@ -22,6 +24,13 @@ import type {
   ScriptStrategyFields,
 } from '../api/scripting-api.types';
 import { describeFailure, isOk } from '../shared/api-error';
+import {
+  SCRIPT_CAPITAL_CONFIG_KEY,
+  describeScriptCapital,
+  parseConfiguredCapital,
+  scriptCapitalOf,
+  type ScriptCapital,
+} from '../shared/script-capital';
 import { scriptInputsOf, scriptSourceOf } from '../shared/script-strategy';
 import { InputOverridesEditorComponent } from '../shared/input-overrides-editor.component';
 
@@ -37,14 +46,11 @@ function isoDate(d: Date): string {
 export function validateBacktestForm(f: {
   fromDate: string;
   toDate: string;
-  initialBalance: number | string;
   symbolOverride: string;
 }): string | null {
   if (!f.fromDate || !f.toDate) return 'Choose a start and an end date.';
   if (Date.parse(f.toDate) <= Date.parse(f.fromDate))
     return 'The end date must be after the start.';
-  const balance = Number(f.initialBalance);
-  if (!Number.isFinite(balance) || balance <= 0) return 'The initial balance must be above zero.';
   const sym = f.symbolOverride.trim();
   if (sym && !/^[A-Za-z0-9]{1,10}$/.test(sym))
     return 'The symbol override must be 1–10 letters or digits.';
@@ -52,9 +58,13 @@ export function validateBacktestForm(f: {
 }
 
 /**
- * Queues a backtest of a script strategy (§4 `POST backtest`): date range and balance, plus the
+ * Queues a backtest of a script strategy (§4 `POST backtest`): the date range, plus the
  * script-only options — symbol / timeframe override, input overrides (typed from the compiled
  * inputs schema), deep mode and the bar magnifier.
+ *
+ * There is no balance to enter: every run of a script opens with one capital, the script's
+ * `strategy(initial_capital=…)` or else the engine default (engine D122), and the engine ignores a
+ * run's own balance for scripts. The form shows that capital read-only, with its source.
  */
 @Component({
   selector: 'app-script-backtest-launcher',
@@ -89,8 +99,8 @@ export function validateBacktestForm(f: {
       }
 
       @if (open()) {
-        <!-- novalidate: validateBacktestForm() owns validation; a browser step mismatch on the
-             balance or an input would otherwise block the submit without a word. -->
+        <!-- novalidate: validateBacktestForm() owns validation; a browser step mismatch on an
+             input would otherwise block the submit without a word. -->
         <form
           [id]="uid + '-form'"
           class="form"
@@ -112,16 +122,6 @@ export function validateBacktestForm(f: {
                 type="date"
                 [value]="toDate()"
                 (change)="toDate.set($any($event.target).value)"
-              />
-            </label>
-            <label class="field">
-              <span>Initial balance</span>
-              <input
-                type="number"
-                min="1"
-                step="any"
-                [value]="initialBalance()"
-                (change)="initialBalance.set($any($event.target).value)"
               />
             </label>
             <label class="field">
@@ -160,6 +160,19 @@ export function validateBacktestForm(f: {
                 <option value="off" [selected]="magnifier() === 'off'">Off — OHLC path only</option>
               </select>
             </label>
+          </div>
+
+          <div class="capital">
+            <dl class="capital-line">
+              <dt class="capital-label">Initial capital</dt>
+              <dd class="capital-value">
+                {{ compiling() ? 'reading the script…' : capitalText() }}
+              </dd>
+            </dl>
+            <p class="note">
+              One capital for every run of the script — backtests, optimizer runs, paper and live
+              sessions — so a backtest sizes its trades as the live session will.
+            </p>
           </div>
 
           <label class="check">
@@ -260,6 +273,30 @@ export function validateBacktestForm(f: {
         font: inherit;
         font-size: var(--text-sm);
       }
+      .capital {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .capital-line {
+        margin: 0;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: var(--space-2);
+        font-size: var(--text-sm);
+      }
+      .capital-label {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .capital-value {
+        margin: 0;
+        font-weight: var(--font-medium);
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+        overflow-wrap: anywhere;
+      }
       .check {
         display: flex;
         align-items: center;
@@ -337,6 +374,7 @@ export function validateBacktestForm(f: {
 export class ScriptBacktestLauncherComponent {
   private readonly api = inject(ScriptStrategyService);
   private readonly scripting = inject(ScriptingService);
+  private readonly config = inject(ConfigService);
   private readonly notifications = inject(NotificationService);
 
   readonly strategy = input.required<StrategyDto & ScriptStrategyFields>();
@@ -350,7 +388,6 @@ export class ScriptBacktestLauncherComponent {
   readonly open = signal(false);
   readonly fromDate = signal(isoDate(new Date(Date.now() - 365 * 86_400_000)));
   readonly toDate = signal(isoDate(new Date()));
-  readonly initialBalance = signal<number | string>(10_000);
   readonly symbolOverride = signal('');
   readonly timeframeOverride = signal('');
   readonly magnifier = signal<MagnifierChoice>('script');
@@ -360,6 +397,13 @@ export class ScriptBacktestLauncherComponent {
   readonly compileNote = signal<string | null>(null);
   readonly inputDefs = signal<ScriptInputDef[] | null>(null);
   readonly declaredMagnifier = signal<boolean | null>(null);
+  /** Where the script's capital comes from, per its compile; null until one answers. */
+  readonly capital = signal<ScriptCapital | null>(null);
+  /** The engine's configured default capital, read when the script declares none. */
+  readonly configuredDefaultCapital = signal<number | null>(null);
+  readonly capitalText = computed(() =>
+    describeScriptCapital(this.capital(), this.configuredDefaultCapital()),
+  );
   readonly overrides = signal<Record<string, unknown>>({});
   readonly inputsValid = signal(true);
 
@@ -377,6 +421,7 @@ export class ScriptBacktestLauncherComponent {
   });
 
   private compiledFor: string | null = null;
+  private defaultCapitalRequested = false;
 
   constructor() {
     // Compile on first open (and again if the script changed) to learn the inputs schema.
@@ -392,6 +437,7 @@ export class ScriptBacktestLauncherComponent {
   private compile(source: string | null): void {
     this.compiledFor = source;
     this.compileNote.set(null);
+    this.capital.set(null);
     if (!source) {
       this.inputDefs.set(null);
       this.compileNote.set('This strategy carries no script source to read inputs from.');
@@ -408,8 +454,9 @@ export class ScriptBacktestLauncherComponent {
           this.compiling.set(false);
           this.inputDefs.set(result.inputs ?? []);
           const props = result.declaration?.strategy ?? null;
-          const capital = Number(props?.initialCapital);
-          if (Number.isFinite(capital) && capital > 0) this.initialBalance.set(capital);
+          const capital = scriptCapitalOf(props);
+          this.capital.set(capital);
+          if (capital.source === 'engineDefault') this.loadConfiguredDefaultCapital();
           const mag = props?.useBarMagnifier;
           this.declaredMagnifier.set(typeof mag === 'boolean' ? mag : null);
         },
@@ -423,25 +470,41 @@ export class ScriptBacktestLauncherComponent {
       });
   }
 
+  /**
+   * Reads `ScriptBacktest:InitialCapital` once. Without an answer (no row, no access, a value
+   * that is not a positive number) the line names the key instead of guessing its value.
+   */
+  private loadConfiguredDefaultCapital(): void {
+    if (this.defaultCapitalRequested) return;
+    this.defaultCapitalRequested = true;
+    this.config
+      .getByKey(SCRIPT_CAPITAL_CONFIG_KEY, { silent: true })
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        this.configuredDefaultCapital.set(
+          isOk(res) ? parseConfiguredCapital(res.data?.value) : null,
+        );
+      });
+  }
+
   /** The request body, or an error message. */
   buildRequest(): ScriptBacktestRequest | string {
     const problem = validateBacktestForm({
       fromDate: this.fromDate(),
       toDate: this.toDate(),
-      initialBalance: this.initialBalance(),
       symbolOverride: this.symbolOverride(),
     });
     if (problem) return problem;
     if (!this.inputsValid()) return 'Fix the highlighted inputs first.';
     const s = this.strategy();
     if (!s.symbol) return 'The strategy has no symbol.';
+    // No initial balance: the engine opens every run of a script with the script's capital.
     const req: ScriptBacktestRequest = {
       strategyId: s.id,
       symbol: s.symbol,
       timeframe: s.timeframe,
       fromDate: this.fromDate(),
       toDate: this.toDate(),
-      initialBalance: Number(this.initialBalance()),
     };
     const sym = this.symbolOverride().trim().toUpperCase();
     if (sym && sym !== s.symbol.toUpperCase()) req.symbolOverride = sym;

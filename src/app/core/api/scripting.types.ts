@@ -105,6 +105,12 @@ export interface ScriptStrategyProperties {
   defaultQtyType?: string | number;
   defaultQtyValue?: number;
   initialCapital?: number;
+  /**
+   * The compiler's word on whether `strategy()` passes `initial_capital`, whatever its value — a
+   * declared 1,000,000 is declared (engine D122). Null or absent: not reported (properties a host
+   * built itself, or an engine from before D122). Never infer it from `initialCapital`.
+   */
+  initialCapitalSpecified?: boolean | null;
   currency?: string;
   slippage?: number;
   /** `Percent` | `CashPerContract` | `CashPerOrder` (or its enum ordinal). */

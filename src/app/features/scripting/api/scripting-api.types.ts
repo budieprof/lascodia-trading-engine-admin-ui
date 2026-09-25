@@ -152,7 +152,11 @@ export interface ScriptDivergence {
   detail: string;
 }
 
-/** §4 — `POST backtest` for a script strategy. */
+/**
+ * §4 — `POST backtest` for a script strategy. No `initialBalance`: every run of a script opens
+ * with the script's `strategy(initial_capital=…)`, else the engine default
+ * `ScriptBacktest:InitialCapital` — the engine ignores a run's own balance for scripts (D122).
+ */
 export interface ScriptBacktestRequest {
   strategyId: number;
   /** The strategy's own symbol / timeframe (the engine refuses a mismatch without an override). */
@@ -160,7 +164,6 @@ export interface ScriptBacktestRequest {
   timeframe: string;
   fromDate: string;
   toDate: string;
-  initialBalance: number;
   symbolOverride?: string;
   timeframeOverride?: string;
   inputs?: Record<string, unknown>;
