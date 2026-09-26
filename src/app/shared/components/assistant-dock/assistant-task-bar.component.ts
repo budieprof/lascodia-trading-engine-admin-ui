@@ -28,6 +28,15 @@ export function taskBarVisible(task: AssistantTaskDto | null, now = Date.now()):
   return now - ended < ENDED_VISIBLE_MS;
 }
 
+/** Open follow-through, for the bar: how many writes await approval and how many runs are going. */
+export function openTracked(task: AssistantTaskDto): { awaiting: number; running: number } {
+  const t = task.tracked ?? [];
+  return {
+    awaiting: t.filter((i) => i.status === 'awaiting_approval').length,
+    running: t.filter((i) => i.status === 'queued' || i.status === 'running').length,
+  };
+}
+
 export function taskProgress(task: AssistantTaskDto): { done: number; total: number; pct: number } {
   const total = task.todos.length;
   const done = task.todos.filter((t) => t.status === 'done' || t.status === 'skipped').length;
@@ -84,6 +93,12 @@ export function taskProgress(task: AssistantTaskDto): { done: number; total: num
         <div class="meta">
           <span>{{ progress().done }}/{{ progress().total }} steps</span>
           <span>wakes {{ t.wakeCount }}/{{ t.maxWakes }}</span>
+          @if (open().awaiting > 0) {
+            <span class="attention">{{ open().awaiting }} awaiting your approval</span>
+          }
+          @if (open().running > 0) {
+            <span>{{ open().running }} run(s) in progress</span>
+          }
           @if (t.budgetUsd > 0) {
             <span>\${{ t.spentUsd.toFixed(2) }} / \${{ t.budgetUsd.toFixed(2) }}</span>
           }
@@ -112,6 +127,21 @@ export function taskProgress(task: AssistantTaskDto): { done: number; total: num
               </li>
             }
           </ul>
+          @if (t.tracked?.length) {
+            <ul class="tracked">
+              @for (item of t.tracked; track item.key) {
+                <li>
+                  <span class="chip" [attr.data-status]="item.status">{{
+                    trackedLabel(item.status)
+                  }}</span>
+                  {{ item.label }}
+                  @if (item.detail) {
+                    <span class="note">— {{ item.detail }}</span>
+                  }
+                </li>
+              }
+            </ul>
+          }
           <ol class="activity">
             @for (a of recentActivity(); track $index) {
               <li>
@@ -207,6 +237,38 @@ export function taskProgress(task: AssistantTaskDto): { done: number; total: num
       .now {
         color: var(--text-primary);
       }
+      .attention {
+        color: var(--warning, #b25000);
+        font-weight: var(--font-semibold);
+      }
+      .tracked {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .chip {
+        display: inline-block;
+        min-width: 7em;
+        padding: 0 6px;
+        margin-right: 4px;
+        border-radius: var(--radius-full);
+        background: var(--bg-tertiary);
+        text-align: center;
+      }
+      .chip[data-status='awaiting_approval'] {
+        background: rgba(255, 149, 0, 0.18);
+      }
+      .chip[data-status='approved'],
+      .chip[data-status='completed'] {
+        background: rgba(52, 199, 89, 0.18);
+      }
+      .chip[data-status='rejected'],
+      .chip[data-status='failed'] {
+        background: rgba(255, 59, 48, 0.16);
+      }
       .todos,
       .activity {
         margin: 0;
@@ -264,6 +326,10 @@ export class AssistantTaskBarComponent {
     const t = this.task();
     return t ? taskProgress(t) : { done: 0, total: 0, pct: 0 };
   });
+  protected readonly open = computed(() => {
+    const t = this.task();
+    return t ? openTracked(t) : { awaiting: 0, running: 0 };
+  });
   protected readonly recentActivity = computed(() =>
     [...(this.task()?.activity ?? [])].reverse().slice(0, 12),
   );
@@ -295,6 +361,10 @@ export class AssistantTaskBarComponent {
       clearInterval(poll);
       if (this.loadTimer) clearTimeout(this.loadTimer);
     });
+  }
+
+  protected trackedLabel(status: string): string {
+    return status.replace(/_/g, ' ');
   }
 
   protected todoGlyph(status: string): string {

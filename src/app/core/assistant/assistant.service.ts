@@ -51,6 +51,20 @@ export interface AssistantTodo {
   note?: string | null;
 }
 
+/** Something the task is following through on: a proposed write, or a run it started. */
+export interface AssistantTrackedItem {
+  key: string;
+  /** action | backtest | walk_forward | optimization */
+  kind: string;
+  label: string;
+  /** awaiting_approval | approved | rejected | failed | queued | running | completed | cancelled */
+  status: string;
+  refId?: number | null;
+  detail?: string | null;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
 /** An admin-assistant long-running task (engine AssistantTaskDto). */
 export interface AssistantTaskDto {
   id: number;
@@ -61,6 +75,8 @@ export interface AssistantTaskDto {
   currentActivity?: string | null;
   todos: AssistantTodo[];
   activity: { atUtc: string; kind: string; text: string }[];
+  /** Proposed writes and the runs they started, followed through by the engine. */
+  tracked?: AssistantTrackedItem[];
   wakeCount: number;
   maxWakes: number;
   budgetUsd: number;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AssistantTaskDto } from '@core/assistant/assistant.service';
-import { taskBarVisible, taskProgress } from './assistant-task-bar.component';
+import { openTracked, taskBarVisible, taskProgress } from './assistant-task-bar.component';
 
 const task = (over: Partial<AssistantTaskDto> = {}): AssistantTaskDto => ({
   id: 1,
@@ -39,5 +39,38 @@ describe('assistant task bar', () => {
       false,
     );
     expect(taskBarVisible(null, now)).toBe(false);
+  });
+
+  it('counts follow-through that is still open', () => {
+    const at = '2026-09-26T10:00:00Z';
+    const t = task({
+      tracked: [
+        {
+          key: 'action:1',
+          kind: 'action',
+          label: 'Import',
+          status: 'awaiting_approval',
+          createdAtUtc: at,
+          updatedAtUtc: at,
+        },
+        {
+          key: 'backtest:9',
+          kind: 'backtest',
+          label: 'Backtest #9',
+          status: 'running',
+          createdAtUtc: at,
+          updatedAtUtc: at,
+        },
+        {
+          key: 'action:2',
+          kind: 'action',
+          label: 'Old',
+          status: 'approved',
+          createdAtUtc: at,
+          updatedAtUtc: at,
+        },
+      ],
+    });
+    expect(openTracked(t)).toEqual({ awaiting: 1, running: 1 });
   });
 });
