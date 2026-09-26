@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   computed,
   effect,
   inject,
@@ -13,6 +14,9 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, map, of } from 'rxjs';
 
 import { AnalysisMonitorsService } from '@core/services/analysis-monitors.service';
+import { PageContextService } from '@core/assistant/page-context.service';
+import { UiCommandService } from '@core/assistant/ui-command.service';
+import { monitorsPageCommands, monitorsPageFacts } from './monitors-page-assistant';
 import { NotificationService } from '@core/notifications/notification.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import { createPolledResource } from '@core/polling/polled-resource';
@@ -1230,6 +1234,9 @@ const STATUS_FILTERS = [
 })
 export class AnalysisMonitorsPageComponent {
   private readonly svc = inject(AnalysisMonitorsService);
+  private readonly pageContext = inject(PageContextService);
+  private readonly uiCommands = inject(UiCommandService);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly notify = inject(NotificationService);
   private readonly realtime = inject(RealtimeService);
   private readonly route = inject(ActivatedRoute);
@@ -1323,6 +1330,50 @@ export class AnalysisMonitorsPageComponent {
   }
 
   constructor() {
+    // The assistant operates monitors through the API; this is how it knows which one the
+    // operator means and what the board is filtered to, and how it drives the board itself.
+    this.pageContext.publish(() =>
+      monitorsPageFacts({
+        statusFilter: this.statusFilter(),
+        search: this.search(),
+        origin: this.origin(),
+        mode: this.mode(),
+        page: this.page(),
+        monitors: this.data()?.monitors ?? [],
+        counters: (this.counters() as unknown as Record<string, number> | null) ?? null,
+        detail: this.detail(),
+      }),
+    );
+    this.uiCommands.register(
+      monitorsPageCommands({
+        statusFilter: this.statusFilter,
+        search: this.search,
+        origin: this.origin,
+        mode: this.mode,
+        page: this.page,
+        statusKeys: STATUS_FILTERS.map((f) => f.key),
+        openMonitor: (id) => this.focusMonitor(id),
+        closeMonitor: () => {
+          this.selectedId.set(null);
+          this.detail.set(null);
+        },
+        openBuilder: (seedId) => {
+          if (seedId == null) {
+            this.openBuilder(null);
+            return true;
+          }
+          const seed =
+            (this.data()?.monitors ?? []).find((m) => m.id === seedId) ??
+            (this.detail()?.monitor.id === seedId ? this.detail()!.monitor : null);
+          if (!seed) return false;
+          this.openBuilder(seed);
+          return true;
+        },
+        openTemplates: () => this.templatesOpen.set(true),
+      }),
+      this.destroyRef,
+    );
+
     // Re-fetch whenever a filter changes.
     effect(() => {
       this.statusFilter();
