@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 import { AgGridAngular } from 'ag-grid-angular';
 import {
   AllCommunityModule,
@@ -6,6 +6,7 @@ import {
   type ColDef,
   type GetRowIdParams,
   type RowClassRules,
+  type RowClickedEvent,
 } from 'ag-grid-community';
 
 import type { ReportTrade } from './strategy-report.model';
@@ -80,6 +81,8 @@ ModuleRegistry.registerModules([AllCommunityModule]);
         [enableCellTextSelection]="true"
         [ensureDomOrder]="true"
         [tooltipShowDelay]="300"
+        [class.clickable]="clickable()"
+        (rowClicked)="onRowClicked($event)"
         style="width: 100%"
       />
     }
@@ -162,6 +165,9 @@ ModuleRegistry.registerModules([AllCommunityModule]);
         width: 100%;
         justify-content: flex-end;
       }
+      .clickable ::ng-deep .ag-row {
+        cursor: pointer;
+      }
       :host ::ng-deep .rpt-gain {
         color: var(--profit);
       }
@@ -223,6 +229,17 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 export class ReportTradesGridComponent {
   readonly trades = input.required<readonly ReportTrade[]>();
   readonly currency = input('');
+  /** True when a parent handles {@link tradeClick} — rows then show as clickable. */
+  readonly clickable = input(false);
+  /** A row was clicked (not a text selection) — the parent opens that trade on a chart. */
+  readonly tradeClick = output<ReportTrade>();
+
+  onRowClicked(event: RowClickedEvent<ReportTrade>): void {
+    if (!this.clickable() || !event.data) return;
+    // Cells are text-selectable; a drag to copy a price must not open the chart.
+    if ((globalThis.getSelection?.()?.toString() ?? '').length > 0) return;
+    this.tradeClick.emit(event.data);
+  }
 
   readonly filters = TRADE_FILTERS;
   readonly filter = signal<TradeFilter>('all');

@@ -22,13 +22,12 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
-// Re-used straight from the backtest feature — same dialog, same payload
-// shape. The walk-forward report just needs to surface trades-per-fold and
-// hand them to the same drilldown.
+// The same trade chart as positions and backtests: a fold's trade is a closed trade.
 import {
-  TradeReplayDialogComponent,
-  type ReplayTrade,
-} from '../../../backtests/components/trade-replay-dialog/trade-replay-dialog.component';
+  EATradeChartModalComponent,
+  type TradeChartSelection,
+} from '@features/ea-instances/components/ea-trade-chart-modal/ea-trade-chart-modal.component';
+import { researchTradeSelection } from '@features/backtests/backtest-trade-chart';
 import type { EChartsOption } from 'echarts';
 
 // ── Window record ─────────────────────────────────────────────────────────
@@ -86,7 +85,7 @@ interface WindowDerived extends WindowResult {
     ErrorStateComponent,
     ChartCardComponent,
     MetricCardComponent,
-    TradeReplayDialogComponent,
+    EATradeChartModalComponent,
   ],
   template: `
     <div class="page">
@@ -288,7 +287,7 @@ interface WindowDerived extends WindowResult {
                   </thead>
                   <tbody>
                     @for (t of pagedTrades(); track $index) {
-                      <tr class="trade-row" (click)="openReplay(t.trade, t.window, t.idx)">
+                      <tr class="trade-row" (click)="openTradeChart(t.trade, t.window, t.idx)">
                         <td class="mono">W{{ t.window + 1 }}</td>
                         <td class="mono">#{{ t.idx }}</td>
                         <td class="nowrap">{{ t.trade.EntryTime | date: 'MMM d HH:mm' }}</td>
@@ -332,7 +331,9 @@ interface WindowDerived extends WindowResult {
                           <button
                             type="button"
                             class="view-btn"
-                            (click)="openReplay(t.trade, t.window, t.idx); $event.stopPropagation()"
+                            (click)="
+                              openTradeChart(t.trade, t.window, t.idx); $event.stopPropagation()
+                            "
                           >
                             View chart
                           </button>
@@ -497,12 +498,11 @@ interface WindowDerived extends WindowResult {
         />
       }
 
-      <!-- Trade-replay dialog (mounted once; input drives open/close). -->
-      <app-trade-replay-dialog
-        [trade]="replayTrade()"
-        [symbol]="run()?.symbol ?? ''"
-        [timeframe]="run()?.timeframe ?? 'H1'"
-        (closed)="replayTrade.set(null)"
+      <!-- Trade chart (mounted once; the selection + open flag drive it). -->
+      <app-ea-trade-chart-modal
+        [selection]="chartSelection()"
+        [open]="chartOpen()"
+        (openChange)="chartOpen.set($event)"
       />
     </div>
   `,
@@ -965,7 +965,9 @@ export class WalkForwardDetailPageComponent implements OnInit {
   readonly tradeWindowFilter = signal<number>(-1);
   readonly tradePage = signal(1);
   readonly tradesPerPage = 25;
-  readonly replayTrade = signal<ReplayTrade | null>(null);
+  /** The trade shown in the chart modal, and whether the modal is open. */
+  readonly chartSelection = signal<TradeChartSelection | null>(null);
+  readonly chartOpen = signal(false);
 
   /** Flattened cross-window trade list with stable 1-based numbering per
    *  fold ("W3 #12"). Numbering is scoped to each window so a trade can be
@@ -1020,19 +1022,17 @@ export class WalkForwardDetailPageComponent implements OnInit {
     Math.min(this.tradePage() * this.tradesPerPage, this.filteredTrades().length),
   );
 
-  openReplay(trade: WindowTrade, window: number, idx: number): void {
-    this.replayTrade.set({
-      ...trade,
-      // Carry the fold + per-fold index into the dialog header.
-      index: idx,
-    } as ReplayTrade);
-    // Store the fold context for the dialog header via the symbol prefix —
-    // dialog already shows symbol + tf so we don't need a separate output.
-    this.replayTradeWindow.set(window);
+  openTradeChart(trade: WindowTrade, window: number, idx: number): void {
+    const run = this.run();
+    this.chartSelection.set(
+      researchTradeSelection(trade, {
+        symbol: run?.symbol ?? '',
+        timeframe: run?.timeframe,
+        label: `Walk-forward W${window + 1} · trade #${idx}`,
+      }),
+    );
+    this.chartOpen.set(true);
   }
-
-  /** Window id of the trade currently being replayed (for the dialog header label). */
-  readonly replayTradeWindow = signal<number>(-1);
 
   exitReasonShort(reason: number): string {
     return reason === 0 ? 'SL' : reason === 1 ? 'TP' : 'EOD';

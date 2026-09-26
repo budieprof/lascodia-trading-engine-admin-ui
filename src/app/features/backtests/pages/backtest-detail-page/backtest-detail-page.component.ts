@@ -19,9 +19,11 @@ import { BacktestRunDto } from '@core/api/api.types';
 import { PageContextService } from '@core/assistant/page-context.service';
 import type { EChartsOption, LineSeriesOption } from 'echarts';
 import {
-  TradeReplayDialogComponent,
-  type ReplayTrade,
-} from '../../components/trade-replay-dialog/trade-replay-dialog.component';
+  EATradeChartModalComponent,
+  type TradeChartSelection,
+} from '@features/ea-instances/components/ea-trade-chart-modal/ea-trade-chart-modal.component';
+import { reportTradeAsChartable, researchTradeSelection } from '../../backtest-trade-chart';
+import type { ReportTrade } from '@features/scripting/report/strategy-report.model';
 import { StrategyReportComponent } from '@features/scripting/report/strategy-report.component';
 import { ScriptRunChartComponent } from '@features/scripting/backtest/script-run-chart.component';
 import {
@@ -53,6 +55,17 @@ interface BacktestTrade {
   // the trade-replay dialog skips the SL/TP horizontals for those rows.
   StopLoss?: number | null;
   TakeProfit?: number | null;
+}
+
+/** The Trades[] of a run's result JSON, or empty when it has none or does not parse. */
+function runTradesOf(resultJson: string | null | undefined): BacktestTrade[] {
+  if (!resultJson) return [];
+  try {
+    const parsed = JSON.parse(resultJson) as { Trades?: unknown };
+    return Array.isArray(parsed?.Trades) ? (parsed.Trades as BacktestTrade[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 interface BacktestResultData {
@@ -116,7 +129,7 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
     ChartCardComponent,
     StatusBadgeComponent,
     ErrorStateComponent,
-    TradeReplayDialogComponent,
+    EATradeChartModalComponent,
     StrategyReportComponent,
     ScriptRunChartComponent,
     RouterLink,
@@ -140,7 +153,12 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
         @if (scriptReport(); as report) {
           <div class="script-run">
             <app-script-run-chart [run]="bt" [report]="report" />
-            <app-strategy-report [report]="report" [backtestRunId]="bt.id" />
+            <app-strategy-report
+              [report]="report"
+              [backtestRunId]="bt.id"
+              [tradesClickable]="true"
+              (tradeClick)="openReportTrade($event)"
+            />
           </div>
         }
 
@@ -459,7 +477,7 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
                 </thead>
                 <tbody>
                   @for (t of pagedTrades(); track $index) {
-                    <tr class="trade-row" (click)="openReplay(t.trade, t.idx)">
+                    <tr class="trade-row" (click)="openTradeChart(t.trade, t.idx)">
                       <td class="mono">#{{ t.idx }}</td>
                       <td class="nowrap">{{ t.trade.EntryTime | date: 'MMM d, yyyy HH:mm' }}</td>
                       <td class="nowrap">{{ t.trade.ExitTime | date: 'MMM d, yyyy HH:mm' }}</td>
@@ -498,7 +516,7 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
                         <button
                           type="button"
                           class="view-btn"
-                          (click)="openReplay(t.trade, t.idx); $event.stopPropagation()"
+                          (click)="openTradeChart(t.trade, t.idx); $event.stopPropagation()"
                         >
                           View chart
                         </button>
@@ -598,12 +616,11 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
         <div class="note">Loading backtest #{{ id() }}…</div>
       }
 
-      <!-- Trade-replay dialog (mounted once; input drives the open/close cycle). -->
-      <app-trade-replay-dialog
-        [trade]="replayTrade()"
-        [symbol]="backtest()?.symbol ?? ''"
-        [timeframe]="backtest()?.timeframe ?? 'H1'"
-        (closed)="replayTrade.set(null)"
+      <!-- Trade chart (mounted once; the selection + open flag drive it). -->
+      <app-ea-trade-chart-modal
+        [selection]="chartSelection()"
+        [open]="chartOpen()"
+        (openChange)="chartOpen.set($event)"
       />
     </div>
   `,
@@ -958,9 +975,11 @@ export class BacktestDetailPageComponent implements OnInit {
   readonly tradeFilter = signal<'all' | 'wins' | 'losses' | 'long' | 'short'>('all');
   readonly tradePage = signal(1);
   readonly tradesPerPage = 25;
-  /** Trade currently mounted in the replay dialog. `null` keeps the dialog
-   *  closed; setting a value drives the dialog's open effect. */
-  readonly replayTrade = signal<ReplayTrade | null>(null);
+  /** The trade shown in the chart modal, and whether the modal is open. */
+  readonly chartSelection = signal<TradeChartSelection | null>(null);
+  readonly chartOpen = signal(false);
+  /** A script run's own trade list — the SL/TP a Strategy-report row does not carry. */
+  readonly scriptRunTrades = signal<BacktestTrade[]>([]);
 
   private readonly pageContext = inject(PageContextService);
 
@@ -1129,8 +1148,31 @@ export class BacktestDetailPageComponent implements OnInit {
     Math.min(this.tradePage() * this.tradesPerPage, this.filteredTrades().length),
   );
 
-  openReplay(trade: BacktestTrade, idx: number): void {
-    this.replayTrade.set({ ...trade, index: idx });
+  openTradeChart(trade: BacktestTrade, idx: number): void {
+    const bt = this.backtest();
+    this.chartSelection.set(
+      researchTradeSelection(trade, {
+        symbol: bt?.symbol ?? '',
+        timeframe: bt?.timeframe,
+        label: `Backtest #${bt?.id ?? ''} · trade #${idx}`,
+      }),
+    );
+    this.chartOpen.set(true);
+  }
+
+  /** A Strategy-report row: its SL/TP come from the run's own trade list (same fills). */
+  openReportTrade(row: ReportTrade): void {
+    const trade = reportTradeAsChartable(row, this.scriptRunTrades());
+    if (!trade) return;
+    const bt = this.backtest();
+    this.chartSelection.set(
+      researchTradeSelection(trade, {
+        symbol: bt?.symbol ?? '',
+        timeframe: bt?.timeframe,
+        label: `Backtest #${bt?.id ?? ''} · trade #${row.number}`,
+      }),
+    );
+    this.chartOpen.set(true);
   }
 
   exitReasonShort(reason: number): string {
@@ -1630,7 +1672,10 @@ export class BacktestDetailPageComponent implements OnInit {
         // Script strategies' runs carry a Strategy report, not the DSL BacktestResult.
         const report = extractStrategyReport(data.resultJson);
         this.scriptReport.set(report);
-        if (report) return;
+        if (report) {
+          this.scriptRunTrades.set(runTradesOf(data.resultJson));
+          return;
+        }
         if (data.resultJson) {
           try {
             const parsed = JSON.parse(data.resultJson) as BacktestResultData;
