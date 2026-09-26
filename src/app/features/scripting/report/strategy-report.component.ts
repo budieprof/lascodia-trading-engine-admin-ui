@@ -5,6 +5,7 @@ import {
   computed,
   inject,
   input,
+  output,
   signal,
 } from '@angular/core';
 
@@ -14,7 +15,7 @@ import { ChartCardComponent } from '@shared/components/chart-card/chart-card.com
 import { ScriptStrategyService, type BacktestExportFormat } from '../api/script-strategy.service';
 import { describeFailure } from '../shared/api-error';
 import { saveBlob } from '../shared/download';
-import { normalizeStrategyReport, reportCurrency } from './strategy-report.model';
+import { normalizeStrategyReport, reportCurrency, type ReportTrade } from './strategy-report.model';
 import { buildProfitDistributionOptions, reportPalette } from './report-charts';
 import { formatDate, formatInteger, formatUnits } from './report-format';
 import {
@@ -209,7 +210,12 @@ let nextReportUid = 0;
               />
             }
             @case ('trades') {
-              <app-report-trades-grid [trades]="r.trades" [currency]="currency()" />
+              <app-report-trades-grid
+                [trades]="r.trades"
+                [currency]="currency()"
+                [clickable]="tradesClickable()"
+                (tradeClick)="tradeClick.emit($event)"
+              />
             }
             @case ('monthly') {
               <app-report-monthly-heatmap
@@ -401,6 +407,10 @@ export class StrategyReportComponent {
   /** Set when the report belongs to a backtest run: enables the CSV / XLSX export. */
   readonly backtestRunId = input<number | null>(null);
   readonly heading = input<string | null>('Strategy report');
+  /** When true, List-of-trades rows are clickable and emit {@link tradeClick}. */
+  readonly tradesClickable = input(false);
+  /** A List-of-trades row was clicked. */
+  readonly tradeClick = output<ReportTrade>();
 
   readonly uid = `rpt-${nextReportUid++}`;
   readonly tabs = REPORT_TABS;

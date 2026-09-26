@@ -113,6 +113,42 @@ export interface TradeChartSelection {
     kind: 'position' | 'order';
     id: number;
   } | null;
+  /**
+   * Timeframe to open on (default M5). A backtest trade passes its run's timeframe; the modal
+   * still steps up when entry → exit would not fit one candle page, so the exit is never cut off.
+   */
+  timeframe?: Timeframe | null;
+}
+
+const TIMEFRAME_ORDER: readonly Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
+const TIMEFRAME_MINUTES: Record<string, number> = {
+  M1: 1,
+  M5: 5,
+  M15: 15,
+  H1: 60,
+  H4: 240,
+  D1: 1440,
+};
+
+/**
+ * The timeframe to open a selection on: the requested one (M5 by default), stepped up until a
+ * closed trade's entry → exit plus the chart's 100 bars of margin fits one 500-candle page.
+ */
+export function initialTimeframe(
+  s: Pick<TradeChartSelection, 'timeframe' | 'referenceTime' | 'exitTime'>,
+): Timeframe {
+  let i = Math.max(0, TIMEFRAME_ORDER.indexOf(s.timeframe ?? 'M5'));
+  if (!s.exitTime) return TIMEFRAME_ORDER[i];
+  const spanMin = Math.max(
+    0,
+    (new Date(s.exitTime).getTime() - new Date(s.referenceTime).getTime()) / 60_000,
+  );
+  while (
+    i < TIMEFRAME_ORDER.length - 1 &&
+    spanMin / TIMEFRAME_MINUTES[TIMEFRAME_ORDER[i]] + 100 > 480
+  )
+    i++;
+  return TIMEFRAME_ORDER[i];
 }
 
 /** Emitted after the engine accepts a chart-driven SL/TP modification. */
@@ -600,7 +636,7 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
       // Reset to M5 on every fresh open so we don't carry a long timeframe
       // from a previous selection (which produces "no candles in window" for
       // short-lived trades).
-      this.selectedTimeframe.set('M5');
+      this.selectedTimeframe.set(initialTimeframe(this.selection));
       // Selection swap ⇒ never carry an armed destructive confirm into the
       // new row.  A click on a *different* row must re-arm explicitly.
       this.confirmArmed.set(false);
