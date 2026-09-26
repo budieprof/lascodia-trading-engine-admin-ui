@@ -70,6 +70,58 @@ const KNOWN: ReadonlyArray<{
     subject: 'alters what the engine is allowed to trade',
     severity: 'warn',
   },
+  // Pine / rule-based script strategies (ADR-0027) — before the generic strategy rules.
+  {
+    match: /\/strategy\/\d+\/account-bindings/i,
+    verb: 'Change which accounts a strategy trades',
+    subject:
+      'a script trades only on its bound accounts — check every REAL account and lot multiplier',
+    severity: 'danger',
+  },
+  {
+    match: /\/strategy\/\d+\/execution-policy/i,
+    verb: "Change a strategy's execution policy",
+    subject: 'Direct skips the signal gates; Standard applies every one',
+    severity: 'warn',
+  },
+  {
+    match: /\/strategy\/\d+\/script\b(?!\/alerts)/i,
+    methods: ['PUT'],
+    verb: "Replace a strategy's Pine script",
+    subject: 'saves a new version and restarts its live session; open positions are left to you',
+    severity: 'warn',
+  },
+  {
+    match: /\/strategy\/\d+\/script\/alerts/i,
+    verb: "Change a script's alert routing",
+    subject: 'where its alerts are delivered — it does not trade',
+    severity: 'info',
+  },
+  {
+    match: /\/strategy\/import\b/i,
+    verb: 'Create a strategy from a script',
+    subject: 'lands Paused as a Draft; nothing trades until it is promoted',
+    severity: 'info',
+  },
+  {
+    match: /\/strategy\/\d+\/(start|stop)-paper-trading/i,
+    verb: 'Start or stop paper trading',
+    subject: 'paper executions only — nothing is sent to an account',
+    severity: 'info',
+  },
+  {
+    match: /\/strategy\/\d+\/submit-for-approval/i,
+    verb: 'Run the promotion gates',
+    subject: 'a pass leaves it Approved + Paused, which the promotion worker may auto-activate',
+    severity: 'warn',
+  },
+  {
+    match: /\/scripting\/(replay|libraries)/i,
+    methods: ['POST', 'PUT'],
+    verb: 'Run a replay or publish a Pine library',
+    subject: 'does not trade; a library update reaches every strategy that imports it',
+    severity: 'info',
+  },
   {
     match:
       /\/strategy\/.*(bulk-action|activate|pause|status)|Strategy\s*·\s*(Bulk|Update|Activate|Pause)/i,
@@ -147,6 +199,9 @@ export function humaniseBody(body: unknown): Array<{ label: string; value: strin
       const label = prefix ? `${prefix} · ${sentenceCase(key)}` : sentenceCase(key);
       if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
         walk(value as Record<string, unknown>, label);
+      } else if (isLongText(value)) {
+        // A whole Pine script in one row buried the rest of the card; it gets its own block.
+        rows.push({ label, value: `${lineCount(value)} lines of text — shown in full below` });
       } else {
         rows.push({ label, value: Array.isArray(value) ? value.join(', ') : String(value) });
       }
@@ -155,6 +210,39 @@ export function humaniseBody(body: unknown): Array<{ label: string; value: strin
 
   walk(body as Record<string, unknown>);
   return rows;
+}
+
+/**
+ * Multi-line or long string fields of a request body (a script, a template), unescaped, so
+ * the operator can read the exact text they are approving rather than a JSON string of \n.
+ */
+export function longTextFields(
+  body: unknown,
+): Array<{ label: string; text: string; lines: number }> {
+  if (body == null || typeof body !== 'object') return [];
+  const out: Array<{ label: string; text: string; lines: number }> = [];
+
+  const walk = (obj: Record<string, unknown>, prefix = '') => {
+    for (const [key, value] of Object.entries(obj)) {
+      const label = prefix ? `${prefix} · ${sentenceCase(key)}` : sentenceCase(key);
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        walk(value as Record<string, unknown>, label);
+      } else if (isLongText(value)) {
+        out.push({ label, text: value, lines: lineCount(value) });
+      }
+    }
+  };
+
+  walk(body as Record<string, unknown>);
+  return out;
+}
+
+function isLongText(value: unknown): value is string {
+  return typeof value === 'string' && (value.includes('\n') || value.length > 200);
+}
+
+function lineCount(text: string): number {
+  return text.split('\n').length;
 }
 
 function sentenceCase(key: string): string {

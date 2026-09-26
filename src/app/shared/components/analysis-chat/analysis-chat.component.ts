@@ -29,6 +29,7 @@ import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import {
   describeAction,
   humaniseBody,
+  longTextFields,
   type ActionImpact,
 } from '@shared/components/chat/action-impact';
 import { MarkdownCopyDirective } from '@shared/directives/markdown-copy.directive';
@@ -840,6 +841,12 @@ export function isCheckpointTurn(t: SpotAnalysisFollowUpTurnDto | null | undefin
                           </dl>
                         }
                       }
+                      @for (field of longFields(pa); track field.label) {
+                        <details class="raw-call long-text">
+                          <summary>{{ field.label }} ({{ field.lines }} lines)</summary>
+                          <pre class="tool-pre">{{ field.text }}</pre>
+                        </details>
+                      }
                       <details class="raw-call">
                         <summary>Raw call</summary>
                         <code class="action-call">{{ pa.method }} {{ pa.path }}</code>
@@ -1645,6 +1652,11 @@ export function isCheckpointTurn(t: SpotAnalysisFollowUpTurnDto | null | undefin
         margin: 0;
         color: var(--text-primary);
         overflow-wrap: anywhere;
+      }
+      .long-text .tool-pre {
+        max-height: 360px;
+        overflow: auto;
+        white-space: pre;
       }
       .raw-call > summary {
         cursor: pointer;
@@ -2514,6 +2526,18 @@ export class AnalysisChatComponent {
     if (!pa.body) return [];
     try {
       return humaniseBody(JSON.parse(pa.body));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Scripts and other long text in the body, shown as readable text rather than escaped JSON. */
+  protected longFields(pa: {
+    body: string | null;
+  }): Array<{ label: string; text: string; lines: number }> {
+    if (!pa.body) return [];
+    try {
+      return longTextFields(JSON.parse(pa.body));
     } catch {
       return [];
     }
