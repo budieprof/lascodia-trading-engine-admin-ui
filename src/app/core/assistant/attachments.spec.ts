@@ -23,6 +23,11 @@ describe('resolveMediaType', () => {
     expect(resolveMediaType(file('rows.csv', 'application/octet-stream'))).toBe('text/csv');
   });
 
+  it('accepts a Pine script, which no OS has a type for', () => {
+    expect(resolveMediaType(file('strategy.pine', ''))).toBe('text/plain');
+    expect(resolveMediaType(file('Breakout.PINE', 'application/octet-stream'))).toBe('text/plain');
+  });
+
   it('refuses what the assistant cannot read', () => {
     expect(resolveMediaType(file('doc.pdf', 'application/pdf'))).toBeNull();
     expect(resolveMediaType(file('sheet.xlsx', 'application/vnd.ms-excel'))).toBeNull();

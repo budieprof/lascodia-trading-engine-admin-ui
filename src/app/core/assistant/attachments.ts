@@ -53,6 +53,10 @@ const TEXT_EXTENSIONS = [
   '.yaml',
   '.yml',
   '.xml',
+  // Pine scripts: no OS knows the type, and the assistant loads them into a buffer to
+  // compile, import or edit a strategy.
+  '.pine',
+  '.pinescript',
 ];
 
 export const ACCEPT_ATTR = [...IMAGE_TYPES, ...TEXT_TYPES, ...TEXT_EXTENSIONS].join(',');
