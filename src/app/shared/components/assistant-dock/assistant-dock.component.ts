@@ -1,3 +1,4 @@
+import { AssistantTaskBarComponent } from './assistant-task-bar.component';
 import {
   DestroyRef,
   ChangeDetectionStrategy,
@@ -45,7 +46,7 @@ import { NotificationService } from '@core/notifications/notification.service';
   selector: 'app-assistant-dock',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [AnalysisChatComponent],
+  imports: [AnalysisChatComponent, AssistantTaskBarComponent],
   template: `
     @if (!dock.open()) {
       <button
@@ -174,6 +175,7 @@ import { NotificationService } from '@core/notifications/notification.service';
               <button type="button" class="retry" (click)="newChat()">Try again</button>
             </div>
           } @else if (dock.conversationId(); as id) {
+            <app-assistant-task-bar [sessionId]="id" />
             <app-analysis-chat
               class="dock-chat"
               [llmInvocationId]="id"

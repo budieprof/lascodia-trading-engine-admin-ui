@@ -42,9 +42,52 @@ function parseContext(json: string | null): unknown {
   }
 }
 
+/** One todo on an assistant task. */
+export interface AssistantTodo {
+  id: string;
+  text: string;
+  /** pending | in_progress | done | skipped | blocked */
+  status: string;
+  note?: string | null;
+}
+
+/** An admin-assistant long-running task (engine AssistantTaskDto). */
+export interface AssistantTaskDto {
+  id: number;
+  sessionLlmInvocationId: number;
+  goal: string;
+  /** Active | Waiting | Done | Failed | Cancelled */
+  status: string;
+  currentActivity?: string | null;
+  todos: AssistantTodo[];
+  activity: { atUtc: string; kind: string; text: string }[];
+  wakeCount: number;
+  maxWakes: number;
+  budgetUsd: number;
+  spentUsd: number;
+  waitingOnMonitorIds: number[];
+  createdAtUtc: string;
+  updatedAtUtc: string;
+  endedAtUtc?: string | null;
+  endReason?: string | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class AssistantService {
   private readonly api = inject(ApiService);
+
+  /** The conversation's long-running task (latest, live or ended); `data` is null when it has none. */
+  getTask(sessionId: number): Observable<ResponseData<AssistantTaskDto | null>> {
+    return this.api.get(`/market-data/assistant/session/${sessionId}/task`, { silent: true });
+  }
+
+  /** Stop the live task: it, every monitor it armed and every queued wake are cancelled. */
+  cancelTask(
+    sessionId: number,
+    reason?: string,
+  ): Observable<ResponseData<AssistantTaskDto | null>> {
+    return this.api.post(`/market-data/assistant/session/${sessionId}/task/cancel`, { reason });
+  }
 
   /** Open a new chat. Returns the anchor id, which is also its id on /conversations. */
   startSession(title = 'Assistant session'): Observable<ResponseData<AssistantSessionDto>> {
