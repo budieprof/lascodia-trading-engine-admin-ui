@@ -54,7 +54,12 @@ import { PageContextService } from '@core/assistant/page-context.service';
 import { UiCommandService } from '@core/assistant/ui-command.service';
 import { chartCommands } from '../../chart-commands';
 import type { EventMark } from '../../overlays/event-marks-renderer';
-import { profileWithValueArea, supportResistance } from '../../overlays/analysis-overlays';
+import {
+  profileWithValueArea,
+  supportResistance,
+  VOLUME_PROFILE_MODES,
+  type VolumeProfileMode,
+} from '../../overlays/analysis-overlays';
 import { marketStructure } from '../../overlays/market-structure';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import type { PriceOverlay } from '../../overlays/overlay-renderer';
@@ -67,8 +72,10 @@ import {
 } from '../../workspace/layout-store.service';
 import {
   DEFAULT_STYLE,
+  TOOL_GROUP_ORDER,
   TOOLS,
   toolFor,
+  type ToolSpec,
   type DashStyle,
   type Drawing,
   type DrawingKind,
@@ -126,7 +133,11 @@ const PAGE_BARS = 1500;
   imports: [FormsModule, DecimalPipe, DatePipe, ChartHostComponent],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
-  host: { '(keydown)': 'onKeydown($event)', tabindex: '0' },
+  host: {
+    '(keydown)': 'onKeydown($event)',
+    '(document:click)': 'closeRailFlyout()',
+    tabindex: '0',
+  },
 })
 export class ChartAnalysisPageComponent {
   private readonly pairs = inject(CurrencyPairsService);
@@ -180,6 +191,9 @@ export class ChartAnalysisPageComponent {
   // Derived from the loaded bars, not fetched. The chart host computes them; these are the
   // toggles the toolbar drives.
   readonly showVolumeProfile = signal(false);
+  readonly volumeProfileMode = signal<VolumeProfileMode>('visible');
+  readonly vpMenuOpen = signal(false);
+  readonly volumeProfileModes = VOLUME_PROFILE_MODES;
   readonly showSupportResistance = signal(false);
   readonly showStructure = signal(false);
 
@@ -350,15 +364,85 @@ export class ChartAnalysisPageComponent {
     { id: '8', label: '⊞⊞', panels: 7 },
   ];
 
+  /**
+   * The left rail, grouped as TradingView groups it: one button per family, the rest of the
+   * family in a flyout. Fifty-odd single buttons in a column was a scroll hunt.
+   */
   readonly toolGroups = computed(() => {
-    const groups: Array<{ name: string; tools: typeof TOOLS }> = [];
+    const byGroup = new Map<string, ToolSpec[]>();
     for (const t of TOOLS) {
-      const existing = groups.find((g) => g.name === t.group);
-      if (existing) (existing.tools as (typeof TOOLS)[number][]).push(t);
-      else groups.push({ name: t.group, tools: [t] as unknown as typeof TOOLS });
+      const list = byGroup.get(t.group) ?? [];
+      list.push(t);
+      byGroup.set(t.group, list);
     }
-    return groups;
+    const ordered = [
+      ...TOOL_GROUP_ORDER,
+      ...[...byGroup.keys()]
+        .filter((id) => !TOOL_GROUP_ORDER.some((g) => g.id === id))
+        .map((id) => ({ id: id as ToolSpec['group'], title: id })),
+    ];
+    return ordered
+      .filter((g) => byGroup.has(g.id))
+      .map((g) => ({ name: g.id, title: g.title, tools: byGroup.get(g.id)! }));
   });
+
+  /** Which tool each rail button currently shows — the family's last-used, as on TradingView. */
+  readonly railPick = signal<Record<string, DrawingKind>>({});
+  /** Group whose flyout is open, or null. */
+  readonly railFlyout = signal<string | null>(null);
+  /** Vertical offset of the open flyout, aligned to its rail button. */
+  readonly railFlyoutTop = signal(0);
+
+  railTool(group: { name: string; tools: readonly ToolSpec[] }): ToolSpec {
+    const kind = this.railPick()[group.name];
+    return group.tools.find((t) => t.kind === kind) ?? group.tools[0];
+  }
+
+  railGroupActive(group: { tools: readonly ToolSpec[] }): boolean {
+    const t = this.tool();
+    return t !== null && group.tools.some((x) => x.kind === t);
+  }
+
+  toggleRailFlyout(name: string, ev: MouseEvent): void {
+    ev.stopPropagation();
+    if (this.railFlyout() === name) {
+      this.railFlyout.set(null);
+      return;
+    }
+    const btn = (ev.currentTarget as HTMLElement).closest('.rail-slot') as HTMLElement | null;
+    const rail = btn?.closest('.chart-body') as HTMLElement | null;
+    if (btn && rail) {
+      this.railFlyoutTop.set(btn.getBoundingClientRect().top - rail.getBoundingClientRect().top);
+    }
+    this.railFlyout.set(name);
+  }
+
+  pickRailTool(group: string, kind: DrawingKind): void {
+    this.railPick.update((m) => ({ ...m, [group]: kind }));
+    this.railFlyout.set(null);
+    this.tool.set(kind);
+  }
+
+  closeRailFlyout(): void {
+    this.railFlyout.set(null);
+    this.vpMenuOpen.set(false);
+  }
+
+  /** Flyout contents for the open group. */
+  readonly openRailGroup = computed(() => {
+    const name = this.railFlyout();
+    return name ? (this.toolGroups().find((g) => g.name === name) ?? null) : null;
+  });
+
+  setVolumeProfileMode(mode: VolumeProfileMode): void {
+    this.volumeProfileMode.set(mode);
+    this.showVolumeProfile.set(true);
+    this.vpMenuOpen.set(false);
+  }
+
+  volumeProfileModeLabel(): string {
+    return VOLUME_PROFILE_MODES.find((m) => m.id === this.volumeProfileMode())?.label ?? '';
+  }
 
   readonly precision = computed(() => {
     const pair = this.symbols().find((p) => p.symbol === this.symbol());
@@ -1542,6 +1626,7 @@ export class ChartAnalysisPageComponent {
       return;
     }
     if (ev.key === 'Escape') {
+      this.railFlyout.set(null);
       this.tool.set(null);
       this.drawings.selectedId.set(null);
       return;

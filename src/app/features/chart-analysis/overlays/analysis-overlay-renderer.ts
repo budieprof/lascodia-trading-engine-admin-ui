@@ -1,6 +1,6 @@
 import type { CanvasRenderingTarget2D } from 'fancy-canvas';
 import type { ISeriesApi, ISeriesPrimitive, SeriesType, Time } from 'lightweight-charts';
-import type { SrLevel, VolumeProfileResult } from './analysis-overlays';
+import type { PeriodProfile, SrLevel, VolumeProfileResult } from './analysis-overlays';
 import type { MarketStructure } from './market-structure';
 
 /**
@@ -28,8 +28,31 @@ function nudge(y: number, placed: number[], gap = 15): number {
   return out;
 }
 
+/**
+ * One profile row, split into up (teal) and down (pink) volume the way TradingView paints its
+ * profiles. Rows inside the value area are drawn stronger than the tails.
+ */
+export function paintBin(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  bin: { volume: number; up?: number; down?: number },
+  inValue: boolean,
+): void {
+  ctx.globalAlpha = inValue ? 0.55 : 0.25;
+  const up = bin.up ?? bin.volume;
+  const upW = bin.volume > 0 ? (up / bin.volume) * w : w;
+  ctx.fillStyle = '#26A69A';
+  ctx.fillRect(x, y, upW, h);
+  ctx.fillStyle = '#EF5350';
+  ctx.fillRect(x + upW, y, w - upW, h);
+}
+
 export class AnalysisOverlayRenderer implements ISeriesPrimitive<Time> {
   private profile: VolumeProfileResult | null = null;
+  private periods: readonly PeriodProfile[] = [];
   private levels: readonly SrLevel[] = [];
   private structure: MarketStructure | null = null;
   private requestUpdate?: () => void;
@@ -37,6 +60,8 @@ export class AnalysisOverlayRenderer implements ISeriesPrimitive<Time> {
   constructor(
     private readonly series: () => ISeriesApi<SeriesType> | null,
     private readonly precision: () => number,
+    /** Bar time (UTC ms) → x, or null when the time scale cannot place it. */
+    private readonly timeToX: (ms: number) => number | null = () => null,
   ) {}
 
   attached(param: { requestUpdate: () => void }): void {
@@ -49,6 +74,12 @@ export class AnalysisOverlayRenderer implements ISeriesPrimitive<Time> {
 
   setProfile(profile: VolumeProfileResult | null): void {
     this.profile = profile;
+    this.requestUpdate?.();
+  }
+
+  /** Session / periodic profiles — each drawn inside its own time span. */
+  setPeriodProfiles(periods: readonly PeriodProfile[]): void {
+    this.periods = periods;
     this.requestUpdate?.();
   }
 
@@ -90,6 +121,7 @@ export class AnalysisOverlayRenderer implements ISeriesPrimitive<Time> {
       // every level inside them.
       this.drawStructure(ctx, series, width);
       this.drawProfile(ctx, series, width, height);
+      this.drawPeriodProfiles(ctx, series, width, height);
       this.drawLevels(ctx, series, width);
       ctx.restore();
     });
@@ -115,35 +147,106 @@ export class AnalysisOverlayRenderer implements ISeriesPrimitive<Time> {
       const y = series.priceToCoordinate(bin.price);
       if (y === null) continue;
       const inValue = bin.price >= profile.valueAreaLow && bin.price <= profile.valueAreaHigh;
-      ctx.globalAlpha = inValue ? 0.42 : 0.2;
-      ctx.fillStyle = '#2962FF';
       const w = (bin.volume / profile.peak) * maxWidth;
       // A 1px gap between rows: without it adjacent buckets fuse into one slab and the
-      // profile stops reading as a distribution. Alpha is raised to compensate — thin bars
-      // at the old opacity nearly vanish.
-      ctx.fillRect(width - w, y - binHeight / 2, w, Math.max(1, binHeight - 1));
+      // profile stops reading as a distribution.
+      paintBin(ctx, width - w, y - binHeight / 2, w, Math.max(1, binHeight - 1), bin, inValue);
     }
+    ctx.globalAlpha = 1;
+    this.valueAreaLines(ctx, series, profile, width - maxWidth, width, 'right');
+    ctx.restore();
+  }
 
-    const pocY = series.priceToCoordinate(profile.poc);
-    if (pocY !== null) {
+  private drawPeriodProfiles(
+    ctx: CanvasRenderingContext2D,
+    series: ISeriesApi<SeriesType>,
+    width: number,
+    height: number,
+  ): void {
+    if (this.periods.length === 0) return;
+    ctx.save();
+    for (const period of this.periods) {
+      const x0 = this.timeToX(period.t0);
+      const x1 = this.timeToX(period.t1);
+      if (x0 === null || x1 === null) continue;
+      if (x1 < 0 || x0 > width) continue;
+      const span = Math.max(4, x1 - x0);
+      const profile = period.profile;
+      if (profile.peak <= 0) continue;
+      const maxWidth = span * 0.7;
+      const binHeight = this.binHeight(series, profile, height);
+
+      // Faint frame over the value area, so each period's accepted range reads at a glance.
+      const vaTop = series.priceToCoordinate(profile.valueAreaHigh);
+      const vaBottom = series.priceToCoordinate(profile.valueAreaLow);
+      if (vaTop !== null && vaBottom !== null) {
+        ctx.globalAlpha = 0.06;
+        ctx.fillStyle = '#2962FF';
+        ctx.fillRect(
+          x0,
+          Math.min(vaTop, vaBottom) - binHeight / 2,
+          span,
+          Math.abs(vaBottom - vaTop) + binHeight,
+        );
+      }
+      for (const bin of profile.bins) {
+        if (bin.volume <= 0) continue;
+        const y = series.priceToCoordinate(bin.price);
+        if (y === null) continue;
+        const inValue = bin.price >= profile.valueAreaLow && bin.price <= profile.valueAreaHigh;
+        const w = (bin.volume / profile.peak) * maxWidth;
+        paintBin(ctx, x0, y - binHeight / 2, w, Math.max(1, binHeight - 1), bin, inValue);
+      }
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = '#FF6D00';
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([]);
-      ctx.beginPath();
-      ctx.moveTo(width - maxWidth, pocY);
-      ctx.lineTo(width, pocY);
-      ctx.stroke();
-      this.tag(
-        ctx,
-        `POC ${profile.poc.toFixed(this.precision())}`,
-        width - maxWidth - 4,
-        pocY,
-        '#FF6D00',
-        'right',
-      );
+      const pocY = series.priceToCoordinate(profile.poc);
+      if (pocY !== null) {
+        ctx.strokeStyle = '#FF6D00';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(x0, pocY);
+        ctx.lineTo(x0 + span, pocY);
+        ctx.stroke();
+      }
     }
     ctx.restore();
+  }
+
+  /** POC (solid) and VAH/VAL (dashed) across [x0, x1], with tags on `side`. */
+  private valueAreaLines(
+    ctx: CanvasRenderingContext2D,
+    series: ISeriesApi<SeriesType>,
+    profile: VolumeProfileResult,
+    x0: number,
+    x1: number,
+    side: 'left' | 'right',
+  ): void {
+    const placed: number[] = [];
+    const lines: Array<[string, number, string, number[]]> = [
+      ['POC', profile.poc, '#FF6D00', []],
+      ['VAH', profile.valueAreaHigh, '#2962FF', [4, 3]],
+      ['VAL', profile.valueAreaLow, '#2962FF', [4, 3]],
+    ];
+    for (const [name, price, colour, dash] of lines) {
+      const y = series.priceToCoordinate(price);
+      if (y === null) continue;
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = name === 'POC' ? 1.5 : 1;
+      ctx.setLineDash(dash);
+      ctx.beginPath();
+      ctx.moveTo(x0, y);
+      ctx.lineTo(x1, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      this.tag(
+        ctx,
+        `${name} ${price.toFixed(this.precision())}`,
+        side === 'right' ? x0 - 4 : x1 + 4,
+        nudge(y, placed),
+        colour,
+        side,
+      );
+    }
   }
 
   /**

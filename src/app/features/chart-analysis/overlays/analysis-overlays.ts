@@ -89,6 +89,72 @@ export function profileWithValueArea(
   };
 }
 
+/** How the chart-level volume profile slices the bars, as TradingView's VP family does. */
+export type VolumeProfileMode = 'visible' | 'session' | 'week' | 'month';
+
+export const VOLUME_PROFILE_MODES: ReadonlyArray<{
+  id: VolumeProfileMode;
+  label: string;
+  hint: string;
+}> = [
+  {
+    id: 'visible',
+    label: 'Visible Range',
+    hint: 'One profile of the bars on screen, re-profiled as you pan',
+  },
+  { id: 'session', label: 'Session', hint: 'One profile per trading day (UTC)' },
+  { id: 'week', label: 'Periodic · Week', hint: 'One profile per week (Monday UTC)' },
+  { id: 'month', label: 'Periodic · Month', hint: 'One profile per calendar month (UTC)' },
+];
+
+export interface PeriodProfile {
+  /** First and last bar time (ms) in the period. */
+  t0: number;
+  t1: number;
+  profile: VolumeProfileResult;
+}
+
+/** Start of the period `time` falls in, in UTC ms. */
+export function periodStart(time: number, mode: Exclude<VolumeProfileMode, 'visible'>): number {
+  const d = new Date(time);
+  if (mode === 'month') return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+  const day = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  if (mode === 'session') return day;
+  // ISO weeks start Monday; getUTCDay() is 0 on Sunday. FX's Sunday-evening open is folded
+  // into the week it trades into, not left as a one-candle profile of its own.
+  const dow = d.getUTCDay();
+  const back = dow === 0 ? -1 : dow - 1;
+  return day - back * 86_400_000;
+}
+
+/**
+ * One profile per session / week / month over `bars`.
+ *
+ * <p>Bins are sized per period rather than once for the whole chart: a quiet Asian session
+ * and a busy NFP day each get a distribution fine enough to show where inside ITS range the
+ * trade happened. Periods with too few bars to say anything are skipped.</p>
+ */
+export function periodProfiles(
+  bars: readonly Ohlc[],
+  mode: Exclude<VolumeProfileMode, 'visible'>,
+  minBars = 3,
+): PeriodProfile[] {
+  const out: PeriodProfile[] = [];
+  let start = 0;
+  for (let i = 1; i <= bars.length; i++) {
+    const boundary =
+      i === bars.length || periodStart(bars[i].time, mode) !== periodStart(bars[start].time, mode);
+    if (!boundary) continue;
+    const slice = bars.slice(start, i);
+    if (slice.length >= minBars) {
+      const profile = profileWithValueArea(slice, Math.max(24, Math.min(72, slice.length * 2)));
+      if (profile) out.push({ t0: slice[0].time, t1: slice[slice.length - 1].time, profile });
+    }
+    start = i;
+  }
+  return out;
+}
+
 // ── Support and resistance ───────────────────────────────────────────────────
 
 export interface SrLevel {

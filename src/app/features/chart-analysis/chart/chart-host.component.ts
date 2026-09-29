@@ -51,7 +51,9 @@ import type { DrawingKind } from '../drawings/model';
 import { OverlayRenderer, type PriceOverlay } from '../overlays/overlay-renderer';
 import { AnalysisOverlayRenderer } from '../overlays/analysis-overlay-renderer';
 import {
+  periodProfiles,
   profileWithValueArea,
+  type VolumeProfileMode,
   supportResistance,
   type SrLevel,
 } from '../overlays/analysis-overlays';
@@ -169,6 +171,8 @@ export class ChartHostComponent implements OnDestroy {
   readonly showVolume = input<boolean>(true);
   /** Volume-by-price histogram down the right edge, with POC and value area. */
   readonly showVolumeProfile = input<boolean>(false);
+  /** Visible range (one profile, right edge) or one profile per session / week / month. */
+  readonly volumeProfileMode = input<VolumeProfileMode>('visible');
   /** Auto-detected support/resistance from swing pivots. */
   readonly showSupportResistance = input<boolean>(false);
   /** Balance range, value area, stop pools and the events that formed them. */
@@ -222,6 +226,10 @@ export class ChartHostComponent implements OnDestroy {
   private readonly analysisRenderer = new AnalysisOverlayRenderer(
     () => this.price,
     () => this.precision(),
+    (ms) => {
+      const x = this.chart?.timeScale().timeToCoordinate(asTime(ms + this.timezoneShiftMs(ms)));
+      return x === null || x === undefined ? null : Number(x);
+    },
   );
   private markerApi: ISeriesMarkersPluginApi<Time> | null = null;
   private readonly eventRenderer = new EventMarksRenderer(() => this.chart);
@@ -309,6 +317,7 @@ export class ChartHostComponent implements OnDestroy {
     effect(() => {
       this.bars();
       this.showVolumeProfile();
+      this.volumeProfileMode();
       this.showSupportResistance();
       this.showStructure();
       untracked(() => this.recomputeAnalysis());
@@ -370,13 +379,22 @@ export class ChartHostComponent implements OnDestroy {
     const wantStructure = this.showStructure();
     if (!wantProfile && !wantLevels && !wantStructure) {
       this.analysisRenderer.setProfile(null);
+      this.analysisRenderer.setPeriodProfiles([]);
       this.analysisRenderer.setLevels([]);
       this.analysisRenderer.setStructure(null);
       return;
     }
 
     const window = this.visibleBars(bars);
-    this.analysisRenderer.setProfile(wantProfile ? profileWithValueArea(window) : null);
+    const mode = this.volumeProfileMode();
+    this.analysisRenderer.setProfile(
+      wantProfile && mode === 'visible' ? profileWithValueArea(window) : null,
+    );
+    // Period profiles cover every loaded bar — the renderer culls off-screen periods, and
+    // re-slicing on pan would split a session in two at the viewport edge.
+    this.analysisRenderer.setPeriodProfiles(
+      wantProfile && mode !== 'visible' ? periodProfiles(bars, mode) : [],
+    );
     this.analysisRenderer.setLevels(wantLevels ? supportResistance(window) : []);
     this.analysisRenderer.setStructure(wantStructure ? marketStructure(window) : null);
   }

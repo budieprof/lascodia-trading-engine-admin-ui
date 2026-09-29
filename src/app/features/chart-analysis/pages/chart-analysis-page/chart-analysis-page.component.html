@@ -147,15 +147,49 @@
       standard OHLCV proxy and must not read as measured order flow.
     -->
     <div class="overlay-picker" role="group" aria-label="Analysis overlays">
-      <button
-        type="button"
-        class="tool"
-        [class.active]="showVolumeProfile()"
-        (click)="showVolumeProfile.set(!showVolumeProfile())"
-        title="Volume profile — volume by price for the loaded window, with POC and value area"
-      >
-        ▤ VP
-      </button>
+      <span class="vp-split">
+        <button
+          type="button"
+          class="tool"
+          [class.active]="showVolumeProfile()"
+          (click)="showVolumeProfile.set(!showVolumeProfile())"
+          [title]="'Volume profile — ' + volumeProfileModeLabel() + ', with POC and value area'"
+        >
+          ▤ VP{{
+            showVolumeProfile() && volumeProfileMode() !== 'visible'
+              ? ' · ' + volumeProfileModeLabel()
+              : ''
+          }}
+        </button>
+        <button
+          type="button"
+          class="tool vp-caret"
+          (click)="$event.stopPropagation(); vpMenuOpen.set(!vpMenuOpen())"
+          title="Volume profile type"
+          aria-haspopup="menu"
+        >
+          ▾
+        </button>
+        @if (vpMenuOpen()) {
+          <div class="vp-menu" role="menu" (click)="$event.stopPropagation()">
+            @for (m of volumeProfileModes; track m.id) {
+              <button
+                type="button"
+                role="menuitem"
+                class="vp-menu-item"
+                [class.active]="showVolumeProfile() && volumeProfileMode() === m.id"
+                (click)="setVolumeProfileMode(m.id)"
+                [title]="m.hint"
+              >
+                {{ m.label }}
+              </button>
+            }
+            <div class="vp-menu-note">
+              Fixed Range &amp; Anchored VP are drawing tools — Volume-based group on the left rail.
+            </div>
+          </div>
+        }
+      </span>
       <button
         type="button"
         class="tool"
@@ -403,16 +437,28 @@
         ⌖
       </button>
       @for (group of toolGroups(); track group.name) {
-        <div class="rail-group">
-          @for (t of group.tools; track t.kind) {
+        @let current = railTool(group);
+        <div class="rail-slot" [class.open]="railFlyout() === group.name">
+          <button
+            type="button"
+            class="rail-tool"
+            [class.active]="tool() === current.kind"
+            (click)="selectTool(current.kind)"
+            [title]="current.label"
+          >
+            {{ current.icon }}
+          </button>
+          @if (group.tools.length > 1) {
             <button
               type="button"
-              class="rail-tool"
-              [class.active]="tool() === t.kind"
-              (click)="selectTool(t.kind)"
-              [title]="t.label"
+              class="rail-caret"
+              [class.active]="railGroupActive(group)"
+              (click)="toggleRailFlyout(group.name, $event)"
+              [title]="group.title"
+              [attr.aria-expanded]="railFlyout() === group.name"
+              aria-haspopup="menu"
             >
-              {{ t.icon }}
+              ›
             </button>
           }
         </div>
@@ -428,6 +474,29 @@
         </button>
       }
     </nav>
+
+    @if (openRailGroup(); as g) {
+      <div
+        class="rail-flyout"
+        role="menu"
+        [style.top.px]="railFlyoutTop()"
+        (click)="$event.stopPropagation()"
+      >
+        <div class="rail-flyout-title">{{ g.title }}</div>
+        @for (t of g.tools; track t.kind) {
+          <button
+            type="button"
+            role="menuitem"
+            class="rail-flyout-item"
+            [class.active]="tool() === t.kind"
+            (click)="pickRailTool(g.name, t.kind)"
+          >
+            <span class="icon">{{ t.icon }}</span>
+            <span>{{ t.label }}</span>
+          </button>
+        }
+      </div>
+    }
 
     <div class="chart-grid" [attr.data-layout]="splitLayout()">
       <!-- Chart surface with the floating legend, as TradingView lays it out. -->
@@ -497,6 +566,7 @@
           [minEventImpact]="minEventImpact()"
           [boxSizeAtr]="boxSizeAtr()"
           [showVolumeProfile]="showVolumeProfile()"
+          [volumeProfileMode]="volumeProfileMode()"
           [showSupportResistance]="showSupportResistance()"
           [showStructure]="showStructure()"
           [symbol]="symbol()"

@@ -45,3 +45,55 @@ describe('volumeProfileSpan', () => {
     expect(span!.t0).toBe(span!.t1);
   });
 });
+
+import { volumeProfile } from '../indicators/math';
+import { periodProfiles, periodStart } from '../overlays/analysis-overlays';
+
+describe('volume profile up/down split', () => {
+  it('attributes each bar to up or down by its own direction, and they sum to volume', () => {
+    const bins = volumeProfile(
+      [
+        { time: 0, open: 1, high: 2, low: 1, close: 2, volume: 100 },
+        { time: 1, open: 2, high: 2, low: 1, close: 1, volume: 40 },
+      ],
+      4,
+    );
+    const up = bins.reduce((a, b) => a + b.up, 0);
+    const down = bins.reduce((a, b) => a + b.down, 0);
+    expect(up).toBeCloseTo(100);
+    expect(down).toBeCloseTo(40);
+    for (const b of bins) expect(b.up + b.down).toBeCloseTo(b.volume);
+  });
+});
+
+describe('periodProfiles', () => {
+  const H = 3_600_000;
+  // Mon 2026-09-28 00:00 UTC, 48 hourly bars → two sessions, one week.
+  const t0 = Date.UTC(2026, 8, 28);
+  const bars = Array.from({ length: 48 }, (_, i) => ({
+    time: t0 + i * H,
+    open: 1 + i * 0.001,
+    high: 1.002 + i * 0.001,
+    low: 0.999 + i * 0.001,
+    close: 1.001 + i * 0.001,
+    volume: 10,
+  }));
+
+  it('session: one profile per UTC day, bounded by that day', () => {
+    const ps = periodProfiles(bars, 'session');
+    expect(ps).toHaveLength(2);
+    expect(ps[0].t0).toBe(t0);
+    expect(ps[0].t1).toBe(t0 + 23 * H);
+    expect(ps[1].t0).toBe(t0 + 24 * H);
+  });
+
+  it('week: both days fall in one profile', () => {
+    expect(periodProfiles(bars, 'week')).toHaveLength(1);
+  });
+
+  it('week starts Monday; Sunday folds into the following week', () => {
+    const sunday = Date.UTC(2026, 8, 27, 22);
+    expect(periodStart(sunday, 'week')).toBe(t0);
+    expect(periodStart(t0 + 5 * 24 * H, 'week')).toBe(t0);
+  });
+});

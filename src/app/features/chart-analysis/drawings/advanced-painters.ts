@@ -1,5 +1,7 @@
 import { ELLIOTT_LABELS, FIB_LEVELS, FIB_RADII, GANN_RATIOS, type Drawing } from './model';
 import { rectOf, type Pt } from './geometry';
+import { profileWithValueArea } from '../overlays/analysis-overlays';
+import { paintBin } from '../overlays/analysis-overlay-renderer';
 
 /**
  * Painters for the analytical tool families — pitchforks, Gann, the extended
@@ -28,7 +30,14 @@ export interface PaintCtx {
    * series it is drawn over. The profiles are the exception because a volume
    * histogram IS the data; there is no geometric construction to use instead.
    */
-  bars?: readonly { time: number; high: number; low: number; close: number; volume: number }[];
+  bars?: readonly {
+    time: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+  }[];
   /** Screen x → time (ms). The inverse of projection, for bar counting. */
   timeAt?: (x: number) => number | null;
 }
@@ -940,32 +949,18 @@ export function paintVolumeProfile(p: PaintCtx, mode: 'anchored' | 'fixed'): voi
   if (inRange.length === 0) return;
 
   const toX = mode === 'fixed' ? (pts[1]?.x ?? fromX) : width;
+  const left = mode === 'fixed' ? Math.min(fromX, toX) : fromX;
+  const right = mode === 'fixed' ? Math.max(fromX, toX) : width;
 
-  // Bucket over the price range actually traded in the window, not the
-  // viewport: a profile that changes shape when you pan is not a profile.
-  let lo = Infinity;
-  let hi = -Infinity;
-  for (const b of inRange) {
-    lo = Math.min(lo, b.low);
-    hi = Math.max(hi, b.high);
-  }
-  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi === lo) return;
+  // The SAME profile the VP overlay uses — volume spread across each bar's high-low range,
+  // split up/down, with a 70% value area. The drawing used to bucket at the close, so the
+  // tool and the overlay disagreed about where the POC was on the same bars.
+  const profile = profileWithValueArea(inRange);
+  if (!profile || profile.peak <= 0) return;
 
-  const BUCKETS = 48;
-  const buckets = new Array<number>(BUCKETS).fill(0);
-  for (const b of inRange) {
-    const idx = Math.min(BUCKETS - 1, Math.floor(((b.close - lo) / (hi - lo)) * BUCKETS));
-    if (idx >= 0) buckets[idx] += b.volume;
-  }
-  const peak = Math.max(...buckets);
-  if (peak <= 0) return;
-  const pocIndex = buckets.indexOf(peak);
-
-  // Map bucket index → screen y by inverting priceAt over the viewport. The
-  // renderer gives us price→y only one way, so walk the pane once to build the
-  // mapping rather than assuming a linear scale (which log mode would break).
+  // Price → y by inverting priceAt over the pane (the renderer only exposes y → price).
+  // Binary search rather than assuming a linear scale, which log mode would break.
   const yForPrice = (price: number): number | null => {
-    // Binary search the pane for the y whose price matches. ~11 iterations.
     let top = 0;
     let bottom = height;
     const pTop = priceAt(top);
@@ -976,46 +971,63 @@ export function paintVolumeProfile(p: PaintCtx, mode: 'anchored' | 'fixed'): voi
       const mid = (top + bottom) / 2;
       const pm = priceAt(mid);
       if (pm === null) return null;
-      // Price decreases as y increases.
       if (pm > price) top = mid;
       else bottom = mid;
     }
     return (top + bottom) / 2;
   };
 
-  const maxBarWidth = Math.min(180, Math.abs(toX - fromX) || 180);
-  const originX = mode === 'fixed' ? Math.min(fromX, toX) : fromX;
+  const rangeW = Math.max(1, right - left);
+  // TradingView's default: rows reach 30% of the range width. An anchored profile has no
+  // right edge of its own, so it is capped in pixels instead.
+  const maxBarWidth = mode === 'fixed' ? Math.max(40, rangeW * 0.3) : Math.min(180, rangeW * 0.3);
+  const step = profile.bins.length > 1 ? profile.bins[1].price - profile.bins[0].price : 0;
 
   ctx.save();
   ctx.setLineDash([]);
-  for (let i = 0; i < BUCKETS; i++) {
-    if (buckets[i] <= 0) continue;
-    const priceLo = lo + ((hi - lo) * i) / BUCKETS;
-    const priceHi = lo + ((hi - lo) * (i + 1)) / BUCKETS;
-    const yTop = yForPrice(priceHi);
-    const yBottom = yForPrice(priceLo);
+
+  // Range frame: the window the profile describes, from its high to its low.
+  const hiY = yForPrice(profile.bins[profile.bins.length - 1].price + step / 2);
+  const loY = yForPrice(profile.bins[0].price - step / 2);
+  if (mode === 'fixed' && hiY !== null && loY !== null) {
+    ctx.globalAlpha = 0.05;
+    ctx.fillStyle = p.drawing.style.color;
+    ctx.fillRect(left, Math.min(hiY, loY), rangeW, Math.abs(loY - hiY));
+    ctx.globalAlpha = 0.4;
+    ctx.strokeStyle = p.drawing.style.color;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(left, Math.min(hiY, loY), rangeW, Math.abs(loY - hiY));
+  }
+
+  for (const bin of profile.bins) {
+    if (bin.volume <= 0) continue;
+    const yTop = yForPrice(bin.price + step / 2);
+    const yBottom = yForPrice(bin.price - step / 2);
     if (yTop === null || yBottom === null) continue;
     const h = Math.max(1, Math.abs(yBottom - yTop) - 1);
-    const w = (buckets[i] / peak) * maxBarWidth;
-    ctx.globalAlpha = i === pocIndex ? 0.75 : 0.3;
-    ctx.fillStyle = p.drawing.style.color;
-    ctx.fillRect(originX, Math.min(yTop, yBottom), w, h);
+    const w = (bin.volume / profile.peak) * maxBarWidth;
+    const inValue = bin.price >= profile.valueAreaLow && bin.price <= profile.valueAreaHigh;
+    paintBin(ctx, left, Math.min(yTop, yBottom), w, h, bin, inValue);
   }
   ctx.globalAlpha = 1;
 
-  // Label the Point of Control — the level the window actually transacted at.
-  const pocPrice = lo + ((hi - lo) * (pocIndex + 0.5)) / BUCKETS;
-  const pocY = yForPrice(pocPrice);
-  if (pocY !== null) {
-    ctx.setLineDash([4, 3]);
-    ctx.strokeStyle = p.drawing.style.color;
-    line(ctx, { x: originX, y: pocY }, { x: originX + maxBarWidth, y: pocY });
-    label(
-      ctx,
-      `POC ${pocPrice.toFixed(precision)}`,
-      { x: originX + maxBarWidth + 40, y: pocY },
-      p.drawing.style.color,
-    );
+  // POC across the whole range; VAH/VAL dashed. Labels sit past the right edge.
+  const levels: Array<[string, number, string, number[]]> = [
+    ['POC', profile.poc, '#FF6D00', []],
+    ['VAH', profile.valueAreaHigh + step / 2, p.drawing.style.color, [4, 3]],
+    ['VAL', profile.valueAreaLow - step / 2, p.drawing.style.color, [4, 3]],
+  ];
+  const lineEnd = mode === 'fixed' ? right : left + maxBarWidth;
+  for (const [name, price, colour, dash] of levels) {
+    const y = yForPrice(price);
+    if (y === null) continue;
+    ctx.setLineDash(dash);
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = name === 'POC' ? 1.5 : 1;
+    line(ctx, { x: left, y }, { x: lineEnd, y });
+    if (p.drawing.style.showLabels) {
+      label(ctx, `${name} ${price.toFixed(precision)}`, { x: lineEnd + 40, y }, colour);
+    }
   }
   ctx.restore();
 }
