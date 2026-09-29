@@ -144,12 +144,54 @@ interface IndicatorSeries {
 @Component({
   selector: 'app-chart-host',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `<div class="chart-host" #container></div>`,
+  template: `<div class="chart-host" #container></div>
+    @if (holdTip(); as tip) {
+      <div
+        class="hold-tip"
+        [style.left.px]="tip.x"
+        [style.top.px]="tip.y"
+        role="tooltip"
+        aria-live="polite"
+      >
+        <div class="row date">{{ tip.date }}</div>
+        @for (r of tip.rows; track r.label) {
+          <div class="row">
+            <span>{{ r.label }}</span
+            ><b [style.color]="r.color">{{ r.value }}</b>
+          </div>
+        }
+      </div>
+    }`,
   styles: [
     `
       .chart-host {
         position: absolute;
         inset: 0;
+      }
+      .hold-tip {
+        position: absolute;
+        z-index: 30;
+        min-width: 170px;
+        padding: 8px 10px;
+        background: var(--surface, #fff);
+        border: 1px solid var(--border, #e6e9ef);
+        border-radius: 6px;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14);
+        font-size: 12px;
+        pointer-events: none;
+      }
+      .hold-tip .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        line-height: 20px;
+      }
+      .hold-tip .date {
+        color: var(--text-muted, #787b86);
+      }
+      .hold-tip b {
+        font-weight: 500;
+        font-variant-numeric: tabular-nums;
       }
     `,
   ],
@@ -216,6 +258,109 @@ export class ChartHostComponent implements OnDestroy {
   private indicatorSeries: IndicatorSeries[] = [];
   private resizeObserver: ResizeObserver | null = null;
   private readonly loadMorePending = signal(false);
+  /**
+   * Press-and-hold values tooltip, as TradingView's "Values tooltip on long press": hold the
+   * pointer still on the chart and the bar under it opens in a card that follows the
+   * crosshair until release. A drag before the delay is a pan and never opens it.
+   */
+  readonly holdTip = signal<{
+    x: number;
+    y: number;
+    date: string;
+    rows: Array<{ label: string; value: string; color: string }>;
+  } | null>(null);
+  private holdTimer: ReturnType<typeof setTimeout> | null = null;
+  private holdOrigin: { x: number; y: number } | null = null;
+  private holding = false;
+  private lastSnapshot: LegendSnapshot | null = null;
+  private lastPointer = { x: 0, y: 0 };
+
+  private holdBoundTo: HTMLElement | null = null;
+  private bindHold(el: HTMLElement): void {
+    if (this.holdBoundTo === el) return;
+    this.holdBoundTo = el;
+    const pos = (ev: PointerEvent) => {
+      const r = el.getBoundingClientRect();
+      return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+    };
+    el.addEventListener('pointerdown', (ev) => {
+      // An armed drawing tool owns the press; so does any button but the primary.
+      if (ev.button !== 0 || this.tool() !== null) return;
+      this.cancelHold();
+      this.holdOrigin = pos(ev);
+      this.lastPointer = this.holdOrigin;
+      this.holdTimer = setTimeout(() => {
+        this.holdTimer = null;
+        this.holding = true;
+        this.renderHoldTip();
+      }, 350);
+    });
+    el.addEventListener('pointermove', (ev) => {
+      const p = pos(ev);
+      this.lastPointer = p;
+      if (this.holdTimer && this.holdOrigin) {
+        if (Math.hypot(p.x - this.holdOrigin.x, p.y - this.holdOrigin.y) > 5) this.cancelHold();
+      } else if (this.holding) {
+        this.renderHoldTip();
+      }
+    });
+    for (const type of ['pointerup', 'pointercancel', 'pointerleave'] as const) {
+      el.addEventListener(type, () => this.cancelHold());
+    }
+  }
+
+  private cancelHold(): void {
+    if (this.holdTimer) clearTimeout(this.holdTimer);
+    this.holdTimer = null;
+    this.holdOrigin = null;
+    this.holding = false;
+    this.holdTip.set(null);
+  }
+
+  private renderHoldTip(): void {
+    const s = this.lastSnapshot;
+    if (!this.holding || !s || s.time === null) return;
+    const dp = this.precision();
+    const fmt = (v: number | null) => (v === null ? '—' : v.toFixed(dp));
+    const change = s.close !== null && s.open !== null ? s.close - s.open : null;
+    const pct = change !== null && s.open ? (change / s.open) * 100 : null;
+    const up = change === null || change >= 0;
+    const tone = up ? '#26A69A' : '#EF5350';
+    const shifted = new Date(s.time + this.timezoneShiftMs(s.time));
+    const date = shifted.toISOString().replace('T', ' ').slice(0, 16);
+    const rows = [
+      { label: 'Open', value: fmt(s.open), color: tone },
+      { label: 'High', value: fmt(s.high), color: tone },
+      { label: 'Low', value: fmt(s.low), color: tone },
+      { label: 'Close', value: fmt(s.close), color: tone },
+      {
+        label: 'Change',
+        value:
+          change === null
+            ? '—'
+            : `${change >= 0 ? '+' : ''}${change.toFixed(dp)} (${(pct ?? 0) >= 0 ? '+' : ''}${(pct ?? 0).toFixed(2)}%)`,
+        color: tone,
+      },
+      { label: 'Vol', value: s.volume === null ? '—' : s.volume.toLocaleString(), color: tone },
+      ...s.indicators.flatMap((ind) =>
+        ind.values.map((v) => ({
+          label: ind.values.length > 1 ? `${ind.label} ${v.title}` : ind.label,
+          value: v.value === null ? '—' : v.value.toFixed(Math.min(dp, 4)),
+          color: v.color,
+        })),
+      ),
+    ];
+    // Beside the pointer, flipped to the other side near the right/bottom edges so the card
+    // never covers the candle being read or runs off the pane.
+    const el = this.container().nativeElement;
+    const W = 200;
+    const H = 24 + rows.length * 20;
+    const { x, y } = this.lastPointer;
+    const left = x + 16 + W > el.clientWidth ? x - 16 - W : x + 16;
+    const top = Math.max(4, Math.min(y - H / 2, el.clientHeight - H - 4));
+    this.holdTip.set({ x: left, y: top, date, rows });
+  }
+
   /** Bars currently on the chart, for legend lookups by time. */
   private plotted: Bar[] = [];
   private computedCache = new Map<string, Record<string, Array<number | null>>>();
@@ -523,6 +668,7 @@ export class ChartHostComponent implements OnDestroy {
     this.resizeObserver.observe(el);
 
     this.chart.subscribeCrosshairMove((param) => this.emitLegend(param));
+    this.bindHold(el);
 
     this.controller.attach(this.chart, el);
     this.controller.onToolComplete = () => this.toolComplete.emit();
@@ -1040,7 +1186,7 @@ export class ChartHostComponent implements OnDestroy {
       })
       .filter((v): v is NonNullable<typeof v> => v !== null);
 
-    this.legend.emit({
+    this.emitSnapshot({
       time: bar.time,
       open: bar.open,
       high: bar.high,
@@ -1050,6 +1196,12 @@ export class ChartHostComponent implements OnDestroy {
       changePct: prev && prev.close !== 0 ? ((bar.close - prev.close) / prev.close) * 100 : null,
       indicators,
     });
+  }
+
+  private emitSnapshot(snap: LegendSnapshot): void {
+    this.lastSnapshot = snap;
+    this.legend.emit(snap);
+    if (this.holding) this.renderHoldTip();
   }
 }
 
