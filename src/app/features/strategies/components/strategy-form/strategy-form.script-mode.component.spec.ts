@@ -164,6 +164,7 @@ describe('StrategyFormComponent — Pine script authoring', () => {
     beforeEach(() => create(null));
 
     it('appears only for RuleBased and defaults to rules, with the rules block and DSL preview', () => {
+      cmp.form.patchValue({ strategyType: 'NewsFade' });
       fixture.detectChanges();
       expect(host.querySelector('app-authoring-mode-switch')).toBeNull();
 
@@ -201,8 +202,27 @@ describe('StrategyFormComponent — Pine script authoring', () => {
       expect(await fixture.getDeferBlocks()).toHaveLength(1);
     });
 
-    it('never authors a script for another strategy type', () => {
+    it('never offers a retired type in the picker, and defaults to RuleBased', () => {
+      create(null);
+      expect(cmp.form.value.strategyType).toBe('RuleBased');
+      expect(cmp.strategyTypeOptions()).not.toContain('MovingAverageCrossover');
+      expect(cmp.strategyTypeOptions()).not.toContain('RSIReversion');
+      expect(cmp.strategyTypeOptions()).toContain('RuleBased');
+      expect(host.querySelector('[data-testid="classic-pine-hint"]')?.textContent).toContain(
+        'lascodia/classic/1',
+      );
+    });
+
+    it('still displays a retired type on a historical row, labelled (retired)', () => {
       cmp.form.patchValue({ strategyType: 'RSIReversion' });
+      fixture.detectChanges();
+      expect(cmp.strategyTypeOptions()).toContain('RSIReversion');
+      expect(cmp.formatType('RSIReversion')).toBe('R S I Reversion (retired)');
+      expect(cmp.formatType('RuleBased')).toBe('Rule Based');
+    });
+
+    it('never authors a script for another strategy type', () => {
+      cmp.form.patchValue({ strategyType: 'NewsFade' });
       cmp.authoringMode.set('script');
       fixture.detectChanges();
       expect(cmp.isScriptAuthoring()).toBe(false);

@@ -16,6 +16,11 @@ import type {
   StrategyType,
   Timeframe,
 } from '@core/api/api.types';
+import {
+  CLASSIC_PINE_LIBRARY_HINT,
+  CREATABLE_STRATEGY_TYPES,
+  isRetiredStrategyType,
+} from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -31,30 +36,7 @@ import { failureMessage, failureMessages } from '../../util/api-failure';
 
 const TIMEFRAMES: readonly Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] as const;
 
-const TEMPLATE_STRATEGY_TYPES: readonly StrategyType[] = [
-  'MovingAverageCrossover',
-  'RSIReversion',
-  'BreakoutScalper',
-  'BollingerBandReversion',
-  'MACDDivergence',
-  'SessionBreakout',
-  'MomentumTrend',
-  'CompositeML',
-  'StatisticalArbitrage',
-  'VwapReversion',
-  'CalendarEffect',
-  'NewsFade',
-  'CarryTrade',
-  'WeekendGapFade',
-  'RoundNumberFade',
-  'WedgeBreakout',
-  'CrossAssetLeadLag',
-  'OrderFlowImbalance',
-  'SubMinuteEvent',
-  'RuleBased',
-  'LlmProposal',
-  'Custom',
-];
+const TEMPLATE_STRATEGY_TYPES: readonly StrategyType[] = CREATABLE_STRATEGY_TYPES;
 
 type SubConfigKey =
   | 'riskOverridesJson'
@@ -377,9 +359,10 @@ const DSL_TYPES: readonly string[] = ['RuleBased', 'LlmProposal'];
                   (ngModelChange)="patchDraft('strategyType', $event)"
                 >
                   @for (st of strategyTypeOptions(d.strategyType); track st) {
-                    <option [value]="st">{{ st }}</option>
+                    <option [value]="st">{{ st }}{{ isRetired(st) ? ' (retired)' : '' }}</option>
                   }
                 </select>
+                <small class="muted small" data-testid="classic-pine-hint">{{ classicHint }}</small>
               </label>
             </div>
             <label class="field">
@@ -926,6 +909,12 @@ export class TemplatesPageComponent {
     if (!d) return;
     this.draft.set({ ...d, [key]: value ?? (key === 'riskProfileId' ? null : '') });
   }
+
+  protected isRetired(type: string | null | undefined): boolean {
+    return isRetiredStrategyType(type);
+  }
+
+  protected readonly classicHint = CLASSIC_PINE_LIBRARY_HINT;
 
   protected strategyTypeOptions(current: string): readonly string[] {
     return TEMPLATE_STRATEGY_TYPES.includes(current as StrategyType)
