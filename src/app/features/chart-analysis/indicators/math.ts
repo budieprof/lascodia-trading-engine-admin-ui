@@ -1112,6 +1112,10 @@ export function fisher(bars: Ohlc[], period = 9): { fisher: Maybe[]; trigger: Ma
 export interface VolumeProfileBin {
   price: number;
   volume: number;
+  /** Share of `volume` from bars that closed at or above their open. */
+  up: number;
+  /** Share of `volume` from bars that closed below their open. */
+  down: number;
 }
 
 /**
@@ -1135,6 +1139,8 @@ export function volumeProfile(bars: Ohlc[], bins = 24): VolumeProfileBin[] {
   const out: VolumeProfileBin[] = Array.from({ length: bins }, (_, i) => ({
     price: lo + step * (i + 0.5),
     volume: 0,
+    up: 0,
+    down: 0,
   }));
   for (const b of bars) {
     // Spread each bar's volume across the bins its range covers, rather than
@@ -1144,7 +1150,14 @@ export function volumeProfile(bars: Ohlc[], bins = 24): VolumeProfileBin[] {
     const last = Math.max(0, Math.min(bins - 1, Math.floor((b.high - lo) / step)));
     const touched = last - first + 1;
     const share = b.volume / touched;
-    for (let i = first; i <= last; i++) out[i].volume += share;
+    // Up/down by the bar's own direction — the OHLCV convention TradingView uses for its
+    // profiles when there is no aggressor tape, which FX never has.
+    const rising = b.close >= b.open;
+    for (let i = first; i <= last; i++) {
+      out[i].volume += share;
+      if (rising) out[i].up += share;
+      else out[i].down += share;
+    }
   }
   return out;
 }

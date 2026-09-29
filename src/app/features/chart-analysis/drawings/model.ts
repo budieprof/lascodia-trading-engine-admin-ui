@@ -174,7 +174,8 @@ export interface ToolSpec {
     | 'elliott'
     | 'patterns'
     | 'annotation'
-    | 'measure';
+    | 'measure'
+    | 'volume';
   /** Clicks needed to complete the drawing. `'freehand'` collects on drag. */
   points: number | 'freehand';
   icon: string;
@@ -382,7 +383,7 @@ export const TOOLS: readonly ToolSpec[] = [
   {
     kind: 'anchored-vwap',
     label: 'Anchored VWAP',
-    group: 'measure',
+    group: 'volume',
     points: 1,
     icon: '⚓',
     defaultStyle: { color: '#00BCD4' },
@@ -491,14 +492,14 @@ export const TOOLS: readonly ToolSpec[] = [
   {
     kind: 'anchored-volume-profile',
     label: 'Anchored Volume Profile',
-    group: 'measure',
+    group: 'volume',
     points: 1,
     icon: '▤',
   },
   {
     kind: 'fixed-range-volume-profile',
     label: 'Fixed Range Volume Profile',
-    group: 'measure',
+    group: 'volume',
     points: 2,
     icon: '▥',
   },
@@ -517,6 +518,25 @@ export const TOOLS: readonly ToolSpec[] = [
   { kind: 'arrow-mark-down', label: 'Arrow Down', group: 'annotation', points: 1, icon: '⬇' },
   { kind: 'arrow-mark-left', label: 'Arrow Left', group: 'annotation', points: 1, icon: '⬅' },
   { kind: 'arrow-mark-right', label: 'Arrow Right', group: 'annotation', points: 1, icon: '➡' },
+];
+
+/**
+ * Left-rail flyouts, in TradingView's order. Each entry is one rail button; its tools open in
+ * a flyout beside it. A ToolSpec group not listed here still renders (appended), so adding a
+ * group can never silently hide its tools.
+ */
+export const TOOL_GROUP_ORDER: ReadonlyArray<{ id: ToolSpec['group']; title: string }> = [
+  { id: 'lines', title: 'Lines' },
+  { id: 'channels', title: 'Channels' },
+  { id: 'pitchfork', title: 'Pitchforks' },
+  { id: 'fib', title: 'Fibonacci' },
+  { id: 'gann', title: 'Gann' },
+  { id: 'patterns', title: 'Patterns' },
+  { id: 'elliott', title: 'Elliott Waves' },
+  { id: 'shapes', title: 'Shapes & Brushes' },
+  { id: 'annotation', title: 'Text & Annotations' },
+  { id: 'measure', title: 'Projection & Measurement' },
+  { id: 'volume', title: 'Volume-based' },
 ];
 
 export function toolFor(kind: DrawingKind): ToolSpec | undefined {
