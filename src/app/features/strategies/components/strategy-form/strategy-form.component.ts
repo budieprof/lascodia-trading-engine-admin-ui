@@ -18,6 +18,9 @@ import {
 import { ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import {
+  CLASSIC_PINE_LIBRARY_HINT,
+  CREATABLE_STRATEGY_TYPES,
+  isRetiredStrategyType,
   StrategyDto,
   StrategyType,
   Timeframe,
@@ -69,29 +72,7 @@ import type { StrategyVersionFields } from '../../util/version-diff';
 /** Strategy types whose Parameters JSON is the rule DSL. */
 const DSL_STRATEGY_TYPES: readonly string[] = ['RuleBased', 'LlmProposal'];
 
-const STRATEGY_TYPES: StrategyType[] = [
-  'MovingAverageCrossover',
-  'RSIReversion',
-  'BreakoutScalper',
-  'BollingerBandReversion',
-  'MACDDivergence',
-  'SessionBreakout',
-  'MomentumTrend',
-  'CompositeML',
-  'StatisticalArbitrage',
-  'VwapReversion',
-  'CalendarEffect',
-  'NewsFade',
-  'CarryTrade',
-  'WeekendGapFade',
-  'RoundNumberFade',
-  'WedgeBreakout',
-  'CrossAssetLeadLag',
-  'OrderFlowImbalance',
-  'SubMinuteEvent',
-  'RuleBased',
-  'Custom',
-];
+const STRATEGY_TYPES: readonly StrategyType[] = CREATABLE_STRATEGY_TYPES;
 
 // Placeholders shown in each sub-config tab so operators see a working schema example
 // before they fill anything in. Pulled out as a const so the template stays readable
@@ -327,10 +308,13 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                   <div class="form-group">
                     <label class="form-label">Strategy Type</label>
                     <select formControlName="strategyType" class="form-input">
-                      @for (st of strategyTypes; track st) {
+                      @for (st of strategyTypeOptions(); track st) {
                         <option [value]="st">{{ formatType(st) }}</option>
                       }
                     </select>
+                    <small class="form-hint" data-testid="classic-pine-hint">{{
+                      classicHint
+                    }}</small>
                   </div>
                 </div>
               }
@@ -2050,13 +2034,13 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   // Typed parameter schema for the currently-selected StrategyType (when one
   // is registered server-side). Drives the typed-input form above the
   // Parameters JSON textarea — operators don't need to know the JSON shape
-  // for common types like RSIReversion / MovingAverageCrossover.
+  // for common types like NewsFade / CarryTrade.
   parameterSchema = signal<StrategyParameterSchemaDto | null>(null);
   parameterValues = signal<Record<string, unknown>>({});
 
   // ── Form values mirrored as signals (the reactive form is not signal-based) ─
   readonly paramsJson = signal('');
-  readonly strategyTypeValue = signal('MovingAverageCrossover');
+  readonly strategyTypeValue = signal('RuleBased');
   readonly formTimeframe = signal<string | null>('H1');
   readonly formName = signal<string | null>(null);
   private readonly formValue = signal<Record<string, any>>({});
@@ -2354,6 +2338,15 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   });
 
   readonly strategyTypes = STRATEGY_TYPES;
+  readonly classicHint = CLASSIC_PINE_LIBRARY_HINT;
+
+  /** Creatable types, plus the current value when it is a retired one (historical row). */
+  strategyTypeOptions(): readonly string[] {
+    const current = this.strategyTypeValue();
+    return !current || (STRATEGY_TYPES as readonly string[]).includes(current)
+      ? STRATEGY_TYPES
+      : [...STRATEGY_TYPES, current];
+  }
   readonly timeframes = TIMEFRAMES;
   readonly timeframeLabels = TIMEFRAME_LABELS;
   readonly placeholders = SUB_CONFIG_PLACEHOLDERS;
@@ -2397,7 +2390,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
       name: ['', Validators.required],
       symbol: ['', Validators.required],
       timeframe: ['H1'],
-      strategyType: ['MovingAverageCrossover'],
+      strategyType: ['RuleBased'],
       parametersJson: [''],
       riskProfileId: [null],
       description: [''],
@@ -3046,7 +3039,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
         name: '',
         symbol: '',
         timeframe: 'H1',
-        strategyType: 'MovingAverageCrossover',
+        strategyType: 'RuleBased',
         parametersJson: '',
         riskProfileId: null,
         description: '',
@@ -3066,7 +3059,8 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   }
 
   formatType(type: string): string {
-    return type.replace(/([A-Z])/g, ' $1').trim();
+    const label = type.replace(/([A-Z])/g, ' $1').trim();
+    return isRetiredStrategyType(type) ? `${label} (retired)` : label;
   }
 
   /**
@@ -3126,6 +3120,8 @@ export class StrategyFormComponent implements OnInit, OnChanges {
       SubMinuteEvent: 'SubMin',
       LlmProposal: 'LLM',
       RuleBased: 'Rule',
+      LlmDsl: 'LLM DSL',
+      CmeOrderflow: 'CME OF',
       Custom: 'Custom',
     };
     return map[type] ?? this.formatType(type);

@@ -256,7 +256,53 @@ export type StrategyType =
   | 'OrderFlowImbalance'
   | 'SubMinuteEvent'
   | 'LlmProposal'
-  | 'RuleBased';
+  | 'RuleBased'
+  | 'LlmDsl'
+  | 'CmeOrderflow';
+
+/**
+ * Strategy types the engine has retired: the API refuses to create, update,
+ * clone or activate them. The enum values survive so historical rows still
+ * display — never offer these in a creation/template picker.
+ */
+export const RETIRED_STRATEGY_TYPES: readonly StrategyType[] = [
+  'RSIReversion',
+  'BollingerBandReversion',
+  'MACDDivergence',
+  'MomentumTrend',
+  'MovingAverageCrossover',
+  'SessionBreakout',
+  'BreakoutScalper',
+  'VwapReversion',
+  'CalendarEffect',
+  'WedgeBreakout',
+  'RoundNumberFade',
+  'WeekendGapFade',
+  'StatisticalArbitrage',
+  'CrossAssetLeadLag',
+];
+
+/** Strategy types the engine still accepts for create/update/clone/activate. */
+export const CREATABLE_STRATEGY_TYPES: readonly StrategyType[] = [
+  'RuleBased',
+  'CompositeML',
+  'LlmProposal',
+  'LlmDsl',
+  'NewsFade',
+  'OrderFlowImbalance',
+  'SubMinuteEvent',
+  'CmeOrderflow',
+  'CarryTrade',
+  'Custom',
+];
+
+export function isRetiredStrategyType(type: string | null | undefined): boolean {
+  return !!type && (RETIRED_STRATEGY_TYPES as readonly string[]).includes(type);
+}
+
+/** Hint shown where an operator reaches for a classic (retired) idea. */
+export const CLASSIC_PINE_LIBRARY_HINT =
+  'Classic ideas (RSI reversion, Bollinger reversion, session breakout, ATR bracket) now ship as the built-in Pine library lascodia/classic/1 — author a RuleBased script and import rsiReversion(), bollingerReversion(), sessionBreakout() or atrBracket().';
 
 export type StrategyStatus = 'Active' | 'Paused' | 'Backtesting' | 'Stopped';
 
