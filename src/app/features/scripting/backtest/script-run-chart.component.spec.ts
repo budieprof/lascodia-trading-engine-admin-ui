@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { Component, Input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
@@ -18,7 +18,12 @@ import { ScriptRunChartComponent } from './script-run-chart.component';
 // them, else the candle store over the run's window with the report's trades. The Lightweight
 // Charts canvas is not in jsdom; a stand-in records what the chart is given.
 
-@Component({ selector: 'app-pine-chart', standalone: true, template: '' })
+@Component({
+  selector: 'app-pine-chart',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
+  template: '',
+})
 class PineChartStubComponent {
   @Input() result: PineChartData | null = null;
   @Input() symbol = '';

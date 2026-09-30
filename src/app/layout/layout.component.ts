@@ -1,4 +1,11 @@
-import { Component, HostListener, effect, inject, signal } from '@angular/core';
+import {
+  Component,
+  HostListener,
+  effect,
+  inject,
+  signal,
+  ChangeDetectionStrategy,
+} from '@angular/core';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { filter } from 'rxjs';
 import { SidebarComponent } from './sidebar/sidebar.component';
@@ -70,6 +77,7 @@ import { FooterVersionPillComponent } from './footer-version-pill/footer-version
       <app-assistant-dock />
     </div>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
       .skip-link {

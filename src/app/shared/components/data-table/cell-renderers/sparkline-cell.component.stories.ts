@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, Input, ViewChild } from '@angular/core';
+import { AfterViewInit, Component, Input, ViewChild, ChangeDetectionStrategy } from '@angular/core';
 import type { Meta, StoryObj } from '@storybook/angular';
 import type { ICellRendererParams } from 'ag-grid-community';
 
@@ -17,6 +17,7 @@ import {
   selector: 'app-sparkline-story-host',
   standalone: true,
   imports: [SparklineCellComponent],
+  changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     <div [style.width]="width" [style.height.px]="32">
       <app-sparkline-cell #cell />

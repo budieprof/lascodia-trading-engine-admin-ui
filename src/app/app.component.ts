@@ -1,4 +1,4 @@
-import { Component, effect, inject } from '@angular/core';
+import { Component, effect, inject, ChangeDetectionStrategy } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { ToastContainerComponent } from '@shared/components/toast/toast-container.component';
 import { AuthService } from '@core/auth/auth.service';
@@ -13,6 +13,7 @@ import { ThemeService } from '@core/theme/theme.service';
     <router-outlet />
     <app-toast-container />
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [],
 })
 export class AppComponent {

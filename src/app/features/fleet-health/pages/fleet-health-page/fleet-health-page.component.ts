@@ -351,11 +351,30 @@ interface EaStats {
                                   <dt>Market</dt>
                                   <dd>{{ d.highlights?.marketState ?? '—' }}</dd>
                                   <dt>Broker connected</dt>
-                                  <dd>{{ boolEmoji(d.highlights?.brokerConnected) }}</dd>
+                                  <dd>
+                                    {{
+                                      boolEmoji(
+                                        $safeNavigationMigration(d.highlights?.brokerConnected)
+                                      )
+                                    }}
+                                  </dd>
                                   <dt>Engine reachable</dt>
-                                  <dd>{{ boolEmoji(d.highlights?.engineReachable) }}</dd>
+                                  <dd>
+                                    {{
+                                      boolEmoji(
+                                        $safeNavigationMigration(d.highlights?.engineReachable)
+                                      )
+                                    }}
+                                  </dd>
                                   <dt>Kill switch</dt>
-                                  <dd>{{ boolEmoji(d.highlights?.killSwitchActive, true) }}</dd>
+                                  <dd>
+                                    {{
+                                      boolEmoji(
+                                        $safeNavigationMigration(d.highlights?.killSwitchActive),
+                                        true
+                                      )
+                                    }}
+                                  </dd>
                                 </dl>
                               </div>
                               <div>
@@ -366,9 +385,20 @@ interface EaStats {
                                   <dt>HTTP P99</dt>
                                   <dd>{{ d.highlights?.latencyP99Ms ?? '—' }} ms</dd>
                                   <dt>HTTP success</dt>
-                                  <dd>{{ pct(d.highlights?.httpSuccessRate) }}</dd>
+                                  <dd>
+                                    {{
+                                      pct($safeNavigationMigration(d.highlights?.httpSuccessRate))
+                                    }}
+                                  </dd>
                                   <dt>HTTP circuit</dt>
-                                  <dd>{{ boolEmoji(d.highlights?.httpCircuitOpen, true) }}</dd>
+                                  <dd>
+                                    {{
+                                      boolEmoji(
+                                        $safeNavigationMigration(d.highlights?.httpCircuitOpen),
+                                        true
+                                      )
+                                    }}
+                                  </dd>
                                   <dt>Last tick age</dt>
                                   <dd>{{ d.highlights?.lastTickAgeSec ?? '—' }} s</dd>
                                 </dl>

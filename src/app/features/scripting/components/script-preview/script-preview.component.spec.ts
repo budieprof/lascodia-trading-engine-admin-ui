@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { of, switchMap, throwError, timer } from 'rxjs';
 
@@ -16,7 +16,12 @@ import { ScriptPreviewComponent } from './script-preview.component';
 // shows the Strategy report of the same run. The chart and the report render on canvas / echarts,
 // which jsdom has not got — stand-ins record what they are given.
 
-@Component({ selector: 'app-pine-preview', standalone: true, template: '' })
+@Component({
+  selector: 'app-pine-preview',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
+  template: '',
+})
 class PinePreviewStubComponent {
   @Input() result: unknown;
   @Input() request: unknown;
@@ -26,7 +31,12 @@ class PinePreviewStubComponent {
   @Output() jumpToLine = new EventEmitter<{ line: number; column?: number | null }>();
 }
 
-@Component({ selector: 'app-strategy-report', standalone: true, template: '' })
+@Component({
+  selector: 'app-strategy-report',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
+  template: '',
+})
 class StrategyReportStubComponent {
   @Input() report: unknown;
 }

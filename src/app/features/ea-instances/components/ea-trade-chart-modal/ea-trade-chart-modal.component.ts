@@ -237,31 +237,32 @@ export interface SlTpModifiedEvent {
             <div class="chart-legend">
               <span class="legend-item">
                 <span class="dot dot--entry"></span>
-                {{ selection?.referenceLabel }} {{ selection?.referencePrice | number: '1.5-5' }}
+                {{ selection?.referenceLabel }}
+                {{ $safeNavigationMigration(selection?.referencePrice) | number: '1.5-5' }}
               </span>
-              @if (selection?.stopLoss !== null) {
+              @if ($safeNavigationMigration(selection?.stopLoss) !== null) {
                 <span class="legend-item">
                   <span class="dot dot--sl"></span>SL {{ selection!.stopLoss | number: '1.5-5' }}
                 </span>
               }
-              @if (selection?.takeProfit !== null) {
+              @if ($safeNavigationMigration(selection?.takeProfit) !== null) {
                 <span class="legend-item">
                   <span class="dot dot--tp"></span>TP {{ selection!.takeProfit | number: '1.5-5' }}
                 </span>
               }
-              @if (selection?.currentPrice !== null) {
+              @if ($safeNavigationMigration(selection?.currentPrice) !== null) {
                 <span class="legend-item">
                   <span class="dot dot--now"></span>Bid
                   {{ selection!.currentPrice | number: '1.5-5' }}
                 </span>
               }
-              @if (selection?.currentAsk !== null) {
+              @if ($safeNavigationMigration(selection?.currentAsk) !== null) {
                 <span class="legend-item">
                   <span class="dot dot--ask"></span>Ask
                   {{ selection!.currentAsk | number: '1.5-5' }}
                 </span>
               }
-              @if (selection?.exitPrice !== null) {
+              @if ($safeNavigationMigration(selection?.exitPrice) !== null) {
                 <span class="legend-item">
                   <span class="dot dot--exit"></span>Exit
                   {{ selection!.exitPrice | number: '1.5-5' }}
