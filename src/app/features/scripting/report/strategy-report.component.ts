@@ -28,6 +28,7 @@ import { ReportOverviewComponent } from './report-overview.component';
 import { ReportSplitTableComponent } from './report-split-table.component';
 import { ReportMetricListComponent } from './report-metric-list.component';
 import { ReportTradesGridComponent } from './report-trades-grid.component';
+import type { TradeOriginOf } from './report-trades-columns';
 import { ReportMonthlyHeatmapComponent } from './report-monthly-heatmap.component';
 import { ReportPropertiesComponent } from './report-properties.component';
 
@@ -93,6 +94,9 @@ let nextReportUid = 0;
           <div class="head-text">
             <h3 class="title" [id]="uid + '-title'">{{ heading() || 'Strategy report' }}</h3>
             <p class="meta">{{ metaLine() }}</p>
+            @if (headingNote(); as note) {
+              <p class="heading-note">{{ note }}</p>
+            }
           </div>
           <div class="head-actions">
             @if (r.meta.useBarMagnifier) {
@@ -214,6 +218,7 @@ let nextReportUid = 0;
                 [trades]="r.trades"
                 [currency]="currency()"
                 [clickable]="tradesClickable()"
+                [origin]="tradeOrigin()"
                 (tradeClick)="tradeClick.emit($event)"
               />
             }
@@ -261,6 +266,12 @@ let nextReportUid = 0;
       }
       .meta {
         margin: var(--space-1) 0 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .heading-note {
+        margin: var(--space-1) 0 0;
+        max-width: 72ch;
         font-size: var(--text-xs);
         color: var(--text-secondary);
       }
@@ -407,8 +418,16 @@ export class StrategyReportComponent {
   /** Set when the report belongs to a backtest run: enables the CSV / XLSX export. */
   readonly backtestRunId = input<number | null>(null);
   readonly heading = input<string | null>('Strategy report');
-  /** When true, List-of-trades rows are clickable and emit {@link tradeClick}. */
+  /** A line under the heading that qualifies the report (the live panel's warm-up caveat). */
+  readonly headingNote = input<string | null>(null);
+  /** When true, List-of-trades rows are clickable (and Enter on a row) and emit {@link tradeClick}. */
   readonly tradesClickable = input(false);
+  /**
+   * Where each listed trade came from — set by the live panel, whose report mixes the warm-up
+   * replay with real paper / live trades; the List of trades then shows an Origin column. A
+   * backtest never sets it. Pass a stable function: a new one rebuilds the grid's columns.
+   */
+  readonly tradeOrigin = input<TradeOriginOf | null>(null);
   /** A List-of-trades row was clicked. */
   readonly tradeClick = output<ReportTrade>();
 

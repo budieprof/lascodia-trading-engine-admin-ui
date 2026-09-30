@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { initialTimeframe } from '@features/ea-instances/components/ea-trade-chart-modal/ea-trade-chart-modal.component';
 import type { ReportTrade } from '@features/scripting/report/strategy-report.model';
 import {
+  chartableTimes,
+  matchReportTrade,
+  reportRowAsChartable,
   reportTradeAsChartable,
   researchTradeSelection,
   type ChartableTrade,
@@ -46,6 +49,28 @@ describe('researchTradeSelection', () => {
     );
     expect([s.stopLoss, s.takeProfit]).toEqual([null, null]);
   });
+
+  it('draws no exit for a trade that is still open — never one at the entry price', () => {
+    for (const open of [
+      { ...runTrade, ExitTime: null, ExitPrice: null },
+      { ...runTrade, ExitTime: '', ExitPrice: runTrade.EntryPrice },
+    ]) {
+      const s = researchTradeSelection(open, { symbol: 'EURUSD', timeframe: 'H1', label: 'x' });
+      expect([s.exitPrice, s.exitTime]).toEqual([null, null]);
+      expect(s.title).toBe('x · EURUSD · Long · open');
+      // No exit → the modal keeps the requested timeframe and its window runs to now.
+      expect(initialTimeframe(s)).toBe('H1');
+    }
+  });
+
+  it('frames a closed trade whose exit price is na without drawing a dot at a made-up price', () => {
+    const s = researchTradeSelection(
+      { ...runTrade, ExitPrice: null },
+      { symbol: 'EURUSD', timeframe: 'H1', label: 'x' },
+    );
+    expect(s.exitTime).toBe('2025-06-27T17:00:00Z');
+    expect(s.exitPrice).toBeNull();
+  });
 });
 
 describe('reportTradeAsChartable', () => {
@@ -73,6 +98,67 @@ describe('reportTradeAsChartable', () => {
     ];
     const t = reportTradeAsChartable(row, other)!;
     expect([t.StopLoss, t.TakeProfit]).toEqual([null, null]);
+  });
+
+  it('charts a closed row exactly as before: exit from the row, SL/TP from the run', () => {
+    const s = researchTradeSelection(reportTradeAsChartable(row, [runTrade])!, {
+      symbol: 'EURUSD',
+      timeframe: 'H1',
+      label: 'Backtest #1330 · trade #1',
+    });
+    expect(s.title).toBe('Backtest #1330 · trade #1 · EURUSD · Long · exited on stop loss');
+    expect([s.exitPrice, s.exitTime]).toEqual([1.16999, '2025-06-27T17:00:00.000Z']);
+    expect([s.stopLoss, s.takeProfit]).toEqual([1.16999, 1.17595]);
+  });
+
+  it('leaves an open row with no exit anywhere open (no exit at the entry price)', () => {
+    const open = { ...row, isOpen: true, exitTime: null, exitPrice: null, exitLeg: '' };
+    const t = reportTradeAsChartable(open as ReportTrade, [])!;
+    expect([t.ExitTime, t.ExitPrice]).toEqual([null, null]);
+    const s = researchTradeSelection(t, { symbol: 'EURUSD', timeframe: 'H1', label: 'x' });
+    expect([s.exitPrice, s.exitTime]).toEqual([null, null]);
+  });
+
+  it("takes an open row's exit from the run when the run closed it (end of data)", () => {
+    const open = { ...row, isOpen: true, exitTime: null, exitPrice: null, exitLeg: '' };
+    const t = reportTradeAsChartable(open as ReportTrade, [
+      { ...runTrade, ExitReason: 2, ExitPrice: 1.171 },
+    ])!;
+    expect([t.ExitTime, t.ExitPrice]).toEqual(['2025-06-27T17:00:00Z', 1.171]);
+  });
+});
+
+describe('matchReportTrade', () => {
+  const row = {
+    number: 4,
+    direction: 'long',
+    entryId: 'L',
+    entryTime: Date.parse('2025-06-27T16:00:00Z'),
+    exitTime: Date.parse('2025-06-27T19:00:00Z'),
+  } as unknown as ReportTrade;
+
+  it('prefers the piece of a partially closed trade that shares the exit', () => {
+    const first = { ...runTrade, TakeProfit: 1.1 };
+    const second = { ...runTrade, ExitTime: '2025-06-27T19:00:00Z', TakeProfit: 1.2 };
+    expect(matchReportTrade(row, [first, second], chartableTimes)).toBe(second);
+    // Without an exit to compare, the first entry match wins (the old behaviour).
+    expect(matchReportTrade({ ...row, exitTime: null }, [first, second], chartableTimes)).toBe(
+      first,
+    );
+  });
+
+  it('never matches an unparseable time, the other side, or a row with no entry', () => {
+    expect(matchReportTrade(row, [{ ...runTrade, EntryTime: 'garbage' }], chartableTimes)).toBe(
+      undefined,
+    );
+    expect(matchReportTrade(row, [{ ...runTrade, Direction: 1 }], chartableTimes)).toBe(undefined);
+    expect(matchReportTrade({ ...row, entryTime: null }, [runTrade], chartableTimes)).toBe(
+      undefined,
+    );
+  });
+
+  it('reportRowAsChartable returns null for a row without an entry', () => {
+    expect(reportRowAsChartable({ ...row, entryPrice: null } as ReportTrade, runTrade)).toBeNull();
   });
 });
 

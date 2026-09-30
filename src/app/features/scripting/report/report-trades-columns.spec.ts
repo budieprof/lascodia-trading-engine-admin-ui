@@ -7,6 +7,7 @@ import {
   filterTrades,
   tradeFilterCounts,
 } from './report-trades-columns';
+import { parseTradeOrigin, tradeOriginTitle, type TradeOrigin } from './trade-origin';
 import { strategyReportFixture } from '../testing/strategy-report.fixture';
 
 const trades = normalizeStrategyReport(strategyReportFixture())!.trades;
@@ -69,6 +70,64 @@ describe('List of trades columns', () => {
     // Signals come from the script: they render through the grid's text path, not a renderer.
     expect(byHeader('Entry signal').cellRenderer).toBeUndefined();
     expect(byHeader('Exit signal').cellRenderer).toBeUndefined();
+  });
+
+  it('has no Origin column unless the host knows each trade’s origin (backtests never do)', () => {
+    expect(cols.some((c) => c.colId === 'origin')).toBe(false);
+    expect(buildTradeColumns('USD', 5, null)).toHaveLength(cols.length);
+  });
+});
+
+describe('Origin column (live session)', () => {
+  const origins: Record<number, TradeOrigin | null> = { 1: 'warmup', 5: 'paper', 6: 'live' };
+  const cols = buildTradeColumns('USD', 5, (t) => origins[t.number ?? -1] ?? null);
+  const origin = cols.find((c) => c.colId === 'origin')!;
+
+  it('follows the trade type', () => {
+    expect(cols.map((c) => c.headerName).slice(0, 4)).toEqual([
+      '#',
+      'Type',
+      'Origin',
+      'Entry signal',
+    ]);
+    expect(origin.headerTooltip).toContain('historical replay');
+  });
+
+  it('badges each trade, with "—" for an unknown one', () => {
+    const render = origin.cellRenderer as (p: any) => string;
+    expect(render({ data: trades[0] })).toBe(
+      '<span class="rpt-origin rpt-origin-warmup">Warm-up</span>',
+    );
+    expect(render({ data: trades[4] })).toContain('Paper');
+    expect(render({ data: trades[5] })).toContain('rpt-origin-live');
+    expect(render({ data: trades[1] })).toBe('—');
+  });
+
+  it('filters and searches on the badge text', () => {
+    const value = origin.valueGetter as (p: any) => string;
+    expect(value({ data: trades[0] })).toBe('Warm-up');
+    expect(value({ data: trades[1] })).toBe('');
+    expect(origin.filter).toBe('agTextColumnFilter');
+    const tip = origin.tooltipValueGetter as (p: any) => string;
+    expect(tip({ data: trades[0] })).toContain('not evidence');
+  });
+});
+
+describe('trade origin', () => {
+  it('reads the wire value in any casing, and nothing else', () => {
+    expect(parseTradeOrigin('warmup')).toBe('warmup');
+    expect(parseTradeOrigin('Warm-up')).toBe('warmup');
+    expect(parseTradeOrigin('WarmUp')).toBe('warmup');
+    expect(parseTradeOrigin('Paper')).toBe('paper');
+    expect(parseTradeOrigin('LIVE')).toBe('live');
+    expect(parseTradeOrigin('backtest')).toBeNull();
+    expect(parseTradeOrigin(null)).toBeNull();
+    expect(parseTradeOrigin(2)).toBeNull();
+  });
+
+  it('titles an unknown origin honestly', () => {
+    expect(tradeOriginTitle('warmup')).toBe('Warm-up replay');
+    expect(tradeOriginTitle(null)).toBe('Origin unknown');
   });
 });
 
