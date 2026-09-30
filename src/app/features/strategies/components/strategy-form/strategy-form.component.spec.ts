@@ -1,3 +1,4 @@
+import { CREATABLE_STRATEGY_TYPES } from '../../../../core/api/api.types';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
@@ -220,6 +221,15 @@ describe('StrategyFormComponent (legacy rules, parameters, edit mode)', () => {
 
   describe('create mode', () => {
     beforeEach(() => create(null));
+
+    it('offers only engine StrategyType values an operator can create', () => {
+      // "LlmDsl" is not an engine type, the CME type is CmeDeepBookOrderflow, and
+      // LlmProposal is engine-promoted (as RuleBased Pine), never hand-created.
+      expect(CREATABLE_STRATEGY_TYPES).not.toContain('LlmDsl' as never);
+      expect(CREATABLE_STRATEGY_TYPES).not.toContain('CmeOrderflow' as never);
+      expect(CREATABLE_STRATEGY_TYPES).not.toContain('LlmProposal');
+      expect(CREATABLE_STRATEGY_TYPES).toContain('CmeDeepBookOrderflow');
+    });
 
     it('authors RuleBased and LlmProposal as Pine scripts — there is no rules mode', () => {
       expect(cmp.authoringMode()).toBe('script');
