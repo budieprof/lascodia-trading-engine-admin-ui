@@ -2698,8 +2698,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
       SubMinuteEvent: 'SubMin',
       LlmProposal: 'LLM',
       RuleBased: 'Rule',
-      LlmDsl: 'LLM DSL',
-      CmeOrderflow: 'CME OF',
+      CmeDeepBookOrderflow: 'CME OF',
       Custom: 'Custom',
     };
     return map[type] ?? this.formatType(type);

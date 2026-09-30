@@ -257,8 +257,7 @@ export type StrategyType =
   | 'SubMinuteEvent'
   | 'LlmProposal'
   | 'RuleBased'
-  | 'LlmDsl'
-  | 'CmeOrderflow';
+  | 'CmeDeepBookOrderflow';
 
 /**
  * Strategy types the engine has retired: the API refuses to create, update,
@@ -282,16 +281,19 @@ export const RETIRED_STRATEGY_TYPES: readonly StrategyType[] = [
   'CrossAssetLeadLag',
 ];
 
-/** Strategy types the engine still accepts for create/update/clone/activate. */
+/**
+ * Strategy types an operator can create. Mirrors the engine's StrategyType enum
+ * (there is no "LlmDsl" type — the JSON rules DSL was retired). LlmProposal is
+ * left out: LLM proposals are promoted by the engine as RuleBased Pine scripts,
+ * so a hand-made LlmProposal would only mislabel an operator's own script.
+ */
 export const CREATABLE_STRATEGY_TYPES: readonly StrategyType[] = [
   'RuleBased',
   'CompositeML',
-  'LlmProposal',
-  'LlmDsl',
   'NewsFade',
   'OrderFlowImbalance',
   'SubMinuteEvent',
-  'CmeOrderflow',
+  'CmeDeepBookOrderflow',
   'CarryTrade',
   'Custom',
 ];
