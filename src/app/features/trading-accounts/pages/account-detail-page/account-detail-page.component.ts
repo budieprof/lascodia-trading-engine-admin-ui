@@ -431,7 +431,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                       s.isActiveOnEngine
                         ? s.symbol + ' is an active currency pair on the engine'
                         : s.symbol +
-                          ' is NOT in the engine\\'s active currency pairs — strategies cannot trade it until it is enabled'
+                          ' is NOT in the engine\\u0027s active currency pairs — strategies cannot trade it until it is enabled'
                     "
                   >
                     <span class="exposure-symbol mono">{{ s.symbol }}</span>

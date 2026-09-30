@@ -9,7 +9,7 @@ import {
   input,
   signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { NgxEchartsDirective } from 'ngx-echarts';
 
 import { ThemeService } from '@core/theme/theme.service';
@@ -34,7 +34,7 @@ import { toEchartsOption, type VisualSpec } from './visual-spec';
   selector: 'app-analysis-visual',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, NgxEchartsDirective],
+  imports: [NgxEchartsDirective],
   template: `
     @if (spec(); as s) {
       <figure class="viz" [attr.data-type]="s.type">

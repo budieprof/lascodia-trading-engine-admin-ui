@@ -316,7 +316,7 @@ const DEFAULT_TIMEFRAME: Timeframe = 'H1';
           <div class="charts-grid">
             <app-chart-card
               title="Regime confidence over time"
-              [subtitle]="'How sure the engine is about ' + primarySymbol() + '\\'s regime'"
+              [subtitle]="'How sure the engine is about ' + primarySymbol() + '\\u0027s regime'"
               [options]="confidenceTimeOptions()"
               height="240px"
             />
