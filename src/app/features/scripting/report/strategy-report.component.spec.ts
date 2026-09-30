@@ -15,15 +15,22 @@ import { ReportTradesGridComponent } from './report-trades-grid.component';
 import { ReportMonthlyHeatmapComponent } from './report-monthly-heatmap.component';
 import { ReportPropertiesComponent } from './report-properties.component';
 import { MINUS } from './report-format';
+import { normalizeStrategyReport, type ReportTrade } from './strategy-report.model';
 import { strategyReportFixture, toPascalCaseKeys } from '../testing/strategy-report.fixture';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
 import { AgGridStubComponent, ChartCardStubComponent } from '../testing/stubs';
 
-declareSignalIo(StrategyReportComponent, { inputs: ['report', 'backtestRunId', 'heading'] });
+declareSignalIo(StrategyReportComponent, {
+  inputs: ['report', 'backtestRunId', 'heading', 'headingNote', 'tradesClickable', 'tradeOrigin'],
+  outputs: ['tradeClick'],
+});
 declareSignalIo(ReportOverviewComponent, { inputs: ['report', 'currency', 'palette'] });
 declareSignalIo(ReportSplitTableComponent, { inputs: ['groups', 'splits', 'currency', 'caption'] });
 declareSignalIo(ReportMetricListComponent, { inputs: ['groups', 'report', 'currency'] });
-declareSignalIo(ReportTradesGridComponent, { inputs: ['trades', 'currency'] });
+declareSignalIo(ReportTradesGridComponent, {
+  inputs: ['trades', 'currency', 'clickable', 'origin'],
+  outputs: ['tradeClick'],
+});
 declareSignalIo(ReportMonthlyHeatmapComponent, {
   inputs: ['monthlyReturns', 'palette', 'currency'],
 });
@@ -156,6 +163,55 @@ describe('StrategyReportComponent', () => {
     fixture.detectChanges();
     expect(el.querySelector('.grid-stub')!.getAttribute('data-rows')).toBe('1');
     expect(el.querySelector('.grid-stub-row')!.textContent).toContain('"isOpen":true');
+  });
+
+  describe('live-session options', () => {
+    const gridStub = () =>
+      fixture.debugElement.query((d) => d.name === 'ag-grid-angular')
+        .componentInstance as AgGridStubComponent;
+    const columnIds = () =>
+      (gridStub().columnDefs as { colId?: string; headerName?: string }[]).map(
+        (c) => c.colId ?? c.headerName,
+      );
+
+    it('leaves a backtest’s report as it was: no note, no Origin column', () => {
+      render(strategyReportFixture(), 812);
+      expect(el.querySelector('.heading-note')).toBeNull();
+      openTab('List of trades');
+      expect(columnIds()).not.toContain('origin');
+    });
+
+    it('adds the heading note and an Origin column when the live panel asks', () => {
+      fixture = TestBed.createComponent(StrategyReportComponent);
+      fixture.componentRef.setInput('report', strategyReportFixture());
+      fixture.componentRef.setInput('headingNote', 'Warm-up trades are a historical replay.');
+      fixture.componentRef.setInput('tradeOrigin', (t: ReportTrade) =>
+        t.number === 1 ? 'warmup' : null,
+      );
+      fixture.componentRef.setInput('tradesClickable', true);
+      fixture.detectChanges();
+      el = fixture.nativeElement as HTMLElement;
+
+      expect(el.querySelector('.heading-note')!.textContent).toContain('historical replay');
+      openTab('List of trades');
+      expect(columnIds().slice(0, 3)).toEqual(['#', 'type', 'origin']);
+
+      // Enter on a focused cell opens the trade, as a click does.
+      const clicked: ReportTrade[] = [];
+      fixture.componentInstance.tradeClick.subscribe((t) => clicked.push(t));
+      const grid = fixture.debugElement.query((d) => d.name === 'app-report-trades-grid')
+        .componentInstance as ReportTradesGridComponent;
+      const trade = normalizeStrategyReport(strategyReportFixture())!.trades[0];
+      grid.onCellKeyDown({
+        event: new KeyboardEvent('keydown', { key: 'Tab' }),
+        data: trade,
+      } as any);
+      grid.onCellKeyDown({
+        event: new KeyboardEvent('keydown', { key: 'Enter' }),
+        data: trade,
+      } as any);
+      expect(clicked).toEqual([trade]);
+    });
   });
 
   it('renders risk, capital, monthly returns and properties tabs', () => {

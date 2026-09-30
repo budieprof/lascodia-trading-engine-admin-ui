@@ -650,7 +650,11 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
                report are fetched when the tab opens, not with the strategies route. -->
           @if (activeTab() === 'live' && isScript()) {
             @defer (on immediate) {
-              <app-script-live-panel [strategyId]="strategyId" />
+              <app-script-live-panel
+                [strategyId]="strategyId"
+                [symbol]="strategy()?.symbol ?? null"
+                [timeframe]="strategy()?.timeframe ?? null"
+              />
             } @loading (minimum 150ms) {
               <p class="muted small"><span class="spinner"></span> Loading the live session…</p>
             }

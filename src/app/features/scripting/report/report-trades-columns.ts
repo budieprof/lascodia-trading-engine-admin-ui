@@ -10,6 +10,10 @@ import {
   formatPrice,
   formatQty,
 } from './report-format';
+import { TRADE_ORIGIN_BADGES, tradeOriginHint, type TradeOrigin } from './trade-origin';
+
+/** Where a listed trade came from, when the host knows (the live session does; a backtest never). */
+export type TradeOriginOf = (trade: ReportTrade) => TradeOrigin | null;
 
 /**
  * Column model and filters for the List of trades. Kept apart from the grid component so the
@@ -99,11 +103,45 @@ function data(p: { data?: ReportTrade }): ReportTrade | undefined {
   return p.data;
 }
 
-export function buildTradeColumns(currency: string, priceDecimals: number): ColDef<ReportTrade>[] {
+/**
+ * The Origin column: a badge per trade (warm-up replay / paper / live), "—" when unknown. The
+ * value is the badge text, so the column filter and the quick search find "Warm-up" rows. Only
+ * the closed set of origin labels reaches the HTML, never script-supplied text.
+ */
+function originColumn(originOf: TradeOriginOf): ColDef<ReportTrade> {
+  const originAt = (p: { data?: ReportTrade }): TradeOrigin | null =>
+    p.data ? originOf(p.data) : null;
+  return {
+    headerName: 'Origin',
+    colId: 'origin',
+    width: 116,
+    valueGetter: (p: ValueGetterParams<ReportTrade>) => {
+      const o = originAt(p);
+      return o ? TRADE_ORIGIN_BADGES[o] : '';
+    },
+    cellRenderer: (p: ICellRendererParams<ReportTrade>) => {
+      const o = originAt(p);
+      return o ? `<span class="rpt-origin rpt-origin-${o}">${TRADE_ORIGIN_BADGES[o]}</span>` : NA;
+    },
+    tooltipValueGetter: (p) => (p.data ? tradeOriginHint(originAt(p)) : ''),
+    headerTooltip: 'Warm-up trades are a historical replay, not paper or live evidence',
+    filter: 'agTextColumnFilter',
+  };
+}
+
+/**
+ * The List-of-trades columns. With `originOf` (the live session) an Origin column follows the
+ * trade type; without it (every backtest) the column set is unchanged.
+ */
+export function buildTradeColumns(
+  currency: string,
+  priceDecimals: number,
+  originOf: TradeOriginOf | null = null,
+): ColDef<ReportTrade>[] {
   const money = (v: number | null, signedPlus = false) =>
     formatMoney(v, currency, { signed: signedPlus });
 
-  return [
+  const columns: ColDef<ReportTrade>[] = [
     {
       headerName: '#',
       field: 'number',
@@ -252,4 +290,6 @@ export function buildTradeColumns(currency: string, priceDecimals: number): ColD
       filter: 'agNumberColumnFilter',
     },
   ];
+  if (originOf) columns.splice(2, 0, originColumn(originOf));
+  return columns;
 }

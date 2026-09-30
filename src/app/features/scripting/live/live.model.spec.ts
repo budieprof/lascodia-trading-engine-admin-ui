@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  OPEN_TRADE_COLUMNS,
   barAgeMinutes,
   deriveColumns,
   formatBrokerLots,
@@ -40,8 +41,58 @@ describe('normalizeLiveStatus', () => {
     });
   });
 
+  it('reads the closed trades and every trade’s origin (either casing)', () => {
+    const l = normalizeLiveStatus({
+      Status: 'Running',
+      OpenTrades: [{ TradeKey: 7, Direction: 'long', Origin: 'paper' }],
+      ClosedTrades: [
+        {
+          TradeKey: 3,
+          EntryId: 'Long',
+          Direction: 'Long',
+          Qty: 10000,
+          Lots: 0.1,
+          EntryPrice: 1.17,
+          EntryTimeMs: 1_767_600_000_000,
+          ExitPrice: 1.175,
+          ExitTimeMs: 1_767_603_600_000,
+          ExitLeg: 'TakeProfit',
+          ExitComment: 'TP',
+          Profit: 50,
+          StopLoss: 1.165,
+          TakeProfit: 1.175,
+          Origin: 'warmup',
+        },
+        { TradeKey: 4, Direction: 'short', StopLoss: null, Origin: 'mystery' },
+      ],
+    })!;
+    expect(l.openTrades[0]['origin']).toBe('paper');
+    expect(l.closedTrades[0]).toEqual({
+      tradeKey: 3,
+      entryId: 'Long',
+      direction: 'long',
+      qty: 10000,
+      lots: 0.1,
+      entryPrice: 1.17,
+      entryTimeMs: 1_767_600_000_000,
+      exitPrice: 1.175,
+      exitTimeMs: 1_767_603_600_000,
+      exitLeg: 'TakeProfit',
+      exitComment: 'TP',
+      profit: 50,
+      stopLoss: 1.165,
+      takeProfit: 1.175,
+      origin: 'warmup',
+    });
+    // An origin the console does not know reads as unknown, never as a guess.
+    expect(l.closedTrades[1].origin).toBeNull();
+    expect(l.closedTrades[1].stopLoss).toBeNull();
+    expect(l.closedTrades[1].exitTimeMs).toBeNull();
+  });
+
   it('tolerates missing collections', () => {
     const l = normalizeLiveStatus({ status: 'Stopped' })!;
+    expect(l.closedTrades).toEqual([]);
     expect(l.openTrades).toEqual([]);
     expect(l.pendingOrders).toEqual([]);
     expect(l.divergences).toEqual([]);
@@ -110,6 +161,12 @@ describe('presentation helpers', () => {
     expect(formatLiveValue('stop', null)).toBe('—');
   });
 
+  it('prints an open trade’s take-profit as a price, and its open profit as money', () => {
+    expect(formatLiveValue('takeProfit', 1.15125)).toBe('1.15125');
+    expect(formatLiveValue('stopLoss', 1.14475)).toBe('1.14475');
+    expect(formatLiveValue('openProfit', 4.2, 'USD')).toBe('+4.20 USD');
+  });
+
   it('prints emulator quantities in Pine units, and the lots the engine derives from them', () => {
     expect(formatLiveValue('qty', 100_000)).toBe('100,000 units');
     expect(formatLiveValue('size', 1)).toBe('1 unit');
@@ -150,6 +207,13 @@ describe('presentation helpers', () => {
       ['entryId', 'qty'],
     );
     expect(cols.map((c) => c.key)).toEqual(['entryId', 'qty', 'alpha', 'zeta']);
+  });
+
+  it('puts an open trade’s origin first, and only when the engine sends one', () => {
+    const tagged = deriveColumns([{ entryId: 'L', qty: 1, origin: 'paper' }], OPEN_TRADE_COLUMNS);
+    expect(tagged.map((c) => c.label)).toEqual(['Origin', 'Entry ID', 'Qty']);
+    const untagged = deriveColumns([{ entryId: 'L', qty: 1 }], OPEN_TRADE_COLUMNS);
+    expect(untagged.map((c) => c.key)).toEqual(['entryId', 'qty']);
   });
 
   it('ages the last bar', () => {

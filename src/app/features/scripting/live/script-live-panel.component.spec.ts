@@ -1,17 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { Component, Input } from '@angular/core';
+import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
+import {
+  EATradeChartModalComponent,
+  type TradeChartSelection,
+} from '@features/ea-instances/components/ea-trade-chart-modal/ea-trade-chart-modal.component';
 
 import { ScriptLivePanelComponent } from './script-live-panel.component';
 import { StrategyReportComponent } from '../report/strategy-report.component';
+import { normalizeStrategyReport, type ReportTrade } from '../report/strategy-report.model';
+import type { TradeOriginOf } from '../report/report-trades-columns';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
 import { strategyReportFixture } from '../testing/strategy-report.fixture';
+import { liveClosedTradesFixture, liveOpenTradeFixture } from '../testing/live-status.fixture';
 
-declareSignalIo(ScriptLivePanelComponent, { inputs: ['strategyId'] });
+declareSignalIo(ScriptLivePanelComponent, { inputs: ['strategyId', 'symbol', 'timeframe'] });
 
 @Component({
   selector: 'app-strategy-report',
@@ -21,7 +28,31 @@ declareSignalIo(ScriptLivePanelComponent, { inputs: ['strategyId'] });
 class ReportStubComponent {
   @Input() report: unknown = null;
   @Input() heading: string | null = null;
+  @Input() headingNote: string | null = null;
   @Input() backtestRunId: number | null = null;
+  @Input() tradesClickable = false;
+  @Input() tradeOrigin: TradeOriginOf | null = null;
+  @Output() readonly tradeClick = new EventEmitter<ReportTrade>();
+}
+
+@Component({ selector: 'app-ea-trade-chart-modal', standalone: true, template: '' })
+class TradeChartModalStubComponent {
+  @Input() selection: TradeChartSelection | null = null;
+  @Input() open = false;
+  @Output() readonly openChange = new EventEmitter<boolean>();
+}
+
+/** The report's List-of-trades rows, as the real report would emit them on a click. */
+const reportRows = normalizeStrategyReport(strategyReportFixture())!.trades;
+const reportRow = (n: number) => reportRows.find((t) => t.number === n)!;
+
+/** The engine with the closed-trades / origin contract. */
+function taggedSession() {
+  return {
+    ...liveSession(),
+    openTrades: [liveOpenTradeFixture()],
+    closedTrades: liveClosedTradesFixture(),
+  };
 }
 
 const BASE = 'http://test/api/v1/lascodia-trading-engine';
@@ -102,6 +133,24 @@ describe('ScriptLivePanelComponent', () => {
 
   const text = () => el.textContent!.replace(/\s+/g, ' ');
 
+  const reportStub = () =>
+    fixture.debugElement.query((d) => d.name === 'app-strategy-report')
+      .componentInstance as ReportStubComponent;
+  const chart = () =>
+    fixture.debugElement.query((d) => d.name === 'app-ea-trade-chart-modal')
+      .componentInstance as TradeChartModalStubComponent;
+  const openTradesSection = () => el.querySelector('#live-open-trades')!.closest('section')!;
+  const openTradeRows = () => [
+    ...openTradesSection().querySelectorAll<HTMLTableRowElement>('tbody tr'),
+  ];
+
+  function load(payload: unknown): void {
+    render();
+    http.expectOne(LIVE_URL).flush(ok(payload));
+    flushBindings();
+    fixture.detectChanges();
+  }
+
   beforeEach(() => {
     TestBed.configureTestingModule({
       imports: [ScriptLivePanelComponent],
@@ -112,8 +161,8 @@ describe('ScriptLivePanelComponent', () => {
       ],
     });
     TestBed.overrideComponent(ScriptLivePanelComponent, {
-      remove: { imports: [StrategyReportComponent] },
-      add: { imports: [ReportStubComponent] },
+      remove: { imports: [StrategyReportComponent, EATradeChartModalComponent] },
+      add: { imports: [ReportStubComponent, TradeChartModalStubComponent] },
     });
     http = TestBed.inject(HttpTestingController);
   });
@@ -291,5 +340,154 @@ describe('ScriptLivePanelComponent', () => {
     fixture.detectChanges();
     expect(text()).toContain('Flat — no open position');
     expect(text()).toContain('Open trades 0');
+  });
+
+  describe('trade chart', () => {
+    it('charts a report trade on the backtest position chart, with its origin in the title', () => {
+      load(taggedSession());
+      const report = reportStub();
+      expect(report.tradesClickable).toBe(true);
+      expect(chart().open).toBe(false);
+
+      report.tradeClick.emit(reportRow(1));
+      fixture.detectChanges();
+
+      const s = chart().selection!;
+      expect(chart().open).toBe(true);
+      expect(s.title).toBe(
+        'Live session · trade #1 · Warm-up replay · EURUSD · Long · exited on take profit',
+      );
+      expect(s.symbol).toBe('EURUSD');
+      expect(s.timeframe).toBe('H1');
+      expect([s.stopLoss, s.takeProfit]).toEqual([1.0262, 1.0365]);
+      expect([s.exitPrice, s.exitTime]).toEqual([1.0365, '2025-01-08T14:00:00.000Z']);
+
+      // Closing hands the flag back, and another row opens again.
+      chart().openChange.emit(false);
+      fixture.detectChanges();
+      expect(chart().open).toBe(false);
+      report.tradeClick.emit(reportRow(6));
+      fixture.detectChanges();
+      expect(chart().open).toBe(true);
+      expect(chart().selection!.title).toBe('Live session · trade #6 · Live · EURUSD · Short');
+    });
+
+    it('tells the report which trades are the warm-up replay', () => {
+      load(taggedSession());
+      const report = reportStub();
+      const origin = report.tradeOrigin!;
+      expect(origin(reportRow(1))).toBe('warmup');
+      expect(origin(reportRow(5))).toBe('paper');
+      expect(origin(reportRow(6))).toBe('live');
+      expect(origin(reportRow(7))).toBe('paper');
+      expect(report.headingNote).toContain('historical replay');
+      expect(report.headingNote).toContain('Origin column');
+    });
+
+    it('opens an open trade from its row by click, Enter or Space, with an Origin badge', () => {
+      load(taggedSession());
+      const headers = [...openTradesSection().querySelectorAll('thead th')].map((th) =>
+        th.textContent!.trim(),
+      );
+      expect(headers[0]).toBe('Origin');
+      const [row] = openTradeRows();
+      const badge = row.querySelector('.origin')!;
+      expect(badge.textContent!.trim()).toBe('Paper');
+      expect(badge.getAttribute('data-origin')).toBe('paper');
+      expect(row.getAttribute('tabindex')).toBe('0');
+      expect(row.getAttribute('role')).toBe('button');
+      expect(row.getAttribute('aria-label')).toBe('Chart open long trade Long, Paper');
+
+      row.click();
+      fixture.detectChanges();
+      const s = chart().selection!;
+      expect(chart().open).toBe(true);
+      expect(s.title).toBe('Live session · trade #7 · Paper · EURUSD · Long · open');
+      expect([s.stopLoss, s.takeProfit]).toEqual([1.165, 1.18]);
+      // No exit: no dot, and the chart runs to now.
+      expect([s.exitPrice, s.exitTime]).toEqual([null, null]);
+
+      // The key is consumed: the chart takes focus on open, and an un-prevented Enter / Space
+      // would go on to "press" its first timeframe button (seen in Chromium: it flipped to M1).
+      for (const key of ['Enter', ' ']) {
+        chart().openChange.emit(false);
+        fixture.detectChanges();
+        const press = new KeyboardEvent('keydown', { key, cancelable: true });
+        row.dispatchEvent(press);
+        fixture.detectChanges();
+        expect(chart().open).toBe(true);
+        expect(press.defaultPrevented).toBe(true);
+      }
+    });
+
+    it('keeps an open chart as it is through a refresh', () => {
+      load(taggedSession());
+      openTradeRows()[0].click();
+      fixture.detectChanges();
+      const selection = chart().selection;
+
+      // A new bar: the trade's stop trailed up. The open chart keeps its selection (a new one
+      // would reload and re-frame it); the table shows the new level.
+      el.querySelector<HTMLButtonElement>('.head .btn')!.click();
+      http.expectOne(LIVE_URL).flush(
+        ok({
+          ...taggedSession(),
+          lastBarTimeMs: Date.now() - 60_000,
+          openTrades: [{ ...liveOpenTradeFixture(), stopLoss: 1.168 }],
+        }),
+      );
+      fixture.detectChanges();
+
+      expect(openTradesSection().textContent).toContain('1.16800');
+      expect(chart().open).toBe(true);
+      expect(chart().selection).toBe(selection);
+    });
+
+    it('opens on the strategy’s own timeframe when the page passes it', () => {
+      fixture = TestBed.createComponent(ScriptLivePanelComponent);
+      fixture.componentRef.setInput('strategyId', 41);
+      fixture.componentRef.setInput('symbol', 'EURUSD');
+      fixture.componentRef.setInput('timeframe', 'M15');
+      fixture.detectChanges();
+      el = fixture.nativeElement as HTMLElement;
+      http.expectOne(LIVE_URL).flush(ok(taggedSession()));
+      flushBindings();
+      fixture.detectChanges();
+
+      reportStub().tradeClick.emit(reportRow(3));
+      fixture.detectChanges();
+      expect(chart().selection!.timeframe).toBe('M15');
+    });
+
+    it('works against an engine without closed trades or origins: no zones, origin unknown', () => {
+      load(liveSession());
+      const report = reportStub();
+      // No Origin column of unknowns, and the hint says why.
+      expect(report.tradeOrigin).toBeNull();
+      expect(report.headingNote).toContain('does not mark');
+      const headers = [...openTradesSection().querySelectorAll('thead th')].map((th) =>
+        th.textContent!.trim(),
+      );
+      expect(headers).not.toContain('Origin');
+
+      report.tradeClick.emit(reportRow(2));
+      fixture.detectChanges();
+      let s = chart().selection!;
+      expect(s.title).toBe(
+        'Live session · trade #2 · Origin unknown · EURUSD · Short · exited on stop loss',
+      );
+      expect([s.stopLoss, s.takeProfit]).toEqual([null, null]);
+      expect([s.exitPrice, s.exitTime]).toEqual([1.034, '2025-01-16T12:00:00.000Z']);
+
+      chart().openChange.emit(false);
+      fixture.detectChanges();
+      openTradeRows()[0].click();
+      fixture.detectChanges();
+      s = chart().selection!;
+      expect(s.title).toBe('Live session · trade #7 · Origin unknown · EURUSD · Long · open');
+      // The older payload's stop (`protectedStop`) still draws its zone.
+      expect(s.stopLoss).toBe(1.16512);
+      expect(s.exitTime).toBeNull();
+    });
   });
 });

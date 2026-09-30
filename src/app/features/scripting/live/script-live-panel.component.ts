@@ -12,13 +12,29 @@ import {
 import { catchError, of } from 'rxjs';
 
 import { createPolledResource } from '@core/polling/polled-resource';
+import {
+  EATradeChartModalComponent,
+  type TradeChartSelection,
+} from '@features/ea-instances/components/ea-trade-chart-modal/ea-trade-chart-modal.component';
 
 import { ScriptStrategyService } from '../api/script-strategy.service';
 import { StrategyExecutionService } from '../api/strategy-execution.service';
 import type { ScriptDivergence } from '../api/scripting-api.types';
 import { describeFailure, isOk } from '../shared/api-error';
 import { StrategyReportComponent } from '../report/strategy-report.component';
-import { normalizeStrategyReport, reportCurrency } from '../report/strategy-report.model';
+import {
+  normalizeStrategyReport,
+  reportCurrency,
+  type ReportTrade,
+} from '../report/strategy-report.model';
+import type { TradeOriginOf } from '../report/report-trades-columns';
+import {
+  TRADE_ORIGIN_BADGES,
+  parseTradeOrigin,
+  tradeOriginHint,
+  tradeOriginTitle,
+  type TradeOrigin,
+} from '../report/trade-origin';
 import {
   NA,
   formatDateTime,
@@ -26,6 +42,15 @@ import {
   formatPrice,
   inferPriceDecimals,
 } from '../report/report-format';
+import {
+  hasTradeOrigins,
+  liveChartContext,
+  liveOpenTradeChart,
+  liveReportTradeChart,
+  liveTradeBook,
+  matchLiveFill,
+  type LiveChartContext,
+} from './live-trade-chart';
 import {
   OPEN_TRADE_COLUMNS,
   PENDING_ORDER_COLUMNS,
@@ -51,11 +76,16 @@ const STALE_MINUTES = 240;
  * the emulator's position, open trades and pending orders, equity, account positions a previous
  * script version left open, the divergences between the emulator and the bound accounts, and the
  * live emulator's Strategy report. Emulator quantities read in units, account positions in lots.
+ *
+ * Every trade — a row of the report's List of trades or of the Open trades table — opens on the
+ * position chart a backtest trade opens, with its origin (warm-up replay, paper, live) in the
+ * title: the session's warm-up replays history through the same emulator, so its trades sit in
+ * the same lists as the real ones.
  */
 @Component({
   selector: 'app-script-live-panel',
   standalone: true,
-  imports: [StrategyReportComponent],
+  imports: [StrategyReportComponent, EATradeChartModalComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="stack">
@@ -200,6 +230,7 @@ const STALE_MINUTES = 240;
           @if (l.openTrades.length === 0) {
             <p class="muted">None.</p>
           } @else {
+            <p class="hint">Select a trade to chart its entry and current stop / target.</p>
             <div class="table-wrap" tabindex="0" role="region" aria-labelledby="live-open-trades">
               <table>
                 <thead>
@@ -211,9 +242,28 @@ const STALE_MINUTES = 240;
                 </thead>
                 <tbody>
                   @for (row of l.openTrades; track $index) {
-                    <tr>
+                    <tr
+                      class="trade-row"
+                      tabindex="0"
+                      role="button"
+                      [attr.aria-label]="openTradeAriaLabel(row)"
+                      (click)="onOpenTradeClick(row)"
+                      (keydown.enter)="$event.preventDefault(); openOpenTrade(row)"
+                      (keydown.space)="$event.preventDefault(); openOpenTrade(row)"
+                    >
                       @for (c of tradeColumns(); track c.key) {
-                        <td>{{ cell(c.key, row) }}</td>
+                        @if (c.key === 'origin') {
+                          <td>
+                            <span
+                              class="origin"
+                              [attr.data-origin]="rowOrigin(row) ?? 'unknown'"
+                              [title]="originHint(rowOrigin(row))"
+                              >{{ originBadge(rowOrigin(row)) }}</span
+                            >
+                          </td>
+                        } @else {
+                          <td>{{ cell(c.key, row) }}</td>
+                        }
                       }
                     </tr>
                   }
@@ -298,12 +348,27 @@ const STALE_MINUTES = 240;
         </section>
 
         @if (hasReport()) {
-          <app-strategy-report [report]="l.report" heading="Live emulator report" />
+          <app-strategy-report
+            [report]="l.report"
+            heading="Live emulator report"
+            [headingNote]="warmupNote()"
+            [tradesClickable]="true"
+            [tradeOrigin]="reportTradeOrigin()"
+            (tradeClick)="openReportTrade($event)"
+          />
         } @else {
           <p class="muted">The live session has not produced a report yet.</p>
         }
       }
     </div>
+
+    <!-- Trade chart: mounted once, outside the polled blocks, and driven by a selection that only
+         a click sets — a refresh never closes, reloads or re-frames an open chart. -->
+    <app-ea-trade-chart-modal
+      [selection]="chartSelection()"
+      [open]="chartOpen()"
+      (openChange)="chartOpen.set($event)"
+    />
   `,
   styles: [
     `
@@ -469,6 +534,37 @@ const STALE_MINUTES = 240;
         background: var(--bg-tertiary);
         white-space: nowrap;
       }
+      .trade-row {
+        cursor: pointer;
+      }
+      .trade-row:hover td {
+        background: var(--bg-tertiary);
+      }
+      .trade-row:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
+      }
+      .origin {
+        display: inline-block;
+        padding: 1px 8px;
+        border-radius: var(--radius-full);
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        white-space: nowrap;
+        color: var(--text-secondary);
+      }
+      .origin[data-origin='warmup'] {
+        border: 1px dashed currentColor;
+        color: #b25000;
+      }
+      .origin[data-origin='paper'] {
+        background: rgba(0, 113, 227, 0.12);
+        color: var(--accent);
+      }
+      .origin[data-origin='live'] {
+        background: rgba(52, 199, 89, 0.14);
+        color: #248a3d;
+      }
       .nowrap {
         white-space: nowrap;
       }
@@ -537,6 +633,16 @@ export class ScriptLivePanelComponent {
   private readonly executionApi = inject(StrategyExecutionService);
 
   readonly strategyId = input.required<number>();
+  /** The strategy's engine symbol / timeframe, for the trade chart; the live report's are the fallback. */
+  readonly symbol = input<string | null>(null);
+  readonly timeframe = input<string | null>(null);
+
+  /**
+   * The trade chart's selection. Set on a click only — never derived from the polled payload — so
+   * a refresh cannot swap it under an open chart (a new selection reloads the candles).
+   */
+  readonly chartSelection = signal<TradeChartSelection | null>(null);
+  readonly chartOpen = signal(false);
 
   /** Account names for the divergence table, from the strategy's bindings. */
   private readonly accountNames = signal<ReadonlyMap<string, string>>(new Map());
@@ -624,8 +730,47 @@ export class ScriptLivePanelComponent {
   readonly tradeColumns = computed(() =>
     deriveColumns(this.live()?.openTrades ?? [], OPEN_TRADE_COLUMNS),
   );
+
   readonly orderColumns = computed(() =>
     deriveColumns(this.live()?.pendingOrders ?? [], PENDING_ORDER_COLUMNS),
+  );
+
+  /** The session's closed and open trades as the chart reads them (SL/TP, origin). */
+  private readonly tradeBook = computed(() => liveTradeBook(this.live()));
+  /** False on an engine build that tags no trade with its origin. */
+  readonly hasOrigins = computed(() => hasTradeOrigins(this.tradeBook()));
+
+  /** Per-row origin lookups, cached until the next payload (the grid asks per render). */
+  private readonly originCache = computed(() => {
+    this.tradeBook();
+    return new WeakMap<ReportTrade, TradeOrigin | null>();
+  });
+
+  /**
+   * The report's Origin column source. One function for the component's lifetime — the grid
+   * rebuilds its columns when this reference changes — reading the latest payload when called.
+   */
+  private readonly originOfReportTrade: TradeOriginOf = (trade) =>
+    untracked(() => {
+      const cache = this.originCache();
+      if (cache.has(trade)) return cache.get(trade) ?? null;
+      const origin = matchLiveFill(trade, this.tradeBook())?.origin ?? null;
+      cache.set(trade, origin);
+      return origin;
+    });
+
+  /** Null on an older engine: the report then lists no Origin column of unknowns. */
+  readonly reportTradeOrigin = computed<TradeOriginOf | null>(() =>
+    this.hasOrigins() ? this.originOfReportTrade : null,
+  );
+
+  readonly warmupNote = computed(
+    () =>
+      'Warm-up trades are a historical replay run before the session went live — not paper ' +
+      'evidence, though the statistics include them. ' +
+      (this.hasOrigins()
+        ? 'The Origin column marks them; select a trade to chart it.'
+        : 'This engine build does not mark which trades they are; select a trade to chart it.'),
   );
 
   readonly sortedDivergences = computed(() =>
@@ -685,6 +830,59 @@ export class ScriptLivePanelComponent {
 
   cell(key: string, row: Record<string, unknown>): string {
     return formatLiveValue(key, row[key], this.currency(), this.priceDecimals());
+  }
+
+  /** A List-of-trades row of the live report → the trade chart. */
+  openReportTrade(row: ReportTrade): void {
+    this.showChart(liveReportTradeChart(row, this.tradeBook(), this.chartContext())?.selection);
+  }
+
+  /** A row of the Open trades table → the trade chart (entry, current SL/TP, runs to now). */
+  openOpenTrade(row: Record<string, unknown>): void {
+    const chart = liveOpenTradeChart(row, this.report()?.trades ?? [], this.chartContext());
+    this.showChart(chart?.selection);
+  }
+
+  onOpenTradeClick(row: Record<string, unknown>): void {
+    // Cells are text-selectable; a drag to copy a price must not open the chart.
+    if ((globalThis.getSelection?.()?.toString() ?? '').length > 0) return;
+    this.openOpenTrade(row);
+  }
+
+  rowOrigin(row: Record<string, unknown>): TradeOrigin | null {
+    return parseTradeOrigin(row['origin']);
+  }
+
+  originBadge(origin: TradeOrigin | null): string {
+    return origin ? TRADE_ORIGIN_BADGES[origin] : NA;
+  }
+
+  originHint(origin: TradeOrigin | null): string {
+    return tradeOriginHint(origin);
+  }
+
+  openTradeAriaLabel(row: Record<string, unknown>): string {
+    const side = String(row['direction'] ?? '')
+      .toLowerCase()
+      .startsWith('s')
+      ? 'short'
+      : 'long';
+    const id = typeof row['entryId'] === 'string' && row['entryId'] ? ` ${row['entryId']}` : '';
+    const origin = 'origin' in row ? `, ${tradeOriginTitle(this.rowOrigin(row))}` : '';
+    return `Chart open ${side} trade${id}${origin}`;
+  }
+
+  private chartContext(): LiveChartContext {
+    return liveChartContext(
+      { symbol: this.symbol(), timeframe: this.timeframe() },
+      this.report()?.meta,
+    );
+  }
+
+  private showChart(selection: TradeChartSelection | null | undefined): void {
+    if (!selection) return;
+    this.chartSelection.set(selection);
+    this.chartOpen.set(true);
   }
 
   divergenceTime(d: ScriptDivergence): string {

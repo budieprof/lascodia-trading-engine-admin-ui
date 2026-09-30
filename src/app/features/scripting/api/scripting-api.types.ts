@@ -1,6 +1,8 @@
 import type { AlertChannel, StrategyDto } from '@core/api/api.types';
 import type { ScriptStrategyProperties } from '@core/api/scripting.types';
 
+import type { TradeOrigin } from '../report/trade-origin';
+
 /**
  * Wire types for the ADR-0027 scripting endpoints the report / screener / alerts / live /
  * execution pages use. Source of truth: `docs/api/scripting-api.md` in the engine repo (§ numbers
@@ -138,12 +140,19 @@ export type ScriptStrategyDto = StrategyDto & ScriptStrategyFields;
  * The emulator's quantities (`position.size`, `openTrades[].qty`, `pendingOrders[].qty`) are Pine
  * units of the underlying; `position.lots` and `openTrades[].lots` are the broker lots they come
  * to (engine DEC-18); `orphanedPositions` are broker positions, in lots.
+ *
+ * Each open and closed trade carries its `origin` (`warmup` | `paper` | `live`): the session's
+ * warm-up replays history before it goes live, and those trades sit in the same lists — and the
+ * same report — as the real ones. An engine build that predates the tag sends no `origin` and no
+ * `closedTrades`; the console then shows the origin as unknown.
  */
 export interface ScriptLiveStatus {
   status: string;
   lastBarTimeMs: number | null;
   position: Record<string, unknown> | null;
   openTrades: Record<string, unknown>[];
+  /** The emulator's closed trades, oldest first (the newest 500); empty on an older engine. */
+  closedTrades: ScriptLiveClosedTrade[];
   pendingOrders: Record<string, unknown>[];
   equity: number | Record<string, unknown> | null;
   /** The live emulator's StrategyReport. */
@@ -151,6 +160,31 @@ export interface ScriptLiveStatus {
   divergences: ScriptDivergence[];
   /** Account positions a previous script version opened, left to the operator (engine D90). */
   orphanedPositions: ScriptOrphanedPosition[];
+}
+
+/**
+ * One of the live emulator's closed trades (`closedTrades[]`). `qty` is Pine units, `lots` the
+ * broker lots it comes to; SL/TP are the protective levels the trade carried; times are unix ms.
+ */
+export interface ScriptLiveClosedTrade {
+  tradeKey: number | null;
+  entryId: string;
+  /** `long` | `short`. */
+  direction: string;
+  qty: number | null;
+  lots: number | null;
+  entryPrice: number | null;
+  entryTimeMs: number | null;
+  exitPrice: number | null;
+  exitTimeMs: number | null;
+  /** `TakeProfit` | `StopLoss` | `Trailing` | '' — the strategy.exit leg that filled. */
+  exitLeg: string;
+  exitComment: string;
+  profit: number | null;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  /** Null when the engine did not say. */
+  origin: TradeOrigin | null;
 }
 
 /**

@@ -9,8 +9,10 @@ import {
   formatPrice,
   formatUnits,
 } from '../report/report-format';
+import { parseTradeOrigin } from '../report/trade-origin';
 import type {
   ScriptDivergence,
+  ScriptLiveClosedTrade,
   ScriptLiveStatus,
   ScriptOrphanedPosition,
 } from '../api/scripting-api.types';
@@ -66,6 +68,26 @@ function orphanedPosition(p: Json): ScriptOrphanedPosition {
   };
 }
 
+function closedTrade(t: Json): ScriptLiveClosedTrade {
+  return {
+    tradeKey: num(t['tradeKey']),
+    entryId: text(t['entryId']),
+    direction: text(t['direction']).toLowerCase(),
+    qty: num(t['qty']),
+    lots: num(t['lots']),
+    entryPrice: num(t['entryPrice']),
+    entryTimeMs: num(t['entryTimeMs']),
+    exitPrice: num(t['exitPrice']),
+    exitTimeMs: num(t['exitTimeMs']),
+    exitLeg: text(t['exitLeg']),
+    exitComment: text(t['exitComment']),
+    profit: num(t['profit']),
+    stopLoss: num(t['stopLoss']),
+    takeProfit: num(t['takeProfit']),
+    origin: parseTradeOrigin(t['origin']),
+  };
+}
+
 /** Normalises the live payload's casing and container types. Null when it is not an object. */
 export function normalizeLiveStatus(raw: unknown): ScriptLiveStatus | null {
   if (!isObject(raw)) return null;
@@ -77,6 +99,7 @@ export function normalizeLiveStatus(raw: unknown): ScriptLiveStatus | null {
     lastBarTimeMs: num(o['lastBarTimeMs']),
     position: isObject(o['position']) ? camelShallow(o['position']) : null,
     openTrades: rows(o['openTrades']),
+    closedTrades: rows(o['closedTrades']).map(closedTrade),
     pendingOrders: rows(o['pendingOrders']),
     equity: isObject(o['equity']) ? camelShallow(o['equity']) : num(o['equity']),
     report: o['report'] ?? null,
@@ -152,7 +175,8 @@ export function formatLiveValue(
   if (k.endsWith('time') || k.endsWith('timems') || k.endsWith('timeutc') || k === 'time') {
     return value > 1e11 ? `${formatDateTime(value)} UTC` : formatNumber(value, 0);
   }
-  if (/(price|stop|limit|target|avg)/.test(k)) return formatPrice(value, priceDecimals);
+  // `takeProfit` is a price level, not an amount — tested before the money keys ("profit").
+  if (/(price|stop|limit|target|avg|takeprofit)/.test(k)) return formatPrice(value, priceDecimals);
   if (/(pnl|profit|equity|commission|value|margin)/.test(k)) {
     return formatMoney(value, currency, { signed: /(pnl|profit)/.test(k) });
   }
@@ -232,8 +256,12 @@ export function deriveColumns(rows: readonly Json[], preferred: readonly string[
   return ordered.map((key) => ({ key, label: humanize(key) }));
 }
 
-/** Preferred order of an open trade's fields: the size in units, then in lots, then the rest. */
+/**
+ * Preferred order of an open trade's fields: where it came from (warm-up replay, paper, live),
+ * then the size in units, then in lots, then the rest.
+ */
 export const OPEN_TRADE_COLUMNS = [
+  'origin',
   'entryId',
   'direction',
   'qty',

@@ -3,7 +3,9 @@ import { AgGridAngular } from 'ag-grid-angular';
 import {
   AllCommunityModule,
   ModuleRegistry,
+  type CellKeyDownEvent,
   type ColDef,
+  type FullWidthCellKeyDownEvent,
   type GetRowIdParams,
   type RowClassRules,
   type RowClickedEvent,
@@ -17,6 +19,7 @@ import {
   filterTrades,
   tradeFilterCounts,
   type TradeFilter,
+  type TradeOriginOf,
 } from './report-trades-columns';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -83,6 +86,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
         [tooltipShowDelay]="300"
         [class.clickable]="clickable()"
         (rowClicked)="onRowClicked($event)"
+        (cellKeyDown)="onCellKeyDown($event)"
         style="width: 100%"
       />
     }
@@ -212,6 +216,25 @@ ModuleRegistry.registerModules([AllCommunityModule]);
         border: 1px solid currentColor;
         color: var(--text-secondary);
       }
+      :host ::ng-deep .rpt-origin {
+        display: inline-block;
+        padding: 1px 8px;
+        border-radius: var(--radius-full);
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+      }
+      :host ::ng-deep .rpt-origin-warmup {
+        border: 1px dashed currentColor;
+        color: #b25000;
+      }
+      :host ::ng-deep .rpt-origin-paper {
+        background: rgba(0, 113, 227, 0.12);
+        color: var(--accent);
+      }
+      :host ::ng-deep .rpt-origin-live {
+        background: rgba(52, 199, 89, 0.14);
+        color: #248a3d;
+      }
       .sr-only {
         position: absolute;
         width: 1px;
@@ -233,11 +256,23 @@ export class ReportTradesGridComponent {
   readonly clickable = input(false);
   /** A row was clicked (not a text selection) — the parent opens that trade on a chart. */
   readonly tradeClick = output<ReportTrade>();
+  /** When set, an Origin column tells warm-up replay, paper and live trades apart (live only). */
+  readonly origin = input<TradeOriginOf | null>(null);
 
   onRowClicked(event: RowClickedEvent<ReportTrade>): void {
     if (!this.clickable() || !event.data) return;
     // Cells are text-selectable; a drag to copy a price must not open the chart.
     if ((globalThis.getSelection?.()?.toString() ?? '').length > 0) return;
+    this.tradeClick.emit(event.data);
+  }
+
+  /** Enter on a focused cell opens its trade, as a click does (arrow keys move between cells). */
+  onCellKeyDown(
+    event: CellKeyDownEvent<ReportTrade> | FullWidthCellKeyDownEvent<ReportTrade>,
+  ): void {
+    const key = (event.event as KeyboardEvent | null | undefined)?.key;
+    if (!this.clickable() || key !== 'Enter' || !event.data) return;
+    event.event?.preventDefault();
     this.tradeClick.emit(event.data);
   }
 
@@ -253,7 +288,7 @@ export class ReportTradesGridComponent {
   );
 
   readonly columnDefs = computed<ColDef<ReportTrade>[]>(() =>
-    buildTradeColumns(this.currency(), this.priceDecimals()),
+    buildTradeColumns(this.currency(), this.priceDecimals(), this.origin()),
   );
 
   readonly defaultColDef: ColDef<ReportTrade> = {
