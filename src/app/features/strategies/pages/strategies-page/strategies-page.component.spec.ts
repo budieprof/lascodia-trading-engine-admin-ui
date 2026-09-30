@@ -170,20 +170,21 @@ describe('StrategiesPageComponent (create refusals, clone)', () => {
     );
   });
 
-  it('bulk create writes each symbol into its copy of the rules and lists the failures', () => {
+  it('bulk create sends one create per symbol and lists the failures', () => {
     create
       .mockReturnValueOnce(of({ status: true, data: 1 }))
       .mockReturnValueOnce(of({ status: false, message: 'duplicate' }));
-    const rules = JSON.stringify({ name: 'r', symbol: 'EURUSD', timeframe: 'H1' });
+    const script = '//@version=6\nstrategy("x")';
     cmp.onCreate({
       name: 'Rule',
       symbol: 'EURUSD',
       symbols: ['EURUSD', 'GBPUSD'],
       strategyType: 'RuleBased',
-      parametersJson: rules,
+      scriptSource: script,
     });
-    expect(JSON.parse(create.mock.calls[0][0].parametersJson).symbol).toBe('EURUSD');
-    expect(JSON.parse(create.mock.calls[1][0].parametersJson).symbol).toBe('GBPUSD');
+    expect(create.mock.calls[0][0]).toMatchObject({ symbol: 'EURUSD', scriptSource: script });
+    expect(create.mock.calls[1][0]).toMatchObject({ symbol: 'GBPUSD', scriptSource: script });
+    expect('symbols' in create.mock.calls[0][0]).toBe(false);
     expect(notifications.error).toHaveBeenCalledWith('1 not created — GBPUSD: duplicate');
     expect(cmp.showCreateForm()).toBe(false);
   });

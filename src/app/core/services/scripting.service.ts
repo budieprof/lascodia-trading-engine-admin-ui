@@ -312,7 +312,7 @@ export class ScriptingService {
     );
   }
 
-  /** `GET strategy/{id}/export` — `.pine` for script strategies, a JSON bundle for DSL ones. */
+  /** `GET strategy/{id}/export` — `.pine` for script strategies, a JSON bundle for legacy DSL rows. */
   exportStrategy(id: number): Observable<StrategyExportDto> {
     return this.api.get<ResponseData<StrategyExportDto>>(`/strategy/${id}/export`, SILENT).pipe(
       map((res) => envelopeData(res, 'The engine did not export the strategy.')),

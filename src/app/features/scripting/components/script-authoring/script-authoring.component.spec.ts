@@ -9,7 +9,6 @@ import type { StrategyDto } from '@core/api/api.types';
 import type { ScriptCompileResult } from '@core/api/scripting.types';
 import { ScriptingService } from '@core/services/scripting.service';
 import { ScriptAuthoringComponent } from './script-authoring.component';
-import { AuthoringModeSwitchComponent } from './authoring-mode-switch.component';
 import { draftFor, type ScriptDraft } from './authoring-mode';
 
 // The script panel's own behaviour: what it hands the strategy form to save, and the exact
@@ -220,29 +219,5 @@ describe('ScriptAuthoringComponent', () => {
       cmp.setPolicy('Nonsense' as any);
       expect(draft().executionPolicy).toBe('Direct');
     });
-  });
-});
-
-describe('AuthoringModeSwitchComponent', () => {
-  it('switches mode, and cannot when locked', () => {
-    TestBed.configureTestingModule({ imports: [AuthoringModeSwitchComponent] });
-    const fixture = TestBed.createComponent(AuthoringModeSwitchComponent);
-    const cmp = fixture.componentInstance;
-    const mode = signal<'rules' | 'script'>('rules');
-    const locked = signal(false);
-    (cmp as any).mode = mode;
-    (cmp as any).locked = locked;
-    fixture.detectChanges();
-    const buttons = () => [...(fixture.nativeElement as HTMLElement).querySelectorAll('button')];
-    buttons()[1].click();
-    expect(mode()).toBe('script');
-    locked.set(true);
-    fixture.detectChanges();
-    expect(buttons()[0].disabled).toBe(true);
-    cmp.choose('rules');
-    expect(mode()).toBe('script');
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain(
-      'Fixed for an existing strategy',
-    );
   });
 });

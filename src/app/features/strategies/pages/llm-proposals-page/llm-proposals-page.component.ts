@@ -21,7 +21,7 @@ import type {
 } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
-import { DslCheckResult, normaliseDslCheck } from '../../dsl/dsl-check';
+import { parseProposalEnvelope } from './proposal-envelope';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
@@ -29,7 +29,22 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
-const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate', 'All'] as const;
+// `DslInvalid` is history from the retired JSON rules DSL; new rows that fail
+// to compile land in `CompileInvalid`.
+const STATUS_TABS = [
+  'Pending',
+  'CompileInvalid',
+  'Approved',
+  'Rejected',
+  'Duplicate',
+  'DslInvalid',
+  'All',
+] as const;
+
+const STATUS_LABELS: Record<string, string> = {
+  CompileInvalid: 'Compile invalid',
+  DslInvalid: 'DSL invalid (legacy)',
+};
 
 @Component({
   selector: 'app-llm-proposals-page',
@@ -50,7 +65,7 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
     <div class="page">
       <app-page-header
         title="Strategies — LLM Proposals"
-        subtitle="LLM-generated strategy candidates. Inspect the DSL before promoting to a Paused strategy."
+        subtitle="LLM-generated Pine strategy candidates. Inspect the script before promoting to a Paused strategy."
       >
         <a routerLink="/strategies" class="btn btn-secondary">← Strategies</a>
         <button
@@ -103,8 +118,8 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
               <dd class="num">{{ r.pendingWritten }}</dd>
             </div>
             <div>
-              <dt>DSL invalid</dt>
-              <dd class="num">{{ r.dslInvalidWritten }}</dd>
+              <dt>Compile invalid</dt>
+              <dd class="num">{{ r.compileInvalidWritten }}</dd>
             </div>
             <div>
               <dt>Duplicate</dt>
@@ -131,9 +146,9 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
           </dl>
           @if (r.totalWritten === 0) {
             <footer class="run-result-foot">
-              Possible reasons: the LLM returned malformed JSON (check /llm/invocations for the
-              matching <code>strategy_proposal.generate</code> row + its error), every candidate was
-              a duplicate of an existing row, the budget circuit-breaker was tripped, or
+              Possible reasons: the LLM returned a malformed proposal (check /llm/invocations for
+              the matching <code>strategy_proposal.generate</code> row + its error), every candidate
+              was a duplicate of an existing row, the budget circuit-breaker was tripped, or
               <code>ProposalsPerCycle</code> is set to 0.
             </footer>
           }
@@ -150,7 +165,7 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
                 [class.active]="statusFilter() === s"
                 (click)="statusFilter.set(s)"
               >
-                {{ s }}
+                {{ statusLabel(s) }}
               </button>
             }
           </div>
@@ -201,12 +216,12 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
               dotColor="#FF3B30"
             />
             <app-metric-card
-              label="DSL invalid"
-              [value]="st.dslInvalidCount"
+              label="Compile invalid"
+              [value]="st.compileInvalidCount"
               format="number"
-              [dotColor]="st.dslInvalidCount > 0 ? '#FF3B30' : '#8E8E93'"
+              [dotColor]="st.compileInvalidCount > 0 ? '#FF3B30' : '#8E8E93'"
             />
-            <!-- Approved ÷ (approved + rejected): invalid DSL and duplicates
+            <!-- Approved ÷ (approved + rejected): uncompilable scripts and duplicates
                  never reached a reviewer, so they are not part of the rate.
                  The label says so instead of leaving the base implicit. -->
             <app-metric-card
@@ -318,7 +333,7 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
                       <td class="mono">{{ r.symbol }}</td>
                       <td>
                         <span class="status-pill" [attr.data-status]="r.status">{{
-                          r.status
+                          statusLabel(r.status)
                         }}</span>
                       </td>
                     </tr>
@@ -358,7 +373,7 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
                     <td class="mono small">{{ p.source }}</td>
                     <td>
                       <span class="status-pill" [attr.data-status]="p.status">
-                        {{ p.status }}
+                        {{ statusLabel(p.status) }}
                       </span>
                       @if (p.promotedStrategyId) {
                         <a
@@ -394,32 +409,37 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
                       <td colspan="6">
                         <div class="detail-grid">
                           <div>
-                            <h4>Plain-English summary</h4>
-                            @if (summaryFor(p.id) === 'loading') {
-                              <p class="summary muted">Summarising DSL…</p>
-                            } @else if (summaryFor(p.id) === 'error') {
-                              <p class="summary muted">
-                                Summary unavailable — DSL summariser refused or the proposal is
-                                malformed. Inspect the raw JSON below.
-                              </p>
-                              @if (summaryErrorsFor(p.id).length > 0) {
-                                <ul class="summary-errors">
-                                  @for (e of summaryErrorsFor(p.id); track $index) {
-                                    <li>{{ e }}</li>
-                                  }
-                                </ul>
+                            @if (envelopeFor(p); as env) {
+                              <h4>
+                                Pine script
+                                @if (env.timeframe) {
+                                  <span class="muted small mono">· {{ env.timeframe }}</span>
+                                }
+                              </h4>
+                              @if (env.description) {
+                                <p class="summary">{{ env.description }}</p>
                               }
-                            } @else if (summaryFor(p.id); as text) {
-                              <p class="summary">{{ text }}</p>
+                              <pre class="json script" data-testid="proposal-script">{{
+                                env.script
+                              }}</pre>
+                            } @else {
+                              <h4>Proposal payload</h4>
+                              <p class="summary muted">
+                                @if (p.status === 'DslInvalid') {
+                                  Legacy JSON rules proposal — the rules DSL is retired, so this row
+                                  is history only.
+                                } @else {
+                                  Not a Pine proposal envelope — shown raw.
+                                }
+                              </p>
+                              <pre class="json">{{ formatJson(p.proposalJson) }}</pre>
                             }
-                            <h4>Proposal JSON</h4>
-                            <pre class="json">{{ formatJson(p.proposalJson) }}</pre>
                           </div>
                           <div>
                             <h4>Disposition</h4>
                             <dl>
                               <dt>Status</dt>
-                              <dd>{{ p.status }}</dd>
+                              <dd>{{ statusLabel(p.status) }}</dd>
                               <dt>Source</dt>
                               <dd class="mono">{{ p.source }}</dd>
                               @if (p.rejectionReason) {
@@ -465,8 +485,8 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
             </p>
             <p class="modal-desc">
               Promotion creates a <strong>Paused</strong> Strategy in your library. You can activate
-              it after reviewing the auto-generated parameters, or pause-and-edit the DSL further
-              before activation. Nothing trades automatically.
+              it after reviewing the auto-generated parameters, or edit the script further before
+              activation. Nothing trades automatically.
             </p>
             <label class="reason-field">
               <span>Reason (optional, written to audit trail)</span>
@@ -856,6 +876,7 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
         background: rgba(255, 59, 48, 0.12);
         color: #d70015;
       }
+      .status-pill[data-status='CompileInvalid'],
       .status-pill[data-status='DslInvalid'] {
         background: rgba(255, 59, 48, 0.12);
         color: #d70015;
@@ -937,12 +958,10 @@ const STATUS_TABS = ['Pending', 'DslInvalid', 'Approved', 'Rejected', 'Duplicate
         border-color: var(--border);
         color: var(--text-tertiary);
       }
-      .summary-errors {
-        margin: 0 0 var(--space-3) 0;
-        padding-left: var(--space-4);
-        font-size: var(--text-xs);
-        font-family: var(--font-mono);
-        color: var(--loss);
+      .json.script {
+        white-space: pre;
+        word-break: normal;
+        color: var(--text-primary);
       }
       .json {
         background: var(--bg-secondary);
@@ -1155,7 +1174,7 @@ export class LlmProposalsPageComponent {
             const promoteSuffix =
               promoted > 0 ? ` · ${promoted} auto-promoted to Paused strategies` : '';
             this.notifications.success?.(
-              `Wrote ${res.data.totalWritten} proposal(s): ${res.data.pendingWritten} pending, ${res.data.dslInvalidWritten} invalid, ${res.data.duplicateWritten} duplicate${promoteSuffix}.`,
+              `Wrote ${res.data.totalWritten} proposal(s): ${res.data.pendingWritten} pending, ${res.data.compileInvalidWritten} compile-invalid, ${res.data.duplicateWritten} duplicate${promoteSuffix}.`,
             );
           } else {
             this.notifications.error?.(
@@ -1216,53 +1235,18 @@ export class LlmProposalsPageComponent {
 
   // Inspect / expand --------------------------------------------------------
   protected readonly expandedId = signal<number | null>(null);
-  /** Plain-English DSL summary of the currently-expanded proposal. Keyed by
-   *  proposal id so re-expanding a previously-seen row doesn't re-fetch. */
-  protected readonly summaries = signal<Record<number, string | 'loading' | 'error'>>({});
 
   protected toggleExpand(id: number): void {
-    const next = this.expandedId() === id ? null : id;
-    this.expandedId.set(next);
-    if (next != null) this.loadSummary(id);
+    this.expandedId.set(this.expandedId() === id ? null : id);
   }
 
-  private loadSummary(id: number): void {
-    const cache = this.summaries();
-    if (cache[id] !== undefined && cache[id] !== 'error') return;
-    const proposal = this.proposals().find((p) => p.id === id);
-    if (!proposal) return;
-    this.summaries.set({ ...cache, [id]: 'loading' });
-    this.strategies
-      .summariseDsl(proposal.proposalJson)
-      .pipe(
-        map((res) => normaliseDslCheck(res)),
-        catchError(() => of(null as DslCheckResult | null)),
-      )
-      .subscribe((check) => {
-        const text = check?.summary ?? null;
-        this.summaries.update((s) => ({
-          ...s,
-          [id]: text && text.trim().length > 0 ? text : 'error',
-        }));
-        this.summaryErrors.update((e) => ({
-          ...e,
-          [id]: (check?.errors ?? []).map((i) => (i.path ? `${i.path}: ${i.message}` : i.message)),
-        }));
-      });
+  /** The proposal's Pine envelope, or null for a legacy DSL / malformed payload. */
+  protected envelopeFor(p: LlmProposalDto) {
+    return parseProposalEnvelope(p.proposalJson);
   }
 
-  /** Why the DSL did not summarise — the validator's errors, keyed by proposal id. */
-  protected readonly summaryErrors = signal<Record<number, string[]>>({});
-
-  /** Resolves the cached summary for a proposal — used by the template to
-   *  render "Loading…" / the prose / a fallback chip without leaking the
-   *  cache shape into the .html. */
-  protected summaryFor(id: number): string | 'loading' | 'error' | undefined {
-    return this.summaries()[id];
-  }
-
-  protected summaryErrorsFor(id: number): string[] {
-    return this.summaryErrors()[id] ?? [];
+  protected statusLabel(status: string): string {
+    return STATUS_LABELS[status] ?? status;
   }
 
   protected formatJson(json: string): string {

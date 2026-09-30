@@ -1,15 +1,12 @@
 import {
   Component,
   ChangeDetectionStrategy,
-  DestroyRef,
   ElementRef,
-  effect,
   input,
   output,
   signal,
   computed,
   inject,
-  untracked,
   OnInit,
   OnChanges,
   SimpleChanges,
@@ -39,7 +36,6 @@ import {
   CurrencyPairDto,
 } from '@core/api/api.types';
 // ── Pine script authoring — see the "Pine script authoring" block at the end of the class.
-import { AuthoringModeSwitchComponent } from '@features/scripting/components/script-authoring/authoring-mode-switch.component';
 import { ScriptAuthoringComponent } from '@features/scripting/components/script-authoring/script-authoring.component';
 import {
   linkedAuthoringMode,
@@ -50,29 +46,23 @@ import { RiskProfilesService } from '@core/services/risk-profiles.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
-import { DslBuilderComponent } from '../dsl-builder/dsl-builder.component';
 import { CloneStrategyDialogComponent } from '../clone-strategy-dialog/clone-strategy-dialog.component';
 import { StrategyVersionDiffComponent } from '../strategy-version-diff/strategy-version-diff.component';
-import {
-  CONDITION_TYPES,
-  DslIssue,
-  INDICATORS,
-  effectiveDslVersion,
-  emitDsl,
-  parseDsl,
-  patchDslFields,
-  upgradeDocToV2,
-  validateDslJson,
-} from '../../dsl/dsl-model';
-import { DSL_EXAMPLES, exampleJsonFor } from '../../dsl/dsl-examples';
-import { DslCheckResult, normaliseDslCheck } from '../../dsl/dsl-check';
 import { failureMessage } from '../../util/api-failure';
 import type { StrategyVersionFields } from '../../util/version-diff';
 
-/** Strategy types whose Parameters JSON is the rule DSL. */
-const DSL_STRATEGY_TYPES: readonly string[] = ['RuleBased', 'LlmProposal'];
+/**
+ * Strategy types authored as Pine v6 scripts. Their Parameters JSON used to hold the retired JSON
+ * rules DSL: a saved row without a script is legacy and never runs.
+ */
+const PINE_STRATEGY_TYPES: readonly string[] = ['RuleBased', 'LlmProposal'];
 
 const STRATEGY_TYPES: readonly StrategyType[] = CREATABLE_STRATEGY_TYPES;
+
+/** Templates that can still seed a strategy — never a legacy JSON-rules (Pine type) one. */
+function loadableTemplates(list: StrategyTemplateDto[] | null | undefined): StrategyTemplateDto[] {
+  return (list ?? []).filter((t) => !PINE_STRATEGY_TYPES.includes(t.strategyType));
+}
 
 // Placeholders shown in each sub-config tab so operators see a working schema example
 // before they fill anything in. Pulled out as a const so the template stays readable
@@ -117,11 +107,9 @@ const TIMEFRAME_LABELS: Record<string, string> = {
     ReactiveFormsModule,
     DatePipe,
     DecimalPipe,
-    DslBuilderComponent,
     CloneStrategyDialogComponent,
     StrategyVersionDiffComponent,
     ConfirmDialogComponent,
-    AuthoringModeSwitchComponent,
     ScriptAuthoringComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -350,11 +338,15 @@ const TIMEFRAME_LABELS: Record<string, string> = {
               </div>
 
               <!-- ── Pine script authoring ──────────────────────────────────────
-                   RuleBased strategies are authored either with the rule builder
-                   (Parameters JSON below) or as a Pine v6 script. In script mode the
-                   panel replaces the rules block and the DSL backtest preview. -->
-              @if (isRuleBased()) {
-                <app-authoring-mode-switch [(mode)]="authoringMode" [locked]="!!strategy()" />
+                   RuleBased / LlmProposal strategies are Pine v6 scripts. A saved row
+                   still on the retired JSON rules DSL is shown read-only below. -->
+              @if (isLegacyRules()) {
+                <div class="legacy-rules-notice" role="note" data-testid="legacy-rules-notice">
+                  <strong>Legacy JSON rules — no longer runs.</strong>
+                  The engine retired the JSON rules DSL: this strategy is kept as history but never
+                  trades or backtests, and it cannot be saved or cloned. Rewrite it in Pine — create
+                  a new RuleBased strategy with a script.
+                </div>
               }
               @if (isScriptAuthoring()) {
                 <app-script-authoring
@@ -426,125 +418,34 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                 </div>
               }
 
-              <!-- Script mode replaces the rules block with the script panel above. -->
+              <!-- Script mode replaces the parameters block with the script panel above. -->
               @if (!isScriptAuthoring()) {
                 <div class="form-group">
                   <label class="form-label">
-                    {{ isDslType() ? 'Rules (DSL JSON)' : 'Parameters JSON' }}
-                    <span class="dsl-example-loader">
-                      <button
-                        type="button"
-                        class="btn btn-link dsl-format-btn"
-                        (click)="formatParametersJson()"
-                        title="Pretty-print the JSON"
-                      >
-                        Format
-                      </button>
-                      @if (!strategy() || isDslType()) {
-                        <select
-                          class="dsl-example-select"
-                          [title]="
-                            strategy()
-                              ? 'Replaces the current rules'
-                              : 'Loads a complete v2 rule and sets the type to RuleBased'
-                          "
-                          (change)="
-                            loadDslExample($any($event.target).value);
-                            $any($event.target).value = ''
-                          "
+                    {{ isLegacyRules() ? 'Legacy JSON rules (read-only)' : 'Parameters JSON' }}
+                    @if (!isLegacyRules()) {
+                      <span class="dsl-example-loader">
+                        <button
+                          type="button"
+                          class="btn btn-link dsl-format-btn"
+                          (click)="formatParametersJson()"
+                          title="Pretty-print the JSON"
                         >
-                          <option value="">Insert DSL example…</option>
-                          @for (ex of dslExamples; track ex.id) {
-                            <option [value]="ex.id">{{ ex.label }}</option>
-                          }
-                        </select>
-                      }
-                    </span>
+                          Format
+                        </button>
+                      </span>
+                    }
                   </label>
-                  @if (isDslType()) {
-                    <app-dsl-builder
-                      [parametersJson]="paramsJson()"
-                      [timeframe]="formTimeframe()"
-                      [symbol]="primarySymbol()"
-                      [strategyName]="formName()"
-                      [issues]="dslIssues()"
-                      [isNew]="!strategy()"
-                      [canUpgrade]="canUpgradeDsl()"
-                      (parametersJsonChange)="onDslBuilderChange($event)"
-                      (upgradeRequested)="askUpgrade()"
-                    />
-                  }
                   <textarea
                     formControlName="parametersJson"
                     class="form-input form-textarea form-mono"
                     rows="8"
-                    [placeholder]="paramsPlaceholder()"
+                    [readOnly]="isLegacyRules()"
+                    placeholder='{"period": 14, "threshold": 0.5}'
                   ></textarea>
-                  @if (isDslType()) {
-                    <div class="dsl-status" aria-live="polite">
-                      @if (dslChecking()) {
-                        <span class="form-hint dsl-checking">Validating with the engine…</span>
-                      } @else if (dslCheckFailed(); as why) {
-                        <span class="form-hint">
-                          Engine validation unavailable ({{ why }}) — showing this console's own
-                          checks.
-                        </span>
-                      }
-                      @if (dslSummary(); as summary) {
-                        <span class="dsl-summary">📖 {{ summary }}</span>
-                      }
-                      @if (dslIssues().length > 0) {
-                        <div class="dsl-issue-list" [class.has-errors]="dslErrorCount() > 0">
-                          <div class="dsl-issue-list-head">
-                            @if (dslErrorCount() > 0) {
-                              <strong>
-                                {{ dslErrorCount() }} error{{ dslErrorCount() === 1 ? '' : 's' }} —
-                                fix before saving
-                              </strong>
-                            }
-                            @if (dslWarningCount() > 0) {
-                              <span>
-                                {{ dslWarningCount() }} warning{{
-                                  dslWarningCount() === 1 ? '' : 's'
-                                }}
-                              </span>
-                            }
-                            <span class="muted">{{ dslIssueSource() }}</span>
-                          </div>
-                          <ul>
-                            @for (i of dslIssues(); track $index) {
-                              <li [class.warning]="i.severity === 'warning'">
-                                {{ i.message }}
-                                @if (i.path) {
-                                  <code class="dsl-issue-path">{{ i.path }}</code>
-                                }
-                              </li>
-                            }
-                          </ul>
-                        </div>
-                      }
-                    </div>
-                  }
-
                   <span class="form-hint">
-                    @if (isDslType()) {
-                      The rules are one JSON document: an <code>entryConditionsRoot</code> tree of
-                      <code>And</code> / <code>Or</code> / <code>Not</code> groups over
-                      {{ conditionTypes.length }} condition types —
-                      @for (t of conditionTypes; track t.type; let lastType = $last) {
-                        <code [title]="t.description">{{ t.type }}</code
-                        >{{ lastType ? '.' : ',' }}
-                      }
-                      Indicators:
-                      @for (ind of indicatorCatalogue; track ind.kind; let lastInd = $last) {
-                        <code [title]="ind.hint">{{ ind.kind }}</code
-                        >{{ lastInd ? '.' : ',' }}
-                      }
-                      An optional <code>exitConditionsRoot</code> closes the strategy's open
-                      position when it holds. <code>dslVersion: 2</code> selects Pine-exact
-                      indicator math; new strategies are created on it. Keys may be camelCase or
-                      PascalCase — the builder writes camelCase. A legacy flat
-                      <code>entryConditions</code> list still reads as an implicit <code>And</code>.
+                    @if (isLegacyRules()) {
+                      Kept for reference while you rewrite the strategy in Pine.
                     } @else {
                       Strategy-type-specific tuning parameters.
                     }
@@ -657,9 +558,9 @@ const TIMEFRAME_LABELS: Record<string, string> = {
               </div>
             }
 
-            <!-- A script previews through its own panel (scripting/run); this DSL
-                 preview is hidden in script mode. -->
-            @if (!isScriptAuthoring()) {
+            <!-- A script previews through its own panel (scripting/run); a legacy
+                 JSON-rules row has nothing the engine can run. -->
+            @if (!isScriptAuthoring() && !isLegacyRules()) {
               <!-- Backtest preview panel — synchronous, server-bounded (≤90d, ≤6000
                  candles, 60s deadline). Operators see real Sharpe / win-rate / max DD
                  before saving. Single-symbol only; multi-symbol previews are too noisy
@@ -1145,7 +1046,8 @@ const TIMEFRAME_LABELS: Record<string, string> = {
               }
 
               <div class="dialog-buttons">
-                @if (!strategy() && templateNameDraft() === null) {
+                <!-- Templates carry no Pine script: a Pine-authored type cannot be one. -->
+                @if (!strategy() && !isRuleBased() && templateNameDraft() === null) {
                   <button
                     type="button"
                     class="btn btn-link save-template-btn"
@@ -1200,47 +1102,6 @@ const TIMEFRAME_LABELS: Record<string, string> = {
       (closed)="cloneOpen.set(false)"
       (cloned)="onCloned()"
     />
-    <app-confirm-dialog
-      [open]="upgradeConfirmOpen()"
-      title="Upgrade to Pine-exact math (v2)?"
-      message="The engine rewrites this strategy's saved rules as dslVersion 2 and saves them straight away. What changes:"
-      confirmLabel="Upgrade"
-      [loading]="upgrading()"
-      (confirm)="confirmUpgrade()"
-      (cancelled)="closeUpgrade()"
-    >
-      <ul class="upgrade-changes">
-        <li>
-          RSI, ATR and ADX switch to Wilder smoothing, as TradingView's <code>ta.rsi</code> /
-          <code>ta.atr</code> / <code>ta.adx</code> compute them — values move, so conditions can
-          fire on different bars.
-        </li>
-        <li>VWAP resets each session instead of averaging the last N bars.</li>
-        <li>
-          MACD, Bollinger Bands and Stochastic take their full settings (fast / slow / signal
-          periods, band multiplier, %K / %D smoothing, price source) through optional indicator
-          params.
-        </li>
-        <li>
-          Spread becomes the real bid/ask spread. Existing Spread conditions are rewritten as
-          BarRange, which keeps measuring the bar's high − low.
-        </li>
-        <li>
-          <strong>
-            Backtests, walk-forward runs and paper results for this strategy were computed on v1
-            math and no longer describe the upgraded rules — re-run them before relying on it.
-          </strong>
-        </li>
-        @if (upgradeConfirmOpen() && formDirty()) {
-          <li class="upgrade-warn">
-            Unsaved changes in this form are discarded — the upgrade starts from the saved rules.
-          </li>
-        }
-      </ul>
-      @if (upgradeError(); as uerr) {
-        <p class="form-error" role="alert">{{ uerr }}</p>
-      }
-    </app-confirm-dialog>
   `,
   styles: [
     `
@@ -1555,15 +1416,6 @@ const TIMEFRAME_LABELS: Record<string, string> = {
       .dsl-example-loader {
         float: right;
       }
-      .dsl-example-select {
-        font-size: 11px;
-        padding: 2px 6px;
-        border: 1px solid var(--border, #e5e5ea);
-        border-radius: 4px;
-        background: var(--bg-secondary, #fafafa);
-        color: var(--text-secondary, #636366);
-        cursor: pointer;
-      }
       .multi-symbol-hint {
         font-size: 11px;
         color: #0071e3;
@@ -1673,52 +1525,14 @@ const TIMEFRAME_LABELS: Record<string, string> = {
         font-size: 12px;
         margin-top: 8px;
       }
-      .dsl-checking {
-        color: var(--text-tertiary, #8e8e93);
-        font-style: italic;
-      }
-      .dsl-summary {
-        display: block;
-        margin-top: 6px;
-        padding: 8px 10px;
-        background: rgba(52, 199, 89, 0.08);
-        border-left: 3px solid #248a3d;
-        border-radius: 4px;
-        font-size: 12px;
-        line-height: 1.4;
-        color: #1d4d1d;
-      }
-      .dsl-issue-list {
-        margin-top: 6px;
-        padding: 6px 10px;
-        background: rgba(255, 149, 0, 0.07);
+      .legacy-rules-notice {
+        margin: 0 0 12px;
+        padding: 10px 12px;
+        background: rgba(255, 149, 0, 0.08);
         border-left: 3px solid #ff9500;
         border-radius: 4px;
         font-size: 12px;
-      }
-      .dsl-issue-list.has-errors {
-        background: rgba(255, 59, 48, 0.07);
-        border-left-color: #d70015;
-      }
-      .dsl-issue-list-head {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        align-items: baseline;
-      }
-      .dsl-issue-list ul {
-        margin: 4px 0 0;
-        padding-left: 18px;
-        color: #8e1010;
-      }
-      .dsl-issue-list li.warning {
-        color: #8a4b00;
-      }
-      .dsl-issue-path {
-        margin-left: 6px;
-        font-size: 10.5px;
-        color: var(--text-tertiary, #8e8e93);
-        overflow-wrap: anywhere;
+        line-height: 1.45;
       }
       .readonly-identity {
         display: flex;
@@ -1767,19 +1581,6 @@ const TIMEFRAME_LABELS: Record<string, string> = {
         max-width: 280px;
         height: 32px;
         font-size: 12px;
-      }
-      .upgrade-changes {
-        margin: 0;
-        padding-left: 18px;
-        font-size: 13px;
-        text-align: left;
-        line-height: 1.45;
-      }
-      .upgrade-changes li + li {
-        margin-top: 6px;
-      }
-      .upgrade-warn {
-        color: #c93400;
       }
       .equity-sparkline {
         display: block;
@@ -1970,13 +1771,6 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   private readonly currencyPairsService = inject(CurrencyPairsService);
   private readonly notifications = inject(NotificationService);
 
-  constructor() {
-    // A pending debounced rule check must not fire after the form is gone.
-    inject(DestroyRef).onDestroy(() => {
-      if (this.dslTimer !== null) clearTimeout(this.dslTimer);
-    });
-  }
-
   /// Available risk profiles for the dropdown — lazy-loaded on first ngOnInit.
   riskProfiles = signal<RiskProfileDto[]>([]);
   /// Available active currency pairs for the symbol picker — drives the
@@ -1998,7 +1792,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
 
   submitted = output<CreateStrategyRequest | UpdateStrategyRequest>();
   cancelled = output<void>();
-  /** The saved strategy changed from inside the form (DSL upgrade, script save): re-read it. */
+  /** The saved strategy changed from inside the form (script save): re-read it. */
   strategyChanged = output<void>();
   /** Edit mode: open the strategy's Execution tab (execution policy, account bindings). */
   executionRequested = output<void>();
@@ -2008,12 +1802,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   templateNameDraft = signal<string | null>(null);
   templateError = signal<string | null>(null);
   cloneOpen = signal(false);
-  upgradeConfirmOpen = signal(false);
-  upgrading = signal(false);
-  upgradeError = signal<string | null>(null);
-  /** The pre-submit DSL check is running. */
-  validatingForSubmit = signal(false);
-  readonly busy = computed(() => this.saving() || this.validatingForSubmit());
+  readonly busy = computed(() => this.saving());
   activeTab = signal<FormTab>('inputs');
   availableTemplates = signal<StrategyTemplateDto[]>([]);
   selectedTemplateId = signal<number | null>(null);
@@ -2048,86 +1837,6 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   readonly primarySymbol = computed<string | null>(
     () => this.strategy()?.symbol ?? this.parsedSymbols()[0] ?? null,
   );
-  readonly isDslType = computed(() => DSL_STRATEGY_TYPES.includes(this.strategyTypeValue()));
-  readonly paramsPlaceholder = computed(() =>
-    this.isDslType()
-      ? 'Rule DSL JSON — build it above or insert an example'
-      : '{"period": 14, "threshold": 0.5}',
-  );
-
-  // ── Rule (DSL) validation ───────────────────────────────────────────────
-  // For RuleBased / LlmProposal the Parameters JSON is the rule DSL. Each
-  // edit is checked at once by this console (dsl-model) and, debounced, by
-  // the engine (POST /strategy/dsl/summarise). The engine's verdict wins
-  // whenever it describes exactly the JSON and timeframe on screen; until
-  // then the console's own checks show. Every issue carries an engine path,
-  // so the builder pins it to the node it is about. Save is disabled while
-  // any error stands, and a save always waits for the engine's verdict on
-  // the exact JSON being saved.
-  private readonly dslServer = signal<{ key: string; result: DslCheckResult } | null>(null);
-  readonly dslChecking = signal(false);
-  /** Set when the engine's check could not run (transport error). */
-  readonly dslCheckFailed = signal<string | null>(null);
-  private dslTimer: ReturnType<typeof setTimeout> | null = null;
-  private dslRequestKey: string | null = null;
-  private readonly dslKey = computed(
-    () => `${this.formTimeframe() ?? ''}\u0000${this.paramsJson()}`,
-  );
-  readonly dslServerFresh = computed(() => this.dslServer()?.key === this.dslKey());
-  private readonly dslClientIssues = computed<DslIssue[]>(() => {
-    if (!this.isDslType()) return [];
-    const json = this.paramsJson();
-    if (!json.trim()) {
-      return [
-        {
-          path: '',
-          message: 'No rules yet — start one in the builder or insert an example',
-          severity: 'error',
-        },
-      ];
-    }
-    return validateDslJson(json, {
-      timeframe: this.formTimeframe(),
-      symbol: this.primarySymbol(),
-    });
-  });
-  readonly dslIssues = computed<DslIssue[]>(() => {
-    if (!this.isDslType()) return [];
-    const server = this.dslServer();
-    if (server && this.dslServerFresh() && this.paramsJson().trim()) {
-      return [...server.result.errors, ...server.result.warnings];
-    }
-    return this.dslClientIssues();
-  });
-  readonly dslErrorCount = computed(
-    () => this.dslIssues().filter((i) => i.severity === 'error').length,
-  );
-  readonly dslWarningCount = computed(() => this.dslIssues().length - this.dslErrorCount());
-  readonly dslSummary = computed(() =>
-    this.dslServerFresh() ? (this.dslServer()?.result.summary ?? null) : null,
-  );
-  readonly dslIssueSource = computed(() =>
-    this.dslServerFresh() ? 'checked by the engine' : 'checked in this console',
-  );
-  /** A saved v1 DSL strategy: the engine-side upgrade applies. */
-  readonly canUpgradeDsl = computed(() => {
-    const s = this.strategy();
-    if (!s || !DSL_STRATEGY_TYPES.includes(s.strategyType)) return false;
-    const r = parseDsl(s.parametersJson ?? '');
-    return r.ok && effectiveDslVersion(r.doc) < 2;
-  });
-
-  private readonly revalidateOnRejection = effect(() => {
-    // A refused save may be about the rules: fetch the engine's verdict on
-    // them now so the offending nodes light up next to the error.
-    if (!this.submitError()) return;
-    untracked(() => {
-      if (!this.form || !this.isDslType() || this.isScriptAuthoring()) return;
-      this.dslServer.set(null);
-      this.scheduleDslCheck(true);
-    });
-  });
-
   // ── Backtest preview state ──────────────────────────────────────────────
   // Synchronous preview backtest of the unsaved configuration. Bounded by
   // the server (≤90d / ≤6000 candles / 60s) so the call returns within
@@ -2350,38 +2059,6 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   readonly timeframes = TIMEFRAMES;
   readonly timeframeLabels = TIMEFRAME_LABELS;
   readonly placeholders = SUB_CONFIG_PLACEHOLDERS;
-  readonly dslExamples = DSL_EXAMPLES;
-  /** Single source of truth for the help text's condition-type and indicator lists. */
-  readonly conditionTypes = CONDITION_TYPES;
-  readonly indicatorCatalogue = INDICATORS;
-
-  /**
-   * Loads a curated example with this strategy's symbol and timeframe written
-   * in. In create mode it also switches the type to RuleBased (and fills an
-   * empty Symbol from the example); an existing strategy's type is fixed.
-   */
-  loadDslExample(id: string): void {
-    if (!id) return;
-    const example = this.dslExamples.find((e) => e.id === id);
-    if (!example) return;
-    const s = this.strategy();
-    const symbol = s?.symbol ?? this.parsedSymbols()[0] ?? null;
-    const timeframe = s?.timeframe ?? (this.form.get('timeframe')?.value as string) ?? null;
-    const patch: Record<string, unknown> = {
-      parametersJson: exampleJsonFor(example, { symbol, timeframe }),
-    };
-    if (!s) {
-      patch['strategyType'] = 'RuleBased';
-      if (!symbol) {
-        const parsed = parseDsl(example.json);
-        if (parsed.ok && typeof parsed.doc.fields['symbol'] === 'string') {
-          patch['symbol'] = parsed.doc.fields['symbol'];
-        }
-      }
-    }
-    this.form.patchValue(patch);
-    this.notifications.success(`Loaded DSL example: ${example.label}`);
-  }
 
   form!: FormGroup;
 
@@ -2405,7 +2082,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     // Lazy-load template chooser the first time the modal mounts. Volume is
     // operator-curated (typically <50 templates) so a single fetch is fine.
     this.strategiesService.listTemplates().subscribe({
-      next: (res) => this.availableTemplates.set(res?.data ?? []),
+      next: (res) => this.availableTemplates.set(loadableTemplates(res?.data)),
       error: () => this.availableTemplates.set([]),
     });
 
@@ -2419,18 +2096,14 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     this.form.get('symbol')?.valueChanges.subscribe((value: string) => {
       this.symbolInputValue.set(value ?? '');
       this.refreshAutoName();
-      this.syncDslIdentity();
     });
     this.form.get('strategyType')?.valueChanges.subscribe((value: string) => {
       this.strategyTypeValue.set(value ?? '');
       this.refreshAutoName();
-      this.scheduleDslCheck();
     });
     this.form.get('timeframe')?.valueChanges.subscribe((value: string) => {
       this.formTimeframe.set(value ?? null);
       this.refreshAutoName();
-      this.syncDslIdentity();
-      this.scheduleDslCheck();
     });
     this.form
       .get('name')
@@ -2451,11 +2124,8 @@ export class StrategyFormComponent implements OnInit, OnChanges {
         error: () => this.currencyPairs.set([]),
       });
 
-    // Every Parameters JSON change re-validates the rules (client-side at
-    // once through the computed issues; engine-side debounced).
     this.form.get('parametersJson')?.valueChanges.subscribe((raw: string) => {
       this.paramsJson.set(raw ?? '');
-      this.scheduleDslCheck();
     });
 
     // Re-fetch the typed parameter schema whenever the StrategyType changes.
@@ -2506,27 +2176,6 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   }
 
   /**
-   * Create mode: keeps the rules' own symbol/timeframe in step with the
-   * strategy's as the operator picks them. An existing strategy's are fixed,
-   * and a mismatch there is flagged by the validator instead.
-   */
-  private syncDslIdentity(): void {
-    if (this.strategy() || !this.isDslType()) return;
-    const json = this.form.get('parametersJson')?.value as string;
-    if (!json?.trim()) return;
-    const parsed = parseDsl(json);
-    if (!parsed.ok) return;
-    const patch: Record<string, unknown> = {};
-    const symbol = this.parsedSymbols()[0];
-    if (symbol && parsed.doc.fields['symbol'] !== symbol) patch['symbol'] = symbol;
-    const tf = this.form.get('timeframe')?.value as string;
-    if (tf && parsed.doc.fields['timeframe'] !== tf) patch['timeframe'] = tf;
-    if (Object.keys(patch).length === 0) return;
-    const next = patchDslFields(json, patch);
-    if (next && next !== json) this.form.patchValue({ parametersJson: next });
-  }
-
-  /**
    * Updates a single typed parameter and pushes the merged JSON into the
    * Parameters JSON textarea — the textarea stays the source of truth so the
    * existing submit pipeline doesn't need rewiring.
@@ -2543,78 +2192,9 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   }
 
   /**
-   * Asks the engine to validate the rules on screen — debounced 600 ms so a
-   * typing burst costs one round-trip (the endpoint is a pure function).
-   * Skipped when the verdict for exactly this JSON + timeframe is already in,
-   * and for JSON that does not parse (the console reports that itself).
-   */
-  private scheduleDslCheck(immediate = false): void {
-    if (this.dslTimer !== null) {
-      clearTimeout(this.dslTimer);
-      this.dslTimer = null;
-    }
-    const json = this.paramsJson();
-    if (
-      !this.isDslType() ||
-      this.isScriptAuthoring() ||
-      !json.trim() ||
-      !parseDsl(json).ok ||
-      this.dslServerFresh()
-    ) {
-      this.dslChecking.set(false);
-      return;
-    }
-    this.dslChecking.set(true);
-    if (immediate) this.runDslCheck();
-    else {
-      this.dslTimer = setTimeout(() => {
-        this.dslTimer = null;
-        this.runDslCheck();
-      }, 600);
-    }
-  }
-
-  /** One engine check of the current rules; `done` runs after its verdict is applied. */
-  private runDslCheck(done?: () => void): void {
-    const json = this.paramsJson();
-    const key = this.dslKey();
-    this.dslRequestKey = key;
-    this.dslChecking.set(true);
-    this.strategiesService.summariseDsl(json, this.formTimeframe()).subscribe({
-      next: (res) => {
-        // A verdict for JSON that has since changed is stale — drop it.
-        if (key === this.dslKey()) {
-          this.dslServer.set({ key, result: normaliseDslCheck(res) });
-          this.dslCheckFailed.set(null);
-        }
-        if (key === this.dslRequestKey) this.dslChecking.set(false);
-        done?.();
-      },
-      error: (err) => {
-        if (key === this.dslRequestKey) {
-          this.dslChecking.set(false);
-          this.dslCheckFailed.set(failureMessage(err, 'request failed'));
-        }
-        done?.();
-      },
-    });
-  }
-
-  /**
-   * Visual-builder edit → patch the parametersJson form control with the
-   * builder's serialised tree. Skips the patch if the new JSON matches the
-   * current value (avoids re-triggering valueChanges → re-render → cursor jump).
-   */
-  onDslBuilderChange(json: string): void {
-    const current = this.form.get('parametersJson')?.value as string | null;
-    if (current === json) return;
-    this.form.patchValue({ parametersJson: json });
-  }
-
-  /**
    * Pretty-print the Parameters JSON via the browser's built-in JSON.parse +
    * JSON.stringify roundtrip. Two-space indentation matches the placeholders
-   * and DSL examples; preserves field order as-is. Reverts the edit on parse
+   * placeholders; preserves field order as-is. Reverts the edit on parse
    * error so the user keeps their (possibly unfinished) original text.
    */
   formatParametersJson(): void {
@@ -3013,8 +2593,6 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     this.templateError.set(null);
     this.updateChangeReason.set('');
     this.cloneOpen.set(false);
-    this.upgradeConfirmOpen.set(false);
-    this.upgradeError.set(null);
     if (s && this.form) {
       // Edit mode: keep the strategy's existing name; auto-generation off.
       this.nameAutoGenerated.set(false);
@@ -3201,7 +2779,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
           this.templateNameDraft.set(null);
           // Refresh dropdown so the new template appears immediately.
           this.strategiesService.listTemplates().subscribe({
-            next: (list) => this.availableTemplates.set(list?.data ?? []),
+            next: (list) => this.availableTemplates.set(loadableTemplates(list?.data)),
           });
         } else {
           this.templateError.set(failureMessage(res, 'The engine did not save the template.'));
@@ -3215,19 +2793,16 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   }
 
   /**
-   * True while rule errors stand: Save stays disabled until they are fixed.
-   * A script-authored strategy has no rules — its compile gate is the script panel's.
+   * True for a legacy JSON-rules row: the engine refuses to save a RuleBased / LlmProposal
+   * strategy without a script, so the form stays read-only until it is rewritten in Pine.
    */
   saveBlocked(): boolean {
-    return !this.isScriptAuthoring() && this.isDslType() && this.dslErrorCount() > 0;
+    return this.isLegacyRules();
   }
 
   /** Why Save is disabled, for its tooltip; null when it is not. */
   saveBlockedReason(): string | null {
-    if (this.saveBlocked()) {
-      const n = this.dslErrorCount();
-      return `Fix ${n} rule error${n === 1 ? '' : 's'} before saving`;
-    }
+    if (this.saveBlocked()) return 'Legacy JSON rules no longer run — rewrite the strategy in Pine';
     if (this.form?.invalid) return 'Fill in the required fields';
     return null;
   }
@@ -3241,52 +2816,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
 
   onSubmit(): void {
     if (this.form.invalid || this.busy() || this.saveBlocked()) return;
-    if (!this.isDslType()) {
-      this.emitSubmit();
-      return;
-    }
-    if (!this.strategy()) this.defaultNewRuleToV2();
-    if (this.dslServerFresh() || !parseDsl(this.paramsJson()).ok) {
-      if (this.dslErrorCount() === 0) this.emitSubmit();
-      return;
-    }
-    // Save exactly what the engine has checked: validate the rules as they
-    // stand now, then submit only if they pass.
-    if (this.dslTimer !== null) {
-      clearTimeout(this.dslTimer);
-      this.dslTimer = null;
-    }
-    this.validatingForSubmit.set(true);
-    this.runDslCheck(() => {
-      this.validatingForSubmit.set(false);
-      const n = this.dslErrorCount();
-      if (n > 0) {
-        this.notifications.error(`Fix ${n} rule error${n === 1 ? '' : 's'} before saving`);
-        return;
-      }
-      this.emitSubmit();
-    });
-  }
-
-  /**
-   * New strategies default to Pine-exact math. A rule with no `dslVersion`
-   * (absent = v1 to the engine) is stamped v2 on create, converting v1 Spread
-   * conditions (bar range) to BarRange so their meaning is kept. An explicit
-   * `dslVersion: 1` is the operator's choice and is left alone.
-   */
-  private defaultNewRuleToV2(): void {
-    const json = this.paramsJson();
-    const parsed = parseDsl(json);
-    if (!parsed.ok) return;
-    const v = parsed.doc.fields['dslVersion'];
-    if (v !== undefined && v !== null) return;
-    const converted = upgradeDocToV2(parsed.doc);
-    this.form.patchValue({ parametersJson: emitDsl(parsed.doc) });
-    if (converted > 0) {
-      this.notifications.info(
-        `Created on Pine-exact math (v2): ${converted} Spread condition${converted === 1 ? '' : 's'} became BarRange.`,
-      );
-    }
+    this.emitSubmit();
   }
 
   private emitSubmit(): void {
@@ -3355,7 +2885,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     return (val.description as string)?.trim() || val.name;
   }
 
-  // ── Clone / DSL upgrade ─────────────────────────────────────────────────
+  // ── Clone ─────────────────────────────────────────────────
 
   openClone(): void {
     this.cloneOpen.set(true);
@@ -3365,44 +2895,6 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   onCloned(): void {
     this.cloneOpen.set(false);
     this.cancelled.emit();
-  }
-
-  askUpgrade(): void {
-    this.upgradeError.set(null);
-    this.upgradeConfirmOpen.set(true);
-  }
-
-  closeUpgrade(): void {
-    if (this.upgrading()) return;
-    this.upgradeConfirmOpen.set(false);
-  }
-
-  /** Engine-side v1 → v2 upgrade of the saved rules (`POST /strategy/{id}/dsl/upgrade`). */
-  confirmUpgrade(): void {
-    const s = this.strategy();
-    if (!s || this.upgrading()) return;
-    this.upgrading.set(true);
-    this.upgradeError.set(null);
-    this.strategiesService.upgradeDsl(s.id, { silent: true }).subscribe({
-      next: (res) => {
-        this.upgrading.set(false);
-        if (res?.status && typeof res.data === 'string' && res.data.trim()) {
-          this.upgradeConfirmOpen.set(false);
-          this.form.patchValue({ parametersJson: res.data });
-          this.notifications.success(
-            'Upgraded to Pine-exact math (v2). Re-run backtests before relying on this strategy.',
-          );
-          this.strategyChanged.emit();
-          if (this.showVersionHistory()) this.refreshVersionHistory();
-        } else {
-          this.upgradeError.set(failureMessage(res, 'The engine did not upgrade the rules.'));
-        }
-      },
-      error: (err) => {
-        this.upgrading.set(false);
-        this.upgradeError.set(failureMessage(err, 'The upgrade failed.'));
-      },
-    });
   }
 
   onCancel(): void {
@@ -3416,8 +2908,9 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   }
 
   // ── Pine script authoring ───────────────────────────────────────────────
-  // RuleBased strategies are authored as rules (the DSL above) or as a Pine v6
-  // script. The mode and the script draft are re-derived whenever the form
+  // RuleBased / LlmProposal strategies are authored as Pine v6 scripts (a
+  // saved row still on the retired JSON rules DSL is legacy, read-only). The
+  // mode and the script draft are re-derived whenever the form
   // opens or is pointed at another strategy; the draft lives here so the
   // script panel keeps it across the form's tab switches.
   //
@@ -3441,15 +2934,21 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   private scriptSaveUnreported = false;
   @ViewChild(ScriptAuthoringComponent) private scriptAuthoring?: ScriptAuthoringComponent;
 
-  /** The strategy being edited — or the type being created — is RuleBased. */
+  /** The strategy being edited — or the type being created — is authored in Pine. */
   isRuleBased(): boolean {
-    const type = this.strategy()?.strategyType ?? this.form?.get('strategyType')?.value;
-    return type === 'RuleBased';
+    // The mirrored signal (not the form control) so an OnPush render follows a type change.
+    const type = this.strategy()?.strategyType ?? this.strategyTypeValue();
+    return PINE_STRATEGY_TYPES.includes(type);
   }
 
-  /** The form is authoring a Pine script (RuleBased in script mode). */
+  /** The form is authoring a Pine script. */
   isScriptAuthoring(): boolean {
     return this.authoringMode() === 'script' && this.isRuleBased();
+  }
+
+  /** A saved RuleBased / LlmProposal row still on the retired JSON rules — read-only. */
+  isLegacyRules(): boolean {
+    return !!this.strategy() && this.authoringMode() === 'legacy' && this.isRuleBased();
   }
 
   /** The symbol the script compiles and previews against (the first one typed, when creating). */
@@ -3496,7 +2995,9 @@ export class StrategyFormComponent implements OnInit, OnChanges {
           sessionFilterJson: val.sessionFilterJson || null,
           regimeGateJson: val.regimeGateJson || null,
           multiTimeframeGateJson: val.multiTimeframeGateJson || null,
-          strategyType: 'RuleBased',
+          strategyType: PINE_STRATEGY_TYPES.includes(val.strategyType)
+            ? val.strategyType
+            : 'RuleBased',
           symbol: symbols[0] ?? val.symbol,
           symbols,
           timeframe: val.timeframe,
