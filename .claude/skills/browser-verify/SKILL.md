@@ -9,7 +9,7 @@ description: >
   confirm a page loads without errors. Also covers the harder cases: proving a
   control actually painted, sweeping many controls at once, reading the bytes the
   app really sends, and exercising screen sharing. This is the Lascodia admin-UI
-  (Angular 20, standalone components, engine API on :5081). Two origins: the
+  (Angular 22, standalone components, engine API on :5081). Two origins: the
   published release on :8080 (what operators see) and the `ng serve` dev server
   on :4200 (work in progress) — pick deliberately.
 ---
