@@ -9,7 +9,9 @@ import { LucideDynamicIcon, LucideInbox, type LucideIconInput } from '@lucide/an
   template: `
     <div class="empty" role="status">
       <div class="icon">
-        <svg [lucideIcon]="icon()" [size]="32" [strokeWidth]="1.5"></svg>
+        <!-- stroke 1: lucide-angular parseInt()ed the old static strokeWidth="1.5", so this
+             icon has always rendered at 1. Kept identical across the @lucide/angular swap. -->
+        <svg [lucideIcon]="icon()" [size]="32" [strokeWidth]="1"></svg>
       </div>
       <h3 class="title">{{ title() }}</h3>
       @if (description()) {
