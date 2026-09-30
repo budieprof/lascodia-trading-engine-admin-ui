@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { LucideAngularModule, Power } from 'lucide-angular';
+import { LucidePower } from '@lucide/angular';
 import { KillSwitchService } from '@core/services/kill-switch.service';
 import { AuthService } from '@core/auth/auth.service';
 
@@ -8,11 +8,11 @@ import { AuthService } from '@core/auth/auth.service';
   selector: 'app-kill-switch-banner',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [LucideAngularModule, RouterLink],
+  imports: [LucidePower, RouterLink],
   template: `
     @if (service.isGlobalEngaged()) {
       <div class="banner" role="alert" aria-live="assertive">
-        <lucide-icon [img]="Power" size="16" strokeWidth="2" />
+        <svg lucidePower [size]="16" [strokeWidth]="2"></svg>
         <span>
           <strong>Global Kill Switch is engaged.</strong>
           No new signals or orders will be generated until disengaged.
@@ -53,7 +53,6 @@ import { AuthService } from '@core/auth/auth.service';
   ],
 })
 export class KillSwitchBannerComponent implements OnInit {
-  protected readonly Power = Power;
   protected readonly service = inject(KillSwitchService);
   private readonly auth = inject(AuthService);
 

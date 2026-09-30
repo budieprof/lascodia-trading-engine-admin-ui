@@ -1,6 +1,11 @@
 import { ApplicationConfig, ErrorHandler, provideZoneChangeDetection } from '@angular/core';
-import { provideRouter, withPreloading, withViewTransitions } from '@angular/router';
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import {
+  provideRouter,
+  withPreloading,
+  withRouterConfig,
+  withViewTransitions,
+} from '@angular/router';
+import { provideHttpClient, withInterceptors, withXhr } from '@angular/common/http';
 import { provideAnimations } from '@angular/platform-browser/animations';
 import { HoverPreloadingStrategy } from '@core/routing/hover-preloading.strategy';
 import { provideEchartsCore } from 'ngx-echarts';
@@ -49,6 +54,9 @@ export function buildAppConfig(runtimeConfig: RuntimeConfig): ApplicationConfig 
       provideRouter(
         routes,
         withPreloading(HoverPreloadingStrategy),
+        // Angular 22 changed the default to 'always' (child routes inherit
+        // every parent param). Keep the pre-v22 behaviour explicitly.
+        withRouterConfig({ paramsInheritanceStrategy: 'emptyOnly' }),
         // Native View Transitions API on each navigation. The browser
         // snapshots the outgoing page and crossfades into the incoming
         // one; we customise the animation in global styles via the
@@ -79,7 +87,10 @@ export function buildAppConfig(runtimeConfig: RuntimeConfig): ApplicationConfig 
         }),
       ),
       // Order matters: auth → retry (so retries carry the token) → error (final toast).
-      provideHttpClient(withInterceptors([authInterceptor, retryInterceptor, errorInterceptor])),
+      provideHttpClient(
+        withXhr(),
+        withInterceptors([authInterceptor, retryInterceptor, errorInterceptor]),
+      ),
       provideAnimations(),
       provideEchartsCore({ echarts: themedEcharts }),
       { provide: ErrorHandler, useClass: GlobalErrorHandler },

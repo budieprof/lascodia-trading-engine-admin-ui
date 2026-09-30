@@ -50,6 +50,12 @@ export default tseslint.config(
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@angular-eslint/component-class-suffix': 'warn',
       '@angular-eslint/directive-class-suffix': 'warn',
+      // angular-eslint 22 recommends this as an error. It flags every
+      // `ChangeDetectionStrategy.Eager`, including the components Angular's v22
+      // `ng update` migration pinned to Eager so they keep their pre-v22
+      // behaviour. Moving them to OnPush is a per-component behaviour change,
+      // so keep them visible as warnings until each one is reviewed.
+      '@angular-eslint/prefer-on-push-component-change-detection': 'warn',
       // Selector style is mixed (`app-` for shared, `ui-` for primitives) — don't enforce.
       '@angular-eslint/component-selector': 'off',
       '@angular-eslint/directive-selector': 'off',

@@ -567,7 +567,7 @@ import {
             <app-chart-card
               title="Drawdown limits by profile"
               [subtitle]="
-                'Daily DD vs total DD — green = today\\'s cap, red = lifetime cap' +
+                'Daily DD vs total DD — green = today\\u0027s cap, red = lifetime cap' +
                 (rpStats().unlimited > 0
                   ? ' · ' + rpStats().unlimited + ' unlimited profile(s) omitted'
                   : '')

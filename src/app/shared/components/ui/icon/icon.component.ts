@@ -1,14 +1,12 @@
 import { Component, ChangeDetectionStrategy, input } from '@angular/core';
-import { LucideAngularModule } from 'lucide-angular';
+import { LucideDynamicIcon } from '@lucide/angular';
 
 @Component({
   selector: 'ui-icon',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideDynamicIcon],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    <lucide-icon [name]="name()" [size]="size()" [strokeWidth]="strokeWidth()"></lucide-icon>
-  `,
+  template: ` <svg [lucideIcon]="name()" [size]="size()" [strokeWidth]="strokeWidth()"></svg> `,
   styles: [
     `
       :host {

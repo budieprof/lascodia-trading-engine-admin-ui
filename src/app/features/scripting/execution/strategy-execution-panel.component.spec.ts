@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 
 import { StrategyExecutionPanelComponent } from './strategy-execution-panel.component';
@@ -9,7 +9,12 @@ import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
 declareSignalIo(StrategyExecutionPanelComponent, { inputs: ['strategy'], outputs: ['changed'] });
 
-@Component({ selector: 'app-account-bindings-editor', standalone: true, template: '' })
+@Component({
+  selector: 'app-account-bindings-editor',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
+  template: '',
+})
 class BindingsStubComponent {
   @Input() strategyId = 0;
   @Input() isScript = false;
@@ -18,7 +23,12 @@ class BindingsStubComponent {
   @Output() saved = new EventEmitter<void>();
 }
 
-@Component({ selector: 'app-execution-policy-card', standalone: true, template: '' })
+@Component({
+  selector: 'app-execution-policy-card',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
+  template: '',
+})
 class PolicyStubComponent {
   @Input() strategyId = 0;
   @Input() policy: string | null = null;

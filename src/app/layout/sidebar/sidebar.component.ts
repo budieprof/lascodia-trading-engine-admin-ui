@@ -1,4 +1,12 @@
-import { Component, computed, input, output, inject, signal } from '@angular/core';
+import {
+  Component,
+  computed,
+  input,
+  output,
+  inject,
+  signal,
+  ChangeDetectionStrategy,
+} from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { ThemeService } from '@core/theme/theme.service';
 import { AuthService, type Role } from '@core/auth/auth.service';
@@ -161,6 +169,7 @@ interface NavGroup {
       }
     </aside>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
       .sidebar {

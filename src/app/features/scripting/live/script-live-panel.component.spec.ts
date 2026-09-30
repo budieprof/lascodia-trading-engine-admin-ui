@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
@@ -23,6 +23,7 @@ declareSignalIo(ScriptLivePanelComponent, { inputs: ['strategyId', 'symbol', 'ti
 @Component({
   selector: 'app-strategy-report',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
   template: '<div class="report-stub">{{ heading }}</div>',
 })
 class ReportStubComponent {
@@ -35,7 +36,12 @@ class ReportStubComponent {
   @Output() readonly tradeClick = new EventEmitter<ReportTrade>();
 }
 
-@Component({ selector: 'app-ea-trade-chart-modal', standalone: true, template: '' })
+@Component({
+  selector: 'app-ea-trade-chart-modal',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
+  template: '',
+})
 class TradeChartModalStubComponent {
   @Input() selection: TradeChartSelection | null = null;
   @Input() open = false;

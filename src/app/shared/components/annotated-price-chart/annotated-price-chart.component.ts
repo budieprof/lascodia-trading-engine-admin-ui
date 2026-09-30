@@ -7,7 +7,7 @@ import {
   input,
   signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { NgxEchartsDirective } from 'ngx-echarts';
 import { catchError, of } from 'rxjs';
 
@@ -36,7 +36,7 @@ import {
   selector: 'app-annotated-price-chart',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, NgxEchartsDirective],
+  imports: [NgxEchartsDirective],
   template: `
     @if (spec(); as s) {
       <figure class="pc">

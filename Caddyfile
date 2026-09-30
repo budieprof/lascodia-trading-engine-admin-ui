@@ -69,10 +69,18 @@
 		# `header` runs BEFORE try_files in Caddy's directive order, so these
 		# match the ORIGINAL request path — which is what makes the deep-link
 		# case land in the no-cache class rather than looking like index.html.
-		@hashed path_regexp \-[A-Z0-9]{8,}\.[a-z0-9]+$
+		#
+		# Two hash shapes. esbuild names files `-` + 8+ of [A-Z0-9]. Since
+		# Angular 22 the builder's chunk-optimisation pass is on by default and
+		# re-emits lazy chunks with 8-char mixed-case hashes that may contain
+		# `_` or `-` (`chunk-DetUXeqZ.js`, `chunk--Bp1qTLm.js`). The second
+		# alternative is anchored to those entry names so an unhashed public
+		# file (`apple-touch-icon.png`, `icon-maskable-512.png`) can never
+		# match it. The first still covers releases built before v22.
+		@hashed path_regexp (\-[A-Z0-9]{8,}|/(chunk|main|polyfills)-[A-Za-z0-9_-]{8})\.[a-z0-9]+$
 		header @hashed Cache-Control "public, max-age=31536000, immutable"
 
-		@revalidate not path_regexp \-[A-Z0-9]{8,}\.[a-z0-9]+$
+		@revalidate not path_regexp (\-[A-Z0-9]{8,}|/(chunk|main|polyfills)-[A-Za-z0-9_-]{8})\.[a-z0-9]+$
 		header @revalidate Cache-Control "no-cache"
 
 		# ── Content-Security-Policy, ENFORCING ──────────────────────────────

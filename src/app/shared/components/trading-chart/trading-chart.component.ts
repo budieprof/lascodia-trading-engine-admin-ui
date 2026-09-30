@@ -997,7 +997,9 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
                       }}</span>
                     </div>
                     @if (
-                      rej.recommendation.action !== 'Hold' && rej.recommendation.entryPrice != null
+                      rej.recommendation.action !== 'Hold' &&
+                      rej.recommendation.entryPrice !== null &&
+                      rej.recommendation.entryPrice !== undefined
                     ) {
                       <div class="rej-levels mono">
                         Entry {{ rej.recommendation.entryPrice }} · SL

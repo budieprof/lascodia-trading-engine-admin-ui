@@ -1,4 +1,4 @@
-import { Component, Input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
 
 /**
  * Light stand-ins for the two heavy children the report renders. The real ones need a canvas
@@ -9,6 +9,7 @@ import { Component, Input } from '@angular/core';
 @Component({
   selector: 'app-chart-card',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
   template: `<div class="chart-stub" [attr.data-title]="title ?? ''">
     {{ title }}
     @if (emptyMessage) {
@@ -30,6 +31,7 @@ export class ChartCardStubComponent {
 @Component({
   selector: 'ag-grid-angular',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
   template: `<div class="grid-stub" [attr.data-rows]="rowData?.length ?? 0">
     @for (row of rowData ?? []; track $index) {
       <div class="grid-stub-row">{{ describe(row) }}</div>

@@ -579,7 +579,12 @@ const CHANNEL_DEFS: ChannelDef[] = [
                       <span class="ch-dirty">Unsaved changes</span>
                     }
                     <span class="ch-timeout">
-                      Timeout {{ fmtDuration(channelStatus(def.channel)?.timeoutSeconds) }}
+                      Timeout
+                      {{
+                        fmtDuration(
+                          $safeNavigationMigration(channelStatus(def.channel)?.timeoutSeconds)
+                        )
+                      }}
                     </span>
                   </div>
 

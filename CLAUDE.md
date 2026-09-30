@@ -2,7 +2,7 @@
 
 ## What this is
 
-The operator console for the Lascodia Trading Engine. Angular 20 (standalone components,
+The operator console for the Lascodia Trading Engine. Angular 22 (standalone components,
 signals, `@ngrx/signals` stores), Tailwind v4 + SCSS tokens, ag-grid + echarts, ~466 TS files
 across 65 feature folders under `src/app/features/`.
 

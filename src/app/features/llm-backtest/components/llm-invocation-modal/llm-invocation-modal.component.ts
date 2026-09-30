@@ -176,15 +176,15 @@ export interface LlmInvocationModalContext {
                       <span class="legend-item"
                         ><span class="dot dot--asof"></span> asOfUtc bar</span
                       >
-                      @if (ctx()?.recommendation?.entryPrice !== null) {
+                      @if ($safeNavigationMigration(ctx()?.recommendation?.entryPrice) !== null) {
                         <span class="legend-item"><span class="dot dot--entry"></span> Entry</span>
                       }
-                      @if (ctx()?.recommendation?.takeProfit !== null) {
+                      @if ($safeNavigationMigration(ctx()?.recommendation?.takeProfit) !== null) {
                         <span class="legend-item"
                           ><span class="dot dot--tp"></span> Take-profit</span
                         >
                       }
-                      @if (ctx()?.recommendation?.stopLoss !== null) {
+                      @if ($safeNavigationMigration(ctx()?.recommendation?.stopLoss) !== null) {
                         <span class="legend-item"><span class="dot dot--sl"></span> Stop-loss</span>
                       }
                     </div>

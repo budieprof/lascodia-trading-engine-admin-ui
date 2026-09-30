@@ -108,7 +108,7 @@ const MAX_FORWARD_BARS = 80;
                 <span class="legend-item"><span class="dot dot--entry"></span> Entry</span>
                 <span class="legend-item"><span class="dot dot--tp"></span> Take-profit</span>
                 <span class="legend-item"><span class="dot dot--sl"></span> Stop-loss</span>
-                @if (sel.outcome?.exitPrice !== null) {
+                @if ($safeNavigationMigration(sel.outcome?.exitPrice) !== null) {
                   <span class="legend-item"><span class="dot dot--exit"></span> Exit</span>
                 }
               </div>

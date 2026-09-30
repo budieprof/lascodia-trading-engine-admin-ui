@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, Input, ViewChild } from '@angular/core';
+import { AfterViewInit, Component, Input, ViewChild, ChangeDetectionStrategy } from '@angular/core';
 import type { Meta, StoryObj } from '@storybook/angular';
 import type { ICellRendererParams } from 'ag-grid-community';
 
@@ -12,6 +12,7 @@ import {
   selector: 'app-status-pill-story-host',
   standalone: true,
   imports: [StatusPillCellComponent],
+  changeDetection: ChangeDetectionStrategy.Eager,
   template: `<app-status-pill-cell #cell />`,
 })
 class StatusPillStoryHostComponent implements AfterViewInit {

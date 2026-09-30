@@ -9,7 +9,7 @@ import {
   HostListener,
   computed,
 } from '@angular/core';
-import { LucideAngularModule } from 'lucide-angular';
+import { LucideDynamicIcon } from '@lucide/angular';
 
 export interface DropdownMenuItem {
   label: string;
@@ -21,7 +21,7 @@ export interface DropdownMenuItem {
 @Component({
   selector: 'ui-dropdown-menu',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideDynamicIcon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="dropdown" tabindex="-1" (keydown)="onKeydown($event)">
@@ -51,7 +51,7 @@ export interface DropdownMenuItem {
               (mouseenter)="focusedIndex.set(i)"
             >
               @if (item.icon) {
-                <lucide-icon [name]="item.icon" [size]="16" [strokeWidth]="1.5"></lucide-icon>
+                <svg [lucideIcon]="item.icon" [size]="16" [strokeWidth]="1.5"></svg>
               }
               <span>{{ item.label }}</span>
             </button>
