@@ -7,7 +7,7 @@ import {
   signal,
 } from '@angular/core';
 import { HubConnectionState } from '@microsoft/signalr';
-import { LucideAngularModule, RadioTower, WifiOff } from 'lucide-angular';
+import { LucideRadioTower, LucideWifiOff } from '@lucide/angular';
 
 import { RealtimeService } from '@core/realtime/realtime.service';
 
@@ -24,7 +24,7 @@ import { RealtimeService } from '@core/realtime/realtime.service';
   selector: 'app-realtime-status-banner',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [LucideAngularModule],
+  imports: [LucideRadioTower, LucideWifiOff],
   template: `
     @if (visible()) {
       <div
@@ -35,10 +35,10 @@ import { RealtimeService } from '@core/realtime/realtime.service';
         aria-live="polite"
       >
         @if (reconnecting()) {
-          <lucide-icon [img]="RadioTower" size="16" strokeWidth="2" />
+          <svg lucideRadioTower [size]="16" [strokeWidth]="2"></svg>
           <span>Live updates reconnecting…</span>
         } @else {
-          <lucide-icon [img]="WifiOff" size="16" strokeWidth="2" />
+          <svg lucideWifiOff [size]="16" [strokeWidth]="2"></svg>
           <span>Live updates offline. Data may be stale until the connection recovers.</span>
         }
       </div>
@@ -70,9 +70,6 @@ import { RealtimeService } from '@core/realtime/realtime.service';
 })
 export class RealtimeStatusBannerComponent {
   private readonly realtime = inject(RealtimeService);
-
-  protected readonly RadioTower = RadioTower;
-  protected readonly WifiOff = WifiOff;
 
   readonly reconnecting = computed(() => this.realtime.state() === HubConnectionState.Reconnecting);
 

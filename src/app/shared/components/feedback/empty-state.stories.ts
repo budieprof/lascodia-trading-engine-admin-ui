@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/angular';
-import { FileX, Inbox, Search } from 'lucide-angular';
+import { LucideFileX, LucideInbox, LucideSearch } from '@lucide/angular';
 import { EmptyStateComponent } from './empty-state.component';
 
 const meta: Meta<EmptyStateComponent> = {
@@ -24,14 +24,14 @@ export const WithAction: Story = {
     description:
       'Start by generating a strategy via the strategy-hunt loop, or create one manually.',
     actionLabel: 'Create strategy',
-    icon: FileX,
+    icon: LucideFileX,
   },
 };
 
 export const TitleOnly: Story = {
   args: {
     title: 'No matching results',
-    icon: Search,
+    icon: LucideSearch,
   },
 };
 
@@ -39,6 +39,6 @@ export const InboxIcon: Story = {
   args: {
     title: 'No pending signals',
     description: 'Approved signals will appear here for review.',
-    icon: Inbox,
+    icon: LucideInbox,
   },
 };

@@ -1,15 +1,15 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { LucideAngularModule, Inbox } from 'lucide-angular';
+import { LucideDynamicIcon, LucideInbox, type LucideIconInput } from '@lucide/angular';
 
 @Component({
   selector: 'app-empty-state',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [LucideAngularModule],
+  imports: [LucideDynamicIcon],
   template: `
     <div class="empty" role="status">
       <div class="icon">
-        <lucide-icon [img]="icon()" size="32" strokeWidth="1.5" />
+        <svg [lucideIcon]="icon()" [size]="32" [strokeWidth]="1.5"></svg>
       </div>
       <h3 class="title">{{ title() }}</h3>
       @if (description()) {
@@ -74,7 +74,7 @@ export class EmptyStateComponent {
   readonly title = input.required<string>();
   readonly description = input<string | null>(null);
   readonly actionLabel = input<string | null>(null);
-  readonly icon = input(Inbox);
+  readonly icon = input<LucideIconInput>(LucideInbox);
 
   readonly actionClick = output<void>();
 }

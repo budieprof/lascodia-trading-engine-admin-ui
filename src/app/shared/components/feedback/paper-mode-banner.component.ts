@@ -1,16 +1,16 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
 import { PaperTradingService } from '@core/services/paper-trading.service';
-import { LucideAngularModule, FlaskConical } from 'lucide-angular';
+import { LucideFlaskConical } from '@lucide/angular';
 
 @Component({
   selector: 'app-paper-mode-banner',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [LucideAngularModule],
+  imports: [LucideFlaskConical],
   template: `
     @if (service.isPaperMode()) {
       <div class="banner" role="status" aria-live="polite">
-        <lucide-icon [img]="FlaskConical" size="16" strokeWidth="2" />
+        <svg lucideFlaskConical [size]="16" [strokeWidth]="2"></svg>
         <span
           ><strong>Paper Trading mode is active.</strong> Orders route to a simulated broker; no
           real money is at risk.</span
@@ -38,7 +38,6 @@ import { LucideAngularModule, FlaskConical } from 'lucide-angular';
   ],
 })
 export class PaperModeBannerComponent implements OnInit {
-  protected readonly FlaskConical = FlaskConical;
   protected readonly service = inject(PaperTradingService);
 
   ngOnInit(): void {

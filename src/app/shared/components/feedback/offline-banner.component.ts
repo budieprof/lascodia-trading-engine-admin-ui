@@ -1,17 +1,17 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { fromEvent, merge } from 'rxjs';
-import { LucideAngularModule, WifiOff } from 'lucide-angular';
+import { LucideWifiOff } from '@lucide/angular';
 
 @Component({
   selector: 'app-offline-banner',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [LucideAngularModule],
+  imports: [LucideWifiOff],
   template: `
     @if (offline()) {
       <div class="banner" role="status" aria-live="polite">
-        <lucide-icon [img]="WifiOff" size="16" strokeWidth="2" />
+        <svg lucideWifiOff [size]="16" [strokeWidth]="2"></svg>
         <span>You are offline. Some features may be unavailable.</span>
       </div>
     }
@@ -35,7 +35,6 @@ import { LucideAngularModule, WifiOff } from 'lucide-angular';
 export class OfflineBannerComponent {
   private readonly destroyRef = inject(DestroyRef);
 
-  protected readonly WifiOff = WifiOff;
   readonly offline = signal(typeof navigator !== 'undefined' && !navigator.onLine);
 
   constructor() {

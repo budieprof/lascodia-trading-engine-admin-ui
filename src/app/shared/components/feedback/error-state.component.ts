@@ -1,15 +1,15 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { LucideAngularModule, AlertTriangle } from 'lucide-angular';
+import { LucideTriangleAlert } from '@lucide/angular';
 
 @Component({
   selector: 'app-error-state',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [LucideAngularModule],
+  imports: [LucideTriangleAlert],
   template: `
     <div class="state" role="alert">
       <div class="icon">
-        <lucide-icon [img]="AlertTriangle" size="32" strokeWidth="1.5" />
+        <svg lucideTriangleAlert [size]="32" [strokeWidth]="1.5"></svg>
       </div>
       <h3 class="title">{{ title() }}</h3>
       @if (message()) {
@@ -75,6 +75,4 @@ export class ErrorStateComponent {
   readonly showRetry = input(true);
 
   readonly retry = output<void>();
-
-  protected readonly AlertTriangle = AlertTriangle;
 }
