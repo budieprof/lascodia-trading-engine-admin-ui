@@ -20,7 +20,7 @@ import {
   type ScriptDraft,
 } from '@features/scripting/components/script-authoring/authoring-mode';
 
-// Script authoring inside the strategy form: the Rules | Script switch, what the form renders in
+// Script authoring inside the strategy form: Pine as the only rules authoring, what the form renders in
 // each mode, and the payloads script mode submits. The script panel's own HTTP (compile, PUT
 // script) is covered by script-authoring.component.spec.ts.
 //
@@ -128,7 +128,6 @@ describe('StrategyFormComponent — Pine script authoring', () => {
             listTemplates: () => of({ status: true, data: [] }),
             listPreviewSnapshots: () => of({ status: true, data: [] }),
             getParameterSchema: () => of({ status: true, data: null }),
-            summariseDsl: () => of({ status: true, data: 'summary' }),
             getVersions: () => of({ status: true, data: [] }),
           },
         },
@@ -160,33 +159,24 @@ describe('StrategyFormComponent — Pine script authoring', () => {
 
   afterEach(() => fixture?.destroy());
 
-  describe('the authoring switch', () => {
+  describe('authoring', () => {
     beforeEach(() => create(null));
 
-    it('appears only for RuleBased and defaults to rules, with the rules block and DSL preview', () => {
+    it('authors RuleBased as a script — no mode switch; other types keep Parameters JSON', () => {
       cmp.form.patchValue({ strategyType: 'NewsFade' });
       fixture.detectChanges();
-      expect(host.querySelector('app-authoring-mode-switch')).toBeNull();
-
-      cmp.form.patchValue({ strategyType: 'RuleBased' });
-      fixture.detectChanges();
-      expect(cmp.isRuleBased()).toBe(true);
-      expect(cmp.authoringMode()).toBe('rules');
-      expect(host.querySelector('app-authoring-mode-switch')).toBeTruthy();
       expect(host.querySelector('app-script-authoring')).toBeNull();
       expect(host.querySelector('textarea[formcontrolname="parametersJson"]')).toBeTruthy();
       expect(host.querySelector('.preview-panel')).toBeTruthy();
       expect(host.querySelector('.dialog.dialog-wide')).toBeNull();
-    });
 
-    it('in script mode swaps the rules block and the DSL preview for the script panel', () => {
       cmp.form.patchValue({ strategyType: 'RuleBased' });
-      cmp.authoringMode.set('script');
       fixture.detectChanges();
+      expect(cmp.authoringMode()).toBe('script');
       expect(cmp.isScriptAuthoring()).toBe(true);
+      expect(host.querySelector('app-authoring-mode-switch')).toBeNull();
       expect(host.querySelector('app-script-authoring')).toBeTruthy();
       expect(host.querySelector('textarea[formcontrolname="parametersJson"]')).toBeNull();
-      expect(host.querySelector('app-dsl-builder')).toBeNull();
       expect(host.querySelector('.preview-panel')).toBeNull();
       expect(host.querySelector('.dialog.dialog-wide')).toBeTruthy();
       expect(cmp.scriptDraft().source).toBe(DEFAULT_STRATEGY_SCRIPT);
@@ -230,13 +220,13 @@ describe('StrategyFormComponent — Pine script authoring', () => {
     });
 
     it('in script mode the Sizing tab explains the script sizes itself — no sizing config to type (D126)', () => {
-      cmp.form.patchValue({ strategyType: 'RuleBased' });
+      cmp.form.patchValue({ strategyType: 'NewsFade' });
       cmp.activeTab.set('sizing');
       fixture.detectChanges();
       expect(host.querySelector('textarea[formcontrolname="sizingConfigJson"]')).toBeTruthy();
       expect(host.querySelector('[data-testid="script-sizing-note"]')).toBeNull();
 
-      cmp.authoringMode.set('script');
+      cmp.form.patchValue({ strategyType: 'RuleBased' });
       fixture.detectChanges();
       expect(host.querySelector('textarea[formcontrolname="sizingConfigJson"]')).toBeNull();
       const note = host.querySelector('[data-testid="script-sizing-note"]');
@@ -412,10 +402,20 @@ describe('StrategyFormComponent — Pine script authoring', () => {
     it('re-derives the mode and draft when the form is pointed at another strategy', () => {
       cmp.scriptDraft.update((d) => ({ ...d, source: 'edited' }));
       (cmp as any).strategy.set(null);
-      expect(cmp.authoringMode()).toBe('rules');
+      expect(cmp.authoringMode()).toBe('script');
       expect(cmp.scriptDraft().source).toBe(DEFAULT_STRATEGY_SCRIPT);
       (cmp as any).strategy.set({ ...STRATEGY, authoringMode: 'Dsl', scriptSource: null });
-      expect(cmp.authoringMode()).toBe('rules');
+      expect(cmp.authoringMode()).toBe('legacy');
+      expect(cmp.isLegacyRules()).toBe(true);
+      expect(host.querySelector('[data-testid="legacy-rules-notice"]')).toBeNull();
+      fixture.detectChanges();
+      expect(host.querySelector('[data-testid="legacy-rules-notice"]')?.textContent).toContain(
+        'Rewrite it in Pine',
+      );
+      const params = host.querySelector(
+        'textarea[formcontrolname="parametersJson"]',
+      ) as HTMLTextAreaElement;
+      expect(params.readOnly).toBe(true);
     });
   });
 });

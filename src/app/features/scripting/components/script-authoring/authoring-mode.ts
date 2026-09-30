@@ -4,20 +4,24 @@ import type { StrategyDto } from '@core/api/api.types';
 import type { ScriptExecutionPolicy, ScriptInputValues } from '@core/api/scripting.types';
 import { parseSavedInputs } from '../../pine/pine-saved-inputs';
 
-/** How a RuleBased strategy is authored: the visual rule builder (JSON DSL) or a Pine v6 script. */
-export type AuthoringMode = 'rules' | 'script';
+/**
+ * How a RuleBased / LlmProposal strategy is authored. Pine v6 scripts are the only rules
+ * authoring; `legacy` is a saved JSON-rules (DSL) row, which the engine no longer runs — it is
+ * shown read-only and has to be rewritten in Pine.
+ */
+export type AuthoringMode = 'legacy' | 'script';
 
-/** A strategy's authoring mode — `Script` when it carries a script. */
+/** A strategy's authoring mode — `legacy` only for a saved row without a script. */
 export function authoringModeOf(strategy: StrategyDto | null | undefined): AuthoringMode {
-  if (!strategy) return 'rules';
+  if (!strategy) return 'script';
   if (strategy.authoringMode === 'Script') return 'script';
-  if (strategy.authoringMode === 'Dsl') return 'rules';
-  return strategy.scriptSource ? 'script' : 'rules';
+  if (strategy.authoringMode === 'Dsl') return 'legacy';
+  return strategy.scriptSource ? 'script' : 'legacy';
 }
 
 /**
  * The strategy form's authoring mode: re-derived from the strategy whenever the form opens or is
- * pointed at another strategy (create → rules), and freely switchable in between.
+ * pointed at another strategy (create → script).
  */
 export function linkedAuthoringMode(
   strategy: () => StrategyDto | null,

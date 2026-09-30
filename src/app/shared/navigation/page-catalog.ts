@@ -72,7 +72,7 @@ export const PAGE_CATALOG: readonly PageCommand[] = [
     group: 'Strategy',
     label: 'Strategies — LLM Proposals',
     route: '/strategies/llm-proposals',
-    keywords: 'llm gpt proposal candidate promote pending dsl',
+    keywords: 'llm gpt proposal candidate promote pending pine script compile',
   },
   {
     group: 'Strategy',

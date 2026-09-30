@@ -30,13 +30,20 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
-import { DslBuilderComponent } from '../../components/dsl-builder/dsl-builder.component';
-import { DslIssue, validateDslJson } from '../../dsl/dsl-model';
 import { failureMessage, failureMessages } from '../../util/api-failure';
 
 const TIMEFRAMES: readonly Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] as const;
 
-const TEMPLATE_STRATEGY_TYPES: readonly StrategyType[] = CREATABLE_STRATEGY_TYPES;
+/**
+ * Pine-authored types. Templates carry no script, so a RuleBased / LlmProposal
+ * template is legacy JSON rules (retired DSL): the engine refuses to save or
+ * apply one, and new templates cannot pick those types.
+ */
+const PINE_TYPES: readonly string[] = ['RuleBased', 'LlmProposal'];
+
+const TEMPLATE_STRATEGY_TYPES: readonly StrategyType[] = CREATABLE_STRATEGY_TYPES.filter(
+  (t) => !PINE_TYPES.includes(t),
+);
 
 type SubConfigKey =
   | 'riskOverridesJson'
@@ -84,8 +91,6 @@ const SUB_CONFIG_FIELDS: ReadonlyArray<{ key: SubConfigKey; label: string; place
     },
   ];
 
-const DSL_TYPES: readonly string[] = ['RuleBased', 'LlmProposal'];
-
 @Component({
   selector: 'app-templates-page',
   standalone: true,
@@ -100,7 +105,6 @@ const DSL_TYPES: readonly string[] = ['RuleBased', 'LlmProposal'];
     ErrorStateComponent,
     EmptyStateComponent,
     ConfirmDialogComponent,
-    DslBuilderComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -197,7 +201,12 @@ const DSL_TYPES: readonly string[] = ['RuleBased', 'LlmProposal'];
                         type="button"
                         class="action"
                         (click)="askApply(t)"
-                        [disabled]="submitting()"
+                        [disabled]="submitting() || isLegacyRules(t.strategyType)"
+                        [title]="
+                          isLegacyRules(t.strategyType)
+                            ? 'Legacy JSON rules — no longer runs, rewrite in Pine'
+                            : 'Apply this template'
+                        "
                       >
                         Apply →
                       </button>
@@ -390,34 +399,23 @@ const DSL_TYPES: readonly string[] = ['RuleBased', 'LlmProposal'];
             </label>
 
             <div class="field">
-              <span>{{ draftIsDsl() ? 'Rules (DSL JSON)' : 'Parameters JSON' }}</span>
+              <span>{{ draftIsDsl() ? 'Legacy JSON rules (read-only)' : 'Parameters JSON' }}</span>
               @if (draftIsDsl()) {
-                <app-dsl-builder
-                  [parametersJson]="d.parametersJson"
-                  [issues]="draftDslIssues()"
-                  (parametersJsonChange)="patchDraft('parametersJson', $event)"
-                />
+                <p class="legacy-note" role="note" data-testid="template-legacy-rules">
+                  <strong>Legacy JSON rules — no longer runs.</strong> The JSON rules DSL is retired
+                  and templates carry no Pine script, so the engine refuses to save or apply this
+                  template. Rewrite it in Pine as a RuleBased strategy.
+                </p>
               }
               <textarea
                 class="mono"
                 rows="8"
+                [readOnly]="draftIsDsl()"
                 [ngModel]="d.parametersJson"
                 (ngModelChange)="patchDraft('parametersJson', $event)"
               ></textarea>
               @if (draftJsonErrors()['parametersJson']; as err) {
                 <span class="field-error">Invalid JSON: {{ err }}</span>
-              }
-              @if (draftDslIssues().length > 0) {
-                <ul class="issue-list">
-                  @for (i of draftDslIssues(); track $index) {
-                    <li [class.warning]="i.severity === 'warning'">
-                      {{ i.message }}
-                      @if (i.path) {
-                        <code>{{ i.path }}</code>
-                      }
-                    </li>
-                  }
-                </ul>
               }
             </div>
 
@@ -778,6 +776,14 @@ const DSL_TYPES: readonly string[] = ['RuleBased', 'LlmProposal'];
         font-size: var(--text-xs);
         color: var(--loss);
       }
+      .legacy-note {
+        margin: 0 0 6px;
+        padding: 8px 10px;
+        background: rgba(255, 149, 0, 0.08);
+        border-left: 3px solid #ff9500;
+        border-radius: 4px;
+        font-size: 12px;
+      }
       .issue-list {
         margin: 0;
         padding-left: var(--space-4);
@@ -836,9 +842,14 @@ export class TemplatesPageComponent {
   protected readonly riskProfiles = signal<RiskProfileDto[]>([]);
   private riskProfilesLoaded = false;
 
+  /** The template being edited is legacy JSON rules (RuleBased / LlmProposal). */
   protected readonly draftIsDsl = computed(() =>
-    DSL_TYPES.includes(this.draft()?.strategyType ?? ''),
+    this.isLegacyRules(this.editing()?.strategyType ?? this.draft()?.strategyType),
   );
+
+  protected isLegacyRules(type: string | null | undefined): boolean {
+    return !!type && PINE_TYPES.includes(type);
+  }
 
   /** JSON syntax errors per field — the engine refuses unparseable sub-configs. */
   protected readonly draftJsonErrors = computed<Record<string, string>>(() => {
@@ -857,23 +868,12 @@ export class TemplatesPageComponent {
     return out;
   });
 
-  /**
-   * The console's checks of a RuleBased / LlmProposal template's rules —
-   * advisory here: a template has no timeframe of its own, and the engine's
-   * answer to the save is what counts.
-   */
-  protected readonly draftDslIssues = computed<DslIssue[]>(() => {
-    const d = this.draft();
-    if (!d || !this.draftIsDsl() || !d.parametersJson.trim()) return [];
-    if (this.draftJsonErrors()['parametersJson']) return [];
-    return validateDslJson(d.parametersJson);
-  });
-
   protected readonly canSaveDraft = computed(() => {
     const d = this.draft();
     return (
       !!d &&
       d.name.trim().length > 0 &&
+      !this.draftIsDsl() &&
       Object.keys(this.draftJsonErrors()).length === 0 &&
       !this.editSaving()
     );

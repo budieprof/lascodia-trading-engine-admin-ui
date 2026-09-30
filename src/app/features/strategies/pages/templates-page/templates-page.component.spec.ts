@@ -20,7 +20,7 @@ const TEMPLATE: StrategyTemplateDto = {
   id: 7,
   name: 'RSI dip',
   description: 'buy the dip',
-  strategyType: 'RuleBased',
+  strategyType: 'CompositeML',
   parametersJson: '{"name":"x"}',
   riskProfileId: 3,
   riskOverridesJson: null,
@@ -71,12 +71,22 @@ describe('TemplatesPageComponent (edit / delete)', () => {
     cmp.openEdit(TEMPLATE);
     expect(cmp.draft()).toMatchObject({
       name: 'RSI dip',
-      strategyType: 'RuleBased',
+      strategyType: 'CompositeML',
       riskProfileId: 3,
       sizingConfigJson: '{"mode":"FixedLot","value":0.1}',
       sessionFilterJson: '',
     });
+    expect(cmp.draftIsDsl()).toBe(false);
+  });
+
+  it('shows a legacy JSON-rules template read-only: no save, no apply', () => {
+    const legacy = { ...TEMPLATE, strategyType: 'RuleBased' } as StrategyTemplateDto;
+    cmp.openEdit(legacy);
     expect(cmp.draftIsDsl()).toBe(true);
+    expect(cmp.canSaveDraft()).toBe(false);
+    expect(cmp.isLegacyRules('LlmProposal')).toBe(true);
+    expect(cmp.isLegacyRules('CompositeML')).toBe(false);
+    expect(cmp.strategyTypeOptions('CompositeML')).not.toContain('RuleBased');
   });
 
   it('blocks saving while a JSON field does not parse', () => {
@@ -98,7 +108,7 @@ describe('TemplatesPageComponent (edit / delete)', () => {
       7,
       expect.objectContaining({
         name: 'RSI dip v2',
-        strategyType: 'RuleBased',
+        strategyType: 'CompositeML',
         riskProfileId: null,
         sizingConfigJson: '{"mode":"FixedLot","value":0.1}',
         sessionFilterJson: null,

@@ -626,7 +626,10 @@ export interface StrategyDto {
   regimeGateJson: string | null;
   multiTimeframeGateJson: string | null;
   // ── Script strategies (ADR-0027) — RuleBased strategies, from `GET strategy/{id}` ──
-  /** `Script` = Pine v6 source in `scriptSource`; `Dsl` = the JSON rule DSL in `parametersJson`. */
+  /**
+   * `Script` = Pine v6 source in `scriptSource`; `Dsl` = a legacy row on the retired JSON rules
+   * DSL (`parametersJson`) — kept as history, never runs.
+   */
   authoringMode?: StrategyAuthoringMode | null;
   scriptSource?: string | null;
   /** Operator input overrides `{ inputId: value }` (an older engine may send the raw JSON text). */
@@ -3116,25 +3119,6 @@ export interface StrategyParameterSchemaDto {
   fields: StrategyParameterFieldDto[];
 }
 
-/** One DSL problem reported by `POST /strategy/dsl/summarise`. */
-export interface DslIssueDto {
-  /** Engine path to the offending node/field, e.g. `entryConditionsRoot.children[1].children[0].leaf`. */
-  path: string;
-  message: string;
-}
-
-/**
- * `POST /strategy/dsl/summarise` result: every error and warning plus the
- * plain-English summary (null when the DSL does not validate). Engines built
- * before this shape answered with the summary string alone.
- */
-export interface DslSummaryDto {
-  summary: string | null;
-  isValid: boolean;
-  errors: DslIssueDto[];
-  warnings: DslIssueDto[];
-}
-
 /** Body for `POST /strategy/{id}/clone`. Omitted fields copy the source strategy's value. */
 export interface CloneStrategyRequest {
   name?: string | null;
@@ -3286,14 +3270,17 @@ export interface RetireSymbolicFeatureRequest {
 
 /**
  * LLM-generated strategy proposal awaiting operator review.
- * `proposalJson` is the raw DSL the model produced; operators inspect
- * it before promoting (which creates a Paused Strategy linked via
- * `promotedStrategyId`) or rejecting.
+ * `proposalJson` is a Pine envelope ({@link LlmProposalPineEnvelope}); operators
+ * inspect the script before promoting (which creates a Paused Strategy linked
+ * via `promotedStrategyId`) or rejecting. `CompileInvalid` = the script did
+ * not compile; `DslInvalid` survives only on historical rows from the retired
+ * JSON rules DSL.
  */
 export type LlmProposalStatus =
   | 'Pending'
   | 'Approved'
   | 'Rejected'
+  | 'CompileInvalid'
   | 'DslInvalid'
   | 'Duplicate'
   | 'Screening'
@@ -3331,6 +3318,16 @@ export interface PromotionReviewSnapshotDto {
   createdAt: string;
 }
 
+/** A proposal's `proposalJson`: the model's Pine v6 strategy and its identity. */
+export interface LlmProposalPineEnvelope {
+  name?: string | null;
+  description?: string | null;
+  symbol?: string | null;
+  timeframe?: string | null;
+  /** Pine v6 source. */
+  script?: string | null;
+}
+
 export interface LlmProposalDto {
   id: number;
   name: string;
@@ -3350,7 +3347,7 @@ export interface LlmProposalDto {
  */
 export interface StrategyProposalCycleResult {
   pendingWritten: number;
-  dslInvalidWritten: number;
+  compileInvalidWritten: number;
   duplicateWritten: number;
   autoPromotedCount: number;
   sourcesAttempted: number;
@@ -3387,7 +3384,7 @@ export interface LlmProposalStatusDto {
   pendingCount: number;
   approvedCount: number;
   rejectedCount: number;
-  dslInvalidCount: number;
+  compileInvalidCount: number;
   duplicateCount: number;
   approvalRateAllTime: number | null;
   lastProposalAt: string | null;

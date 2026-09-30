@@ -386,6 +386,7 @@ export interface ScriptPublisherDto {
 
 export type ScriptExecutionPolicy = 'Standard' | 'Direct';
 
+/** `Dsl` marks a legacy row on the retired JSON rules DSL — it never runs. */
 export type StrategyAuthoringMode = 'Dsl' | 'Script';
 
 /** Body for `PUT strategy/{id}/script`. */
@@ -394,7 +395,7 @@ export interface UpdateStrategyScriptRequest {
   inputs: ScriptInputValues;
 }
 
-/** `GET strategy/{id}/export` — a `.pine` file for scripts, a JSON bundle for DSL strategies. */
+/** `GET strategy/{id}/export` — a `.pine` file for scripts, a JSON bundle for legacy DSL rows. */
 export interface StrategyExportDto {
   fileName: string;
   content: string;

@@ -16,8 +16,10 @@ import type { CurrencyPairDto, StrategyDto, Timeframe } from '@core/api/api.type
 import { StrategiesService } from '@core/services/strategies.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { NotificationService } from '@core/notifications/notification.service';
-import { ENGINE_TIMEFRAMES, forEachCondition, parseDsl, timeframeRank } from '../../dsl/dsl-model';
+import { authoringModeOf } from '@features/scripting/components/script-authoring/authoring-mode';
 import { failureMessage } from '../../util/api-failure';
+
+const ENGINE_TIMEFRAMES: readonly Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
 
 /**
  * "Clone to another symbol/timeframe…": copies a strategy — rules, risk
@@ -105,10 +107,10 @@ import { failureMessage } from '../../util/api-failure';
                 edit without touching #{{ s.id }}.
               </p>
             }
-            @if (htfConflict(); as tfs) {
-              <p class="warn">
-                The rules use higher-timeframe conditions on {{ tfs }}, which are not above
-                {{ timeframe() }} — they would never fire on the copy until you change them.
+            @if (isLegacyRules()) {
+              <p class="warn" data-testid="clone-legacy-rules">
+                This strategy is on the retired JSON rules DSL — it no longer runs and the engine
+                refuses to clone it. Rewrite it in Pine instead.
               </p>
             }
             @if (error(); as err) {
@@ -124,7 +126,7 @@ import { failureMessage } from '../../util/api-failure';
               type="button"
               class="btn btn-primary"
               (click)="submit()"
-              [disabled]="busy() || !canSubmit()"
+              [disabled]="busy() || !canSubmit() || isLegacyRules()"
             >
               {{ busy() ? 'Cloning…' : 'Clone & open' }}
             </button>
@@ -294,7 +296,7 @@ export class CloneStrategyDialogComponent {
 
   readonly canSubmit = computed(() => {
     const sym = this.symbol().trim();
-    return sym.length > 0 && sym.length <= 10 && timeframeRank(this.timeframe()) >= 0;
+    return sym.length > 0 && sym.length <= 10 && ENGINE_TIMEFRAMES.includes(this.timeframe());
   });
 
   readonly sameTarget = computed(() => {
@@ -306,26 +308,11 @@ export class CloneStrategyDialogComponent {
     );
   });
 
-  /** Higher-timeframe conditions that would not be above the copy's timeframe. */
-  readonly htfConflict = computed<string | null>(() => {
+  /** A RuleBased / LlmProposal row without a script: legacy JSON rules, never cloned. */
+  readonly isLegacyRules = computed(() => {
     const s = this.strategy();
-    if (!s?.parametersJson) return null;
-    if (s.strategyType !== 'RuleBased' && s.strategyType !== 'LlmProposal') return null;
-    const parsed = parseDsl(s.parametersJson);
-    if (!parsed.ok) return null;
-    const target = timeframeRank(this.timeframe());
-    const bad = new Set<string>();
-    forEachCondition(parsed.doc, (c) => {
-      const htf = c.config['higherTimeframe'];
-      if (
-        c.type === 'HtfIndicatorThreshold' &&
-        timeframeRank(htf) >= 0 &&
-        timeframeRank(htf) <= target
-      ) {
-        bad.add(String(htf));
-      }
-    });
-    return bad.size > 0 ? [...bad].join(', ') : null;
+    if (!s || (s.strategyType !== 'RuleBased' && s.strategyType !== 'LlmProposal')) return false;
+    return authoringModeOf(s) === 'legacy';
   });
 
   private loadPairs(): void {
@@ -346,7 +333,7 @@ export class CloneStrategyDialogComponent {
 
   submit(): void {
     const s = this.strategy();
-    if (!s || this.busy() || !this.canSubmit()) return;
+    if (!s || this.busy() || !this.canSubmit() || this.isLegacyRules()) return;
     this.busy.set(true);
     this.error.set(null);
     const name = this.name().trim();

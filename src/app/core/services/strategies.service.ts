@@ -3,7 +3,6 @@ import { Observable } from 'rxjs';
 import { ApiCallOptions, ApiService } from '@core/api/api.service';
 import {
   CloneStrategyRequest,
-  DslSummaryDto,
   ResponseData,
   PagedData,
   PagerRequest,
@@ -78,14 +77,6 @@ export class StrategiesService {
     return this.api.post(`/strategy/${id}/clone`, body, opts);
   }
 
-  /**
-   * Moves a v1 DSL strategy to Pine-exact math (`dslVersion: 2`) and saves it;
-   * `data` is the upgraded ParametersJson.
-   */
-  upgradeDsl(id: number, opts?: ApiCallOptions): Observable<ResponseData<string>> {
-    return this.api.post(`/strategy/${id}/dsl/upgrade`, {}, opts);
-  }
-
   // ── Strategy templates (TradingView-style presets) ──
   listTemplates(): Observable<ResponseData<StrategyTemplateDto[]>> {
     return this.api.get(`/strategy/templates`);
@@ -135,26 +126,6 @@ export class StrategiesService {
     data: RunBacktestPreviewRequest,
   ): Observable<ResponseData<BacktestPreviewResult>> {
     return this.api.post(`/strategy/backtest-preview`, data);
-  }
-
-  /**
-   * Validates DSL JSON and renders its plain-English summary. `timeframe` (the
-   * strategy's own) lets the engine check higher-timeframe conditions.
-   *
-   * `data` is a {@link DslSummaryDto}; engines built before that shape return
-   * the summary string (or null with the error in `message`), so callers go
-   * through `normaliseDslCheck`. `dslJson` is the old request field, sent
-   * alongside `parametersJson` so either engine build answers.
-   */
-  summariseDsl(
-    parametersJson: string,
-    timeframe?: string | null,
-  ): Observable<ResponseData<DslSummaryDto | string | null>> {
-    return this.api.post(
-      `/strategy/dsl/summarise`,
-      { parametersJson, dslJson: parametersJson, timeframe: timeframe || null },
-      { silent: true },
-    );
   }
 
   /** Engine answers `data: true`; symbol/timeframe/type changes are refused with `-11`. */

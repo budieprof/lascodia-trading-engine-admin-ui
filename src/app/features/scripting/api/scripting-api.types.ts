@@ -113,6 +113,7 @@ export interface ScriptLibrarySummary {
 
 // ── §8 Script strategies ──────────────────────────────────────────────────────
 
+/** `Dsl` marks a legacy row on the retired JSON rules DSL — it never runs. */
 export type AuthoringMode = 'Dsl' | 'Script';
 
 export type ExecutionPolicy = 'Standard' | 'Direct';

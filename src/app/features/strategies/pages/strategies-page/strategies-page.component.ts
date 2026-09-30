@@ -45,7 +45,6 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { DecimalPipe } from '@angular/common';
 import { StrategyFormComponent } from '../../components/strategy-form/strategy-form.component';
 import { CloneStrategyDialogComponent } from '../../components/clone-strategy-dialog/clone-strategy-dialog.component';
-import { patchDslFields } from '../../dsl/dsl-model';
 import { failureMessage } from '../../util/api-failure';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
@@ -2148,7 +2147,6 @@ export class StrategiesPageComponent {
     let created = 0;
     const failures: string[] = [];
     const baseName = (data?.name as string) ?? 'Strategy';
-    const isDsl = data?.strategyType === 'RuleBased' || data?.strategyType === 'LlmProposal';
     this.createSaving.set(true);
     const submitOne = (idx: number): void => {
       if (idx >= symbols.length) {
@@ -2170,16 +2168,10 @@ export class StrategiesPageComponent {
       // so each spawned strategy ends up with a unique, recognisable name.
       const includesSymbol = baseName.toUpperCase().includes(symbol);
       const name = includesSymbol ? baseName : `${baseName} ${symbol}`;
-      // Each copy's rules name its own symbol.
-      const parametersJson =
-        isDsl && typeof data?.parametersJson === 'string'
-          ? (patchDslFields(data.parametersJson, { symbol }) ?? data.parametersJson)
-          : data?.parametersJson;
       const req: CreateStrategyRequest = {
         ...data,
         name,
         symbol,
-        parametersJson,
       };
       delete (req as any).symbols;
       this.strategiesService.create(req, { silent: true }).subscribe({
