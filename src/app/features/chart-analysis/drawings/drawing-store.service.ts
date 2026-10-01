@@ -2,7 +2,11 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { newDrawingId, type Drawing, type DrawingKind, type DrawingStyle } from './model';
 import { reorder, shiftPoints, topZ, type ZOrderOp } from './drawing-ops';
 import { behaviorFor } from './tools/registry';
-import { ChartDrawingsService, type ChartDrawingDto } from '@core/services/chart-drawings.service';
+import {
+  ChartDrawingsService,
+  type ChartDrawingDto,
+  type ChartDrawingInput,
+} from '@core/services/chart-drawings.service';
 
 const STORAGE_KEY = 'lascodia.chart.drawings.v1';
 const UNDO_DEPTH = 50;
@@ -38,6 +42,16 @@ const SYNC_DEBOUNCE_MS = 900;
 @Injectable({ providedIn: 'root' })
 export class DrawingStore {
   private readonly remote = inject(ChartDrawingsService);
+
+  constructor() {
+    // `pagehide` fires on close, reload and bfcache; `visibilitychange` covers mobile tab kills.
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', () => this.flushOnHide());
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') this.flushOnHide();
+      });
+    }
+  }
   private readonly all = signal<Drawing[]>(this.restore());
 
   /** Scopes hydrated from the engine this session, so we fetch each once. */
@@ -151,27 +165,9 @@ export class DrawingStore {
     }
   }
 
-  /** Queue a scope for the next debounced sync. */
-  private markDirty(symbol: string, resolution: string): void {
-    if (!symbol || !resolution) return;
-    this.dirtyScopes.add(`${symbol}|${resolution}`);
-    if (this.syncTimer !== null) clearTimeout(this.syncTimer);
-    this.syncTimer = setTimeout(() => this.flush(), SYNC_DEBOUNCE_MS);
-  }
-
-  private flush(): void {
-    this.syncTimer = null;
-    const scopes = [...this.dirtyScopes];
-    this.dirtyScopes.clear();
-    if (scopes.length === 0) return;
-    this.syncState.set('saving');
-
-    let pending = scopes.length;
-    let failed = false;
-    for (const key of scopes) {
-      const [symbol, resolution] = key.split('|');
-      // Transient tools (the ruler) are a measurement, not a drawing: never synced.
-      const payload = this.forScope(symbol, resolution)
+  /** What the engine stores for a scope. Transient tools (the ruler) are a measurement, never synced. */
+  private payloadFor(symbol: string, resolution: string): ChartDrawingInput[] {
+    return this.forScope(symbol, resolution)
         .filter((d) => !behaviorFor(d.kind)?.transient)
         .map((d) => ({
         clientId: d.id,
@@ -185,6 +181,45 @@ export class DrawingStore {
         visibleOn: (d.visibleOn ?? []).join(','),
         zIndex: d.z ?? 0,
       }));
+  }
+
+  /** Queue a scope for the next debounced sync. */
+  private markDirty(symbol: string, resolution: string): void {
+    if (!symbol || !resolution) return;
+    this.dirtyScopes.add(`${symbol}|${resolution}`);
+    if (this.syncTimer !== null) clearTimeout(this.syncTimer);
+    this.syncTimer = setTimeout(() => this.flush(), SYNC_DEBOUNCE_MS);
+  }
+
+  /**
+   * Tab closing / reloading: send whatever is still waiting on the debounce, with requests that
+   * outlive the page. Without this the last ~second of edits (a delete, a "remove all") was lost.
+   */
+  private readonly flushOnHide = (): void => {
+    if (this.syncTimer === null && this.dirtyScopes.size === 0) return;
+    if (this.syncTimer !== null) clearTimeout(this.syncTimer);
+    this.syncTimer = null;
+    const scopes = [...this.dirtyScopes];
+    this.dirtyScopes.clear();
+    for (const key of scopes) {
+      const [symbol, resolution] = key.split('|');
+      this.remote.replaceScopeOnUnload(symbol, resolution, this.payloadFor(symbol, resolution));
+    }
+  };
+
+  private flush(): void {
+    this.syncTimer = null;
+    const scopes = [...this.dirtyScopes];
+    this.dirtyScopes.clear();
+    if (scopes.length === 0) return;
+    this.syncState.set('saving');
+
+    let pending = scopes.length;
+    let failed = false;
+    for (const key of scopes) {
+      const [symbol, resolution] = key.split('|');
+      // Transient tools (the ruler) are a measurement, not a drawing: never synced.
+      const payload = this.payloadFor(symbol, resolution);
 
       this.remote.replaceScope(symbol, resolution, payload).subscribe({
         next: (res) => {

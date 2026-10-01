@@ -354,6 +354,11 @@ export class DrawingController {
     // TV: a ruler measurement goes away on the next click on the chart.
     if (this.transientId && !this.pendingKind) this.clearTransient();
 
+    // Every branch below preventDefaults the pointerdown (so the chart does not pan while a
+    // drawing is placed or dragged), and that also stops the browser moving keyboard focus.
+    // Take it explicitly, or Delete / Enter / ⌘C / arrow nudges reach nothing after a click.
+    (this.container?.closest('[tabindex]') as HTMLElement | null)?.focus({ preventScroll: true });
+
     // Placing a new drawing.
     if (this.activeTool) {
       const kind = this.activeTool;
