@@ -116,4 +116,19 @@ export const UI_ICONS: Record<string, string> = {
     '<rect x="4.5" y="6.5" width="19" height="15" rx="1.5"/><path d="M10.5 6.5v15M17.5 6.5v15M4.5 14.5h19"/>',
   'layout-8':
     '<rect x="3.5" y="6.5" width="21" height="15" rx="1.5"/><path d="M8.5 6.5v15M14.5 6.5v15M19.5 6.5v15M3.5 14.5h21"/>',
+  // ── drawing toolbar / rail (TradingView) ──
+  /** Stay in drawing mode: pencil with a small padlock. */
+  'draw-stay':
+    '<path d="M15.5 5.5l4 4L10 19H6v-4z"/><path d="M13 8l4 4"/>' +
+    '<rect x="16.5" y="18.5" width="7" height="5" rx="1"/><path d="M18 18.5v-1.5a2 2 0 0 1 4 0v1.5"/>',
+  grip: DOT(11, 8, 1.2) + DOT(17, 8, 1.2) + DOT(11, 14, 1.2) + DOT(17, 14, 1.2) + DOT(11, 20, 1.2) + DOT(17, 20, 1.2),
+  'line-width':
+    '<path d="M6 8.5h16"/><path d="M6 13.5h16" stroke-width="2"/><path d="M6 19.5h16" stroke-width="3"/>',
+  'line-solid': '<path d="M5 14h18" stroke-width="2"/>',
+  'line-dashed': '<path d="M5 14h4M12 14h4M19 14h4" stroke-width="2"/>',
+  'line-dotted': DOT(6, 14, 1.2) + DOT(10, 14, 1.2) + DOT(14, 14, 1.2) + DOT(18, 14, 1.2) + DOT(22, 14, 1.2),
+  'text-color': '<path d="M9 19L14 7l5 12M10.8 15h6.4"/>',
+  'line-color': '<path d="M17.5 5.5l4 4L12 19H8v-4z"/><path d="M15 8l4 4"/>',
+  'bring-front': '<rect x="5.5" y="5.5" width="11" height="11" fill="currentColor" stroke="none"/><rect x="11.5" y="11.5" width="11" height="11"/>',
+  'send-back': '<rect x="5.5" y="5.5" width="11" height="11"/><rect x="11.5" y="11.5" width="11" height="11" fill="currentColor" stroke="none"/>',
 };

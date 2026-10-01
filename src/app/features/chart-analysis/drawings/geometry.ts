@@ -16,9 +16,10 @@ export interface Pt {
 
 /** How close the pointer must get, in px, to grab a line or a handle. */
 export const HIT_TOLERANCE = 6;
-export const HANDLE_RADIUS = 4;
+/** TradingView's anchor handle: ~5.5px radius, white fill, 1.5px blue ring. */
+export const HANDLE_RADIUS = 5.5;
 /** Handles are easier to grab than the line they sit on, as in TradingView. */
-export const HANDLE_TOLERANCE = 7;
+export const HANDLE_TOLERANCE = 8;
 
 /**
  * Distance from a point to a finite segment.

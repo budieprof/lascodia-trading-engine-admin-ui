@@ -1,3 +1,5 @@
+import { behaviorFor } from './tools/registry';
+import { optionsOf } from './tools/types';
 import type { CanvasRenderingTarget2D } from 'fancy-canvas';
 import type { IChartApi, ISeriesApi, ISeriesPrimitive, SeriesType, Time } from 'lightweight-charts';
 import { FIB_LEVELS, type DashStyle, type Drawing } from './model';
@@ -55,6 +57,8 @@ import type { Bar } from '../datafeed/candle-feed.service';
 export class DrawingRenderer implements ISeriesPrimitive<Time> {
   private drawings: Drawing[] = [];
   private selectedId: string | null = null;
+  /** Drawing under the pointer: shows its handles faintly, as TradingView does. */
+  private hoverId: string | null = null;
   /** In-progress drawing, rendered as a preview while being placed. */
   private preview: { drawing: Drawing; cursor: Pt | null } | null = null;
   private requestUpdate?: () => void;
@@ -101,6 +105,12 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     this.requestUpdate?.();
   }
 
+  setHover(id: string | null): void {
+    if (id === this.hoverId) return;
+    this.hoverId = id;
+    this.requestUpdate?.();
+  }
+
   setPreview(preview: { drawing: Drawing; cursor: Pt | null } | null): void {
     this.preview = preview;
     this.requestUpdate?.();
@@ -126,10 +136,48 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     const chart = this.chart();
     const series = this.series();
     if (!chart || !series) return null;
-    const x = chart.timeScale().timeToCoordinate((this.shift(point.time) / 1000) as Time);
     const y = series.priceToCoordinate(point.price);
-    if (x === null || y === null) return null;
+    if (y === null) return null;
+    const x = chart.timeScale().timeToCoordinate((this.shift(point.time) / 1000) as Time) ?? this.xAtTime(point.time);
+    if (x === null) return null;
     return { x, y };
+  }
+
+  /**
+   * Extrapolated x for an instant outside the loaded bars — future anchors
+   * (position targets, forecasts) and anchors older than the loaded history.
+   * Whole-bar steps from the nearest end, at the current bar spacing.
+   */
+  xAtTime(timeMs: number): number | null {
+    const edge = this.edge(timeMs);
+    if (!edge) return null;
+    return edge.x + ((timeMs - edge.time) / edge.step) * edge.spacing;
+  }
+
+  /** Inverse of `xAtTime`, snapped to whole bars (UTC ms). */
+  timeAtX(x: number): number | null {
+    const bars = this.bars();
+    if (bars.length === 0) return null;
+    const last = this.edge(bars[bars.length - 1].time + 1);
+    const first = this.edge(bars[0].time - 1);
+    const e = last && x >= last.x ? last : first && x <= first.x ? first : last;
+    if (!e) return null;
+    return e.time + Math.round((x - e.x) / e.spacing) * e.step;
+  }
+
+  private edge(timeMs: number): { time: number; x: number; step: number; spacing: number } | null {
+    const chart = this.chart();
+    const bars = this.bars();
+    if (!chart || bars.length < 2) return null;
+    const ref = timeMs >= bars[bars.length - 1].time ? bars[bars.length - 1] : bars[0];
+    const x = chart.timeScale().timeToCoordinate((this.shift(ref.time) / 1000) as Time);
+    if (x === null) return null;
+    const spacing = chart.timeScale().options().barSpacing;
+    const gaps: number[] = [];
+    for (let i = Math.max(1, bars.length - 50); i < bars.length; i++) gaps.push(bars[i].time - bars[i - 1].time);
+    gaps.sort((a, b) => a - b);
+    const step = gaps[gaps.length >> 1] || 60_000;
+    return { time: ref.time, x, step, spacing };
   }
 
   projectAll(drawing: Drawing): Pt[] {
@@ -160,7 +208,8 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
       for (const drawing of this.drawings) {
         const pts = this.projectAll(drawing);
         if (pts.length === 0) continue;
-        this.paint(ctx, drawing, pts, w, h, drawing.id === this.selectedId);
+        const selected = drawing.id === this.selectedId;
+        this.paint(ctx, drawing, pts, w, h, selected, !selected && drawing.id === this.hoverId);
       }
 
       if (this.preview) {
@@ -170,6 +219,8 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
           ctx.globalAlpha = 0.75;
           this.paint(ctx, this.preview.drawing, withCursor, w, h, false);
           ctx.globalAlpha = 1;
+          // TV shows the anchors already placed while a drawing is in progress.
+          this.handles(ctx, withCursor, false);
         }
       }
 
@@ -192,8 +243,19 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     w: number,
     h: number,
     selected: boolean,
+    hovered = false,
   ): void {
     this.applyStroke(ctx, drawing);
+    const showHandles = selected || hovered;
+    const behavior = behaviorFor(drawing.kind);
+    if (behavior) {
+      const base = this.paintCtx(ctx, drawing, pts, w, h);
+      const options = optionsOf(behavior, drawing);
+      behavior.paint({ ...base, selected, hovered, options });
+      ctx.setLineDash([]);
+      if (showHandles) this.handles(ctx, behavior.handles?.({ ...base, options }) ?? pts, drawing.locked, !selected);
+      return;
+    }
     const [a, b, c] = pts;
     const fill = drawing.style.fill;
 
@@ -353,7 +415,7 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     }
 
     ctx.setLineDash([]);
-    if (selected) this.handles(ctx, pts, drawing.locked);
+    if (showHandles) this.handles(ctx, pts, drawing.locked, !selected);
   }
 
   /**
@@ -369,7 +431,18 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     width: number,
     height: number,
   ): void {
-    const p: PaintCtx = {
+    this.paintLegacyAdvanced(this.paintCtx(ctx, drawing, pts, width, height));
+  }
+
+  /** The painter context every tool receives. */
+  paintCtx(
+    ctx: CanvasRenderingContext2D,
+    drawing: Drawing,
+    pts: Pt[],
+    width: number,
+    height: number,
+  ): PaintCtx {
+    return {
       ctx,
       drawing,
       pts,
@@ -387,7 +460,10 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
         return this.unshift(Number(t) * 1000);
       },
     };
+  }
 
+  private paintLegacyAdvanced(p: PaintCtx): void {
+    const { drawing, ctx, pts, width, height } = p;
     switch (drawing.kind) {
       case 'pitchfork':
       case 'schiff-pitchfork':
@@ -753,18 +829,22 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     ctx.restore();
   }
 
-  private handles(ctx: CanvasRenderingContext2D, pts: Pt[], locked: boolean): void {
+  /**
+   * TradingView anchor handles: white disc, 1.5px #2962FF ring. Hover draws
+   * them at reduced opacity; a locked drawing greys the ring so it is obvious
+   * why dragging does nothing.
+   */
+  private handles(ctx: CanvasRenderingContext2D, pts: Pt[], locked: boolean, faint = false): void {
     ctx.save();
     ctx.setLineDash([]);
+    ctx.globalAlpha = faint ? 0.55 : 1;
     for (const p of pts) {
       ctx.beginPath();
       ctx.arc(p.x, p.y, HANDLE_RADIUS, 0, Math.PI * 2);
-      // A locked drawing shows its anchors but greys them, so it is obvious
-      // why dragging does nothing.
-      ctx.fillStyle = locked ? '#787B86' : '#FFFFFF';
+      ctx.fillStyle = '#FFFFFF';
       ctx.fill();
       ctx.strokeStyle = locked ? '#787B86' : '#2962FF';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 1.5;
       ctx.stroke();
     }
     ctx.restore();

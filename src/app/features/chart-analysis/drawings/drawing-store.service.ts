@@ -1,5 +1,7 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { newDrawingId, type Drawing, type DrawingKind, type DrawingStyle } from './model';
+import { reorder, shiftPoints, topZ, type ZOrderOp } from './drawing-ops';
+import { behaviorFor } from './tools/registry';
 import { ChartDrawingsService, type ChartDrawingDto } from '@core/services/chart-drawings.service';
 
 const STORAGE_KEY = 'lascodia.chart.drawings.v1';
@@ -140,6 +142,7 @@ export class DrawingStore {
         style,
         locked: row.locked,
         createdAt: Date.parse(row.createdAt) || Date.now(),
+        ...extrasFromDto(row),
       };
     } catch {
       // A row we cannot parse is dropped rather than throwing: one bad record
@@ -167,13 +170,20 @@ export class DrawingStore {
     let failed = false;
     for (const key of scopes) {
       const [symbol, resolution] = key.split('|');
-      const payload = this.forScope(symbol, resolution).map((d) => ({
+      // Transient tools (the ruler) are a measurement, not a drawing: never synced.
+      const payload = this.forScope(symbol, resolution)
+        .filter((d) => !behaviorFor(d.kind)?.transient)
+        .map((d) => ({
         clientId: d.id,
         kind: d.kind,
         pointsJson: JSON.stringify(d.points),
         styleJson: JSON.stringify(d.style),
         locked: d.locked,
         createdAt: new Date(d.createdAt).toISOString(),
+        optionsJson: JSON.stringify(d.options ?? {}),
+        hidden: !!d.hidden,
+        visibleOn: (d.visibleOn ?? []).join(','),
+        zIndex: d.z ?? 0,
       }));
 
       this.remote.replaceScope(symbol, resolution, payload).subscribe({
@@ -202,6 +212,7 @@ export class DrawingStore {
     points: Drawing['points'],
     style: DrawingStyle,
     scope?: { symbol: string; resolution: string },
+    extra?: Pick<Drawing, 'options'>,
   ): Drawing {
     const { symbol, resolution } = scope ?? this.scope();
     const drawing: Drawing = {
@@ -213,6 +224,8 @@ export class DrawingStore {
       style,
       locked: false,
       createdAt: Date.now(),
+      z: topZ(this.forScope(symbol, resolution)),
+      ...(extra?.options ? { options: extra.options } : {}),
     };
     this.mutate((list) => [...list, drawing]);
     return drawing;
@@ -222,30 +235,98 @@ export class DrawingStore {
     this.mutate((list) => list.map((d) => (d.id === id ? { ...d, ...patch } : d)), recordUndo);
   }
 
-  updateStyle(id: string, patch: Partial<DrawingStyle>): void {
-    this.mutate((list) =>
-      list.map((d) => (d.id === id ? { ...d, style: { ...d.style, ...patch } } : d)),
+  updateStyle(id: string, patch: Partial<DrawingStyle>, recordUndo = true): void {
+    this.mutate(
+      (list) => list.map((d) => (d.id === id ? { ...d, style: { ...d.style, ...patch } } : d)),
+      recordUndo,
     );
   }
 
-  remove(id: string): void {
-    this.mutate((list) => list.filter((d) => d.id !== id));
+  remove(id: string, recordUndo = true): void {
+    this.mutate((list) => list.filter((d) => d.id !== id), recordUndo);
     if (this.selectedId() === id) this.selectedId.set(null);
   }
 
-  /** Duplicate, nudged slightly so the copy is visibly a separate object. */
-  clone(id: string): Drawing | null {
+  /**
+   * Duplicate a drawing on top of the stack (TV "Clone"). `points` lets a
+   * Ctrl-drag clone land where the pointer took it; otherwise the copy sits
+   * exactly over the source, as TradingView's Clone does.
+   */
+  clone(id: string, points?: Drawing['points'], recordUndo = true): Drawing | null {
     const source = this.all().find((d) => d.id === id);
     if (!source) return null;
     const copy: Drawing = {
-      ...source,
+      ...structuredCloneDrawing(source),
       id: newDrawingId(),
-      points: source.points.map((p) => ({ ...p, price: p.price })),
+      points: points ?? source.points.map((p) => ({ ...p })),
       createdAt: Date.now(),
       locked: false,
+      hidden: false,
+      z: topZ(this.forScope(source.symbol, source.resolution)),
     };
-    this.mutate((list) => [...list, copy]);
+    this.mutate((list) => [...list, copy], recordUndo);
     return copy;
+  }
+
+  // ── Clipboard (Cmd/Ctrl+C, Cmd/Ctrl+V) ──────────────────────────────────
+
+  private clipboard: Drawing | null = null;
+
+  copy(id: string): boolean {
+    const d = this.all().find((x) => x.id === id);
+    if (!d) return false;
+    this.clipboard = structuredCloneDrawing(d);
+    return true;
+  }
+
+  get hasClipboard(): boolean {
+    return this.clipboard !== null;
+  }
+
+  /**
+   * Paste the copied drawing into `scope`. Pasted into the chart it was copied
+   * from, it is offset by `offset` (time, price) so it does not hide the
+   * original — TradingView shifts a paste the same way.
+   */
+  paste(scope: { symbol: string; resolution: string }, offset = { dt: 0, dp: 0 }): Drawing | null {
+    const src = this.clipboard;
+    if (!src) return null;
+    const same = src.symbol === scope.symbol && src.resolution === scope.resolution;
+    const pasted: Drawing = {
+      ...structuredCloneDrawing(src),
+      id: newDrawingId(),
+      symbol: scope.symbol,
+      resolution: scope.resolution,
+      points: same ? shiftPoints(src.points, offset.dt, offset.dp) : src.points.map((p) => ({ ...p })),
+      createdAt: Date.now(),
+      locked: false,
+      hidden: false,
+      z: topZ(this.forScope(scope.symbol, scope.resolution)),
+    };
+    this.mutate((list) => [...list, pasted]);
+    // Successive pastes keep stepping away from the last one.
+    if (same) this.clipboard = structuredCloneDrawing(pasted);
+    return pasted;
+  }
+
+  /** TV "Visual order": bring to front / send to back / forward / backward. */
+  reorder(id: string, op: ZOrderOp): void {
+    const d = this.all().find((x) => x.id === id);
+    if (!d) return;
+    const zs = reorder(this.forScope(d.symbol, d.resolution), id, op);
+    this.mutate((list) => list.map((x) => (zs.has(x.id) ? { ...x, z: zs.get(x.id)! } : x)));
+  }
+
+  /** Hide one drawing (TV "Hide"); it stays in the object tree. */
+  setHidden(id: string, hidden: boolean): void {
+    this.update(id, { hidden });
+  }
+
+  updateOptions(id: string, patch: Record<string, unknown>, recordUndo = true): void {
+    this.mutate(
+      (list) => list.map((d) => (d.id === id ? { ...d, options: { ...(d.options ?? {}), ...patch } } : d)),
+      recordUndo,
+    );
   }
 
   toggleLock(id: string): void {
@@ -345,6 +426,20 @@ export class DrawingStore {
     this.undoRevision.update((v) => v + 1);
   }
 
+  /**
+   * Abandon the gesture opened by `beginGesture` and restore its snapshot —
+   * the settings dialog's Cancel after a live preview.
+   */
+  cancelGesture(): void {
+    const snapshot = this.undoStack.pop();
+    if (!snapshot) return;
+    const before = this.all();
+    this.all.set(snapshot);
+    this.persist(snapshot);
+    this.syncAffected(before, snapshot);
+    this.undoRevision.update((v) => v + 1);
+  }
+
   private persist(list: Drawing[]): void {
     // Wrapped because storage throws outright in some contexts (private
     // windows, blocked site data) rather than merely being empty — and losing
@@ -369,10 +464,34 @@ export class DrawingStore {
           !!d &&
           typeof d === 'object' &&
           typeof (d as Drawing).id === 'string' &&
-          Array.isArray((d as Drawing).points),
+          Array.isArray((d as Drawing).points) &&
+          !behaviorFor((d as Drawing).kind)?.transient,
       );
     } catch {
       return [];
     }
   }
+}
+
+function structuredCloneDrawing(d: Drawing): Drawing {
+  return JSON.parse(JSON.stringify(d)) as Drawing;
+}
+
+/** Options / visibility / z from an engine row; absent on engines without them. */
+function extrasFromDto(row: ChartDrawingDto): Partial<Drawing> {
+  const out: Partial<Drawing> = {};
+  if (row.optionsJson) {
+    try {
+      const o: unknown = JSON.parse(row.optionsJson);
+      if (o && typeof o === 'object' && !Array.isArray(o) && Object.keys(o).length) {
+        out.options = o as Record<string, unknown>;
+      }
+    } catch {
+      /* bad options: fall back to the tool's defaults */
+    }
+  }
+  if (row.hidden) out.hidden = true;
+  if (row.visibleOn) out.visibleOn = row.visibleOn.split(',').filter(Boolean);
+  if (typeof row.zIndex === 'number') out.z = row.zIndex;
+  return out;
 }
