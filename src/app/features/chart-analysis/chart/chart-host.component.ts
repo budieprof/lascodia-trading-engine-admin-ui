@@ -49,6 +49,7 @@ import {
 } from './price-transforms';
 import { DrawingStore } from '../drawings/drawing-store.service';
 import { DrawingController } from '../drawings/drawing-controller';
+import type { MagnetMode } from '../drawings/drawing-ops';
 import type { DrawingKind } from '../drawings/model';
 import { OverlayRenderer, type PriceOverlay } from '../overlays/overlay-renderer';
 import { AnalysisOverlayRenderer } from '../overlays/analysis-overlay-renderer';
@@ -245,7 +246,10 @@ export class ChartHostComponent implements OnDestroy {
   readonly precision = input<number>(5);
   /** Armed drawing tool, or null for the cursor. */
   readonly tool = input<DrawingKind | null>(null);
-  readonly magnet = input<boolean>(false);
+  /** TradingView magnet: off / weak / strong (Ctrl/Cmd inverts it while drawing). */
+  readonly magnet = input<MagnetMode>('off');
+  /** TV "Stay in drawing mode": keep the tool armed after a drawing completes. */
+  readonly stayInDrawingMode = input<boolean>(false);
   /** Price scale mode — normal, logarithmic or percentage. */
   readonly scaleMode = input<'normal' | 'log' | 'percent'>('normal');
   /** Engine-derived price levels: position entry/SL/TP and pending orders. */
@@ -272,11 +276,37 @@ export class ChartHostComponent implements OnDestroy {
   readonly resolution = input<string>('');
 
   /** Raised when the visible range reaches the oldest bar we hold. */
+  /** Arrow-key nudge of the selected drawing (bars sideways, pixels vertically). */
+  nudgeSelectedDrawing(bars: number, pixels: number): boolean {
+    return this.controller.nudgeSelected(bars, pixels);
+  }
+
+  /** Paste the copied drawing onto this chart. */
+  pasteDrawing(): boolean {
+    return this.controller.paste() !== null;
+  }
+
+  /** Finish a multi-click drawing (Enter). */
+  finishDrawing(): boolean {
+    return this.controller.finishPending();
+  }
+
+  /** Abandon a drawing in progress. Returns whether one was. */
+  cancelDrawing(): boolean {
+    const was = this.controller.isPlacing;
+    this.controller.cancelPending();
+    return was;
+  }
+
   readonly loadMore = output<void>();
   /** Crosshair readout for the legend; null time means "latest bar". */
   readonly legend = output<LegendSnapshot>();
   /** Raised when a drawing tool finishes, so the toolbar can disarm. */
   readonly toolComplete = output<void>();
+  /** Double-click on a drawing — open its Settings dialog. */
+  readonly drawingSettings = output<string>();
+  /** Right-click on a drawing — open the drawing context menu (client coords). */
+  readonly drawingContextMenu = output<{ id: string; clientX: number; clientY: number }>();
 
   private chart: IChartApi | null = null;
   // Includes 'Histogram' because the Column style plots the close as bars on
@@ -481,9 +511,11 @@ export class ChartHostComponent implements OnDestroy {
     effect(() => {
       const tool = this.tool();
       const magnet = this.magnet();
+      const stay = this.stayInDrawingMode();
       const bars = this.bars();
       untracked(() => {
-        this.controller.magnet = magnet;
+        this.controller.magnetMode = magnet;
+        this.controller.stayInDrawingMode = stay;
         this.controller.bars = bars;
         if (this.controller.activeTool !== tool) this.controller.setTool(tool);
       });
@@ -775,7 +807,10 @@ export class ChartHostComponent implements OnDestroy {
 
     this.controller.attach(this.chart, el);
     this.controller.onToolComplete = () => this.toolComplete.emit();
-    this.controller.magnet = this.magnet();
+    this.controller.onEditRequest = (id) => this.drawingSettings.emit(id);
+    this.controller.onDrawingContextMenu = (e) => this.drawingContextMenu.emit(e);
+    this.controller.magnetMode = this.magnet();
+    this.controller.stayInDrawingMode = this.stayInDrawingMode();
     this.controller.bars = this.bars();
 
     // Infinite history: when the left edge reaches the oldest bar we hold, ask

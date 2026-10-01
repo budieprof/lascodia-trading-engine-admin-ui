@@ -1,6 +1,7 @@
 import type { PaintCtx } from '../advanced-painters';
 import type { Pt } from '../geometry';
 import type { Drawing, DrawingKind, DrawingPoint, DrawingStyle } from '../model';
+import type { Bar } from '../../datafeed/candle-feed.service';
 
 /**
  * Per-tool behaviour — the seam that lets each tool match TradingView exactly.
@@ -64,6 +65,20 @@ export interface ToolBehavior {
   moveHandle?(drawing: Drawing, index: number, to: DrawingPoint, geo: ToolGeometry): DrawingPoint[];
   /** Whether screen point `at` touches the drawing. Defaults to geometry.hitTestDrawing. */
   hitTest?(p: PaintCtx & { options: Record<string, unknown> }, at: Pt, tol: number): boolean;
+  /**
+   * Transient tools (the ruler) vanish on the next chart click or tool change
+   * and are never synced to the engine.
+   */
+  transient?: boolean;
+  /**
+   * Called once when the drawing is completed, before it is stored. May
+   * replace the anchors (e.g. derive a position's target/stop) or seed
+   * options (e.g. snapshot source bars).
+   */
+  onCreate?(
+    drawing: Drawing,
+    bars: readonly Bar[],
+  ): { points?: DrawingPoint[]; options?: Record<string, unknown> } | void;
 }
 
 export type ToolBehaviorMap = Partial<Record<DrawingKind, ToolBehavior>>;
