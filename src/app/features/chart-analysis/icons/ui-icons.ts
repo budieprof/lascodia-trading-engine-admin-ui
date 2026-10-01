@@ -86,6 +86,11 @@ export const UI_ICONS: Record<string, string> = {
   live: DOT(14, 14, 3),
   closed: '<circle cx="14" cy="14" r="3"/>',
 
+  plus: '<path d="M14 7v14M7 14h14"/>',
+  more: DOT(8, 14, 1.3) + DOT(14, 14, 1.3) + DOT(20, 14, 1.3),
+  pencil: '<path d="M17.5 6.5l4 4L11 21H7v-4z"/><path d="M15 9l4 4"/>',
+  flag: '<path d="M8.5 23V5.5"/><path d="M8.5 6.5h11l-2.5 4 2.5 4h-11" fill="currentColor"/>',
+
   // ── split-layout picker ──
   'layout-1': '<rect x="5.5" y="6.5" width="17" height="15" rx="1.5"/>',
   'layout-2h': '<rect x="5.5" y="6.5" width="17" height="15" rx="1.5"/><path d="M14.5 6.5v15"/>',
