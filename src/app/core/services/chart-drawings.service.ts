@@ -1,6 +1,8 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from '@core/api/api.service';
+import { AuthService } from '@core/auth/auth.service';
+import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import type { ResponseData } from '@core/api/api.types';
 
 /** One drawing as the engine stores it. */
@@ -52,6 +54,8 @@ export interface ChartDrawingInput {
 @Injectable({ providedIn: 'root' })
 export class ChartDrawingsService {
   private readonly api = inject(ApiService);
+  private readonly auth = inject(AuthService);
+  private readonly baseUrl = `${inject(RUNTIME_CONFIG).apiBaseUrl}/api/v1/lascodia-trading-engine`;
 
   list(symbol: string, resolution: string): Observable<ResponseData<ChartDrawingDto[]>> {
     return this.api.post(`/chart-drawings/list`, { symbol, resolution });
@@ -63,5 +67,24 @@ export class ChartDrawingsService {
     drawings: ChartDrawingInput[],
   ): Observable<ResponseData<number>> {
     return this.api.put(`/chart-drawings/scope`, { symbol, resolution, drawings });
+  }
+
+  /**
+   * Same write, but able to outlive the page: `fetch(..., { keepalive: true })` is the one request
+   * the browser still delivers after a tab closes or reloads. Used only to flush unsaved edits on
+   * `pagehide` — an HttpClient call started there is cancelled with the document.
+   */
+  replaceScopeOnUnload(symbol: string, resolution: string, drawings: ChartDrawingInput[]): void {
+    const token = this.auth.getToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    // The cookie sentinel is not a bearer token; the HttpOnly cookie travels via `credentials`.
+    if (token && token.split('.').length === 3) headers['Authorization'] = `Bearer ${token}`;
+    void fetch(`${this.baseUrl}/chart-drawings/scope`, {
+      method: 'PUT',
+      keepalive: true,
+      credentials: 'include',
+      headers,
+      body: JSON.stringify({ symbol, resolution, drawings }),
+    }).catch(() => undefined);
   }
 }
