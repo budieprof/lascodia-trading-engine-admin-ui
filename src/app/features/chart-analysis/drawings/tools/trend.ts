@@ -171,36 +171,37 @@ export function statsLines(p: P, a: Pt, b: Pt): string[] {
   if (p0 !== null && p1 !== null) {
     const d = p1 - p0;
     const parts: string[] = [];
-    if (o['showPriceRange'] !== false) parts.push(fmtSigned(d, p.precision));
-    if (o['showPercentChange'] !== false && p0 !== 0) parts.push(`(${fmtSigned((d / Math.abs(p0)) * 100, 2)}%)`);
-    if (o['showPipsChange'] !== false) parts.push(fmtSigned(Math.round(d * 10 ** p.precision), 0));
+    if (o['showPriceRange'] === true) parts.push(fmtSigned(d, p.precision));
+    if (o['showPercentChange'] === true && p0 !== 0) parts.push(`(${fmtSigned((d / Math.abs(p0)) * 100, 2)}%)`);
+    if (o['showPipsChange'] === true) parts.push(fmtSigned(Math.round(d * 10 ** p.precision), 0));
     if (parts.length) out.push(parts.join(' '));
   }
   const t0 = timeOf(p, 0);
   const t1 = timeOf(p, 1);
   if (t0 !== null && t1 !== null) {
     const parts: string[] = [];
-    if (o['showBarsRange'] !== false && p.bars?.length) {
+    if (o['showBarsRange'] === true && p.bars?.length) {
       parts.push(`${nearestBar(p.bars, t1) - nearestBar(p.bars, t0)} bars`);
     }
-    if (o['showDateTimeRange'] !== false) parts.push(formatSpan(t1 - t0));
+    if (o['showDateTimeRange'] === true) parts.push(formatSpan(t1 - t0));
     if (parts.length) out.push(parts.join(', '));
   }
-  if (o['showDistance'] !== false) out.push(`Distance: ${Math.round(Math.hypot(b.x - a.x, b.y - a.y))} px`);
-  if (o['showAngle'] !== false) out.push(`∠ ${screenAngle(a, b).toFixed(2)}°`);
+  if (o['showDistance'] === true) out.push(`Distance: ${Math.round(Math.hypot(b.x - a.x, b.y - a.y))} px`);
+  if (o['showAngle'] === true) out.push(`∠ ${screenAngle(a, b).toFixed(2)}°`);
   return out;
 }
 
 // ── options ────────────────────────────────────────────────────────────────
 
-const STATS: ToolOption[] = [
-  { key: 'showPriceRange', label: 'Price range', type: 'bool', default: true },
-  { key: 'showPercentChange', label: 'Percent change', type: 'bool', default: true },
-  { key: 'showPipsChange', label: 'Change in ticks', type: 'bool', default: true },
-  { key: 'showBarsRange', label: 'Bars range', type: 'bool', default: true },
-  { key: 'showDateTimeRange', label: 'Date/time range', type: 'bool', default: true },
-  { key: 'showDistance', label: 'Distance', type: 'bool', default: true },
-  { key: 'showAngle', label: 'Angle', type: 'bool', default: true },
+/** Charting Library Trendline/InfolineLineToolOverrides: all off for a trend line, all on for an info line. */
+const stats = (on: boolean): ToolOption[] => [
+  { key: 'showPriceRange', label: 'Price range', type: 'bool', default: on },
+  { key: 'showPercentChange', label: 'Percent change', type: 'bool', default: on },
+  { key: 'showPipsChange', label: 'Change in ticks', type: 'bool', default: on },
+  { key: 'showBarsRange', label: 'Bars range', type: 'bool', default: on },
+  { key: 'showDateTimeRange', label: 'Date/time range', type: 'bool', default: on },
+  { key: 'showDistance', label: 'Distance', type: 'bool', default: on },
+  { key: 'showAngle', label: 'Angle', type: 'bool', default: on },
 ];
 
 function trendOptions(extendRight: boolean, extendLeft: boolean, alwaysStats: boolean): ToolOption[] {
@@ -209,16 +210,9 @@ function trendOptions(extendRight: boolean, extendLeft: boolean, alwaysStats: bo
     { key: 'extendRight', label: 'Extend right', type: 'bool', default: extendRight },
     { key: 'showMiddlePoint', label: 'Middle point', type: 'bool', default: false },
     { key: 'showPriceLabels', label: 'Price labels', type: 'bool', default: false },
-    {
-      key: 'stats',
-      label: 'Stats',
-      type: 'select',
-      default: alwaysStats ? 'values' : 'hidden',
-      choices: ['hidden', 'compact', 'values'],
-    },
-    { key: 'statsPosition', label: 'Stats position', type: 'select', default: 'right', choices: ['left', 'center', 'right'] },
+    { key: 'statsPosition', label: 'Stats position', type: 'select', default: alwaysStats ? 'center' : 'right', choices: ['left', 'center', 'right'] },
     { key: 'alwaysShowStats', label: 'Always show stats', type: 'bool', default: alwaysStats },
-    ...STATS,
+    ...stats(alwaysStats),
   ];
 }
 
@@ -250,10 +244,8 @@ function paintTrend(p: P & { selected: boolean }): void {
   }
   if (bool(o, 'showPriceLabels')) priceTags(p, [a, b]);
   lineText(p, a, b);
-  const mode = o['stats'];
-  if (mode !== 'hidden' && (bool(o, 'alwaysShowStats') || p.selected)) {
-    let lines = statsLines(p, a, b);
-    if (mode === 'compact') lines = [lines.join('   ')];
+  if (bool(o, 'alwaysShowStats') || p.selected) {
+    const lines = statsLines(p, a, b);
     const pos = o['statsPosition'];
     const [l, r] = a.x <= b.x ? [a, b] : [b, a];
     statsBox(ctx, lines, pos === 'left' ? l : pos === 'center' ? mid(a, b) : r, drawing.style.color);
@@ -265,7 +257,7 @@ function hitTrend(p: P, at: Pt, tol: number): boolean {
   return !!s && distanceToSegment(at, s[0], s[1]) <= tol;
 }
 
-const lineStyle = { color: TV_BLUE, width: 2, dash: 'solid' as const, fill: null };
+const lineStyle = { color: TV_BLUE, width: 2, dash: 'solid' as const, fill: null, fontSize: 14 };
 
 function trendTool(extendRight: boolean, extendLeft: boolean, alwaysStats: boolean): ToolBehavior {
   return {
@@ -675,16 +667,17 @@ export function regressionLines(p: P): RegressionLines | null {
 
 const regressionTrend: ToolBehavior = {
   points: 2,
-  defaultStyle: { color: TV_BLUE, width: 1, dash: 'solid', fill: TV_FILL },
+  // RegressiontrendLineToolOverrides: up/down rgba(41,98,255,0.3) 2px, base rgba(242,54,69,0.3) dashed 1px, transparency 70.
+  defaultStyle: { color: 'rgba(41,98,255,0.3)', width: 2, dash: 'solid', fill: 'rgba(41,98,255,0.09)' },
   options: [
     { key: 'upperDeviation', label: 'Upper deviation', type: 'number', default: 2, step: 0.1 },
     { key: 'lowerDeviation', label: 'Lower deviation', type: 'number', default: -2, step: 0.1 },
     { key: 'useUpperDeviation', label: 'Use upper deviation', type: 'bool', default: true },
     { key: 'useLowerDeviation', label: 'Use lower deviation', type: 'bool', default: true },
     { key: 'source', label: 'Source', type: 'select', default: 'close', choices: SOURCES },
-    { key: 'baseColor', label: 'Base line', type: 'color', default: '#F23645' },
+    { key: 'baseColor', label: 'Base line', type: 'color', default: 'rgba(242,54,69,0.3)' },
     { key: 'extendLines', label: 'Extend lines', type: 'bool', default: false },
-    { key: 'showPearsons', label: "Pearson's R", type: 'bool', default: false },
+    { key: 'showPearsons', label: "Pearson's R", type: 'bool', default: true },
     { key: 'showBackground', label: 'Background', type: 'bool', default: true },
   ],
   paint(p) {
@@ -708,7 +701,8 @@ const regressionTrend: ToolBehavior = {
     if (useUp) seg(ctx, up[0], up[1]);
     if (useDn) seg(ctx, dn[0], dn[1]);
     ctx.save();
-    ctx.strokeStyle = String(p.options['baseColor'] ?? '#F23645');
+    ctx.strokeStyle = String(p.options['baseColor'] ?? 'rgba(242,54,69,0.3)');
+    ctx.lineWidth = 1;
     ctx.setLineDash([5, 4]);
     seg(ctx, base[0], base[1]);
     ctx.restore();
@@ -835,7 +829,7 @@ function pitchfork(variant: PitchforkVariant): ToolBehavior {
         }
       }
       ctx.save();
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 2;
       for (const lv of L.levels) {
         ctx.strokeStyle = lv.color;
         seg(ctx, lv.from, lv.to);

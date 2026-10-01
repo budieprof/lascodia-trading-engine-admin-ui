@@ -192,10 +192,10 @@ describe('pitchforks', () => {
 describe('lines', () => {
   it('option defaults: ray extends right, extended line both, info line shows stats', () => {
     const o = (k: Drawing['kind']) => optionsOf(BEHAVIORS[k], drawing(k));
-    expect(o('trend-line')).toMatchObject({ extendLeft: false, extendRight: false, stats: 'hidden' });
+    expect(o('trend-line')).toMatchObject({ extendLeft: false, extendRight: false, alwaysShowStats: false, showAngle: false, showPriceRange: false });
     expect(o('ray')).toMatchObject({ extendLeft: false, extendRight: true });
     expect(o('extended-line')).toMatchObject({ extendLeft: true, extendRight: true });
-    expect(o('info-line')).toMatchObject({ alwaysShowStats: true, stats: 'values' });
+    expect(o('info-line')).toMatchObject({ alwaysShowStats: true, showAngle: true, showBarsRange: true, statsPosition: 'center' });
     expect(BEHAVIORS['trend-line']!.defaultStyle).toMatchObject({ color: '#2962FF', width: 2 });
   });
 
