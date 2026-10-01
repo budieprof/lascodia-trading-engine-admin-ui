@@ -1,3 +1,4 @@
+import { ChartIconComponent } from '../icons/chart-icon.component';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -23,7 +24,11 @@ import {
 } from 'lightweight-charts';
 
 import { ThemeService } from '@core/theme/theme.service';
-import type { ScriptInputDto, ScriptInputValue, ScriptInputValues } from '@core/api/scripting.types';
+import type {
+  ScriptInputDto,
+  ScriptInputValue,
+  ScriptInputValues,
+} from '@core/api/scripting.types';
 import {
   formatMoney,
   formatNumber,
@@ -53,7 +58,7 @@ interface SummaryRow {
   selector: 'app-strategy-tester-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe],
+  imports: [ChartIconComponent, DatePipe],
   template: `
     <section class="tester" aria-label="Strategy tester">
       <header class="tester__bar">
@@ -75,7 +80,14 @@ interface SummaryRow {
         @if (running()) {
           <span class="tester__muted">Running…</span>
         }
-        <button type="button" class="tester__icon" aria-label="Close strategy tester" (click)="closed.emit()">×</button>
+        <button
+          type="button"
+          class="tester__icon"
+          aria-label="Close strategy tester"
+          (click)="closed.emit()"
+        >
+          <app-chart-icon name="close" [size]="18" />
+        </button>
       </header>
 
       @if (result()?.error; as err) {
@@ -90,7 +102,9 @@ interface SummaryRow {
                 <div class="kpi">
                   <span>Net profit</span>
                   <b [class]="tone(m.netProfit)">{{ money(m.netProfit, true) }}</b>
-                  <small [class]="tone(m.netProfitPercent)">{{ pct(m.netProfitPercent, true) }}</small>
+                  <small [class]="tone(m.netProfitPercent)">{{
+                    pct(m.netProfitPercent, true)
+                  }}</small>
                 </div>
                 <div class="kpi">
                   <span>Total closed trades</span><b>{{ num(m.totalClosedTrades, 0) }}</b>
@@ -99,26 +113,43 @@ interface SummaryRow {
                   <span>Percent profitable</span><b>{{ pct(m.winRatePercent) }}</b>
                   <small>{{ num(m.winningTrades, 0) }}/{{ num(m.totalClosedTrades, 0) }}</small>
                 </div>
-                <div class="kpi"><span>Profit factor</span><b>{{ ratio(m.profitFactor) }}</b></div>
+                <div class="kpi">
+                  <span>Profit factor</span><b>{{ ratio(m.profitFactor) }}</b>
+                </div>
                 <div class="kpi">
                   <span>Max drawdown</span><b class="neg">{{ money(m.maxDrawdown) }}</b>
                   <small>{{ pct(m.maxDrawdownPercent) }}</small>
                 </div>
-                <div class="kpi"><span>Avg trade</span><b [class]="tone(m.avgTrade)">{{ money(m.avgTrade, true) }}</b></div>
+                <div class="kpi">
+                  <span>Avg trade</span
+                  ><b [class]="tone(m.avgTrade)">{{ money(m.avgTrade, true) }}</b>
+                </div>
               </div>
               <div #equity class="tester__equity" aria-label="Equity curve"></div>
             } @else {
-              <p class="tester__muted">No strategy report — run a strategy() script to see results.</p>
+              <p class="tester__muted">
+                No strategy report — run a strategy() script to see results.
+              </p>
             }
           }
           @case ('performance') {
             <table class="tester__table">
               <thead>
-                <tr><th>Metric</th><th>All</th><th>Long</th><th>Short</th></tr>
+                <tr>
+                  <th>Metric</th>
+                  <th>All</th>
+                  <th>Long</th>
+                  <th>Short</th>
+                </tr>
               </thead>
               <tbody>
                 @for (r of summary(); track r.label) {
-                  <tr><td>{{ r.label }}</td><td>{{ r.all }}</td><td>{{ r.long }}</td><td>{{ r.short }}</td></tr>
+                  <tr>
+                    <td>{{ r.label }}</td>
+                    <td>{{ r.all }}</td>
+                    <td>{{ r.long }}</td>
+                    <td>{{ r.short }}</td>
+                  </tr>
                 }
               </tbody>
             </table>
@@ -127,26 +158,48 @@ interface SummaryRow {
             <table class="tester__table">
               <thead>
                 <tr>
-                  <th>#</th><th>Type</th><th>Signal</th><th>Entry</th><th>Price</th>
-                  <th>Exit</th><th>Price</th><th>Qty</th><th>Profit</th><th>Cum. profit</th>
+                  <th>#</th>
+                  <th>Type</th>
+                  <th>Signal</th>
+                  <th>Entry</th>
+                  <th>Price</th>
+                  <th>Exit</th>
+                  <th>Price</th>
+                  <th>Qty</th>
+                  <th>Profit</th>
+                  <th>Cum. profit</th>
                 </tr>
               </thead>
               <tbody>
                 @for (t of trades(); track t.number) {
                   <tr>
                     <td>{{ t.number }}</td>
-                    <td [class]="t.side === 'long' ? 'pos' : 'neg'">{{ t.side === 'long' ? 'Long' : 'Short' }}{{ t.isOpen ? ' (open)' : '' }}</td>
+                    <td [class]="t.side === 'long' ? 'pos' : 'neg'">
+                      {{ t.side === 'long' ? 'Long' : 'Short' }}{{ t.isOpen ? ' (open)' : '' }}
+                    </td>
                     <td>{{ t.entrySignal }}{{ t.exitSignal ? ' → ' + t.exitSignal : '' }}</td>
                     <td>{{ t.entryTime * 1000 | date: 'yyyy-MM-dd HH:mm' : 'UTC' }}</td>
                     <td>{{ t.entryPrice }}</td>
-                    <td>{{ t.exitTime !== null ? (t.exitTime * 1000 | date: 'yyyy-MM-dd HH:mm' : 'UTC') : '—' }}</td>
+                    <td>
+                      {{
+                        t.exitTime !== null
+                          ? (t.exitTime * 1000 | date: 'yyyy-MM-dd HH:mm' : 'UTC')
+                          : '—'
+                      }}
+                    </td>
                     <td>{{ t.exitPrice ?? '—' }}</td>
                     <td>{{ num(t.qty, 0) }}</td>
-                    <td [class]="tone(t.profit)">{{ money(t.profit, true) }} <small>{{ pct(t.profitPercent, true) }}</small></td>
-                    <td [class]="tone(t.cumulativeProfit)">{{ money(t.cumulativeProfit, true) }}</td>
+                    <td [class]="tone(t.profit)">
+                      {{ money(t.profit, true) }} <small>{{ pct(t.profitPercent, true) }}</small>
+                    </td>
+                    <td [class]="tone(t.cumulativeProfit)">
+                      {{ money(t.cumulativeProfit, true) }}
+                    </td>
                   </tr>
                 } @empty {
-                  <tr><td colspan="10" class="tester__muted">No trades.</td></tr>
+                  <tr>
+                    <td colspan="10" class="tester__muted">No trades.</td>
+                  </tr>
                 }
               </tbody>
             </table>
@@ -158,25 +211,47 @@ interface SummaryRow {
                   <span>{{ i.title }}</span>
                   @switch (i.kind) {
                     @case ('bool') {
-                      <input type="checkbox" [checked]="value(i) === true" (change)="set(i, $any($event.target).checked)" />
+                      <input
+                        type="checkbox"
+                        [checked]="value(i) === true"
+                        (change)="set(i, $any($event.target).checked)"
+                      />
                     }
                     @case ('int') {
-                      <input type="number" step="1" [min]="i.minValue ?? null" [max]="i.maxValue ?? null"
-                        [value]="value(i)" (change)="set(i, toNumber($any($event.target).value, true))" />
+                      <input
+                        type="number"
+                        step="1"
+                        [min]="i.minValue ?? null"
+                        [max]="i.maxValue ?? null"
+                        [value]="value(i)"
+                        (change)="set(i, toNumber($any($event.target).value, true))"
+                      />
                     }
                     @case ('float') {
-                      <input type="number" [step]="i.step ?? 'any'" [min]="i.minValue ?? null" [max]="i.maxValue ?? null"
-                        [value]="value(i)" (change)="set(i, toNumber($any($event.target).value, false))" />
+                      <input
+                        type="number"
+                        [step]="i.step ?? 'any'"
+                        [min]="i.minValue ?? null"
+                        [max]="i.maxValue ?? null"
+                        [value]="value(i)"
+                        (change)="set(i, toNumber($any($event.target).value, false))"
+                      />
                     }
                     @default {
                       @if (i.options?.length) {
                         <select (change)="set(i, i.options![$any($event.target).selectedIndex])">
                           @for (o of i.options; track $index) {
-                            <option [selected]="o === value(i)">{{ i.optionTexts?.[$index] ?? o }}</option>
+                            <option [selected]="o === value(i)">
+                              {{ i.optionTexts?.[$index] ?? o }}
+                            </option>
                           }
                         </select>
                       } @else {
-                        <input type="text" [value]="value(i)" (change)="set(i, $any($event.target).value)" />
+                        <input
+                          type="text"
+                          [value]="value(i)"
+                          (change)="set(i, $any($event.target).value)"
+                        />
                       }
                     }
                   }
@@ -196,36 +271,157 @@ interface SummaryRow {
   `,
   styles: [
     `
-      :host { display: block; min-height: 0; }
-      .tester { display: flex; flex-direction: column; height: 100%; background: var(--surface); border-top: 1px solid var(--border); font-size: 12px; }
-      .tester__bar { display: flex; align-items: center; gap: 12px; padding: 4px 10px; border-bottom: 1px solid var(--border); }
-      .tester__title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
-      .tester__tabs { display: flex; gap: 2px; }
-      .tester__tabs button, .tester__icon, .tester__actions button { background: none; border: 0; color: var(--text-muted); padding: 4px 8px; border-radius: 4px; cursor: pointer; font: inherit; }
-      .tester__tabs button:hover, .tester__icon:hover, .tester__actions button:hover { background: var(--surface-hover); }
-      .tester__tabs button.active { color: var(--accent); background: var(--accent-soft); }
-      .tester__spacer { flex: 1; }
-      .tester__icon { font-size: 16px; line-height: 1; }
-      .tester__body { flex: 1; overflow: auto; padding: 8px 10px; min-height: 0; }
-      .tester__error { padding: 6px 10px; color: var(--loss); border-bottom: 1px solid var(--border); }
-      .tester__muted { color: var(--text-muted); }
-      .tester__kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 8px; }
-      .kpi { display: flex; flex-direction: column; gap: 2px; }
-      .kpi span, .kpi small { color: var(--text-muted); }
-      .kpi b { font-size: 14px; }
-      .tester__equity { height: 180px; }
-      .tester__table { width: 100%; border-collapse: collapse; }
-      .tester__table th, .tester__table td { text-align: right; padding: 3px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-      .tester__table th:first-child, .tester__table td:first-child { text-align: left; }
-      .tester__table th { color: var(--text-muted); font-weight: 500; position: sticky; top: 0; background: var(--surface); }
-      .pos { color: var(--profit); }
-      .neg { color: var(--loss); }
-      .tester__inputs { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 16px; align-items: end; }
-      .field { display: flex; flex-direction: column; gap: 3px; }
-      .field span { color: var(--text-muted); }
-      .field input, .field select { background: var(--surface); color: inherit; border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font: inherit; }
-      .tester__actions { display: flex; gap: 8px; grid-column: 1 / -1; }
-      .tester__actions .primary { background: var(--accent); color: #fff; }
+      :host {
+        display: block;
+        min-height: 0;
+      }
+      .tester {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        background: var(--surface);
+        border-top: 1px solid var(--border);
+        font-size: 12px;
+      }
+      .tester__bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 4px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      .tester__title {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 240px;
+      }
+      .tester__tabs {
+        display: flex;
+        gap: 2px;
+      }
+      .tester__tabs button,
+      .tester__icon,
+      .tester__actions button {
+        background: none;
+        border: 0;
+        color: var(--text-muted);
+        padding: 4px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        font: inherit;
+      }
+      .tester__tabs button:hover,
+      .tester__icon:hover,
+      .tester__actions button:hover {
+        background: var(--surface-hover);
+      }
+      .tester__tabs button.active {
+        color: var(--accent);
+        background: var(--accent-soft);
+      }
+      .tester__spacer {
+        flex: 1;
+      }
+      .tester__icon {
+        font-size: 16px;
+        line-height: 1;
+      }
+      .tester__body {
+        flex: 1;
+        overflow: auto;
+        padding: 8px 10px;
+        min-height: 0;
+      }
+      .tester__error {
+        padding: 6px 10px;
+        color: var(--loss);
+        border-bottom: 1px solid var(--border);
+      }
+      .tester__muted {
+        color: var(--text-muted);
+      }
+      .tester__kpis {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .kpi {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .kpi span,
+      .kpi small {
+        color: var(--text-muted);
+      }
+      .kpi b {
+        font-size: 14px;
+      }
+      .tester__equity {
+        height: 180px;
+      }
+      .tester__table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .tester__table th,
+      .tester__table td {
+        text-align: right;
+        padding: 3px 8px;
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+      }
+      .tester__table th:first-child,
+      .tester__table td:first-child {
+        text-align: left;
+      }
+      .tester__table th {
+        color: var(--text-muted);
+        font-weight: 500;
+        position: sticky;
+        top: 0;
+        background: var(--surface);
+      }
+      .pos {
+        color: var(--profit);
+      }
+      .neg {
+        color: var(--loss);
+      }
+      .tester__inputs {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 8px 16px;
+        align-items: end;
+      }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .field span {
+        color: var(--text-muted);
+      }
+      .field input,
+      .field select {
+        background: var(--surface);
+        color: inherit;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 4px 6px;
+        font: inherit;
+      }
+      .tester__actions {
+        display: flex;
+        gap: 8px;
+        grid-column: 1 / -1;
+      }
+      .tester__actions .primary {
+        background: var(--accent);
+        color: #fff;
+      }
     `,
   ],
 })
@@ -276,9 +472,11 @@ export class StrategyTesterPanelComponent implements OnDestroy {
       long: f(long),
       short: f(short),
     });
-    const money = (k: keyof ReportSplit) => (s: ReportSplit) => formatMoney(s[k] as number | null, cur, { signed: true });
+    const money = (k: keyof ReportSplit) => (s: ReportSplit) =>
+      formatMoney(s[k] as number | null, cur, { signed: true });
     const pct = (k: keyof ReportSplit) => (s: ReportSplit) => formatPercent(s[k] as number | null);
-    const int = (k: keyof ReportSplit) => (s: ReportSplit) => formatNumber(s[k] as number | null, 0);
+    const int = (k: keyof ReportSplit) => (s: ReportSplit) =>
+      formatNumber(s[k] as number | null, 0);
     return [
       row('Net profit', money('netProfit')),
       row('Net profit %', pct('netProfitPercent')),
@@ -305,7 +503,12 @@ export class StrategyTesterPanelComponent implements OnDestroy {
         short: '',
       },
       { label: 'Sharpe ratio', all: formatRatio(report.returns.sharpeRatio), long: '', short: '' },
-      { label: 'Sortino ratio', all: formatRatio(report.returns.sortinoRatio), long: '', short: '' },
+      {
+        label: 'Sortino ratio',
+        all: formatRatio(report.returns.sortinoRatio),
+        long: '',
+        short: '',
+      },
     ];
   });
 
@@ -374,7 +577,11 @@ export class StrategyTesterPanelComponent implements OnDestroy {
   }
 
   // ── equity chart ──
-  private drawEquity(el: HTMLElement | null, curve: { time: number; value: number }[], dark: boolean): void {
+  private drawEquity(
+    el: HTMLElement | null,
+    curve: { time: number; value: number }[],
+    dark: boolean,
+  ): void {
     if (!el) {
       this.disposeEquity();
       return;
@@ -383,7 +590,11 @@ export class StrategyTesterPanelComponent implements OnDestroy {
       this.disposeEquity();
       this.equityChart = createChart(el, {
         autoSize: true,
-        layout: { attributionLogo: false, fontSize: 11, background: { type: ColorType.Solid, color: 'transparent' } },
+        layout: {
+          attributionLogo: false,
+          fontSize: 11,
+          background: { type: ColorType.Solid, color: 'transparent' },
+        },
         rightPriceScale: { borderVisible: false },
         timeScale: { borderVisible: false, timeVisible: true },
         handleScroll: false,

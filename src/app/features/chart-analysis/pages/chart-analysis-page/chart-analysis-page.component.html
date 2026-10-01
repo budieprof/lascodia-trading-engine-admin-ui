@@ -9,7 +9,7 @@
         [attr.aria-expanded]="symbolMenuOpen()"
       >
         <span class="symbol-name">{{ symbol() }}</span>
-        <span class="caret">▾</span>
+        <span class="caret"><app-chart-icon name="caret" [size]="16" /></span>
       </button>
       @if (symbolMenuOpen()) {
         <div class="menu symbol-menu">
@@ -82,9 +82,11 @@
 
     <div class="indicator-picker">
       <button type="button" class="tool" (click)="openStudiesDialog()" data-testid="open-studies">
-        Indicators
+        <app-chart-icon name="indicators" [size]="20" /> Indicators
       </button>
-      <button type="button" class="tool" (click)="openStudiesDialog('strategies')">Strategies</button>
+      <button type="button" class="tool" (click)="openStudiesDialog('strategies')">
+        <app-chart-icon name="strategy" [size]="20" /> Strategies
+      </button>
       <button
         type="button"
         class="tool"
@@ -92,7 +94,7 @@
         (click)="editorOpen.set(!editorOpen()); dockPreference.set('editor')"
         title="Pine editor"
       >
-        Pine
+        <app-chart-icon name="pine" [size]="20" /> Pine
       </button>
     </div>
     @if (indicatorMenuOpen()) {
@@ -133,7 +135,7 @@
       (click)="toggleEvents()"
       title="Economic events on the time axis"
     >
-      📅
+      <app-chart-icon name="calendar" [size]="20" />
     </button>
     @if (showEvents()) {
       <button
@@ -160,7 +162,7 @@
           (click)="showVolumeProfile.set(!showVolumeProfile())"
           [title]="'Volume profile — ' + volumeProfileModeLabel() + ', with POC and value area'"
         >
-          ▤ VP{{
+          <app-chart-icon name="volume-profile" [size]="18" /> VP{{
             showVolumeProfile() && volumeProfileMode() !== 'visible'
               ? ' · ' + volumeProfileModeLabel()
               : ''
@@ -173,7 +175,7 @@
           title="Volume profile type"
           aria-haspopup="menu"
         >
-          ▾
+          <app-chart-icon name="caret" [size]="16" />
         </button>
         @if (vpMenuOpen()) {
           <div class="vp-menu" role="menu" (click)="$event.stopPropagation()">
@@ -202,7 +204,7 @@
         (click)="showSupportResistance.set(!showSupportResistance())"
         title="Support &amp; resistance — auto-detected from swing pivots, weighted by touches"
       >
-        ⇥ S/R
+        <app-chart-icon name="sr-levels" [size]="18" /> S/R
       </button>
       <button
         type="button"
@@ -211,7 +213,7 @@
         (click)="showStructure.set(!showStructure())"
         title="Market structure — balance range, value area, estimated stop pools, and the climax / spring / upthrust bars that formed them"
       >
-        ⌗ Structure
+        <app-chart-icon name="structure" [size]="18" /> Structure
       </button>
       <button
         type="button"
@@ -220,7 +222,7 @@
         (click)="toggleDelta()"
         title="Order-flow delta, ESTIMATED from OHLCV — there is no aggressor tape for FX here, so a bar closing near its high is assumed bought"
       >
-        ⧗ Δ est
+        <app-chart-icon name="delta" [size]="18" /> Δ est
       </button>
     </div>
 
@@ -231,7 +233,7 @@
       (click)="magnet.set(!magnet())"
       title="Magnet — snap drawings to OHLC (M)"
     >
-      🧲 Magnet
+      <app-chart-icon name="magnet" [size]="18" /> Magnet
     </button>
 
     <select
@@ -254,7 +256,7 @@
           (click)="setSplitLayout(l.id)"
           [title]="l.panels + 1 + ' chart(s)'"
         >
-          {{ l.label }}
+          <app-chart-icon [name]="'layout-' + l.id" [size]="20" />
         </button>
       }
     </div>
@@ -266,7 +268,7 @@
       (click)="openSidePane('details')"
       title="Symbol details"
     >
-      ℹ
+      <app-chart-icon name="info" [size]="20" />
     </button>
     <button
       type="button"
@@ -275,7 +277,7 @@
       (click)="openSidePane('news')"
       title="News for this pair"
     >
-      📰
+      <app-chart-icon name="news" [size]="20" />
     </button>
 
     <button
@@ -285,7 +287,7 @@
       (click)="watchlistOpen.set(!watchlistOpen())"
       title="Watchlist"
     >
-      👁 Watchlist
+      <app-chart-icon name="watchlist" [size]="18" /> Watchlist
     </button>
 
     <button
@@ -307,7 +309,7 @@
       [disabled]="!drawings.canUndo()"
       title="Undo (⌘Z)"
     >
-      ↶
+      <app-chart-icon name="undo" [size]="20" />
     </button>
     <button
       type="button"
@@ -316,23 +318,23 @@
       [disabled]="!drawings.canRedo()"
       title="Redo (⇧⌘Z)"
     >
-      ↷
+      <app-chart-icon name="redo" [size]="20" />
     </button>
 
     <div class="layout-picker">
       <button type="button" class="tool" (click)="layoutMenuOpen.set(!layoutMenuOpen())">
-        Layouts
+        <app-chart-icon name="layouts" [size]="20" /> Layouts
       </button>
       @if (layoutMenuOpen()) {
         <div class="menu layout-menu">
-          <button type="button" class="menu-action" (click)="saveLayout()">💾 Save layout…</button>
+          <button type="button" class="menu-action" (click)="saveLayout()"><app-chart-icon name="save" [size]="18" /> Save layout…</button>
           <button
             type="button"
             class="menu-action"
             (click)="saveTemplate()"
             [disabled]="!active().length"
           >
-            ⭐ Save studies as template…
+            <app-chart-icon name="star" [size]="18" /> Save studies as template…
           </button>
           @if (layoutStore.layouts().length) {
             <div class="menu-heading">Layouts</div>
@@ -344,7 +346,7 @@
                     <span class="muted">{{ l.symbol }} {{ resolutionLabel(l.resolution) }}</span>
                   </button>
                   <button type="button" class="tree-remove" (click)="removeLayout(l.id, $event)">
-                    ✕
+                    <app-chart-icon name="close" [size]="14" />
                   </button>
                 </li>
               }
@@ -360,7 +362,7 @@
                     <span class="muted">{{ t.indicators.length }} studies</span>
                   </button>
                   <button type="button" class="tree-remove" (click)="removeTemplate(t.id, $event)">
-                    ✕
+                    <app-chart-icon name="close" [size]="14" />
                   </button>
                 </li>
               }
@@ -382,7 +384,7 @@
     </select>
 
     <button type="button" class="tool" (click)="takeSnapshot()" title="Save chart as PNG">
-      📷
+      <app-chart-icon name="camera" [size]="20" />
     </button>
     <button
       type="button"
@@ -391,7 +393,7 @@
       (click)="toggleFullscreen()"
       title="Fullscreen"
     >
-      ⛶
+      <app-chart-icon name="fullscreen" [size]="20" />
     </button>
 
     <button
@@ -401,24 +403,24 @@
       (click)="replayActive() ? exitReplay() : startReplay()"
       title="Bar replay"
     >
-      ⏯ Replay
+      <app-chart-icon name="replay" [size]="18" /> Replay
     </button>
 
     @switch (drawings.syncState()) {
       @case ('saving') {
-        <span class="status muted" title="Saving drawings to the engine">⟳</span>
+        <span class="status muted" title="Saving drawings to the engine"><app-chart-icon name="sync" [size]="16" /></span>
       }
       @case ('offline') {
         <span
           class="status sync-warn"
           title="Drawings are saved in this browser only — the engine is unreachable"
         >
-          ⚠ local only
+          <app-chart-icon name="warning" [size]="16" /> local only
         </span>
       }
       @case ('error') {
         <span class="status sync-warn" title="The engine rejected the last drawing sync"
-          >⚠ not saved</span
+          ><app-chart-icon name="warning" [size]="16" /> not saved</span
         >
       }
     }
@@ -439,7 +441,7 @@
         (click)="selectTool(null)"
         title="Cursor (Esc)"
       >
-        ⌖
+        <app-chart-icon name="arrow" [size]="24" />
       </button>
       @for (group of toolGroups(); track group.name) {
         @let current = railTool(group);
@@ -451,7 +453,7 @@
             (click)="selectTool(current.kind)"
             [title]="current.label"
           >
-            {{ current.icon }}
+            <app-chart-icon [name]="current.kind" [size]="28" />
           </button>
           @if (group.tools.length > 1) {
             <button
@@ -463,7 +465,7 @@
               [attr.aria-expanded]="railFlyout() === group.name"
               aria-haspopup="menu"
             >
-              ›
+              <app-chart-icon name="chevron-right" [size]="12" />
             </button>
           }
         </div>
@@ -475,7 +477,7 @@
           (click)="drawings.clearVisible()"
           title="Remove all drawings on this chart"
         >
-          🗑
+          <app-chart-icon name="trash" [size]="24" />
         </button>
       }
     </nav>
@@ -496,7 +498,7 @@
             [class.active]="tool() === t.kind"
             (click)="pickRailTool(g.name, t.kind)"
           >
-            <span class="icon">{{ t.icon }}</span>
+            <span class="icon"><app-chart-icon [name]="t.kind" [size]="28" /></span>
             <span>{{ t.label }}</span>
           </button>
         }
@@ -511,12 +513,16 @@
             <strong>{{ symbol() }}</strong>
             <span class="muted">{{ resolutionLabel(resolution()) }}</span>
             <span class="market-status" [class]="marketStatus()">
+              <app-chart-icon
+                [name]="marketStatus() === 'open' ? 'live' : marketStatus() === 'closed' ? 'closed' : 'warning'"
+                [size]="12"
+              />
               {{
                 marketStatus() === 'open'
-                  ? '● live'
+                  ? 'live'
                   : marketStatus() === 'closed'
-                    ? '○ market closed'
-                    : '⚠ feed stale'
+                    ? 'market closed'
+                    : 'feed stale'
               }}
             </span>
           </div>
@@ -620,7 +626,7 @@
               (click)="toggleDrawingFill(sel.id, sel.style.fill)"
               title="Fill"
             >
-              ▩
+              <app-chart-icon name="fill" [size]="18" />
             </button>
             @if (sel.kind === 'text' || sel.kind === 'callout') {
               <input
@@ -637,10 +643,10 @@
               [class.active]="sel.locked"
               title="Lock"
             >
-              {{ sel.locked ? '🔒' : '🔓' }}
+              <app-chart-icon [name]="sel.locked ? 'lock' : 'unlock'" [size]="18" />
             </button>
-            <button type="button" (click)="drawings.clone(sel.id)" title="Duplicate">⧉</button>
-            <button type="button" (click)="removeDrawing(sel.id)" title="Delete (⌫)">✕</button>
+            <button type="button" (click)="drawings.clone(sel.id)" title="Duplicate"><app-chart-icon name="clone" [size]="18" /></button>
+            <button type="button" (click)="removeDrawing(sel.id)" title="Delete (⌫)"><app-chart-icon name="close" [size]="18" /></button>
           </div>
         }
 
@@ -777,7 +783,7 @@
                      inline it swamped the pane and pushed the headlines below
                      the fold, so it lives in the tooltip. -->
                 <dt>Method</dt>
-                <dd class="muted note-hint" [title]="ctx.asOfNote">hover for scoring ⓘ</dd>
+                <dd class="muted note-hint" [title]="ctx.asOfNote">hover for scoring <app-chart-icon name="info" [size]="14" /></dd>
               </dl>
               @if (newsFocus()?.omissionReason; as why) {
                 <div
@@ -847,10 +853,10 @@
                     <span class="swatch" [style.background]="d.style.color"></span>
                     <span>{{ drawingLabel(d) }}</span>
                     @if (d.locked) {
-                      <span class="muted">🔒</span>
+                      <span class="muted"><app-chart-icon name="lock" [size]="14" /></span>
                     }
                   </button>
-                  <button type="button" class="tree-remove" (click)="removeDrawing(d.id)">✕</button>
+                  <button type="button" class="tree-remove" (click)="removeDrawing(d.id)"><app-chart-icon name="close" [size]="14" /></button>
                 </li>
               }
             </ul>
@@ -895,7 +901,7 @@
               (click)="focusPanel(panel.id)"
               title="Swap with the main chart"
             >
-              ⇄
+              <app-chart-icon name="swap" [size]="18" />
             </button>
           </div>
           <app-chart-host
@@ -916,11 +922,11 @@
 
   @if (replayActive()) {
     <div class="replay-bar">
-      <button type="button" (click)="stepReplay(-1)" title="Back one bar">⏮</button>
+      <button type="button" (click)="stepReplay(-1)" title="Back one bar"><app-chart-icon name="step-back" [size]="18" /></button>
       <button type="button" (click)="toggleReplayPlay()" title="Play / pause">
-        {{ replayPlaying() ? '⏸' : '▶' }}
+        <app-chart-icon [name]="replayPlaying() ? 'pause' : 'play'" [size]="18" />
       </button>
-      <button type="button" (click)="stepReplay(1)" title="Forward one bar">⏭</button>
+      <button type="button" (click)="stepReplay(1)" title="Forward one bar"><app-chart-icon name="step-forward" [size]="18" /></button>
       <input
         type="range"
         class="replay-scrub"
@@ -955,10 +961,10 @@
           </span>
           @if (run.result.kind === 'strategy') {
             <button type="button" class="study-toggle" (click)="testerOpen.set(!testerOpen())" title="Strategy tester">
-              📊
+              <app-chart-icon name="tester" [size]="16" />
             </button>
           }
-          <button type="button" class="study-remove" (click)="removeScript(run.item.key)" title="Remove">✕</button>
+          <button type="button" class="study-remove" (click)="removeScript(run.item.key)" title="Remove"><app-chart-icon name="close" [size]="14" /></button>
         </div>
       }
       @if (scriptRunning()) {
@@ -967,7 +973,7 @@
       @if (scriptError()) {
         <div class="study script-error" role="alert">
           {{ scriptError() }}
-          <button type="button" class="study-remove" (click)="scriptError.set(null)">✕</button>
+          <button type="button" class="study-remove" (click)="scriptError.set(null)"><app-chart-icon name="close" [size]="14" /></button>
         </div>
       }
       @for (item of active(); track item.uid) {
@@ -979,7 +985,7 @@
             [attr.aria-pressed]="item.visible"
             [title]="item.visible ? 'Hide' : 'Show'"
           >
-            {{ item.visible ? '👁' : '🚫' }}
+            <app-chart-icon [name]="item.visible ? 'eye' : 'eye-off'" [size]="16" />
           </button>
           <span class="study-label">{{ labelFor(item) }}</span>
           @for (input of inputsFor(item); track input.key) {
@@ -1016,7 +1022,7 @@
             (click)="removeIndicator(item.uid)"
             title="Remove"
           >
-            ✕
+            <app-chart-icon name="close" [size]="14" />
           </button>
         </div>
       }

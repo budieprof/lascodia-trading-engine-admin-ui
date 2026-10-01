@@ -1,3 +1,4 @@
+import { ChartIconComponent } from '../icons/chart-icon.component';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -39,7 +40,7 @@ export interface ScriptEditorSubmit {
   selector: 'app-script-editor-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PineEditorComponent],
+  imports: [ChartIconComponent, PineEditorComponent],
   template: `
     <section class="editor" aria-label="Pine editor">
       <header class="editor__bar">
@@ -58,7 +59,14 @@ export interface ScriptEditorSubmit {
         <button type="button" class="primary" (click)="addToChart()" [disabled]="!source().trim()">
           Add to chart
         </button>
-        <button type="button" class="editor__icon" aria-label="Close editor" (click)="closed.emit()">×</button>
+        <button
+          type="button"
+          class="editor__icon"
+          aria-label="Close editor"
+          (click)="closed.emit()"
+        >
+          <app-chart-icon name="close" [size]="18" />
+        </button>
       </header>
       <app-pine-editor
         [value]="source()"
@@ -72,10 +80,15 @@ export interface ScriptEditorSubmit {
           <span class="err">{{ e }}</span>
         } @else if (result(); as r) {
           @if (r.success) {
-            <span class="ok">Compiled — {{ r.declaration?.kind ?? 'script' }} “{{ r.declaration?.title }}”, {{ r.inputs.length }} input(s)</span>
+            <span class="ok"
+              >Compiled — {{ r.declaration?.kind ?? 'script' }} “{{ r.declaration?.title }}”,
+              {{ r.inputs.length }} input(s)</span
+            >
           }
           @for (d of diagnostics(); track $index) {
-            <span [class]="d.severity === 'error' ? 'err' : 'warn'">{{ d.line }}:{{ d.column }} {{ d.message }}</span>
+            <span [class]="d.severity === 'error' ? 'err' : 'warn'"
+              >{{ d.line }}:{{ d.column }} {{ d.message }}</span
+            >
           }
         } @else if (savedNote(); as n) {
           <span class="ok">{{ n }}</span>
@@ -85,21 +98,89 @@ export interface ScriptEditorSubmit {
   `,
   styles: [
     `
-      :host { display: block; min-height: 0; height: 100%; }
-      .editor { display: flex; flex-direction: column; height: 100%; background: var(--surface); border-left: 1px solid var(--border); font-size: 12px; }
-      .editor__bar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--border); }
-      .editor__name { background: transparent; border: 1px solid transparent; color: inherit; font: inherit; font-weight: 600; padding: 3px 6px; border-radius: 4px; min-width: 0; }
-      .editor__name:hover, .editor__name:focus { border-color: var(--border); }
-      .editor__spacer { flex: 1; }
-      button { background: none; border: 1px solid var(--border); color: inherit; padding: 3px 10px; border-radius: 4px; cursor: pointer; font: inherit; }
-      button:hover { background: var(--surface-hover); }
-      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-      .editor__icon { border: 0; font-size: 16px; line-height: 1; padding: 2px 6px; }
-      app-pine-editor { flex: 1; min-height: 0; display: block; }
-      .editor__status { display: flex; flex-direction: column; gap: 2px; max-height: 90px; overflow: auto; padding: 4px 8px; border-top: 1px solid var(--border); }
-      .ok { color: var(--profit); }
-      .err { color: var(--loss); }
-      .warn { color: var(--text-muted); }
+      :host {
+        display: block;
+        min-height: 0;
+        height: 100%;
+      }
+      .editor {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        background: var(--surface);
+        border-left: 1px solid var(--border);
+        font-size: 12px;
+      }
+      .editor__bar {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      .editor__name {
+        background: transparent;
+        border: 1px solid transparent;
+        color: inherit;
+        font: inherit;
+        font-weight: 600;
+        padding: 3px 6px;
+        border-radius: 4px;
+        min-width: 0;
+      }
+      .editor__name:hover,
+      .editor__name:focus {
+        border-color: var(--border);
+      }
+      .editor__spacer {
+        flex: 1;
+      }
+      button {
+        background: none;
+        border: 1px solid var(--border);
+        color: inherit;
+        padding: 3px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        font: inherit;
+      }
+      button:hover {
+        background: var(--surface-hover);
+      }
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      .editor__icon {
+        border: 0;
+        font-size: 16px;
+        line-height: 1;
+        padding: 2px 6px;
+      }
+      app-pine-editor {
+        flex: 1;
+        min-height: 0;
+        display: block;
+      }
+      .editor__status {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        max-height: 90px;
+        overflow: auto;
+        padding: 4px 8px;
+        border-top: 1px solid var(--border);
+      }
+      .ok {
+        color: var(--profit);
+      }
+      .err {
+        color: var(--loss);
+      }
+      .warn {
+        color: var(--text-muted);
+      }
     `,
   ],
 })
@@ -124,7 +205,9 @@ export class ScriptEditorPanelComponent {
   protected readonly result = signal<ScriptCompileResult | null>(null);
   protected readonly error = signal<string | null>(null);
   protected readonly savedNote = signal<string | null>(null);
-  protected readonly diagnostics = computed<ScriptDiagnostic[]>(() => this.result()?.diagnostics ?? []);
+  protected readonly diagnostics = computed<ScriptDiagnostic[]>(
+    () => this.result()?.diagnostics ?? [],
+  );
 
   constructor() {
     effect(() => {
@@ -153,7 +236,8 @@ export class ScriptEditorPanelComponent {
         next: (r) => {
           this.result.set(r);
           this.compiling.set(false);
-          if (r.declaration?.title && this.name() === 'My script') this.name.set(r.declaration.title);
+          if (r.declaration?.title && this.name() === 'My script')
+            this.name.set(r.declaration.title);
         },
         error: (e: Error) => {
           this.error.set(e.message || 'Compile failed.');
@@ -170,6 +254,10 @@ export class ScriptEditorPanelComponent {
   }
 
   protected addToChart(): void {
-    this.add.emit({ source: this.source(), kind: detectScriptKind(this.source()), name: this.name() });
+    this.add.emit({
+      source: this.source(),
+      kind: detectScriptKind(this.source()),
+      name: this.name(),
+    });
   }
 }
