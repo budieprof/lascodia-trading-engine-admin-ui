@@ -260,9 +260,12 @@ export type StrategyType =
   | 'CmeDeepBookOrderflow';
 
 /**
- * Strategy types the engine has retired: the API refuses to create, update,
- * clone or activate them. The enum values survive so historical rows still
- * display — never offer these in a creation/template picker.
+ * Strategy types the engine has retired (engine `RetiredStrategyTypes.All`): the
+ * API refuses to create, update, clone or activate them. The enum values survive
+ * so historical rows still display — never offer these in a creation/template
+ * picker. Two waves: the 14 classic price/indicator types (2026-09-29, Pine ports
+ * in `lascodia/classic/1`) and the five event / carry / order-flow types
+ * (2026-09-30, engine `EventFlowTypes`), whose ideas are Pine scripts now.
  */
 export const RETIRED_STRATEGY_TYPES: readonly StrategyType[] = [
   'RSIReversion',
@@ -279,22 +282,25 @@ export const RETIRED_STRATEGY_TYPES: readonly StrategyType[] = [
   'WeekendGapFade',
   'StatisticalArbitrage',
   'CrossAssetLeadLag',
+  // 2026-09-30 — the event / carry / order-flow types (engine EventFlowTypes).
+  'NewsFade',
+  'CarryTrade',
+  'OrderFlowImbalance',
+  'SubMinuteEvent',
+  'CmeDeepBookOrderflow',
 ];
 
 /**
- * Strategy types an operator can create. Mirrors the engine's StrategyType enum
- * (there is no "LlmDsl" type — the JSON rules DSL was retired). LlmProposal is
- * left out: LLM proposals are promoted by the engine as RuleBased Pine scripts,
- * so a hand-made LlmProposal would only mislabel an operator's own script.
+ * Strategy types an operator can create: RuleBased (a Pine v6 script) and the
+ * two evaluator types the engine still runs, CompositeML and Custom. Every other
+ * StrategyType is retired (see RETIRED_STRATEGY_TYPES). There is no "LlmDsl"
+ * type — the JSON rules DSL was retired. LlmProposal is left out: LLM proposals
+ * are promoted by the engine as RuleBased Pine scripts, so a hand-made
+ * LlmProposal would only mislabel an operator's own script.
  */
 export const CREATABLE_STRATEGY_TYPES: readonly StrategyType[] = [
   'RuleBased',
   'CompositeML',
-  'NewsFade',
-  'OrderFlowImbalance',
-  'SubMinuteEvent',
-  'CmeDeepBookOrderflow',
-  'CarryTrade',
   'Custom',
 ];
 
@@ -305,6 +311,10 @@ export function isRetiredStrategyType(type: string | null | undefined): boolean 
 /** Hint shown where an operator reaches for a classic (retired) idea. */
 export const CLASSIC_PINE_LIBRARY_HINT =
   'Classic ideas (RSI reversion, Bollinger reversion, session breakout, ATR bracket) now ship as the built-in Pine library lascodia/classic/1 — author a RuleBased script and import rsiReversion(), bollingerReversion(), sessionBreakout() or atrBracket().';
+
+/** Hint shown where an operator reaches for a retired event / carry / order-flow idea. */
+export const EVENT_PINE_HINT =
+  'Event, carry and order-flow ideas (news fade, carry, order-flow imbalance, sub-minute event, CME orderflow) are RuleBased Pine scripts too: read the calendar through lascodia.news_* / request.economic. A script built to trade around releases is exempted from the engine’s news blackout on its Execution tab.';
 
 export type StrategyStatus = 'Active' | 'Paused' | 'Backtesting' | 'Stopped';
 

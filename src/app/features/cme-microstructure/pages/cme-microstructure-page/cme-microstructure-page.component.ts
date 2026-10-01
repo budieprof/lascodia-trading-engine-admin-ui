@@ -724,8 +724,9 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
           <header class="card-head">
             <h3>Shadow monitor — would-have signals</h3>
             <span class="muted small">
-              Recorded, never traded. Prove precision here before enabling a live
-              CmeDeepBookOrderflow strategy.
+              Recorded, never traded — research only. The CmeDeepBookOrderflow strategy type is
+              retired (2026-09-30); a CME-flow strategy would be a Pine script with its own data
+              access.
             </span>
           </header>
 
@@ -1425,16 +1426,17 @@ export class CmeMicrostructurePageComponent {
   }
 
   /**
-   * Says what the status *means for trading*, not just what it is. "Stale" on its own reads like a
-   * fault; it is actually the freshness gate doing its job, and the operator needs to know the
-   * strategy path is refusing the flow rather than silently trading on an old book.
+   * Says what the status *means*, not just what it is. "Stale" on its own reads like a fault; it is
+   * actually the freshness gate doing its job, and the operator needs to know the shadow monitor
+   * (the gate's only consumer since the CmeDeepBookOrderflow strategy type was retired) is refusing
+   * the flow rather than silently deciding on an old book.
    */
   protected feedStatusExplanation(health: CmeFeedHealthDto): string {
     switch (health.status) {
       case 'Live':
-        return `Newest bar is inside the ${health.maxFlowStalenessSeconds}s freshness gate, so the strategy path will accept this flow.`;
+        return `Newest bar is inside the ${health.maxFlowStalenessSeconds}s freshness gate, so the shadow monitor will accept this flow.`;
       case 'Stale':
-        return `Newest bar is older than the ${health.maxFlowStalenessSeconds}s freshness gate, so the strategy path is refusing this flow. Data exists — it is just too old to trade on.`;
+        return `Newest bar is older than the ${health.maxFlowStalenessSeconds}s freshness gate, so the shadow monitor is refusing this flow. Data exists — it is just too old to decide on.`;
       default:
         return 'Nothing ingested yet. Expected until a Databento slice is loaded or a sidecar starts streaming — not a fault.';
     }

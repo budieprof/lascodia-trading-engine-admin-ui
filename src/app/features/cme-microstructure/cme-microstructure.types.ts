@@ -65,8 +65,9 @@ export interface CmeWarmTierStatusDto {
  * Whether the CME feed is usable right now, as opposed to merely configured.
  *
  * `NoData` is the expected state before the historical slice is purchased — it is not an error.
- * `Stale` means data exists but the newest bar is past the staleness gate, so the strategy path
- * refuses it. Only `Live` is tradeable.
+ * `Stale` means data exists but the newest bar is past the staleness gate, so the shadow monitor
+ * (the gate's only consumer — the CmeDeepBookOrderflow strategy type is retired) refuses it. Only
+ * `Live` is usable.
  */
 export interface CmeFeedHealthDto {
   status: 'NoData' | 'Stale' | 'Live';
