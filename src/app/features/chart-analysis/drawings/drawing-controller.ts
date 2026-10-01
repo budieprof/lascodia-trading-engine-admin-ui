@@ -13,6 +13,7 @@ import {
   isDrag,
   isVisibleOn,
   shiftPoints,
+  shiftPointsByBars,
   snapAngle,
   type MagnetMode,
 } from './drawing-ops';
@@ -225,7 +226,16 @@ export class DrawingController {
     }
     const dt = bars * barStepMs(this.bars);
     if (dt === 0 && dp === 0) return false;
-    this.store.update(d.id, { points: shiftPoints(d.points, dt, dp) });
+    this.store.update(d.id, {
+      points: shiftPointsByBars(
+        d.points,
+        bars,
+        dp,
+        (t) => this.renderer.logicalAt(t),
+        (l) => this.renderer.timeAtLogical(l),
+        dt,
+      ),
+    });
     return true;
   }
 
@@ -509,7 +519,19 @@ export class DrawingController {
       const model = this.toModel(to);
       const startModel = this.toModel(drag.start);
       if (!model || !startModel) return;
-      const points = shiftPoints(drag.originalPoints, model.time - startModel.time, model.price - startModel.price);
+      const l0 = this.renderer.logicalAt(startModel.time);
+      const l1 = this.renderer.logicalAt(model.time);
+      const points =
+        l0 !== null && l1 !== null
+          ? shiftPointsByBars(
+              drag.originalPoints,
+              l1 - l0,
+              model.price - startModel.price,
+              (t) => this.renderer.logicalAt(t),
+              (l) => this.renderer.timeAtLogical(l),
+              model.time - startModel.time,
+            )
+          : shiftPoints(drag.originalPoints, model.time - startModel.time, model.price - startModel.price);
       this.store.update(drawing.id, { points }, false);
     }
   };

@@ -149,9 +149,58 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
    * Whole-bar steps from the nearest end, at the current bar spacing.
    */
   xAtTime(timeMs: number): number | null {
+    const bars = this.bars();
+    const chart = this.chart();
+    // Inside the loaded history but between bars (a weekend, a gap, or an anchor moved by
+    // time): interpolate between the two neighbouring bars. Extrapolating from the first
+    // bar here threw the point far off-screen and tore multi-point shapes apart on drag.
+    if (chart && bars.length >= 2 && timeMs > bars[0].time && timeMs < bars[bars.length - 1].time) {
+      const i = barIndexBefore(bars, timeMs);
+      const a = bars[i];
+      const b = bars[i + 1];
+      const xa = chart.timeScale().timeToCoordinate((this.shift(a.time) / 1000) as Time);
+      const xb = chart.timeScale().timeToCoordinate((this.shift(b.time) / 1000) as Time);
+      if (xa !== null && xb !== null) return xa + ((timeMs - a.time) / (b.time - a.time)) * (xb - xa);
+    }
     const edge = this.edge(timeMs);
     if (!edge) return null;
     return edge.x + ((timeMs - edge.time) / edge.step) * edge.spacing;
+  }
+
+  /**
+   * Fractional bar index of an instant: whole numbers on bars, fractions between them, and
+   * whole-bar steps past either end. Moving a drawing in this space keeps its shape across
+   * weekends and session gaps, as TradingView does (it moves drawings by bars, not by time).
+   */
+  logicalAt(timeMs: number): number | null {
+    const bars = this.bars();
+    if (bars.length < 2) return null;
+    const step = this.medianStep();
+    const last = bars.length - 1;
+    if (timeMs <= bars[0].time) return (timeMs - bars[0].time) / step;
+    if (timeMs >= bars[last].time) return last + (timeMs - bars[last].time) / step;
+    const i = barIndexBefore(bars, timeMs);
+    return i + (timeMs - bars[i].time) / (bars[i + 1].time - bars[i].time);
+  }
+
+  /** Inverse of `logicalAt`. */
+  timeAtLogical(l: number): number | null {
+    const bars = this.bars();
+    if (bars.length < 2) return null;
+    const step = this.medianStep();
+    const last = bars.length - 1;
+    if (l <= 0) return bars[0].time + l * step;
+    if (l >= last) return bars[last].time + (l - last) * step;
+    const i = Math.floor(l);
+    return bars[i].time + (l - i) * (bars[i + 1].time - bars[i].time);
+  }
+
+  private medianStep(): number {
+    const bars = this.bars();
+    const gaps: number[] = [];
+    for (let i = Math.max(1, bars.length - 50); i < bars.length; i++) gaps.push(bars[i].time - bars[i - 1].time);
+    gaps.sort((a, b) => a - b);
+    return gaps[gaps.length >> 1] || 60_000;
   }
 
   /** Inverse of `xAtTime`, snapped to whole bars (UTC ms). */
@@ -866,4 +915,16 @@ export function extend(a: Pt, b: Pt, w: number, h: number): Pt {
   const scale = (Math.abs(w) + Math.abs(h)) * 2;
   const len = Math.hypot(dx, dy);
   return { x: a.x + (dx / len) * scale, y: a.y + (dy / len) * scale };
+}
+
+/** Index of the last bar at or before `timeMs` (bars ascending, time inside the range). */
+function barIndexBefore(bars: readonly { time: number }[], timeMs: number): number {
+  let lo = 0;
+  let hi = bars.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (bars[mid].time <= timeMs) lo = mid;
+    else hi = mid;
+  }
+  return lo;
 }
