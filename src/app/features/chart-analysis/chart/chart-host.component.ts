@@ -50,7 +50,7 @@ import {
 import { DrawingStore } from '../drawings/drawing-store.service';
 import { DrawingController } from '../drawings/drawing-controller';
 import type { MagnetMode } from '../drawings/drawing-ops';
-import type { DrawingKind } from '../drawings/model';
+import type { Drawing, DrawingKind } from '../drawings/model';
 import { OverlayRenderer, type PriceOverlay } from '../overlays/overlay-renderer';
 import { AnalysisOverlayRenderer } from '../overlays/analysis-overlay-renderer';
 import {
@@ -168,6 +168,20 @@ interface IndicatorSeries {
   selector: 'app-chart-host',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<div class="chart-host" #container></div>
+    @if (inlineEdit(); as ie) {
+      <textarea
+        class="inline-edit"
+        [style.left.px]="ie.rect.x"
+        [style.top.px]="ie.rect.y"
+        [style.width.px]="ie.rect.w"
+        [style.height.px]="ie.rect.h"
+        [value]="ie.value"
+        (keydown)="onInlineKey($event)"
+        (blur)="commitInline($any($event.target).value)"
+        aria-label="Edit text"
+        autofocus
+      ></textarea>
+    }
     @if (holdTip(); as tip) {
       <div
         class="hold-tip"
@@ -187,6 +201,22 @@ interface IndicatorSeries {
     }`,
   styles: [
     `
+      .inline-edit {
+        position: absolute;
+        z-index: 30;
+        min-width: 60px;
+        min-height: 22px;
+        padding: 2px 4px;
+        box-sizing: border-box;
+        resize: none;
+        font: inherit;
+        font-size: 13px;
+        color: var(--tv-ink, #131722);
+        background: var(--tv-bg, #fff);
+        border: 1px solid #2962ff;
+        border-radius: 2px;
+        outline: none;
+      }
       .chart-host {
         position: absolute;
         inset: 0;
@@ -284,6 +314,30 @@ export class ChartHostComponent implements OnDestroy {
   /** Paste the copied drawing onto this chart. */
   pasteDrawing(): boolean {
     return this.controller.paste() !== null;
+  }
+
+  /** Inline text editor over a drawing (double-click on a text-bearing tool). */
+  readonly inlineEdit = signal<{
+    id: string;
+    rect: { x: number; y: number; w: number; h: number };
+    value: string;
+    commit: (v: string) => Partial<Drawing>;
+  } | null>(null);
+
+  onInlineKey(ev: KeyboardEvent): void {
+    ev.stopPropagation(); // the page's shortcuts must not see typing
+    if (ev.key === 'Escape') this.inlineEdit.set(null);
+    else if (ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      this.commitInline((ev.target as HTMLTextAreaElement).value);
+    }
+  }
+
+  commitInline(value: string): void {
+    const ie = this.inlineEdit();
+    if (!ie) return;
+    this.inlineEdit.set(null);
+    if (value !== ie.value) this.controller.applyInlineEdit(ie.id, ie.commit(value));
   }
 
   /** Finish a multi-click drawing (Enter). */
@@ -808,6 +862,11 @@ export class ChartHostComponent implements OnDestroy {
     this.controller.attach(this.chart, el);
     this.controller.onToolComplete = () => this.toolComplete.emit();
     this.controller.onEditRequest = (id) => this.drawingSettings.emit(id);
+    this.controller.onInlineEdit = (e) => {
+      this.inlineEdit.set(e);
+      // Focus once rendered; the textarea is created by the signal change.
+      setTimeout(() => (this.container().nativeElement.parentElement?.querySelector('.inline-edit') as HTMLTextAreaElement | null)?.select());
+    };
     this.controller.onDrawingContextMenu = (e) => this.drawingContextMenu.emit(e);
     this.controller.magnetMode = this.magnet();
     this.controller.stayInDrawingMode = this.stayInDrawingMode();

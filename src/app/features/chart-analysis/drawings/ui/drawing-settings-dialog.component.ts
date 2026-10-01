@@ -196,7 +196,34 @@ type Level = { value: number; color: string; visible: boolean };
                     </label>
                   } @else {
                     <span class="sd-label">{{ o.label }}</span>
-                    <input class="sd-text" [value]="opts()[o.key] ?? ''" (change)="option(o.key, o.type === 'number' ? +$any($event.target).value : $any($event.target).value)" />
+                    <span class="sd-ctl">
+                      @switch (o.type) {
+                        @case ('color') {
+                          <input type="color" class="sd-mini" [value]="hex($any(opts()[o.key]))" (input)="option(o.key, $any($event.target).value)" />
+                        }
+                        @case ('select') {
+                          <select (change)="option(o.key, $any($event.target).value)">
+                            @for (c of $any(o).choices; track c) {
+                              <option [value]="c" [selected]="opts()[o.key] === c">{{ c }}</option>
+                            }
+                          </select>
+                        }
+                        @case ('number') {
+                          <input
+                            type="number"
+                            class="sd-num"
+                            [attr.min]="$any(o).min ?? null"
+                            [attr.max]="$any(o).max ?? null"
+                            [attr.step]="$any(o).step ?? 'any'"
+                            [value]="opts()[o.key]"
+                            (change)="option(o.key, +$any($event.target).value)"
+                          />
+                        }
+                        @default {
+                          <input class="sd-text" [value]="opts()[o.key] ?? ''" (input)="option(o.key, $any($event.target).value)" />
+                        }
+                      }
+                    </span>
                   }
                 </div>
               }

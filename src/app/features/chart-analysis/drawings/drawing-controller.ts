@@ -4,7 +4,7 @@ import { DrawingRenderer } from './drawing-renderer';
 import type { DrawingStore } from './drawing-store.service';
 import { HANDLE_RADIUS, hitHandle, hitTestDrawing, magnetPrice, type Pt } from './geometry';
 import { behaviorFor } from './tools/registry';
-import { optionsOf } from './tools/types';
+import { optionsOf, type InlineEdit, type TextRect } from './tools/types';
 import { styleFor, toolFor, type Drawing, type DrawingKind, type DrawingPoint } from './model';
 import {
   barStepMs,
@@ -83,6 +83,8 @@ export class DrawingController {
   onSelectionChange?: (id: string | null) => void;
   /** Double-click on a drawing: open its Settings dialog. */
   onEditRequest?: (id: string) => void;
+  /** Double-click on a text-bearing drawing: edit inline at `rect` (container coordinates). */
+  onInlineEdit?: (e: { id: string; rect: TextRect; value: string; commit: (v: string) => Partial<Drawing> }) => void;
   /** Right-click on a drawing: open the drawing menu at these client coordinates. */
   onDrawingContextMenu?: (e: { id: string; clientX: number; clientY: number }) => void;
 
@@ -567,8 +569,38 @@ export class DrawingController {
     ev.preventDefault();
     ev.stopPropagation();
     this.select(hit.id);
-    this.onEditRequest?.(hit.id);
+    const edit = hit.drawing.locked ? null : this.inlineEditAt(hit.drawing, p!);
+    if (edit && this.onInlineEdit) this.onInlineEdit({ id: hit.id, ...edit });
+    else this.onEditRequest?.(hit.id);
   };
+
+  /** Inline edit offered by the tool at `p`: a cell (`editAt`) or its text box (`textRect`). */
+  private inlineEditAt(d: Drawing, p: Pt): InlineEdit | null {
+    const behavior = behaviorFor(d.kind);
+    if (!behavior?.editAt && !behavior?.textRect) return null;
+    const pts = this.renderer.projectAll(d);
+    if (pts.length === 0) return null;
+    const ctx = {
+      ...this.renderer.paintCtx(
+        null as unknown as CanvasRenderingContext2D,
+        d,
+        pts,
+        this.container?.clientWidth ?? 0,
+        this.container?.clientHeight ?? 0,
+      ),
+      options: optionsOf(behavior, d),
+    };
+    const cell = behavior.editAt?.(ctx, p);
+    if (cell) return cell;
+    const rect = behavior.textRect?.(ctx);
+    if (!rect) return null;
+    return { rect, value: d.style.text ?? '', commit: (text) => ({ style: { ...d.style, text } }) };
+  }
+
+  /** Apply an inline edit's result as one undo step. */
+  applyInlineEdit(id: string, patch: Partial<Drawing>): void {
+    this.store.update(id, patch);
+  }
 
   /** Right-click: cancels a drawing in progress, else opens the drawing menu. */
   private onContextMenu = (ev: MouseEvent): void => {

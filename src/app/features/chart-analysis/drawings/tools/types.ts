@@ -53,7 +53,8 @@ export interface ToolBehavior {
   /** Extra settings beyond colour/width/dash/fill/text, with their defaults. */
   options?: readonly ToolOption[];
 
-  paint(p: PaintCtx & { selected: boolean; options: Record<string, unknown> }): void;
+  /** `hovered` is true while the pointer is over the drawing (and it is not selected). */
+  paint(p: PaintCtx & { selected: boolean; hovered?: boolean; options: Record<string, unknown> }): void;
 
   /** Screen positions of the grab handles. Defaults to the projected anchors. */
   handles?(p: PaintCtx & { options: Record<string, unknown> }): Pt[];
@@ -65,6 +66,17 @@ export interface ToolBehavior {
   moveHandle?(drawing: Drawing, index: number, to: DrawingPoint, geo: ToolGeometry): DrawingPoint[];
   /** Whether screen point `at` touches the drawing. Defaults to geometry.hitTestDrawing. */
   hitTest?(p: PaintCtx & { options: Record<string, unknown> }, at: Pt, tol: number): boolean;
+  /**
+   * Screen rect of the drawing's text box. When present, double-clicking the
+   * drawing edits `style.text` inline in a textarea at this rect instead of
+   * opening the Settings dialog.
+   */
+  textRect?(p: PaintCtx & { options: Record<string, unknown> }): TextRect | null;
+  /**
+   * Generic inline edit at a point (e.g. a table cell). Takes precedence over
+   * `textRect` when it returns an edit for the double-clicked point.
+   */
+  editAt?(p: PaintCtx & { options: Record<string, unknown> }, at: Pt): InlineEdit | null;
   /**
    * Transient tools (the ruler) vanish on the next chart click or tool change
    * and are never synced to the engine.
@@ -79,6 +91,20 @@ export interface ToolBehavior {
     drawing: Drawing,
     bars: readonly Bar[],
   ): { points?: DrawingPoint[]; options?: Record<string, unknown> } | void;
+}
+
+export interface TextRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** An inline text edit: where the editor sits, its initial value, and how to apply it. */
+export interface InlineEdit {
+  rect: TextRect;
+  value: string;
+  commit(value: string): Partial<Drawing>;
 }
 
 export type ToolBehaviorMap = Partial<Record<DrawingKind, ToolBehavior>>;

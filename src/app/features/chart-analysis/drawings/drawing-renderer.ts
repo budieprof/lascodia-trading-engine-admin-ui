@@ -251,7 +251,7 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     if (behavior) {
       const base = this.paintCtx(ctx, drawing, pts, w, h);
       const options = optionsOf(behavior, drawing);
-      behavior.paint({ ...base, selected, options });
+      behavior.paint({ ...base, selected, hovered, options });
       ctx.setLineDash([]);
       if (showHandles) this.handles(ctx, behavior.handles?.({ ...base, options }) ?? pts, drawing.locked, !selected);
       return;
