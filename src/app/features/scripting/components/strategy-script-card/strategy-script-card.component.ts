@@ -87,13 +87,15 @@ import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
       </header>
 
       <div class="card-body">
-        <app-pine-editor
-          [value]="source()"
-          [readOnly]="true"
-          [diagnostics]="compiled()?.diagnostics ?? []"
-          height="380px"
-          ariaLabel="Strategy script (read-only)"
-        />
+        <div class="editor-cell">
+          <app-pine-editor
+            [value]="source()"
+            [readOnly]="true"
+            [diagnostics]="compiled()?.diagnostics ?? []"
+            height="100%"
+            ariaLabel="Strategy script (read-only)"
+          />
+        </div>
         <div class="side">
           <h4 class="side-title">Declaration</h4>
           <app-declaration-summary
@@ -159,7 +161,19 @@ import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
         display: grid;
         grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr);
         gap: 16px;
-        align-items: start;
+        /* Stretch so the editor cell matches the declaration/inputs column's height. */
+        align-items: stretch;
+      }
+      /* The side column drives the row height; the editor is taken out of flow so its own
+         content never grows the row, and fills whatever height the side column sets. */
+      .editor-cell {
+        position: relative;
+        min-width: 0;
+        min-height: 380px;
+      }
+      .editor-cell app-pine-editor {
+        position: absolute;
+        inset: 0;
       }
       @media (max-width: 1000px) {
         .card-body {

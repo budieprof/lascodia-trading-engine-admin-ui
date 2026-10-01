@@ -10,6 +10,11 @@ import { PinePreviewComponent } from '../../pine-preview/pine-preview.component'
 import { StrategyReportComponent } from '../../report/strategy-report.component';
 import { strategyReportFixture } from '../../testing/strategy-report.fixture';
 import { ScriptPreviewComponent } from './script-preview.component';
+import {
+  EATradeChartModalComponent,
+  type TradeChartSelection,
+} from '@features/ea-instances/components/ea-trade-chart-modal/ea-trade-chart-modal.component';
+import type { ReportTrade } from '../../report/strategy-report.model';
 
 // The editor's Preview: it runs the script, hosts the Pine chart (app-pine-preview) in its chart
 // slot fed by the run, routes the chart's source-line jumps to the editor and, for a strategy,
@@ -39,6 +44,20 @@ class PinePreviewStubComponent {
 })
 class StrategyReportStubComponent {
   @Input() report: unknown;
+  @Input() tradesClickable = false;
+  @Output() tradeClick = new EventEmitter<ReportTrade>();
+}
+
+@Component({
+  selector: 'app-ea-trade-chart-modal',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
+  template: '',
+})
+class TradeChartModalStubComponent {
+  @Input() selection: TradeChartSelection | null = null;
+  @Input() open = false;
+  @Output() openChange = new EventEmitter<boolean>();
 }
 
 declareSignalIo(ScriptPreviewComponent, {
@@ -98,8 +117,16 @@ describe('ScriptPreviewComponent', () => {
       providers: [{ provide: ScriptingService, useValue: { run } }],
     });
     TestBed.overrideComponent(ScriptPreviewComponent, {
-      remove: { imports: [PinePreviewComponent, StrategyReportComponent] },
-      add: { imports: [PinePreviewStubComponent, StrategyReportStubComponent] },
+      remove: {
+        imports: [PinePreviewComponent, StrategyReportComponent, EATradeChartModalComponent],
+      },
+      add: {
+        imports: [
+          PinePreviewStubComponent,
+          StrategyReportStubComponent,
+          TradeChartModalStubComponent,
+        ],
+      },
     });
   });
 
@@ -158,6 +185,46 @@ describe('ScriptPreviewComponent', () => {
     fixture.detectChanges();
     expect(el.querySelector('app-strategy-report')).toBeNull();
     expect(el.querySelector<HTMLElement>('.chart-slot')!.hidden).toBe(false);
+  });
+
+  it('opens a List-of-trades row on the position chart', async () => {
+    render();
+    await preview();
+    el.querySelectorAll<HTMLButtonElement>('.result-tab')[1].click();
+    fixture.detectChanges();
+    const report = fixture.debugElement.query(
+      (d) => d.componentInstance instanceof StrategyReportStubComponent,
+    ).componentInstance as StrategyReportStubComponent;
+    expect(report.tradesClickable).toBe(true);
+    const entry = Date.UTC(2026, 8, 10, 15, 0);
+    report.tradeClick.emit({
+      number: 18,
+      direction: 'short',
+      entryTime: entry,
+      entryPrice: 1.16294,
+      exitTime: entry + 8 * 3_600_000,
+      exitPrice: 1.16102,
+      exitLeg: 'Close',
+    } as ReportTrade);
+    fixture.detectChanges();
+    const modal = fixture.debugElement.query(
+      (d) => d.componentInstance instanceof TradeChartModalStubComponent,
+    ).componentInstance as TradeChartModalStubComponent;
+    expect(modal.open).toBe(true);
+    expect(modal.selection).toMatchObject({
+      symbol: 'EURUSD',
+      direction: 'Sell',
+      referencePrice: 1.16294,
+      referenceTime: new Date(entry).toISOString(),
+      exitPrice: 1.16102,
+      exitTime: new Date(entry + 8 * 3_600_000).toISOString(),
+      timeframe: 'H1',
+      stopLoss: null,
+      takeProfit: null,
+    });
+    modal.openChange.emit(false);
+    fixture.detectChanges();
+    expect(modal.open).toBe(false);
   });
 
   it('runs an indicator in preview mode, without a report tab', async () => {

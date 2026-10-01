@@ -23,6 +23,16 @@ import { PinePreviewComponent } from '../../pine-preview/pine-preview.component'
 import { StrategyReportComponent } from '../../report/strategy-report.component';
 import { normalizeStrategyReport } from '../../report/strategy-report.model';
 import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
+import {
+  EATradeChartModalComponent,
+  type TradeChartSelection,
+} from '@features/ea-instances/components/ea-trade-chart-modal/ea-trade-chart-modal.component';
+import {
+  reportRowAsChartable,
+  researchTradeSelection,
+} from '@features/backtests/backtest-trade-chart';
+import type { ReportTrade } from '../../report/strategy-report.model';
+import { engineTimeframe } from '../../backtest/run-chart.model';
 
 const BAR_CHOICES = [500, 1000, 2000, 5000, 10000] as const;
 
@@ -42,7 +52,7 @@ export type PreviewView = 'chart' | 'report';
   selector: 'app-script-preview',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DecimalPipe, PinePreviewComponent, StrategyReportComponent],
+  imports: [DecimalPipe, PinePreviewComponent, StrategyReportComponent, EATradeChartModalComponent],
   template: `
     <div class="preview">
       <div class="controls">
@@ -158,10 +168,22 @@ export type PreviewView = 'chart' | 'report';
       }
       @if (hasReport() && view() === 'report') {
         <div class="report-slot" role="tabpanel">
-          <app-strategy-report [report]="chartRun()!.report" />
+          <app-strategy-report
+            [report]="chartRun()!.report"
+            [tradesClickable]="!!symbol()"
+            (tradeClick)="openReportTrade($event)"
+          />
         </div>
       }
     </div>
+
+    <!-- A List-of-trades row on the position chart (a top-layer <dialog>, so it opens above the
+         strategy form's own modal). -->
+    <app-ea-trade-chart-modal
+      [selection]="tradeChart()"
+      [open]="tradeChartOpen()"
+      (openChange)="tradeChartOpen.set($event)"
+    />
   `,
   styles: [
     SCRIPTING_UI_STYLES,
@@ -284,6 +306,26 @@ export class ScriptPreviewComponent {
   readonly barChoices = BAR_CHOICES;
   readonly bars = signal<number>(2000);
   readonly running = signal(false);
+  readonly tradeChart = signal<TradeChartSelection | null>(null);
+  readonly tradeChartOpen = signal(false);
+
+  /**
+   * A report row on the position chart: entry, exit, and the run's timeframe. A preview run
+   * returns no per-fill SL/TP list, so the chart draws no SL/TP zones.
+   */
+  openReportTrade(row: ReportTrade): void {
+    const trade = reportRowAsChartable(row, null);
+    const symbol = this.symbol();
+    if (!trade || !symbol) return;
+    this.tradeChart.set(
+      researchTradeSelection(trade, {
+        symbol,
+        timeframe: engineTimeframe(this.timeframe()) ?? this.timeframe(),
+        label: `Preview · trade #${row.number}`,
+      }),
+    );
+    this.tradeChartOpen.set(true);
+  }
   readonly error = signal<string | null>(null);
   readonly lastResult = signal<ScriptRunResult | null>(null);
   /** The request behind `lastResult` — the chart re-runs it for a trace window, a profile or a replay. */

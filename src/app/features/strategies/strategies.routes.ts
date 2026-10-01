@@ -62,5 +62,13 @@ export const STRATEGIES_ROUTES: Routes = [
     component: StrategyAnalyticsPageComponent,
     data: { breadcrumb: 'Analytics' },
   },
+  {
+    path: ':id/edit',
+    data: { breadcrumb: 'Edit' },
+    loadComponent: () =>
+      import('./pages/strategy-edit-page/strategy-edit-page.component').then(
+        (m) => m.StrategyEditPageComponent,
+      ),
+  },
   { path: ':id', component: StrategyDetailPageComponent, data: { breadcrumb: 'Detail' } },
 ];

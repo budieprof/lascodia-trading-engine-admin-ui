@@ -714,6 +714,7 @@ import { isNewsBlackoutExempt } from '@features/scripting/execution/news-blackou
         (cancelled)="closeEdit()"
         (strategyChanged)="loadStrategy()"
         (executionRequested)="openExecutionTab()"
+        (pageRequested)="openEditPage()"
       />
 
       <!-- Always in the template: an evaluation keeps running (and reports back) after the
@@ -2056,6 +2057,10 @@ export class StrategyDetailPageComponent implements OnInit {
       )
       .subscribe((id) => this.showStrategy(id));
 
+    // `?tab=` opens a tab directly — the full-page editor sends the operator to Execution.
+    const tab = this.route.snapshot?.queryParamMap?.get('tab');
+    if (tab) this.activeTab.set(tab);
+
     // Push refresh: filter to events for this strategy id, throttle to 5s so
     // a chatty 60s-cadence worker can't pile up if the page sits open. The
     // payload carries the new HealthScore so we don't need a follow-up GET in
@@ -2108,6 +2113,12 @@ export class StrategyDetailPageComponent implements OnInit {
   openEdit(): void {
     this.updateError.set(null);
     this.showEditForm.set(true);
+  }
+
+  /** Continue editing on the full page (/strategies/:id/edit). */
+  openEditPage(): void {
+    this.showEditForm.set(false);
+    this.router.navigate(['/strategies', this.strategyId, 'edit']);
   }
 
   closeEdit(): void {

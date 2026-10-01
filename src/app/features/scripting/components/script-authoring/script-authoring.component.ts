@@ -68,7 +68,7 @@ function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
           [symbol]="symbol()"
           [timeframe]="timeframe()"
           [fileName]="fileName()"
-          editorHeight="470px"
+          [editorHeight]="spacious() ? 'max(620px, calc(100vh - 300px))' : '470px'"
           (compiled)="onCompiled($event)"
         />
       </div>
@@ -99,7 +99,7 @@ function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
           </button>
         </div>
 
-        <div class="side-body">
+        <div class="side-body" [class.is-spacious]="spacious()">
           @switch (tab()) {
             @case ('inputs') {
               @if (showingStaleInputs()) {
@@ -245,6 +245,9 @@ function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
         overflow-y: auto;
         padding-right: 2px;
       }
+      .side-body.is-spacious {
+        max-height: max(670px, calc(100vh - 250px));
+      }
       .note {
         margin: 0 0 6px;
         font-size: 11px;
@@ -305,6 +308,8 @@ export class ScriptAuthoringComponent {
   /** The strategy's symbol and timeframe — used to refine warnings and to run previews. */
   readonly symbol = input<string | null>(null);
   readonly timeframe = input<string | null>(null);
+  /** Full-page host: a taller editor and inputs panel. */
+  readonly spacious = input(false);
   /** Edit mode: the operator wants to change the policy (on the detail page's Execution tab). */
   readonly executionRequested = output<void>();
 
