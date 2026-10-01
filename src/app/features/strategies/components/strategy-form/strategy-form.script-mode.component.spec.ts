@@ -163,7 +163,7 @@ describe('StrategyFormComponent — Pine script authoring', () => {
     beforeEach(() => create(null));
 
     it('authors RuleBased as a script — no mode switch; other types keep Parameters JSON', () => {
-      cmp.form.patchValue({ strategyType: 'NewsFade' });
+      cmp.form.patchValue({ strategyType: 'Custom' });
       fixture.detectChanges();
       expect(host.querySelector('app-script-authoring')).toBeNull();
       expect(host.querySelector('textarea[formcontrolname="parametersJson"]')).toBeTruthy();
@@ -211,8 +211,23 @@ describe('StrategyFormComponent — Pine script authoring', () => {
       expect(cmp.formatType('RuleBased')).toBe('Rule Based');
     });
 
-    it('never authors a script for another strategy type', () => {
+    it('labels the retired event / carry / order-flow types (retired) on a historical row', () => {
       cmp.form.patchValue({ strategyType: 'NewsFade' });
+      fixture.detectChanges();
+      expect(cmp.strategyTypeOptions()).toContain('NewsFade');
+      expect(cmp.formatType('NewsFade')).toBe('News Fade (retired)');
+      expect(cmp.formatType('CmeDeepBookOrderflow')).toBe('Cme Deep Book Orderflow (retired)');
+      expect(cmp.formatType('CompositeML')).not.toContain('(retired)');
+    });
+
+    it('points event / carry / order-flow ideas at Pine and the news-blackout exemption', () => {
+      const hint = host.querySelector('[data-testid="event-pine-hint"]')?.textContent ?? '';
+      expect(hint).toContain('lascodia.news_*');
+      expect(hint).toContain('Execution tab');
+    });
+
+    it('never authors a script for another strategy type', () => {
+      cmp.form.patchValue({ strategyType: 'Custom' });
       cmp.authoringMode.set('script');
       fixture.detectChanges();
       expect(cmp.isScriptAuthoring()).toBe(false);
@@ -220,7 +235,7 @@ describe('StrategyFormComponent — Pine script authoring', () => {
     });
 
     it('in script mode the Sizing tab explains the script sizes itself — no sizing config to type (D126)', () => {
-      cmp.form.patchValue({ strategyType: 'NewsFade' });
+      cmp.form.patchValue({ strategyType: 'Custom' });
       cmp.activeTab.set('sizing');
       fixture.detectChanges();
       expect(host.querySelector('textarea[formcontrolname="sizingConfigJson"]')).toBeTruthy();

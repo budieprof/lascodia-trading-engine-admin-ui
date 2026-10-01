@@ -331,7 +331,7 @@ export const DIRECT_SKIPS: readonly string[] = [
 export const DIRECT_KEEPS: readonly string[] = [
   'Kill switches (global and per strategy) and engine degradation / emergency halts',
   'EA health: no live EA for the symbol (or no live bound EA), stale ticks, EA-side safety gates',
-  'News blackout, the session allowlist and the strategy’s own session / regime / timeframe filters',
+  'News blackout (unless the strategy holds the audited news-blackout exemption), the session allowlist and the strategy’s own session / regime / timeframe filters',
   'Account bindings, the RiskProfile / Tier-2 risk checker and every account cap (lots, risk %, exposure, drawdown, margin)',
   'Strategy health, backtest qualification, the failure circuit breaker, per-strategy cooldown and exact-duplicate protection',
 ];

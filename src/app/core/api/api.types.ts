@@ -260,9 +260,12 @@ export type StrategyType =
   | 'CmeDeepBookOrderflow';
 
 /**
- * Strategy types the engine has retired: the API refuses to create, update,
- * clone or activate them. The enum values survive so historical rows still
- * display — never offer these in a creation/template picker.
+ * Strategy types the engine has retired (engine `RetiredStrategyTypes.All`): the
+ * API refuses to create, update, clone or activate them. The enum values survive
+ * so historical rows still display — never offer these in a creation/template
+ * picker. Two waves: the 14 classic price/indicator types (2026-09-29, Pine ports
+ * in `lascodia/classic/1`) and the five event / carry / order-flow types
+ * (2026-09-30, engine `EventFlowTypes`), whose ideas are Pine scripts now.
  */
 export const RETIRED_STRATEGY_TYPES: readonly StrategyType[] = [
   'RSIReversion',
@@ -279,22 +282,25 @@ export const RETIRED_STRATEGY_TYPES: readonly StrategyType[] = [
   'WeekendGapFade',
   'StatisticalArbitrage',
   'CrossAssetLeadLag',
+  // 2026-09-30 — the event / carry / order-flow types (engine EventFlowTypes).
+  'NewsFade',
+  'CarryTrade',
+  'OrderFlowImbalance',
+  'SubMinuteEvent',
+  'CmeDeepBookOrderflow',
 ];
 
 /**
- * Strategy types an operator can create. Mirrors the engine's StrategyType enum
- * (there is no "LlmDsl" type — the JSON rules DSL was retired). LlmProposal is
- * left out: LLM proposals are promoted by the engine as RuleBased Pine scripts,
- * so a hand-made LlmProposal would only mislabel an operator's own script.
+ * Strategy types an operator can create: RuleBased (a Pine v6 script) and the
+ * two evaluator types the engine still runs, CompositeML and Custom. Every other
+ * StrategyType is retired (see RETIRED_STRATEGY_TYPES). There is no "LlmDsl"
+ * type — the JSON rules DSL was retired. LlmProposal is left out: LLM proposals
+ * are promoted by the engine as RuleBased Pine scripts, so a hand-made
+ * LlmProposal would only mislabel an operator's own script.
  */
 export const CREATABLE_STRATEGY_TYPES: readonly StrategyType[] = [
   'RuleBased',
   'CompositeML',
-  'NewsFade',
-  'OrderFlowImbalance',
-  'SubMinuteEvent',
-  'CmeDeepBookOrderflow',
-  'CarryTrade',
   'Custom',
 ];
 
@@ -305,6 +311,10 @@ export function isRetiredStrategyType(type: string | null | undefined): boolean 
 /** Hint shown where an operator reaches for a classic (retired) idea. */
 export const CLASSIC_PINE_LIBRARY_HINT =
   'Classic ideas (RSI reversion, Bollinger reversion, session breakout, ATR bracket) now ship as the built-in Pine library lascodia/classic/1 — author a RuleBased script and import rsiReversion(), bollingerReversion(), sessionBreakout() or atrBracket().';
+
+/** Hint shown where an operator reaches for a retired event / carry / order-flow idea. */
+export const EVENT_PINE_HINT =
+  'Event, carry and order-flow ideas (news fade, carry, order-flow imbalance, sub-minute event, CME orderflow) are RuleBased Pine scripts too: read the calendar through lascodia.news_* / request.economic. A script built to trade around releases is exempted from the engine’s news blackout on its Execution tab.';
 
 export type StrategyStatus = 'Active' | 'Paused' | 'Backtesting' | 'Stopped';
 
@@ -639,6 +649,14 @@ export interface StrategyDto {
   scriptLanguageVersion?: number | null;
   executionPolicy?: ScriptExecutionPolicy | null;
   accountBindingCount?: number | null;
+  /**
+   * The audited opt-out of the engine's high-impact news blackout (list and detail rows). Script
+   * strategies only — the engine honours it only on a strategy with a script: their live, paper and
+   * backtest entries, and the EA's own blackout, then let entries through inside the window. Set
+   * through `PUT strategy/{id}` (`newsBlackoutExempt` + `newsBlackoutExemptReason`); every grant /
+   * revoke is a `NewsBlackoutExemption` DecisionLog row. Absent on engines before 2026-10-01.
+   */
+  newsBlackoutExempt?: boolean;
 }
 
 export interface TradeSignalDto {
@@ -679,6 +697,12 @@ export interface TradeSignalDto {
   /** Number of distinct trading accounts that created an order from this
    *  signal. 0 = no account picked it up (rejected/expired everywhere). */
   accountsPickedUpCount: number;
+  /** True when the signal's strategy is a script strategy holding the news-blackout
+   *  exemption: the engine's high-impact news blackout let it through, and the EA's
+   *  own blackout must not refuse it either. Read from the strategy when the signal
+   *  is served (a revoked exemption stops unexecuted signals too). Absent on engines
+   *  before 2026-10-01. */
+  newsBlackoutExempt?: boolean;
 }
 
 /** Trade-signal provenance. Mirrors the backend TradeSignalSource enum. */
@@ -4692,7 +4716,24 @@ export interface UpdateStrategyRequest {
   multiTimeframeGateJson?: string | null;
   /** Optional free-text reason annotating the auto-captured pre-edit snapshot. */
   changeReason?: string | null;
+  /**
+   * Grant (`true`) or revoke (`false`) the strategy's opt-out of the engine's high-impact news
+   * blackout; omitted leaves it unchanged. Script strategies only (`-11` otherwise). Every change
+   * is audited (DecisionLog `NewsBlackoutExemption`, Granted / Revoked) in the same transaction.
+   */
+  newsBlackoutExempt?: boolean | null;
+  /**
+   * Why the exemption is granted — required for a grant, at least
+   * {@link NEWS_BLACKOUT_EXEMPT_REASON_MIN} characters once trimmed (`-11` otherwise) — or
+   * revoked (optional). Recorded on the audit row; at most 1000 characters.
+   */
+  newsBlackoutExemptReason?: string | null;
 }
+
+/** Shortest reason the engine accepts for a news-blackout exemption grant (`NewsBlackoutExemption.MinReasonLength`). */
+export const NEWS_BLACKOUT_EXEMPT_REASON_MIN = 10;
+/** Longest reason the engine accepts (`UpdateStrategyCommandValidator`). */
+export const NEWS_BLACKOUT_EXEMPT_REASON_MAX = 1000;
 
 export interface StrategyVersionDto {
   id: number;

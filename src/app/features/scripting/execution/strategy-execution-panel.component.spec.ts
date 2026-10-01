@@ -5,6 +5,7 @@ import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { StrategyExecutionPanelComponent } from './strategy-execution-panel.component';
 import { AccountBindingsEditorComponent } from './account-bindings-editor.component';
 import { ExecutionPolicyCardComponent } from './execution-policy-card.component';
+import { NewsBlackoutExemptionCardComponent } from './news-blackout-exemption-card.component';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
 declareSignalIo(StrategyExecutionPanelComponent, { inputs: ['strategy'], outputs: ['changed'] });
@@ -36,6 +37,19 @@ class PolicyStubComponent {
   @Output() policyChanged = new EventEmitter<string>();
 }
 
+@Component({
+  selector: 'app-news-blackout-exemption-card',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: '',
+})
+class ExemptionStubComponent {
+  @Input() strategyId = 0;
+  @Input() strategyName: string | null = null;
+  @Input() exempt = false;
+  @Output() changed = new EventEmitter<boolean>();
+}
+
 describe('StrategyExecutionPanelComponent', () => {
   let fixture: ComponentFixture<StrategyExecutionPanelComponent>;
   let el: HTMLElement;
@@ -50,9 +64,44 @@ describe('StrategyExecutionPanelComponent', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({ imports: [StrategyExecutionPanelComponent] });
     TestBed.overrideComponent(StrategyExecutionPanelComponent, {
-      remove: { imports: [AccountBindingsEditorComponent, ExecutionPolicyCardComponent] },
-      add: { imports: [BindingsStubComponent, PolicyStubComponent] },
+      remove: {
+        imports: [
+          AccountBindingsEditorComponent,
+          ExecutionPolicyCardComponent,
+          NewsBlackoutExemptionCardComponent,
+        ],
+      },
+      add: { imports: [BindingsStubComponent, PolicyStubComponent, ExemptionStubComponent] },
     });
+  });
+
+  const exemptionCard = () =>
+    fixture.debugElement.query((d) => d.name === 'app-news-blackout-exemption-card')
+      ?.componentInstance as ExemptionStubComponent | undefined;
+
+  it('offers the news-blackout exemption on a script strategy, with its current state', () => {
+    render({ authoringMode: 'Script', newsBlackoutExempt: true });
+    expect(exemptionCard()?.strategyId).toBe(41);
+    expect(exemptionCard()?.strategyName).toBe('S');
+    expect(exemptionCard()?.exempt).toBe(true);
+  });
+
+  it('reads an engine that sends no flag as not exempt', () => {
+    render({ authoringMode: 'Script' });
+    expect(exemptionCard()?.exempt).toBe(false);
+  });
+
+  it('has no exemption for a non-script strategy (the engine refuses one)', () => {
+    render({ authoringMode: 'Dsl', newsBlackoutExempt: true });
+    expect(exemptionCard()).toBeUndefined();
+  });
+
+  it('re-emits an exemption change so the page re-reads the strategy', () => {
+    render({ authoringMode: 'Script' });
+    let count = 0;
+    fixture.componentInstance.changed.subscribe(() => count++);
+    exemptionCard()!.changed.emit(true);
+    expect(count).toBe(1);
   });
 
   it('explains that a script strategy with no binding never trades live', () => {

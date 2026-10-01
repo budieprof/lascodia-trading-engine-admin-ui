@@ -65,6 +65,7 @@ import { ScriptLivePanelComponent } from '@features/scripting/live/script-live-p
 import { ScriptAlertsTabComponent } from '@features/scripting/alerts/script-alerts-tab.component';
 import { ScriptBacktestLauncherComponent } from '@features/scripting/backtest/script-backtest-launcher.component';
 import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
+import { isNewsBlackoutExempt } from '@features/scripting/execution/news-blackout-exemption.model';
 
 @Component({
   selector: 'app-strategy-detail-page',
@@ -107,6 +108,17 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
               <span class="stage-chip" title="Lifecycle stage">
                 <app-status-badge [status]="stage" type="lifecycle" />
               </span>
+            }
+            @if (newsBlackoutExempt()) {
+              <button
+                type="button"
+                class="exempt-chip"
+                data-testid="news-blackout-exempt-badge"
+                title="Exempt from the engine's high-impact news blackout: its live, paper and backtest entries are let through inside the window (an audited opt-out). Manage it on the Execution tab."
+                (click)="openExecutionTab()"
+              >
+                News-blackout exempt
+              </button>
             }
             <app-presence-badge [routeKey]="'strategy:' + strategyId" />
           </span>
@@ -869,10 +881,33 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
       .head-chips {
         display: inline-flex;
         align-items: center;
+        flex-wrap: wrap;
         gap: var(--space-2);
       }
       .stage-chip {
         display: inline-flex;
+      }
+      .exempt-chip {
+        display: inline-flex;
+        align-items: center;
+        height: 22px;
+        padding: 0 10px;
+        border-radius: var(--radius-full);
+        border: 1px solid rgba(255, 149, 0, 0.55);
+        background: rgba(255, 149, 0, 0.12);
+        color: var(--warning);
+        font: inherit;
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .exempt-chip:hover {
+        background: rgba(255, 149, 0, 0.2);
+      }
+      .exempt-chip:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
       }
       .activation-hint {
         display: flex;
@@ -1586,6 +1621,8 @@ export class StrategyDetailPageComponent implements OnInit {
   // ── ADR-0027 script strategies ─────────────────────────────────────────
   /** Pine-script strategy (authoringMode Script): shows the Live and Alerts tabs. */
   readonly isScript = computed(() => isScriptStrategy(this.strategy()));
+  /** A script strategy holding the audited news-blackout exemption: badged in the header. */
+  readonly newsBlackoutExempt = computed(() => isNewsBlackoutExempt(this.strategy()));
   private static readonly SCRIPT_ONLY_TABS: readonly string[] = ['live', 'alerts'];
   readonly visibleDetailTabs = computed<TabItem[]>(() =>
     this.isScript()

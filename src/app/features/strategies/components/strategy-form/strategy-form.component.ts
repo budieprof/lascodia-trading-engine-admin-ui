@@ -17,6 +17,7 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import {
   CLASSIC_PINE_LIBRARY_HINT,
   CREATABLE_STRATEGY_TYPES,
+  EVENT_PINE_HINT,
   isRetiredStrategyType,
   StrategyDto,
   StrategyType,
@@ -303,6 +304,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                     <small class="form-hint" data-testid="classic-pine-hint">{{
                       classicHint
                     }}</small>
+                    <small class="form-hint" data-testid="event-pine-hint">{{ eventHint }}</small>
                   </div>
                 </div>
               }
@@ -1821,9 +1823,10 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   });
 
   // Typed parameter schema for the currently-selected StrategyType (when one
-  // is registered server-side). Drives the typed-input form above the
-  // Parameters JSON textarea — operators don't need to know the JSON shape
-  // for common types like NewsFade / CarryTrade.
+  // is registered server-side — today only CompositeML; the event / carry /
+  // order-flow types that had schemas are retired). Drives the typed-input form
+  // above the Parameters JSON textarea, so operators don't need to know the
+  // JSON shape.
   parameterSchema = signal<StrategyParameterSchemaDto | null>(null);
   parameterValues = signal<Record<string, unknown>>({});
 
@@ -2048,6 +2051,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
 
   readonly strategyTypes = STRATEGY_TYPES;
   readonly classicHint = CLASSIC_PINE_LIBRARY_HINT;
+  readonly eventHint = EVENT_PINE_HINT;
 
   /** Creatable types, plus the current value when it is a retired one (historical row). */
   strategyTypeOptions(): readonly string[] {

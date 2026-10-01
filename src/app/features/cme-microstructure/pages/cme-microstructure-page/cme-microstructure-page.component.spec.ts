@@ -47,6 +47,18 @@ describe('CmeMicrostructurePageComponent', () => {
     });
   });
 
+  describe('feedStatusExplanation', () => {
+    // The CmeDeepBookOrderflow strategy type was retired on 2026-09-30: the freshness gate now
+    // only feeds the shadow monitor, so the copy must not promise a strategy path.
+    it('says the shadow monitor, not a strategy, accepts or refuses the flow', () => {
+      const explain = (status: 'Live' | 'Stale') =>
+        cmp['feedStatusExplanation']({ status, maxFlowStalenessSeconds: 120 } as never);
+      expect(explain('Live')).toContain('shadow monitor will accept');
+      expect(explain('Stale')).toContain('shadow monitor is refusing');
+      for (const s of ['Live', 'Stale'] as const) expect(explain(s)).not.toContain('strategy');
+    });
+  });
+
   describe('hasData', () => {
     it('is false until real tape has been ingested', () => {
       expect(cmp['hasData']()).toBe(false);

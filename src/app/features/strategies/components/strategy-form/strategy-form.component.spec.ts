@@ -1,4 +1,8 @@
-import { CREATABLE_STRATEGY_TYPES } from '../../../../core/api/api.types';
+import {
+  CREATABLE_STRATEGY_TYPES,
+  RETIRED_STRATEGY_TYPES,
+  isRetiredStrategyType,
+} from '../../../../core/api/api.types';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
@@ -223,12 +227,38 @@ describe('StrategyFormComponent (legacy rules, parameters, edit mode)', () => {
     beforeEach(() => create(null));
 
     it('offers only engine StrategyType values an operator can create', () => {
-      // "LlmDsl" is not an engine type, the CME type is CmeDeepBookOrderflow, and
-      // LlmProposal is engine-promoted (as RuleBased Pine), never hand-created.
+      // "LlmDsl" is not an engine type, LlmProposal is engine-promoted (as
+      // RuleBased Pine), never hand-created, and the event / carry / order-flow
+      // types were retired on 2026-09-30 (engine RetiredStrategyTypes.EventFlowTypes).
       expect(CREATABLE_STRATEGY_TYPES).not.toContain('LlmDsl' as never);
       expect(CREATABLE_STRATEGY_TYPES).not.toContain('CmeOrderflow' as never);
       expect(CREATABLE_STRATEGY_TYPES).not.toContain('LlmProposal');
-      expect(CREATABLE_STRATEGY_TYPES).toContain('CmeDeepBookOrderflow');
+      expect(CREATABLE_STRATEGY_TYPES).not.toContain('CmeDeepBookOrderflow');
+      expect([...CREATABLE_STRATEGY_TYPES]).toEqual(['RuleBased', 'CompositeML', 'Custom']);
+    });
+
+    it('treats the five event / carry / order-flow types as retired', () => {
+      for (const t of [
+        'NewsFade',
+        'CarryTrade',
+        'OrderFlowImbalance',
+        'SubMinuteEvent',
+        'CmeDeepBookOrderflow',
+      ] as const) {
+        expect(isRetiredStrategyType(t)).toBe(true);
+        expect(CREATABLE_STRATEGY_TYPES).not.toContain(t);
+        expect(cmp.strategyTypeOptions()).not.toContain(t);
+      }
+      expect(isRetiredStrategyType('RuleBased')).toBe(false);
+      expect(isRetiredStrategyType('CompositeML')).toBe(false);
+      expect(isRetiredStrategyType('Custom')).toBe(false);
+      // Every StrategyType is either creatable, retired, or the engine-promoted LlmProposal.
+      const covered = new Set<string>([
+        ...CREATABLE_STRATEGY_TYPES,
+        ...RETIRED_STRATEGY_TYPES,
+        'LlmProposal',
+      ]);
+      expect(covered.size).toBe(23);
     });
 
     it('authors RuleBased and LlmProposal as Pine scripts — there is no rules mode', () => {
