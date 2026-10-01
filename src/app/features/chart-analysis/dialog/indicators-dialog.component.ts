@@ -113,55 +113,182 @@ function loadFavourites(): Set<string> {
     </div>
   `,
   styles: `
-    :host { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; }
-    .backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.25); }
+    :host {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      display: grid;
+      place-items: center;
+    }
+    .backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.25);
+    }
     .dialog {
-      position: relative; width: min(760px, calc(100vw - 32px)); height: min(560px, calc(100vh - 64px));
-      display: flex; flex-direction: column; background: var(--surface, #fff); color: inherit;
-      border: 1px solid var(--border, #e6e9ef); border-radius: 10px; box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25);
+      position: relative;
+      width: min(760px, calc(100vw - 32px));
+      height: min(560px, calc(100vh - 64px));
+      display: flex;
+      flex-direction: column;
+      background: var(--surface, #fff);
+      color: inherit;
+      border: 1px solid var(--border, #e6e9ef);
+      border-radius: 10px;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25);
     }
-    header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 6px; }
-    h2 { margin: 0; font-size: 16px; font-weight: 600; }
-    .close { border: 0; background: transparent; color: inherit; font-size: 16px; cursor: pointer; }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px 6px;
+    }
+    h2 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+    }
+    .close {
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font-size: 16px;
+      cursor: pointer;
+    }
     .search {
-      margin: 6px 16px; padding: 8px 10px; border: 1px solid var(--border, #e6e9ef); border-radius: 6px;
-      background: transparent; color: inherit; font: inherit;
+      margin: 6px 16px;
+      padding: 8px 10px;
+      border: 1px solid var(--border, #e6e9ef);
+      border-radius: 6px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
     }
-    .tabs { display: flex; gap: 6px; padding: 6px 16px; flex-wrap: wrap; }
+    .tabs {
+      display: flex;
+      gap: 6px;
+      padding: 6px 16px;
+      flex-wrap: wrap;
+    }
     .tabs button {
-      border: 1px solid var(--border, #e6e9ef); background: transparent; color: inherit; border-radius: 14px;
-      padding: 3px 12px; cursor: pointer; font: inherit; font-size: 12px;
+      border: 1px solid var(--border, #e6e9ef);
+      background: transparent;
+      color: inherit;
+      border-radius: 14px;
+      padding: 3px 12px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
     }
-    .tabs button.active { background: var(--text, #131722); color: var(--surface, #fff); }
-    .count { opacity: 0.6; font-size: 11px; }
-    .body { flex: 1; display: flex; min-height: 0; border-top: 1px solid var(--border, #e6e9ef); }
-    ul { list-style: none; margin: 0; padding: 6px 0; overflow-y: auto; }
-    .categories { width: 180px; flex: none; border-right: 1px solid var(--border, #e6e9ef); }
+    .tabs button.active {
+      background: var(--text, #131722);
+      color: var(--surface, #fff);
+    }
+    .count {
+      opacity: 0.6;
+      font-size: 11px;
+    }
+    .body {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+      border-top: 1px solid var(--border, #e6e9ef);
+    }
+    ul {
+      list-style: none;
+      margin: 0;
+      padding: 6px 0;
+      overflow-y: auto;
+    }
+    .categories {
+      width: 180px;
+      flex: none;
+      border-right: 1px solid var(--border, #e6e9ef);
+    }
     .categories button {
-      width: 100%; text-align: left; border: 0; background: transparent; color: inherit; padding: 6px 14px;
-      cursor: pointer; font: inherit; font-size: 13px;
+      width: 100%;
+      text-align: left;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      padding: 6px 14px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
     }
-    .categories button.active { background: var(--hover, rgba(0, 0, 0, 0.06)); font-weight: 600; }
-    .items { flex: 1; }
-    .items li { display: flex; align-items: center; }
-    .items li:hover { background: var(--hover, rgba(0, 0, 0, 0.05)); }
-    .fav { border: 0; background: transparent; cursor: pointer; color: var(--muted, #9598a1); opacity: 0.35; padding: 6px 4px 6px 12px; }
-    .fav.on { color: #f5b301; opacity: 1; }
-    .items li:hover .fav { opacity: 1; }
+    .categories button.active {
+      background: var(--hover, rgba(0, 0, 0, 0.06));
+      font-weight: 600;
+    }
+    .items {
+      flex: 1;
+    }
+    .items li {
+      display: flex;
+      align-items: center;
+    }
+    .items li:hover {
+      background: var(--hover, rgba(0, 0, 0, 0.05));
+    }
+    .fav {
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      color: var(--muted, #9598a1);
+      opacity: 0.35;
+      padding: 6px 4px 6px 12px;
+    }
+    .fav.on {
+      color: #f5b301;
+      opacity: 1;
+    }
+    .items li:hover .fav {
+      opacity: 1;
+    }
     .pick {
-      flex: 1; display: flex; gap: 10px; align-items: center; border: 0; background: transparent; color: inherit;
-      text-align: left; padding: 6px 12px 6px 4px; cursor: pointer; font: inherit; font-size: 13px;
+      flex: 1;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      padding: 6px 12px 6px 4px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
     }
-    .name { flex: 1; }
-    .muted { color: var(--muted, #787b86); font-size: 11px; }
-    .empty { padding: 16px; color: var(--muted, #787b86); }
-    .description { min-height: 34px; padding: 8px 16px; font-size: 12px; color: var(--muted, #787b86); border-top: 1px solid var(--border, #e6e9ef); }
-    @media (max-width: 600px) { .categories { width: 120px; } }
+    .name {
+      flex: 1;
+    }
+    .muted {
+      color: var(--muted, #787b86);
+      font-size: 11px;
+    }
+    .empty {
+      padding: 16px;
+      color: var(--muted, #787b86);
+    }
+    .description {
+      min-height: 34px;
+      padding: 8px 16px;
+      font-size: 12px;
+      color: var(--muted, #787b86);
+      border-top: 1px solid var(--border, #e6e9ef);
+    }
+    @media (max-width: 600px) {
+      .categories {
+        width: 120px;
+      }
+    }
   `,
 })
 export class IndicatorsDialogComponent {
   readonly items = input.required<DialogItem[]>();
   readonly initialTab = input<DialogTab>('indicators');
+  /** Scripts/strategies are still being fetched. */
+  readonly loading = input(false);
   readonly picked = output<DialogItem>();
   readonly closed = output<void>();
 
@@ -187,16 +314,24 @@ export class IndicatorsDialogComponent {
     }),
   );
   readonly counts = computed(() => {
-    const c: Record<DialogTab, number> = { indicators: 0, strategies: 0, profiles: 0, patterns: 0, fundamentals: 0 };
+    const c: Record<DialogTab, number> = {
+      indicators: 0,
+      strategies: 0,
+      profiles: 0,
+      patterns: 0,
+      fundamentals: 0,
+    };
     for (const it of this.items()) c[TAB_FOR_KIND[it.kind]]++;
     return c;
   });
   readonly emptyText = computed(() =>
-    this.query()
-      ? 'Nothing matches.'
-      : this.category() === FAVOURITES
-        ? 'No favourites yet — star an item to pin it here.'
-        : 'Nothing here yet.',
+    this.loading() && this.tab() === 'strategies'
+      ? 'Loading strategies…'
+      : this.query()
+        ? 'Nothing matches.'
+        : this.category() === FAVOURITES
+          ? 'No favourites yet — star an item to pin it here.'
+          : 'Nothing here yet.',
   );
 
   constructor() {

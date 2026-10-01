@@ -99,6 +99,7 @@
       <app-indicators-dialog
         [items]="dialogItems()"
         [initialTab]="dialogTab()"
+        [loading]="!scriptCatalog()"
         (picked)="onDialogPick($event)"
         (closed)="indicatorMenuOpen.set(false)"
       />
