@@ -1,0 +1,340 @@
+<header class="wl-header">
+  <button
+    type="button"
+    class="wl-title"
+    (click)="listMenuOpen.set(!listMenuOpen()); $event.stopPropagation()"
+    [attr.aria-expanded]="listMenuOpen()"
+    data-testid="watchlist-title"
+  >
+    {{ list()?.name ?? 'Watchlist' }}
+    <app-chart-icon name="caret" [size]="16" />
+  </button>
+  @if (store.saving()) {
+    <app-chart-icon class="wl-saving" name="sync" [size]="14" title="Saving" />
+  }
+  <span class="wl-spacer"></span>
+  <button
+    type="button"
+    class="wl-icon"
+    title="Add symbol"
+    (click)="openAdd($event)"
+    data-testid="watchlist-add"
+  >
+    <app-chart-icon name="plus" [size]="22" />
+  </button>
+  <button
+    type="button"
+    class="wl-icon"
+    title="More"
+    (click)="moreMenuOpen.set(!moreMenuOpen()); $event.stopPropagation()"
+  >
+    <app-chart-icon name="more" [size]="22" />
+  </button>
+  <button type="button" class="wl-icon" title="Close watchlist" (click)="closed.emit()">
+    <app-chart-icon name="close" [size]="18" />
+  </button>
+
+  @if (listMenuOpen()) {
+    <div class="wl-menu wl-list-menu" (click)="$event.stopPropagation()">
+      <div class="wl-menu-heading">Watchlists</div>
+      @for (l of store.lists(); track l.id) {
+        <button type="button" [class.active]="l.isActive" (click)="switchList(l.id)">
+          {{ l.name }}
+        </button>
+      }
+      <hr />
+      <button type="button" (click)="newList()">Create new list…</button>
+      <button type="button" (click)="copyList()">Make a copy…</button>
+      <button type="button" (click)="renameList()">Rename…</button>
+      <button type="button" class="danger" (click)="deleteList()">Delete list</button>
+    </div>
+  }
+  @if (moreMenuOpen()) {
+    <div class="wl-menu wl-more-menu" (click)="$event.stopPropagation()">
+      <button type="button" (click)="newSection()">Add section…</button>
+      <button type="button" (click)="sort.set({ key: 'none', dir: 1 }); moreMenuOpen.set(false)">
+        Clear sorting
+      </button>
+    </div>
+  }
+</header>
+
+@if (addOpen()) {
+  <div class="wl-add" (click)="$event.stopPropagation()">
+    <input
+      #addInput
+      type="search"
+      placeholder="Search symbol"
+      [value]="addQuery()"
+      (input)="addQuery.set($any($event.target).value)"
+      (keydown.enter)="addFirstMatch()"
+      (keydown.escape)="addOpen.set(false)"
+    />
+    <ul>
+      @for (c of addCandidates(); track c.symbol) {
+        <li>
+          <button type="button" [disabled]="c.added" (click)="add(c.symbol)">
+            <span class="wl-badge" [attr.data-ccy]="c.symbol.slice(0, 3)">{{
+              c.symbol.slice(0, 1)
+            }}</span>
+            <span class="wl-add-symbol">{{ c.symbol }}</span>
+            <span class="muted">{{ c.name }}</span>
+            <span class="wl-add-state">{{ c.added ? 'Added' : '' }}</span>
+          </button>
+        </li>
+      } @empty {
+        <li class="muted wl-empty">No symbol matches.</li>
+      }
+    </ul>
+  </div>
+}
+
+<div class="wl-body" [style.flex-basis.%]="listFraction() * 100">
+  <div class="wl-columns" role="row">
+    <button type="button" class="col-symbol" (click)="sortBy('symbol')">
+      Symbol {{ sortMark('symbol') }}
+    </button>
+    <button type="button" class="col-num" (click)="sortBy('last')">
+      Last {{ sortMark('last') }}
+    </button>
+    <button type="button" class="col-num" (click)="sortBy('change')">
+      Chg {{ sortMark('change') }}
+    </button>
+    <button type="button" class="col-num" (click)="sortBy('changePct')">
+      Chg% {{ sortMark('changePct') }}
+    </button>
+  </div>
+
+  @if (store.error() && !list()) {
+    <div class="wl-empty">{{ store.error() }}</div>
+  } @else if (!store.loaded()) {
+    <div class="wl-empty muted">Loading…</div>
+  }
+
+  <div class="wl-rows" role="grid" (dragover)="$event.preventDefault()" (drop)="onDrop($event)">
+    @for (s of sections(); track s.id) {
+      <div
+        class="wl-section"
+        (dragover)="onDragOver(s.id, s.rows[0]?.symbol ?? null, $event)"
+        [class.drop-before]="
+          dropTarget()?.sectionId === s.id &&
+          dropTarget()?.before === (s.rows[0]?.symbol ?? null) &&
+          !s.rows.length
+        "
+      >
+        <button
+          type="button"
+          class="wl-section-toggle"
+          (click)="toggleSection(s.id)"
+          [attr.aria-expanded]="!s.collapsed"
+        >
+          <app-chart-icon [name]="s.collapsed ? 'chevron-right' : 'caret'" [size]="14" />
+        </button>
+        @if (editingSection() === s.id) {
+          <input
+            class="wl-section-input"
+            [value]="s.name"
+            (keydown.enter)="commitSectionName(s.id, $any($event.target).value)"
+            (keydown.escape)="editingSection.set(null)"
+            (blur)="commitSectionName(s.id, $any($event.target).value)"
+          />
+        } @else {
+          <span class="wl-section-name" (dblclick)="editingSection.set(s.id)">{{ s.name }}</span>
+        }
+        <span class="wl-section-actions">
+          <button type="button" title="Rename section" (click)="editingSection.set(s.id)">
+            <app-chart-icon name="pencil" [size]="14" />
+          </button>
+          <button
+            type="button"
+            title="Remove section (keeps its symbols)"
+            (click)="deleteSection(s.id)"
+          >
+            <app-chart-icon name="close" [size]="14" />
+          </button>
+        </span>
+      </div>
+      @if (!s.collapsed) {
+        @for (r of s.rows; track r.symbol) {
+          @let parts = split(r.last, r.digits);
+          <div
+            class="wl-row"
+            role="row"
+            draggable="true"
+            [attr.data-symbol]="r.symbol"
+            [class.selected]="r.symbol === current().toUpperCase()"
+            [class.dragging]="dragging() === r.symbol"
+            [class.drop-before]="
+              dropTarget()?.sectionId === s.id && dropTarget()?.before === r.symbol
+            "
+            (click)="pick(r.symbol)"
+            (contextmenu)="openRowMenu(r, $event)"
+            (dragstart)="onDragStart(r.symbol, $event)"
+            (dragover)="onDragOver(s.id, r.symbol, $event)"
+            (dragend)="onDragEnd()"
+          >
+            <button
+              type="button"
+              class="wl-flag"
+              [attr.data-flag]="r.flag"
+              [class.set]="r.flag !== null"
+              (click)="cycleFlag(r, $event)"
+              [title]="r.flag ? 'Flag: ' + r.flag + ' (click for next)' : 'Flag symbol'"
+            >
+              <app-chart-icon name="flag" [size]="14" />
+            </button>
+            <span class="col-symbol">
+              <span class="wl-badge" [attr.data-ccy]="r.symbol.slice(0, 3)">{{
+                r.symbol.slice(0, 1)
+              }}</span>
+              <span class="wl-symbol">{{ r.symbol }}</span>
+              <span
+                class="wl-dot"
+                [class.open]="r.marketOpen"
+                [title]="r.marketOpen ? 'Market open' : 'Market closed'"
+              ></span>
+            </span>
+            <span
+              class="col-num wl-last"
+              [class.flash-up]="flash()[r.symbol] === 'up'"
+              [class.flash-down]="flash()[r.symbol] === 'down'"
+            >
+              {{ parts[0] }}<sup>{{ parts[1] }}</sup>
+            </span>
+            <span
+              class="col-num"
+              [class.up]="(r.change ?? 0) > 0"
+              [class.down]="(r.change ?? 0) < 0"
+            >
+              {{ r.change === null ? '' : (r.change | number: '1.' + r.digits + '-' + r.digits) }}
+            </span>
+            <span
+              class="col-num"
+              [class.up]="(r.changePct ?? 0) > 0"
+              [class.down]="(r.changePct ?? 0) < 0"
+            >
+              {{ r.changePct === null ? '' : (r.changePct | number: '1.2-2') + '%' }}
+            </span>
+            <button
+              type="button"
+              class="wl-remove"
+              title="Remove from watchlist"
+              (click)="remove(r.symbol); $event.stopPropagation()"
+            >
+              <app-chart-icon name="close" [size]="14" />
+            </button>
+          </div>
+        }
+      }
+    }
+    @if (store.loaded() && list() && !symbols().length) {
+      <div class="wl-empty muted">This list is empty — add a symbol with +.</div>
+    }
+  </div>
+</div>
+
+@if (rowMenu(); as m) {
+  <div
+    class="wl-menu wl-row-menu"
+    [style.left.px]="m.x"
+    [style.top.px]="m.y"
+    (click)="$event.stopPropagation()"
+  >
+    <button type="button" (click)="pick(m.symbol); rowMenu.set(null)">Open {{ m.symbol }}</button>
+    <div class="wl-menu-heading">Flag</div>
+    <div class="wl-flag-row">
+      @for (f of flags; track f) {
+        <button
+          type="button"
+          class="wl-flag set"
+          [attr.data-flag]="f"
+          (click)="setFlag(m.symbol, f)"
+          [title]="f"
+        >
+          <app-chart-icon name="flag" [size]="14" />
+        </button>
+      }
+      <button type="button" class="wl-flag" (click)="setFlag(m.symbol, null)" title="Clear flag">
+        <app-chart-icon name="close" [size]="14" />
+      </button>
+    </div>
+    @if ((list()?.sections?.length ?? 0) > 1) {
+      <div class="wl-menu-heading">Move to section</div>
+      @for (s of list()!.sections; track s.id) {
+        <button type="button" (click)="moveTo(m.symbol, s.id)">{{ s.name }}</button>
+      }
+    }
+    <hr />
+    <button type="button" class="danger" (click)="remove(m.symbol)">Remove from watchlist</button>
+  </div>
+}
+
+<div class="wl-resizer" (pointerdown)="startResize($event)" title="Drag to resize"></div>
+
+@let d = detail();
+@let dp = split(d.row.last, d.row.digits);
+<section class="wl-details" aria-label="Symbol details">
+  <div class="wl-d-head">
+    <span class="wl-badge big" [attr.data-ccy]="d.symbol.slice(0, 3)">{{
+      d.symbol.slice(0, 1)
+    }}</span>
+    <strong>{{ d.symbol }}</strong>
+  </div>
+  <div class="muted wl-d-name">{{ d.name }} · Forex</div>
+  <div class="wl-d-price">
+    <span class="wl-d-last"
+      >{{ dp[0] }}<sup>{{ dp[1] }}</sup></span
+    >
+    <span class="muted wl-d-ccy">{{ d.quote }}</span>
+  </div>
+  <div
+    class="wl-d-change"
+    [class.up]="(d.row.change ?? 0) > 0"
+    [class.down]="(d.row.change ?? 0) < 0"
+  >
+    @if (d.row.change !== null) {
+      {{
+        (d.row.change > 0 ? '+' : '') +
+          (d.row.change | number: '1.' + d.row.digits + '-' + d.row.digits)
+      }}
+      {{ (d.row.changePct! > 0 ? '+' : '') + (d.row.changePct | number: '1.2-2') }}%
+    }
+  </div>
+  <div class="wl-d-status" [class.open]="d.marketOpen">
+    <span class="wl-dot" [class.open]="d.marketOpen"></span>
+    {{ d.marketOpen ? 'Market open' : 'Market closed' }}
+  </div>
+
+  <dl class="wl-d-stats">
+    <dt>Open</dt>
+    <dd>
+      {{ d.open === null ? '—' : (d.open | number: '1.' + d.row.digits + '-' + d.row.digits) }}
+    </dd>
+    <dt>Prev close</dt>
+    <dd>
+      {{
+        d.prevClose === null
+          ? '—'
+          : (d.prevClose | number: '1.' + d.row.digits + '-' + d.row.digits)
+      }}
+    </dd>
+    <dt>Day high</dt>
+    <dd>
+      {{ d.high === null ? '—' : (d.high | number: '1.' + d.row.digits + '-' + d.row.digits) }}
+    </dd>
+    <dt>Day low</dt>
+    <dd>{{ d.low === null ? '—' : (d.low | number: '1.' + d.row.digits + '-' + d.row.digits) }}</dd>
+  </dl>
+
+  @if (headline(); as h) {
+    <button type="button" class="wl-news" (click)="openNews.emit()">
+      <span class="wl-news-meta">News · {{ h.source }} · {{ h.at }}</span>
+      <span class="wl-news-title">{{ h.title }}</span>
+      <span class="wl-news-more">More news ›</span>
+    </button>
+  }
+
+  <app-performance-tiles [symbol]="d.symbol" />
+  <app-seasonals [symbol]="d.symbol" />
+  <app-technicals-gauge [bars]="bars()" [timeframe]="timeframe()" />
+</section>

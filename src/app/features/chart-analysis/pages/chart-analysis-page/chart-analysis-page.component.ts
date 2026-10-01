@@ -26,6 +26,7 @@ import {
 } from '../../datafeed/aggregate';
 import { priceScaleFor } from '../../datafeed/symbol-info';
 import { ChartIconComponent } from '../../icons/chart-icon.component';
+import { WatchlistPanelComponent, type WatchHeadline } from '../../watchlist/watchlist-panel.component';
 import { IndicatorsDialogComponent } from '../../dialog/indicators-dialog.component';
 import type { DialogItem, DialogTab } from '../../dialog/dialog-items';
 import {
@@ -158,6 +159,26 @@ const CHART_STYLES: Array<{ id: ChartStyle; label: string }> = [
 /** How many bars to pull per request / per scroll-back page. */
 const PAGE_BARS = 1500;
 
+const WATCHLIST_OPEN_KEY = 'lascodia.chart.watchlistOpen';
+/** TradingView keeps the watchlist docked by default; the operator's last choice wins. */
+const DOCK_WIDTH_KEY = 'lascodia.chart.watchlistWidth';
+function loadDockWidth(): number {
+  try {
+    const w = Number(localStorage.getItem(DOCK_WIDTH_KEY));
+    return w >= 240 && w <= 640 ? w : 380;
+  } catch {
+    return 380;
+  }
+}
+
+function loadWatchlistOpen(): boolean {
+  try {
+    return localStorage.getItem(WATCHLIST_OPEN_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
 @Component({
   selector: 'app-chart-analysis-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -168,6 +189,7 @@ const PAGE_BARS = 1500;
     ChartHostComponent,
     IndicatorsDialogComponent,
     ChartIconComponent,
+    WatchlistPanelComponent,
     StrategyTesterPanelComponent,
     ScriptEditorPanelComponent,
     PerformanceTilesComponent,
@@ -344,7 +366,22 @@ export class ChartAnalysisPageComponent {
   //
   // Prices come from the same throttled `priceUpdated` stream the chart uses,
   // so the panel costs one extra map rather than 23 more polls.
-  readonly watchlistOpen = signal(false);
+  readonly watchlistOpen = signal(loadWatchlistOpen());
+  readonly dockWidth = signal(loadDockWidth());
+  /** Symbols the watchlist panel shows, for the live-price subscription. */
+  readonly watchlistSymbols = signal<string[]>([]);
+  readonly liveBids = computed(() => {
+    const out: Record<string, number> = {};
+    for (const [sym, q] of Object.entries(this.prices())) out[sym] = q.bid;
+    return out;
+  });
+  readonly watchHeadline = computed<WatchHeadline | null>(() => {
+    const a = this.articles()[0];
+    if (!a) return null;
+    const mins = Math.max(0, Math.round((Date.now() - Date.parse(a.publishedAtUtc)) / 60_000));
+    const at = mins < 60 ? `${mins} min ago` : mins < 1440 ? `${Math.round(mins / 60)} h ago` : `${Math.round(mins / 1440)} d ago`;
+    return { title: a.title, source: a.sourceName, at };
+  });
 
   // ── Side panes: Details and News ─────────────────────────────────────────
   private readonly newsIntel = inject(NewsIntelService);
@@ -388,21 +425,6 @@ export class ChartAnalysisPageComponent {
     };
   });
   readonly prices = signal<Record<string, { bid: number; prev: number }>>({});
-
-  readonly watchlist = computed(() => {
-    const quotes = this.prices();
-    return this.symbols().map((p) => {
-      const sym = (p.symbol ?? '').toUpperCase();
-      const q = quotes[sym];
-      const changePct = q && q.prev !== 0 ? ((q.bid - q.prev) / q.prev) * 100 : null;
-      return {
-        symbol: sym,
-        digits: Math.trunc(p.decimalPlaces) || 5,
-        bid: q?.bid ?? null,
-        changePct,
-      };
-    });
-  });
 
   // ── Bar replay ───────────────────────────────────────────────────────────
   //
@@ -795,10 +817,26 @@ export class ChartAnalysisPageComponent {
       const wanted = new Set<string>([
         this.symbol().toUpperCase(),
         ...this.comparePanels().map((p) => p.symbol.toUpperCase()),
-        ...(this.watchlistOpen() ? this.symbols().map((p) => (p.symbol ?? '').toUpperCase()) : []),
+        ...(this.watchlistOpen() ? this.watchlistSymbols() : []),
       ]);
       wanted.delete('');
       untracked(() => this.syncPriceSubscriptions(wanted));
+    });
+
+    // Remember the dock state, and keep the headline under the watchlist on the current symbol.
+    effect(() => {
+      const open = this.watchlistOpen();
+      try {
+        localStorage.setItem(WATCHLIST_OPEN_KEY, open ? '1' : '0');
+      } catch {
+        // Per-viewer convenience only.
+      }
+    });
+    effect(() => {
+      const open = this.watchlistOpen();
+      this.symbol();
+      this.symbols();
+      if (open && this.sidePane() !== 'news') untracked(() => this.loadNews());
     });
 
     this.destroyRef.onDestroy(() => {
@@ -1395,6 +1433,25 @@ export class ChartAnalysisPageComponent {
   }
 
   // ── Toolbar actions ──────────────────────────────────────────────────────
+
+  startDockResize(ev: PointerEvent): void {
+    ev.preventDefault();
+    const startX = ev.clientX;
+    const startW = this.dockWidth();
+    const move = (e: PointerEvent) =>
+      this.dockWidth.set(Math.min(640, Math.max(240, startW + (startX - e.clientX))));
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      try {
+        localStorage.setItem(DOCK_WIDTH_KEY, String(this.dockWidth()));
+      } catch {
+        // Per-viewer convenience only.
+      }
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
 
   selectSymbol(symbol: string): void {
     this.symbolMenuOpen.set(false);

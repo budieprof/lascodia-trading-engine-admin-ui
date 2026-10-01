@@ -431,7 +431,7 @@
     <span class="status muted">{{ bars().length }} bars</span>
   </header>
 
-  <div class="chart-body">
+  <div class="chart-body" [style.--dock-width.px]="dockWidth()">
     <!-- Left drawing rail, as on TradingView. -->
     <nav class="draw-rail" aria-label="Drawing tools">
       <button
@@ -505,7 +505,24 @@
       </div>
     }
 
-    <div class="chart-grid" [attr.data-layout]="splitLayout()">
+    @if (watchlistOpen()) {
+      <aside class="watch-dock">
+        <div class="dock-resizer" (pointerdown)="startDockResize($event)" title="Drag to resize"></div>
+        <app-watchlist-panel
+          [pairs]="symbols()"
+          [current]="symbol()"
+          [liveBids]="liveBids()"
+          [bars]="bars()"
+          [timeframe]="resolutionLabel(resolution())"
+          [headline]="watchHeadline()"
+          (selected)="selectSymbol($event)"
+          (symbolsChange)="watchlistSymbols.set($event)"
+          (openNews)="openSidePane('news')"
+          (closed)="watchlistOpen.set(false)"
+        />
+      </aside>
+    }
+    <div class="chart-grid" [attr.data-layout]="splitLayout()" [class.with-dock]="watchlistOpen()">
       <!-- Chart surface with the floating legend, as TradingView lays it out. -->
       <div class="chart-area primary" (contextmenu)="openContextMenu($event)">
         <div class="legend">
@@ -811,34 +828,6 @@
                 }
               </ul>
             }
-          </aside>
-        }
-
-        <!-- Watchlist. -->
-        @if (watchlistOpen()) {
-          <aside class="watchlist">
-            <div class="tree-title">Watchlist</div>
-            <ul>
-              @for (w of watchlist(); track w.symbol) {
-                <li [class.selected]="w.symbol === symbol()">
-                  <button type="button" class="watch-row" (click)="selectSymbol(w.symbol)">
-                    <span class="watch-symbol">{{ w.symbol }}</span>
-                    <span class="watch-price">
-                      {{
-                        w.bid === null ? '—' : (w.bid | number: '1.' + w.digits + '-' + w.digits)
-                      }}
-                    </span>
-                    <span
-                      class="watch-change"
-                      [class.up]="(w.changePct ?? 0) >= 0"
-                      [class.down]="(w.changePct ?? 0) < 0"
-                    >
-                      {{ w.changePct === null ? '' : (w.changePct | number: '1.2-2') + '%' }}
-                    </span>
-                  </button>
-                </li>
-              }
-            </ul>
           </aside>
         }
 
