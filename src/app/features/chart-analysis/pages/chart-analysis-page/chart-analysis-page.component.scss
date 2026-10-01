@@ -1107,3 +1107,61 @@ $rail-width: 40px;
   font-size: 11px;
   margin-top: 2px;
 }
+
+// Pine runs in the studies bar.
+.pine-tag {
+  font-size: 10px;
+  padding: 1px 5px;
+  margin-right: 4px;
+  border-radius: 4px;
+  background: var(--accent-soft, rgba(41, 98, 255, 0.12));
+  color: var(--accent, #2962ff);
+}
+
+.script-error {
+  color: var(--danger, #ef5350);
+  border-color: currentColor;
+}
+
+.symbol-input {
+  width: 72px;
+  text-transform: uppercase;
+}
+
+// Strategy tester / Pine editor dock under the chart.
+.bottom-panel {
+  flex: 0 0 auto;
+  height: min(340px, 40vh);
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--border, #e6e9ef);
+}
+
+.dock-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px 10px 0;
+  border-bottom: 1px solid var(--border, #e6e9ef);
+
+  button {
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: inherit;
+    padding: 4px 10px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+  }
+
+  button.active {
+    border-bottom-color: var(--accent, #2962ff);
+    font-weight: 600;
+  }
+}
+
+// Many studies must not push the chart off the page.
+.studies {
+  max-height: 112px;
+  overflow-y: auto;
+}

@@ -1726,3 +1726,887 @@ export function estimatedDelta(bars: readonly Ohlc[]): DeltaBar[] {
   }
   return out;
 }
+
+// ── Fifth wave: TradingView built-in parity ────────────────────────────────
+
+const highestIn = (v: number[], from: number, to: number): number => {
+  let m = -Infinity;
+  for (let j = from; j <= to; j++) if (v[j] > m) m = v[j];
+  return m;
+};
+const lowestIn = (v: number[], from: number, to: number): number => {
+  let m = Infinity;
+  for (let j = from; j <= to; j++) if (v[j] < m) m = v[j];
+  return m;
+};
+
+/**
+ * Align a second symbol's bars to the primary bars by time (an as-of join).
+ *
+ * Each primary bar takes the most recent compare bar at or before its time, so a
+ * compare feed with gaps never borrows a FUTURE value. Bars before the first
+ * compare bar are null.
+ */
+export function alignByTime(bars: readonly Ohlc[], compare: readonly Ohlc[]): (Ohlc | null)[] {
+  const sorted = [...compare].sort((a, b) => a.time - b.time);
+  const out: (Ohlc | null)[] = [];
+  let j = -1;
+  for (const bar of bars) {
+    while (j + 1 < sorted.length && sorted[j + 1].time <= bar.time) j++;
+    out.push(j >= 0 ? sorted[j] : null);
+  }
+  return out;
+}
+
+/** Least Squares Moving Average — the regression line's value `offset` bars back from its end. */
+export function lsma(values: number[], period = 25, offset = 0): Maybe[] {
+  const out: Maybe[] = nulls(values.length);
+  if (period < 2) return out;
+  for (let i = period - 1; i < values.length; i++) {
+    let sx = 0;
+    let sy = 0;
+    let sxy = 0;
+    let sxx = 0;
+    for (let j = 0; j < period; j++) {
+      const y = values[i - period + 1 + j];
+      sx += j;
+      sy += y;
+      sxy += j * y;
+      sxx += j * j;
+    }
+    const denom = period * sxx - sx * sx;
+    if (denom === 0) continue;
+    const slope = (period * sxy - sx * sy) / denom;
+    const intercept = (sy - slope * sx) / period;
+    out[i] = intercept + slope * (period - 1 - offset);
+  }
+  return out;
+}
+
+/** Zero-lag EMA — EMA of `2·x − x[lag]`, lag = ⌊(period−1)/2⌋. */
+export function zlema(values: number[], period = 20): Maybe[] {
+  const lag = Math.floor((period - 1) / 2);
+  const adj: Maybe[] = values.map((v, i) => (i >= lag ? 2 * v - values[i - lag] : null));
+  return denseMap(adj, (d) => ema(d, period));
+}
+
+/** Kaufman Adaptive Moving Average — smoothing scaled by the efficiency ratio. */
+export function kama(values: number[], period = 10, fast = 2, slow = 30): Maybe[] {
+  const out: Maybe[] = nulls(values.length);
+  if (values.length <= period) return out;
+  const fastSc = 2 / (fast + 1);
+  const slowSc = 2 / (slow + 1);
+  let prev = values[period - 1];
+  out[period - 1] = prev;
+  for (let i = period; i < values.length; i++) {
+    const change = Math.abs(values[i] - values[i - period]);
+    let vol = 0;
+    for (let j = i - period + 1; j <= i; j++) vol += Math.abs(values[j] - values[j - 1]);
+    const er = vol === 0 ? 0 : change / vol;
+    const sc = (er * (fastSc - slowSc) + slowSc) ** 2;
+    prev = prev + sc * (values[i] - prev);
+    out[i] = prev;
+  }
+  return out;
+}
+
+/** VIDYA — an EMA whose factor is scaled by |CMO|, so it speeds up in trends. */
+export function vidya(values: number[], period = 9, cmoLen = 9): Maybe[] {
+  const out: Maybe[] = nulls(values.length);
+  const alpha = 2 / (period + 1);
+  let prev: number | null = null;
+  for (let i = cmoLen; i < values.length; i++) {
+    let up = 0;
+    let down = 0;
+    for (let j = i - cmoLen + 1; j <= i; j++) {
+      const d = values[j] - values[j - 1];
+      if (d > 0) up += d;
+      else down -= d;
+    }
+    const k = up + down === 0 ? 0 : Math.abs((up - down) / (up + down));
+    prev = prev === null ? values[i] : alpha * k * values[i] + (1 - alpha * k) * prev;
+    out[i] = prev;
+  }
+  return out;
+}
+
+/** Tillson T3 — six chained EMAs combined with the volume factor `v`. */
+export function t3(values: number[], period = 5, v = 0.7): Maybe[] {
+  const e1 = ema(values, period);
+  const e2 = denseMap(e1, (d) => ema(d, period));
+  const e3 = denseMap(e2, (d) => ema(d, period));
+  const e4 = denseMap(e3, (d) => ema(d, period));
+  const e5 = denseMap(e4, (d) => ema(d, period));
+  const e6 = denseMap(e5, (d) => ema(d, period));
+  const c1 = -(v ** 3);
+  const c2 = 3 * v * v + 3 * v ** 3;
+  const c3 = -6 * v * v - 3 * v - 3 * v ** 3;
+  const c4 = 1 + 3 * v + v ** 3 + 3 * v * v;
+  return values.map((_, i) =>
+    e6[i] === null || e3[i] === null
+      ? null
+      : c1 * (e6[i] as number) +
+        c2 * (e5[i] as number) +
+        c3 * (e4[i] as number) +
+        c4 * (e3[i] as number),
+  );
+}
+
+/** Average Day Range — SMA of each bar's high−low. */
+export function averageDayRange(bars: Ohlc[], period = 14): Maybe[] {
+  return sma(
+    bars.map((b) => b.high - b.low),
+    period,
+  );
+}
+
+/**
+ * Chop Zone — the angle (degrees) of a 34-EMA of hlc3, normalised by the
+ * 30-bar range. Positive = rising. TradingView colours bands of this angle;
+ * here it is the histogram value itself.
+ */
+export function chopZone(bars: Ohlc[], emaLen = 34, rangeLen = 30): Maybe[] {
+  const avg = bars.map((b) => (b.high + b.low + b.close) / 3);
+  const e = ema(
+    bars.map((b) => b.close),
+    emaLen,
+  );
+  const highs = bars.map((b) => b.high);
+  const lows = bars.map((b) => b.low);
+  const out: Maybe[] = nulls(bars.length);
+  for (let i = Math.max(rangeLen - 1, 1); i < bars.length; i++) {
+    if (e[i] === null || e[i - 1] === null) continue;
+    const hh = highestIn(highs, i - rangeLen + 1, i);
+    const ll = lowestIn(lows, i - rangeLen + 1, i);
+    if (hh === ll) {
+      out[i] = 0;
+      continue;
+    }
+    const span = (25 / (hh - ll)) * ll;
+    const y = (((e[i - 1] as number) - (e[i] as number)) / avg[i]) * span;
+    const angle = (Math.acos(1 / Math.sqrt(1 + y * y)) * 180) / Math.PI;
+    out[i] = y > 0 ? -angle : angle;
+  }
+  return out;
+}
+
+/** Bollinger Bands Trend — (|lowerS−lowerL| − |upperS−upperL|) / middleS · 100. */
+export function bbTrend(values: number[], short = 20, long = 50, mult = 2): Maybe[] {
+  const s = bollinger(values, short, mult);
+  const l = bollinger(values, long, mult);
+  return values.map((_, i) => {
+    const vals = [s.lower[i], l.lower[i], s.upper[i], l.upper[i], s.middle[i]];
+    if (vals.some((v) => v === null) || s.middle[i] === 0) return null;
+    const [sl, ll, su, lu, sm] = vals as number[];
+    return ((Math.abs(sl - ll) - Math.abs(su - lu)) / sm) * 100;
+  });
+}
+
+/** Ulcer Index — RMS of percentage drawdown from the rolling highest close. */
+export function ulcerIndex(values: number[], period = 14): Maybe[] {
+  const sq: number[] = values.map((v, i) => {
+    const hh = highestIn(values, Math.max(0, i - period + 1), i);
+    const dd = hh === 0 ? 0 : ((v - hh) / hh) * 100;
+    return dd * dd;
+  });
+  // Clamp: the running SMA can leave -1e-17 on a flat stretch, and sqrt of that is NaN.
+  return sma(sq, period).map((m, i) =>
+    m === null || i < 2 * period - 2 ? null : Math.sqrt(Math.max(0, m)),
+  );
+}
+
+/**
+ * Chandelier Exit — ATR stop hung from the highest high (long) / lowest low
+ * (short), ratcheting like TradingView's version.
+ */
+export function chandelierExit(
+  bars: Ohlc[],
+  period = 22,
+  mult = 3,
+): { long: Maybe[]; short: Maybe[] } {
+  const a = atr(bars, period);
+  const highs = bars.map((b) => b.high);
+  const lows = bars.map((b) => b.low);
+  const long: Maybe[] = nulls(bars.length);
+  const short: Maybe[] = nulls(bars.length);
+  for (let i = period - 1; i < bars.length; i++) {
+    if (a[i] === null) continue;
+    let ls = highestIn(highs, i - period + 1, i) - mult * (a[i] as number);
+    let ss = lowestIn(lows, i - period + 1, i) + mult * (a[i] as number);
+    const pl = long[i - 1];
+    const ps = short[i - 1];
+    if (pl !== null && pl !== undefined && bars[i - 1].close > pl) ls = Math.max(ls, pl);
+    if (ps !== null && ps !== undefined && bars[i - 1].close < ps) ss = Math.min(ss, ps);
+    long[i] = ls;
+    short[i] = ss;
+  }
+  return { long, short };
+}
+
+/** Klinger Volume Oscillator (TradingView form): signed volume by hlc3 change, EMA fast − slow. */
+export function klinger(
+  bars: Ohlc[],
+  fast = 34,
+  slow = 55,
+  signalLen = 13,
+): { kvo: Maybe[]; signal: Maybe[] } {
+  const sv = bars.map((b, i) => {
+    if (i === 0) return 0;
+    const p = bars[i - 1];
+    const ch = (b.high + b.low + b.close) / 3 - (p.high + p.low + p.close) / 3;
+    return ch >= 0 ? b.volume : -b.volume;
+  });
+  const f = ema(sv, fast);
+  const s = ema(sv, slow);
+  const kvo: Maybe[] = sv.map((_, i) =>
+    f[i] === null || s[i] === null ? null : (f[i] as number) - (s[i] as number),
+  );
+  return { kvo, signal: denseMap(kvo, (d) => ema(d, signalLen)) };
+}
+
+/** Chaikin Volatility — % rate of change of an EMA of the high−low range. */
+export function chaikinVolatility(bars: Ohlc[], emaLen = 10, rocLen = 10): Maybe[] {
+  const e = ema(
+    bars.map((b) => b.high - b.low),
+    emaLen,
+  );
+  return e.map((v, i) => {
+    const p = i >= rocLen ? e[i - rocLen] : null;
+    return v === null || p === null || p === 0 ? null : ((v - p) / p) * 100;
+  });
+}
+
+/** Price Oscillator — (fast MA − slow MA) / slow MA · 100. */
+export function priceOscillator(
+  values: number[],
+  fast = 10,
+  slow = 21,
+  type: 'SMA' | 'EMA' = 'SMA',
+): Maybe[] {
+  const fn = type === 'EMA' ? ema : sma;
+  const f = fn(values, fast);
+  const s = fn(values, slow);
+  return values.map((_, i) =>
+    f[i] === null || s[i] === null || s[i] === 0
+      ? null
+      : (((f[i] as number) - (s[i] as number)) / (s[i] as number)) * 100,
+  );
+}
+
+/** Average ranks (1-based, ties share the mean rank). */
+function ranks(v: number[]): number[] {
+  const idx = v.map((x, i) => [x, i] as const).sort((a, b) => a[0] - b[0]);
+  const out = new Array<number>(v.length);
+  let k = 0;
+  while (k < idx.length) {
+    let m = k;
+    while (m + 1 < idx.length && idx[m + 1][0] === idx[k][0]) m++;
+    const r = (k + m) / 2 + 1;
+    for (let t = k; t <= m; t++) out[idx[t][1]] = r;
+    k = m + 1;
+  }
+  return out;
+}
+
+/** Rank Correlation Index — Spearman correlation of price rank vs time rank, ×100. */
+export function rci(values: number[], period = 10): Maybe[] {
+  const out: Maybe[] = nulls(values.length);
+  if (period < 2) return out;
+  for (let i = period - 1; i < values.length; i++) {
+    const win = values.slice(i - period + 1, i + 1);
+    const pr = ranks(win);
+    let d2 = 0;
+    for (let j = 0; j < period; j++) d2 += (j + 1 - pr[j]) ** 2;
+    out[i] = (1 - (6 * d2) / (period * (period * period - 1))) * 100;
+  }
+  return out;
+}
+
+/** Stochastic Momentum Index (Blau) with its EMA signal. */
+export function smi(
+  bars: Ohlc[],
+  kLen = 10,
+  dLen = 3,
+  signalLen = 3,
+): { smi: Maybe[]; signal: Maybe[] } {
+  const highs = bars.map((b) => b.high);
+  const lows = bars.map((b) => b.low);
+  const rel: Maybe[] = nulls(bars.length);
+  const rng: Maybe[] = nulls(bars.length);
+  for (let i = kLen - 1; i < bars.length; i++) {
+    const hh = highestIn(highs, i - kLen + 1, i);
+    const ll = lowestIn(lows, i - kLen + 1, i);
+    rel[i] = bars[i].close - (hh + ll) / 2;
+    rng[i] = hh - ll;
+  }
+  const dbl = (s: Maybe[]) =>
+    denseMap(
+      denseMap(s, (d) => ema(d, dLen)),
+      (d) => ema(d, dLen),
+    );
+  const r = dbl(rel);
+  const g = dbl(rng);
+  const out: Maybe[] = bars.map((_, i) =>
+    r[i] === null || g[i] === null || g[i] === 0
+      ? null
+      : (200 * (r[i] as number)) / (g[i] as number),
+  );
+  return { smi: out, signal: denseMap(out, (d) => ema(d, signalLen)) };
+}
+
+export interface VwapBands {
+  vwap: Maybe[];
+  upper1: Maybe[];
+  lower1: Maybe[];
+  upper2: Maybe[];
+  lower2: Maybe[];
+}
+
+/**
+ * VWAP with volume-weighted standard-deviation bands, resetting whenever
+ * `periodKey` changes (and starting at `startIndex`). A null key means
+ * "never reset". Bars with zero volume count with weight 1 so FX tick-volume
+ * gaps do not blank the line.
+ */
+function vwapCore(
+  bars: Ohlc[],
+  mult1: number,
+  mult2: number,
+  startIndex: number,
+  periodKey: ((t: number) => number) | null,
+): VwapBands {
+  const n = bars.length;
+  const r: VwapBands = {
+    vwap: nulls(n),
+    upper1: nulls(n),
+    lower1: nulls(n),
+    upper2: nulls(n),
+    lower2: nulls(n),
+  };
+  let key = NaN;
+  let sv = 0;
+  let spv = 0;
+  let sp2v = 0;
+  for (let i = Math.max(0, startIndex); i < n; i++) {
+    const k = periodKey ? periodKey(bars[i].time) : 0;
+    if (k !== key) {
+      key = k;
+      sv = 0;
+      spv = 0;
+      sp2v = 0;
+    }
+    const b = bars[i];
+    const p = (b.high + b.low + b.close) / 3;
+    const v = b.volume > 0 ? b.volume : 1;
+    sv += v;
+    spv += p * v;
+    sp2v += p * p * v;
+    const vw = spv / sv;
+    const sd = Math.sqrt(Math.max(0, sp2v / sv - vw * vw));
+    r.vwap[i] = vw;
+    r.upper1[i] = vw + mult1 * sd;
+    r.lower1[i] = vw - mult1 * sd;
+    r.upper2[i] = vw + mult2 * sd;
+    r.lower2[i] = vw - mult2 * sd;
+  }
+  return r;
+}
+
+export type AnchorPeriod = 'Day' | 'Week' | 'Month';
+
+/** Calendar period key for a UTC ms timestamp. Weeks start Monday. */
+export function periodKey(time: number, period: AnchorPeriod): number {
+  const day = Math.floor(time / 86_400_000);
+  if (period === 'Week') return Math.floor((day + 3) / 7); // 1970-01-01 was a Thursday
+  if (period === 'Month') {
+    const d = new Date(time);
+    return d.getUTCFullYear() * 12 + d.getUTCMonth();
+  }
+  return day;
+}
+
+/** Session VWAP with ±mult1/±mult2 standard-deviation bands. */
+export function vwapBands(
+  bars: Ohlc[],
+  mult1 = 1,
+  mult2 = 2,
+  anchor: AnchorPeriod = 'Day',
+): VwapBands {
+  return vwapCore(bars, mult1, mult2, 0, (t) => periodKey(t, anchor));
+}
+
+/**
+ * Anchored VWAP. The anchor is a UTC ms timestamp when `anchorTime > 0`
+ * (first bar at or after it), else `barsBack` bars from the end.
+ */
+export function anchoredVwap(
+  bars: Ohlc[],
+  barsBack = 100,
+  anchorTime = 0,
+  mult1 = 1,
+  mult2 = 2,
+): VwapBands {
+  let start: number;
+  if (anchorTime > 0) {
+    start = bars.findIndex((b) => b.time >= anchorTime);
+    if (start < 0) start = bars.length;
+  } else {
+    start = Math.max(0, bars.length - Math.max(1, Math.floor(barsBack)));
+  }
+  return vwapCore(bars, mult1, mult2, start, null);
+}
+
+/** Volume with its moving average. */
+export function volumeWithMa(bars: Ohlc[], period = 20): { volume: Maybe[]; ma: Maybe[] } {
+  const v = bars.map((b) => b.volume);
+  return { volume: v, ma: sma(v, period) };
+}
+
+/**
+ * Up/Down volume — a bar's volume attributed by candle direction (up bars
+ * positive, down bars negative) plus the net. TradingView splits by lower
+ * timeframe ticks; with bar data only, candle direction is the proxy.
+ */
+export function upDownVolume(bars: Ohlc[]): { up: Maybe[]; down: Maybe[]; delta: Maybe[] } {
+  const up = bars.map((b) => (b.close > b.open ? b.volume : 0));
+  const down = bars.map((b) => (b.close < b.open ? -b.volume : 0));
+  return { up, down, delta: up.map((u, i) => u + down[i]) };
+}
+
+/** Cumulative ESTIMATED delta that resets each period (see `estimatedDelta`). */
+export function cumulativeDeltaByPeriod(bars: Ohlc[], period: AnchorPeriod | 'None'): Maybe[] {
+  const d = estimatedDelta(bars);
+  let key = NaN;
+  let cum = 0;
+  return bars.map((b, i) => {
+    const k = period === 'None' ? 0 : periodKey(b.time, period);
+    if (k !== key) {
+      key = k;
+      cum = 0;
+    }
+    cum += d[i].delta;
+    return cum;
+  });
+}
+
+export interface Pivot {
+  index: number;
+  price: number;
+  high: boolean;
+}
+
+/**
+ * Swing pivots: a bar whose high (low) is the strict extreme of `left` bars
+ * before and `right` bars after it. Returned in time order.
+ */
+export function swingPivots(bars: Ohlc[], left = 5, right = 5): Pivot[] {
+  const out: Pivot[] = [];
+  for (let i = left; i < bars.length - right; i++) {
+    let isHigh = true;
+    let isLow = true;
+    for (let j = i - left; j <= i + right; j++) {
+      if (j === i) continue;
+      if (bars[j].high >= bars[i].high) isHigh = false;
+      if (bars[j].low <= bars[i].low) isLow = false;
+    }
+    if (isHigh) out.push({ index: i, price: bars[i].high, high: true });
+    if (isLow) out.push({ index: i, price: bars[i].low, high: false });
+  }
+  return out;
+}
+
+/** Alternating high/low pivots: consecutive same-side pivots keep only the more extreme. */
+function alternatingPivots(bars: Ohlc[], left: number, right: number): Pivot[] {
+  const out: Pivot[] = [];
+  for (const p of swingPivots(bars, left, right)) {
+    const last = out[out.length - 1];
+    if (last && last.high === p.high) {
+      if ((p.high && p.price > last.price) || (!p.high && p.price < last.price))
+        out[out.length - 1] = p;
+    } else out.push(p);
+  }
+  return out;
+}
+
+/**
+ * Pivot Points High/Low — the most recent confirmed swing high and swing low
+ * held as step lines. A null at each change breaks the line so no diagonal is
+ * drawn between levels.
+ */
+export function pivotsHighLow(
+  bars: Ohlc[],
+  left = 10,
+  right = 10,
+): { high: Maybe[]; low: Maybe[] } {
+  const n = bars.length;
+  const high: Maybe[] = nulls(n);
+  const low: Maybe[] = nulls(n);
+  const piv = swingPivots(bars, left, right);
+  const fill = (side: boolean, out: Maybe[]) => {
+    const list = piv.filter((p) => p.high === side);
+    list.forEach((p, k) => {
+      const end = k + 1 < list.length ? list[k + 1].index : n;
+      for (let i = p.index + 1; i < end; i++) out[i] = p.price;
+    });
+  };
+  fill(true, high);
+  fill(false, low);
+  return { high, low };
+}
+
+export const FIB_RETRACEMENT_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1] as const;
+export const FIB_EXTENSION_LEVELS = [0.618, 1, 1.618, 2.618] as const;
+
+/**
+ * Auto Fib Retracement over the last `lookback` bars: from the extreme that
+ * came first to the one that came last. Level 0 sits at the later extreme
+ * (TradingView's convention), level 1 at the earlier. Lines span only the
+ * window from the first extreme to the last bar.
+ */
+export function autoFibRetracement(bars: Ohlc[], lookback = 100): Maybe[][] {
+  const n = bars.length;
+  const out = FIB_RETRACEMENT_LEVELS.map(() => nulls(n));
+  if (n < 2) return out;
+  const from = Math.max(0, n - lookback);
+  let hi = from;
+  let lo = from;
+  for (let i = from; i < n; i++) {
+    if (bars[i].high > bars[hi].high) hi = i;
+    if (bars[i].low < bars[lo].low) lo = i;
+  }
+  const H = bars[hi].high;
+  const L = bars[lo].low;
+  const upMove = lo < hi; // low first, then high: retrace down from H
+  const start = Math.min(hi, lo);
+  FIB_RETRACEMENT_LEVELS.forEach((r, k) => {
+    const price = upMove ? H - (H - L) * r : L + (H - L) * r;
+    for (let i = start; i < n; i++) out[k][i] = price;
+  });
+  return out;
+}
+
+/**
+ * Auto Fib Extension from the last three alternating pivots A→B→C:
+ * level r = C + (B − A)·r, drawn from C onward.
+ */
+export function autoFibExtension(bars: Ohlc[], depth = 10): Maybe[][] {
+  const n = bars.length;
+  const out = FIB_EXTENSION_LEVELS.map(() => nulls(n));
+  const piv = alternatingPivots(bars, depth, depth);
+  if (piv.length < 3) return out;
+  const [a, b, c] = piv.slice(-3);
+  FIB_EXTENSION_LEVELS.forEach((r, k) => {
+    const price = c.price + (b.price - a.price) * r;
+    for (let i = c.index; i < n; i++) out[k][i] = price;
+  });
+  return out;
+}
+
+/**
+ * Auto Andrews' Pitchfork from the last three alternating pivots P0, P1, P2:
+ * the median runs from P0 through the P1–P2 midpoint; the tines are parallel
+ * through P1 and P2.
+ */
+export function autoPitchfork(
+  bars: Ohlc[],
+  depth = 10,
+): { median: Maybe[]; upper: Maybe[]; lower: Maybe[] } {
+  const n = bars.length;
+  const r = { median: nulls(n), upper: nulls(n), lower: nulls(n) };
+  const piv = alternatingPivots(bars, depth, depth);
+  if (piv.length < 3) return r;
+  const [p0, p1, p2] = piv.slice(-3);
+  const mx = (p1.index + p2.index) / 2;
+  const my = (p1.price + p2.price) / 2;
+  if (mx === p0.index) return r;
+  const slope = (my - p0.price) / (mx - p0.index);
+  const tineA = p1.price > p2.price ? p1 : p2;
+  const tineB = tineA === p1 ? p2 : p1;
+  for (let i = p0.index; i < n; i++) r.median[i] = p0.price + slope * (i - p0.index);
+  for (let i = tineA.index; i < n; i++) r.upper[i] = tineA.price + slope * (i - tineA.index);
+  for (let i = tineB.index; i < n; i++) r.lower[i] = tineB.price + slope * (i - tineB.index);
+  return r;
+}
+
+/** Auto Trendlines: lines through the last two swing highs and last two swing lows, extended right. */
+export function autoTrendlines(
+  bars: Ohlc[],
+  depth = 10,
+): { resistance: Maybe[]; support: Maybe[] } {
+  const n = bars.length;
+  const piv = swingPivots(bars, depth, depth);
+  const line = (side: boolean): Maybe[] => {
+    const out = nulls(n);
+    const list = piv.filter((p) => p.high === side);
+    if (list.length < 2) return out;
+    const [a, b] = list.slice(-2);
+    const slope = (b.price - a.price) / (b.index - a.index);
+    for (let i = a.index; i < n; i++) out[i] = a.price + slope * (i - a.index);
+    return out;
+  };
+  return { resistance: line(true), support: line(false) };
+}
+
+export type PivotType = 'Traditional' | 'Fibonacci' | 'Woodie' | 'Classic' | 'DM' | 'Camarilla';
+export const PIVOT_TYPES: readonly PivotType[] = [
+  'Traditional',
+  'Fibonacci',
+  'Woodie',
+  'Classic',
+  'DM',
+  'Camarilla',
+];
+
+export interface PivotLevels {
+  p: number;
+  r1: number;
+  s1: number;
+  r2: number | null;
+  s2: number | null;
+  r3: number | null;
+  s3: number | null;
+}
+
+/** Pivot levels for one prior period's OHLC. */
+export function pivotLevels(
+  type: PivotType,
+  o: number,
+  h: number,
+  l: number,
+  c: number,
+): PivotLevels {
+  const range = h - l;
+  switch (type) {
+    case 'Fibonacci': {
+      const p = (h + l + c) / 3;
+      return {
+        p,
+        r1: p + 0.382 * range,
+        s1: p - 0.382 * range,
+        r2: p + 0.618 * range,
+        s2: p - 0.618 * range,
+        r3: p + range,
+        s3: p - range,
+      };
+    }
+    case 'Woodie': {
+      const p = (h + l + 2 * c) / 4;
+      return {
+        p,
+        r1: 2 * p - l,
+        s1: 2 * p - h,
+        r2: p + range,
+        s2: p - range,
+        r3: h + 2 * (p - l),
+        s3: l - 2 * (h - p),
+      };
+    }
+    case 'Classic': {
+      const p = (h + l + c) / 3;
+      return {
+        p,
+        r1: 2 * p - l,
+        s1: 2 * p - h,
+        r2: p + range,
+        s2: p - range,
+        r3: p + 2 * range,
+        s3: p - 2 * range,
+      };
+    }
+    case 'DM': {
+      const x = c < o ? h + 2 * l + c : c > o ? 2 * h + l + c : h + l + 2 * c;
+      return { p: x / 4, r1: x / 2 - l, s1: x / 2 - h, r2: null, s2: null, r3: null, s3: null };
+    }
+    case 'Camarilla': {
+      const p = (h + l + c) / 3;
+      return {
+        p,
+        r1: c + (range * 1.1) / 12,
+        s1: c - (range * 1.1) / 12,
+        r2: c + (range * 1.1) / 6,
+        s2: c - (range * 1.1) / 6,
+        r3: c + (range * 1.1) / 4,
+        s3: c - (range * 1.1) / 4,
+      };
+    }
+    default: {
+      const p = (h + l + c) / 3;
+      return {
+        p,
+        r1: 2 * p - l,
+        s1: 2 * p - h,
+        r2: p + range,
+        s2: p - range,
+        r3: h + 2 * (p - l),
+        s3: l - 2 * (h - p),
+      };
+    }
+  }
+}
+
+/**
+ * Pivot Points Standard: each period's levels come from the PREVIOUS period's
+ * OHLC. A null on the first bar of each period breaks the step so periods are
+ * not joined by a diagonal.
+ */
+export function pivotPointsStandard(
+  bars: Ohlc[],
+  type: PivotType = 'Traditional',
+  period: AnchorPeriod = 'Day',
+): Record<'p' | 'r1' | 's1' | 'r2' | 's2' | 'r3' | 's3', Maybe[]> {
+  const n = bars.length;
+  const keys = ['p', 'r1', 's1', 'r2', 's2', 'r3', 's3'] as const;
+  const out = Object.fromEntries(keys.map((k) => [k, nulls(n)])) as Record<
+    (typeof keys)[number],
+    Maybe[]
+  >;
+  let key = NaN;
+  let cur: { o: number; h: number; l: number; c: number } | null = null;
+  let lv: PivotLevels | null = null;
+  for (let i = 0; i < n; i++) {
+    const b = bars[i];
+    const k = periodKey(b.time, period);
+    if (k !== key) {
+      if (cur) lv = pivotLevels(type, cur.o, cur.h, cur.l, cur.c);
+      cur = { o: b.open, h: b.high, l: b.low, c: b.close };
+      key = k;
+      continue; // the break bar stays null
+    }
+    if (cur) {
+      cur.h = Math.max(cur.h, b.high);
+      cur.l = Math.min(cur.l, b.low);
+      cur.c = b.close;
+    }
+    if (lv) for (const kk of keys) out[kk][i] = lv[kk];
+  }
+  return out;
+}
+
+/** Linear Regression Channel over the last `period` bars: fit ± mult·σ of residuals. */
+export function linRegChannel(
+  values: number[],
+  period = 100,
+  mult = 2,
+): { upper: Maybe[]; middle: Maybe[]; lower: Maybe[] } {
+  const n = values.length;
+  const r = { upper: nulls(n), middle: nulls(n), lower: nulls(n) };
+  const len = Math.min(period, n);
+  if (len < 2) return r;
+  const start = n - len;
+  let sx = 0;
+  let sy = 0;
+  let sxy = 0;
+  let sxx = 0;
+  for (let j = 0; j < len; j++) {
+    const y = values[start + j];
+    sx += j;
+    sy += y;
+    sxy += j * y;
+    sxx += j * j;
+  }
+  const slope = (len * sxy - sx * sy) / (len * sxx - sx * sx);
+  const intercept = (sy - slope * sx) / len;
+  let ss = 0;
+  for (let j = 0; j < len; j++) ss += (values[start + j] - (intercept + slope * j)) ** 2;
+  const sd = Math.sqrt(ss / len);
+  for (let j = 0; j < len; j++) {
+    const m = intercept + slope * j;
+    r.middle[start + j] = m;
+    r.upper[start + j] = m + mult * sd;
+    r.lower[start + j] = m - mult * sd;
+  }
+  return r;
+}
+
+/**
+ * Session high/low: within each occurrence of the UTC window [startHour,
+ * endHour) the running high and low, null outside it (so separate sessions
+ * are not joined). Windows that wrap midnight are supported.
+ */
+export function sessionHighLow(
+  bars: Ohlc[],
+  startHour: number,
+  endHour: number,
+): { high: Maybe[]; low: Maybe[] } {
+  const n = bars.length;
+  const high: Maybe[] = nulls(n);
+  const low: Maybe[] = nulls(n);
+  let hh = -Infinity;
+  let ll = Infinity;
+  let inPrev = false;
+  for (let i = 0; i < n; i++) {
+    const h = new Date(bars[i].time).getUTCHours();
+    const inside =
+      startHour <= endHour ? h >= startHour && h < endHour : h >= startHour || h < endHour;
+    if (!inside) {
+      inPrev = false;
+      continue;
+    }
+    if (!inPrev) {
+      hh = -Infinity;
+      ll = Infinity;
+    }
+    inPrev = true;
+    hh = Math.max(hh, bars[i].high);
+    ll = Math.min(ll, bars[i].low);
+    high[i] = hh;
+    low[i] = ll;
+  }
+  return { high, low };
+}
+
+/** Rolling Pearson correlation of two aligned series. */
+export function correlation(a: Maybe[], b: Maybe[], period = 20): Maybe[] {
+  const n = a.length;
+  const out: Maybe[] = nulls(n);
+  for (let i = period - 1; i < n; i++) {
+    let sa = 0;
+    let sb = 0;
+    let saa = 0;
+    let sbb = 0;
+    let sab = 0;
+    let ok = true;
+    for (let j = i - period + 1; j <= i; j++) {
+      const x = a[j];
+      const y = b[j];
+      if (x === null || y === null) {
+        ok = false;
+        break;
+      }
+      sa += x;
+      sb += y;
+      saa += x * x;
+      sbb += y * y;
+      sab += x * y;
+    }
+    if (!ok) continue;
+    const cov = sab - (sa * sb) / period;
+    const va = saa - (sa * sa) / period;
+    const vb = sbb - (sb * sb) / period;
+    if (va <= 0 || vb <= 0) continue;
+    out[i] = Math.max(-1, Math.min(1, cov / Math.sqrt(va * vb)));
+  }
+  return out;
+}
+
+/** Relative strength vs another series: (a/a[n]) / (b/b[n]). Above 1 = outperforming. */
+export function relativeStrength(a: Maybe[], b: Maybe[], period = 50): Maybe[] {
+  return a.map((x, i) => {
+    if (i < period) return null;
+    const x0 = a[i - period];
+    const y = b[i];
+    const y0 = b[i - period];
+    if (x === null || x0 === null || y === null || y0 === null || x0 === 0 || y === 0) return null;
+    return x / x0 / (y / y0);
+  });
+}
+
+/** Spread (a − mult·b) and ratio (a / b) of two aligned series. */
+export function spreadRatio(a: Maybe[], b: Maybe[], mult = 1): { spread: Maybe[]; ratio: Maybe[] } {
+  return {
+    spread: a.map((x, i) => (x === null || b[i] === null ? null : x - mult * (b[i] as number))),
+    ratio: a.map((x, i) =>
+      x === null || b[i] === null || b[i] === 0 ? null : x / (b[i] as number),
+    ),
+  };
+}

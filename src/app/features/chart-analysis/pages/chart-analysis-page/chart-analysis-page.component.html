@@ -81,24 +81,28 @@
     }
 
     <div class="indicator-picker">
-      <button type="button" class="tool" (click)="indicatorMenuOpen.set(!indicatorMenuOpen())">
+      <button type="button" class="tool" (click)="openStudiesDialog()" data-testid="open-studies">
         Indicators
       </button>
-      @if (indicatorMenuOpen()) {
-        <div class="menu indicator-menu">
-          <ul class="menu-list">
-            @for (def of catalogue; track def.id) {
-              <li>
-                <button type="button" (click)="addIndicator(def.id)">
-                  <span>{{ def.name }}</span>
-                  <span class="muted">{{ def.target === 'overlay' ? 'overlay' : 'pane' }}</span>
-                </button>
-              </li>
-            }
-          </ul>
-        </div>
-      }
+      <button type="button" class="tool" (click)="openStudiesDialog('strategies')">Strategies</button>
+      <button
+        type="button"
+        class="tool"
+        [class.active]="editorOpen()"
+        (click)="editorOpen.set(!editorOpen()); dockPreference.set('editor')"
+        title="Pine editor"
+      >
+        Pine
+      </button>
     </div>
+    @if (indicatorMenuOpen()) {
+      <app-indicators-dialog
+        [items]="dialogItems()"
+        [initialTab]="dialogTab()"
+        (picked)="onDialogPick($event)"
+        (closed)="indicatorMenuOpen.set(false)"
+      />
+    }
 
     <button
       type="button"
@@ -573,6 +577,9 @@
           [resolution]="resolution()"
           [overlays]="overlays()"
           [markers]="markers()"
+          [compareBars]="compareBars()"
+          [scriptResults]="scriptResults()"
+          [externalPanes]="externalPanes()"
           (loadMore)="loadOlder()"
           (legend)="onLegend($event)"
           (toolComplete)="onToolComplete()"
@@ -643,7 +650,7 @@
             <button type="button" (click)="objectTreeOpen.set(true); closeContextMenu()">
               Show objects
             </button>
-            <button type="button" (click)="indicatorMenuOpen.set(true); closeContextMenu()">
+            <button type="button" (click)="openStudiesDialog(); closeContextMenu()">
               Add indicator…
             </button>
             @if (cm.price !== null) {
@@ -722,6 +729,9 @@
               <dt>To</dt>
               <dd class="muted">{{ details().to }}</dd>
             </dl>
+            <app-performance-tiles [symbol]="symbol()" />
+            <app-technicals-gauge [bars]="bars()" [timeframe]="resolutionLabel(resolution())" />
+            <app-seasonals [symbol]="symbol()" />
           </aside>
         }
 
@@ -934,8 +944,31 @@
   }
 
   <!-- Active studies: rename-free, TradingView-style list with inline inputs. -->
-  @if (active().length) {
+  @if (active().length || scriptRuns().length || scriptRunning() || scriptError()) {
     <aside class="studies">
+      @for (run of scriptRuns(); track run.item.key) {
+        <div class="study script-study">
+          <span class="study-label">
+            <span class="pine-tag">{{ run.result.kind === 'strategy' ? 'Strategy' : 'Pine' }}</span>
+            {{ run.result.title || run.item.name }}
+          </span>
+          @if (run.result.kind === 'strategy') {
+            <button type="button" class="study-toggle" (click)="testerOpen.set(!testerOpen())" title="Strategy tester">
+              📊
+            </button>
+          }
+          <button type="button" class="study-remove" (click)="removeScript(run.item.key)" title="Remove">✕</button>
+        </div>
+      }
+      @if (scriptRunning()) {
+        <div class="study muted">Running script…</div>
+      }
+      @if (scriptError()) {
+        <div class="study script-error" role="alert">
+          {{ scriptError() }}
+          <button type="button" class="study-remove" (click)="scriptError.set(null)">✕</button>
+        </div>
+      }
       @for (item of active(); track item.uid) {
         <div class="study" [class.hidden-study]="!item.visible">
           <button
@@ -951,13 +984,29 @@
           @for (input of inputsFor(item); track input.key) {
             <label class="study-input">
               {{ input.label }}
-              <input
-                type="number"
-                [value]="item.params[input.key]"
-                [min]="input.min ?? 1"
-                [max]="input.max ?? 500"
-                (change)="setParam(item.uid, input.key, $any($event.target).value)"
-              />
+              @if (input.type === 'select') {
+                <select (change)="setParam(item.uid, input.key, $any($event.target).value)">
+                  @for (opt of input.options ?? []; track opt) {
+                    <option [value]="opt" [selected]="item.params[input.key] === opt">{{ opt }}</option>
+                  }
+                </select>
+              } @else if (input.type === 'symbol') {
+                <input
+                  type="text"
+                  class="symbol-input"
+                  [value]="item.params[input.key]"
+                  (change)="setParam(item.uid, input.key, $any($event.target).value)"
+                />
+              } @else {
+                <input
+                  type="number"
+                  [value]="item.params[input.key]"
+                  [min]="input.min ?? 0"
+                  [max]="input.max ?? 100000"
+                  step="any"
+                  (change)="setParam(item.uid, input.key, $any($event.target).value)"
+                />
+              }
             </label>
           }
           <button
@@ -971,5 +1020,36 @@
         </div>
       }
     </aside>
+  }
+  @if (dockTab(); as tab) {
+    <section class="bottom-panel">
+      @if (editorOpen() && strategyRun() && testerOpen()) {
+        <nav class="dock-tabs" role="tablist">
+          <button type="button" role="tab" [class.active]="tab === 'editor'" (click)="dockPreference.set('editor')">
+            Pine Editor
+          </button>
+          <button type="button" role="tab" [class.active]="tab === 'tester'" (click)="dockPreference.set('tester')">
+            Strategy Tester
+          </button>
+        </nav>
+      }
+      @if (tab === 'editor') {
+        <app-script-editor-panel
+          [symbol]="symbol()"
+          [resolution]="resolution()"
+          (add)="onEditorAdd($event)"
+          (saved)="onEditorSaved()"
+          (closed)="editorOpen.set(false)"
+        />
+      } @else if (strategyRun(); as run) {
+        <app-strategy-tester-panel
+          [result]="run.result"
+          [values]="run.values"
+          [running]="scriptRunning()"
+          (rerun)="rerunStrategy($event)"
+          (closed)="testerOpen.set(false)"
+        />
+      }
+    </section>
   }
 </div>

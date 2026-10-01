@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { INDICATORS, defaultParams, indicatorById } from './registry';
+import { INDICATORS, INDICATOR_CATEGORIES, defaultParams, indicatorById } from './registry';
 import type { Ohlc } from './math';
 
 /**
@@ -37,7 +37,57 @@ const bars: Ohlc[] = Array.from({ length: 300 }, (_, i) => {
   };
 });
 
+/** A second, related-but-different series for the multi-symbol studies. */
+const compareBars: Ohlc[] = bars.map((b, i) => {
+  const k = 1.25 + Math.sin(i / 13) * 0.02;
+  return { ...b, open: b.open * k, high: b.high * k, low: b.low * k, close: b.close * k };
+});
+
 describe('indicator registry', () => {
+  it('gives every indicator a known category and a one-sentence description', () => {
+    for (const def of INDICATORS) {
+      expect(INDICATOR_CATEGORIES, `${def.id} category`).toContain(def.category);
+      expect(def.description.trim().length, `${def.id} description`).toBeGreaterThan(10);
+    }
+  });
+
+  it('declares options for every select input and a default among them', () => {
+    for (const def of INDICATORS) {
+      for (const input of def.inputs.filter((i) => i.type === 'select')) {
+        expect(input.options?.length, `${def.id}.${input.key}`).toBeGreaterThan(0);
+        expect(input.options).toContain(input.default);
+      }
+    }
+  });
+
+  it('marks exactly the indicators with a symbol input as needing compare bars', () => {
+    for (const def of INDICATORS) {
+      const hasSymbol = def.inputs.some((i) => i.type === 'symbol');
+      expect(!!def.needsCompare, def.id).toBe(hasSymbol);
+    }
+  });
+
+  it('returns bar-aligned all-null series for compare studies when no compare bars are given', () => {
+    for (const def of INDICATORS.filter((d) => d.needsCompare)) {
+      const r = def.compute(bars, defaultParams(def));
+      for (const plot of def.plots) {
+        expect(r[plot.key].length).toBe(bars.length);
+        expect(r[plot.key].every((v) => v === null)).toBe(true);
+      }
+    }
+  });
+
+  it('computes every select option without error', () => {
+    for (const def of INDICATORS) {
+      for (const input of def.inputs.filter((i) => i.type === 'select')) {
+        for (const opt of input.options ?? []) {
+          const r = def.compute(bars, { ...defaultParams(def), [input.key]: opt }, { compareBars });
+          for (const plot of def.plots) expect(r[plot.key]?.length).toBe(bars.length);
+        }
+      }
+    }
+  });
+
   it('has unique ids', () => {
     const ids = INDICATORS.map((i) => i.id);
     expect(new Set(ids).size, `duplicate id in ${ids.join(', ')}`).toBe(ids.length);
@@ -49,7 +99,7 @@ describe('indicator registry', () => {
 
   for (const def of INDICATORS) {
     describe(def.id, () => {
-      const result = def.compute(bars, defaultParams(def));
+      const result = def.compute(bars, defaultParams(def), { compareBars });
 
       it('returns a series for every declared plot', () => {
         // The trap: a plot whose key `compute` never returns draws nothing,

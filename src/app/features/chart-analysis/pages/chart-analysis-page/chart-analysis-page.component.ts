@@ -25,6 +25,36 @@ import {
   mergeForming,
 } from '../../datafeed/aggregate';
 import { priceScaleFor } from '../../datafeed/symbol-info';
+import { IndicatorsDialogComponent } from '../../dialog/indicators-dialog.component';
+import type { DialogItem, DialogTab } from '../../dialog/dialog-items';
+import {
+  fundamentalIdOf,
+  studyDefaults,
+  studyDialogItems,
+  studyKind,
+  studyLabel,
+  studyMeta,
+} from '../../studies';
+import { FxFundamentalsService } from '../../panels/fx-fundamentals.service';
+import { DailyBarsService } from '../../panels/daily-bars.service';
+import { FUNDAMENTAL_PANES, stepDifference, type PanePoint } from '../../panels/fx-fundamentals';
+import { PerformanceTilesComponent } from '../../panels/performance-tiles.component';
+import { SeasonalsComponent } from '../../panels/seasonals.component';
+import { TechnicalsGaugeComponent } from '../../panels/technicals-gauge.component';
+import type { ExternalPane } from '../../chart/chart-host.component';
+import { catchError, forkJoin, from, map, of, switchMap as switchMapTo, type Observable } from 'rxjs';
+import {
+  ChartScriptService,
+  type ChartScriptCatalog,
+  type ChartScriptItem,
+} from '../../scripts/chart-script.service';
+import type { ChartScriptResult } from '../../scripts/chart-script.model';
+import type { ScriptInputValues } from '@core/api/scripting.types';
+import { StrategyTesterPanelComponent } from '../../scripts/strategy-tester-panel.component';
+import {
+  ScriptEditorPanelComponent,
+  type ScriptEditorSubmit,
+} from '../../scripts/script-editor-panel.component';
 import {
   INDICATORS,
   defaultParams,
@@ -130,7 +160,18 @@ const PAGE_BARS = 1500;
 @Component({
   selector: 'app-chart-analysis-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, DecimalPipe, DatePipe, ChartHostComponent],
+  imports: [
+    FormsModule,
+    DecimalPipe,
+    DatePipe,
+    ChartHostComponent,
+    IndicatorsDialogComponent,
+    StrategyTesterPanelComponent,
+    ScriptEditorPanelComponent,
+    PerformanceTilesComponent,
+    SeasonalsComponent,
+    TechnicalsGaugeComponent,
+  ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
   host: {
@@ -148,6 +189,12 @@ export class ChartAnalysisPageComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly pageContext = inject(PageContextService);
   private readonly uiCommands = inject(UiCommandService);
+  private readonly chartScripts = inject(ChartScriptService);
+  private readonly fundamentals = inject(FxFundamentalsService);
+  private readonly dailyBars = inject(DailyBarsService);
+
+  /** Fetched FX-fundamental series, keyed by the study's uid. */
+  readonly externalPanes = signal<ExternalPane[]>([]);
 
   private readonly host = viewChild<ChartHostComponent>('host');
 
@@ -167,6 +214,83 @@ export class ChartAnalysisPageComponent {
   readonly active = signal<ActiveIndicator[]>([]);
   readonly legend = signal<LegendSnapshot | null>(null);
   readonly indicatorMenuOpen = signal(false);
+  readonly dialogTab = signal<DialogTab>('indicators');
+
+  /** Pine scripts + strategies the dialog can add; fetched when the dialog first opens. */
+  readonly scriptCatalog = signal<ChartScriptCatalog | null>(null);
+  readonly dialogItems = computed<DialogItem[]>(() => {
+    const items = studyDialogItems();
+    const cat = this.scriptCatalog();
+    if (cat) {
+      for (const it of cat.mine)
+        items.push({
+          kind: it.kind === 'strategy' ? 'strategy' : 'script',
+          id: it.key,
+          name: it.name,
+          description: it.description,
+          category: it.kind === 'strategy' ? 'My scripts' : 'My scripts',
+          tag: 'Pine',
+        });
+      for (const it of cat.strategies)
+        items.push({
+          kind: 'strategy',
+          id: it.key,
+          name: it.name,
+          description: it.description,
+          category: 'Engine strategies',
+          tag: [it.symbol, it.timeframe].filter(Boolean).join(' '),
+        });
+      for (const it of cat.examples)
+        items.push({
+          kind: it.kind === 'strategy' ? 'strategy' : 'script',
+          id: it.key,
+          name: it.name,
+          description: it.description,
+          category: 'Built-in examples',
+          tag: 'Pine',
+        });
+    }
+    return items;
+  });
+
+  /** Pine runs on the chart (indicators and at most one strategy, like TradingView). */
+  readonly scriptRuns = signal<
+    {
+      item: ChartScriptItem;
+      result: ChartScriptResult;
+      values: ScriptInputValues;
+      symbol: string;
+      resolution: TvResolution;
+    }[]
+  >([]);
+  readonly scriptResults = computed(() => this.scriptRuns().map((r) => r.result));
+  readonly strategyRun = computed(
+    () => this.scriptRuns().find((r) => r.result.kind === 'strategy') ?? null,
+  );
+  readonly scriptRunning = signal(false);
+  readonly scriptError = signal<string | null>(null);
+  readonly testerOpen = signal(true);
+  readonly editorOpen = signal(false);
+  /** Which dock tab wins when both the editor and the tester are open. */
+  readonly dockPreference = signal<'editor' | 'tester'>('tester');
+  readonly dockTab = computed<'editor' | 'tester' | null>(() => {
+    const editor = this.editorOpen();
+    const tester = !!this.strategyRun() && this.testerOpen();
+    if (editor && tester) return this.dockPreference();
+    return editor ? 'editor' : tester ? 'tester' : null;
+  });
+
+  /** Other symbols' bars for compare studies, keyed by symbol. */
+  readonly compareBars = signal<Record<string, Bar[]>>({});
+  private readonly compareSymbols = computed(() => {
+    const out = new Set<string>();
+    for (const a of this.active()) {
+      if (!a.visible || !indicatorById(a.defId)?.needsCompare) continue;
+      const sym = String(a.params['symbol'] ?? '').toUpperCase();
+      if (sym && sym !== this.symbol().toUpperCase()) out.add(sym);
+    }
+    return [...out].sort();
+  });
   readonly symbolMenuOpen = signal(false);
   readonly symbolQuery = signal('');
 
@@ -476,6 +600,33 @@ export class ChartAnalysisPageComponent {
 
   constructor() {
     this.loadSymbols();
+
+    // FX-fundamental studies: fetched per symbol, drawn as their own panes.
+    effect(() => {
+      const items = this.active().filter((a) => a.visible && studyKind(a.defId) === 'fundamental');
+      const symbol = this.symbol();
+      untracked(() => this.loadFundamentals(items, symbol));
+    });
+
+    // Compare studies need the other symbol's bars on the same resolution.
+    effect(() => {
+      const symbols = this.compareSymbols();
+      const resolution = this.resolution();
+      untracked(() => void this.loadCompareBars(symbols, resolution));
+    });
+
+    // A Pine run describes ONE symbol+timeframe; re-run on a switch rather than paint
+    // another instrument's plots over this one.
+    effect(() => {
+      const symbol = this.symbol();
+      const resolution = this.resolution();
+      untracked(() => {
+        const runs = this.scriptRuns();
+        if (runs.some((r) => r.symbol !== symbol || r.resolution !== resolution)) {
+          for (const r of runs) this.runScript(r.item, r.values, true);
+        }
+      });
+    });
 
     // Tell the assistant what this page is showing, and what it may do to it.
     //
@@ -1267,15 +1418,190 @@ export class ChartAnalysisPageComponent {
     void this.reload();
   }
 
+  private async loadCompareBars(symbols: string[], resolution: TvResolution): Promise<void> {
+    const now = Date.now();
+    const next: Record<string, Bar[]> = {};
+    await Promise.all(
+      symbols.map(async (sym) => {
+        try {
+          next[sym] = (await this.feed.getBars(sym, resolution, 0, now, PAGE_BARS)).bars;
+        } catch {
+          // Unknown symbol: the study stays empty rather than failing the chart.
+        }
+      }),
+    );
+    // Drop the result if the operator moved on while it loaded.
+    if (resolution !== this.resolution()) return;
+    this.compareBars.set(next);
+  }
+
+  private fundamentalsRequest = 0;
+  private loadFundamentals(items: ActiveIndicator[], symbol: string): void {
+    const request = ++this.fundamentalsRequest;
+    if (!items.length) {
+      this.externalPanes.set([]);
+      return;
+    }
+    const base = symbol.slice(0, 3);
+    const quote = symbol.slice(3, 6);
+    const one = (a: ActiveIndicator): Observable<ExternalPane> => {
+      const id = fundamentalIdOf(a.defId);
+      const pane = (lines: ExternalPane['lines']): ExternalPane => ({ uid: a.uid, lines });
+      switch (id) {
+        case 'rate-differential':
+          return this.fundamentals
+            .rateDifferential(symbol)
+            .pipe(map((pts) => pane([{ title: `${base}−${quote} rate %`, color: '#2962FF', points: pts }])));
+        case 'swap-carry':
+          return from(this.dailyBars.daily(symbol)).pipe(
+            switchMapTo((daily) => this.fundamentals.carryPanes(symbol, daily)),
+            map((c) => {
+              if (c.swapIssue) this.scriptError.set(`Swap / carry: ${c.swapIssue}`);
+              return pane([
+                { title: 'Swap long / lot', color: '#26A69A', points: c.swapLong },
+                { title: 'Swap short / lot', color: '#EF5350', points: c.swapShort },
+              ]);
+            }),
+          );
+        case 'news-pressure':
+          return this.fundamentals
+            .newsPressureDifference(base, quote)
+            .pipe(map((pts) => pane([{ title: `News ${base}−${quote}`, color: '#AB47BC', points: pts, precision: 3 }])));
+        case 'economic-surprise': {
+          const side = String(a.params['side'] ?? 'base − quote');
+          const halfLifeDays = Number(a.params['halfLifeDays'] ?? 30);
+          const series = (ccy: string) => this.fundamentals.surpriseIndex(ccy, { halfLifeDays });
+          const pts$: Observable<PanePoint[]> =
+            side === 'base'
+              ? series(base)
+              : side === 'quote'
+                ? series(quote)
+                : forkJoin([series(base), series(quote)]).pipe(map(([x, y]) => stepDifference(x, y)));
+          return pts$.pipe(
+            map((pts) => pane([{ title: `Surprise ${side === 'base − quote' ? `${base}−${quote}` : side === 'base' ? base : quote}`, color: '#FF6D00', points: pts }])),
+          );
+        }
+        default:
+          return of(pane([]));
+      }
+    };
+    forkJoin(
+      items.map((a) =>
+        one(a).pipe(
+          catchError((err: unknown) => {
+            const title = FUNDAMENTAL_PANES.find((f) => f.id === fundamentalIdOf(a.defId))?.title;
+            this.scriptError.set(`${title ?? a.defId}: ${err instanceof Error ? err.message : 'unavailable'}`);
+            return of({ uid: a.uid, lines: [] } as ExternalPane);
+          }),
+        ),
+      ),
+    )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((panes) => {
+        if (request === this.fundamentalsRequest) this.externalPanes.set(panes);
+      });
+  }
+
+  openStudiesDialog(tab: DialogTab = 'indicators'): void {
+    this.dialogTab.set(tab);
+    this.indicatorMenuOpen.set(true);
+    if (!this.scriptCatalog()) {
+      this.chartScripts
+        .listItems()
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe((cat) => this.scriptCatalog.set(cat));
+    }
+  }
+
+  private scriptItemByKey(key: string): ChartScriptItem | null {
+    const cat = this.scriptCatalog();
+    if (!cat) return null;
+    return [...cat.mine, ...cat.strategies, ...cat.examples].find((i) => i.key === key) ?? null;
+  }
+
+  onDialogPick(item: DialogItem): void {
+    if (item.kind === 'strategy' || item.kind === 'script') {
+      const script = this.scriptItemByKey(item.id);
+      if (script) this.runScript(script, {});
+      this.indicatorMenuOpen.set(false);
+      return;
+    }
+    if (!studyMeta(item.id)) {
+      // Listed for completeness (e.g. COT) but there is no data behind it.
+      this.scriptError.set(`${item.name}: ${item.description ?? 'not available'}`);
+      this.indicatorMenuOpen.set(false);
+      return;
+    }
+    this.addIndicator(item.id);
+  }
+
+  /** Run a Pine script/strategy over the loaded window and paint it. */
+  runScript(item: ChartScriptItem, values: ScriptInputValues, replace = false): void {
+    this.scriptRunning.set(true);
+    this.scriptError.set(null);
+    const symbol = this.symbol();
+    const resolution = this.resolution();
+    this.chartScripts
+      .runOnChart(item, symbol, resolution, values, Math.min(this.bars().length || PAGE_BARS, 5000))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.scriptRunning.set(false);
+          // A run for a symbol the operator has since left is stale.
+          if (symbol !== this.symbol() || resolution !== this.resolution()) return;
+          if (result.error) {
+            this.scriptError.set(`${item.name}: ${result.error}`);
+            return;
+          }
+          this.scriptRuns.update((runs) => {
+            // One strategy at a time (its tester owns the bottom panel); a re-run replaces.
+            const kept = runs.filter(
+              (r) =>
+                r.item.key !== item.key && !(result.kind === 'strategy' && r.result.kind === 'strategy'),
+            );
+            return [...kept, { item, result, values, symbol, resolution }];
+          });
+          if (result.kind === 'strategy' && !replace) {
+            this.testerOpen.set(true);
+            this.dockPreference.set('tester');
+          }
+        },
+        error: (err: unknown) => {
+          this.scriptRunning.set(false);
+          this.scriptError.set(`${item.name}: ${err instanceof Error ? err.message : 'run failed'}`);
+        },
+      });
+  }
+
+  rerunStrategy(values: ScriptInputValues): void {
+    const run = this.strategyRun();
+    if (run) this.runScript(run.item, values, true);
+  }
+
+  removeScript(key: string): void {
+    this.scriptRuns.update((runs) => runs.filter((r) => r.item.key !== key));
+  }
+
+  onEditorAdd(submit: ScriptEditorSubmit): void {
+    this.runScript(this.chartScripts.itemForSource(submit.source, submit.kind, submit.name), {});
+  }
+
+  onEditorSaved(): void {
+    // Refresh "My scripts" in the dialog.
+    this.chartScripts
+      .listItems()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((cat) => this.scriptCatalog.set(cat));
+  }
+
   addIndicator(defId: string): void {
-    const def = indicatorById(defId);
-    if (!def) return;
+    if (!studyMeta(defId)) return;
     this.active.update((list) => [
       ...list,
       {
         uid: `${defId}-${Date.now().toString(36)}-${list.length}`,
         defId,
-        params: defaultParams(def),
+        params: studyDefaults(defId),
         visible: true,
       },
     ]);
@@ -1293,20 +1619,28 @@ export class ChartAnalysisPageComponent {
   }
 
   setParam(uid: string, key: string, raw: string): void {
-    const value = Number(raw);
-    if (!Number.isFinite(value)) return;
+    const item = this.active().find((i) => i.uid === uid);
+    const input = item ? studyMeta(item.defId)?.inputs.find((i) => i.key === key) : undefined;
+    // Select and symbol inputs are strings; everything else must parse as a number.
+    let value: number | string;
+    if (input && (input.type === 'select' || input.type === 'symbol')) {
+      value = input.type === 'symbol' ? raw.trim().toUpperCase() : raw;
+      if (!value) return;
+    } else {
+      value = Number(raw);
+      if (!Number.isFinite(value)) return;
+    }
     this.active.update((list) =>
       list.map((i) => (i.uid === uid ? { ...i, params: { ...i.params, [key]: value } } : i)),
     );
   }
 
   labelFor(item: ActiveIndicator): string {
-    const def = indicatorById(item.defId);
-    return def ? indicatorLabel(def, item.params) : item.defId;
+    return studyLabel(item.defId, item.params);
   }
 
   inputsFor(item: ActiveIndicator) {
-    return indicatorById(item.defId)?.inputs.filter((i) => i.type === 'number') ?? [];
+    return studyMeta(item.defId)?.inputs.filter((i) => i.type !== 'source') ?? [];
   }
 
   onLegend(snapshot: LegendSnapshot): void {
