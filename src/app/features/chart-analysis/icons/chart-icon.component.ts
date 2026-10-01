@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input } from '@an
 import { DomSanitizer } from '@angular/platform-browser';
 import { UI_ICONS } from './ui-icons';
 import { TOOL_ICONS } from './tool-icons';
+import { CHART_TYPE_ICONS } from './chart-type-icons';
 
 /**
  * Line icon in the chart's visual language: 28×28 grid, 1px strokes in
@@ -51,6 +52,7 @@ export class ChartIconComponent {
   readonly markup = computed(() =>
     this.sanitizer.bypassSecurityTrustHtml(
       UI_ICONS[this.name()] ??
+        CHART_TYPE_ICONS[this.name()] ??
         (TOOL_ICONS as Record<string, string>)[this.name()] ??
         UI_ICONS['fallback'],
     ),
@@ -58,5 +60,5 @@ export class ChartIconComponent {
 }
 
 export function hasChartIcon(name: string): boolean {
-  return name in UI_ICONS || name in TOOL_ICONS;
+  return name in UI_ICONS || name in TOOL_ICONS || name in CHART_TYPE_ICONS;
 }

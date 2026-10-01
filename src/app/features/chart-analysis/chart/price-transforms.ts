@@ -284,3 +284,60 @@ function segment(time: number, open: number, close: number, volume: number): Bar
     volume,
   };
 }
+
+/**
+ * Range bars: every bar spans exactly `rangeSize` from high to low.
+ *
+ * The intrabar path is approximated from OHLC the way TradingView's own
+ * history-based range bars do: an up candle is assumed to travel
+ * open → low → high → close, a down candle open → high → low → close (the wick
+ * against the close is printed first). Walking that path, a bar closes the
+ * moment its high-low would exceed `rangeSize`, at the exact boundary price,
+ * and the next bar opens at that close. The final, still-forming bar is
+ * included (its range may be smaller), as on TradingView.
+ */
+export function toRangeBars(bars: Bar[], rangeSize: number): Bar[] {
+  if (bars.length === 0 || !(rangeSize > 0)) return [];
+  const out: Bar[] = [];
+  let open = bars[0].open;
+  let hi = open;
+  let lo = open;
+  let volume = 0;
+  let time = bars[0].time;
+  let guard = 0;
+
+  const emit = (close: number, t: number) => {
+    out.push({ time, open, high: Math.max(hi, close), low: Math.min(lo, close), close, volume });
+    open = hi = lo = close;
+    volume = 0;
+    time = t;
+  };
+
+  for (const bar of bars) {
+    const path =
+      bar.close >= bar.open
+        ? [bar.open, bar.low, bar.high, bar.close]
+        : [bar.open, bar.high, bar.low, bar.close];
+    volume += bar.volume;
+    for (const p of path) {
+      for (;;) {
+        if (guard++ > 200_000) return sequence(out);
+        if (p >= lo + rangeSize) {
+          hi = lo + rangeSize;
+          emit(hi, bar.time);
+        } else if (p <= hi - rangeSize) {
+          lo = hi - rangeSize;
+          emit(lo, bar.time);
+        } else {
+          hi = Math.max(hi, p);
+          lo = Math.min(lo, p);
+          break;
+        }
+      }
+    }
+  }
+  if (hi !== lo || out.length === 0) {
+    out.push({ time, open, high: hi, low: lo, close: bars[bars.length - 1].close, volume });
+  }
+  return sequence(out);
+}

@@ -26,7 +26,10 @@ import {
 } from '../../datafeed/aggregate';
 import { priceScaleFor } from '../../datafeed/symbol-info';
 import { ChartIconComponent } from '../../icons/chart-icon.component';
-import { WatchlistPanelComponent, type WatchHeadline } from '../../watchlist/watchlist-panel.component';
+import {
+  WatchlistPanelComponent,
+  type WatchHeadline,
+} from '../../watchlist/watchlist-panel.component';
 import { IndicatorsDialogComponent } from '../../dialog/indicators-dialog.component';
 import type { DialogItem, DialogTab } from '../../dialog/dialog-items';
 import {
@@ -44,7 +47,15 @@ import { PerformanceTilesComponent } from '../../panels/performance-tiles.compon
 import { SeasonalsComponent } from '../../panels/seasonals.component';
 import { TechnicalsGaugeComponent } from '../../panels/technicals-gauge.component';
 import type { ExternalPane } from '../../chart/chart-host.component';
-import { catchError, forkJoin, from, map, of, switchMap as switchMapTo, type Observable } from 'rxjs';
+import {
+  catchError,
+  forkJoin,
+  from,
+  map,
+  of,
+  switchMap as switchMapTo,
+  type Observable,
+} from 'rxjs';
 import {
   ChartScriptService,
   type ChartScriptCatalog,
@@ -98,6 +109,7 @@ import type { PriceOverlay } from '../../overlays/overlay-renderer';
 import type { ChartMarker } from '../../chart/chart-host.component';
 import {
   CHART_TIMEZONES,
+  timezoneOffsetMinutes,
   ChartLayoutStore,
   type ChartLayout,
   type StudyTemplate,
@@ -134,6 +146,99 @@ const RESOLUTION_LABELS: Record<TvResolution, string> = {
   '1M': '1M',
 };
 
+const RESOLUTION_GROUPS: Array<{
+  label: string;
+  items: Array<{ id: TvResolution; name: string }>;
+}> = [
+  {
+    label: 'Minutes',
+    items: [
+      { id: '1', name: '1 minute' },
+      { id: '5', name: '5 minutes' },
+      { id: '15', name: '15 minutes' },
+      { id: '30', name: '30 minutes' },
+    ],
+  },
+  {
+    label: 'Hours',
+    items: [
+      { id: '60', name: '1 hour' },
+      { id: '240', name: '4 hours' },
+    ],
+  },
+  {
+    label: 'Days',
+    items: [
+      { id: '1D', name: '1 day' },
+      { id: '1W', name: '1 week' },
+      { id: '1M', name: '1 month' },
+    ],
+  },
+];
+
+const DAY = 86_400_000;
+/** TradingView's bottom-bar presets: each picks the interval it shows the span at. */
+const RANGE_PRESETS: Array<{
+  id: string;
+  title: string;
+  resolution: TvResolution;
+  spanMs: number | 'ytd' | 'all';
+}> = [
+  { id: '1D', title: '1 day in 1 minute intervals', resolution: '1', spanMs: DAY },
+  { id: '5D', title: '5 days in 5 minute intervals', resolution: '5', spanMs: 5 * DAY },
+  { id: '1M', title: '1 month in 30 minute intervals', resolution: '30', spanMs: 30 * DAY },
+  { id: '3M', title: '3 months in 1 hour intervals', resolution: '60', spanMs: 91 * DAY },
+  { id: '6M', title: '6 months in 4 hour intervals', resolution: '240', spanMs: 182 * DAY },
+  { id: 'YTD', title: 'Year to date in 1 day intervals', resolution: '1D', spanMs: 'ytd' },
+  { id: '1Y', title: '1 year in 1 day intervals', resolution: '1D', spanMs: 365 * DAY },
+  { id: '5Y', title: '5 years in 1 week intervals', resolution: '1W', spanMs: 5 * 365 * DAY },
+  { id: 'All', title: 'All data in 1 month intervals', resolution: '1M', spanMs: 'all' },
+];
+
+type ToolbarMenu = 'interval' | 'style' | 'templates' | 'overlays' | 'alert' | 'split' | 'tz';
+
+/** The chart-type menu, grouped as TradingView groups it. TPO and Session volume profile toggle studies. */
+type StyleChoice = ChartStyle | 'tpo' | 'session-vp';
+const STYLE_GROUPS: Array<Array<{ id: StyleChoice; label: string }>> = [
+  [
+    { id: 'bars', label: 'Bars' },
+    { id: 'candles', label: 'Candles' },
+    { id: 'hollow', label: 'Hollow candles' },
+    { id: 'vol-candle', label: 'Volume candles' },
+  ],
+  [
+    { id: 'line', label: 'Line' },
+    { id: 'line-markers', label: 'Line with markers' },
+    { id: 'stepline', label: 'Step line' },
+  ],
+  [
+    { id: 'area', label: 'Area' },
+    { id: 'hlc-area', label: 'HLC area' },
+    { id: 'baseline', label: 'Baseline' },
+  ],
+  [
+    { id: 'column', label: 'Columns' },
+    { id: 'hilo', label: 'High-low' },
+    { id: 'hlc-bars', label: 'HLC bars' },
+  ],
+  [
+    { id: 'tpo', label: 'Time price opportunity' },
+    { id: 'session-vp', label: 'Session volume profile' },
+  ],
+  [
+    { id: 'heikin-ashi', label: 'Heikin Ashi' },
+    { id: 'renko', label: 'Renko' },
+    { id: 'line-break', label: 'Line break' },
+    { id: 'kagi', label: 'Kagi' },
+    { id: 'pnf', label: 'Point & figure' },
+    { id: 'range', label: 'Range' },
+  ],
+];
+const STYLE_STUDY: Partial<Record<StyleChoice, string>> = {
+  tpo: 'profile:tpo',
+  'session-vp': 'profile:vp-session',
+};
+
 const CHART_STYLES: Array<{ id: ChartStyle; label: string }> = [
   { id: 'candles', label: 'Candles' },
   { id: 'hollow', label: 'Hollow candles' },
@@ -154,6 +259,7 @@ const CHART_STYLES: Array<{ id: ChartStyle; label: string }> = [
   { id: 'line-break', label: 'Line Break' },
   { id: 'kagi', label: 'Kagi' },
   { id: 'pnf', label: 'Point & Figure' },
+  { id: 'range', label: 'Range' },
 ];
 
 /** How many bars to pull per request / per scroll-back page. */
@@ -225,6 +331,138 @@ export class ChartAnalysisPageComponent {
   readonly resolutions = SUPPORTED_RESOLUTIONS;
   readonly resolutionLabel = (r: TvResolution) => RESOLUTION_LABELS[r] ?? r;
   readonly chartStyles = CHART_STYLES;
+  readonly chartStyleGroups = STYLE_GROUPS;
+  readonly resolutionGroups = RESOLUTION_GROUPS;
+
+  /** One open toolbar menu at a time, as in TradingView. */
+  readonly openMenu = signal<ToolbarMenu | null>(null);
+  toggleMenu(menu: ToolbarMenu, ev: Event): void {
+    ev.stopPropagation();
+    this.layoutMenuOpen.set(false);
+    this.openMenu.set(this.openMenu() === menu ? null : menu);
+  }
+
+  readonly styleLabel = computed(
+    () => CHART_STYLES.find((s) => s.id === this.style())?.label ?? this.style(),
+  );
+
+  isStyleSelected(id: StyleChoice): boolean {
+    const study = STYLE_STUDY[id];
+    return study ? this.active().some((a) => a.defId === study) : this.style() === id;
+  }
+
+  pickStyle(id: StyleChoice): void {
+    const study = STYLE_STUDY[id];
+    if (study) {
+      const existing = this.active().find((a) => a.defId === study);
+      if (existing) this.removeIndicator(existing.uid);
+      else this.addIndicator(study);
+    } else {
+      this.style.set(id as ChartStyle);
+    }
+    this.openMenu.set(null);
+  }
+
+  readonly overlayCount = computed(
+    () =>
+      [
+        this.showOverlays(),
+        this.showEvents(),
+        this.showVolumeProfile(),
+        this.showSupportResistance(),
+        this.showStructure(),
+        this.deltaOn(),
+      ].filter(Boolean).length,
+  );
+
+  readonly alertPrice = signal<number>(0);
+  openAlertDraft(ev: Event): void {
+    this.alertPrice.set(Number((this.bars().at(-1)?.close ?? 0).toFixed(this.precision())));
+    this.toggleMenu('alert', ev);
+  }
+
+  readonly rangePresets = RANGE_PRESETS;
+  /** A preset waiting for its interval's bars to load before the window is applied. */
+  private pendingRange: { fromMs: number; toMs: number } | 'all' | null = null;
+
+  applyRangePreset(id: string): void {
+    const p = RANGE_PRESETS.find((r) => r.id === id);
+    if (!p) return;
+    const now = Date.now();
+    this.pendingRange =
+      p.spanMs === 'all'
+        ? 'all'
+        : {
+            fromMs:
+              p.spanMs === 'ytd' ? Date.UTC(new Date(now).getUTCFullYear(), 0, 1) : now - p.spanMs,
+            toMs: now,
+          };
+    if (this.resolution() !== p.resolution) this.selectResolution(p.resolution);
+    else this.flushPendingRange();
+  }
+
+  goToDate(value: string): void {
+    const t = Date.parse(`${value}T00:00:00Z`);
+    if (!Number.isFinite(t)) return;
+    // Centre the day: a window the width of what is on screen, around the date.
+    const span = Math.max((resolutionMs(this.resolution()) ?? DAY) * 120, DAY);
+    this.pendingRange = { fromMs: t - span / 2, toMs: t + span / 2 };
+    this.flushPendingRange();
+  }
+
+  private flushPendingRange(): void {
+    const host = this.host();
+    const r = this.pendingRange;
+    if (!host || !r || !this.bars().length) return;
+    if (r === 'all') host.fitContent();
+    else host.setVisibleRange(r.fromMs, r.toMs);
+    this.pendingRange = null;
+  }
+
+  toggleEditor(): void {
+    const open = this.dockTab() === 'editor';
+    this.editorOpen.set(!open);
+    if (!open) this.dockPreference.set('editor');
+  }
+
+  toggleTester(): void {
+    if (this.dockTab() === 'tester') {
+      this.testerOpen.set(false);
+    } else {
+      this.testerOpen.set(true);
+      this.dockPreference.set('tester');
+    }
+  }
+
+  autoScale(): void {
+    this.scaleMode.set('normal');
+    this.host()?.autoScalePrice();
+  }
+
+  /** Bottom-bar clock on the chart's timezone, ticking each second like TradingView's. */
+  readonly clock = signal('');
+  readonly timezoneShort = computed(() => {
+    const zone = this.timezone();
+    if (zone === 'UTC') return 'UTC';
+    const offset = timezoneOffsetMinutes(zone, Date.now());
+    const sign = offset >= 0 ? '+' : '−';
+    const h = Math.floor(Math.abs(offset) / 60);
+    const m = Math.abs(offset) % 60;
+    return `(UTC${sign}${h}${m ? ':' + String(m).padStart(2, '0') : ''})`;
+  });
+  private tickClock(): void {
+    const zone = this.timezone();
+    const now = Date.now();
+    const shifted = new Date(
+      now + (zone === 'UTC' ? 0 : timezoneOffsetMinutes(zone, now) * 60_000),
+    );
+    this.clock.set(shifted.toISOString().slice(11, 19));
+  }
+
+  readonly currentLayoutName = computed(() => {
+    this.layoutStore.layouts();
+    return this.layoutStore.lastLayout()?.name ?? 'Unnamed';
+  });
   readonly catalogue = INDICATORS;
 
   readonly symbols = signal<CurrencyPairDto[]>([]);
@@ -379,7 +617,12 @@ export class ChartAnalysisPageComponent {
     const a = this.articles()[0];
     if (!a) return null;
     const mins = Math.max(0, Math.round((Date.now() - Date.parse(a.publishedAtUtc)) / 60_000));
-    const at = mins < 60 ? `${mins} min ago` : mins < 1440 ? `${Math.round(mins / 60)} h ago` : `${Math.round(mins / 1440)} d ago`;
+    const at =
+      mins < 60
+        ? `${mins} min ago`
+        : mins < 1440
+          ? `${Math.round(mins / 60)} h ago`
+          : `${Math.round(mins / 1440)} d ago`;
     return { title: a.title, source: a.sourceName, at };
   });
 
@@ -574,6 +817,8 @@ export class ChartAnalysisPageComponent {
   closeRailFlyout(): void {
     this.railFlyout.set(null);
     this.vpMenuOpen.set(false);
+    this.openMenu.set(null);
+    this.layoutMenuOpen.set(false);
   }
 
   /** Flyout contents for the open group. */
@@ -821,6 +1066,19 @@ export class ChartAnalysisPageComponent {
       ]);
       wanted.delete('');
       untracked(() => this.syncPriceSubscriptions(wanted));
+    });
+
+    // Ticking clock, and presets applied once their interval's bars are in.
+    this.tickClock();
+    const clockTimer = setInterval(() => this.tickClock(), 1000);
+    this.destroyRef.onDestroy(() => clearInterval(clockTimer));
+    effect(() => {
+      this.bars();
+      this.timezone();
+      untracked(() => {
+        this.tickClock();
+        queueMicrotask(() => this.flushPendingRange());
+      });
     });
 
     // Remember the dock state, and keep the headline under the watchlist on the current symbol.
@@ -1510,7 +1768,11 @@ export class ChartAnalysisPageComponent {
         case 'rate-differential':
           return this.fundamentals
             .rateDifferential(symbol)
-            .pipe(map((pts) => pane([{ title: `${base}−${quote} rate %`, color: '#2962FF', points: pts }])));
+            .pipe(
+              map((pts) =>
+                pane([{ title: `${base}−${quote} rate %`, color: '#2962FF', points: pts }]),
+              ),
+            );
         case 'swap-carry':
           return from(this.dailyBars.daily(symbol)).pipe(
             switchMapTo((daily) => this.fundamentals.carryPanes(symbol, daily)),
@@ -1525,7 +1787,13 @@ export class ChartAnalysisPageComponent {
         case 'news-pressure':
           return this.fundamentals
             .newsPressureDifference(base, quote)
-            .pipe(map((pts) => pane([{ title: `News ${base}−${quote}`, color: '#AB47BC', points: pts, precision: 3 }])));
+            .pipe(
+              map((pts) =>
+                pane([
+                  { title: `News ${base}−${quote}`, color: '#AB47BC', points: pts, precision: 3 },
+                ]),
+              ),
+            );
         case 'economic-surprise': {
           const side = String(a.params['side'] ?? 'base − quote');
           const halfLifeDays = Number(a.params['halfLifeDays'] ?? 30);
@@ -1535,9 +1803,19 @@ export class ChartAnalysisPageComponent {
               ? series(base)
               : side === 'quote'
                 ? series(quote)
-                : forkJoin([series(base), series(quote)]).pipe(map(([x, y]) => stepDifference(x, y)));
+                : forkJoin([series(base), series(quote)]).pipe(
+                    map(([x, y]) => stepDifference(x, y)),
+                  );
           return pts$.pipe(
-            map((pts) => pane([{ title: `Surprise ${side === 'base − quote' ? `${base}−${quote}` : side === 'base' ? base : quote}`, color: '#FF6D00', points: pts }])),
+            map((pts) =>
+              pane([
+                {
+                  title: `Surprise ${side === 'base − quote' ? `${base}−${quote}` : side === 'base' ? base : quote}`,
+                  color: '#FF6D00',
+                  points: pts,
+                },
+              ]),
+            ),
           );
         }
         default:
@@ -1549,7 +1827,9 @@ export class ChartAnalysisPageComponent {
         one(a).pipe(
           catchError((err: unknown) => {
             const title = FUNDAMENTAL_PANES.find((f) => f.id === fundamentalIdOf(a.defId))?.title;
-            this.scriptError.set(`${title ?? a.defId}: ${err instanceof Error ? err.message : 'unavailable'}`);
+            this.scriptError.set(
+              `${title ?? a.defId}: ${err instanceof Error ? err.message : 'unavailable'}`,
+            );
             return of({ uid: a.uid, lines: [] } as ExternalPane);
           }),
         ),
@@ -1616,7 +1896,8 @@ export class ChartAnalysisPageComponent {
             // One strategy at a time (its tester owns the bottom panel); a re-run replaces.
             const kept = runs.filter(
               (r) =>
-                r.item.key !== item.key && !(result.kind === 'strategy' && r.result.kind === 'strategy'),
+                r.item.key !== item.key &&
+                !(result.kind === 'strategy' && r.result.kind === 'strategy'),
             );
             return [...kept, { item, result, values, symbol, resolution }];
           });
@@ -1627,7 +1908,9 @@ export class ChartAnalysisPageComponent {
         },
         error: (err: unknown) => {
           this.scriptRunning.set(false);
-          this.scriptError.set(`${item.name}: ${err instanceof Error ? err.message : 'run failed'}`);
+          this.scriptError.set(
+            `${item.name}: ${err instanceof Error ? err.message : 'run failed'}`,
+          );
         },
       });
   }
@@ -1905,6 +2188,12 @@ export class ChartAnalysisPageComponent {
     this.contextMenu.set(null);
     const price = menu?.price;
     if (price === null || price === undefined) return;
+    this.createAlertAt(price);
+  }
+
+  /** Create a PriceLevel alert at `price`, above or below the last close. */
+  createAlertAt(price: number): void {
+    if (!Number.isFinite(price) || price <= 0) return;
 
     const digits = this.precision();
     const symbol = this.symbol();
