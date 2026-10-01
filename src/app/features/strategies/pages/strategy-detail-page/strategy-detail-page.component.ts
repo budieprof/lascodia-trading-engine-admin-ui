@@ -2028,6 +2028,15 @@ export class StrategyDetailPageComponent implements OnInit {
       valueFormatter: (p: any) => (p.value != null ? p.value.toFixed(3) : '—'),
     },
     {
+      colId: 'oosWinRate',
+      headerName: 'Win %',
+      headerTooltip:
+        'Out-of-sample win rate: winning OOS trades / all OOS trades, pooled over every window',
+      width: 100,
+      valueGetter: (p: any) => this.oosWinRate(p.data),
+      valueFormatter: (p: any) => (p.value != null ? `${(p.value * 100).toFixed(1)}%` : '—'),
+    },
+    {
       field: 'startedAt',
       headerName: 'Started',
       flex: 1,
@@ -2035,6 +2044,35 @@ export class StrategyDetailPageComponent implements OnInit {
       valueFormatter: (p: any) => this.relativeTime.transform(p.value),
     },
   ];
+
+  /** Pooled OOS win rate from windowResultsJson (each window's OosWinRate weighted by its OosTotalTrades); null when unknown. */
+  private readonly oosWinRateCache = new Map<number, number | null>();
+  private oosWinRate(run: WalkForwardRunDto | undefined): number | null {
+    if (!run?.windowResultsJson) return null;
+    if (this.oosWinRateCache.has(run.id)) return this.oosWinRateCache.get(run.id)!;
+    let rate: number | null = null;
+    try {
+      const windows = JSON.parse(run.windowResultsJson) as Array<{
+        OosTotalTrades?: number;
+        OosWinRate?: number;
+      }>;
+      let trades = 0;
+      let wins = 0;
+      for (const w of Array.isArray(windows) ? windows : []) {
+        const n = Number(w?.OosTotalTrades ?? 0);
+        const wr = Number(w?.OosWinRate);
+        if (n > 0 && Number.isFinite(wr)) {
+          trades += n;
+          wins += wr * n;
+        }
+      }
+      rate = trades > 0 ? wins / trades : null;
+    } catch {
+      rate = null;
+    }
+    this.oosWinRateCache.set(run.id, rate);
+    return rate;
+  }
 
   onBacktestRowClick(run: BacktestRunDto): void {
     this.router.navigate(['/backtests', run.id]);
