@@ -21,6 +21,7 @@ import {
   HistogramSeries,
   LineSeries,
   LineStyle,
+  LineType,
   createChart,
   createSeriesMarkers,
   type CandlestickData,
@@ -60,6 +61,15 @@ import {
 import { marketStructure } from '../overlays/market-structure';
 import { timezoneOffsetMinutes } from '../workspace/layout-store.service';
 import { EventMarksRenderer, type EventMark } from '../overlays/event-marks-renderer';
+import { ProfileRenderer } from '../profiles/profile-renderer';
+import { computeProfileStudy } from '../profiles/profile-studies';
+import { PatternRenderer } from '../patterns/pattern-renderer';
+import { detectCandlestickPatterns, type CandleTrendFilter } from '../patterns/candlestick-patterns';
+import { detectChartPatterns } from '../patterns/chart-patterns';
+import { renderScriptResult, type ScriptRenderHandle } from '../scripts/script-renderer';
+import type { ChartScriptResult } from '../scripts/chart-script.model';
+import { alignToBars, type PanePoint } from '../panels/fx-fundamentals';
+import { ALL_PATTERNS, profileIdOf, studyKind, studySubId } from '../studies';
 
 /**
  * Chart styles the toolbar can switch between — the 18 of TradingView's
@@ -95,6 +105,12 @@ const PRICE_BASED: ReadonlySet<ChartStyle> = new Set<ChartStyle>([
   'pnf',
   'line-break',
 ]);
+
+/** A pane of externally fetched series (FX fundamentals). */
+export interface ExternalPane {
+  uid: string;
+  lines: { title: string; color: string; points: PanePoint[]; precision?: number }[];
+}
 
 /** An indicator the operator has added to this chart. */
 export interface ActiveIndicator {
@@ -239,6 +255,14 @@ export class ChartHostComponent implements OnDestroy {
   readonly boxSizeAtr = input<number>(1);
   /** Which chart this panel is, so it renders only its own drawings. */
   readonly symbol = input<string>('');
+  /** Bars of other symbols, keyed by symbol, for compare studies (correlation, spread…). */
+  readonly compareBars = input<Record<string, Bar[]>>({});
+  /** Pine indicator / strategy runs to paint on this chart. */
+  readonly scriptResults = input<ChartScriptResult[]>([]);
+  /** Externally sourced series (FX fundamentals), each in its own pane. */
+  readonly externalPanes = input<ExternalPane[]>([]);
+  /** Whether strategy entry/exit arrows are drawn. */
+  readonly showScriptTrades = input<boolean>(true);
   readonly resolution = input<string>('');
 
   /** Raised when the visible range reaches the oldest bar we hold. */
@@ -378,6 +402,23 @@ export class ChartHostComponent implements OnDestroy {
   );
   private markerApi: ISeriesMarkersPluginApi<Time> | null = null;
   private readonly eventRenderer = new EventMarksRenderer(() => this.chart);
+  /** One renderer per active profile study, keyed by the study's uid. */
+  private profileRenderers = new Map<string, ProfileRenderer>();
+  /** Every active pattern study paints through this one renderer. */
+  private readonly patternRenderer = new PatternRenderer(
+    () => this.price,
+    // Patterns run on the PLOTTED bars, whose times are already zone-shifted.
+    (ms) => {
+      const x = this.chart?.timeScale().timeToCoordinate(asTime(ms));
+      return x === null || x === undefined ? null : Number(x);
+    },
+    () => this.theme.theme() === 'dark',
+  );
+  /** UTC ms → x, for studies computed on the unshifted bars. */
+  private readonly utcToX = (ms: number): number | null => {
+    const x = this.chart?.timeScale().timeToCoordinate(asTime(ms + this.timezoneShiftMs(ms)));
+    return x === null || x === undefined ? null : Number(x);
+  };
 
   constructor() {
     // Create once the view exists, then keep it in step with inputs. Each
@@ -404,7 +445,12 @@ export class ChartHostComponent implements OnDestroy {
       // and the studies have to be recomputed against what is actually drawn.
       this.bars();
       this.style();
-      untracked(() => this.applyIndicators(active, this.plotted));
+      this.compareBars();
+      untracked(() => {
+        this.applyIndicators(active, this.plotted);
+        this.applyPatterns(active);
+        this.applyProfiles(active);
+      });
     });
 
     // Drawing state → renderer. Reads the store's signals so any mutation
@@ -452,6 +498,25 @@ export class ChartHostComponent implements OnDestroy {
       );
     });
 
+    // Pine runs. Re-rendered when the price series is replaced (style, timezone, theme),
+    // because the script's primitives and panes hang off that series.
+    effect(() => {
+      const results = this.scriptResults();
+      const trades = this.showScriptTrades();
+      this.style();
+      this.timezone();
+      this.theme.theme();
+      untracked(() => this.applyScripts(results, trades));
+    });
+
+    effect(() => {
+      const panes = this.externalPanes();
+      this.timezone();
+      this.theme.theme();
+      this.bars();
+      untracked(() => this.applyExternalPanes(panes));
+    });
+
     effect(() => {
       const overlays = this.overlays();
       untracked(() => this.overlayRenderer.setOverlays(overlays));
@@ -489,6 +554,8 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
+    for (const h of this.scriptHandles) h.dispose();
+    this.scriptHandles = [];
     this.resizeObserver?.disconnect();
     this.controller.detach();
     this.chart?.remove();
@@ -688,6 +755,7 @@ export class ChartHostComponent implements OnDestroy {
       // what they say. Debounced: this fires on every frame of a drag, and recomputing a
       // profile per frame would make the pan stutter.
       this.scheduleAnalysis();
+      this.scheduleVisibleProfiles();
     });
 
     this.applyData(this.bars(), this.style(), this.showVolume(), this.precision());
@@ -921,6 +989,11 @@ export class ChartHostComponent implements OnDestroy {
       this.price.attachPrimitive(this.overlayRenderer);
       this.price.attachPrimitive(this.analysisRenderer);
       this.price.attachPrimitive(this.eventRenderer);
+      this.price.attachPrimitive(this.patternRenderer);
+      // The series was replaced (style change, or new bars), and every primitive hanging off
+      // the old one went with it: profiles are re-made by the indicators effect, Pine runs here.
+      this.profileRenderers.clear();
+      this.applyScripts(this.scriptResults(), this.showScriptTrades());
       this.markerApi = createSeriesMarkers(this.price, []);
       this.applyMarkers(this.markers());
     }
@@ -1058,12 +1131,175 @@ export class ChartHostComponent implements OnDestroy {
     def: IndicatorDef,
     ohlc: Ohlc[],
   ): Record<string, Array<number | null>> {
-    const cacheKey = `${item.uid}:${JSON.stringify(item.params)}:${ohlc.length}:${ohlc[0]?.time ?? 0}`;
+    // Compare studies also depend on the other symbol's bars, so those are part of the key.
+    const symbol = def.needsCompare ? String(item.params['symbol'] ?? '').toUpperCase() : '';
+    const compare = symbol ? this.compareBars()[symbol] : undefined;
+    const cacheKey = `${item.uid}:${JSON.stringify(item.params)}:${ohlc.length}:${ohlc[0]?.time ?? 0}:${symbol}:${compare?.length ?? 0}`;
     const hit = this.computedCache.get(cacheKey);
     if (hit) return hit;
-    const computed = def.compute(ohlc, item.params);
+    const computed = def.compute(
+      ohlc,
+      item.params,
+      // Same zone shift as the plotted bars, or alignByTime would pair the wrong bars.
+      compare ? { compareBars: this.shiftForTimezone(compare, this.timezone()) } : undefined,
+    );
     this.computedCache.set(cacheKey, computed);
     return computed;
+  }
+
+  private externalSeries: ISeriesApi<'Line'>[] = [];
+  private applyExternalPanes(panes: ExternalPane[]): void {
+    if (!this.chart) return;
+    for (const s of this.externalSeries) {
+      try {
+        this.chart.removeSeries(s);
+      } catch {
+        // Went with a rebuilt chart.
+      }
+    }
+    this.externalSeries = [];
+    for (const pane of panes) {
+      const paneIndex = this.chart.panes().length;
+      for (const line of pane.lines) {
+        const s = this.chart.addSeries(
+          LineSeries,
+          {
+            color: line.color,
+            lineWidth: 2,
+            // Policy rates, swaps and roll-ups are step functions: a value holds until the next.
+            lineType: LineType.WithSteps,
+            priceLineVisible: false,
+            title: line.title,
+            priceFormat: { type: 'price', precision: line.precision ?? 2, minMove: 10 ** -(line.precision ?? 2) },
+          },
+          paneIndex,
+        );
+        // Sampled onto the chart's own bars: every distinct time a series carries becomes a
+        // slot on the SHARED time axis, so a feed with its own cadence (news roll-ups every few
+        // minutes) would otherwise wedge thousands of slots between the bars and squash them.
+        const raw = this.bars();
+        const values = alignToBars(line.points, raw);
+        s.setData(
+          raw
+            .map((b, i) => ({ time: asTime(b.time + this.timezoneShiftMs(b.time)), value: values[i] }))
+            .filter((d): d is { time: Time; value: number } => d.value !== null && d.value !== undefined),
+        );
+        this.externalSeries.push(s);
+      }
+    }
+  }
+
+  private scriptHandles: ScriptRenderHandle[] = [];
+  private applyScripts(results: ChartScriptResult[], showTrades: boolean): void {
+    for (const h of this.scriptHandles) {
+      try {
+        h.dispose();
+      } catch {
+        // Pane already gone with a rebuilt chart.
+      }
+    }
+    this.scriptHandles = [];
+    if (!this.chart || !this.price) return;
+    for (const r of results) {
+      this.scriptHandles.push(
+        renderScriptResult(this.chart, this.price, r, {
+          shiftMs: (ms) => this.timezoneShiftMs(ms),
+          showTrades,
+          pricePrecision: this.precision(),
+        }),
+      );
+    }
+  }
+
+  /** Candlestick + chart-pattern studies → the shared pattern renderer. */
+  private applyPatterns(active: ActiveIndicator[]): void {
+    const bars = this.plotted;
+    const studies = active.filter((a) => a.visible && studyKind(a.defId) !== 'indicator');
+    const candles = studies.filter((a) => studyKind(a.defId) === 'candle-pattern');
+    const charts = studies.filter((a) => studyKind(a.defId) === 'chart-pattern');
+    this.patternRenderer.setBars(bars);
+
+    const candleHits = candles.flatMap((a) => {
+      const sub = studySubId(a.defId);
+      return detectCandlestickPatterns(bars, {
+        ids: sub === ALL_PATTERNS ? undefined : [sub],
+        trend: (a.params['trend'] as CandleTrendFilter) ?? 'sma50',
+      });
+    });
+    // Two studies can cover the same pattern ("All" plus one specific); mark each bar once.
+    const seen = new Set<string>();
+    this.patternRenderer.setCandlestickHits(
+      candleHits.filter((h) => {
+        const k = `${h.index}:${h.id}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      }),
+    );
+
+    const chartHits = charts.flatMap((a) => {
+      const sub = studySubId(a.defId);
+      return detectChartPatterns(bars, {
+        ids: sub === ALL_PATTERNS ? undefined : [sub],
+        pivotDepth: Number(a.params['pivotDepth'] ?? 5),
+        tolerance: Number(a.params['tolerance'] ?? 0.1),
+        maxPerType: Number(a.params['maxPerType'] ?? 3),
+      });
+    });
+    const seenChart = new Set<string>();
+    this.patternRenderer.setChartPatterns(
+      chartHits.filter((h) => {
+        const k = `${h.id}:${h.startIndex}:${h.endIndex}`;
+        if (seenChart.has(k)) return false;
+        seenChart.add(k);
+        return true;
+      }),
+    );
+  }
+
+  /**
+   * Profile studies. Computed on the UNSHIFTED bars, because session windows are
+   * defined on the UTC clock; drawn through `utcToX`, which applies the shift.
+   */
+  private applyProfiles(active: ActiveIndicator[]): void {
+    if (!this.price) return;
+    const wanted = active.filter((a) => a.visible && studyKind(a.defId) === 'profile');
+    const keep = new Set(wanted.map((a) => a.uid));
+    for (const [uid, r] of [...this.profileRenderers]) {
+      if (!keep.has(uid)) {
+        this.price.detachPrimitive(r);
+        this.profileRenderers.delete(uid);
+      }
+    }
+    const bars = this.bars();
+    const range = this.chart?.timeScale().getVisibleLogicalRange() ?? null;
+    for (const a of wanted) {
+      let r = this.profileRenderers.get(a.uid);
+      if (!r) {
+        r = new ProfileRenderer(() => this.price, this.utcToX);
+        this.price.attachPrimitive(r);
+        this.profileRenderers.set(a.uid, r);
+      }
+      r.setModel(
+        computeProfileStudy(
+          profileIdOf(a.defId),
+          bars,
+          a.params,
+          range ? { from: range.from, to: range.to } : null,
+        ),
+      );
+    }
+  }
+
+  /** The visible-range profile follows pans; debounced like the analysis overlays. */
+  private profileTimer: ReturnType<typeof setTimeout> | null = null;
+  private scheduleVisibleProfiles(): void {
+    if (!this.indicators().some((a) => a.visible && a.defId === 'profile:vp-visible')) return;
+    if (this.profileTimer !== null) clearTimeout(this.profileTimer);
+    this.profileTimer = setTimeout(() => {
+      this.profileTimer = null;
+      this.applyProfiles(this.indicators());
+    }, 120);
   }
 
   private createIndicatorSeries(item: ActiveIndicator, def: IndicatorDef): IndicatorSeries | null {
@@ -1088,6 +1324,17 @@ export class ChartHostComponent implements OnDestroy {
                 lineWidth: (plot.lineWidth ?? 2) as DeepPartial<1 | 2 | 3 | 4>,
                 priceLineVisible: false,
                 lastValueVisible: def.target === 'overlay',
+                // An overlay shares the price scale; without the symbol's precision the axis
+                // falls back to the library default of 2 decimals (1.14 for EURUSD).
+                ...(def.target === 'overlay'
+                  ? {
+                      priceFormat: {
+                        type: 'price' as const,
+                        precision: this.precision(),
+                        minMove: 1 / 10 ** this.precision(),
+                      },
+                    }
+                  : {}),
               },
               paneIndex,
             );

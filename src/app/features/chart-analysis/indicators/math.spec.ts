@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as M5 from './math';
 import {
   adx,
   atr,
@@ -876,5 +877,299 @@ describe('standardErrorBands', () => {
     const r = standardErrorBands(line, 21, 2);
     expect(r.upper[59] as number).toBeCloseTo(r.middle[59] as number, 6);
     expect(r.lower[59] as number).toBeCloseTo(r.middle[59] as number, 6);
+  });
+});
+
+// ── Fifth wave: TradingView built-in parity ────────────────────────────────
+
+const mk = (
+  i: number,
+  o: number,
+  h: number,
+  l: number,
+  c: number,
+  v = 100,
+  hourMs = 3_600_000,
+): Ohlc5 => ({
+  time: Date.UTC(2026, 0, 5) + i * hourMs, // 2026-01-05 is a Monday
+  open: o,
+  high: h,
+  low: l,
+  close: c,
+  volume: v,
+});
+type Ohlc5 = import('./math').Ohlc;
+const flatBars = (closes: number[]): Ohlc5[] => closes.map((c, i) => mk(i, c, c + 1, c - 1, c));
+
+describe('fifth wave', () => {
+  it('alignByTime is an as-of join and never borrows a future bar', () => {
+    const a = [mk(0, 1, 1, 1, 1), mk(1, 1, 1, 1, 1), mk(2, 1, 1, 1, 1), mk(3, 1, 1, 1, 1)];
+    const b = [mk(3, 9, 9, 9, 40), mk(1, 9, 9, 9, 20)]; // unsorted, with a gap at 2
+    const r = M5.alignByTime(a, b).map((x) => x?.close ?? null);
+    expect(r).toEqual([null, 20, 20, 40]);
+  });
+
+  it('lsma equals the regression end-point and is exact on a line', () => {
+    const line = [1, 3, 5, 7, 9, 11];
+    expect(M5.lsma(line, 3)[5]).toBeCloseTo(11);
+    expect(M5.lsma(line, 3, 1)[5]).toBeCloseTo(9); // offset walks back along the fit
+    expect(M5.lsma(line, 3)[1]).toBeNull();
+  });
+
+  it('zlema of a constant is the constant and its lag offset is ⌊(n−1)/2⌋', () => {
+    const r = M5.zlema([5, 5, 5, 5, 5, 5, 5, 5], 4);
+    // lag = 1: first adjusted value at index 1, EMA seed after 4 more → index 4
+    expect(r[3]).toBeNull();
+    expect(r[4]).toBeCloseTo(5);
+    expect(r[7]).toBeCloseTo(5);
+  });
+
+  it('kama moves at the fast constant when efficiency is 1', () => {
+    const v = [1, 2, 3, 4, 5];
+    const r = M5.kama(v, 2, 2, 30);
+    // ER = 1 → sc = (2/3)^2 = 4/9; seed at index 1 = 2; next = 2 + 4/9·(3−2)
+    expect(r[1]).toBe(2);
+    expect(r[2]).toBeCloseTo(2 + 4 / 9);
+  });
+
+  it('vidya with |CMO| = 1 is a plain EMA step', () => {
+    const v = [1, 2, 3, 4];
+    const r = M5.vidya(v, 3, 2);
+    // seeds at index 2 = 3; alpha = 0.5, k = 1 → 0.5·4 + 0.5·3
+    expect(r[2]).toBe(3);
+    expect(r[3]).toBeCloseTo(3.5);
+  });
+
+  it('t3 of a constant is the constant (coefficients sum to 1)', () => {
+    const r = M5.t3(new Array(40).fill(7), 3, 0.7);
+    expect(r[39]).toBeCloseTo(7);
+    expect(r.findIndex((x) => x !== null)).toBe(6 * 2); // six EMAs of length 3
+  });
+
+  it('averageDayRange averages high−low', () => {
+    const b = [mk(0, 1, 3, 1, 2), mk(1, 1, 5, 1, 2)];
+    expect(M5.averageDayRange(b, 2)[1]).toBe(3);
+  });
+
+  it('chopZone is ~0 on flat EMA and positive when rising', () => {
+    const flat = flatBars(new Array(60).fill(10));
+    expect(M5.chopZone(flat)[59]).toBeCloseTo(0);
+    const up = flatBars(Array.from({ length: 60 }, (_, i) => 10 + i * 0.5));
+    expect(M5.chopZone(up)[59]!).toBeGreaterThan(0);
+  });
+
+  it('bbTrend is 0 for a constant series', () => {
+    expect(M5.bbTrend(new Array(60).fill(3), 5, 10, 2)[59]).toBe(0);
+  });
+
+  it('ulcerIndex is 0 on a rising series and matches RMS drawdown otherwise', () => {
+    expect(M5.ulcerIndex([1, 2, 3, 4, 5], 2)[4]).toBe(0);
+    // period 2: dd at i=3 (10→8 → −20%), i=4 (8 vs max(8,8)=8 → 0) → sqrt((400+0)/2)
+    const r = M5.ulcerIndex([10, 10, 10, 8, 8], 2);
+    expect(r[3]).toBeCloseTo(Math.sqrt((0 + 400) / 2));
+    expect(r[4]).toBeCloseTo(Math.sqrt((400 + 0) / 2));
+  });
+
+  it('chandelierExit hangs mult·ATR off the period extremes', () => {
+    const b = [mk(0, 10, 12, 8, 10), mk(1, 10, 12, 8, 10), mk(2, 10, 12, 8, 10)];
+    const r = M5.chandelierExit(b, 2, 1); // TR = 4 throughout → ATR 4
+    expect(r.long[1]).toBe(12 - 4);
+    expect(r.short[1]).toBe(8 + 4);
+  });
+
+  it('klinger is 0 with constant signed volume', () => {
+    const b = flatBars(Array.from({ length: 80 }, (_, i) => 10 + i));
+    const r = M5.klinger(b, 3, 5, 2);
+    expect(r.kvo[79]).toBeCloseTo(0);
+    expect(r.signal[79]).toBeCloseTo(0);
+  });
+
+  it('chaikinVolatility is the % change of EMA(high−low)', () => {
+    const b = [mk(0, 1, 2, 1, 1), mk(1, 1, 2, 1, 1), mk(2, 1, 3, 1, 1)];
+    // EMA(1): range itself → (2−1)/1·100 with rocLen 2 between index 0 and 2
+    expect(M5.chaikinVolatility(b, 1, 2)[2]).toBeCloseTo(100);
+  });
+
+  it('priceOscillator is (fast−slow)/slow·100', () => {
+    const v = [1, 2, 3, 4];
+    // SMA2 at 3 = 3.5, SMA4 = 2.5 → 40%
+    expect(M5.priceOscillator(v, 2, 4, 'SMA')[3]).toBeCloseTo(40);
+  });
+
+  it('rci is +100 for a strictly rising window and −100 for a falling one', () => {
+    expect(M5.rci([1, 2, 3, 4, 5], 5)[4]).toBeCloseTo(100);
+    expect(M5.rci([5, 4, 3, 2, 1], 5)[4]).toBeCloseTo(-100);
+    // hand: ranks [1,3,2] vs time [1,2,3] → Σd² = 2 → 1 − 12/24 = 0.5
+    expect(M5.rci([1, 3, 2], 3)[2]).toBeCloseTo(50);
+  });
+
+  it('smi is +100 when price sits at the top of every range', () => {
+    const b = Array.from({ length: 30 }, (_, i) => mk(i, i, i + 1, i - 1, i + 1));
+    const r = M5.smi(b, 3, 2, 2);
+    // close = hh; rel = hh − (hh+ll)/2 = range/2 → 200·(range/2)/range = 100
+    expect(r.smi[29]).toBeCloseTo(100);
+  });
+
+  it('vwapBands: vwap is volume-weighted typical price and the bands use weighted σ', () => {
+    const b = [mk(0, 1, 1, 1, 1, 1), mk(1, 3, 3, 3, 3, 3)];
+    const r = M5.vwapBands(b, 1, 2);
+    expect(r.vwap[1]).toBeCloseTo((1 + 9) / 4); // 2.5
+    const sd = Math.sqrt((1 + 27) / 4 - 2.5 * 2.5); // √0.75
+    expect(r.upper1[1]).toBeCloseTo(2.5 + sd);
+    expect(r.lower2[1]).toBeCloseTo(2.5 - 2 * sd);
+  });
+
+  it('vwapBands resets at the UTC day boundary', () => {
+    const b = [mk(0, 1, 1, 1, 1), mk(24, 5, 5, 5, 5)];
+    expect(M5.vwapBands(b).vwap[1]).toBe(5);
+  });
+
+  it('anchoredVwap starts at the anchor (bars back or timestamp)', () => {
+    const b = [1, 2, 3, 4].map((c, i) => mk(i, c, c, c, c));
+    const r = M5.anchoredVwap(b, 2);
+    expect(r.vwap[1]).toBeNull();
+    expect(r.vwap[2]).toBe(3);
+    expect(r.vwap[3]).toBeCloseTo(3.5);
+    expect(M5.anchoredVwap(b, 100, b[1].time).vwap[1]).toBe(2);
+  });
+
+  it('volumeWithMa, upDownVolume', () => {
+    const b = [mk(0, 1, 2, 0, 2, 10), mk(1, 2, 2, 0, 1, 30), mk(2, 1, 1, 1, 1, 5)];
+    expect(M5.volumeWithMa(b, 2).ma[1]).toBe(20);
+    const r = M5.upDownVolume(b);
+    expect(r.up).toEqual([10, 0, 0]);
+    expect(r.down).toEqual([0, -30, 0]);
+    expect(r.delta).toEqual([10, -30, 0]);
+  });
+
+  it('cumulativeDeltaByPeriod resets each period', () => {
+    // close at high → delta = +volume
+    const b = [mk(0, 1, 2, 1, 2, 10), mk(1, 1, 2, 1, 2, 10), mk(24, 1, 2, 1, 2, 10)];
+    expect(M5.cumulativeDeltaByPeriod(b, 'Day')).toEqual([10, 20, 10]);
+    expect(M5.cumulativeDeltaByPeriod(b, 'None')).toEqual([10, 20, 30]);
+  });
+
+  it('periodKey: weeks start on Monday, months by calendar', () => {
+    const sun = Date.UTC(2026, 0, 4, 12);
+    const mon = Date.UTC(2026, 0, 5, 1);
+    expect(M5.periodKey(mon, 'Week')).toBe(M5.periodKey(sun, 'Week') + 1);
+    expect(M5.periodKey(Date.UTC(2026, 1, 1), 'Month')).toBe(2026 * 12 + 1);
+  });
+
+  // A tent: rises to a peak at 10 then falls to a trough at 20, then rises.
+  const tent = Array.from({ length: 40 }, (_, i) => {
+    const c = i <= 10 ? i : i <= 20 ? 20 - i : i - 20;
+    return mk(i, c, c + 0.5, c - 0.5, c);
+  });
+
+  it('swingPivots finds the peak and trough', () => {
+    const p = M5.swingPivots(tent, 3, 3);
+    expect(p).toContainEqual({ index: 10, price: 10.5, high: true });
+    expect(p).toContainEqual({ index: 20, price: -0.5, high: false });
+  });
+
+  it('pivotsHighLow holds the last pivot level after confirmation', () => {
+    const r = M5.pivotsHighLow(tent, 3, 3);
+    expect(r.high[10]).toBeNull();
+    expect(r.high[11]).toBe(10.5);
+    expect(r.low[25]).toBe(-0.5);
+  });
+
+  it('autoFibRetracement: 0 at the later extreme, 1 at the earlier', () => {
+    const b = [0, 10, 5].map((c, i) => mk(i, c, c, c, c)); // low first then high
+    const lv = M5.autoFibRetracement(b, 3);
+    const at = (r: number) => lv[M5.FIB_RETRACEMENT_LEVELS.indexOf(r as never)][2];
+    expect(at(0)).toBe(10);
+    expect(at(1)).toBe(0);
+    expect(at(0.5)).toBe(5);
+    expect(at(0.618)).toBeCloseTo(3.82);
+  });
+
+  it('autoFibExtension projects C + (B − A)·r', () => {
+    // pivots: low 0 at 3, high 10 at 10, low ~4 at 16
+    const closes = [3, 2, 1, 0, 2, 4, 6, 7, 8, 9, 10, 9, 8, 7, 6, 5, 4, 5, 6, 7, 8, 9, 10, 11];
+    const b = closes.map((c, i) => mk(i, c, c, c, c));
+    const lv = M5.autoFibExtension(b, 3);
+    const k = M5.FIB_EXTENSION_LEVELS.indexOf(1 as never);
+    expect(lv[k][16]).toBe(4 + (10 - 0) * 1);
+    expect(lv[k][15]).toBeNull();
+  });
+
+  it('autoPitchfork median passes through the P1–P2 midpoint', () => {
+    const closes = [3, 2, 1, 0, 2, 4, 6, 7, 8, 9, 10, 9, 8, 7, 6, 5, 4, 5, 6, 7, 8, 9, 10, 11];
+    const b = closes.map((c, i) => mk(i, c, c, c, c));
+    const r = M5.autoPitchfork(b, 3);
+    expect(r.median[3]).toBe(0);
+    expect(r.median[13]).toBeCloseTo(7); // midpoint of (10,10) and (16,4)
+    expect(r.upper[10]).toBe(10);
+    expect(r.lower[16]).toBe(4);
+  });
+
+  it('autoTrendlines joins the last two swing lows', () => {
+    const closes = [5, 4, 3, 4, 5, 6, 5, 4, 5, 6, 7, 8];
+    const b = closes.map((c, i) => mk(i, c, c, c, c));
+    const r = M5.autoTrendlines(b, 2);
+    expect(r.support[2]).toBe(3);
+    expect(r.support[7]).toBe(4);
+    expect(r.support[11]).toBeCloseTo(4 + (1 / 5) * 4);
+  });
+
+  it('pivotLevels: textbook values for each type', () => {
+    const [o, h, l, c] = [100, 110, 90, 105];
+    const P = (h + l + c) / 3;
+    const t = M5.pivotLevels('Traditional', o, h, l, c);
+    expect(t.p).toBeCloseTo(P);
+    expect(t.r1).toBeCloseTo(2 * P - l);
+    expect(t.s3!).toBeCloseTo(l - 2 * (h - P));
+    expect(M5.pivotLevels('Fibonacci', o, h, l, c).r2!).toBeCloseTo(P + 0.618 * 20);
+    expect(M5.pivotLevels('Woodie', o, h, l, c).p).toBeCloseTo((110 + 90 + 210) / 4);
+    expect(M5.pivotLevels('Classic', o, h, l, c).r3!).toBeCloseTo(P + 40);
+    const dm = M5.pivotLevels('DM', o, h, l, c); // c > o → X = 2H + L + C = 415
+    expect(dm.p).toBeCloseTo(415 / 4);
+    expect(dm.r1).toBeCloseTo(415 / 2 - 90);
+    expect(dm.r2).toBeNull();
+    expect(M5.pivotLevels('Camarilla', o, h, l, c).r3!).toBeCloseTo(105 + (20 * 1.1) / 4);
+  });
+
+  it('pivotPointsStandard uses the previous day and breaks at the boundary', () => {
+    const b = [
+      mk(0, 100, 110, 90, 105),
+      mk(1, 105, 108, 95, 100),
+      mk(24, 100, 101, 99, 100),
+      mk(25, 100, 101, 99, 100),
+    ];
+    const r = M5.pivotPointsStandard(b, 'Traditional', 'Day');
+    expect(r.p[2]).toBeNull();
+    expect(r.p[3]).toBeCloseTo((110 + 90 + 100) / 3);
+  });
+
+  it('linRegChannel is exact on a line with zero-width bands', () => {
+    const r = M5.linRegChannel([0, 1, 2, 3, 4, 5], 4, 2);
+    expect(r.middle[1]).toBeNull();
+    expect(r.middle[5]).toBeCloseTo(5);
+    expect(r.upper[2]).toBeCloseTo(2);
+  });
+
+  it('sessionHighLow tracks the running extreme inside the window only', () => {
+    const b = [0, 1, 2, 3].map((h) => mk(h, 1, 1 + h, 1 - h, 1));
+    const r = M5.sessionHighLow(b, 1, 3);
+    expect(r.high).toEqual([null, 2, 3, null]);
+    expect(r.low).toEqual([null, 0, -1, null]);
+    // wrapping window 22→2
+    expect(M5.sessionHighLow(b, 22, 2).high).toEqual([1, 2, null, null]);
+  });
+
+  it('correlation is ±1 for linear relations and null over gaps', () => {
+    const a = [1, 2, 3, 4, 5];
+    expect(M5.correlation(a, [2, 4, 6, 8, 10], 3)[4]).toBeCloseTo(1);
+    expect(M5.correlation(a, [5, 4, 3, 2, 1], 3)[4]).toBeCloseTo(-1);
+    expect(M5.correlation(a, [1, null, 3, 4, 5], 3)[3]).toBeNull();
+  });
+
+  it('relativeStrength and spreadRatio', () => {
+    expect(M5.relativeStrength([1, 2], [1, 1], 1)[1]).toBe(2);
+    const r = M5.spreadRatio([4, 6], [2, null], 1);
+    expect(r.spread).toEqual([2, null]);
+    expect(r.ratio).toEqual([2, null]);
   });
 });
