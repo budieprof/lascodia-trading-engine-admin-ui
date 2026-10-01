@@ -26,6 +26,9 @@ import {
 } from '../../datafeed/aggregate';
 import { priceScaleFor } from '../../datafeed/symbol-info';
 import { ChartIconComponent } from '../../icons/chart-icon.component';
+import { DrawingToolbarComponent } from '../../drawings/ui/drawing-toolbar.component';
+import { DrawingSettingsDialogComponent } from '../../drawings/ui/drawing-settings-dialog.component';
+import type { ZOrderOp } from '../../drawings/drawing-ops';
 import {
   WatchlistPanelComponent,
   type WatchHeadline,
@@ -296,6 +299,8 @@ function loadWatchlistOpen(): boolean {
     ChartHostComponent,
     IndicatorsDialogComponent,
     ChartIconComponent,
+    DrawingToolbarComponent,
+    DrawingSettingsDialogComponent,
     WatchlistPanelComponent,
     StrategyTesterPanelComponent,
     ScriptEditorPanelComponent,
@@ -693,6 +698,17 @@ export class ChartAnalysisPageComponent {
   readonly tools = TOOLS;
   readonly tool = signal<DrawingKind | null>(null);
   readonly magnet = signal(false);
+  /** Strength used when the magnet is on — TradingView's Weak / Strong. */
+  readonly magnetStrength = signal<'weak' | 'strong'>(readPref('magnetStrength', 'weak'));
+  readonly magnetMenuOpen = signal(false);
+  /** What the chart applies: off, or the chosen strength. */
+  readonly magnetMode = computed(() => (this.magnet() ? this.magnetStrength() : 'off'));
+  /** TV "Stay in drawing mode". */
+  readonly stayInDrawing = signal<boolean>(readPref('stayInDrawing', false));
+  /** Drawing whose Settings dialog is open. */
+  readonly settingsFor = signal<string | null>(null);
+  /** Right-click menu on a drawing (page-relative coordinates). */
+  readonly drawingMenu = signal<{ id: string; x: number; y: number } | null>(null);
   readonly scaleMode = signal<'normal' | 'log' | 'percent'>('normal');
   readonly objectTreeOpen = signal(false);
   readonly dashOptions: DashStyle[] = ['solid', 'dashed', 'dotted'];
@@ -810,6 +826,8 @@ export class ChartAnalysisPageComponent {
 
   closeRailFlyout(): void {
     this.railFlyout.set(null);
+    this.magnetMenuOpen.set(false);
+    this.drawingMenu.set(null);
     this.vpMenuOpen.set(false);
     this.openMenu.set(null);
     this.layoutMenuOpen.set(false);
@@ -2279,6 +2297,74 @@ export class ChartAnalysisPageComponent {
     this.drawings.updateStyle(id, { fill: current ? null : withAlpha(base, 0.15) });
   }
 
+  toggleMagnetMenu(ev: MouseEvent): void {
+    ev.stopPropagation();
+    this.railFlyout.set(null);
+    if (this.magnetMenuOpen()) {
+      this.magnetMenuOpen.set(false);
+      return;
+    }
+    const btn = (ev.currentTarget as HTMLElement).closest('.rail-slot') as HTMLElement | null;
+    const body = btn?.closest('.chart-body') as HTMLElement | null;
+    if (btn && body) this.railFlyoutTop.set(btn.getBoundingClientRect().top - body.getBoundingClientRect().top);
+    this.magnetMenuOpen.set(true);
+  }
+
+  setMagnetStrength(mode: 'weak' | 'strong'): void {
+    this.magnetStrength.set(mode);
+    this.magnet.set(true);
+    this.magnetMenuOpen.set(false);
+    writePref('magnetStrength', mode);
+  }
+
+  toggleStayInDrawing(): void {
+    this.stayInDrawing.set(!this.stayInDrawing());
+    writePref('stayInDrawing', this.stayInDrawing());
+  }
+
+  openDrawingMenu(e: { id: string; clientX: number; clientY: number }, area: HTMLElement): void {
+    this.contextMenu.set(null);
+    const r = area.getBoundingClientRect();
+    this.drawingMenu.set({ id: e.id, x: e.clientX - r.left, y: e.clientY - r.top });
+  }
+
+  /** Drawing context-menu / More-menu actions (TradingView's set). */
+  drawingAction(
+    id: string,
+    action: 'settings' | 'clone' | 'copy' | 'hide' | 'lock' | 'remove' | ZOrderOp,
+  ): void {
+    this.drawingMenu.set(null);
+    switch (action) {
+      case 'settings':
+        this.settingsFor.set(id);
+        break;
+      case 'clone': {
+        const c = this.drawings.clone(id);
+        if (c) this.drawings.selectedId.set(c.id);
+        break;
+      }
+      case 'copy':
+        this.drawings.copy(id);
+        break;
+      case 'hide':
+        this.drawings.setHidden(id, true);
+        this.drawings.selectedId.set(null);
+        break;
+      case 'lock':
+        this.drawings.toggleLock(id);
+        break;
+      case 'remove':
+        this.drawings.remove(id);
+        break;
+      default:
+        this.drawings.reorder(id, action);
+    }
+  }
+
+  drawingById(id: string): Drawing | undefined {
+    return this.drawings.allDrawings().find((d) => d.id === id);
+  }
+
   /**
    * Keyboard shortcuts, matching TradingView's where they exist.
    *
@@ -2301,8 +2387,32 @@ export class ChartAnalysisPageComponent {
       this.drawings.redo();
       return;
     }
+    if (mod && ev.key.toLowerCase() === 'c' && !ev.shiftKey) {
+      const id = this.drawings.selectedId();
+      if (id && !window.getSelection()?.toString()) {
+        ev.preventDefault();
+        this.drawings.copy(id);
+      }
+      return;
+    }
+    if (mod && ev.key.toLowerCase() === 'v' && !ev.shiftKey) {
+      if (this.drawings.hasClipboard) {
+        ev.preventDefault();
+        this.host()?.pasteDrawing();
+      }
+      return;
+    }
+    if (ev.key === 'Enter' && this.tool()) {
+      if (this.host()?.finishDrawing()) ev.preventDefault();
+      return;
+    }
     if (ev.key === 'Escape') {
+      // TV: Esc first abandons a drawing in progress and drops the tool, then
+      // clears the selection.
+      this.host()?.cancelDrawing();
       this.railFlyout.set(null);
+      this.magnetMenuOpen.set(false);
+      this.drawingMenu.set(null);
       this.tool.set(null);
       this.drawings.selectedId.set(null);
       return;
@@ -2313,6 +2423,14 @@ export class ChartAnalysisPageComponent {
         ev.preventDefault();
         this.drawings.remove(id);
       }
+      return;
+    }
+    if (ev.key.startsWith('Arrow') && this.drawings.selectedId() && !mod) {
+      // Nudge: one bar sideways / one pixel vertically; Shift ×10.
+      const k = ev.shiftKey ? 10 : 1;
+      const bars = ev.key === 'ArrowLeft' ? -k : ev.key === 'ArrowRight' ? k : 0;
+      const px = ev.key === 'ArrowUp' ? -k : ev.key === 'ArrowDown' ? k : 0;
+      if (this.host()?.nudgeSelectedDrawing(bars, px)) ev.preventDefault();
       return;
     }
     if (ev.key.toLowerCase() === 'm' && !mod) {
@@ -2346,4 +2464,22 @@ function withAlpha(hex: string, alpha: number): string {
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
   if (!m) return `rgba(41,98,255,${alpha})`;
   return `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},${alpha})`;
+}
+
+/** Small per-browser drawing preferences (magnet strength, stay-in-drawing). */
+function readPref<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(`lascodia.chart.pref.${key}`);
+    return raw === null ? fallback : (JSON.parse(raw) as T);
+  } catch {
+    return fallback;
+  }
+}
+
+function writePref(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(`lascodia.chart.pref.${key}`, JSON.stringify(value));
+  } catch {
+    /* preference not remembered */
+  }
 }

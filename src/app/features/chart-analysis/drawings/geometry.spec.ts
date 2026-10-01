@@ -210,7 +210,7 @@ describe('every tool is selectable', () => {
    * a click on its own geometry registers.
    */
   const pointsFor = (spec: (typeof TOOLS)[number]): Pt[] => {
-    const n = spec.points === 'freehand' ? 3 : spec.points;
+    const n = typeof spec.points === 'number' ? spec.points : 3;
     // A rising diagonal — non-degenerate in both axes, so no tool is tested
     // against a zero-width or zero-height shape it would rightly reject.
     return Array.from({ length: n }, (_, i) => ({ x: 100 + i * 60, y: 200 - i * 40 }));

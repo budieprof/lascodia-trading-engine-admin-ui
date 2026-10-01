@@ -49,7 +49,8 @@ import {
 } from './price-transforms';
 import { DrawingStore } from '../drawings/drawing-store.service';
 import { DrawingController } from '../drawings/drawing-controller';
-import type { DrawingKind } from '../drawings/model';
+import type { MagnetMode } from '../drawings/drawing-ops';
+import type { Drawing, DrawingKind } from '../drawings/model';
 import { OverlayRenderer, type PriceOverlay } from '../overlays/overlay-renderer';
 import { AnalysisOverlayRenderer } from '../overlays/analysis-overlay-renderer';
 import {
@@ -167,6 +168,20 @@ interface IndicatorSeries {
   selector: 'app-chart-host',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<div class="chart-host" #container></div>
+    @if (inlineEdit(); as ie) {
+      <textarea
+        class="inline-edit"
+        [style.left.px]="ie.rect.x"
+        [style.top.px]="ie.rect.y"
+        [style.width.px]="ie.rect.w"
+        [style.height.px]="ie.rect.h"
+        [value]="ie.value"
+        (keydown)="onInlineKey($event)"
+        (blur)="commitInline($any($event.target).value)"
+        aria-label="Edit text"
+        autofocus
+      ></textarea>
+    }
     @if (holdTip(); as tip) {
       <div
         class="hold-tip"
@@ -186,6 +201,22 @@ interface IndicatorSeries {
     }`,
   styles: [
     `
+      .inline-edit {
+        position: absolute;
+        z-index: 30;
+        min-width: 60px;
+        min-height: 22px;
+        padding: 2px 4px;
+        box-sizing: border-box;
+        resize: none;
+        font: inherit;
+        font-size: 13px;
+        color: var(--tv-ink, #131722);
+        background: var(--tv-bg, #fff);
+        border: 1px solid #2962ff;
+        border-radius: 2px;
+        outline: none;
+      }
       .chart-host {
         position: absolute;
         inset: 0;
@@ -245,7 +276,10 @@ export class ChartHostComponent implements OnDestroy {
   readonly precision = input<number>(5);
   /** Armed drawing tool, or null for the cursor. */
   readonly tool = input<DrawingKind | null>(null);
-  readonly magnet = input<boolean>(false);
+  /** TradingView magnet: off / weak / strong (Ctrl/Cmd inverts it while drawing). */
+  readonly magnet = input<MagnetMode>('off');
+  /** TV "Stay in drawing mode": keep the tool armed after a drawing completes. */
+  readonly stayInDrawingMode = input<boolean>(false);
   /** Price scale mode — normal, logarithmic or percentage. */
   readonly scaleMode = input<'normal' | 'log' | 'percent'>('normal');
   /** Engine-derived price levels: position entry/SL/TP and pending orders. */
@@ -272,11 +306,61 @@ export class ChartHostComponent implements OnDestroy {
   readonly resolution = input<string>('');
 
   /** Raised when the visible range reaches the oldest bar we hold. */
+  /** Arrow-key nudge of the selected drawing (bars sideways, pixels vertically). */
+  nudgeSelectedDrawing(bars: number, pixels: number): boolean {
+    return this.controller.nudgeSelected(bars, pixels);
+  }
+
+  /** Paste the copied drawing onto this chart. */
+  pasteDrawing(): boolean {
+    return this.controller.paste() !== null;
+  }
+
+  /** Inline text editor over a drawing (double-click on a text-bearing tool). */
+  readonly inlineEdit = signal<{
+    id: string;
+    rect: { x: number; y: number; w: number; h: number };
+    value: string;
+    commit: (v: string) => Partial<Drawing>;
+  } | null>(null);
+
+  onInlineKey(ev: KeyboardEvent): void {
+    ev.stopPropagation(); // the page's shortcuts must not see typing
+    if (ev.key === 'Escape') this.inlineEdit.set(null);
+    else if (ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      this.commitInline((ev.target as HTMLTextAreaElement).value);
+    }
+  }
+
+  commitInline(value: string): void {
+    const ie = this.inlineEdit();
+    if (!ie) return;
+    this.inlineEdit.set(null);
+    if (value !== ie.value) this.controller.applyInlineEdit(ie.id, ie.commit(value));
+  }
+
+  /** Finish a multi-click drawing (Enter). */
+  finishDrawing(): boolean {
+    return this.controller.finishPending();
+  }
+
+  /** Abandon a drawing in progress. Returns whether one was. */
+  cancelDrawing(): boolean {
+    const was = this.controller.isPlacing;
+    this.controller.cancelPending();
+    return was;
+  }
+
   readonly loadMore = output<void>();
   /** Crosshair readout for the legend; null time means "latest bar". */
   readonly legend = output<LegendSnapshot>();
   /** Raised when a drawing tool finishes, so the toolbar can disarm. */
   readonly toolComplete = output<void>();
+  /** Double-click on a drawing — open its Settings dialog. */
+  readonly drawingSettings = output<string>();
+  /** Right-click on a drawing — open the drawing context menu (client coords). */
+  readonly drawingContextMenu = output<{ id: string; clientX: number; clientY: number }>();
 
   private chart: IChartApi | null = null;
   // Includes 'Histogram' because the Column style plots the close as bars on
@@ -481,9 +565,11 @@ export class ChartHostComponent implements OnDestroy {
     effect(() => {
       const tool = this.tool();
       const magnet = this.magnet();
+      const stay = this.stayInDrawingMode();
       const bars = this.bars();
       untracked(() => {
-        this.controller.magnet = magnet;
+        this.controller.magnetMode = magnet;
+        this.controller.stayInDrawingMode = stay;
         this.controller.bars = bars;
         if (this.controller.activeTool !== tool) this.controller.setTool(tool);
       });
@@ -775,7 +861,15 @@ export class ChartHostComponent implements OnDestroy {
 
     this.controller.attach(this.chart, el);
     this.controller.onToolComplete = () => this.toolComplete.emit();
-    this.controller.magnet = this.magnet();
+    this.controller.onEditRequest = (id) => this.drawingSettings.emit(id);
+    this.controller.onInlineEdit = (e) => {
+      this.inlineEdit.set(e);
+      // Focus once rendered; the textarea is created by the signal change.
+      setTimeout(() => (this.container().nativeElement.parentElement?.querySelector('.inline-edit') as HTMLTextAreaElement | null)?.select());
+    };
+    this.controller.onDrawingContextMenu = (e) => this.drawingContextMenu.emit(e);
+    this.controller.magnetMode = this.magnet();
+    this.controller.stayInDrawingMode = this.stayInDrawingMode();
     this.controller.bars = this.bars();
 
     // Infinite history: when the left edge reaches the oldest bar we hold, ask

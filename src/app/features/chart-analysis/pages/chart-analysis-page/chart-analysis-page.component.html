@@ -558,14 +558,37 @@
         </button>
       }
       <div class="rail-sep"></div>
+      <div class="rail-slot" [class.open]="magnetMenuOpen()">
+        <button
+          type="button"
+          class="rail-tool"
+          [class.active]="magnet()"
+          (click)="magnet.set(!magnet())"
+          [title]="(magnetStrength() === 'strong' ? 'Strong' : 'Weak') + ' magnet (M) — hold Ctrl/⌘ to invert while drawing'"
+        >
+          <app-chart-icon name="magnet" [size]="28" />
+        </button>
+        <button
+          type="button"
+          class="rail-caret"
+          [class.active]="magnet()"
+          (click)="toggleMagnetMenu($event)"
+          title="Magnet mode"
+          [attr.aria-expanded]="magnetMenuOpen()"
+          aria-haspopup="menu"
+        >
+          <app-chart-icon name="chevron-right" [size]="12" />
+        </button>
+      </div>
       <button
         type="button"
         class="rail-tool"
-        [class.active]="magnet()"
-        (click)="magnet.set(!magnet())"
-        title="Magnet — snap drawings to OHLC (M)"
+        [class.active]="stayInDrawing()"
+        (click)="toggleStayInDrawing()"
+        title="Stay in drawing mode"
+        [attr.aria-pressed]="stayInDrawing()"
       >
-        <app-chart-icon name="magnet" [size]="28" />
+        <app-chart-icon name="draw-stay" [size]="28" />
       </button>
       <button
         type="button"
@@ -597,6 +620,19 @@
         <app-chart-icon name="trash" [size]="28" />
       </button>
     </nav>
+
+    @if (magnetMenuOpen()) {
+      <div class="rail-flyout magnet-menu" [style.top.px]="railFlyoutTop()" role="menu" (click)="$event.stopPropagation()">
+        <button type="button" class="rail-flyout-item" role="menuitemradio"
+          [class.active]="magnet() && magnetStrength() === 'weak'" (click)="setMagnetStrength('weak')">
+          <app-chart-icon name="magnet" [size]="28" /><span>Weak Magnet</span>
+        </button>
+        <button type="button" class="rail-flyout-item" role="menuitemradio"
+          [class.active]="magnet() && magnetStrength() === 'strong'" (click)="setMagnetStrength('strong')">
+          <app-chart-icon name="magnet" [size]="28" /><span>Strong Magnet</span>
+        </button>
+      </div>
+    }
 
     @if (openRailGroup(); as g) {
       <div
@@ -691,7 +727,7 @@
     }
     <div class="chart-grid" [attr.data-layout]="splitLayout()" [class.with-dock]="watchlistOpen()">
       <!-- Chart surface with the floating legend, as TradingView lays it out. -->
-      <div class="chart-area primary" (contextmenu)="openContextMenu($event)">
+      <div class="chart-area primary" #chartArea (contextmenu)="openContextMenu($event)" (pointerdown)="drawingMenu.set(null)">
         <div class="legend">
           <div class="legend-title">
             <strong>{{ symbol() }}</strong>
@@ -760,7 +796,8 @@
           [indicators]="active()"
           [precision]="precision()"
           [tool]="tool()"
-          [magnet]="magnet()"
+          [magnet]="magnetMode()"
+          [stayInDrawingMode]="stayInDrawing()"
           [scaleMode]="scaleMode()"
           [timezone]="timezone()"
           [events]="events()"
@@ -780,68 +817,50 @@
           (loadMore)="loadOlder()"
           (legend)="onLegend($event)"
           (toolComplete)="onToolComplete()"
+          (drawingSettings)="settingsFor.set($event)"
+          (drawingContextMenu)="openDrawingMenu($event, chartArea)"
         />
 
-        <!-- Style editor for the selected drawing. -->
+        <!-- TradingView's floating drawing toolbar for the selected drawing. -->
         @if (drawings.selected(); as sel) {
-          <div class="draw-inspector">
-            <span class="inspector-title">{{ drawingLabel(sel) }}</span>
-            <input
-              type="color"
-              [value]="sel.style.color"
-              (input)="setDrawingColor(sel.id, $any($event.target).value)"
-              title="Colour"
-            />
-            <select
-              [value]="sel.style.dash"
-              (change)="setDrawingDash(sel.id, $any($event.target).value)"
-              title="Line style"
-            >
-              @for (d of dashOptions; track d) {
-                <option [value]="d">{{ d }}</option>
-              }
-            </select>
-            <input
-              type="number"
-              class="width-input"
-              min="1"
-              max="10"
-              [value]="sel.style.width"
-              (change)="setDrawingWidth(sel.id, $any($event.target).value)"
-              title="Line width"
-            />
-            <button
-              type="button"
-              [class.active]="sel.style.fill !== null"
-              (click)="toggleDrawingFill(sel.id, sel.style.fill)"
-              title="Fill"
-            >
-              <app-chart-icon name="fill" [size]="18" />
-            </button>
-            @if (sel.kind === 'text' || sel.kind === 'callout') {
-              <input
-                type="text"
-                class="text-input"
-                placeholder="Label…"
-                [value]="sel.style.text"
-                (input)="setDrawingText(sel.id, $any($event.target).value)"
-              />
-            }
-            <button
-              type="button"
-              (click)="drawings.toggleLock(sel.id)"
-              [class.active]="sel.locked"
-              title="Lock"
-            >
-              <app-chart-icon [name]="sel.locked ? 'lock' : 'unlock'" [size]="18" />
-            </button>
-            <button type="button" (click)="drawings.clone(sel.id)" title="Duplicate">
-              <app-chart-icon name="clone" [size]="18" />
-            </button>
-            <button type="button" (click)="removeDrawing(sel.id)" title="Delete (⌫)">
-              <app-chart-icon name="close" [size]="18" />
-            </button>
-          </div>
+          <app-drawing-toolbar [drawing]="sel" (settings)="settingsFor.set($event)" />
+        }
+
+        <!-- Right-click menu on a drawing. -->
+        @if (drawingMenu(); as dm) {
+          @if (drawingById(dm.id); as dd) {
+            <div class="context-menu drawing-menu" role="menu" [style.left.px]="dm.x" [style.top.px]="dm.y"
+              (pointerdown)="$event.stopPropagation()">
+              <button type="button" (click)="drawingAction(dd.id, 'settings')">
+                <app-chart-icon name="settings" [size]="20" />Settings…
+              </button>
+              <div class="menu-sep"></div>
+              <button type="button" (click)="drawingAction(dd.id, 'clone')"><app-chart-icon name="clone" [size]="20" />Clone</button>
+              <button type="button" (click)="drawingAction(dd.id, 'copy')"><span class="mi-blank"></span>Copy</button>
+              <button type="button" (click)="drawingAction(dd.id, 'hide')"><app-chart-icon name="eye-off" [size]="20" />Hide</button>
+              <button type="button" (click)="drawingAction(dd.id, 'lock')">
+                <app-chart-icon [name]="dd.locked ? 'unlock' : 'lock'" [size]="20" />{{ dd.locked ? 'Unlock' : 'Lock' }}
+              </button>
+              <div class="menu-sep"></div>
+              <div class="submenu-host">
+                <button type="button" class="has-sub"><app-chart-icon name="layers" [size]="20" />Visual order<span class="sub-caret">›</span></button>
+                <div class="context-menu submenu" role="menu">
+                  <button type="button" (click)="drawingAction(dd.id, 'front')"><app-chart-icon name="bring-front" [size]="20" />Bring to front</button>
+                  <button type="button" (click)="drawingAction(dd.id, 'forward')"><span class="mi-blank"></span>Bring forward</button>
+                  <button type="button" (click)="drawingAction(dd.id, 'backward')"><span class="mi-blank"></span>Send backward</button>
+                  <button type="button" (click)="drawingAction(dd.id, 'back')"><app-chart-icon name="send-back" [size]="20" />Send to back</button>
+                </div>
+              </div>
+              <div class="menu-sep"></div>
+              <button type="button" class="danger" (click)="drawingAction(dd.id, 'remove')">
+                <app-chart-icon name="trash" [size]="20" />Remove
+              </button>
+            </div>
+          }
+        }
+
+        @if (settingsFor(); as sid) {
+          <app-drawing-settings-dialog [drawingId]="sid" [resolutions]="resolutions" (closed)="settingsFor.set(null)" />
         }
 
         @if (contextMenu(); as cm) {

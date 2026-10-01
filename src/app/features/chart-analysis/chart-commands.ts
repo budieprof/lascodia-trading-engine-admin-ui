@@ -768,7 +768,7 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
           points.push({ time, price });
         }
 
-        const needed = spec.points === 'freehand' ? 2 : spec.points;
+        const needed = typeof spec.points === 'number' ? spec.points : 2;
         if (points.length < needed) {
           return fail(`${spec.label} needs ${needed} point(s); ${points.length} given.`);
         }

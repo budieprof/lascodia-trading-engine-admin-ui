@@ -169,6 +169,8 @@ export interface Drawing {
   /** Visibility tab: hidden entirely, or shown only on these resolutions (empty = all). */
   hidden?: boolean;
   visibleOn?: string[];
+  /** Visual order within the chart: higher paints on top (TV "Visual order"). */
+  z?: number;
 }
 
 export interface ToolSpec {
@@ -186,8 +188,12 @@ export interface ToolSpec {
     | 'annotation'
     | 'measure'
     | 'volume';
-  /** Clicks needed to complete the drawing. `'freehand'` collects on drag. */
-  points: number | 'freehand';
+  /**
+   * Clicks needed to complete the drawing. `'freehand'` collects on drag and
+   * finishes on release; `'multi'` adds a point per click until double-click,
+   * Enter, or (closed shapes) a click on the first point.
+   */
+  points: number | 'freehand' | 'multi';
   icon: string;
   /** Tools that snap to a single axis ignore the other coordinate. */
   axis?: 'price' | 'time';
@@ -260,7 +266,7 @@ export const TOOLS: readonly ToolSpec[] = [
     icon: '△',
     defaultStyle: { fill: 'rgba(41,98,255,0.12)' },
   },
-  { kind: 'path', label: 'Path', group: 'shapes', points: 'freehand', icon: '⋰' },
+  { kind: 'path', label: 'Path', group: 'shapes', points: 'multi', icon: '⋰' },
   { kind: 'brush', label: 'Brush', group: 'shapes', points: 'freehand', icon: '✎' },
 
   { kind: 'fib-retracement', label: 'Fib Retracement', group: 'fib', points: 2, icon: '⁞' },
@@ -386,7 +392,7 @@ export const TOOLS: readonly ToolSpec[] = [
   // ── More annotations ─────────────────────────────────────────────────────
   { kind: 'arc', label: 'Arc', group: 'shapes', points: 2, icon: '◡' },
   { kind: 'curve', label: 'Curve', group: 'shapes', points: 3, icon: '∿' },
-  { kind: 'polyline', label: 'Polyline', group: 'shapes', points: 'freehand', icon: '⏢' },
+  { kind: 'polyline', label: 'Polyline', group: 'shapes', points: 'multi', icon: '⏢' },
   { kind: 'flag', label: 'Flag Mark', group: 'annotation', points: 1, icon: '⚑' },
   { kind: 'price-label', label: 'Price Label', group: 'annotation', points: 1, icon: '🏷' },
   { kind: 'signpost', label: 'Signpost', group: 'annotation', points: 1, icon: '📍' },
@@ -756,6 +762,12 @@ export function newDrawingId(): string {
   return `d_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/**
+ * Resolved style for a new drawing. Precedence, lowest first: generic default
+ * (TV's #2962FF, 2px) → ToolSpec default → per-tool behaviour default →
+ * `base` (a saved template / default template, which the operator chose and
+ * therefore wins).
+ */
 export function styleFor(kind: DrawingKind, base?: Partial<DrawingStyle>): DrawingStyle {
   return {
     ...DEFAULT_STYLE,

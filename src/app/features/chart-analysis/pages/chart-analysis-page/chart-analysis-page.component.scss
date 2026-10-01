@@ -1874,3 +1874,63 @@ $strip-width: 46px;
   opacity: 0.35;
   cursor: default;
 }
+
+// ── Drawing context menu (TradingView) ─────────────────────────────────────
+.drawing-menu,
+.drawing-menu .submenu {
+  min-width: 220px;
+  padding: 6px 0;
+  background: var(--tv-bg);
+  color: var(--tv-ink);
+  border: 0;
+  border-radius: 6px;
+  box-shadow: var(--tv-menu-shadow), 0 0 0 1px var(--tv-line);
+  font-size: 13px;
+
+  button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px;
+    font-size: 13px;
+
+    &:hover:not(:disabled) {
+      background: var(--tv-hover);
+    }
+  }
+
+  .menu-sep {
+    height: 1px;
+    margin: 6px 0;
+    background: var(--tv-line);
+  }
+
+  .mi-blank {
+    width: 20px;
+  }
+}
+
+.drawing-menu .submenu-host {
+  position: relative;
+
+  > .has-sub {
+    width: 100%;
+  }
+
+  .sub-caret {
+    margin-left: auto;
+    color: var(--tv-muted);
+  }
+
+  > .submenu {
+    display: none;
+    position: absolute;
+    left: 100%;
+    top: -6px;
+  }
+
+  &:hover > .submenu,
+  &:focus-within > .submenu {
+    display: flex;
+  }
+}

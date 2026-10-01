@@ -15,6 +15,12 @@ export interface ChartDrawingDto {
   locked: boolean;
   createdAt: string;
   updatedAt: string;
+  /** Tool settings (Fib levels, extend…), JSON. Absent on engines before feat/drawing-options. */
+  optionsJson?: string;
+  hidden?: boolean;
+  /** Comma-separated resolutions the drawing shows on; empty = all. */
+  visibleOn?: string;
+  zIndex?: number;
 }
 
 export interface ChartDrawingInput {
@@ -24,6 +30,12 @@ export interface ChartDrawingInput {
   styleJson: string;
   locked: boolean;
   createdAt: string;
+  /** Tool settings (Fib levels, extend…), JSON. Absent on engines before feat/drawing-options. */
+  optionsJson?: string;
+  hidden?: boolean;
+  /** Comma-separated resolutions the drawing shows on; empty = all. */
+  visibleOn?: string;
+  zIndex?: number;
 }
 
 /**
