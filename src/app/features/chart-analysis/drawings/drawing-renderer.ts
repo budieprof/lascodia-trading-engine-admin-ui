@@ -54,6 +54,10 @@ import type { Bar } from '../datafeed/candle-feed.service';
  * and `priceToCoordinate` are only valid for the current viewport, so the
  * coordinates are recomputed each frame from the `{time, price}` model.
  */
+/** TradingView's selection colour on the axes. */
+const AXIS_BLUE = '#2962FF';
+const AXIS_BAND = 'rgba(41, 98, 255, 0.25)';
+
 export class DrawingRenderer implements ISeriesPrimitive<Time> {
   private drawings: Drawing[] = [];
   private selectedId: string | null = null;
@@ -129,6 +133,125 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
         }),
       },
     ];
+  }
+
+  // ── Axis labels for the selected drawing ─────────────────────────────────
+  // TradingView marks a selected drawing on both scales: a blue label at each handle's price on
+  // the price axis and at each handle's time on the time axis, plus a translucent band over the
+  // drawing's whole price and time range.
+
+  /** Handle positions of the selected drawing (or the drawing being placed), screen space. */
+  private selectedHandles(): Pt[] {
+    const d = this.preview?.drawing ?? this.drawings.find((x) => x.id === this.selectedId);
+    if (!d) return [];
+    const pts = this.projectAll(d);
+    if (this.preview?.cursor) pts.push(this.preview.cursor);
+    if (pts.length === 0) return [];
+    const behavior = behaviorFor(d.kind);
+    if (!behavior?.handles || this.preview) return pts;
+    const chart = this.chart();
+    const el = chart?.chartElement();
+    const base = this.paintCtx(
+      null as unknown as CanvasRenderingContext2D,
+      d,
+      pts,
+      el?.clientWidth ?? 0,
+      el?.clientHeight ?? 0,
+    );
+    try {
+      return behavior.handles({ ...base, options: optionsOf(behavior, d) });
+    } catch {
+      return pts;
+    }
+  }
+
+  private axisLabelTime(x: number): string {
+    const chart = this.chart();
+    let sec = chart?.timeScale().coordinateToTime(x) as number | null | undefined;
+    if (sec === null || sec === undefined) {
+      const utc = this.timeAtX(x);
+      if (utc === null) return '';
+      sec = this.shift(utc) / 1000;
+    }
+    const d = new Date(Number(sec) * 1000);
+    const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()];
+    const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const date = `${day} ${pad(d.getUTCDate())} ${mon} '${String(d.getUTCFullYear()).slice(2)}`;
+    // Daily and slower charts label dates only, as TradingView does.
+    return this.medianStep() >= 86_400_000 ? date : `${date}  ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  }
+
+  priceAxisViews() {
+    const series = this.series();
+    if (!series) return [];
+    const seen = new Set<number>();
+    return this.selectedHandles()
+      .filter((h) => {
+        const k = Math.round(h.y);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      })
+      .map((h) => {
+        const price = series.coordinateToPrice(h.y);
+        return {
+          coordinate: () => h.y,
+          text: () => (price === null ? '' : Number(price).toFixed(this.precision())),
+          textColor: () => '#FFFFFF',
+          backColor: () => AXIS_BLUE,
+          visible: () => price !== null,
+          tickVisible: () => true,
+        };
+      });
+  }
+
+  timeAxisViews() {
+    const seen = new Set<number>();
+    return this.selectedHandles()
+      .filter((h) => {
+        const k = Math.round(h.x);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      })
+      .map((h) => ({
+        coordinate: () => h.x,
+        text: () => this.axisLabelTime(h.x),
+        textColor: () => '#FFFFFF',
+        backColor: () => AXIS_BLUE,
+        visible: () => true,
+        tickVisible: () => true,
+      }));
+  }
+
+  priceAxisPaneViews() {
+    return [this.axisBand('y')];
+  }
+
+  timeAxisPaneViews() {
+    return [this.axisBand('x')];
+  }
+
+  private axisBand(axis: 'x' | 'y') {
+    return {
+      zOrder: () => 'bottom' as const,
+      renderer: () => ({
+        draw: (target: CanvasRenderingTarget2D) => {
+          const hs = this.selectedHandles();
+          if (hs.length < 2) return;
+          const vals = hs.map((h) => (axis === 'x' ? h.x : h.y));
+          const lo = Math.min(...vals);
+          const hi = Math.max(...vals);
+          if (hi - lo < 1) return;
+          target.useBitmapCoordinateSpace(({ context, bitmapSize, horizontalPixelRatio, verticalPixelRatio }) => {
+            context.fillStyle = AXIS_BAND;
+            if (axis === 'y') context.fillRect(0, lo * verticalPixelRatio, bitmapSize.width, (hi - lo) * verticalPixelRatio);
+            else context.fillRect(lo * horizontalPixelRatio, 0, (hi - lo) * horizontalPixelRatio, bitmapSize.height);
+          });
+        },
+      }),
+    };
   }
 
   /** Project a model point to screen space, or null if off the current scale. */
