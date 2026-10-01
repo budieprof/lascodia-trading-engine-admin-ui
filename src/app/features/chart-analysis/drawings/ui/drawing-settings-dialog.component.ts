@@ -80,7 +80,11 @@ type Level = { value: number; color: string; visible: boolean };
               @if (fillable()) {
                 <div class="sd-row">
                   <label class="sd-label sd-check">
-                    <input type="checkbox" [checked]="d.style.fill !== null" (change)="toggleFill($any($event.target).checked)" />
+                    <input
+                      type="checkbox"
+                      [checked]="hasBgOption() ? !!opts()['background'] : d.style.fill !== null"
+                      (change)="hasBgOption() ? option('background', $any($event.target).checked) : toggleFill($any($event.target).checked)"
+                    />
                     Background
                   </label>
                   <span class="sd-ctl">
@@ -88,7 +92,7 @@ type Level = { value: number; color: string; visible: boolean };
                       <button
                         type="button"
                         class="sd-swatch"
-                        [disabled]="d.style.fill === null"
+                        [disabled]="hasBgOption() ? !opts()['background'] : d.style.fill === null"
                         [style.background]="d.style.fill ?? 'transparent'"
                         (click)="toggleColor('fill')"
                       ></button>
@@ -99,12 +103,14 @@ type Level = { value: number; color: string; visible: boolean };
                   </span>
                 </div>
               }
-              <div class="sd-row">
-                <label class="sd-label sd-check">
-                  <input type="checkbox" [checked]="d.style.showLabels" (change)="style({ showLabels: $any($event.target).checked })" />
-                  Labels
-                </label>
-              </div>
+              @if (legacyLabels()) {
+                <div class="sd-row">
+                  <label class="sd-label sd-check">
+                    <input type="checkbox" [checked]="d.style.showLabels" (change)="style({ showLabels: $any($event.target).checked })" />
+                    Labels
+                  </label>
+                </div>
+              }
               @for (o of styleOptions(); track o.key) {
                 <div class="sd-row" [class.sd-levels-row]="o.type === 'levels'">
                   @switch (o.type) {
@@ -386,7 +392,16 @@ export class DrawingSettingsDialogComponent implements OnInit {
     const d = this.live();
     return d ? (behaviorFor(d.kind)?.options ?? []) : [];
   });
-  readonly styleOptions = computed(() => this.behaviorOptions().filter((o) => o.tab !== 'text'));
+  /** The tool declares its own background switch; the generic Background row drives it. */
+  readonly hasBgOption = computed(() => this.behaviorOptions().some((o) => o.key === 'background' && o.type === 'bool'));
+  /** Tools with a behaviour declare their own label options; the generic switch is for legacy tools. */
+  readonly legacyLabels = computed(() => {
+    const d = this.live();
+    return !!d && !behaviorFor(d.kind);
+  });
+  readonly styleOptions = computed(() =>
+    this.behaviorOptions().filter((o) => o.tab !== 'text' && !(o.key === 'background' && o.type === 'bool')),
+  );
   readonly textOptions = computed(() => this.behaviorOptions().filter((o) => o.tab === 'text'));
   readonly opts = computed(() => {
     const d = this.live();

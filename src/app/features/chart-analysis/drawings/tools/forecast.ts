@@ -936,8 +936,15 @@ function hitProfile(p: Ctx, at: Pt, tol: number, mode: 'fixed' | 'anchored'): bo
 const MEASURE_STYLE = { color: TV_BLUE, width: 1, fill: RANGE_BLUE_FILL, showLabels: true } as const;
 
 export const BEHAVIORS: ToolBehaviorMap = {
-  'long-position': positionBehavior('long'),
-  'short-position': positionBehavior('short'),
+  'long-position': {
+    ...positionBehavior('long'),
+    // Store TradingView's default target/stop at creation instead of deriving them on every paint.
+    onCreate: (d) => ({ points: completePositionPoints(d, 'long') }),
+  },
+  'short-position': {
+    ...positionBehavior('short'),
+    onCreate: (d) => ({ points: completePositionPoints(d, 'short') }),
+  },
 
   forecast: {
     points: 2,
@@ -958,6 +965,17 @@ export const BEHAVIORS: ToolBehaviorMap = {
     ],
     paint: paintBarsPattern,
     hitTest: hitBarsPattern,
+    // TradingView freezes the copied bars at creation: later moves relocate the copy, not the source.
+    onCreate: (d, bars) => {
+      const [a, b] = d.points;
+      if (!a || !b) return;
+      const t0 = Math.min(a.time, b.time);
+      const t1 = Math.max(a.time, b.time);
+      const sourceBars = bars
+        .filter((x) => x.time >= t0 && x.time <= t1)
+        .map((x) => ({ time: x.time, open: x.open, high: x.high, low: x.low, close: x.close, volume: x.volume }));
+      return sourceBars.length ? { options: { ...(d.options ?? {}), sourceBars } } : undefined;
+    },
   },
 
   'ghost-feed': {
@@ -1024,7 +1042,7 @@ export const BEHAVIORS: ToolBehaviorMap = {
    * on the next click. Transient removal needs controller support (see
    * TRANSIENT_KINDS); painting and hit-testing are `measure`'s.
    */
-  ruler: { points: 2, defaultStyle: MEASURE_STYLE, paint: paintMeasure, hitTest: rangeHit },
+  ruler: { points: 2, transient: true, defaultStyle: MEASURE_STYLE, paint: paintMeasure, hitTest: rangeHit },
 };
 
 /** For the controller: kinds TradingView removes on the next chart click (the rail ruler). */

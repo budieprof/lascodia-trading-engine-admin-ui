@@ -89,6 +89,17 @@ export function tableCellAt(t: TableLayout, at: Pt): { row: number; col: number;
 
 export const TABLE_BEHAVIOR: ToolBehavior = {
   points: 1,
+  // Double-click a cell to edit it in place.
+  editAt: (p, at) => {
+    const cell = tableCellAt(layoutTable(p), at);
+    if (!cell) return null;
+    const value = tableCells(optionsOfTable(p))[cell.row]?.[cell.col] ?? '';
+    return {
+      rect: { x: cell.rect.x, y: cell.rect.y, w: cell.rect.w, h: cell.rect.h },
+      value,
+      commit: (v) => ({ options: setTableCell(p.drawing, cell.row, cell.col, v) }),
+    };
+  },
   defaultStyle: { fontSize: 14, color: '#434651', textColor: '#131722', text: '' },
   options: [
     { key: 'rows', label: 'Rows', type: 'number', default: TABLE_DEFAULT_ROWS, min: 1, max: 30, step: 1, tab: 'style' },
@@ -132,3 +143,7 @@ export const TABLE_BEHAVIOR: ToolBehavior = {
   },
   hitTest: (p, at, tol) => !!p.pts.length && inRect(at, layoutTable(p).bounds, tol),
 };
+
+function optionsOfTable(p: { options: Record<string, unknown> }): Record<string, unknown> {
+  return p.options;
+}

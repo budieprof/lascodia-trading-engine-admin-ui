@@ -514,3 +514,9 @@ export function textBoxRect(p: TextPaintCtx): Rect | null {
       return null;
   }
 }
+
+// Inline editing: double-click edits the text in place on every tool that has free text.
+for (const kind of ['text', 'anchored-note', 'comment', 'callout', 'price-label', 'signpost', 'balloon'] as const) {
+  const b = BEHAVIORS[kind];
+  if (b && !b.textRect) b.textRect = (p) => textBoxRect(p);
+}
