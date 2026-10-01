@@ -545,16 +545,57 @@
           }
         </div>
       }
-      @if (drawings.visible().length) {
+      <div class="rail-sep"></div>
+      @for (t of railStandalone; track t.kind) {
         <button
           type="button"
-          class="rail-tool danger"
-          (click)="drawings.clearVisible()"
-          title="Remove all drawings on this chart"
+          class="rail-tool"
+          [class.active]="tool() === t.kind"
+          (click)="selectTool(t.kind)"
+          [title]="t.label"
         >
-          <app-chart-icon name="trash" [size]="24" />
+          <app-chart-icon [name]="t.kind" [size]="28" />
         </button>
       }
+      <div class="rail-sep"></div>
+      <button
+        type="button"
+        class="rail-tool"
+        [class.active]="magnet()"
+        (click)="magnet.set(!magnet())"
+        title="Magnet — snap drawings to OHLC (M)"
+      >
+        <app-chart-icon name="magnet" [size]="28" />
+      </button>
+      <button
+        type="button"
+        class="rail-tool"
+        [class.active]="drawings.allLocked()"
+        [disabled]="!drawings.visible().length"
+        (click)="drawings.setLockAll(!drawings.allLocked())"
+        [title]="drawings.allLocked() ? 'Unlock all drawings' : 'Lock all drawings'"
+      >
+        <app-chart-icon [name]="drawings.allLocked() ? 'lock' : 'unlock'" [size]="28" />
+      </button>
+      <button
+        type="button"
+        class="rail-tool"
+        [class.active]="drawings.hidden()"
+        (click)="drawings.hidden.set(!drawings.hidden())"
+        [title]="drawings.hidden() ? 'Show all drawings' : 'Hide all drawings'"
+      >
+        <app-chart-icon [name]="drawings.hidden() ? 'eye-off' : 'eye'" [size]="28" />
+      </button>
+      <div class="rail-sep"></div>
+      <button
+        type="button"
+        class="rail-tool"
+        [disabled]="!drawings.visible().length"
+        (click)="drawings.clearVisible()"
+        title="Remove all drawings on this chart"
+      >
+        <app-chart-icon name="trash" [size]="28" />
+      </button>
     </nav>
 
     @if (openRailGroup(); as g) {
@@ -564,18 +605,23 @@
         [style.top.px]="railFlyoutTop()"
         (click)="$event.stopPropagation()"
       >
-        <div class="rail-flyout-title">{{ g.title }}</div>
-        @for (t of g.tools; track t.kind) {
-          <button
-            type="button"
-            role="menuitem"
-            class="rail-flyout-item"
-            [class.active]="tool() === t.kind"
-            (click)="pickRailTool(g.name, t.kind)"
-          >
-            <span class="icon"><app-chart-icon [name]="t.kind" [size]="28" /></span>
-            <span>{{ t.label }}</span>
-          </button>
+        @for (sec of g.sections; track sec.title) {
+          @if (!$first) {
+            <div class="rail-flyout-sep"></div>
+          }
+          <div class="rail-flyout-title">{{ sec.title }}</div>
+          @for (t of sec.tools; track t.kind) {
+            <button
+              type="button"
+              role="menuitem"
+              class="rail-flyout-item"
+              [class.active]="tool() === t.kind"
+              (click)="pickRailTool(g.name, t.kind)"
+            >
+              <span class="icon"><app-chart-icon [name]="t.kind" [size]="28" /></span>
+              <span>{{ t.label }}</span>
+            </button>
+          }
         }
       </div>
     }

@@ -253,6 +253,21 @@ export class DrawingStore {
     if (d) this.update(id, { locked: !d.locked });
   }
 
+  /** Whether every drawing on the current chart is locked. */
+  readonly allLocked = computed(() => {
+    const v = this.visible();
+    return v.length > 0 && v.every((d) => d.locked);
+  });
+
+  /** Lock or unlock every drawing on the current chart (one undo step). */
+  setLockAll(locked: boolean): void {
+    const ids = new Set(this.visible().map((d) => d.id));
+    this.mutate((list) => list.map((d) => (ids.has(d.id) ? { ...d, locked } : d)));
+  }
+
+  /** Hide all drawings without deleting them — a view toggle, not an edit. */
+  readonly hidden = signal(false);
+
   /** Remove every drawing on the current chart. */
   clearVisible(): void {
     const { symbol, resolution } = this.scope();

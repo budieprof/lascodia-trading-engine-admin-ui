@@ -1820,3 +1820,57 @@ $strip-width: 46px;
   border-color: var(--tv-line);
   border-radius: 4px;
 }
+
+// ── Rail flyouts and utilities, TradingView metrics ──
+.rail-flyout {
+  min-width: 240px;
+  padding: 6px 0;
+  background: var(--tv-bg);
+  border: 0;
+  border-radius: 6px;
+  box-shadow: var(--tv-menu-shadow), 0 0 0 1px var(--tv-line);
+}
+
+.rail-flyout-title {
+  padding: 10px 14px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--tv-muted);
+}
+
+.rail-flyout-sep {
+  height: 1px;
+  margin: 6px 6px;
+  background: var(--tv-line);
+}
+
+.rail-flyout-item {
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 14px 0 8px;
+  border-radius: 0;
+  color: var(--tv-ink);
+
+  &:hover {
+    background: var(--tv-hover);
+  }
+
+  &.active {
+    background: var(--tv-active-bg);
+    color: var(--tv-blue);
+  }
+}
+
+.rail-sep {
+  flex: none;
+  width: 28px;
+  height: 1px;
+  margin: 6px auto;
+  background: var(--tv-line);
+}
+
+.rail-tool:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
