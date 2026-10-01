@@ -1165,3 +1165,36 @@ $rail-width: 40px;
   max-height: 112px;
   overflow-y: auto;
 }
+
+// ── Line icons (app-chart-icon) ──
+// TradingView's look: icon-led buttons, full-strength ink at rest, icon and label on one baseline.
+.tool,
+.menu-action,
+.market-status,
+.study-toggle,
+.study-remove,
+.tree-remove,
+.panel-focus {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tool {
+  color: var(--text, #131722);
+}
+
+.rail-tool {
+  width: 36px;
+  height: 34px;
+  color: var(--text, #131722);
+}
+
+.rail-caret {
+  display: inline-flex;
+  align-items: center;
+}
+
+.icon {
+  display: inline-flex;
+}

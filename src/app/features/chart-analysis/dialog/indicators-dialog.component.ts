@@ -9,6 +9,7 @@ import {
   viewChild,
   afterNextRender,
 } from '@angular/core';
+import { ChartIconComponent } from '../icons/chart-icon.component';
 import {
   ALL,
   DIALOG_TABS,
@@ -40,6 +41,7 @@ function loadFavourites(): Set<string> {
  */
 @Component({
   selector: 'app-indicators-dialog',
+  imports: [ChartIconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown.escape)': 'closed.emit()' },
   template: `
@@ -47,7 +49,9 @@ function loadFavourites(): Set<string> {
     <div class="dialog" role="dialog" aria-label="Indicators, metrics and strategies">
       <header>
         <h2>Indicators, metrics and strategies</h2>
-        <button type="button" class="close" (click)="closed.emit()" aria-label="Close">✕</button>
+        <button type="button" class="close" (click)="closed.emit()" aria-label="Close">
+          <app-chart-icon name="close" [size]="20" />
+        </button>
       </header>
       <input
         #search
@@ -76,7 +80,10 @@ function loadFavourites(): Set<string> {
             @for (c of categories(); track c) {
               <li>
                 <button type="button" [class.active]="category() === c" (click)="category.set(c)">
-                  {{ c === favouritesLabel ? '★ ' + c : c }}
+                  @if (c === favouritesLabel) {
+                    <app-chart-icon name="star" [size]="16" />
+                  }
+                  {{ c }}
                 </button>
               </li>
             }
@@ -92,7 +99,10 @@ function loadFavourites(): Set<string> {
                 (click)="toggleFavourite(it)"
                 [title]="favourites().has(key(it)) ? 'Remove from favourites' : 'Add to favourites'"
               >
-                ★
+                <app-chart-icon
+                  [name]="favourites().has(key(it)) ? 'star-filled' : 'star'"
+                  [size]="16"
+                />
               </button>
               <button type="button" class="pick" (click)="picked.emit(it)">
                 <span class="name">{{ it.name }}</span>

@@ -25,6 +25,7 @@ import {
   mergeForming,
 } from '../../datafeed/aggregate';
 import { priceScaleFor } from '../../datafeed/symbol-info';
+import { ChartIconComponent } from '../../icons/chart-icon.component';
 import { IndicatorsDialogComponent } from '../../dialog/indicators-dialog.component';
 import type { DialogItem, DialogTab } from '../../dialog/dialog-items';
 import {
@@ -166,6 +167,7 @@ const PAGE_BARS = 1500;
     DatePipe,
     ChartHostComponent,
     IndicatorsDialogComponent,
+    ChartIconComponent,
     StrategyTesterPanelComponent,
     ScriptEditorPanelComponent,
     PerformanceTilesComponent,
