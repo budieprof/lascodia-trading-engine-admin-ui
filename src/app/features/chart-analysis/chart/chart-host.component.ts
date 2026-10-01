@@ -466,7 +466,7 @@ export class ChartHostComponent implements OnDestroy {
       // Filtered by THIS panel's symbol and timeframe rather than the store's
       // single global scope: in a split layout every panel is on screen at
       // once, and a global set would paint one panel's trendlines onto another.
-      const all = this.drawings.allDrawings();
+      const all = this.drawings.hidden() ? [] : this.drawings.allDrawings();
       const symbol = this.symbol();
       const resolution = this.resolution();
       const selected = this.drawings.selectedId();

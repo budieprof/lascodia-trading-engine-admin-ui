@@ -539,6 +539,176 @@ export const TOOL_GROUP_ORDER: ReadonlyArray<{ id: ToolSpec['group']; title: str
   { id: 'volume', title: 'Volume-based' },
 ];
 
+/**
+ * The left rail exactly as TradingView lays it out: six family buttons, each opening a flyout
+ * of titled sections. `TOOL_GROUP_ORDER` above is the coarse taxonomy; this is the rail.
+ * Every tool in `TOOLS` must appear here once (a spec enforces it), so a new tool cannot be
+ * silently left off the rail.
+ */
+export interface RailSection {
+  title: string;
+  kinds: readonly DrawingKind[];
+}
+export interface RailGroup {
+  id: string;
+  title: string;
+  sections: readonly RailSection[];
+}
+
+export const RAIL_LAYOUT: readonly RailGroup[] = [
+  {
+    id: 'trend',
+    title: 'Trend line tools',
+    sections: [
+      {
+        title: 'Lines',
+        kinds: [
+          'trend-line',
+          'ray',
+          'info-line',
+          'extended-line',
+          'trend-angle',
+          'horizontal-line',
+          'horizontal-ray',
+          'vertical-line',
+          'cross-line',
+        ],
+      },
+      { title: 'Channels', kinds: ['parallel-channel', 'regression-channel', 'flat-channel', 'disjoint-angle'] },
+      {
+        title: 'Pitchforks',
+        kinds: ['pitchfork', 'schiff-pitchfork', 'modified-schiff-pitchfork', 'inside-pitchfork'],
+      },
+    ],
+  },
+  {
+    id: 'fib',
+    title: 'Gann and Fibonacci tools',
+    sections: [
+      {
+        title: 'Fibonacci',
+        kinds: [
+          'fib-retracement',
+          'fib-extension',
+          'fib-channel',
+          'fib-timezone',
+          'fib-speed-fan',
+          'trend-fib-time',
+          'fib-circles',
+          'fib-spiral',
+          'fib-resistance-arcs',
+          'fib-arcs',
+          'fib-wedge',
+          'pitchfan',
+        ],
+      },
+      {
+        title: 'Gann',
+        kinds: ['gann-box', 'gann-square-fixed', 'gann-square', 'gann-fan', 'gann-fan-fixed', 'gann-grid'],
+      },
+    ],
+  },
+  {
+    id: 'patterns',
+    title: 'Patterns',
+    sections: [
+      {
+        title: 'Chart patterns',
+        kinds: [
+          'xabcd-pattern',
+          'cypher-pattern',
+          'head-and-shoulders',
+          'head-and-shoulders-inverse',
+          'abcd-pattern',
+          'triangle-pattern',
+          'three-drives',
+          'five-point-pattern',
+        ],
+      },
+      {
+        title: 'Elliott waves',
+        kinds: [
+          'elliott-impulse',
+          'elliott-correction',
+          'elliott-triangle',
+          'elliott-double-combo',
+          'elliott-triple-combo',
+          'elliott-minor',
+          'elliott-intermediate',
+        ],
+      },
+      { title: 'Cycles', kinds: ['cyclic-lines', 'time-cycles', 'sine-line'] },
+    ],
+  },
+  {
+    id: 'forecast',
+    title: 'Forecasting and measurement tools',
+    sections: [
+      {
+        title: 'Forecasting',
+        kinds: ['long-position', 'short-position', 'forecast', 'bars-pattern', 'ghost-feed', 'projection'],
+      },
+      {
+        title: 'Volume-based',
+        kinds: ['anchored-vwap', 'fixed-range-volume-profile', 'anchored-volume-profile'],
+      },
+      { title: 'Measurers', kinds: ['price-range', 'date-range', 'measure'] },
+    ],
+  },
+  {
+    id: 'shapes',
+    title: 'Geometric shapes',
+    sections: [
+      { title: 'Brushes', kinds: ['brush', 'highlighter'] },
+      {
+        title: 'Arrows',
+        kinds: ['arrow', 'arrow-mark-up', 'arrow-mark-down', 'arrow-mark-left', 'arrow-mark-right'],
+      },
+      {
+        title: 'Shapes',
+        kinds: [
+          'rectangle',
+          'rotated-rectangle',
+          'path',
+          'circle',
+          'ellipse',
+          'polyline',
+          'triangle',
+          'arc',
+          'curve',
+          'double-curve',
+          'arc-curve',
+        ],
+      },
+    ],
+  },
+  {
+    id: 'text',
+    title: 'Text and annotation tools',
+    sections: [
+      {
+        title: 'Text and notes',
+        kinds: [
+          'text',
+          'anchored-note',
+          'comment',
+          'table',
+          'callout',
+          'price-label',
+          'signpost',
+          'flag',
+          'balloon',
+          'sticker',
+        ],
+      },
+      { title: 'Content', kinds: ['idea'] },
+    ],
+  },
+];
+
+/** Standalone rail buttons below the families (TradingView's measure ruler). */
+export const RAIL_STANDALONE: readonly DrawingKind[] = ['ruler'];
+
 export function toolFor(kind: DrawingKind): ToolSpec | undefined {
   return TOOLS.find((t) => t.kind === kind);
 }

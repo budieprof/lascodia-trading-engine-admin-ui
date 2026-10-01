@@ -116,7 +116,8 @@ import {
 } from '../../workspace/layout-store.service';
 import {
   DEFAULT_STYLE,
-  TOOL_GROUP_ORDER,
+  RAIL_LAYOUT,
+  RAIL_STANDALONE,
   TOOLS,
   toolFor,
   type ToolSpec,
@@ -759,23 +760,16 @@ export class ChartAnalysisPageComponent {
    * The left rail, grouped as TradingView groups it: one button per family, the rest of the
    * family in a flyout. Fifty-odd single buttons in a column was a scroll hunt.
    */
-  readonly toolGroups = computed(() => {
-    const byGroup = new Map<string, ToolSpec[]>();
-    for (const t of TOOLS) {
-      const list = byGroup.get(t.group) ?? [];
-      list.push(t);
-      byGroup.set(t.group, list);
-    }
-    const ordered = [
-      ...TOOL_GROUP_ORDER,
-      ...[...byGroup.keys()]
-        .filter((id) => !TOOL_GROUP_ORDER.some((g) => g.id === id))
-        .map((id) => ({ id: id as ToolSpec['group'], title: id })),
-    ];
-    return ordered
-      .filter((g) => byGroup.has(g.id))
-      .map((g) => ({ name: g.id, title: g.title, tools: byGroup.get(g.id)! }));
-  });
+  readonly toolGroups = computed(() =>
+    RAIL_LAYOUT.map((g) => {
+      const sections = g.sections.map((sec) => ({
+        title: sec.title,
+        tools: sec.kinds.map((k) => toolFor(k)).filter((t): t is ToolSpec => !!t),
+      }));
+      return { name: g.id, title: g.title, sections, tools: sections.flatMap((sec) => sec.tools) };
+    }),
+  );
+  readonly railStandalone = RAIL_STANDALONE.map((k) => toolFor(k)).filter((t): t is ToolSpec => !!t);
 
   /** Which tool each rail button currently shows — the family's last-used, as on TradingView. */
   readonly railPick = signal<Record<string, DrawingKind>>({});
