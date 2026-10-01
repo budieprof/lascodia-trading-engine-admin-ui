@@ -47,6 +47,27 @@ export function shiftPoints(points: readonly DrawingPoint[], dt: number, dp: num
   return points.map((p) => ({ time: p.time + dt, price: p.price + dp }));
 }
 
+/**
+ * Move every anchor by `dBars` bars (fractional allowed) and `dp` in price — TradingView's
+ * move semantics. Shifting by milliseconds instead lands anchors inside weekends and session
+ * gaps, which squashes or tears multi-point shapes; counting bars keeps the shape intact.
+ * Falls back to a time shift when the bar mapping is unavailable.
+ */
+export function shiftPointsByBars(
+  points: readonly DrawingPoint[],
+  dBars: number,
+  dp: number,
+  logicalAt: (t: number) => number | null,
+  timeAtLogical: (l: number) => number | null,
+  fallbackDt: number,
+): DrawingPoint[] {
+  return points.map((p) => {
+    const l = logicalAt(p.time);
+    const t = l === null ? null : timeAtLogical(l + dBars);
+    return { time: t ?? p.time + fallbackDt, price: p.price + dp };
+  });
+}
+
 // ── Visibility on intervals (TV "Visibility" tab) ──────────────────────────
 
 export type IntervalUnit = 'ticks' | 'seconds' | 'minutes' | 'hours' | 'days' | 'weeks' | 'months';
