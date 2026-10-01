@@ -5,6 +5,7 @@ import {
   toKagi,
   toLineBreak,
   toPointAndFigure,
+  toRangeBars,
   toRenko,
 } from './price-transforms';
 
@@ -118,5 +119,51 @@ describe('empty input', () => {
     expect(toPointAndFigure([], 1, 3)).toEqual([]);
     expect(toKagi([], 1)).toEqual([]);
     expect(averageTrueRange([])).toBe(0);
+  });
+});
+
+describe('toRangeBars', () => {
+  const ohlc = (time: number, open: number, high: number, low: number, close: number): Bar => ({
+    time,
+    open,
+    high,
+    low,
+    close,
+    volume: 1,
+  });
+
+  it('returns nothing for empty input or a non-positive range', () => {
+    expect(toRangeBars([], 1)).toEqual([]);
+    expect(toRangeBars(series([1, 2]), 0)).toEqual([]);
+  });
+
+  it('every completed bar spans exactly the range size', () => {
+    const bars = series([100, 103, 101, 106, 99, 104, 110, 102]);
+    const out = toRangeBars(bars, 2);
+    expect(out.length).toBeGreaterThan(3);
+    for (const b of out.slice(0, -1)) {
+      expect(b.high - b.low).toBeCloseTo(2, 9);
+      expect(b.close === b.high || b.close === b.low).toBe(true);
+    }
+    assertStrictlyIncreasing(out);
+  });
+
+  it('chains each bar open to the previous close', () => {
+    const out = toRangeBars(series([100, 105, 97, 108]), 1.5);
+    for (let i = 1; i < out.length; i++) expect(out[i].open).toBeCloseTo(out[i - 1].close, 9);
+  });
+
+  it('walks an up candle open -> low -> high -> close', () => {
+    // Dips 2 first, then rallies 6: the first bar must be a DOWN bar.
+    const out = toRangeBars([ohlc(0, 100, 106, 98, 105)], 2);
+    expect(out[0].close).toBeLessThan(out[0].open);
+    expect(out[0].low).toBe(98);
+    expect(out.slice(1, -1).every((b) => b.close > b.open)).toBe(true);
+  });
+
+  it('walks a down candle open -> high -> low -> close', () => {
+    const out = toRangeBars([ohlc(0, 100, 102, 94, 95)], 2);
+    expect(out[0].close).toBeGreaterThan(out[0].open);
+    expect(out[0].high).toBe(102);
   });
 });

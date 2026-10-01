@@ -44,8 +44,8 @@ export interface CustomSeriesStyle extends CustomSeriesOptions {
 
 const DEFAULT_STYLE: CustomSeriesStyle = {
   ...customSeriesDefaultOptions,
-  upColor: '#26A69A',
-  downColor: '#EF5350',
+  upColor: '#089981',
+  downColor: '#F23645',
   minBarWidth: 1,
 };
 

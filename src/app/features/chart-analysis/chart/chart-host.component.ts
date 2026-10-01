@@ -42,6 +42,7 @@ import { HiLoSeries, VolCandleSeries, type OhlcvData } from './custom-series';
 import {
   averageTrueRange,
   toKagi,
+  toRangeBars,
   toLineBreak,
   toPointAndFigure,
   toRenko,
@@ -64,7 +65,10 @@ import { EventMarksRenderer, type EventMark } from '../overlays/event-marks-rend
 import { ProfileRenderer } from '../profiles/profile-renderer';
 import { computeProfileStudy } from '../profiles/profile-studies';
 import { PatternRenderer } from '../patterns/pattern-renderer';
-import { detectCandlestickPatterns, type CandleTrendFilter } from '../patterns/candlestick-patterns';
+import {
+  detectCandlestickPatterns,
+  type CandleTrendFilter,
+} from '../patterns/candlestick-patterns';
 import { detectChartPatterns } from '../patterns/chart-patterns';
 import { renderScriptResult, type ScriptRenderHandle } from '../scripts/script-renderer';
 import type { ChartScriptResult } from '../scripts/chart-script.model';
@@ -96,7 +100,8 @@ export type ChartStyle =
   | 'renko'
   | 'kagi'
   | 'pnf'
-  | 'line-break';
+  | 'line-break'
+  | 'range';
 
 /** Styles whose bars are built from price movement, not time. */
 const PRICE_BASED: ReadonlySet<ChartStyle> = new Set<ChartStyle>([
@@ -104,6 +109,7 @@ const PRICE_BASED: ReadonlySet<ChartStyle> = new Set<ChartStyle>([
   'kagi',
   'pnf',
   'line-break',
+  'range',
 ]);
 
 /** A pane of externally fetched series (FX fundamentals). */
@@ -349,7 +355,7 @@ export class ChartHostComponent implements OnDestroy {
     const change = s.close !== null && s.open !== null ? s.close - s.open : null;
     const pct = change !== null && s.open ? (change / s.open) * 100 : null;
     const up = change === null || change >= 0;
-    const tone = up ? '#26A69A' : '#EF5350';
+    const tone = up ? '#089981' : '#F23645';
     const shifted = new Date(s.time + this.timezoneShiftMs(s.time));
     const date = shifted.toISOString().replace('T', ' ').slice(0, 16);
     const rows = [
@@ -686,16 +692,31 @@ export class ChartHostComponent implements OnDestroy {
     return true;
   }
 
+  /**
+   * TradingView's 2026 chart palette.
+   *
+   * Light: white canvas, #131722 text, near-invisible #F0F3FA grid, #E0E3EB
+   * scale borders. Dark: TradingView's current dark canvas is the neutral
+   * #0F0F0F (it moved off the old blue-grey #131722 in the 2023 redesign) with
+   * #DBDBDB text, #1F1F1F grid and #2E2E2E borders. Candles use TradingView's
+   * current default pair #089981 / #F23645 for body, wick and border alike;
+   * volume is the same pair at 50% alpha. The crosshair is a dashed #9598A1
+   * line whose axis labels sit on a dark #131722 chip in light mode and a
+   * #363A45 chip in dark mode, as TradingView draws them.
+   */
   private palette(dark: boolean) {
     return {
-      background: dark ? '#131722' : '#FFFFFF',
-      text: dark ? '#D1D4DC' : '#131722',
-      grid: dark ? '#1E222D' : '#E6E9EF',
-      border: dark ? '#2A2E39' : '#D6DCDE',
-      up: '#26A69A',
-      down: '#EF5350',
-      volumeUp: dark ? 'rgba(38,166,154,0.4)' : 'rgba(38,166,154,0.35)',
-      volumeDown: dark ? 'rgba(239,83,80,0.4)' : 'rgba(239,83,80,0.35)',
+      background: dark ? '#0F0F0F' : '#FFFFFF',
+      text: dark ? '#DBDBDB' : '#131722',
+      grid: dark ? '#1F1F1F' : '#F0F3FA',
+      border: dark ? '#2E2E2E' : '#E0E3EB',
+      up: '#089981',
+      down: '#F23645',
+      volumeUp: 'rgba(8,153,129,0.5)',
+      volumeDown: 'rgba(242,54,69,0.5)',
+      crosshair: '#9598A1',
+      crosshairLabel: dark ? '#363A45' : '#131722',
+      line: '#2962FF',
     };
   }
 
@@ -708,21 +729,36 @@ export class ChartHostComponent implements OnDestroy {
       layout: {
         background: { type: ColorType.Solid, color: p.background },
         textColor: p.text,
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif",
+        fontSize: 12,
         attributionLogo: false,
         panes: { separatorColor: p.border, separatorHoverColor: p.border, enableResize: true },
       },
       grid: { vertLines: { color: p.grid }, horzLines: { color: p.grid } },
-      rightPriceScale: { borderColor: p.border, scaleMargins: { top: 0.1, bottom: 0.1 } },
+      rightPriceScale: { borderColor: p.border, scaleMargins: { top: 0.1, bottom: 0.08 } },
       timeScale: {
         borderColor: p.border,
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 6,
+        // TradingView's defaults: ~5 bars of empty space right of the last bar,
+        // 6px per bar.
+        rightOffset: 5,
+        barSpacing: 6,
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: p.border, labelBackgroundColor: p.border, style: LineStyle.Dashed },
-        horzLine: { color: p.border, labelBackgroundColor: p.border, style: LineStyle.Dashed },
+        vertLine: {
+          color: p.crosshair,
+          width: 1,
+          labelBackgroundColor: p.crosshairLabel,
+          style: LineStyle.Dashed,
+        },
+        horzLine: {
+          color: p.crosshair,
+          width: 1,
+          labelBackgroundColor: p.crosshairLabel,
+          style: LineStyle.Dashed,
+        },
       },
       autoSize: false,
       handleScroll: true,
@@ -824,6 +860,11 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   /** Reset both scales to fit the data, as double-clicking the axis does. */
+  /** Fit the price axis to the visible data, leaving the time window alone (TradingView's "auto"). */
+  autoScalePrice(): void {
+    this.chart?.priceScale('right').applyOptions({ autoScale: true });
+  }
+
   resetScales(): void {
     this.chart?.timeScale().fitContent();
     this.chart?.priceScale('right').applyOptions({ autoScale: true });
@@ -863,6 +904,15 @@ export class ChartHostComponent implements OnDestroy {
     }
 
     const priceFormat = { type: 'price' as const, precision, minMove: 1 / 10 ** precision };
+    // TradingView's last-price line: dotted, in the series colour (the
+    // library colours it per the last bar's direction for OHLC series), with
+    // the value chip on the axis.
+    const lastPrice = {
+      lastValueVisible: true,
+      priceLineVisible: true,
+      priceLineStyle: LineStyle.Dotted,
+      priceLineWidth: 1 as const,
+    };
 
     if (
       style === 'line' ||
@@ -878,43 +928,65 @@ export class ChartHostComponent implements OnDestroy {
       const data = source.map((b) => ({ time: asTime(b.time), value: b.close }));
       if (style === 'line' || style === 'kagi') {
         this.price = this.chart.addSeries(LineSeries, {
-          color: style === 'kagi' ? '#787B86' : '#2962FF',
+          color: style === 'kagi' ? '#787B86' : p.line,
           lineWidth: 2,
           priceFormat,
+          ...lastPrice,
         });
       } else if (style === 'stepline') {
         this.price = this.chart.addSeries(LineSeries, {
-          color: '#2962FF',
+          color: p.line,
           lineWidth: 2,
           lineType: 1, // with-steps
           priceFormat,
+          ...lastPrice,
         });
       } else if (style === 'line-markers') {
         this.price = this.chart.addSeries(LineSeries, {
-          color: '#2962FF',
+          color: p.line,
           lineWidth: 2,
           pointMarkersVisible: true,
           priceFormat,
+          ...lastPrice,
         });
       } else if (style === 'hlc-area') {
         this.price = this.chart.addSeries(AreaSeries, {
-          lineColor: '#2962FF',
+          lineColor: p.line,
           topColor: 'rgba(41,98,255,0.28)',
-          bottomColor: 'rgba(41,98,255,0.02)',
+          bottomColor: 'rgba(41,98,255,0)',
           priceFormat,
+          ...lastPrice,
         });
       } else if (style === 'area') {
         this.price = this.chart.addSeries(AreaSeries, {
-          lineColor: '#2962FF',
-          topColor: 'rgba(41,98,255,0.35)',
-          bottomColor: 'rgba(41,98,255,0.02)',
+          lineColor: p.line,
+          topColor: 'rgba(41,98,255,0.28)',
+          bottomColor: 'rgba(41,98,255,0)',
           priceFormat,
+          ...lastPrice,
         });
       } else {
-        const base = source.length ? source[0].close : 0;
+        // TradingView's baseline defaults to the price at 50% of the visible
+        // price range. Lightweight Charts' base value is a fixed price, so the
+        // midpoint of the loaded bars' high/low range stands in for it.
+        let lo = Infinity;
+        let hi = -Infinity;
+        for (const b of source) {
+          lo = Math.min(lo, b.low);
+          hi = Math.max(hi, b.high);
+        }
+        const base = source.length ? (lo + hi) / 2 : 0;
         this.price = this.chart.addSeries(BaselineSeries, {
           baseValue: { type: 'price', price: base },
+          topLineColor: p.up,
+          topFillColor1: 'rgba(8,153,129,0.28)',
+          topFillColor2: 'rgba(8,153,129,0.05)',
+          bottomLineColor: p.down,
+          bottomFillColor1: 'rgba(242,54,69,0.05)',
+          bottomFillColor2: 'rgba(242,54,69,0.28)',
+          lineWidth: 2,
           priceFormat,
+          ...lastPrice,
         });
       }
       this.price.setData(data as SeriesDataItemTypeMap['Line'][]);
@@ -927,6 +999,7 @@ export class ChartHostComponent implements OnDestroy {
         openVisible: style !== 'hlc-bars',
         thinBars: style !== 'hlc-bars',
         priceFormat,
+        ...lastPrice,
       });
       this.price.setData(source.map(toOhlcData) as SeriesDataItemTypeMap['Bar'][]);
     } else if (style === 'hilo' || style === 'vol-candle') {
@@ -938,6 +1011,7 @@ export class ChartHostComponent implements OnDestroy {
         upColor: p.up,
         downColor: p.down,
         priceFormat,
+        ...lastPrice,
       });
       custom.setData(
         source.map(
@@ -953,7 +1027,11 @@ export class ChartHostComponent implements OnDestroy {
       );
       this.price = custom;
     } else if (style === 'column') {
-      const column = this.chart.addSeries(HistogramSeries, { color: p.up, priceFormat });
+      const column = this.chart.addSeries(HistogramSeries, {
+        color: p.up,
+        priceFormat,
+        ...lastPrice,
+      });
       column.setData(
         source.map((b) => ({
           time: asTime(b.time),
@@ -972,6 +1050,7 @@ export class ChartHostComponent implements OnDestroy {
         wickUpColor: p.up,
         wickDownColor: p.down,
         priceFormat,
+        ...lastPrice,
       });
       this.price.setData(source.map(toOhlcData) as CandlestickData<Time>[]);
     }
@@ -1048,6 +1127,8 @@ export class ChartHostComponent implements OnDestroy {
         return toPointAndFigure(bars, unit, 3);
       case 'kagi':
         return toKagi(bars, unit * 2);
+      case 'range':
+        return toRangeBars(bars, unit);
       default:
         return bars;
     }
@@ -1170,7 +1251,11 @@ export class ChartHostComponent implements OnDestroy {
             lineType: LineType.WithSteps,
             priceLineVisible: false,
             title: line.title,
-            priceFormat: { type: 'price', precision: line.precision ?? 2, minMove: 10 ** -(line.precision ?? 2) },
+            priceFormat: {
+              type: 'price',
+              precision: line.precision ?? 2,
+              minMove: 10 ** -(line.precision ?? 2),
+            },
           },
           paneIndex,
         );
@@ -1181,8 +1266,13 @@ export class ChartHostComponent implements OnDestroy {
         const values = alignToBars(line.points, raw);
         s.setData(
           raw
-            .map((b, i) => ({ time: asTime(b.time + this.timezoneShiftMs(b.time)), value: values[i] }))
-            .filter((d): d is { time: Time; value: number } => d.value !== null && d.value !== undefined),
+            .map((b, i) => ({
+              time: asTime(b.time + this.timezoneShiftMs(b.time)),
+              value: values[i],
+            }))
+            .filter(
+              (d): d is { time: Time; value: number } => d.value !== null && d.value !== undefined,
+            ),
         );
         this.externalSeries.push(s);
       }

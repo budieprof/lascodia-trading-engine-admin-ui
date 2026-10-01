@@ -12,8 +12,9 @@
   outline: none;
   --wl-up: #089981;
   --wl-down: #f23645;
-  --wl-hover: var(--surface-hover, rgba(0, 0, 0, 0.04));
-  --wl-line: var(--border, #e0e3eb);
+  --wl-hover: #f0f3fa;
+  --wl-line: #e0e3eb;
+  font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif;
 }
 
 button {
@@ -375,7 +376,7 @@ button {
 .wl-last {
   border-radius: 2px;
   padding: 1px 2px;
-  transition: background-color 0.5s ease-out;
+  transition: color 0.6s ease-out;
 
   sup {
     font-size: 0.72em;
@@ -383,13 +384,14 @@ button {
     margin-left: 0.5px;
   }
 
+  // TradingView flashes the digits, not the cell.
   &.flash-up {
-    background: rgba(8, 153, 129, 0.18);
+    color: var(--wl-up);
     transition: none;
   }
 
   &.flash-down {
-    background: rgba(242, 54, 69, 0.18);
+    color: var(--wl-down);
     transition: none;
   }
 }
@@ -634,4 +636,11 @@ button {
 .wl-news-more {
   font-size: 11px;
   color: var(--text-muted, #787b86);
+}
+
+:host-context([data-theme='dark']) {
+  --wl-hover: #2a2a2a;
+  --wl-line: #2e2e2e;
+  background: #0f0f0f;
+  color: #dbdbdb;
 }

@@ -91,6 +91,21 @@ export const UI_ICONS: Record<string, string> = {
   pencil: '<path d="M17.5 6.5l4 4L11 21H7v-4z"/><path d="M15 9l4 4"/>',
   flag: '<path d="M8.5 23V5.5"/><path d="M8.5 6.5h11l-2.5 4 2.5 4h-11" fill="currentColor"/>',
 
+  search: '<circle cx="12.5" cy="12.5" r="6"/><path d="M17 17l5.5 5.5"/>',
+  templates:
+    '<rect x="5.5" y="5.5" width="7" height="7" rx="1"/><rect x="15.5" y="5.5" width="7" height="7" rx="1"/><rect x="5.5" y="15.5" width="7" height="7" rx="1"/><rect x="15.5" y="15.5" width="7" height="7" rx="1"/>',
+  layers:
+    '<path d="M14 5.5l8.5 4.5-8.5 4.5L5.5 10z"/><path d="M5.5 14l8.5 4.5 8.5-4.5"/><path d="M5.5 18l8.5 4.5 8.5-4.5"/>',
+  volume:
+    '<path d="M5.5 22.5h17"/><path d="M8.5 22.5v-5M11.5 22.5v-9M14.5 22.5v-6M17.5 22.5v-11M20.5 22.5v-7"/>',
+  trades: '<path d="M5.5 20l5-6 4 3 7-8.5"/><path d="M8 8.5h4M10 6.5v4"/>' + DOT(21.5, 8.5, 1.4),
+  alert:
+    '<path d="M14 5.5a5.5 5.5 0 0 0-5.5 5.5v4.5L6.5 19h15l-2-3.5V11A5.5 5.5 0 0 0 14 5.5z"/><path d="M12 21.5a2 2 0 0 0 4 0"/>',
+  'goto-date':
+    '<rect x="5.5" y="7.5" width="17" height="15" rx="1.5"/><path d="M5.5 11.5h17M10.5 5v4M17.5 5v4"/><path d="M12 17h6M16 15l2 2-2 2"/>',
+  'object-tree':
+    '<path d="M7.5 6.5h6M7.5 6.5v15M7.5 13.5h6M7.5 21.5h6"/><rect x="15.5" y="4.5" width="7" height="4" rx="1"/><rect x="15.5" y="11.5" width="7" height="4" rx="1"/><rect x="15.5" y="19.5" width="7" height="4" rx="1"/>',
+
   // ── split-layout picker ──
   'layout-1': '<rect x="5.5" y="6.5" width="17" height="15" rx="1.5"/>',
   'layout-2h': '<rect x="5.5" y="6.5" width="17" height="15" rx="1.5"/><path d="M14.5 6.5v15"/>',

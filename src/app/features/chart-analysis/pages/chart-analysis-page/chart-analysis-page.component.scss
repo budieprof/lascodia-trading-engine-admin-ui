@@ -1,5 +1,5 @@
 // Width of the left drawing rail; the chart area is inset by it.
-$rail-width: 40px;
+$rail-width: 52px;
 
 // Chart workstation layout. Deliberately close to TradingView's chrome:
 // a thin top toolbar, a full-bleed chart with a floating legend, and a
@@ -823,8 +823,6 @@ $rail-width: 40px;
 
 // ── Watchlist ──────────────────────────────────────────────────────────────
 
-
-
 .watch-row {
   display: grid;
   grid-template-columns: 1fr auto auto;
@@ -1175,7 +1173,6 @@ $rail-width: 40px;
   display: inline-flex;
 }
 
-
 // ── Watchlist dock (right) ──
 // Docked like TradingView's: it takes width from the chart rather than
 // floating over it, and its left edge drags to resize.
@@ -1210,4 +1207,616 @@ $rail-width: 40px;
 
 .chart-grid.with-dock {
   right: var(--dock-width, 380px);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TradingView chrome (2026) — measured from the live site:
+//   13px system UI font, ink #131722, muted #787b86, hairlines #e0e3eb,
+//   hover #f0f3fa, selected #e3effd/#2962ff, 4px radii, 38px top bar,
+//   34px icon buttons, 52px left rail, 46px right strip, 32px bottom bar.
+// Dark values mirror the canvas palette in ChartHostComponent.
+// ═══════════════════════════════════════════════════════════════════════════
+
+.chart-page {
+  --tv-ink: #131722;
+  --tv-muted: #787b86;
+  --tv-line: #e0e3eb;
+  --tv-hover: #f0f3fa;
+  --tv-active-bg: #e3effd;
+  --tv-blue: #2962ff;
+  --tv-bg: #ffffff;
+  --tv-menu-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  --tv-up: #089981;
+  --tv-down: #f23645;
+
+  font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif;
+  font-size: 13px;
+  color: var(--tv-ink);
+  background: var(--tv-bg);
+  border: 1px solid var(--tv-line);
+  border-radius: 4px;
+}
+
+:host-context(.dark),
+:host-context([data-theme='dark']) {
+  .chart-page {
+    --tv-ink: #dbdbdb;
+    --tv-muted: #8b8b8b;
+    --tv-line: #2e2e2e;
+    --tv-hover: #2a2a2a;
+    --tv-active-bg: #142e61;
+    --tv-bg: #0f0f0f;
+    --tv-menu-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  }
+}
+
+.muted {
+  color: var(--tv-muted);
+}
+
+// ── Top toolbar ────────────────────────────────────────────────────────────
+.toolbar {
+  flex-wrap: nowrap;
+  gap: 0;
+  height: 38px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--tv-line);
+  overflow: visible;
+}
+
+.tb-sep {
+  flex: none;
+  width: 1px;
+  height: 22px;
+  margin: 0 4px;
+  background: var(--tv-line);
+}
+
+.tb-menu-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.tb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 34px;
+  min-width: 34px;
+  padding: 0 3px;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tv-ink);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &.tb-text {
+    padding: 0 8px 0 4px;
+  }
+
+  &:hover:not(:disabled),
+  &.open {
+    background: var(--tv-hover);
+  }
+
+  &.active {
+    color: var(--tv-blue);
+  }
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+}
+
+.tb-layout-name {
+  padding: 0 4px 0 8px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-badge {
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  margin-left: -6px;
+  align-self: flex-start;
+  margin-top: 4px;
+  border-radius: 7px;
+  background: var(--tv-blue);
+  color: #fff;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.symbol-button {
+  height: 34px;
+  padding: 0 10px 0 6px;
+  border-radius: 4px;
+  gap: 4px;
+  color: var(--tv-ink);
+
+  &:hover {
+    background: var(--tv-hover);
+  }
+}
+
+.symbol-name {
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+// Menus (dropdowns) — flat, hairline-free, TradingView's soft shadow.
+.tb-menu,
+.menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 60;
+  min-width: 200px;
+  max-height: min(560px, 75vh);
+  overflow-y: auto;
+  padding: 6px 0;
+  background: var(--tv-bg);
+  border: 0;
+  border-radius: 6px;
+  box-shadow:
+    var(--tv-menu-shadow),
+    0 0 0 1px var(--tv-line);
+  display: flex;
+  flex-direction: column;
+}
+
+.tb-right,
+.layout-menu {
+  left: auto;
+  right: 0;
+}
+
+.tb-up {
+  top: auto;
+  bottom: calc(100% + 2px);
+}
+
+.tb-menu-heading,
+.menu-heading {
+  padding: 8px 16px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--tv-muted);
+}
+
+.tb-menu-sep {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--tv-line);
+}
+
+.tb-menu-item,
+.menu-action,
+.menu-list button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 16px 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--tv-ink);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: var(--tv-hover);
+  }
+
+  &.selected {
+    background: var(--tv-ink);
+    color: var(--tv-bg);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+.menu-list button,
+.menu-action {
+  padding: 0 16px;
+}
+
+.tb-menu-item:not(:has(app-chart-icon)) {
+  padding-left: 16px;
+}
+
+.tb-check.on {
+  color: var(--tv-blue);
+}
+
+.tb-check::after {
+  content: '';
+  margin-left: auto;
+  width: 14px;
+}
+
+.tb-check.on::after {
+  content: '✓';
+  text-align: right;
+}
+
+.tb-menu-row {
+  display: flex;
+  align-items: center;
+
+  .tb-menu-item {
+    flex: 1;
+  }
+}
+
+.tb-menu-x {
+  display: inline-flex;
+  margin-right: 8px;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tv-muted);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--tv-hover);
+    color: var(--tv-ink);
+  }
+}
+
+.tb-hint {
+  margin-left: auto;
+  color: var(--tv-muted);
+  font-size: 12px;
+}
+
+.tb-menu-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 16px 6px 46px;
+}
+
+.tb-chip {
+  padding: 2px 8px;
+  margin-right: 12px;
+  border: 1px solid var(--tv-line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tv-ink);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+
+  &.on {
+    border-color: var(--tv-blue);
+    color: var(--tv-blue);
+  }
+
+  &:hover {
+    background: var(--tv-hover);
+  }
+}
+
+.tb-menu-chips .tb-chip {
+  margin-right: 0;
+}
+
+.tb-menu-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+
+  input {
+    width: 96px;
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid var(--tv-line);
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+
+    &:focus {
+      outline: none;
+      border-color: var(--tv-blue);
+    }
+  }
+}
+
+.tb-menu-empty {
+  padding: 6px 16px 8px;
+  color: var(--tv-muted);
+}
+
+.tb-primary {
+  margin: 4px 16px 6px;
+  height: 32px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--tv-blue);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover {
+    filter: brightness(1.08);
+  }
+}
+
+.tb-style-menu {
+  min-width: 230px;
+}
+
+.tb-split-menu {
+  flex-direction: row;
+  flex-wrap: wrap;
+  min-width: 0;
+  width: 132px;
+  padding: 6px;
+  gap: 2px;
+}
+
+.tb-split {
+  display: inline-flex;
+  padding: 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tv-ink);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--tv-hover);
+  }
+
+  &.selected {
+    background: var(--tv-active-bg);
+    color: var(--tv-blue);
+  }
+}
+
+.tb-alert-menu {
+  min-width: 240px;
+}
+
+.tb-tz-menu {
+  min-width: 180px;
+}
+
+// ── Left rail ──────────────────────────────────────────────────────────────
+.draw-rail {
+  padding: 4px;
+  gap: 0;
+  border-right: 1px solid var(--tv-line);
+}
+
+.rail-tool {
+  width: 44px;
+  height: 38px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--tv-ink);
+
+  &:hover {
+    background: var(--tv-hover);
+  }
+
+  &.active {
+    background: var(--tv-active-bg);
+    color: var(--tv-blue);
+  }
+}
+
+// ── Right icon strip ───────────────────────────────────────────────────────
+$strip-width: 46px;
+
+.right-strip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 22;
+  width: $strip-width;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0;
+  border-left: 1px solid var(--tv-line);
+  background: var(--tv-bg);
+}
+
+.strip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tv-ink);
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: var(--tv-hover);
+  }
+
+  &.active {
+    background: var(--tv-active-bg);
+    color: var(--tv-blue);
+  }
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+}
+
+.watch-dock {
+  right: $strip-width;
+  border-left: 1px solid var(--tv-line);
+}
+
+.chart-grid {
+  right: $strip-width;
+}
+
+.chart-grid.with-dock {
+  right: calc(var(--dock-width, 380px) + #{$strip-width});
+}
+
+// ── Bottom bar ─────────────────────────────────────────────────────────────
+.bottom-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 4px;
+  border-top: 1px solid var(--tv-line);
+  font-size: 12px;
+}
+
+.bb-ranges {
+  display: flex;
+}
+
+.bb-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--tv-line);
+}
+
+.bb-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tv-ink);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: var(--tv-hover);
+  }
+
+  &.on,
+  &.active {
+    color: var(--tv-blue);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+.bb-tab.active {
+  background: var(--tv-active-bg);
+}
+
+.bb-goto {
+  position: relative;
+  padding: 0 4px;
+
+  input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+}
+
+.bb-clock {
+  font-variant-numeric: tabular-nums;
+}
+
+.bb-status {
+  margin-right: 8px;
+}
+
+// ── Legend: one line, like TradingView ─────────────────────────────────────
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 10px;
+  max-width: calc(100% - 120px);
+  font-size: 13px;
+  text-shadow: none;
+}
+
+.legend > * {
+  flex-basis: 100%;
+}
+
+.legend > .legend-title,
+.legend > .legend-ohlc {
+  flex-basis: auto;
+}
+
+.legend-title {
+  gap: 6px;
+
+  strong {
+    font-weight: 400;
+  }
+}
+
+.legend-ohlc {
+  gap: 8px;
+
+  &.up {
+    color: var(--tv-up);
+  }
+
+  &.down {
+    color: var(--tv-down);
+  }
+
+  b {
+    font-weight: 400;
+    margin-left: 1px;
+  }
+}
+
+.legend-time {
+  display: none;
+}
+
+.market-status {
+  font-size: 12px;
+}
+
+// ── Studies strip ──────────────────────────────────────────────────────────
+.studies {
+  border-top: 1px solid var(--tv-line);
+}
+
+.study {
+  border-color: var(--tv-line);
+  border-radius: 4px;
 }

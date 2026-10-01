@@ -8,8 +8,8 @@
         (click)="symbolMenuOpen.set(!symbolMenuOpen())"
         [attr.aria-expanded]="symbolMenuOpen()"
       >
+        <app-chart-icon name="search" [size]="18" />
         <span class="symbol-name">{{ symbol() }}</span>
-        <span class="caret"><app-chart-icon name="caret" [size]="16" /></span>
       </button>
       @if (symbolMenuOpen()) {
         <div class="menu symbol-menu">
@@ -37,66 +37,102 @@
       }
     </div>
 
-    <div class="divider"></div>
+    <div class="tb-sep"></div>
 
-    <div class="timeframes" role="group" aria-label="Timeframe">
-      @for (r of resolutions; track r) {
-        <button
-          type="button"
-          class="tf"
-          [class.active]="resolution() === r"
-          (click)="selectResolution(r)"
-        >
-          {{ resolutionLabel(r) }}
-        </button>
-      }
-    </div>
-
-    <div class="divider"></div>
-
-    <select
-      class="style-select"
-      [ngModel]="style()"
-      (ngModelChange)="style.set($event)"
-      aria-label="Chart style"
-    >
-      @for (s of chartStyles; track s.id) {
-        <option [value]="s.id">{{ s.label }}</option>
-      }
-    </select>
-
-    @if (priceBasedStyle()) {
-      <label class="box-size" title="Box size as a multiple of ATR">
-        Box
-        <input
-          type="number"
-          min="0.1"
-          max="20"
-          step="0.1"
-          [value]="boxSizeAtr()"
-          (change)="setBoxSize($any($event.target).value)"
-        />
-        ×ATR
-      </label>
-    }
-
-    <div class="indicator-picker">
-      <button type="button" class="tool" (click)="openStudiesDialog()" data-testid="open-studies">
-        <app-chart-icon name="indicators" [size]="20" /> Indicators
-      </button>
-      <button type="button" class="tool" (click)="openStudiesDialog('strategies')">
-        <app-chart-icon name="strategy" [size]="20" /> Strategies
-      </button>
+    <!-- Interval -->
+    <div class="tb-menu-anchor">
       <button
         type="button"
-        class="tool"
-        [class.active]="editorOpen()"
-        (click)="editorOpen.set(!editorOpen()); dockPreference.set('editor')"
-        title="Pine editor"
+        class="tb-btn tb-text"
+        (click)="toggleMenu('interval', $event)"
+        [class.open]="openMenu() === 'interval'"
+        title="Interval"
+        data-testid="interval-button"
       >
-        <app-chart-icon name="pine" [size]="20" /> Pine
+        {{ resolutionLabel(resolution()) }}
       </button>
+      @if (openMenu() === 'interval') {
+        <div class="tb-menu" role="menu" (click)="$event.stopPropagation()">
+          @for (g of resolutionGroups; track g.label) {
+            <div class="tb-menu-heading">{{ g.label }}</div>
+            @for (r of g.items; track r.id) {
+              <button
+                type="button"
+                role="menuitemradio"
+                class="tb-menu-item"
+                [class.selected]="resolution() === r.id"
+                (click)="selectResolution(r.id); openMenu.set(null)"
+              >
+                {{ r.name }}
+              </button>
+            }
+          }
+        </div>
+      }
     </div>
+
+    <div class="tb-sep"></div>
+
+    <!-- Chart type -->
+    <div class="tb-menu-anchor">
+      <button
+        type="button"
+        class="tb-btn"
+        (click)="toggleMenu('style', $event)"
+        [class.open]="openMenu() === 'style'"
+        [title]="styleLabel()"
+        data-testid="style-button"
+      >
+        <app-chart-icon [name]="style()" [size]="28" />
+      </button>
+      @if (openMenu() === 'style') {
+        <div class="tb-menu tb-style-menu" role="menu" (click)="$event.stopPropagation()">
+          @for (g of chartStyleGroups; track $index) {
+            @if ($index > 0) {
+              <div class="tb-menu-sep"></div>
+            }
+            @for (s of g; track s.id) {
+              <button
+                type="button"
+                role="menuitemradio"
+                class="tb-menu-item"
+                [class.selected]="isStyleSelected(s.id)"
+                (click)="pickStyle(s.id)"
+              >
+                <app-chart-icon [name]="s.id" [size]="28" />
+                {{ s.label }}
+              </button>
+            }
+          }
+          @if (priceBasedStyle()) {
+            <div class="tb-menu-sep"></div>
+            <label class="tb-menu-field" title="Box / range size as a multiple of ATR(14)">
+              Box size
+              <input
+                type="number"
+                min="0.1"
+                max="20"
+                step="0.1"
+                [value]="boxSizeAtr()"
+                (change)="setBoxSize($any($event.target).value)"
+              />
+              × ATR
+            </label>
+          }
+        </div>
+      }
+    </div>
+
+    <div class="tb-sep"></div>
+
+    <button
+      type="button"
+      class="tb-btn tb-text"
+      (click)="openStudiesDialog()"
+      data-testid="open-studies"
+    >
+      <app-chart-icon name="indicators" [size]="28" /> Indicators
+    </button>
     @if (indicatorMenuOpen()) {
       <app-indicators-dialog
         [items]="dialogItems()"
@@ -107,227 +143,309 @@
       />
     }
 
-    <button
-      type="button"
-      class="tool"
-      [class.active]="showVolume()"
-      (click)="showVolume.set(!showVolume())"
-    >
-      Volume
-    </button>
-
-    <div class="divider"></div>
-
-    <button
-      type="button"
-      class="tool"
-      [class.active]="showOverlays()"
-      (click)="toggleOverlays()"
-      title="Show open positions and trade signals on the chart"
-    >
-      Trades
-    </button>
-
-    <button
-      type="button"
-      class="tool"
-      [class.active]="showEvents()"
-      (click)="toggleEvents()"
-      title="Economic events on the time axis"
-    >
-      <app-chart-icon name="calendar" [size]="20" />
-    </button>
-    @if (showEvents()) {
+    <!-- Study templates -->
+    <div class="tb-menu-anchor">
       <button
         type="button"
-        class="tool"
-        (click)="cycleEventImpact()"
-        title="Minimum event impact shown"
+        class="tb-btn"
+        (click)="toggleMenu('templates', $event)"
+        [class.open]="openMenu() === 'templates'"
+        title="Indicator templates"
       >
-        {{ minEventImpact() }}+
+        <app-chart-icon name="templates" [size]="28" />
       </button>
-    }
-
-    <!--
-      Analytical overlays. These are DERIVED from the loaded bars, not fetched — which is
-      why the delta one says "est.": there is no aggressor tape for FX here, so it is the
-      standard OHLCV proxy and must not read as measured order flow.
-    -->
-    <div class="overlay-picker" role="group" aria-label="Analysis overlays">
-      <span class="vp-split">
-        <button
-          type="button"
-          class="tool"
-          [class.active]="showVolumeProfile()"
-          (click)="showVolumeProfile.set(!showVolumeProfile())"
-          [title]="'Volume profile — ' + volumeProfileModeLabel() + ', with POC and value area'"
-        >
-          <app-chart-icon name="volume-profile" [size]="18" /> VP{{
-            showVolumeProfile() && volumeProfileMode() !== 'visible'
-              ? ' · ' + volumeProfileModeLabel()
-              : ''
-          }}
-        </button>
-        <button
-          type="button"
-          class="tool vp-caret"
-          (click)="$event.stopPropagation(); vpMenuOpen.set(!vpMenuOpen())"
-          title="Volume profile type"
-          aria-haspopup="menu"
-        >
-          <app-chart-icon name="caret" [size]="16" />
-        </button>
-        @if (vpMenuOpen()) {
-          <div class="vp-menu" role="menu" (click)="$event.stopPropagation()">
-            @for (m of volumeProfileModes; track m.id) {
-              <button
-                type="button"
-                role="menuitem"
-                class="vp-menu-item"
-                [class.active]="showVolumeProfile() && volumeProfileMode() === m.id"
-                (click)="setVolumeProfileMode(m.id)"
-                [title]="m.hint"
-              >
-                {{ m.label }}
-              </button>
+      @if (openMenu() === 'templates') {
+        <div class="tb-menu" role="menu" (click)="$event.stopPropagation()">
+          <button
+            type="button"
+            class="tb-menu-item"
+            (click)="saveTemplate(); openMenu.set(null)"
+            [disabled]="!active().length"
+          >
+            <app-chart-icon name="save" [size]="28" /> Save indicator template…
+          </button>
+          @if (layoutStore.templates().length) {
+            <div class="tb-menu-heading">My templates</div>
+            @for (t of layoutStore.templates(); track t.id) {
+              <div class="tb-menu-row">
+                <button
+                  type="button"
+                  class="tb-menu-item"
+                  (click)="applyTemplate(t); openMenu.set(null)"
+                >
+                  {{ t.name }} <span class="tb-hint">{{ t.indicators.length }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="tb-menu-x"
+                  (click)="removeTemplate(t.id, $event)"
+                  title="Delete template"
+                >
+                  <app-chart-icon name="close" [size]="16" />
+                </button>
+              </div>
             }
-            <div class="vp-menu-note">
-              Fixed Range &amp; Anchored VP are drawing tools — Volume-based group on the left rail.
-            </div>
-          </div>
-        }
-      </span>
-      <button
-        type="button"
-        class="tool"
-        [class.active]="showSupportResistance()"
-        (click)="showSupportResistance.set(!showSupportResistance())"
-        title="Support &amp; resistance — auto-detected from swing pivots, weighted by touches"
-      >
-        <app-chart-icon name="sr-levels" [size]="18" /> S/R
-      </button>
-      <button
-        type="button"
-        class="tool"
-        [class.active]="showStructure()"
-        (click)="showStructure.set(!showStructure())"
-        title="Market structure — balance range, value area, estimated stop pools, and the climax / spring / upthrust bars that formed them"
-      >
-        <app-chart-icon name="structure" [size]="18" /> Structure
-      </button>
-      <button
-        type="button"
-        class="tool"
-        [class.active]="deltaOn()"
-        (click)="toggleDelta()"
-        title="Order-flow delta, ESTIMATED from OHLCV — there is no aggressor tape for FX here, so a bar closing near its high is assumed bought"
-      >
-        <app-chart-icon name="delta" [size]="18" /> Δ est
-      </button>
+          } @else {
+            <div class="tb-menu-empty">No saved templates yet.</div>
+          }
+        </div>
+      }
     </div>
 
-    <button
-      type="button"
-      class="tool"
-      [class.active]="magnet()"
-      (click)="magnet.set(!magnet())"
-      title="Magnet — snap drawings to OHLC (M)"
-    >
-      <app-chart-icon name="magnet" [size]="18" /> Magnet
-    </button>
+    <!-- On-chart data: volume, trades, events, analysis overlays -->
+    <div class="tb-menu-anchor">
+      <button
+        type="button"
+        class="tb-btn"
+        (click)="toggleMenu('overlays', $event)"
+        [class.open]="openMenu() === 'overlays'"
+        [class.active]="overlayCount() > 0"
+        title="Chart overlays"
+        data-testid="overlays-button"
+      >
+        <app-chart-icon name="layers" [size]="28" />
+        @if (overlayCount() > 0) {
+          <span class="tb-badge">{{ overlayCount() }}</span>
+        }
+      </button>
+      @if (openMenu() === 'overlays') {
+        <div class="tb-menu tb-overlays-menu" role="menu" (click)="$event.stopPropagation()">
+          <div class="tb-menu-heading">Data</div>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="showVolume()"
+            (click)="showVolume.set(!showVolume())"
+          >
+            <app-chart-icon name="volume" [size]="28" /> Volume
+          </button>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="showOverlays()"
+            (click)="toggleOverlays()"
+            title="Open positions, orders and trade signals"
+          >
+            <app-chart-icon name="trades" [size]="28" /> Trades &amp; signals
+          </button>
+          <div class="tb-menu-row">
+            <button
+              type="button"
+              class="tb-menu-item tb-check"
+              [class.on]="showEvents()"
+              (click)="toggleEvents()"
+              title="Economic events on the time axis"
+            >
+              <app-chart-icon name="calendar" [size]="28" /> Economic events
+            </button>
+            @if (showEvents()) {
+              <button
+                type="button"
+                class="tb-chip"
+                (click)="cycleEventImpact()"
+                title="Minimum impact shown"
+              >
+                {{ minEventImpact() }}+
+              </button>
+            }
+          </div>
+          <div class="tb-menu-sep"></div>
+          <div class="tb-menu-heading">Analysis</div>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="showVolumeProfile()"
+            (click)="showVolumeProfile.set(!showVolumeProfile())"
+          >
+            <app-chart-icon name="volume-profile" [size]="28" /> Volume profile
+          </button>
+          @if (showVolumeProfile()) {
+            <div class="tb-menu-chips">
+              @for (m of volumeProfileModes; track m.id) {
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="tb-chip"
+                  [class.on]="volumeProfileMode() === m.id"
+                  (click)="setVolumeProfileMode(m.id)"
+                  [title]="m.hint"
+                >
+                  {{ m.label }}
+                </button>
+              }
+            </div>
+          }
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="showSupportResistance()"
+            (click)="showSupportResistance.set(!showSupportResistance())"
+            title="Auto support &amp; resistance from swing pivots"
+          >
+            <app-chart-icon name="sr-levels" [size]="28" /> Support &amp; resistance
+          </button>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="showStructure()"
+            (click)="showStructure.set(!showStructure())"
+            title="Balance range, value area, stop pools, climax/spring/upthrust bars"
+          >
+            <app-chart-icon name="structure" [size]="28" /> Market structure
+          </button>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="deltaOn()"
+            (click)="toggleDelta()"
+            title="Order-flow delta ESTIMATED from OHLCV — no aggressor tape for FX"
+          >
+            <app-chart-icon name="delta" [size]="28" /> Delta (estimated)
+          </button>
+        </div>
+      }
+    </div>
 
-    <select
-      class="style-select"
-      [ngModel]="scaleMode()"
-      (ngModelChange)="scaleMode.set($event)"
-      aria-label="Price scale mode"
-    >
-      <option value="normal">Normal</option>
-      <option value="log">Log</option>
-      <option value="percent">%</option>
-    </select>
+    <div class="tb-sep"></div>
 
-    <div class="split-picker" role="group" aria-label="Split layout">
-      @for (l of splitLayouts; track l.id) {
-        <button
-          type="button"
-          class="tool"
-          [class.active]="splitLayout() === l.id"
-          (click)="setSplitLayout(l.id)"
-          [title]="l.panels + 1 + ' chart(s)'"
-        >
-          <app-chart-icon [name]="'layout-' + l.id" [size]="20" />
-        </button>
+    <!-- Alert -->
+    <div class="tb-menu-anchor">
+      <button
+        type="button"
+        class="tb-btn tb-text"
+        (click)="openAlertDraft($event)"
+        [class.open]="openMenu() === 'alert'"
+        title="Create price alert"
+      >
+        <app-chart-icon name="alert" [size]="28" /> Alert
+      </button>
+      @if (openMenu() === 'alert') {
+        <div class="tb-menu tb-alert-menu" (click)="$event.stopPropagation()">
+          <div class="tb-menu-heading">Price alert · {{ symbol() }}</div>
+          <label class="tb-menu-field">
+            Price
+            <input
+              type="number"
+              [step]="1 / 10 ** precision()"
+              [value]="alertPrice()"
+              (input)="alertPrice.set($any($event.target).valueAsNumber)"
+              (keydown.enter)="createAlertAt(alertPrice()); openMenu.set(null)"
+            />
+          </label>
+          <button
+            type="button"
+            class="tb-primary"
+            (click)="createAlertAt(alertPrice()); openMenu.set(null)"
+          >
+            Create
+          </button>
+        </div>
       }
     </div>
 
     <button
       type="button"
-      class="tool"
-      [class.active]="sidePane() === 'details'"
-      (click)="openSidePane('details')"
-      title="Symbol details"
+      class="tb-btn tb-text"
+      [class.active]="replayActive()"
+      (click)="replayActive() ? exitReplay() : startReplay()"
+      title="Bar replay"
     >
-      <app-chart-icon name="info" [size]="20" />
+      <app-chart-icon name="replay" [size]="28" /> Replay
     </button>
-    <button
-      type="button"
-      class="tool"
-      [class.active]="sidePane() === 'news'"
-      (click)="openSidePane('news')"
-      title="News for this pair"
-    >
-      <app-chart-icon name="news" [size]="20" />
-    </button>
+
+    <div class="tb-sep"></div>
 
     <button
       type="button"
-      class="tool"
-      [class.active]="watchlistOpen()"
-      (click)="watchlistOpen.set(!watchlistOpen())"
-      title="Watchlist"
-    >
-      <app-chart-icon name="watchlist" [size]="18" /> Watchlist
-    </button>
-
-    <button
-      type="button"
-      class="tool"
-      [class.active]="objectTreeOpen()"
-      (click)="objectTreeOpen.set(!objectTreeOpen())"
-      [disabled]="!drawings.visible().length"
-    >
-      Objects ({{ drawings.visible().length }})
-    </button>
-
-    <span class="spacer"></span>
-
-    <button
-      type="button"
-      class="tool"
+      class="tb-btn"
       (click)="drawings.undo()"
       [disabled]="!drawings.canUndo()"
       title="Undo (⌘Z)"
     >
-      <app-chart-icon name="undo" [size]="20" />
+      <app-chart-icon name="undo" [size]="28" />
     </button>
     <button
       type="button"
-      class="tool"
+      class="tb-btn"
       (click)="drawings.redo()"
       [disabled]="!drawings.canRedo()"
       title="Redo (⇧⌘Z)"
     >
-      <app-chart-icon name="redo" [size]="20" />
+      <app-chart-icon name="redo" [size]="28" />
     </button>
 
-    <div class="layout-picker">
-      <button type="button" class="tool" (click)="layoutMenuOpen.set(!layoutMenuOpen())">
-        <app-chart-icon name="layouts" [size]="20" /> Layouts
+    <span class="spacer"></span>
+
+    @switch (drawings.syncState()) {
+      @case ('saving') {
+        <span class="status muted" title="Saving drawings to the engine"
+          ><app-chart-icon name="sync" [size]="16"
+        /></span>
+      }
+      @case ('offline') {
+        <span
+          class="status sync-warn"
+          title="Drawings are saved in this browser only — the engine is unreachable"
+        >
+          <app-chart-icon name="warning" [size]="16" /> local only
+        </span>
+      }
+      @case ('error') {
+        <span class="status sync-warn" title="The engine rejected the last drawing sync"
+          ><app-chart-icon name="warning" [size]="16" /> not saved</span
+        >
+      }
+    }
+
+    @if (loading()) {
+      <span class="status muted">Loading…</span>
+    }
+
+    <!-- Multi-chart layout -->
+    <div class="tb-menu-anchor">
+      <button
+        type="button"
+        class="tb-btn"
+        (click)="toggleMenu('split', $event)"
+        [class.open]="openMenu() === 'split'"
+        title="Select layout"
+      >
+        <app-chart-icon [name]="'layout-' + splitLayout()" [size]="28" />
+      </button>
+      @if (openMenu() === 'split') {
+        <div class="tb-menu tb-split-menu tb-right" role="menu" (click)="$event.stopPropagation()">
+          @for (l of splitLayouts; track l.id) {
+            <button
+              type="button"
+              class="tb-split"
+              [class.selected]="splitLayout() === l.id"
+              (click)="setSplitLayout(l.id); openMenu.set(null)"
+              [title]="l.panels + 1 + ' chart(s)'"
+            >
+              <app-chart-icon [name]="'layout-' + l.id" [size]="28" />
+            </button>
+          }
+        </div>
+      }
+    </div>
+
+    <div class="tb-sep"></div>
+
+    <!-- Saved layouts -->
+    <div class="layout-picker tb-menu-anchor">
+      <button
+        type="button"
+        class="tb-btn tb-text tb-layout-name"
+        (click)="layoutMenuOpen.set(!layoutMenuOpen()); $event.stopPropagation()"
+      >
+        {{ currentLayoutName() }}
+        <app-chart-icon name="caret" [size]="18" />
       </button>
       @if (layoutMenuOpen()) {
         <div class="menu layout-menu">
-          <button type="button" class="menu-action" (click)="saveLayout()"><app-chart-icon name="save" [size]="18" /> Save layout…</button>
+          <button type="button" class="menu-action" (click)="saveLayout()">
+            <app-chart-icon name="save" [size]="18" /> Save layout…
+          </button>
           <button
             type="button"
             class="menu-action"
@@ -372,63 +490,20 @@
       }
     </div>
 
-    <select
-      class="style-select"
-      [ngModel]="timezone()"
-      (ngModelChange)="timezone.set($event)"
-      aria-label="Chart timezone"
-    >
-      @for (tz of timezones; track tz.id) {
-        <option [value]="tz.id">{{ tz.label }}</option>
-      }
-    </select>
+    <div class="tb-sep"></div>
 
-    <button type="button" class="tool" (click)="takeSnapshot()" title="Save chart as PNG">
-      <app-chart-icon name="camera" [size]="20" />
-    </button>
     <button
       type="button"
-      class="tool"
-      [class.active]="isFullscreen()"
+      class="tb-btn"
       (click)="toggleFullscreen()"
+      [class.active]="isFullscreen()"
       title="Fullscreen"
     >
-      <app-chart-icon name="fullscreen" [size]="20" />
+      <app-chart-icon name="fullscreen" [size]="28" />
     </button>
-
-    <button
-      type="button"
-      class="tool"
-      [class.active]="replayActive()"
-      (click)="replayActive() ? exitReplay() : startReplay()"
-      title="Bar replay"
-    >
-      <app-chart-icon name="replay" [size]="18" /> Replay
+    <button type="button" class="tb-btn" (click)="takeSnapshot()" title="Take a snapshot (PNG)">
+      <app-chart-icon name="camera" [size]="28" />
     </button>
-
-    @switch (drawings.syncState()) {
-      @case ('saving') {
-        <span class="status muted" title="Saving drawings to the engine"><app-chart-icon name="sync" [size]="16" /></span>
-      }
-      @case ('offline') {
-        <span
-          class="status sync-warn"
-          title="Drawings are saved in this browser only — the engine is unreachable"
-        >
-          <app-chart-icon name="warning" [size]="16" /> local only
-        </span>
-      }
-      @case ('error') {
-        <span class="status sync-warn" title="The engine rejected the last drawing sync"
-          ><app-chart-icon name="warning" [size]="16" /> not saved</span
-        >
-      }
-    }
-
-    @if (loading()) {
-      <span class="status">Loading…</span>
-    }
-    <span class="status muted">{{ bars().length }} bars</span>
   </header>
 
   <div class="chart-body" [style.--dock-width.px]="dockWidth()">
@@ -505,9 +580,55 @@
       </div>
     }
 
+    <nav class="right-strip" aria-label="Panels">
+      <button
+        type="button"
+        class="strip-btn"
+        [class.active]="watchlistOpen()"
+        (click)="watchlistOpen.set(!watchlistOpen())"
+        title="Watchlist, details and news"
+      >
+        <app-chart-icon name="watchlist" [size]="28" />
+      </button>
+      <button
+        type="button"
+        class="strip-btn"
+        [class.active]="sidePane() === 'details'"
+        (click)="openSidePane('details')"
+        title="Symbol details"
+      >
+        <app-chart-icon name="info" [size]="28" />
+      </button>
+      <button
+        type="button"
+        class="strip-btn"
+        [class.active]="sidePane() === 'news'"
+        (click)="openSidePane('news')"
+        title="News for this pair"
+      >
+        <app-chart-icon name="news" [size]="28" />
+      </button>
+      <button
+        type="button"
+        class="strip-btn"
+        [class.active]="objectTreeOpen()"
+        (click)="objectTreeOpen.set(!objectTreeOpen())"
+        [disabled]="!drawings.visible().length"
+        [title]="'Object tree (' + drawings.visible().length + ')'"
+      >
+        <app-chart-icon name="object-tree" [size]="28" />
+      </button>
+      <button type="button" class="strip-btn" (click)="openAlertDraft($event)" title="Create alert">
+        <app-chart-icon name="alert" [size]="28" />
+      </button>
+    </nav>
     @if (watchlistOpen()) {
       <aside class="watch-dock">
-        <div class="dock-resizer" (pointerdown)="startDockResize($event)" title="Drag to resize"></div>
+        <div
+          class="dock-resizer"
+          (pointerdown)="startDockResize($event)"
+          title="Drag to resize"
+        ></div>
         <app-watchlist-panel
           [pairs]="symbols()"
           [current]="symbol()"
@@ -531,7 +652,13 @@
             <span class="muted">{{ resolutionLabel(resolution()) }}</span>
             <span class="market-status" [class]="marketStatus()">
               <app-chart-icon
-                [name]="marketStatus() === 'open' ? 'live' : marketStatus() === 'closed' ? 'closed' : 'warning'"
+                [name]="
+                  marketStatus() === 'open'
+                    ? 'live'
+                    : marketStatus() === 'closed'
+                      ? 'closed'
+                      : 'warning'
+                "
                 [size]="12"
               />
               {{
@@ -662,8 +789,12 @@
             >
               <app-chart-icon [name]="sel.locked ? 'lock' : 'unlock'" [size]="18" />
             </button>
-            <button type="button" (click)="drawings.clone(sel.id)" title="Duplicate"><app-chart-icon name="clone" [size]="18" /></button>
-            <button type="button" (click)="removeDrawing(sel.id)" title="Delete (⌫)"><app-chart-icon name="close" [size]="18" /></button>
+            <button type="button" (click)="drawings.clone(sel.id)" title="Duplicate">
+              <app-chart-icon name="clone" [size]="18" />
+            </button>
+            <button type="button" (click)="removeDrawing(sel.id)" title="Delete (⌫)">
+              <app-chart-icon name="close" [size]="18" />
+            </button>
           </div>
         }
 
@@ -800,7 +931,9 @@
                      inline it swamped the pane and pushed the headlines below
                      the fold, so it lives in the tooltip. -->
                 <dt>Method</dt>
-                <dd class="muted note-hint" [title]="ctx.asOfNote">hover for scoring <app-chart-icon name="info" [size]="14" /></dd>
+                <dd class="muted note-hint" [title]="ctx.asOfNote">
+                  hover for scoring <app-chart-icon name="info" [size]="14" />
+                </dd>
               </dl>
               @if (newsFocus()?.omissionReason; as why) {
                 <div
@@ -845,7 +978,9 @@
                       <span class="muted"><app-chart-icon name="lock" [size]="14" /></span>
                     }
                   </button>
-                  <button type="button" class="tree-remove" (click)="removeDrawing(d.id)"><app-chart-icon name="close" [size]="14" /></button>
+                  <button type="button" class="tree-remove" (click)="removeDrawing(d.id)">
+                    <app-chart-icon name="close" [size]="14" />
+                  </button>
                 </li>
               }
             </ul>
@@ -909,13 +1044,109 @@
     </div>
   </div>
 
+  <footer class="bottom-bar">
+    <div class="bb-ranges" role="group" aria-label="Date range">
+      @for (r of rangePresets; track r.id) {
+        <button type="button" class="bb-btn" (click)="applyRangePreset(r.id)" [title]="r.title">
+          {{ r.id }}
+        </button>
+      }
+    </div>
+    <div class="bb-sep"></div>
+    <label class="bb-btn bb-goto" title="Go to date">
+      <app-chart-icon name="goto-date" [size]="22" />
+      <input type="date" (change)="goToDate($any($event.target).value)" aria-label="Go to date" />
+    </label>
+    <div class="bb-sep"></div>
+    <button
+      type="button"
+      class="bb-btn bb-tab"
+      [class.active]="dockTab() === 'editor'"
+      (click)="toggleEditor()"
+    >
+      Pine Editor
+    </button>
+    <button
+      type="button"
+      class="bb-btn bb-tab"
+      [class.active]="dockTab() === 'tester'"
+      [disabled]="!strategyRun()"
+      (click)="toggleTester()"
+      [title]="strategyRun() ? 'Strategy Tester' : 'Add a strategy to the chart to test it'"
+    >
+      Strategy Tester
+    </button>
+    <span class="spacer"></span>
+    <span class="bb-status muted">{{ bars().length }} bars</span>
+    <div class="tb-menu-anchor">
+      <button
+        type="button"
+        class="bb-btn bb-clock"
+        (click)="toggleMenu('tz', $event)"
+        title="Timezone"
+      >
+        {{ clock() }} {{ timezoneShort() }}
+      </button>
+      @if (openMenu() === 'tz') {
+        <div
+          class="tb-menu tb-tz-menu tb-up tb-right"
+          role="menu"
+          (click)="$event.stopPropagation()"
+        >
+          @for (tz of timezones; track tz.id) {
+            <button
+              type="button"
+              class="tb-menu-item"
+              [class.selected]="timezone() === tz.id"
+              (click)="timezone.set(tz.id); openMenu.set(null)"
+            >
+              {{ tz.label }}
+            </button>
+          }
+        </div>
+      }
+    </div>
+    <div class="bb-sep"></div>
+    <button
+      type="button"
+      class="bb-btn"
+      [class.on]="scaleMode() === 'percent'"
+      (click)="scaleMode.set(scaleMode() === 'percent' ? 'normal' : 'percent')"
+      title="Percentage scale"
+    >
+      %
+    </button>
+    <button
+      type="button"
+      class="bb-btn"
+      [class.on]="scaleMode() === 'log'"
+      (click)="scaleMode.set(scaleMode() === 'log' ? 'normal' : 'log')"
+      title="Logarithmic scale"
+    >
+      log
+    </button>
+    <button
+      type="button"
+      class="bb-btn"
+      [class.on]="scaleMode() === 'normal'"
+      (click)="autoScale()"
+      title="Auto (fits data to screen)"
+    >
+      auto
+    </button>
+  </footer>
+
   @if (replayActive()) {
     <div class="replay-bar">
-      <button type="button" (click)="stepReplay(-1)" title="Back one bar"><app-chart-icon name="step-back" [size]="18" /></button>
+      <button type="button" (click)="stepReplay(-1)" title="Back one bar">
+        <app-chart-icon name="step-back" [size]="18" />
+      </button>
       <button type="button" (click)="toggleReplayPlay()" title="Play / pause">
         <app-chart-icon [name]="replayPlaying() ? 'pause' : 'play'" [size]="18" />
       </button>
-      <button type="button" (click)="stepReplay(1)" title="Forward one bar"><app-chart-icon name="step-forward" [size]="18" /></button>
+      <button type="button" (click)="stepReplay(1)" title="Forward one bar">
+        <app-chart-icon name="step-forward" [size]="18" />
+      </button>
       <input
         type="range"
         class="replay-scrub"
@@ -949,11 +1180,23 @@
             {{ run.result.title || run.item.name }}
           </span>
           @if (run.result.kind === 'strategy') {
-            <button type="button" class="study-toggle" (click)="testerOpen.set(!testerOpen())" title="Strategy tester">
+            <button
+              type="button"
+              class="study-toggle"
+              (click)="testerOpen.set(!testerOpen())"
+              title="Strategy tester"
+            >
               <app-chart-icon name="tester" [size]="16" />
             </button>
           }
-          <button type="button" class="study-remove" (click)="removeScript(run.item.key)" title="Remove"><app-chart-icon name="close" [size]="14" /></button>
+          <button
+            type="button"
+            class="study-remove"
+            (click)="removeScript(run.item.key)"
+            title="Remove"
+          >
+            <app-chart-icon name="close" [size]="14" />
+          </button>
         </div>
       }
       @if (scriptRunning()) {
@@ -962,7 +1205,9 @@
       @if (scriptError()) {
         <div class="study script-error" role="alert">
           {{ scriptError() }}
-          <button type="button" class="study-remove" (click)="scriptError.set(null)"><app-chart-icon name="close" [size]="14" /></button>
+          <button type="button" class="study-remove" (click)="scriptError.set(null)">
+            <app-chart-icon name="close" [size]="14" />
+          </button>
         </div>
       }
       @for (item of active(); track item.uid) {
@@ -983,7 +1228,9 @@
               @if (input.type === 'select') {
                 <select (change)="setParam(item.uid, input.key, $any($event.target).value)">
                   @for (opt of input.options ?? []; track opt) {
-                    <option [value]="opt" [selected]="item.params[input.key] === opt">{{ opt }}</option>
+                    <option [value]="opt" [selected]="item.params[input.key] === opt">
+                      {{ opt }}
+                    </option>
                   }
                 </select>
               } @else if (input.type === 'symbol') {
@@ -1021,10 +1268,20 @@
     <section class="bottom-panel">
       @if (editorOpen() && strategyRun() && testerOpen()) {
         <nav class="dock-tabs" role="tablist">
-          <button type="button" role="tab" [class.active]="tab === 'editor'" (click)="dockPreference.set('editor')">
+          <button
+            type="button"
+            role="tab"
+            [class.active]="tab === 'editor'"
+            (click)="dockPreference.set('editor')"
+          >
             Pine Editor
           </button>
-          <button type="button" role="tab" [class.active]="tab === 'tester'" (click)="dockPreference.set('tester')">
+          <button
+            type="button"
+            role="tab"
+            [class.active]="tab === 'tester'"
+            (click)="dockPreference.set('tester')"
+          >
             Strategy Tester
           </button>
         </nav>
