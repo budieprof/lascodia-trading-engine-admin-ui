@@ -3,6 +3,8 @@ import type { Bar } from '../datafeed/candle-feed.service';
 import { DrawingRenderer } from './drawing-renderer';
 import type { DrawingStore } from './drawing-store.service';
 import { hitHandle, hitTestDrawing, magnetPrice, type Pt } from './geometry';
+import { behaviorFor } from './tools/registry';
+import { optionsOf } from './tools/types';
 import { styleFor, toolFor, type Drawing, type DrawingKind, type DrawingPoint } from './model';
 
 /**
@@ -188,7 +190,8 @@ export class DrawingController {
       this.pendingKind = this.activeTool;
       this.pending.push(model);
 
-      if (spec.points !== 'freehand' && this.pending.length >= spec.points) {
+      const needed = behaviorFor(this.activeTool)?.points ?? spec.points;
+      if (needed !== 'freehand' && this.pending.length >= needed) {
         this.commitPending();
       }
       ev.preventDefault();
@@ -244,10 +247,16 @@ export class DrawingController {
     if (!drawing) return;
 
     if (this.dragging.handleIndex >= 0) {
-      // Resize: move the grabbed anchor only.
-      const points = this.dragging.originalPoints.map((pt, i) =>
-        i === this.dragging?.handleIndex ? model : pt,
-      );
+      // Resize: the tool decides what a handle drag means (perimeter handles on an ellipse,
+      // edge handles on a rectangle…); by default it moves the grabbed anchor only.
+      const behavior = behaviorFor(drawing.kind);
+      const handleIndex = this.dragging.handleIndex;
+      const points = behavior?.moveHandle
+        ? behavior.moveHandle({ ...drawing, points: this.dragging.originalPoints }, handleIndex, model, {
+            project: (pt) => this.renderer.project(pt),
+            unproject: (pt) => this.toModel(pt),
+          })
+        : this.dragging.originalPoints.map((pt, i) => (i === handleIndex ? model : pt));
       this.store.update(drawing.id, { points }, false);
     } else {
       // Move: shift every anchor by the pointer delta, converted in model
@@ -328,9 +337,18 @@ export class DrawingController {
       const d = list[i];
       const pts = this.renderer.projectAll(d);
       if (pts.length === 0) continue;
-      const handle = hitHandle(p, pts);
+      const behavior = behaviorFor(d.kind);
+      const ctxBase = behavior
+        ? { ...this.renderer.paintCtx(null as unknown as CanvasRenderingContext2D, d, pts, bounds.width, bounds.height), options: optionsOf(behavior, d) }
+        : null;
+      const handlePts = behavior?.handles && ctxBase ? behavior.handles(ctxBase) : pts;
+      const handle = hitHandle(p, handlePts);
       if (handle >= 0) return { id: d.id, drawing: d, handleIndex: handle };
-      if (hitTestDrawing(p, d.kind, pts, d.style.fill !== null, bounds)) {
+      const hit =
+        behavior?.hitTest && ctxBase
+          ? behavior.hitTest(ctxBase, p, 6)
+          : hitTestDrawing(p, d.kind, pts, d.style.fill !== null, bounds);
+      if (hit) {
         return { id: d.id, drawing: d, handleIndex: -1 };
       }
     }

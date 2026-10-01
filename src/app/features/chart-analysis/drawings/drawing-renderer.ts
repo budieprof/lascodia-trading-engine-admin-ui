@@ -1,3 +1,5 @@
+import { behaviorFor } from './tools/registry';
+import { optionsOf } from './tools/types';
 import type { CanvasRenderingTarget2D } from 'fancy-canvas';
 import type { IChartApi, ISeriesApi, ISeriesPrimitive, SeriesType, Time } from 'lightweight-charts';
 import { FIB_LEVELS, type DashStyle, type Drawing } from './model';
@@ -194,6 +196,15 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     selected: boolean,
   ): void {
     this.applyStroke(ctx, drawing);
+    const behavior = behaviorFor(drawing.kind);
+    if (behavior) {
+      const base = this.paintCtx(ctx, drawing, pts, w, h);
+      const options = optionsOf(behavior, drawing);
+      behavior.paint({ ...base, selected, options });
+      ctx.setLineDash([]);
+      if (selected) this.handles(ctx, behavior.handles?.({ ...base, options }) ?? pts, drawing.locked);
+      return;
+    }
     const [a, b, c] = pts;
     const fill = drawing.style.fill;
 
@@ -369,7 +380,18 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     width: number,
     height: number,
   ): void {
-    const p: PaintCtx = {
+    this.paintLegacyAdvanced(this.paintCtx(ctx, drawing, pts, width, height));
+  }
+
+  /** The painter context every tool receives. */
+  paintCtx(
+    ctx: CanvasRenderingContext2D,
+    drawing: Drawing,
+    pts: Pt[],
+    width: number,
+    height: number,
+  ): PaintCtx {
+    return {
       ctx,
       drawing,
       pts,
@@ -387,7 +409,10 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
         return this.unshift(Number(t) * 1000);
       },
     };
+  }
 
+  private paintLegacyAdvanced(p: PaintCtx): void {
+    const { drawing, ctx, pts, width, height } = p;
     switch (drawing.kind) {
       case 'pitchfork':
       case 'schiff-pitchfork':

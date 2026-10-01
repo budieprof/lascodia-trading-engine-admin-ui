@@ -1,3 +1,4 @@
+import { behaviorFor } from './tools/registry';
 /**
  * The drawing model.
  *
@@ -147,6 +148,10 @@ export interface DrawingStyle {
   text: string;
   /** Show the price/level labels a tool defines (Fib levels, position R:R). */
   showLabels: boolean;
+  /** Text tab (TradingView keeps text colour separate from line colour). */
+  textColor?: string;
+  bold?: boolean;
+  italic?: boolean;
 }
 
 export interface Drawing {
@@ -159,6 +164,11 @@ export interface Drawing {
   style: DrawingStyle;
   locked: boolean;
   createdAt: number;
+  /** Tool-specific settings (Fib levels, extend left/right, labels…), keyed by ToolOption.key. */
+  options?: Record<string, unknown>;
+  /** Visibility tab: hidden entirely, or shown only on these resolutions (empty = all). */
+  hidden?: boolean;
+  visibleOn?: string[];
 }
 
 export interface ToolSpec {
@@ -747,5 +757,10 @@ export function newDrawingId(): string {
 }
 
 export function styleFor(kind: DrawingKind, base?: Partial<DrawingStyle>): DrawingStyle {
-  return { ...DEFAULT_STYLE, ...(toolFor(kind)?.defaultStyle ?? {}), ...(base ?? {}) };
+  return {
+    ...DEFAULT_STYLE,
+    ...(toolFor(kind)?.defaultStyle ?? {}),
+    ...(behaviorFor(kind)?.defaultStyle ?? {}),
+    ...(base ?? {}),
+  };
 }
