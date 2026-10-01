@@ -103,5 +103,60 @@ describe('BacktestDetailPageComponent (result shape)', () => {
     expect(cmp.scriptReport()).toBeNull();
     expect(cmp.parsed()).toBeNull();
     expect(cmp.parseError()).toBeNull();
+    expect(cmp.newsBlackout()).toBeNull();
+  });
+
+  it('summarises how a script run modelled the news blackout', () => {
+    const result = {
+      Trades: [],
+      report: strategyReportFixture(),
+      script: {
+        costModel: 'Pine',
+        newsBlackout: {
+          applied: true,
+          exempt: false,
+          modelled: true,
+          minutesBefore: 30,
+          minutesAfter: 15,
+          explanation: 'HighImpactEventInTtl=Enforce, PostEventBlackout=Enforce',
+          events: 12,
+          blockedEntries: 2,
+        },
+      },
+    };
+    http.expectOne(RUN_URL).flush(run(JSON.stringify(result)));
+    expect(cmp.scriptReport()).not.toBeNull();
+    const nb = cmp.newsBlackout()!;
+    expect(nb.status).toBe('Applied');
+    expect(nb.window).toBe('30 min before / 15 min after');
+    expect(nb.effect).toContain('2 entries live would refuse were removed');
+    expect(nb.explanation).toContain('HighImpactEventInTtl=Enforce');
+  });
+
+  it('says an exempt strategy’s run kept its entries', () => {
+    const result = {
+      report: strategyReportFixture(),
+      script: {
+        newsBlackout: {
+          applied: false,
+          exempt: true,
+          modelled: true,
+          minutesBefore: 0,
+          minutesAfter: 0,
+          explanation: 'the strategy is news-blackout exempt',
+          events: 0,
+          blockedEntries: 0,
+        },
+      },
+    };
+    http.expectOne(RUN_URL).flush(run(JSON.stringify(result)));
+    expect(cmp.newsBlackout()?.status).toBe('Exempt');
+    expect(cmp.newsBlackout()?.window).toBeNull();
+  });
+
+  it('shows no news-blackout line for a script run stored before the engine modelled it', () => {
+    http.expectOne(RUN_URL).flush(run(JSON.stringify(strategyReportFixture())));
+    expect(cmp.scriptReport()).not.toBeNull();
+    expect(cmp.newsBlackout()).toBeNull();
   });
 });

@@ -23,6 +23,11 @@ import {
   type TradeChartSelection,
 } from '@features/ea-instances/components/ea-trade-chart-modal/ea-trade-chart-modal.component';
 import { reportTradeAsChartable, researchTradeSelection } from '../../backtest-trade-chart';
+import {
+  scriptNewsBlackoutOf,
+  summarizeNewsBlackout,
+  type NewsBlackoutSummary,
+} from '../../script-news-blackout';
 import type { ReportTrade } from '@features/scripting/report/strategy-report.model';
 import { StrategyReportComponent } from '@features/scripting/report/strategy-report.component';
 import { ScriptRunChartComponent } from '@features/scripting/backtest/script-run-chart.component';
@@ -147,6 +152,41 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
       </app-page-header>
 
       @if (backtest(); as bt) {
+        <!-- How a script run modelled the engine's high-impact news blackout
+             (resultJson.script.newsBlackout). Older runs carry none and show nothing. -->
+        @if (newsBlackout(); as nb) {
+          <section
+            class="blackout"
+            data-testid="news-blackout"
+            [attr.data-tone]="nb.tone"
+            aria-label="News blackout in this run"
+          >
+            <div class="blackout-line">
+              <span class="blackout-title">News blackout</span>
+              <span class="blackout-pill" [attr.data-tone]="nb.tone" [attr.title]="nb.explanation">
+                {{ nb.status }}
+              </span>
+              @if (nb.window) {
+                <span class="blackout-window">
+                  Window <strong>{{ nb.window }}</strong>
+                </span>
+              }
+              <span class="blackout-effect">{{ nb.effect }}</span>
+            </div>
+            @if (nb.explanation || nb.reportNote) {
+              <details class="blackout-why">
+                <summary>Why</summary>
+                @if (nb.explanation) {
+                  <p>{{ nb.explanation }}</p>
+                }
+                @if (nb.reportNote) {
+                  <p>{{ nb.reportNote }}</p>
+                }
+              </details>
+            }
+          </section>
+        }
+
         <!-- A script strategy's run carries a Strategy report (ADR-0027) instead of the
              JSON-DSL BacktestResult: it gets the chart of the run and the report view;
              every other run keeps the DSL analytics below untouched. -->
@@ -954,6 +994,68 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
         flex-direction: column;
         gap: var(--space-4);
       }
+      .blackout {
+        margin-bottom: var(--space-4);
+        padding: var(--space-3) var(--space-4);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        background: var(--bg-secondary);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+      .blackout[data-tone='exempt'] {
+        border-color: rgba(255, 149, 0, 0.55);
+      }
+      .blackout-line {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-2) var(--space-3);
+      }
+      .blackout-title {
+        font-weight: var(--font-semibold);
+      }
+      .blackout-pill {
+        padding: 1px 8px;
+        border-radius: var(--radius-full);
+        border: 1px solid var(--border);
+        background: var(--bg-tertiary);
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+      }
+      .blackout-pill[data-tone='applied'] {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .blackout-pill[data-tone='exempt'] {
+        border-color: rgba(255, 149, 0, 0.55);
+        background: rgba(255, 149, 0, 0.12);
+        color: var(--warning);
+      }
+      .blackout-window strong {
+        font-variant-numeric: tabular-nums;
+      }
+      .blackout-effect {
+        color: var(--text-secondary);
+      }
+      .blackout-why {
+        margin-top: var(--space-2);
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .blackout-why summary {
+        cursor: pointer;
+        width: fit-content;
+      }
+      .blackout-why summary:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .blackout-why p {
+        margin: var(--space-1) 0 0;
+        line-height: 1.5;
+        overflow-wrap: anywhere;
+      }
     `,
   ],
 })
@@ -967,6 +1069,8 @@ export class BacktestDetailPageComponent implements OnInit {
   readonly parsed = signal<BacktestResultData | null>(null);
   /** Set when the run is a script strategy's: its resultJson is a Strategy report (ADR-0027). */
   readonly scriptReport = signal<StrategyReport | null>(null);
+  /** How a script run modelled the news blackout; null on older and non-script runs. */
+  readonly newsBlackout = signal<NewsBlackoutSummary | null>(null);
   readonly parseError = signal<string | null>(null);
   /** Set when the run itself could not be fetched (distinct from a payload that parsed badly). */
   readonly loadError = signal<string | null>(null);
@@ -1669,6 +1773,8 @@ export class BacktestDetailPageComponent implements OnInit {
         }
         const data = res.data as BacktestRunDto;
         this.backtest.set(data);
+        const blackout = scriptNewsBlackoutOf(data.resultJson);
+        this.newsBlackout.set(blackout ? summarizeNewsBlackout(blackout) : null);
         // Script strategies' runs carry a Strategy report, not the DSL BacktestResult.
         const report = extractStrategyReport(data.resultJson);
         this.scriptReport.set(report);
