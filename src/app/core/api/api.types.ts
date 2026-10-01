@@ -639,6 +639,14 @@ export interface StrategyDto {
   scriptLanguageVersion?: number | null;
   executionPolicy?: ScriptExecutionPolicy | null;
   accountBindingCount?: number | null;
+  /**
+   * The audited opt-out of the engine's high-impact news blackout (list and detail rows). Script
+   * strategies only — the engine honours it only on a strategy with a script: their live, paper and
+   * backtest entries, and the EA's own blackout, then let entries through inside the window. Set
+   * through `PUT strategy/{id}` (`newsBlackoutExempt` + `newsBlackoutExemptReason`); every grant /
+   * revoke is a `NewsBlackoutExemption` DecisionLog row. Absent on engines before 2026-10-01.
+   */
+  newsBlackoutExempt?: boolean;
 }
 
 export interface TradeSignalDto {
@@ -679,6 +687,12 @@ export interface TradeSignalDto {
   /** Number of distinct trading accounts that created an order from this
    *  signal. 0 = no account picked it up (rejected/expired everywhere). */
   accountsPickedUpCount: number;
+  /** True when the signal's strategy is a script strategy holding the news-blackout
+   *  exemption: the engine's high-impact news blackout let it through, and the EA's
+   *  own blackout must not refuse it either. Read from the strategy when the signal
+   *  is served (a revoked exemption stops unexecuted signals too). Absent on engines
+   *  before 2026-10-01. */
+  newsBlackoutExempt?: boolean;
 }
 
 /** Trade-signal provenance. Mirrors the backend TradeSignalSource enum. */
@@ -4692,7 +4706,24 @@ export interface UpdateStrategyRequest {
   multiTimeframeGateJson?: string | null;
   /** Optional free-text reason annotating the auto-captured pre-edit snapshot. */
   changeReason?: string | null;
+  /**
+   * Grant (`true`) or revoke (`false`) the strategy's opt-out of the engine's high-impact news
+   * blackout; omitted leaves it unchanged. Script strategies only (`-11` otherwise). Every change
+   * is audited (DecisionLog `NewsBlackoutExemption`, Granted / Revoked) in the same transaction.
+   */
+  newsBlackoutExempt?: boolean | null;
+  /**
+   * Why the exemption is granted — required for a grant, at least
+   * {@link NEWS_BLACKOUT_EXEMPT_REASON_MIN} characters once trimmed (`-11` otherwise) — or
+   * revoked (optional). Recorded on the audit row; at most 1000 characters.
+   */
+  newsBlackoutExemptReason?: string | null;
 }
+
+/** Shortest reason the engine accepts for a news-blackout exemption grant (`NewsBlackoutExemption.MinReasonLength`). */
+export const NEWS_BLACKOUT_EXEMPT_REASON_MIN = 10;
+/** Longest reason the engine accepts (`UpdateStrategyCommandValidator`). */
+export const NEWS_BLACKOUT_EXEMPT_REASON_MAX = 1000;
 
 export interface StrategyVersionDto {
   id: number;

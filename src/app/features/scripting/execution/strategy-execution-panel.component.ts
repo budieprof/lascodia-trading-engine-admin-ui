@@ -6,15 +6,22 @@ import type { ExecutionPolicy, ScriptStrategyFields } from '../api/scripting-api
 import { executionPolicyOf, isScriptStrategy } from '../shared/script-strategy';
 import { AccountBindingsEditorComponent } from './account-bindings-editor.component';
 import { ExecutionPolicyCardComponent } from './execution-policy-card.component';
+import { NewsBlackoutExemptionCardComponent } from './news-blackout-exemption-card.component';
+import { isNewsBlackoutExempt } from './news-blackout-exemption.model';
 
 /**
  * The strategy detail page's Execution tab (every strategy type): a standing explanation of how
- * account bindings gate live trading, the bindings editor and the execution-policy selector.
+ * account bindings gate live trading, the bindings editor, the execution-policy selector and — for
+ * a script strategy — its audited news-blackout exemption.
  */
 @Component({
   selector: 'app-strategy-execution-panel',
   standalone: true,
-  imports: [AccountBindingsEditorComponent, ExecutionPolicyCardComponent],
+  imports: [
+    AccountBindingsEditorComponent,
+    ExecutionPolicyCardComponent,
+    NewsBlackoutExemptionCardComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (strategy(); as s) {
@@ -56,6 +63,17 @@ import { ExecutionPolicyCardComponent } from './execution-policy-card.component'
           [isScript]="isScript()"
           (policyChanged)="onPolicyChanged($event)"
         />
+
+        <!-- Script strategies only: the engine has no per-strategy news-blackout opt-out for an
+             evaluator strategy (its blackout is applied per symbol before evaluation). -->
+        @if (isScript()) {
+          <app-news-blackout-exemption-card
+            [strategyId]="s.id"
+            [strategyName]="s.name"
+            [exempt]="newsBlackoutExempt()"
+            (changed)="changed.emit()"
+          />
+        }
       </div>
     }
   `,
@@ -95,6 +113,7 @@ export class StrategyExecutionPanelComponent {
 
   readonly isScript = computed(() => isScriptStrategy(this.strategy()));
   readonly policy = computed(() => executionPolicyOf(this.strategy()));
+  readonly newsBlackoutExempt = computed(() => isNewsBlackoutExempt(this.strategy()));
 
   onPolicyChanged(_policy: ExecutionPolicy): void {
     this.changed.emit();

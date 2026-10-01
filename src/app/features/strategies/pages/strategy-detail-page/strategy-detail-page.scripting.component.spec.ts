@@ -43,6 +43,42 @@ describe('StrategyDetailPageComponent (script-strategy tabs)', () => {
     expect(tabs()).toEqual(expect.arrayContaining(['execution', 'live', 'alerts']));
   });
 
+  it('badges a script strategy that holds the news-blackout exemption', () => {
+    cmp.strategy.set({
+      id: 41,
+      strategyType: 'RuleBased',
+      authoringMode: 'Script',
+      newsBlackoutExempt: true,
+    } as any);
+    expect(cmp.newsBlackoutExempt()).toBe(true);
+    cmp.strategy.set({
+      id: 41,
+      strategyType: 'RuleBased',
+      authoringMode: 'Script',
+      newsBlackoutExempt: false,
+    } as any);
+    expect(cmp.newsBlackoutExempt()).toBe(false);
+    // An engine before 2026-10-01 sends no flag.
+    cmp.strategy.set({ id: 41, strategyType: 'RuleBased', authoringMode: 'Script' } as any);
+    expect(cmp.newsBlackoutExempt()).toBe(false);
+  });
+
+  it('never badges a non-script strategy — the engine ignores the flag there', () => {
+    cmp.strategy.set({
+      id: 41,
+      strategyType: 'CompositeML',
+      authoringMode: null,
+      newsBlackoutExempt: true,
+    } as any);
+    expect(cmp.newsBlackoutExempt()).toBe(false);
+  });
+
+  it('the badge leads to the Execution tab, where the exemption is managed', () => {
+    cmp.activeTab.set('config');
+    cmp.openExecutionTab();
+    expect(cmp.activeTab()).toBe('execution');
+  });
+
   it('hides them for a DSL strategy', () => {
     cmp.strategy.set({ id: 41, strategyType: 'RuleBased', authoringMode: 'Dsl' } as any);
     expect(cmp.isScript()).toBe(false);
