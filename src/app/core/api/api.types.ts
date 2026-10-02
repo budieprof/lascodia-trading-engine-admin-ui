@@ -5060,11 +5060,17 @@ export interface StartShadowEvaluationRequest {
 
 export interface CreateBacktestRequest {
   strategyId: number;
+  /** Must be the strategy's own symbol; another market goes in `symbolOverride`. */
   symbol?: string;
+  /** Must be the strategy's own timeframe; another one goes in `timeframeOverride`. */
   timeframe?: string;
   fromDate: string;
   toDate: string;
   initialBalance: number;
+  /** Backtest the strategy's rules on this symbol instead (an override run: never promotion evidence). */
+  symbolOverride?: string;
+  /** Backtest the strategy's rules on this timeframe instead (an override run). */
+  timeframeOverride?: string;
 }
 
 export interface CreateWalkForwardRequest {

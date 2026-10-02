@@ -5,6 +5,7 @@ import {
   inject,
   signal,
   effect,
+  viewChild,
   OnInit,
 } from '@angular/core';
 import { Router } from '@angular/router';
@@ -18,6 +19,7 @@ import { ChartCardComponent } from '@shared/components/chart-card/chart-card.com
 import { StatusPillCellComponent } from '@shared/components/data-table/cell-renderers/status-pill-cell.component';
 import { BacktestsService } from '@core/services/backtests.service';
 import { WalkForwardService } from '@core/services/walk-forward.service';
+import { StrategiesService } from '@core/services/strategies.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { ColDef } from 'ag-grid-community';
 import {
@@ -26,6 +28,7 @@ import {
   BacktestRunDto,
   WalkForwardRunDto,
   ResponseData,
+  CreateBacktestRequest,
 } from '@core/api/api.types';
 import { FormsModule } from '@angular/forms';
 
@@ -57,11 +60,16 @@ import { FormsModule } from '@angular/forms';
           <div class="form-grid">
             <div class="field">
               <label>Strategy ID</label>
-              <input type="number" [(ngModel)]="formData.strategyId" placeholder="1" />
+              <input
+                type="number"
+                [(ngModel)]="formData.strategyId"
+                (ngModelChange)="onStrategyIdChange($event)"
+                placeholder="1"
+              />
             </div>
             <div class="field">
               <label>Symbol</label>
-              <input type="text" [(ngModel)]="formData.symbol" placeholder="EUR/USD" />
+              <input type="text" [(ngModel)]="formData.symbol" placeholder="EURUSD" />
             </div>
             <div class="field">
               <label>Timeframe</label>
@@ -87,9 +95,26 @@ import { FormsModule } from '@angular/forms';
               <input type="date" [(ngModel)]="formData.toDate" />
             </div>
           </div>
+          @if (strategyInfo(); as s) {
+            <p class="form-hint">
+              #{{ s.id }} {{ s.name }} — trades {{ s.symbol }} {{ s.timeframe }}.
+              @if (isOverride()) {
+                <strong>Override run</strong> on {{ normalizedSymbol() || s.symbol }}
+                {{ formData.timeframe }}: the strategy's rules on another market — never promotion
+                evidence.
+              }
+            </p>
+          } @else if (strategyLookupError()) {
+            <p class="form-hint form-hint-error">{{ strategyLookupError() }}</p>
+          }
+          @if (queueError()) {
+            <p class="form-hint form-hint-error">{{ queueError() }}</p>
+          }
           <div class="form-actions">
             <button class="btn-secondary" (click)="showForm.set(false)">Cancel</button>
-            <button class="btn-primary" (click)="queueBacktest()">Queue</button>
+            <button class="btn-primary" [disabled]="queueing()" (click)="queueBacktest()">
+              {{ queueing() ? 'Queueing…' : 'Queue' }}
+            </button>
           </div>
         </div>
       }
@@ -295,6 +320,7 @@ import { FormsModule } from '@angular/forms';
             <span class="muted">Server-paged — click any row for the detail page</span>
           </header>
           <app-data-table
+            #btTable
             [columnDefs]="backtestColumns"
             [fetchData]="fetchBacktests"
             (rowClick)="onBacktestClick($event)"
@@ -551,6 +577,14 @@ import { FormsModule } from '@angular/forms';
         margin: 0 0 var(--space-4);
         color: var(--text-primary);
       }
+      .form-hint {
+        margin: 0 0 var(--space-3);
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+      }
+      .form-hint-error {
+        color: var(--loss);
+      }
       .form-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -743,7 +777,9 @@ export class BacktestsPageComponent implements OnInit {
   private backtestsService = inject(BacktestsService);
   private walkForwardService = inject(WalkForwardService);
   private notifications = inject(NotificationService);
+  private strategiesService = inject(StrategiesService);
   private router = inject(Router);
+  private readonly btTable = viewChild<DataTableComponent<BacktestRunDto>>('btTable');
 
   tabs = [
     { label: 'Backtest Runs', value: 'backtests' },
@@ -754,12 +790,67 @@ export class BacktestsPageComponent implements OnInit {
 
   formData = {
     strategyId: 1,
-    symbol: 'EUR/USD',
+    symbol: 'EURUSD',
     timeframe: 'H1',
     initialBalance: 10000,
     fromDate: '2025-01-01',
     toDate: '2025-12-31',
   };
+
+  /** The strategy the form points at; its own symbol/timeframe are what a normal run must send. */
+  readonly strategyInfo = signal<{
+    id: number;
+    name: string;
+    symbol: string;
+    timeframe: string;
+  } | null>(null);
+  readonly strategyLookupError = signal<string | null>(null);
+  readonly queueing = signal(false);
+  readonly queueError = signal<string | null>(null);
+  private strategyLookupSeq = 0;
+
+  /** "EUR/USD" / "eurusd " → "EURUSD": the engine's symbols carry no separators. */
+  normalizedSymbol(): string {
+    return (this.formData.symbol ?? '').toUpperCase().replace(/[^A-Z0-9.]/g, '');
+  }
+
+  isOverride(): boolean {
+    const s = this.strategyInfo();
+    if (!s) return false;
+    const sym = this.normalizedSymbol();
+    return (!!sym && sym !== s.symbol) || this.formData.timeframe !== s.timeframe;
+  }
+
+  /** Looks the strategy up and fills its own symbol/timeframe, so a normal run never trips the engine's market check. */
+  onStrategyIdChange(id: number | null): void {
+    const seq = ++this.strategyLookupSeq;
+    this.strategyInfo.set(null);
+    this.strategyLookupError.set(null);
+    this.queueError.set(null);
+    if (!id || id <= 0) return;
+    this.strategiesService.getById(id).subscribe({
+      next: (res) => {
+        if (seq !== this.strategyLookupSeq) return;
+        const s = res?.status ? res.data : null;
+        if (!s || !s.symbol) {
+          this.strategyLookupError.set(res?.message || `Strategy ${id} not found`);
+          return;
+        }
+        this.strategyInfo.set({
+          id: s.id,
+          name: s.name ?? `Strategy ${s.id}`,
+          symbol: s.symbol,
+          timeframe: s.timeframe,
+        });
+        this.formData.symbol = s.symbol;
+        this.formData.timeframe = s.timeframe;
+      },
+      error: () => {
+        if (seq === this.strategyLookupSeq)
+          this.strategyLookupError.set(`Strategy ${id} could not be loaded`);
+      },
+    });
+  }
 
   // ── Analytics samples (probe-and-fetch, capped at 5000) ─────────────
   readonly btSample = signal<BacktestRunDto[]>([]);
@@ -777,6 +868,7 @@ export class BacktestsPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadBtAnalyticsSample();
+    this.onStrategyIdChange(this.formData.strategyId);
   }
 
   // ── Backtest analytics ─────────────────────────────────────────────
@@ -1539,23 +1631,50 @@ export class BacktestsPageComponent implements OnInit {
     this.router.navigate(['/walk-forward', row.id]);
   }
 
+  /**
+   * Queues the run and reports the ENGINE's verdict: a refusal arrives as `status: false` with its reason (unknown
+   * strategy, a symbol/timeframe that is not the strategy's own, a script that no longer compiles…) and used to be
+   * shown as "queued successfully". A run on another market is sent as an explicit override.
+   */
   queueBacktest() {
-    this.backtestsService
-      .create({
-        strategyId: this.formData.strategyId,
-        symbol: this.formData.symbol,
-        timeframe: this.formData.timeframe as any,
-        initialBalance: this.formData.initialBalance,
-        fromDate: this.formData.fromDate,
-        toDate: this.formData.toDate,
-      })
-      .subscribe({
-        next: () => {
-          this.notifications.success('Backtest queued successfully');
-          this.showForm.set(false);
-          this.loadBtAnalyticsSample();
-        },
-        error: () => this.notifications.error('Failed to queue backtest'),
-      });
+    const symbol = this.normalizedSymbol();
+    const own = this.strategyInfo();
+    const req: CreateBacktestRequest = {
+      strategyId: this.formData.strategyId,
+      symbol,
+      timeframe: this.formData.timeframe,
+      initialBalance: this.formData.initialBalance,
+      fromDate: this.formData.fromDate,
+      toDate: this.formData.toDate,
+    };
+    if (own && own.id === this.formData.strategyId) {
+      req.symbol = own.symbol;
+      req.timeframe = own.timeframe;
+      if (symbol && symbol !== own.symbol) req.symbolOverride = symbol;
+      if (this.formData.timeframe !== own.timeframe)
+        req.timeframeOverride = this.formData.timeframe;
+    }
+    this.queueing.set(true);
+    this.queueError.set(null);
+    this.backtestsService.create(req).subscribe({
+      next: (res) => {
+        this.queueing.set(false);
+        if (!res?.status) {
+          const msg = res?.message || 'The engine refused the backtest';
+          this.queueError.set(msg);
+          this.notifications.error(msg);
+          return;
+        }
+        this.notifications.success(res.data ? `Backtest #${res.data} queued` : 'Backtest queued');
+        this.showForm.set(false);
+        this.btTable()?.loadData();
+      },
+      error: (err: unknown) => {
+        this.queueing.set(false);
+        const msg = (err as { message?: string })?.message || 'Failed to queue backtest';
+        this.queueError.set(msg);
+        this.notifications.error(msg);
+      },
+    });
   }
 }

@@ -13,7 +13,8 @@ import {
 export class BacktestsService {
   private readonly api = inject(ApiService);
 
-  create(data: CreateBacktestRequest): Observable<ResponseData<BacktestRunDto>> {
+  /** Queues a run. `data` is the new run's id; a refusal comes back as `status: false` with the engine's message. */
+  create(data: CreateBacktestRequest): Observable<ResponseData<number>> {
     return this.api.post(`/backtest`, data);
   }
 
