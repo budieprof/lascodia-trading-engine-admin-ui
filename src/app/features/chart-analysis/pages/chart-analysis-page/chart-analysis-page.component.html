@@ -1244,6 +1244,14 @@
             <span class="pine-tag">{{ run.result.kind === 'strategy' ? 'Strategy' : 'Pine' }}</span>
             {{ run.result.title || run.item.name }}
           </span>
+          <button
+            type="button"
+            class="study-toggle"
+            (click)="openScriptSource(run.item.key)"
+            title="Source code"
+          >
+            <app-chart-icon name="pine" [size]="16" />
+          </button>
           @if (run.result.kind === 'strategy') {
             <button
               type="button"
@@ -1355,6 +1363,11 @@
         <app-script-editor-panel
           [symbol]="symbol()"
           [resolution]="resolution()"
+          [initialSource]="editorTarget()?.source ?? null"
+          [initialName]="editorTarget()?.name ?? null"
+          [onChart]="!!editorTarget()"
+          [loading]="!!editorTarget()?.loading"
+          [strategyId]="editorTarget()?.strategyId ?? null"
           (add)="onEditorAdd($event)"
           (saved)="onEditorSaved()"
           (closed)="editorOpen.set(false)"

@@ -25,6 +25,7 @@ import {
   mergeForming,
 } from '../../datafeed/aggregate';
 import { priceScaleFor } from '../../datafeed/symbol-info';
+import { StrategiesService } from '@core/services/strategies.service';
 import { ChartIconComponent } from '../../icons/chart-icon.component';
 import { DrawingToolbarComponent } from '../../drawings/ui/drawing-toolbar.component';
 import { DrawingSettingsDialogComponent } from '../../drawings/ui/drawing-settings-dialog.component';
@@ -426,9 +427,12 @@ export class ChartAnalysisPageComponent {
   }
 
   toggleEditor(): void {
-    const open = this.dockTab() === 'editor';
-    this.editorOpen.set(!open);
-    if (!open) this.dockPreference.set('editor');
+    if (this.dockTab() === 'editor') {
+      this.editorOpen.set(false);
+      return;
+    }
+    // Opening the editor shows the script on the chart, as TradingView does.
+    this.openScriptSource(this.editorKey());
   }
 
   toggleTester(): void {
@@ -539,6 +543,45 @@ export class ChartAnalysisPageComponent {
   readonly scriptError = signal<string | null>(null);
   readonly testerOpen = signal(true);
   readonly editorOpen = signal(false);
+
+  // ── Pine Editor ↔ chart script (TradingView: the editor shows the script on the chart) ──
+  private readonly strategies = inject(StrategiesService);
+  /** The chart script the editor is showing (its run key), or null for a new script. */
+  readonly editorKey = signal<string | null>(null);
+  /** Engine strategy sources, fetched once per id. */
+  private readonly strategySources = signal<Record<number, string | null>>({});
+  readonly editorTarget = computed(() => {
+    const runs = this.scriptRuns();
+    const key = this.editorKey();
+    const run = runs.find((r) => r.item.key === key) ?? null;
+    if (!run) return null;
+    const item = run.item;
+    const id = item.strategyId ?? null;
+    const source = item.pineSource ?? (id !== null ? (this.strategySources()[id] ?? null) : null);
+    return { key: item.key, name: run.result.title || item.name, source, strategyId: id, loading: id !== null && source === null };
+  });
+
+  /** Point the editor at a chart script, loading an engine strategy's source when needed. */
+  openScriptSource(key: string | null): void {
+    const runs = this.scriptRuns();
+    const target =
+      key ?? (runs.find((r) => r.result.kind === 'strategy') ?? runs[runs.length - 1])?.item.key ?? null;
+    this.editorKey.set(target);
+    const item = runs.find((r) => r.item.key === target)?.item;
+    const id = item?.strategyId;
+    if (id !== undefined && id !== null && !item?.pineSource && !(id in this.strategySources())) {
+      this.strategies
+        .getById(id)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (res) =>
+            this.strategySources.update((m) => ({ ...m, [id]: res?.data?.scriptSource ?? '' })),
+          error: () => this.strategySources.update((m) => ({ ...m, [id]: '' })),
+        });
+    }
+    this.editorOpen.set(true);
+    this.dockPreference.set('editor');
+  }
   /** Which dock tab wins when both the editor and the tester are open. */
   readonly dockPreference = signal<'editor' | 'tester'>('tester');
   readonly dockTab = computed<'editor' | 'tester' | null>(() => {
@@ -1937,7 +1980,12 @@ export class ChartAnalysisPageComponent {
   }
 
   onEditorAdd(submit: ScriptEditorSubmit): void {
-    this.runScript(this.chartScripts.itemForSource(submit.source, submit.kind, submit.name), {});
+    // Editing a script that is on the chart updates it in place (the edited copy replaces it).
+    const replacing = this.editorTarget();
+    if (replacing) this.removeScript(replacing.key);
+    const item = this.chartScripts.itemForSource(submit.source, submit.kind, submit.name);
+    this.editorKey.set(item.key);
+    this.runScript(item, {});
   }
 
   onEditorSaved(): void {

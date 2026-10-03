@@ -56,8 +56,12 @@ export interface ScriptEditorSubmit {
           {{ compiling() ? 'Compiling…' : 'Compile' }}
         </button>
         <button type="button" (click)="save()">Save</button>
-        <button type="button" class="primary" (click)="addToChart()" [disabled]="!source().trim()">
-          Add to chart
+        @if (strategyId() !== null) {
+          <a class="editor__link" [href]="'/strategies/' + strategyId() + '/edit'" target="_blank" rel="noopener"
+            title="Saving there changes the engine strategy">Open in strategy editor</a>
+        }
+        <button type="button" class="primary" (click)="addToChart()" [disabled]="!source().trim() || loading()">
+          {{ onChart() ? 'Update on chart' : 'Add to chart' }}
         </button>
         <button
           type="button"
@@ -68,6 +72,9 @@ export interface ScriptEditorSubmit {
           <app-chart-icon name="close" [size]="18" />
         </button>
       </header>
+      @if (loading()) {
+        <div class="editor__loading">Loading the strategy's source…</div>
+      }
       <app-pine-editor
         [value]="source()"
         (valueChange)="onEdit($event)"
@@ -178,6 +185,20 @@ export interface ScriptEditorSubmit {
       .err {
         color: var(--loss);
       }
+      .editor__link {
+        font-size: 12px;
+        color: var(--accent, #2962ff);
+        text-decoration: none;
+        align-self: center;
+      }
+      .editor__link:hover {
+        text-decoration: underline;
+      }
+      .editor__loading {
+        padding: 6px 12px;
+        font-size: 12px;
+        color: var(--text-muted, #787b86);
+      }
       .warn {
         color: var(--text-muted);
       }
@@ -194,6 +215,12 @@ export class ScriptEditorPanelComponent {
   /** The chart's symbol / resolution — refine compile warnings. */
   readonly symbol = input<string | null>(null);
   readonly resolution = input<string | null>(null);
+  /** The editor is showing a script that is on the chart: "Add" becomes "Update on chart". */
+  readonly onChart = input(false);
+  /** The chart script's source is still being fetched from the engine. */
+  readonly loading = input(false);
+  /** An engine strategy: link to its editor, where saving changes the live strategy. */
+  readonly strategyId = input<number | null>(null);
 
   readonly add = output<ScriptEditorSubmit>();
   readonly saved = output<string>();
