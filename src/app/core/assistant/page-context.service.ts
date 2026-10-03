@@ -12,11 +12,11 @@ import { UiCommandService } from './ui-command.service';
 /**
  * How much page context may be sent.
  *
- * <p>Matches the engine's own `AssistantPageContextMaxChars` (8000). Staying under the
+ * <p>Matches the engine's own `AssistantPageContextMaxChars` (24000 — the chart page alone registers ~70 commands, and at 8000 their parameter names were the first thing dropped, so the model guessed them). Staying under the
  * server cap is the point: the engine truncates as plain TEXT with a marker, which the model
  * can cope with, but a page that routinely overruns would be handing it half a sentence.</p>
  */
-const MAX_CONTEXT_CHARS = 8000;
+const MAX_CONTEXT_CHARS = 24000;
 
 /**
  * Assembles what the assistant is told about the current page.
@@ -145,7 +145,21 @@ export class PageContextService {
 
       const stages: PageContext[] = [
         full,
-        // 1. Keep every command, lose the parameter documentation.
+        // 1. Keep every command's parameter names and types; keep the descriptions only for
+        //    commands that need them most (destructive ones, and the Pine editor's, whose
+        //    arguments are easy to guess wrong).
+        {
+          ...full,
+          commands: commands.map((c) =>
+            c.confirm || /^(pine|strategy)\./.test(c.id)
+              ? c
+              : {
+                  ...c,
+                  params: c.params?.map((p) => ({ name: p.name, type: p.type, description: '' })),
+                },
+          ),
+        },
+        // 1b. Keep every command, lose the parameter documentation.
         {
           ...full,
           commands: commands.map((c) => ({

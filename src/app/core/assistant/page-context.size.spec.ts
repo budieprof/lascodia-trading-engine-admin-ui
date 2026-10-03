@@ -91,7 +91,23 @@ describe('page context payload', () => {
     const json = svc.captureJson();
     expect(json).not.toBeNull();
     expect(() => JSON.parse(json!), 'payload must parse at any size').not.toThrow();
-    expect(json!.length).toBeLessThanOrEqual(8000);
+    expect(json!.length).toBeLessThanOrEqual(24000);
+  });
+
+  it('keeps the Pine editor parameter docs when other commands shed theirs', () => {
+    // The chart page registers ~70 commands; at the old cap the parameter NAMES went first
+    // and the model called strategy.focusTrade with {trade:2} instead of {number:2}.
+    const pine: UiCommand = {
+      id: 'strategy.focusTrade',
+      description: 'Pan to a trade',
+      params: [{ name: 'number', type: 'number', description: 'Trade number.', required: true }],
+      run: () => ({ ok: true, message: 'ok' }),
+    };
+    const svc = makeService([...Array.from({ length: 21 }, (_, i) => fatCommand(i)), pine]);
+    const parsed = JSON.parse(svc.captureJson()!);
+    const focus = parsed.commands.find((c: { id: string }) => c.id === 'strategy.focusTrade');
+    expect(focus.params[0]).toMatchObject({ name: 'number', description: 'Trade number.' });
+    expect(parsed.commands[0].params[0].description).toBe('');
   });
 
   it('keeps the command ids when it has to shed detail', () => {
