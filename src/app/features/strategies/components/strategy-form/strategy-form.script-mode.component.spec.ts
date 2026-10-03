@@ -320,6 +320,51 @@ describe('StrategyFormComponent — Pine script authoring', () => {
   describe('edit', () => {
     beforeEach(() => create(STRATEGY));
 
+    describe('saveScriptForAssistant (assistant strategy.save)', () => {
+      function assistPanel(draft: ScriptDraft | null, dirty: boolean, saves = true, failure: string | null = null) {
+        const stub = { ...panel(draft, dirty, saves), message: signal<string | null>(null) };
+        stub.saveScript.mockImplementation(async () => {
+          if (!saves) stub.message.set(failure);
+          return saves;
+        });
+        (cmp as any).scriptAuthoring = stub;
+        return stub;
+      }
+
+      it('records the change reason and saves through the submit path', async () => {
+        const draft: ScriptDraft = { source: `${SCRIPT}// x\n`, inputs: { in_3_len: 20 }, executionPolicy: 'Direct' };
+        const stub = assistPanel(draft, true);
+        const r = await cmp.saveScriptForAssistant('tighter stop');
+        expect(cmp.updateChangeReason()).toBe('tighter stop');
+        // The reason travels with the script PUT, so a script-only save still records it.
+        expect(stub.saveScript).toHaveBeenCalledWith(42, draft, 'tighter stop');
+        expect(r.ok).toBe(true);
+        expect(r.message).toContain('tighter stop');
+      });
+
+      it('passes the reason into the metadata update when the form changed too', async () => {
+        assistPanel({ source: SCRIPT, inputs: { in_3_len: 25 }, executionPolicy: 'Direct' }, true);
+        cmp.form.patchValue({ name: 'Renamed' });
+        cmp.form.markAsDirty();
+        const r = await cmp.saveScriptForAssistant('why');
+        expect(r.ok).toBe(true);
+        expect(submitted[0]).toMatchObject({ changeReason: 'why' });
+      });
+
+      it('reports the panel refusal as a failure', async () => {
+        assistPanel({ source: `${SCRIPT}//y`, inputs: {}, executionPolicy: 'Direct' }, true, false, 'The engine refused the script: bad');
+        const r = await cmp.saveScriptForAssistant('r');
+        expect(r).toEqual({ ok: false, message: 'The engine refused the script: bad' });
+      });
+
+      it('does nothing when nothing changed', async () => {
+        const stub = assistPanel(null, false);
+        const r = await cmp.saveScriptForAssistant('r');
+        expect(r.ok).toBe(true);
+        expect(stub.prepareSubmit).not.toHaveBeenCalled();
+      });
+    });
+
     it('opens a script strategy in script mode with its saved script, inputs and policy', () => {
       expect(cmp.isScriptAuthoring()).toBe(true);
       expect(cmp.scriptDraft()).toEqual({
@@ -337,7 +382,7 @@ describe('StrategyFormComponent — Pine script authoring', () => {
       };
       const stub = panel(draft, true);
       await cmp.submitScript();
-      expect(stub.saveScript).toHaveBeenCalledWith(42, draft);
+      expect(stub.saveScript).toHaveBeenCalledWith(42, draft, '');
       expect(submitted).toEqual([]);
       expect(cancelled).toBe(1);
       expect(notify['success']).toHaveBeenCalled();

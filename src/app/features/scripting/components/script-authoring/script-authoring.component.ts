@@ -8,6 +8,7 @@ import {
   model,
   output,
   signal,
+  viewChild,
 } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
@@ -314,6 +315,8 @@ export class ScriptAuthoringComponent {
   readonly executionRequested = output<void>();
 
   @ViewChild(ScriptWorkbenchComponent) workbench?: ScriptWorkbenchComponent;
+  /** The Preview, once its deferred chunk has loaded. */
+  readonly preview = viewChild(ScriptPreviewComponent);
 
   private readonly scripting = inject(ScriptingService);
   readonly tab = signal<SideTab>('inputs');
@@ -337,6 +340,17 @@ export class ScriptAuthoringComponent {
     if (source === this.draft().source) return;
     this.draft.update((d) => ({ ...d, source }));
     this.message.set(null);
+  }
+
+  /** Replaces the script through the editor, so the change is undoable there. */
+  replaceSource(source: string): void {
+    if (this.workbench) this.workbench.replaceSource(source);
+    else this.setSource(source);
+  }
+
+  /** The script as the editor holds it right now (unsaved edits included). */
+  currentSource(): string {
+    return this.workbench?.currentSource() ?? this.draft().source;
   }
 
   setInputs(inputs: ScriptInputValues): void {
@@ -422,7 +436,11 @@ export class ScriptAuthoringComponent {
    * `PUT strategy/{id}/script` — the engine compiles, captures a version and restarts the live
    * session at the next bar. A compile refusal marks every diagnostic in the editor.
    */
-  async saveScript(strategyId: number, draft: ScriptDraft = this.draft()): Promise<boolean> {
+  async saveScript(
+    strategyId: number,
+    draft: ScriptDraft = this.draft(),
+    changeReason?: string | null,
+  ): Promise<boolean> {
     this.phase.set('saving');
     this.message.set(null);
     try {
@@ -430,6 +448,7 @@ export class ScriptAuthoringComponent {
         this.scripting.updateStrategyScript(strategyId, {
           source: draft.source,
           inputs: draft.inputs,
+          ...(changeReason?.trim() ? { changeReason: changeReason.trim() } : {}),
         }),
       );
       return true;

@@ -2660,6 +2660,7 @@ export class AnalysisChatComponent {
       ...opts,
       clientOk: result.ok,
       clientOutcome: result.message,
+      ...splitClientData(result.data),
     });
   }
 
@@ -3331,4 +3332,24 @@ export class AnalysisChatComponent {
       },
     });
   }
+}
+
+/**
+ * Split a page command's result data for the wire: a `{buffer:{name,text}}` hand-off travels as
+ * `clientBuffer` (written into the assistant's buffer store, never echoed into the thread), and
+ * everything else as `clientData`, which the assistant reads as the command's result.
+ */
+export function splitClientData(data: unknown): Pick<ResolveApprovalOptions, 'clientData' | 'clientBuffer'> {
+  if (data === undefined || data === null) return {};
+  if (typeof data === 'object' && !Array.isArray(data) && 'buffer' in data) {
+    const { buffer, ...rest } = data as { buffer: unknown } & Record<string, unknown>;
+    const b = buffer as { name?: unknown; text?: unknown } | null;
+    const clientBuffer =
+      b && typeof b.name === 'string' && typeof b.text === 'string' ? { name: b.name, text: b.text } : null;
+    return {
+      ...(clientBuffer ? { clientBuffer } : {}),
+      ...(Object.keys(rest).length ? { clientData: rest } : {}),
+    };
+  }
+  return { clientData: data };
 }

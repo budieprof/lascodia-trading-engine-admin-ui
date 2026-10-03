@@ -233,6 +233,16 @@ export class PineEditorComponent implements AfterViewInit, OnDestroy {
     this.handle?.focus();
   }
 
+  /**
+   * Replaces the document as an edit the operator can undo (Ctrl/Cmd-Z), unlike the `value`
+   * binding which treats outside changes as loads. The change flows back out through `value`.
+   * Before the editor has loaded, it simply sets the value.
+   */
+  replaceSource(doc: string): void {
+    if (this.handle) this.handle.setValue(doc, true);
+    else this.value.set(doc);
+  }
+
   /** The live source (the editor's own document, even mid-keystroke). */
   currentValue(): string {
     return this.handle?.getValue() ?? this.value();

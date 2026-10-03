@@ -393,6 +393,8 @@ export type StrategyAuthoringMode = 'Dsl' | 'Script';
 export interface UpdateStrategyScriptRequest {
   source: string;
   inputs: ScriptInputValues;
+  /** Recorded on the pre-edit version snapshot. */
+  changeReason?: string | null;
 }
 
 /** `GET strategy/{id}/export` — a `.pine` file for scripts, a JSON bundle for legacy DSL rows. */
