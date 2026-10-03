@@ -1,3 +1,4 @@
+import { tradeDetail, type TradeDetail } from './trade-detail';
 import { ChartIconComponent } from '../icons/chart-icon.component';
 import {
   ChangeDetectionStrategy,
@@ -172,7 +173,20 @@ interface SummaryRow {
               </thead>
               <tbody>
                 @for (t of trades(); track t.number) {
-                  <tr>
+                  <tr
+                    class="tester__trade"
+                    tabindex="0"
+                    [class.selected]="selected() === t.number"
+                    [attr.aria-label]="'Trade ' + t.number + ': click to show on chart, long-press for details'"
+                    title="Click: show on chart · Long-press or right-click: trade details"
+                    (pointerdown)="pressStart(t, $event)"
+                    (pointerup)="pressEnd(t, $event)"
+                    (pointerleave)="pressCancel()"
+                    (pointercancel)="pressCancel()"
+                    (contextmenu)="$event.preventDefault(); openDetail(t)"
+                    (keydown.enter)="focusTrade(t)"
+                    (keydown.shift.enter)="$event.preventDefault(); openDetail(t)"
+                  >
                     <td>{{ t.number }}</td>
                     <td [class]="t.side === 'long' ? 'pos' : 'neg'">
                       {{ t.side === 'long' ? 'Long' : 'Short' }}{{ t.isOpen ? ' (open)' : '' }}
@@ -268,9 +282,112 @@ interface SummaryRow {
         }
       </div>
     </section>
-  `,
+  
+    @if (detail(); as d) {
+      <div class="td-backdrop" (click)="detail.set(null)"></div>
+      <section class="td" role="dialog" aria-modal="true" [attr.aria-label]="d.title + ' details'" (keydown.escape)="detail.set(null)" tabindex="-1">
+        <header class="td__head">
+          <strong>{{ d.title }}</strong>
+          <span class="td__side" [class.pos]="d.side === 'long'" [class.neg]="d.side === 'short'">{{ d.side === 'long' ? 'Long' : 'Short' }}</span>
+          <span class="td__spacer"></span>
+          <button type="button" class="td__btn" (click)="focusTrade(detailTrade()!); detail.set(null)">Show on chart</button>
+          <button type="button" class="td__x" aria-label="Close" (click)="detail.set(null)">×</button>
+        </header>
+        <div class="td__body">
+          <div class="td__cols">
+            <div>
+              <h4>Trade</h4>
+              <dl>
+                @for (r of d.trade; track r.label) {
+                  <dt>{{ r.label }}</dt><dd [class]="r.tone ?? ''">{{ r.value }}</dd>
+                }
+              </dl>
+            </div>
+            <div>
+              <h4>Outcome</h4>
+              <dl>
+                @for (r of d.outcome; track r.label) {
+                  <dt>{{ r.label }}</dt><dd [class]="r.tone ?? ''">{{ r.value }}</dd>
+                }
+              </dl>
+            </div>
+          </div>
+          <h4>Strategy values at entry and exit</h4>
+          @if (d.series.length) {
+            <table class="td__table">
+              <thead><tr><th>Series</th><th>At entry</th><th>At exit</th></tr></thead>
+              <tbody>
+                @for (s of d.series; track s.title) {
+                  <tr>
+                    <td><span class="td__dot" [style.background]="s.color"></span>{{ s.title }}</td>
+                    <td>{{ s.entry === null ? '—' : s.entry.toFixed(5) }}</td>
+                    <td>{{ s.exit === null ? '—' : s.exit.toFixed(5) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          } @else {
+            <p class="td__muted">This strategy plots nothing, so there are no indicator values to show.</p>
+          }
+          <h4>Bar at entry and exit</h4>
+          <table class="td__table">
+            <thead><tr><th></th><th>Entry bar</th><th>Exit bar</th></tr></thead>
+            <tbody>
+              @for (b of d.bars; track b.label) {
+                <tr><td>{{ b.label }}</td><td>{{ b.entry ?? '—' }}</td><td>{{ b.exit ?? '—' }}</td></tr>
+              }
+            </tbody>
+          </table>
+          @if (d.inputs.length) {
+            <h4>Inputs used</h4>
+            <dl class="td__inputs">
+              @for (r of d.inputs; track r.label) {
+                <dt>{{ r.label }}</dt><dd>{{ r.value }}</dd>
+              }
+            </dl>
+          }
+        </div>
+      </section>
+    }
+`,
   styles: [
     `
+      .tester__trade { cursor: pointer; user-select: none; }
+      .tester__trade:hover td { background: var(--tv-hover, rgba(0, 0, 0, 0.04)); }
+      .tester__trade.selected td { background: var(--tv-active-bg, #e3effd); }
+      .tester__trade:focus-visible { outline: 2px solid var(--accent, #2962ff); outline-offset: -2px; }
+      .td-backdrop { position: fixed; inset: 0; z-index: 300; background: rgba(10, 12, 18, 0.4); }
+      .td {
+        position: fixed; z-index: 301; left: 50%; top: 50%; transform: translate(-50%, -50%);
+        width: min(760px, calc(100vw - 32px)); max-height: min(80vh, 760px); display: flex; flex-direction: column;
+        background: var(--tv-bg, var(--surface, #fff)); color: var(--tv-ink, inherit); border-radius: 8px;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3); font-size: 13px;
+      }
+      .td__head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--tv-line, #e0e3eb); }
+      .td__head strong { font-size: 15px; }
+      .td__side { font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+      .td__side.pos { background: rgba(8, 153, 129, 0.12); color: #089981; }
+      .td__side.neg { background: rgba(242, 54, 69, 0.12); color: #f23645; }
+      .td__spacer { flex: 1; }
+      .td__btn { font: inherit; padding: 4px 10px; border: 1px solid var(--tv-line, #e0e3eb); border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+      .td__btn:hover { background: var(--tv-hover, rgba(0, 0, 0, 0.05)); }
+      .td__x { font-size: 20px; line-height: 1; border: 0; background: transparent; color: inherit; cursor: pointer; padding: 0 4px; }
+      .td__body { overflow-y: auto; padding: 4px 16px 16px; }
+      .td h4 { margin: 14px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tv-muted, #787b86); }
+      .td__cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0 24px; }
+      .td dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
+      .td dt { color: var(--tv-muted, #787b86); }
+      .td dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .td dd.pos { color: #089981; }
+      .td dd.neg { color: #f23645; }
+      .td__table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+      .td__table th, .td__table td { padding: 4px 8px; text-align: right; border-bottom: 1px solid var(--tv-line, #e0e3eb); }
+      .td__table th:first-child, .td__table td:first-child { text-align: left; }
+      .td__table th { font-weight: 500; color: var(--tv-muted, #787b86); font-size: 12px; }
+      .td__dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+      .td__muted { color: var(--tv-muted, #787b86); margin: 0; }
+      .td__inputs { grid-template-columns: 1fr auto; }
+
       :host {
         display: block;
         min-height: 0;
@@ -439,6 +556,51 @@ export class StrategyTesterPanelComponent implements OnDestroy {
   /** Re-run with these input overrides. */
   readonly rerun = output<ScriptInputValues>();
   readonly closed = output<void>();
+  /** A trade row was clicked: the page frames that trade on the chart. */
+  readonly tradeFocus = output<ChartTrade>();
+
+  protected readonly selected = signal<number | null>(null);
+  protected readonly detail = signal<TradeDetail | null>(null);
+  protected readonly detailTrade = signal<ChartTrade | null>(null);
+  private pressTimer: ReturnType<typeof setTimeout> | null = null;
+  private longPressed = false;
+
+  /** Long-press (500 ms, like a touch long-press) opens the detail popup; a short click frames the trade. */
+  protected pressStart(t: ChartTrade, ev: PointerEvent): void {
+    if (ev.button !== 0) return;
+    this.longPressed = false;
+    this.pressCancel();
+    this.pressTimer = setTimeout(() => {
+      this.pressTimer = null;
+      this.longPressed = true;
+      this.openDetail(t);
+    }, 500);
+  }
+
+  protected pressEnd(t: ChartTrade, ev: PointerEvent): void {
+    if (ev.button !== 0) return;
+    const wasLong = this.longPressed;
+    this.pressCancel();
+    if (!wasLong) this.focusTrade(t);
+  }
+
+  protected pressCancel(): void {
+    if (this.pressTimer !== null) clearTimeout(this.pressTimer);
+    this.pressTimer = null;
+  }
+
+  protected focusTrade(t: ChartTrade): void {
+    this.selected.set(t.number);
+    this.tradeFocus.emit(t);
+  }
+
+  protected openDetail(t: ChartTrade): void {
+    const r = this.result();
+    if (!r) return;
+    this.selected.set(t.number);
+    this.detailTrade.set(t);
+    this.detail.set(tradeDetail(r, t, this.values()));
+  }
 
   protected readonly tabs: { id: TesterTab; label: string }[] = [
     { id: 'overview', label: 'Overview' },

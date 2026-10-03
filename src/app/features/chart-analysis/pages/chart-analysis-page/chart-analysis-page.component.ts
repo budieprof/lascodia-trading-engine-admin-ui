@@ -65,7 +65,8 @@ import {
   type ChartScriptCatalog,
   type ChartScriptItem,
 } from '../../scripts/chart-script.service';
-import type { ChartScriptResult } from '../../scripts/chart-script.model';
+import type { ChartScriptResult, ChartTrade } from '../../scripts/chart-script.model';
+import { tradeWindow } from '../../scripts/trade-detail';
 import type { ScriptInputValues } from '@core/api/scripting.types';
 import { StrategyTesterPanelComponent } from '../../scripts/strategy-tester-panel.component';
 import {
@@ -1968,6 +1969,13 @@ export class ChartAnalysisPageComponent {
           );
         },
       });
+  }
+
+  /** Frame a strategy trade on the chart (List of trades click), TradingView-style. */
+  focusTrade(t: ChartTrade): void {
+    const step = (resolutionMs(this.resolution()) ?? 3_600_000) / 1000;
+    const w = tradeWindow(t, step, Math.floor(Date.now() / 1000));
+    this.host()?.setVisibleRange(w.fromMs, w.toMs);
   }
 
   rerunStrategy(values: ScriptInputValues): void {
