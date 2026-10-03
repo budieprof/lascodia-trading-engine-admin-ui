@@ -1975,7 +1975,7 @@ export class ChartAnalysisPageComponent {
   focusTrade(t: ChartTrade): void {
     const step = (resolutionMs(this.resolution()) ?? 3_600_000) / 1000;
     const w = tradeWindow(t, step, Math.floor(Date.now() / 1000));
-    this.host()?.setVisibleRange(w.fromMs, w.toMs);
+    this.host()?.glideToRange(w.fromMs, w.toMs);
   }
 
   rerunStrategy(values: ScriptInputValues): void {
