@@ -646,6 +646,7 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.cancelGlide();
     for (const h of this.scriptHandles) h.dispose();
     this.scriptHandles = [];
     this.resizeObserver?.disconnect();
@@ -766,6 +767,77 @@ export class ChartHostComponent implements OnDestroy {
       // The library throws when the range holds no data at all.
       return false;
     }
+  }
+
+  /**
+   * Glide the time axis to [fromMs, toMs] (UTC): the visible logical range is interpolated
+   * frame by frame with an ease-in-out curve, so the chart pans and zooms in one continuous
+   * motion instead of jumping. A new call continues from wherever the current glide is; grabbing
+   * the chart cancels it; reduced-motion users get the jump.
+   */
+  glideToRange(fromMs: number, toMs: number, durationMs = 520): boolean {
+    const scale = this.chart?.timeScale();
+    const start = scale?.getVisibleLogicalRange();
+    const a = this.logicalAtMs(Math.min(fromMs, toMs));
+    const b = this.logicalAtMs(Math.max(fromMs, toMs));
+    if (!scale || !start || a === null || b === null) return this.setVisibleRange(fromMs, toMs);
+    this.cancelGlide();
+    const reduce =
+      typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) {
+      scale.setVisibleLogicalRange({ from: a, to: b });
+      return true;
+    }
+    const s0 = start.from;
+    const s1 = start.to;
+    const t0 = performance.now();
+    const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+    const step = (now: number) => {
+      const k = Math.min(1, (now - t0) / durationMs);
+      const e = ease(k);
+      scale.setVisibleLogicalRange({ from: s0 + (a - s0) * e, to: s1 + (b - s1) * e });
+      this.glideFrame = k < 1 ? requestAnimationFrame(step) : null;
+    };
+    this.glideFrame = requestAnimationFrame(step);
+    // The operator taking hold of the chart ends the glide where it is.
+    const el = this.container().nativeElement;
+    const stop = () => this.cancelGlide();
+    el.addEventListener('pointerdown', stop, { once: true });
+    el.addEventListener('wheel', stop, { once: true, passive: true });
+    this.glideCleanup = () => {
+      el.removeEventListener('pointerdown', stop);
+      el.removeEventListener('wheel', stop);
+    };
+    return true;
+  }
+
+  private glideFrame: number | null = null;
+  private glideCleanup: (() => void) | null = null;
+
+  private cancelGlide(): void {
+    if (this.glideFrame !== null) cancelAnimationFrame(this.glideFrame);
+    this.glideFrame = null;
+    this.glideCleanup?.();
+    this.glideCleanup = null;
+  }
+
+  /** Fractional bar index of a UTC instant on the plotted (zone-shifted) bars; extrapolates past either end. */
+  private logicalAtMs(utcMs: number): number | null {
+    const bars = this.plotted;
+    if (bars.length < 2) return null;
+    const t = utcMs + this.timezoneShiftMs(utcMs);
+    const last = bars.length - 1;
+    const step = (bars[last].time - bars[0].time) / last || 3_600_000;
+    if (t <= bars[0].time) return (t - bars[0].time) / step;
+    if (t >= bars[last].time) return last + (t - bars[last].time) / step;
+    let lo = 0;
+    let hi = last;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (bars[mid].time <= t) lo = mid;
+      else hi = mid;
+    }
+    return lo + (t - bars[lo].time) / (bars[hi].time - bars[lo].time);
   }
 
   /** Show the most recent `count` bars. */
