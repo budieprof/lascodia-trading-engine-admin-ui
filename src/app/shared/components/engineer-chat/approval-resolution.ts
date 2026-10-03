@@ -58,7 +58,18 @@ export interface ResolveApprovalOptions {
   clientOutcome?: string | null;
   /** Whether that client-side command succeeded. `ui_action` cards only. */
   clientOk?: boolean | null;
+  /**
+   * The command's structured result (`UiCommandOutcome.data`) — what a read-type command found,
+   * e.g. the lines of the open Pine script. Sent as JSON text; the engine fences it as page content.
+   */
+  clientData?: unknown;
+  /** Text the page hands to one of the assistant's server-side buffers (`pine.toBuffer`). */
+  clientBuffer?: { name: string; text: string } | null;
 }
+
+/** Engine-side caps for the client report (mirrored so the clip is visible here, not silent there). */
+export const MAX_CLIENT_DATA_LENGTH = 24_000;
+export const MAX_CLIENT_BUFFER_LENGTH = 500_000;
 
 /**
  * The resolve request body.
@@ -77,6 +88,22 @@ export function resolveApprovalBody(opts?: ResolveApprovalOptions | null): Recor
   const outcome = (opts?.clientOutcome ?? '').trim();
   if (outcome) body['clientOutcome'] = outcome.slice(0, MAX_REASON_LENGTH);
   if (typeof opts?.clientOk === 'boolean') body['clientOk'] = opts.clientOk;
+  if (opts?.clientData !== undefined && opts.clientData !== null) {
+    let json: string;
+    try {
+      json = JSON.stringify(opts.clientData) ?? '';
+    } catch {
+      json = '';
+    }
+    if (json)
+      body['clientData'] =
+        json.length > MAX_CLIENT_DATA_LENGTH
+          ? `${json.slice(0, MAX_CLIENT_DATA_LENGTH)}…[truncated ${json.length - MAX_CLIENT_DATA_LENGTH} chars — page with smaller ranges]`
+          : json;
+  }
+  const buf = opts?.clientBuffer;
+  if (buf && typeof buf.name === 'string' && typeof buf.text === 'string' && buf.text.length <= MAX_CLIENT_BUFFER_LENGTH)
+    body['clientBuffer'] = { name: buf.name, text: buf.text };
   return body;
 }
 

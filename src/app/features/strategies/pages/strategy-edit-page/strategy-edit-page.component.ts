@@ -3,12 +3,15 @@ import {
   Component,
   DestroyRef,
   OnInit,
+  effect,
   inject,
   signal,
+  untracked,
+  viewChild,
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { distinctUntilChanged, filter, map } from 'rxjs';
+import { distinctUntilChanged, filter, firstValueFrom, map } from 'rxjs';
 
 import type { StrategyDto, UpdateStrategyRequest } from '@core/api/api.types';
 import { StrategiesService } from '@core/services/strategies.service';
@@ -16,6 +19,12 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { StrategyFormComponent } from '../../components/strategy-form/strategy-form.component';
 import { failureMessage } from '../../util/api-failure';
+import { MarketDataService } from '@core/services/market-data.service';
+import { AssistantDockService } from '@core/assistant/assistant-dock.service';
+import { PageContextService } from '@core/assistant/page-context.service';
+import { UiCommandService } from '@core/assistant/ui-command.service';
+import { pineAssistCommands, pineEditorFacts } from '@shared/pine-assist/pine-assist';
+import { createStrategyPineAdapter } from '../../pine-assist/strategy-pine-adapter';
 
 /**
  * Full-page strategy editor (/strategies/:id/edit): the same form as the detail page's Edit
@@ -68,6 +77,76 @@ export class StrategyEditPageComponent implements OnInit {
   readonly loadError = signal(false);
   readonly saving = signal(false);
   readonly submitError = signal<string | null>(null);
+
+  private readonly marketData = inject(MarketDataService);
+  private readonly dock = inject(AssistantDockService);
+  private readonly uiCommands = inject(UiCommandService);
+  private readonly pageContext = inject(PageContextService);
+  private readonly form = viewChild(StrategyFormComponent);
+
+  /** The Pine editor as the assistant drives it (pine.* / strategy.* page commands). */
+  readonly pineAdapter = createStrategyPineAdapter({
+    strategy: () => this.strategy(),
+    panel: () => this.form()?.scriptPanel(),
+    showScript: () => this.form()?.activeTab.set('inputs'),
+    save: (reason) =>
+      this.form()?.saveScriptForAssistant(reason) ??
+      Promise.resolve({ ok: false, message: 'The strategy form is not open.' }),
+    readBuffer: async (name) => {
+      const sessionId = this.dock.conversationId();
+      if (sessionId == null) return null;
+      return firstValueFrom(this.marketData.getAssistantBuffer(sessionId, name));
+    },
+  });
+  /** Withdraws the registered commands; null while none are registered. */
+  private unregisterCommands: (() => void) | null = null;
+
+  constructor() {
+    // The commands exist only while a Pine strategy's script editor is on the page.
+    effect(() => {
+      const f = this.form();
+      const active = !!f?.scriptPanel() && f.isScriptAuthoring();
+      untracked(() => {
+        if (active && !this.unregisterCommands) this.registerPineCommands();
+        else if (!active && this.unregisterCommands) this.withdrawPineCommands();
+      });
+    });
+    this.destroyRef.onDestroy(() => this.withdrawPineCommands());
+
+    // Read at send time, so the facts are always current.
+    this.pageContext.publish(() => {
+      const s = this.strategy();
+      const f = this.form();
+      const editing = !!this.unregisterCommands && !!f?.scriptPanel();
+      return {
+        headline: s
+          ? `Editing strategy #${s.id} "${s.name}" (${s.symbol} ${s.timeframe}, ${s.strategyType})`
+          : 'Loading a strategy for editing',
+        ...(s ? { record: { kind: 'strategy', id: s.id, label: s.name ?? undefined } } : {}),
+        ...(editing ? { filters: { ...pineEditorFacts(this.pineAdapter) } } : {}),
+      };
+    });
+  }
+
+  private registerPineCommands(): void {
+    let withdraw: (() => void) | null = null;
+    // A scoped DestroyRef: the registration ends when the editor goes away, not only with the page.
+    const scope = {
+      destroyed: false,
+      onDestroy: (cb: () => void) => {
+        withdraw = cb;
+        return () => (withdraw = null);
+      },
+    } as unknown as DestroyRef;
+    this.uiCommands.register(pineAssistCommands(this.pineAdapter), scope);
+    this.unregisterCommands = () => withdraw?.();
+  }
+
+  private withdrawPineCommands(): void {
+    const fn = this.unregisterCommands;
+    this.unregisterCommands = null;
+    fn?.();
+  }
 
   subtitle(): string {
     const s = this.strategy();

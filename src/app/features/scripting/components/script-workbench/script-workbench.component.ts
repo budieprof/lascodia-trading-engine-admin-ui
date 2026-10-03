@@ -282,6 +282,17 @@ export class ScriptWorkbenchComponent {
     this.editor?.revealPosition(line, column);
   }
 
+  /** Replaces the source as an undoable edit in the editor (see PineEditorComponent.replaceSource). */
+  replaceSource(doc: string): void {
+    if (this.editor) this.editor.replaceSource(doc);
+    else this.source.set(doc);
+  }
+
+  /** The editor's live text (falls back to the bound source before it loads). */
+  currentSource(): string {
+    return this.editor?.currentValue() ?? this.source();
+  }
+
   focus(): void {
     this.editor?.focus();
   }

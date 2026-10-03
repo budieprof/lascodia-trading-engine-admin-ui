@@ -1,5 +1,6 @@
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, catchError, map, of, throwError } from 'rxjs';
+import { HttpErrorResponse } from '@angular/common/http';
 import { ApiService, type ApiCallOptions } from '@core/api/api.service';
 import {
   ResponseData,
@@ -516,6 +517,24 @@ export class MarketDataService {
       symbol: this.formatSymbol(symbol),
       timeframe,
     });
+  }
+
+  /**
+   * `GET market-data/assistant/session/{sessionId}/buffer/{name}` — the text of one of the
+   * assistant's server-side buffers for a conversation. Null when the buffer does not exist.
+   */
+  getAssistantBuffer(sessionId: number | string, name: string): Observable<string | null> {
+    return this.api
+      .get<ResponseData<{ text?: string | null } | null>>(
+        `/market-data/assistant/session/${encodeURIComponent(String(sessionId))}/buffer/${encodeURIComponent(name)}`,
+        { silent: true },
+      )
+      .pipe(
+        map((res) => (res?.status === false ? null : (res?.data?.text ?? null))),
+        catchError((err: unknown) =>
+          err instanceof HttpErrorResponse && err.status === 404 ? of(null) : throwError(() => err),
+        ),
+      );
   }
 
   private formatSymbol(symbol: string): string {

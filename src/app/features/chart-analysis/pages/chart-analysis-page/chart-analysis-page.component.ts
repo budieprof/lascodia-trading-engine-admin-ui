@@ -67,6 +67,12 @@ import {
 } from '../../scripts/chart-script.service';
 import type { ChartScriptResult, ChartTrade } from '../../scripts/chart-script.model';
 import { tradeWindow } from '../../scripts/trade-detail';
+import { chartPineAdapter } from '../../scripts/chart-pine-adapter';
+import { detectScriptKind } from '../../scripts/chart-script.model';
+import { pineAssistCommands, pineEditorFacts, type PineEditorAdapter } from '@shared/pine-assist/pine-assist';
+import { firstValueFrom } from 'rxjs';
+import { MarketDataService } from '@core/services/market-data.service';
+import { AssistantDockService } from '@core/assistant/assistant-dock.service';
 import type { ScriptInputValues } from '@core/api/scripting.types';
 import { StrategyTesterPanelComponent } from '../../scripts/strategy-tester-panel.component';
 import {
@@ -564,6 +570,7 @@ export class ChartAnalysisPageComponent {
 
   /** Point the editor at a chart script, loading an engine strategy's source when needed. */
   openScriptSource(key: string | null): void {
+    if (key !== this.editorKey()) this.assistSource.set(null);
     const runs = this.scriptRuns();
     const target =
       key ?? (runs.find((r) => r.result.kind === 'strategy') ?? runs[runs.length - 1])?.item.key ?? null;
@@ -583,6 +590,74 @@ export class ChartAnalysisPageComponent {
     this.editorOpen.set(true);
     this.dockPreference.set('editor');
   }
+  // ── The assistant's view of the Pine Editor (`pine.*` / `strategy.*` page commands) ──
+  /** The editor's current text, for the script it shows — kept here so it reads even with the tester in front. */
+  private readonly editorDraft = signal<{ key: string | null; text: string } | null>(null);
+  /** Text the assistant wrote, pushed into the editor (a new seq applies it). */
+  readonly assistSource = signal<{ text: string; seq: number } | null>(null);
+  private assistSeq = 0;
+
+  onEditorSource(text: string): void {
+    this.editorDraft.set({ key: this.editorKey(), text });
+  }
+
+  private draftText(): string {
+    const d = this.editorDraft();
+    if (d && d.key === this.editorKey()) return d.text;
+    return this.editorTarget()?.source ?? '';
+  }
+
+  private writeDraft(text: string): void {
+    if (!this.editorOpen()) this.openScriptSource(this.editorKey());
+    this.dockPreference.set('editor');
+    this.editorDraft.set({ key: this.editorKey(), text });
+    this.assistSource.set({ text, seq: ++this.assistSeq });
+  }
+
+  private readonly scriptEditor = viewChild(ScriptEditorPanelComponent);
+  private readonly marketData = inject(MarketDataService);
+  private readonly assistantDock = inject(AssistantDockService);
+
+  private readonly pineAdapter: PineEditorAdapter = chartPineAdapter({
+    editorName: () => this.editorTarget()?.name ?? null,
+    draft: () => this.draftText(),
+    writeDraft: (t) => this.writeDraft(t),
+    openEditor: () => {
+      if (!this.editorOpen()) this.openScriptSource(this.editorKey());
+      this.dockPreference.set('editor');
+    },
+    compile: async (source) => {
+      const r = await firstValueFrom(this.chartScripts.compile(source, this.symbol(), this.resolution()));
+      this.scriptEditor()?.showCompile(r);
+      return r;
+    },
+    runDraft: (source) =>
+      new Promise((resolve) => {
+        const target = this.editorTarget();
+        if (target) this.removeScript(target.key);
+        const item = this.chartScripts.itemForSource(source, detectScriptKind(source), target?.name ?? 'Untitled script');
+        this.editorKey.set(item.key);
+        this.editorDraft.set({ key: item.key, text: source });
+        this.runScript(item, {}, false, resolve);
+      }),
+    currentRun: () => {
+      const run = this.scriptRuns().find((r) => r.item.key === this.editorKey()) ?? this.strategyRun();
+      return run ? { result: run.result, values: run.values } : null;
+    },
+    rerun: (values) =>
+      new Promise((resolve) => {
+        const run = this.scriptRuns().find((r) => r.item.key === this.editorKey()) ?? this.strategyRun();
+        if (!run) resolve({ error: 'Nothing is running on the chart.' });
+        else this.runScript(run.item, values, true, resolve);
+      }),
+    focusTrade: (t) => this.focusTrade(t),
+    pricePrecision: () => this.precision(),
+    readBuffer: async (name) => {
+      const id = this.assistantDock.conversationId();
+      return id ? firstValueFrom(this.marketData.getAssistantBuffer(id, name)) : null;
+    },
+  });
+
   /** Which dock tab wins when both the editor and the tester are open. */
   readonly dockPreference = signal<'editor' | 'tester'>('tester');
   readonly dockTab = computed<'editor' | 'tester' | null>(() => {
@@ -975,6 +1050,7 @@ export class ChartAnalysisPageComponent {
         economicEvents: this.showEvents(),
         magnet: this.magnet(),
         replay: this.replayActive(),
+        ...(this.editorOpen() || this.scriptRuns().length ? pineEditorFacts(this.pineAdapter) : {}),
       },
       figures: {
         barsLoaded: this.bars().length,
@@ -989,6 +1065,9 @@ export class ChartAnalysisPageComponent {
       },
       ids: { studies: this.active().map((i) => i.uid) },
     }));
+
+    // The Pine Editor: the assistant reads, edits, compiles and runs the operator's script live.
+    this.uiCommands.register(pineAssistCommands(this.pineAdapter), this.destroyRef);
 
     this.uiCommands.register(
       chartCommands({
@@ -1931,7 +2010,12 @@ export class ChartAnalysisPageComponent {
   }
 
   /** Run a Pine script/strategy over the loaded window and paint it. */
-  runScript(item: ChartScriptItem, values: ScriptInputValues, replace = false): void {
+  runScript(
+    item: ChartScriptItem,
+    values: ScriptInputValues,
+    replace = false,
+    done?: (r: ChartScriptResult | { error: string }) => void,
+  ): void {
     this.scriptRunning.set(true);
     this.scriptError.set(null);
     const symbol = this.symbol();
@@ -1943,9 +2027,13 @@ export class ChartAnalysisPageComponent {
         next: (result) => {
           this.scriptRunning.set(false);
           // A run for a symbol the operator has since left is stale.
-          if (symbol !== this.symbol() || resolution !== this.resolution()) return;
+          if (symbol !== this.symbol() || resolution !== this.resolution()) {
+            done?.({ error: 'The chart moved to another symbol or timeframe during the run.' });
+            return;
+          }
           if (result.error) {
             this.scriptError.set(`${item.name}: ${result.error}`);
+            done?.({ error: result.error });
             return;
           }
           this.scriptRuns.update((runs) => {
@@ -1961,9 +2049,11 @@ export class ChartAnalysisPageComponent {
             this.testerOpen.set(true);
             this.dockPreference.set('tester');
           }
+          done?.(result);
         },
         error: (err: unknown) => {
           this.scriptRunning.set(false);
+          done?.({ error: err instanceof Error ? err.message : 'run failed' });
           this.scriptError.set(
             `${item.name}: ${err instanceof Error ? err.message : 'run failed'}`,
           );

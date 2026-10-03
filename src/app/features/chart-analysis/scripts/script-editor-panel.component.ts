@@ -222,7 +222,15 @@ export class ScriptEditorPanelComponent {
   /** An engine strategy: link to its editor, where saving changes the live strategy. */
   readonly strategyId = input<number | null>(null);
 
+  /**
+   * Text written into the editor from outside (the assistant's `pine.*` commands). A new `seq`
+   * replaces the buffer as if typed, so the operator sees it at once and can keep editing.
+   */
+  readonly externalSource = input<{ text: string; seq: number } | null>(null);
+
   readonly add = output<ScriptEditorSubmit>();
+  /** Every change to the buffer — typed, loaded or written from outside. */
+  readonly sourceChange = output<string>();
   readonly saved = output<string>();
   readonly closed = output<void>();
 
@@ -244,6 +252,19 @@ export class ScriptEditorPanelComponent {
         if (src !== null) this.source.set(src);
         if (name) this.name.set(name);
         this.result.set(null);
+        this.sourceChange.emit(this.source());
+      });
+    });
+    let appliedSeq = -1;
+    effect(() => {
+      const ext = this.externalSource();
+      if (!ext || ext.seq === appliedSeq) return;
+      appliedSeq = ext.seq;
+      untracked(() => {
+        this.source.set(ext.text);
+        this.result.set(null);
+        this.savedNote.set(null);
+        this.sourceChange.emit(ext.text);
       });
     });
   }
@@ -251,6 +272,13 @@ export class ScriptEditorPanelComponent {
   protected onEdit(v: string): void {
     this.source.set(v);
     this.savedNote.set(null);
+    this.sourceChange.emit(v);
+  }
+
+  /** Show a compile result produced elsewhere (the assistant's `pine.compile`). */
+  showCompile(r: ScriptCompileResult): void {
+    this.result.set(r);
+    this.error.set(null);
   }
 
   compile(): void {

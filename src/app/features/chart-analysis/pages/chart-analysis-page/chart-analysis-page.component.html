@@ -1368,6 +1368,8 @@
           [onChart]="!!editorTarget()"
           [loading]="!!editorTarget()?.loading"
           [strategyId]="editorTarget()?.strategyId ?? null"
+          [externalSource]="assistSource()"
+          (sourceChange)="onEditorSource($event)"
           (add)="onEditorAdd($event)"
           (saved)="onEditorSaved()"
           (closed)="editorOpen.set(false)"

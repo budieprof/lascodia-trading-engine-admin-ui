@@ -311,3 +311,17 @@ describe('parseDecisionEcho', () => {
     expect(parseDecisionEcho(turn({ role: 'User', content: '**Rejected.**' }))).toBeNull();
   });
 });
+
+describe('resolveApprovalBody — page command results', () => {
+  it('sends result data as JSON text, capped', () => {
+    expect(resolveApprovalBody({ clientData: { a: 1 } })['clientData']).toBe('{"a":1}');
+    const big = resolveApprovalBody({ clientData: 'x'.repeat(30_000) })['clientData'] as string;
+    expect(big.length).toBeLessThan(24_200);
+    expect(big).toContain('truncated');
+  });
+
+  it('sends a buffer hand-off only when well formed', () => {
+    expect(resolveApprovalBody({ clientBuffer: { name: 'live', text: 'x' } })['clientBuffer']).toEqual({ name: 'live', text: 'x' });
+    expect(resolveApprovalBody({ clientBuffer: null })['clientBuffer']).toBeUndefined();
+  });
+});

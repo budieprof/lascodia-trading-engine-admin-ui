@@ -11,6 +11,7 @@ import {
   OnChanges,
   SimpleChanges,
   ViewChild,
+  viewChild,
 } from '@angular/core';
 import { ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { DatePipe, DecimalPipe } from '@angular/common';
@@ -2986,6 +2987,8 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   /** The script was saved in this edit, but the host has not re-read the strategy since. */
   private scriptSaveUnreported = false;
   @ViewChild(ScriptAuthoringComponent) private scriptAuthoring?: ScriptAuthoringComponent;
+  /** The script panel as a signal query, for hosts that react to it appearing (the assistant). */
+  readonly scriptPanel = viewChild(ScriptAuthoringComponent);
 
   /** The strategy being edited — or the type being created — is authored in Pine. */
   isRuleBased(): boolean {
@@ -3062,7 +3065,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
         return;
       }
       const scriptChanged = panel.isDirty();
-      if (scriptChanged && !(await panel.saveScript(existing.id, script))) return;
+      if (scriptChanged && !(await panel.saveScript(existing.id, script, this.updateChangeReason()))) return;
       if (this.form.dirty) {
         // Metadata only: the script went through its own endpoint, and
         // parametersJson is left out so the (empty) rules stay untouched. The
@@ -3079,5 +3082,32 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     } finally {
       this.scriptSubmitting = false;
     }
+  }
+
+  /**
+   * The assistant's `strategy.save`: records the change reason, then runs the same path as the
+   * Save button ({@link submitScript}) and reports what happened.
+   */
+  async saveScriptForAssistant(reason: string): Promise<{ ok: boolean; message: string }> {
+    this.updateChangeReason.set(reason);
+    const panel = this.scriptAuthoring;
+    if (!panel || !this.isScriptAuthoring()) return { ok: false, message: 'The script editor is not open.' };
+    if (this.scriptSubmitting) return { ok: false, message: 'A save is already in progress.' };
+    if (this.form.invalid) {
+      return { ok: false, message: 'The strategy form has invalid fields; fix them before saving.' };
+    }
+    const scriptChanged = panel.isDirty();
+    if (!scriptChanged && !this.form.dirty) {
+      return { ok: true, message: 'Nothing to save: the script matches the saved version.' };
+    }
+    await this.submitScript();
+    const problem = panel.message();
+    if (problem) return { ok: false, message: problem };
+    return {
+      ok: true,
+      message: scriptChanged
+        ? `Saved the script (reason: "${reason}"). Live sessions pick it up at the next bar.`
+        : `Sent the strategy update (reason: "${reason}").`,
+    };
   }
 }
