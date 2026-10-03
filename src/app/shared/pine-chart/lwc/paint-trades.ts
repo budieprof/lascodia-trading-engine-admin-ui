@@ -30,15 +30,16 @@ function qtyText(q: number): string {
 }
 
 /** The fill markers of one trade (entry, plus exit when closed). */
-export function tradeMarkers(t: TradeDrawing, currency = ''): TradeMarker[] {
+export function tradeMarkers(t: TradeDrawing, currency = ''): (TradeMarker & { qty: number })[] {
   const long = t.direction === 'long';
   const profit = `${t.profit >= 0 ? '+' : ''}${t.profit.toFixed(2)}${currency ? ' ' + currency : ''}${
     t.profitPercent !== null
       ? ` (${t.profitPercent >= 0 ? '+' : ''}${t.profitPercent.toFixed(2)}%)`
       : ''
   }`;
-  const out: TradeMarker[] = [
+  const out: (TradeMarker & { qty: number })[] = [
     {
+      qty: t.qty,
       logical: t.entryX,
       price: t.entryPrice,
       side: long ? 'buy' : 'sell',
@@ -53,6 +54,7 @@ export function tradeMarkers(t: TradeDrawing, currency = ''): TradeMarker[] {
   if (t.exitX !== null && t.exitPrice !== null) {
     const signal = t.exitSignal ?? 'Close';
     out.push({
+      qty: t.qty,
       logical: t.exitX,
       price: t.exitPrice,
       side: long ? 'sell' : 'buy',
@@ -60,6 +62,37 @@ export function tradeMarkers(t: TradeDrawing, currency = ''): TradeMarker[] {
       color: TRADE_COLORS.exit,
       text: `${signal}\n${long ? '-' : '+'}${qtyText(t.qty)}`,
       tooltip: `Trade #${t.number} · ${long ? 'Long' : 'Short'} exit "${signal}" · ${qtyText(t.qty)} @ ${t.exitPrice} · P/L ${profit}`,
+    });
+  }
+  return out;
+}
+
+/**
+ * TradingView draws one arrow per ORDER, not per trade leg: a reversal (close the short and open
+ * the long on the same bar) is a single "Long +20,000" order. Merge fills that share a bar,
+ * direction and price; the entry's signal names the order and the quantities add up.
+ */
+export function mergeFills(markers: readonly (TradeMarker & { qty: number })[]): TradeMarker[] {
+  const groups = new Map<string, (TradeMarker & { qty: number })[]>();
+  for (const m of markers) {
+    const key = `${Math.round(m.logical)}|${m.side}|${m.price.toPrecision(10)}`;
+    const g = groups.get(key);
+    if (g) g.push(m);
+    else groups.set(key, [m]);
+  }
+  const out: TradeMarker[] = [];
+  for (const g of groups.values()) {
+    if (g.length === 1) {
+      out.push(g[0]);
+      continue;
+    }
+    const lead = g.find((m) => m.kind === 'entry') ?? g[0];
+    const qty = g.reduce((s, m) => s + Math.abs(m.qty), 0);
+    const signal = lead.text.split('\n')[0];
+    out.push({
+      ...lead,
+      text: `${signal}\n${lead.side === 'buy' ? '+' : '-'}${qtyText(qty)}`,
+      tooltip: g.map((m) => m.tooltip).join('\n'),
     });
   }
   return out;
@@ -99,9 +132,11 @@ export function paintTrades(
   const tickW = Math.max(4, Math.min(16, p.barSpacing * 0.8));
   ctx.font = cssFont(TEXT_PX, FONT_DEFAULT);
   const inView = (x: number | null) => x !== null && x >= p.from && x <= p.to;
-  for (const t of trades) {
-    if (!inView(t.entryX) && !inView(t.exitX)) continue;
-    for (const m of tradeMarkers(t)) {
+  const fills = mergeFills(
+    trades.filter((t) => inView(t.entryX) || inView(t.exitX)).flatMap((t) => tradeMarkers(t)),
+  );
+  {
+    for (const m of fills) {
       if (m.logical < p.from || m.logical > p.to) continue;
       const bar = Math.round(m.logical);
       const x = p.x(m.logical);
