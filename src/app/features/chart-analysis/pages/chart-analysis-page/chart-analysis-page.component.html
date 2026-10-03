@@ -1378,6 +1378,7 @@
           [values]="run.values"
           [running]="scriptRunning()"
           (rerun)="rerunStrategy($event)"
+          (tradeFocus)="focusTrade($event)"
           (closed)="testerOpen.set(false)"
         />
       }
