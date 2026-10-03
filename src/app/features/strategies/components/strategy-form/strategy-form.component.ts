@@ -51,6 +51,8 @@ import { CloneStrategyDialogComponent } from '../clone-strategy-dialog/clone-str
 import { StrategyVersionDiffComponent } from '../strategy-version-diff/strategy-version-diff.component';
 import { failureMessage } from '../../util/api-failure';
 import type { StrategyVersionFields } from '../../util/version-diff';
+import { SUB_CONFIG_SCHEMAS } from '../../util/sub-config-schema';
+import { SubConfigEditorComponent } from '../sub-config-editor/sub-config-editor.component';
 
 /**
  * Strategy types authored as Pine v6 scripts. Their Parameters JSON used to hold the retired JSON
@@ -106,6 +108,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
   standalone: true,
   imports: [
     ReactiveFormsModule,
+    SubConfigEditorComponent,
     DatePipe,
     DecimalPipe,
     CloneStrategyDialogComponent,
@@ -479,20 +482,15 @@ const TIMEFRAME_LABELS: Record<string, string> = {
 
             <!-- ========== RISK OVERRIDES TAB ========== -->
             @if (activeTab() === 'risk') {
-              <div class="form-group">
-                <label class="form-label">Risk Overrides JSON</label>
-                <textarea
-                  formControlName="riskOverridesJson"
-                  class="form-input form-textarea form-mono"
-                  rows="6"
-                  [placeholder]="placeholders.riskOverrides"
-                ></textarea>
-                <span class="form-hint">
-                  Optional. SL/TP/trailing-stop overrides for signals from this strategy. Leave
-                  blank to inherit from the assigned risk profile. Modes:
-                  <code>Atr</code> (multiplier × ATR) or <code>Pips</code> (literal pips).
-                </span>
-              </div>
+              <app-sub-config-editor
+                formControlName="riskOverridesJson"
+                [schema]="schemas.riskOverrides"
+                [placeholder]="placeholders.riskOverrides"
+              />
+              <span class="form-hint">
+                Optional. SL/TP/trailing-stop overrides for signals from this strategy. Leave a
+                field blank to inherit from the assigned risk profile.
+              </span>
             }
 
             <!-- ========== SIZING TAB ========== -->
@@ -510,75 +508,48 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                   </span>
                 </div>
               } @else {
-                <div class="form-group">
-                  <label class="form-label">Sizing Config JSON</label>
-                  <textarea
-                    formControlName="sizingConfigJson"
-                    class="form-input form-textarea form-mono"
-                    rows="6"
-                    [placeholder]="placeholders.sizing"
-                  ></textarea>
-                  <span class="form-hint">
-                    Optional. Position-sizing model, clamped by the account's risk profile. Modes:
-                    <code>FixedLot</code>, <code>RiskPercentOfEquity</code>,
-                    <code>PercentOfEquity</code>, <code>Cash</code>, <code>AtrBased</code>,
-                    <code>BaseLotMultiplier</code>. Leave blank to size at the risk profile's risk
-                    per trade.
-                  </span>
-                </div>
+                <app-sub-config-editor
+                  formControlName="sizingConfigJson"
+                  [schema]="schemas.sizing"
+                  [placeholder]="placeholders.sizing"
+                />
+                <span class="form-hint">
+                  Optional. Position-sizing model, clamped by the account's risk profile. Leave the
+                  mode blank to size at the risk profile's risk per trade.
+                </span>
               }
             }
 
             <!-- ========== FILTERS TAB (session + news) ========== -->
             @if (activeTab() === 'filters') {
-              <div class="form-group">
-                <label class="form-label">Session Filter JSON</label>
-                <textarea
-                  formControlName="sessionFilterJson"
-                  class="form-input form-textarea form-mono"
-                  rows="6"
-                  [placeholder]="placeholders.sessionFilter"
-                ></textarea>
-                <span class="form-hint">
-                  Optional. Time-of-day window (UTC) plus optional news embargo.
-                  <code>sessionStartUtc</code> / <code>sessionEndUtc</code> as <code>HH:mm</code>;
-                  set <code>tradeWeekends:false</code> to skip Saturday/Sunday. Leave blank to trade
-                  24/5.
-                </span>
-              </div>
+              <app-sub-config-editor
+                formControlName="sessionFilterJson"
+                [schema]="schemas.sessionFilter"
+                [placeholder]="placeholders.sessionFilter"
+              />
+              <span class="form-hint">
+                Optional. Time-of-day window (UTC) plus optional news embargo. Leave blank to trade
+                around the clock.
+              </span>
             }
 
             <!-- ========== GATES TAB (regime + higher-TF) ========== -->
             @if (activeTab() === 'gates') {
-              <div class="form-group">
-                <label class="form-label">Regime Gate JSON</label>
-                <textarea
-                  formControlName="regimeGateJson"
-                  class="form-input form-textarea form-mono"
-                  rows="4"
-                  [placeholder]="placeholders.regimeGate"
-                ></textarea>
-                <span class="form-hint">
-                  Optional. Allowlist of regimes where this strategy may emit signals. Values:
-                  <code>Trending</code>, <code>Ranging</code>, <code>Breakout</code>,
-                  <code>HighVolatility</code>, <code>LowVolatility</code>, <code>Crisis</code>.
-                </span>
-              </div>
-
-              <div class="form-group">
-                <label class="form-label">Multi-Timeframe Gate JSON</label>
-                <textarea
-                  formControlName="multiTimeframeGateJson"
-                  class="form-input form-textarea form-mono"
-                  rows="4"
-                  [placeholder]="placeholders.multiTimeframeGate"
-                ></textarea>
-                <span class="form-hint">
-                  Optional. Higher-timeframe confirmation. Comparator:
-                  <code>PriceAbove</code>, <code>PriceBelow</code>, <code>Crossover</code>,
-                  <code>Crossunder</code>.
-                </span>
-              </div>
+              <app-sub-config-editor
+                formControlName="regimeGateJson"
+                [schema]="schemas.regimeGate"
+                [placeholder]="placeholders.regimeGate"
+              />
+              <app-sub-config-editor
+                formControlName="multiTimeframeGateJson"
+                [schema]="schemas.mtfGate"
+                [strategyTimeframe]="formTimeframe()"
+                [placeholder]="placeholders.multiTimeframeGate"
+              />
+              <span class="form-hint">
+                Optional. A regime allowlist and a higher-timeframe confirmation; both blank = no
+                gate.
+              </span>
             }
 
             <!-- A script previews through its own panel (scripting/run); a legacy
@@ -2129,6 +2100,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   readonly timeframes = TIMEFRAMES;
   readonly timeframeLabels = TIMEFRAME_LABELS;
   readonly placeholders = SUB_CONFIG_PLACEHOLDERS;
+  readonly schemas = SUB_CONFIG_SCHEMAS;
 
   form!: FormGroup;
 

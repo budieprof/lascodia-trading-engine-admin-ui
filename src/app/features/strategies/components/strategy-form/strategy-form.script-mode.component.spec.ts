@@ -238,12 +238,16 @@ describe('StrategyFormComponent — Pine script authoring', () => {
       cmp.form.patchValue({ strategyType: 'Custom' });
       cmp.activeTab.set('sizing');
       fixture.detectChanges();
-      expect(host.querySelector('textarea[formcontrolname="sizingConfigJson"]')).toBeTruthy();
+      expect(
+        host.querySelector('app-sub-config-editor[formcontrolname="sizingConfigJson"]'),
+      ).toBeTruthy();
       expect(host.querySelector('[data-testid="script-sizing-note"]')).toBeNull();
 
       cmp.form.patchValue({ strategyType: 'RuleBased' });
       fixture.detectChanges();
-      expect(host.querySelector('textarea[formcontrolname="sizingConfigJson"]')).toBeNull();
+      expect(
+        host.querySelector('app-sub-config-editor[formcontrolname="sizingConfigJson"]'),
+      ).toBeNull();
       const note = host.querySelector('[data-testid="script-sizing-note"]');
       expect(note?.textContent).toContain('qty = 100000');
       expect(note?.textContent).toContain('lot multiplier');
