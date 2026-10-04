@@ -564,7 +564,10 @@
           class="rail-tool"
           [class.active]="magnet()"
           (click)="magnet.set(!magnet())"
-          [title]="(magnetStrength() === 'strong' ? 'Strong' : 'Weak') + ' magnet (M) — hold Ctrl/⌘ to invert while drawing'"
+          [title]="
+            (magnetStrength() === 'strong' ? 'Strong' : 'Weak') +
+            ' magnet (M) — hold Ctrl/⌘ to invert while drawing'
+          "
         >
           <app-chart-icon name="magnet" [size]="28" />
         </button>
@@ -622,13 +625,28 @@
     </nav>
 
     @if (magnetMenuOpen()) {
-      <div class="rail-flyout magnet-menu" [style.top.px]="railFlyoutTop()" role="menu" (click)="$event.stopPropagation()">
-        <button type="button" class="rail-flyout-item" role="menuitemradio"
-          [class.active]="magnet() && magnetStrength() === 'weak'" (click)="setMagnetStrength('weak')">
+      <div
+        class="rail-flyout magnet-menu"
+        [style.top.px]="railFlyoutTop()"
+        role="menu"
+        (click)="$event.stopPropagation()"
+      >
+        <button
+          type="button"
+          class="rail-flyout-item"
+          role="menuitemradio"
+          [class.active]="magnet() && magnetStrength() === 'weak'"
+          (click)="setMagnetStrength('weak')"
+        >
           <app-chart-icon name="magnet" [size]="28" /><span>Weak Magnet</span>
         </button>
-        <button type="button" class="rail-flyout-item" role="menuitemradio"
-          [class.active]="magnet() && magnetStrength() === 'strong'" (click)="setMagnetStrength('strong')">
+        <button
+          type="button"
+          class="rail-flyout-item"
+          role="menuitemradio"
+          [class.active]="magnet() && magnetStrength() === 'strong'"
+          (click)="setMagnetStrength('strong')"
+        >
           <app-chart-icon name="magnet" [size]="28" /><span>Strong Magnet</span>
         </button>
       </div>
@@ -721,13 +739,19 @@
           (selected)="selectSymbol($event)"
           (symbolsChange)="watchlistSymbols.set($event)"
           (openNews)="openSidePane('news')"
+          (openTechnicals)="technicalsOpen.set(true)"
           (closed)="watchlistOpen.set(false)"
         />
       </aside>
     }
     <div class="chart-grid" [attr.data-layout]="splitLayout()" [class.with-dock]="watchlistOpen()">
       <!-- Chart surface with the floating legend, as TradingView lays it out. -->
-      <div class="chart-area primary" #chartArea (contextmenu)="openContextMenu($event)" (pointerdown)="drawingMenu.set(null)">
+      <div
+        class="chart-area primary"
+        #chartArea
+        (contextmenu)="openContextMenu($event)"
+        (pointerdown)="drawingMenu.set(null)"
+      >
         <div class="legend">
           <div class="legend-title">
             <strong>{{ symbol() }}</strong>
@@ -829,26 +853,51 @@
         <!-- Right-click menu on a drawing. -->
         @if (drawingMenu(); as dm) {
           @if (drawingById(dm.id); as dd) {
-            <div class="context-menu drawing-menu" role="menu" [style.left.px]="dm.x" [style.top.px]="dm.y"
-              (pointerdown)="$event.stopPropagation()">
+            <div
+              class="context-menu drawing-menu"
+              role="menu"
+              [style.left.px]="dm.x"
+              [style.top.px]="dm.y"
+              (pointerdown)="$event.stopPropagation()"
+            >
               <button type="button" (click)="drawingAction(dd.id, 'settings')">
                 <app-chart-icon name="settings" [size]="20" />Settings…
               </button>
               <div class="menu-sep"></div>
-              <button type="button" (click)="drawingAction(dd.id, 'clone')"><app-chart-icon name="clone" [size]="20" />Clone</button>
-              <button type="button" (click)="drawingAction(dd.id, 'copy')"><span class="mi-blank"></span>Copy</button>
-              <button type="button" (click)="drawingAction(dd.id, 'hide')"><app-chart-icon name="eye-off" [size]="20" />Hide</button>
+              <button type="button" (click)="drawingAction(dd.id, 'clone')">
+                <app-chart-icon name="clone" [size]="20" />Clone
+              </button>
+              <button type="button" (click)="drawingAction(dd.id, 'copy')">
+                <span class="mi-blank"></span>Copy
+              </button>
+              <button type="button" (click)="drawingAction(dd.id, 'hide')">
+                <app-chart-icon name="eye-off" [size]="20" />Hide
+              </button>
               <button type="button" (click)="drawingAction(dd.id, 'lock')">
-                <app-chart-icon [name]="dd.locked ? 'unlock' : 'lock'" [size]="20" />{{ dd.locked ? 'Unlock' : 'Lock' }}
+                <app-chart-icon [name]="dd.locked ? 'unlock' : 'lock'" [size]="20" />{{
+                  dd.locked ? 'Unlock' : 'Lock'
+                }}
               </button>
               <div class="menu-sep"></div>
               <div class="submenu-host">
-                <button type="button" class="has-sub"><app-chart-icon name="layers" [size]="20" />Visual order<span class="sub-caret">›</span></button>
+                <button type="button" class="has-sub">
+                  <app-chart-icon name="layers" [size]="20" />Visual order<span class="sub-caret"
+                    >›</span
+                  >
+                </button>
                 <div class="context-menu submenu" role="menu">
-                  <button type="button" (click)="drawingAction(dd.id, 'front')"><app-chart-icon name="bring-front" [size]="20" />Bring to front</button>
-                  <button type="button" (click)="drawingAction(dd.id, 'forward')"><span class="mi-blank"></span>Bring forward</button>
-                  <button type="button" (click)="drawingAction(dd.id, 'backward')"><span class="mi-blank"></span>Send backward</button>
-                  <button type="button" (click)="drawingAction(dd.id, 'back')"><app-chart-icon name="send-back" [size]="20" />Send to back</button>
+                  <button type="button" (click)="drawingAction(dd.id, 'front')">
+                    <app-chart-icon name="bring-front" [size]="20" />Bring to front
+                  </button>
+                  <button type="button" (click)="drawingAction(dd.id, 'forward')">
+                    <span class="mi-blank"></span>Bring forward
+                  </button>
+                  <button type="button" (click)="drawingAction(dd.id, 'backward')">
+                    <span class="mi-blank"></span>Send backward
+                  </button>
+                  <button type="button" (click)="drawingAction(dd.id, 'back')">
+                    <app-chart-icon name="send-back" [size]="20" />Send to back
+                  </button>
                 </div>
               </div>
               <div class="menu-sep"></div>
@@ -860,7 +909,11 @@
         }
 
         @if (settingsFor(); as sid) {
-          <app-drawing-settings-dialog [drawingId]="sid" [resolutions]="resolutions" (closed)="settingsFor.set(null)" />
+          <app-drawing-settings-dialog
+            [drawingId]="sid"
+            [resolutions]="resolutions"
+            (closed)="settingsFor.set(null)"
+          />
         }
 
         @if (contextMenu(); as cm) {
@@ -1107,6 +1160,20 @@
         </div>
       }
     </div>
+    @if (technicalsOpen()) {
+      <app-technicals-view
+        class="technicals-pane"
+        [class.with-dock]="watchlistOpen()"
+        [symbol]="symbol()"
+        [base]="currentPair()?.baseCurrency ?? null"
+        [quote]="currentPair()?.quoteCurrency ?? null"
+        [digits]="panelPrecision(symbol())"
+        [initialResolution]="resolution()"
+        [livePrice]="liveBids()[symbol()] ?? null"
+        (closed)="technicalsOpen.set(false)"
+        (addStudy)="addStudyFromTechnicals($event)"
+      />
+    }
   </div>
 
   <footer class="bottom-bar">

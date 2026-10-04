@@ -1,6 +1,61 @@
 import { describe, expect, it } from 'vitest';
 import type { Ohlc } from '../indicators/math';
-import { gaugePosition, technicalRating, ratingLabel } from './technicals';
+import {
+  adxVerdict,
+  aoVerdict,
+  bbpVerdict,
+  crossVote,
+  gaugePosition,
+  ichimokuVerdict,
+  technicalRating,
+  ratingLabel,
+} from './technicals';
+import { indicatorById } from '../indicators/registry';
+
+// TradingView's documented rules (help centre 43000614331), each with the case
+// the earlier simplified rule got wrong.
+describe('TradingView rating rules', () => {
+  it('ADX: Sell needs ADX FALLING — a strengthening downtrend is Neutral', () => {
+    expect(adxVerdict(30, 28, 25, 15).vote).toBe('buy');
+    expect(adxVerdict(30, 32, 15, 25).vote).toBe('sell');
+    // Was Sell before: −DI leads and ADX > 20, but ADX is rising (TradingView 1D EURUSD: Neutral).
+    expect(adxVerdict(42, 41, 15, 25).vote).toBe('neutral');
+    expect(adxVerdict(30, 28, 15, 25).reason).toContain('falling');
+    expect(adxVerdict(18, 15, 30, 10).vote).toBe('neutral');
+  });
+
+  it('Awesome Oscillator: a zero cross or a saucer, not merely "below zero and falling"', () => {
+    expect(aoVerdict(0.1, -0.1, -0.2).vote).toBe('buy');
+    expect(aoVerdict(-0.1, 0.1, 0.2).vote).toBe('sell');
+    expect(aoVerdict(0.3, 0.2, 0.25).vote).toBe('buy'); // above 0, dipped, turned up
+    expect(aoVerdict(-0.3, -0.2, -0.25).vote).toBe('sell'); // below 0, bounced, turned down
+    // Was Sell before: below zero and falling, but it has not turned — still falling from p2.
+    expect(aoVerdict(-0.03, -0.02, -0.01).vote).toBe('neutral');
+  });
+
+  it('Bull Bear Power: gated on the trend', () => {
+    expect(bbpVerdict('up', 0.01, -0.01, 0.02, -0.02).vote).toBe('buy');
+    expect(bbpVerdict('down', 0.01, -0.03, 0.02, -0.02).vote).toBe('sell');
+    // Was Sell before (net power negative and falling) — with no bull power above zero it is Neutral.
+    expect(bbpVerdict('down', -0.005, -0.04, -0.004, -0.03).vote).toBe('neutral');
+    expect(bbpVerdict(null, 0.01, -0.01, 0.02, -0.02).vote).toBe('neutral');
+  });
+
+  it('Stochastic RSI: Buy only in a downtrend, Sell only in an uptrend; plain Stochastic is ungated', () => {
+    expect(crossVote(10, 5, 'down').vote).toBe('buy');
+    expect(crossVote(10, 5, 'up').vote).toBe('neutral');
+    expect(crossVote(90, 95, 'up').vote).toBe('sell');
+    expect(crossVote(90, 95, 'down').vote).toBe('neutral');
+    expect(crossVote(10, 5).vote).toBe('buy');
+  });
+
+  it('Ichimoku: the whole stack must line up', () => {
+    expect(ichimokuVerdict(1.5, 1.4, 1.3, 1.2, 1.1).vote).toBe('buy');
+    expect(ichimokuVerdict(1.0, 1.1, 1.2, 1.3, 1.4).vote).toBe('sell');
+    // Was Sell before (price under the base line) — but conversion is above base: Neutral.
+    expect(ichimokuVerdict(1.12, 1.15, 1.14, 1.16, 1.17).vote).toBe('neutral');
+  });
+});
 import { dayOfYear, performanceTiles, seasonalYears, type DailyBar } from './performance';
 import { alignToBars, stepDifference, swapPerLotSeries } from './fx-fundamentals';
 
@@ -61,12 +116,62 @@ describe('technicalRating', () => {
     const r = technicalRating(trend(50, 0.5));
     const counted = r.movingAverages.buy + r.movingAverages.neutral + r.movingAverages.sell;
     expect(counted).toBeLessThan(r.movingAverages.votes.length);
-    expect(r.movingAverages.votes.find((v) => v.name === 'SMA (200)')?.value).toBeNull();
+    expect(
+      r.movingAverages.votes.find((v) => v.name === 'Simple Moving Average (200)')?.value,
+    ).toBeNull();
   });
 
   it('is neutral with zero voters on empty input', () => {
     const r = technicalRating([]);
     expect(r.summary).toEqual({ rating: 0, label: 'Neutral', buy: 0, neutral: 0, sell: 0 });
+  });
+
+  it("lists TradingView's indicators, in TradingView's order and names", () => {
+    const r = technicalRating(trend(260, 0.5));
+    expect(r.oscillators.votes.map((v) => v.name)).toEqual([
+      'Relative Strength Index (14)',
+      'Stochastic %K (14, 3, 3)',
+      'Commodity Channel Index (20)',
+      'Average Directional Index (14)',
+      'Awesome Oscillator',
+      'Momentum (10)',
+      'MACD Level (12, 26)',
+      'Stochastic RSI Fast (3, 3, 14, 14)',
+      'Williams Percent Range (14)',
+      'Bull Bear Power',
+      'Ultimate Oscillator (7, 14, 28)',
+    ]);
+    expect(r.movingAverages.votes.map((v) => v.name)).toEqual([
+      ...[10, 20, 30, 50, 100, 200].flatMap((p) => [
+        `Exponential Moving Average (${p})`,
+        `Simple Moving Average (${p})`,
+      ]),
+      'Ichimoku Base Line (9, 26, 52, 26)',
+      'Volume Weighted Moving Average (20)',
+      'Hull Moving Average (9)',
+    ]);
+  });
+
+  it('points every row at a real chart study with real input keys', () => {
+    // A typo here does not fail loudly: "+ Chart" would add the study with its DEFAULT inputs.
+    const r = technicalRating(trend(260, 0.5));
+    for (const v of [...r.oscillators.votes, ...r.movingAverages.votes]) {
+      const def = indicatorById(v.study.id);
+      expect(def, v.name).toBeDefined();
+      const keys = def!.inputs.map((i) => i.key);
+      for (const k of Object.keys(v.study.params)) expect(keys, `${v.name}: ${k}`).toContain(k);
+    }
+  });
+
+  it('explains every vote, including the ones that could not be computed', () => {
+    const short = technicalRating(trend(40, 0.5));
+    for (const v of [...short.oscillators.votes, ...short.movingAverages.votes]) {
+      expect(v.reason.length, v.name).toBeGreaterThan(0);
+    }
+    const sma200 = short.movingAverages.votes.find((v) => v.name === 'Simple Moving Average (200)');
+    expect(sma200?.reason).toContain('Not enough history');
+    const up = technicalRating(trend(260, 0.5));
+    expect(up.movingAverages.votes[0].reason).toBe('Price is above the average');
   });
 
   it('bands labels like TradingView', () => {

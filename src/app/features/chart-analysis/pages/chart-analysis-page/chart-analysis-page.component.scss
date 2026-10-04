@@ -1687,6 +1687,20 @@ $strip-width: 46px;
   right: calc(var(--dock-width, 380px) + #{$strip-width + 2 * $pane-gap});
 }
 
+// The Technicals view takes the chart's place, and its insets, while open.
+.technicals-pane {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: $rail-width + $pane-gap;
+  right: $strip-width + $pane-gap;
+  z-index: 21;
+
+  &.with-dock {
+    right: calc(var(--dock-width, 380px) + #{$strip-width + 2 * $pane-gap});
+  }
+}
+
 // ── Bottom bar ─────────────────────────────────────────────────────────────
 .bottom-bar {
   flex: none;

@@ -4,8 +4,8 @@ import { resolutionSource, timeframeMs, type TvResolution } from './resolution';
 /**
  * Client-side bar aggregation for the resolutions the engine does not store.
  *
- * The engine persists M1/M5/M15/H1/H4/D1 only, so `30`, `1W` and `1M` are built
- * here from the nearest stored timeframe.
+ * The engine persists M1/M5/M15/H1/H4/D1 only, so `30`, `120`, `1W` and `1M` are
+ * built here from the nearest stored timeframe.
  *
  * ── Why the week starts on SUNDAY ────────────────────────────────────────────
  * Verified against the live `Candle` table on 2026-09-19: D1 bars are stamped at

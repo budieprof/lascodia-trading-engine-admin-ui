@@ -43,6 +43,7 @@ export const RESOLUTION_SOURCES: Readonly<Record<TvResolution, ResolutionSource>
   '15': { timeframe: 'M15', aggregate: 1 },
   '30': { timeframe: 'M15', aggregate: 2 },
   '60': { timeframe: 'H1', aggregate: 1 },
+  '120': { timeframe: 'H1', aggregate: 2 },
   '240': { timeframe: 'H4', aggregate: 1 },
   '1D': { timeframe: 'D1', aggregate: 1 },
   '1W': { timeframe: 'D1', aggregate: 'week' },
