@@ -334,3 +334,22 @@ describe('fx-fundamentals helpers', () => {
     expect(short[0].value).toBeCloseTo(-20, 10);
   });
 });
+
+describe('backfillDaily', () => {
+  it('fills the years before the first stored D1 bar from H1, so a prior seasonal year is whole', async () => {
+    const { backfillDaily } = await import('./daily-bars.service');
+    const H = 3_600_000;
+    const firstD1 = Date.UTC(2024, 9, 1);
+    const h1 = Array.from({ length: 24 * 300 }, (_, i) => {
+      const t = Date.UTC(2023, 11, 20) + i * H;
+      return { time: t, open: 1, high: 1.1, low: 0.9, close: 1 + i / 1e6, volume: 1 };
+    });
+    const d1 = [{ time: firstD1, open: 1, high: 1, low: 1, close: 1, volume: 1 }];
+    const out = backfillDaily(d1, h1);
+    expect(out[0].time).toBe(Date.UTC(2023, 11, 20));
+    expect(out.every((b, i) => i === 0 || b.time > out[i - 1].time)).toBe(true);
+    expect(out.filter((b) => b.time >= firstD1)).toEqual(d1);
+    // 2024 now has January bars and a 2023 close to measure from.
+    expect(seasonalYears(out, 0)[0].points[0].day).toBeLessThan(5);
+  });
+});
