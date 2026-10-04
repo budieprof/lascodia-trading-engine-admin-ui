@@ -1,6 +1,11 @@
 // Width of the left drawing rail; the chart area is inset by it.
 $rail-width: 52px;
 
+// Band between panes (toolbar, rail, chart, watchlist, strip, bottom bar).
+// TradingView separates its layout areas with the platform background showing
+// through a 4px gap, not a hairline border.
+$pane-gap: 4px;
+
 // Chart workstation layout. Deliberately close to TradingView's chrome:
 // a thin top toolbar, a full-bleed chart with a floating legend, and a
 // studies strip underneath.
@@ -31,7 +36,6 @@ $rail-width: 52px;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border-bottom: 1px solid var(--border, #e6e9ef);
   flex: 0 0 auto;
   flex-wrap: wrap;
 }
@@ -228,7 +232,6 @@ $rail-width: 52px;
   flex-direction: column;
   gap: 2px;
   padding: 6px 4px;
-  border-right: 1px solid var(--border, #e6e9ef);
   // Bounded by `inset`, so this genuinely scrolls instead of growing.
   overflow-y: auto;
   scrollbar-width: thin;
@@ -632,7 +635,6 @@ $rail-width: 52px;
   flex-wrap: wrap;
   gap: 6px;
   padding: 6px 10px;
-  border-top: 1px solid var(--border, #e6e9ef);
   flex: 0 0 auto;
 }
 
@@ -694,7 +696,7 @@ $rail-width: 52px;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border-top: 1px solid var(--border, #e6e9ef);
+  background: var(--tv-bg);
   font-size: 12px;
   flex: 0 0 auto;
 
@@ -870,10 +872,11 @@ $rail-width: 52px;
 
 .chart-grid {
   position: absolute;
-  inset: 0 0 0 $rail-width;
+  inset: 0 0 0 calc(#{$rail-width} + #{$pane-gap});
   display: grid;
-  gap: 1px;
-  background: var(--border, #e6e9ef);
+  // Split layouts get the same band between charts as between panes.
+  gap: $pane-gap;
+  background: var(--tv-gutter);
 
   &[data-layout='1'] {
     grid-template-columns: 1fr;
@@ -1108,7 +1111,7 @@ $rail-width: 52px;
   height: min(340px, 40vh);
   min-height: 0;
   overflow: auto;
-  border-top: 1px solid var(--border, #e6e9ef);
+  background: var(--tv-bg);
 }
 
 .dock-tabs {
@@ -1183,7 +1186,6 @@ $rail-width: 52px;
   bottom: 0;
   z-index: 20;
   width: var(--dock-width, 380px);
-  border-left: 1px solid var(--border, #e0e3eb);
   background: var(--surface, #fff);
 
   app-watchlist-panel {
@@ -1191,22 +1193,19 @@ $rail-width: 52px;
   }
 }
 
+// The gutter left of the dock IS the handle, so hovering lights the band itself.
 .dock-resizer {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -3px;
-  width: 6px;
+  left: -$pane-gap;
+  width: $pane-gap;
   z-index: 21;
   cursor: col-resize;
 
   &:hover {
     background: var(--accent-soft, rgba(41, 98, 255, 0.2));
   }
-}
-
-.chart-grid.with-dock {
-  right: var(--dock-width, 380px);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1228,12 +1227,16 @@ $rail-width: 52px;
   --tv-menu-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
   --tv-up: #089981;
   --tv-down: #f23645;
+  --tv-gutter: #e0e3eb;
 
+  // The page is the gutter; every pane paints --tv-bg over it, so the
+  // $pane-gap between panes reads as a band.
+  gap: $pane-gap;
   font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif;
   font-size: 13px;
   color: var(--tv-ink);
-  background: var(--tv-bg);
-  border: 1px solid var(--tv-line);
+  background: var(--tv-gutter);
+  border: 1px solid var(--tv-gutter);
   border-radius: 4px;
 }
 
@@ -1247,6 +1250,7 @@ $rail-width: 52px;
     --tv-active-bg: #142e61;
     --tv-bg: #0f0f0f;
     --tv-menu-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+    --tv-gutter: #2e2e2e;
   }
 }
 
@@ -1260,7 +1264,7 @@ $rail-width: 52px;
   gap: 0;
   height: 38px;
   padding: 0 4px;
-  border-bottom: 1px solid var(--tv-line);
+  background: var(--tv-bg);
   overflow: visible;
 }
 
@@ -1605,7 +1609,7 @@ $rail-width: 52px;
 .draw-rail {
   padding: 4px;
   gap: 0;
-  border-right: 1px solid var(--tv-line);
+  background: var(--tv-bg);
 }
 
 .rail-tool {
@@ -1640,7 +1644,6 @@ $strip-width: 46px;
   align-items: center;
   gap: 2px;
   padding: 4px 0;
-  border-left: 1px solid var(--tv-line);
   background: var(--tv-bg);
 }
 
@@ -1672,16 +1675,16 @@ $strip-width: 46px;
 }
 
 .watch-dock {
-  right: $strip-width;
-  border-left: 1px solid var(--tv-line);
+  right: $strip-width + $pane-gap;
+  background: var(--tv-bg);
 }
 
 .chart-grid {
-  right: $strip-width;
+  right: $strip-width + $pane-gap;
 }
 
 .chart-grid.with-dock {
-  right: calc(var(--dock-width, 380px) + #{$strip-width});
+  right: calc(var(--dock-width, 380px) + #{$strip-width + 2 * $pane-gap});
 }
 
 // ── Bottom bar ─────────────────────────────────────────────────────────────
@@ -1691,7 +1694,7 @@ $strip-width: 46px;
   align-items: center;
   height: 32px;
   padding: 0 4px;
-  border-top: 1px solid var(--tv-line);
+  background: var(--tv-bg);
   font-size: 12px;
 }
 
@@ -1813,7 +1816,7 @@ $strip-width: 46px;
 
 // ── Studies strip ──────────────────────────────────────────────────────────
 .studies {
-  border-top: 1px solid var(--tv-line);
+  background: var(--tv-bg);
 }
 
 .study {
@@ -1828,7 +1831,9 @@ $strip-width: 46px;
   background: var(--tv-bg);
   border: 0;
   border-radius: 6px;
-  box-shadow: var(--tv-menu-shadow), 0 0 0 1px var(--tv-line);
+  box-shadow:
+    var(--tv-menu-shadow),
+    0 0 0 1px var(--tv-line);
 }
 
 .rail-flyout-title {
@@ -1884,7 +1889,9 @@ $strip-width: 46px;
   color: var(--tv-ink);
   border: 0;
   border-radius: 6px;
-  box-shadow: var(--tv-menu-shadow), 0 0 0 1px var(--tv-line);
+  box-shadow:
+    var(--tv-menu-shadow),
+    0 0 0 1px var(--tv-line);
   font-size: 13px;
 
   button {
