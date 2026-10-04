@@ -1,0 +1,177 @@
+<div class="tv-inner">
+  <header class="tv-head">
+    <h2 class="tv-title">
+      <span class="tv-name">{{ pairName() }}</span>
+      <span class="tv-sub">· Technicals</span>
+      @if (loading() && data()) {
+        <span class="tv-sync" aria-live="polite">Updating…</span>
+      }
+    </h2>
+    <button type="button" class="tv-back" (click)="closed.emit()">
+      <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+        <path
+          d="M3 4.5h12v9H3zM6 10.5l2-2 2 1.5 3-3"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.2"
+          stroke-linejoin="round"
+        />
+      </svg>
+      Back to chart
+    </button>
+  </header>
+
+  <nav class="tv-tabs" role="tablist" aria-label="Timeframe">
+    @for (tf of timeframes; track tf.id) {
+      @let f = data()?.frames?.[tf.id];
+      <button
+        type="button"
+        role="tab"
+        class="tv-tab"
+        [class.active]="selected() === tf.id"
+        [attr.aria-selected]="selected() === tf.id"
+        (click)="selected.set(tf.id)"
+      >
+        <span class="tv-tab-name">{{ tf.label }}</span>
+        @if (!f) {
+          <span class="tv-tab-rating none">…</span>
+        } @else if (!f.barCount) {
+          <span class="tv-tab-rating none">No data</span>
+        } @else {
+          <span class="tv-tab-rating" [class]="tone(f.rating.summary.label)">{{
+            f.rating.summary.label
+          }}</span>
+        }
+      </button>
+    }
+  </nav>
+
+  @if (error() && !data()) {
+    <div class="tv-empty">{{ error() }}</div>
+  } @else if (!frame()) {
+    <div class="tv-empty">Loading technicals…</div>
+  } @else if (frame(); as f) {
+    @if (!f.barCount) {
+      <div class="tv-empty">No {{ tabLabel() }} candles stored for {{ symbol() }}.</div>
+    } @else {
+      <section class="tv-gauges">
+        @for (g of gauges(); track g.key) {
+          <div class="tv-gauge" [class.lg]="g.key === 'summary'">
+            <app-rating-gauge [rating]="g.rating" [label]="g.title + ': ' + g.label" />
+            <div class="tv-g-title">{{ g.title }}</div>
+            <div class="tv-g-label" [class]="tone(g.label)">{{ g.label }}</div>
+            <div class="tv-counts">
+              <div>
+                <span class="k">Sell</span><span class="v">{{ g.sell }}</span>
+              </div>
+              <div>
+                <span class="k">Neutral</span><span class="v">{{ g.neutral }}</span>
+              </div>
+              <div>
+                <span class="k">Buy</span><span class="v">{{ g.buy }}</span>
+              </div>
+            </div>
+          </div>
+        }
+      </section>
+
+      <section class="tv-tables">
+        @for (t of tables(); track t.title) {
+          <div class="tv-block">
+            <h3 class="tv-h3">{{ t.title }}</h3>
+            <table class="tv-table">
+              <thead>
+                <tr>
+                  <th class="name">Name</th>
+                  <th class="num">Value</th>
+                  <th class="act">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (v of t.votes; track v.name) {
+                  <tr>
+                    <td class="name" [title]="v.name">
+                      <span class="nm">{{ v.name }}</span>
+                      <button
+                        type="button"
+                        class="tv-add"
+                        (click)="addStudy.emit(v.study)"
+                        [title]="'Add ' + v.name + ' to the chart'"
+                      >
+                        + Chart
+                      </button>
+                    </td>
+                    <td class="num">{{ v.value === null ? '—' : t.fmt(v.value) }}</td>
+                    <td class="act" [class]="v.value === null ? 'none' : v.vote" [title]="v.reason">
+                      {{ action(v) }}
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      </section>
+
+      @if (pivots(); as p) {
+        <section class="tv-block">
+          <h3 class="tv-h3">
+            Pivots <span class="tv-h3-sub">{{ p.periodName }}, from {{ p.from }}</span>
+          </h3>
+          <table class="tv-table pivots">
+            <thead>
+              <tr>
+                <th class="name">Pivot</th>
+                @for (m of methods; track m.id) {
+                  <th class="num">{{ m.label }}</th>
+                }
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of pivotRows; track row) {
+                <tr>
+                  <td class="name">{{ row }}</td>
+                  @for (m of methods; track m.id) {
+                    @let v = p.levels[m.id][row];
+                    @let b = p.brackets[m.id];
+                    <td
+                      class="num"
+                      [class.near-r]="b.above === row"
+                      [class.near-s]="b.below === row"
+                      [attr.title]="
+                        b.above === row
+                          ? 'Nearest ' + m.label + ' resistance above the price'
+                          : b.below === row
+                            ? 'Nearest ' + m.label + ' support at or below the price'
+                            : null
+                      "
+                    >
+                      {{ v === null ? '—' : price(v) }}
+                    </td>
+                  }
+                </tr>
+              }
+            </tbody>
+          </table>
+          @if (p.price !== null) {
+            <p class="tv-note">
+              At {{ price(p.price) }}, each method's nearest
+              <span class="near-r-key">resistance</span> and
+              <span class="near-s-key">support</span> are marked.
+            </p>
+          }
+        </section>
+      }
+
+      <p class="tv-foot">
+        Rated on {{ f.barCount }} bars ({{ tabLabel() }}) to
+        {{ f.lastTime | date: 'd MMM yyyy, HH:mm' : 'UTC' }} UTC, the forming bar included, from the
+        engine's stored candles. Hover an action for the rule behind it.
+        @if (missing() > 0) {
+          {{ missing() }} {{ missing() === 1 ? 'row shows' : 'rows show' }} — because its lookback
+          is longer than the {{ tabLabel() }} history the engine holds.
+        }
+      </p>
+    }
+  }
+</div>

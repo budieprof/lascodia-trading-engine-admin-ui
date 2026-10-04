@@ -34,6 +34,8 @@ import {
   WatchlistPanelComponent,
   type WatchHeadline,
 } from '../../watchlist/watchlist-panel.component';
+import { TechnicalsViewComponent } from '../../panels/technicals-view.component';
+import type { StudyRef } from '../../panels/technicals';
 import { IndicatorsDialogComponent } from '../../dialog/indicators-dialog.component';
 import type { DialogItem, DialogTab } from '../../dialog/dialog-items';
 import {
@@ -69,7 +71,11 @@ import type { ChartScriptResult, ChartTrade } from '../../scripts/chart-script.m
 import { tradeWindow } from '../../scripts/trade-detail';
 import { chartPineAdapter } from '../../scripts/chart-pine-adapter';
 import { detectScriptKind } from '../../scripts/chart-script.model';
-import { pineAssistCommands, pineEditorFacts, type PineEditorAdapter } from '@shared/pine-assist/pine-assist';
+import {
+  pineAssistCommands,
+  pineEditorFacts,
+  type PineEditorAdapter,
+} from '@shared/pine-assist/pine-assist';
 import { firstValueFrom } from 'rxjs';
 import { MarketDataService } from '@core/services/market-data.service';
 import { AssistantDockService } from '@core/assistant/assistant-dock.service';
@@ -152,6 +158,7 @@ const RESOLUTION_LABELS: Record<TvResolution, string> = {
   '15': '15m',
   '30': '30m',
   '60': '1h',
+  '120': '2h',
   '240': '4h',
   '1D': '1D',
   '1W': '1W',
@@ -175,6 +182,7 @@ const RESOLUTION_GROUPS: Array<{
     label: 'Hours',
     items: [
       { id: '60', name: '1 hour' },
+      { id: '120', name: '2 hours' },
       { id: '240', name: '4 hours' },
     ],
   },
@@ -315,6 +323,7 @@ function loadWatchlistOpen(): boolean {
     PerformanceTilesComponent,
     SeasonalsComponent,
     TechnicalsGaugeComponent,
+    TechnicalsViewComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -565,7 +574,13 @@ export class ChartAnalysisPageComponent {
     const item = run.item;
     const id = item.strategyId ?? null;
     const source = item.pineSource ?? (id !== null ? (this.strategySources()[id] ?? null) : null);
-    return { key: item.key, name: run.result.title || item.name, source, strategyId: id, loading: id !== null && source === null };
+    return {
+      key: item.key,
+      name: run.result.title || item.name,
+      source,
+      strategyId: id,
+      loading: id !== null && source === null,
+    };
   });
 
   /** Point the editor at a chart script, loading an engine strategy's source when needed. */
@@ -573,7 +588,9 @@ export class ChartAnalysisPageComponent {
     if (key !== this.editorKey()) this.assistSource.set(null);
     const runs = this.scriptRuns();
     const target =
-      key ?? (runs.find((r) => r.result.kind === 'strategy') ?? runs[runs.length - 1])?.item.key ?? null;
+      key ??
+      (runs.find((r) => r.result.kind === 'strategy') ?? runs[runs.length - 1])?.item.key ??
+      null;
     this.editorKey.set(target);
     const item = runs.find((r) => r.item.key === target)?.item;
     const id = item?.strategyId;
@@ -627,7 +644,9 @@ export class ChartAnalysisPageComponent {
       this.dockPreference.set('editor');
     },
     compile: async (source) => {
-      const r = await firstValueFrom(this.chartScripts.compile(source, this.symbol(), this.resolution()));
+      const r = await firstValueFrom(
+        this.chartScripts.compile(source, this.symbol(), this.resolution()),
+      );
       this.scriptEditor()?.showCompile(r);
       return r;
     },
@@ -635,18 +654,24 @@ export class ChartAnalysisPageComponent {
       new Promise((resolve) => {
         const target = this.editorTarget();
         if (target) this.removeScript(target.key);
-        const item = this.chartScripts.itemForSource(source, detectScriptKind(source), target?.name ?? 'Untitled script');
+        const item = this.chartScripts.itemForSource(
+          source,
+          detectScriptKind(source),
+          target?.name ?? 'Untitled script',
+        );
         this.editorKey.set(item.key);
         this.editorDraft.set({ key: item.key, text: source });
         this.runScript(item, {}, false, resolve);
       }),
     currentRun: () => {
-      const run = this.scriptRuns().find((r) => r.item.key === this.editorKey()) ?? this.strategyRun();
+      const run =
+        this.scriptRuns().find((r) => r.item.key === this.editorKey()) ?? this.strategyRun();
       return run ? { result: run.result, values: run.values } : null;
     },
     rerun: (values) =>
       new Promise((resolve) => {
-        const run = this.scriptRuns().find((r) => r.item.key === this.editorKey()) ?? this.strategyRun();
+        const run =
+          this.scriptRuns().find((r) => r.item.key === this.editorKey()) ?? this.strategyRun();
         if (!run) resolve({ error: 'Nothing is running on the chart.' });
         else this.runScript(run.item, values, true, resolve);
       }),
@@ -750,6 +775,20 @@ export class ChartAnalysisPageComponent {
           : `${Math.round(mins / 1440)} d ago`;
     return { title: a.title, source: a.sourceName, at };
   });
+
+  // ── Technicals view ("More technicals") ──────────────────────────────────
+  // Laid over the chart area rather than replacing it, so the chart stays
+  // mounted and "Back to chart" returns to exactly the same state.
+  readonly technicalsOpen = signal(false);
+  readonly currentPair = computed(() =>
+    this.symbols().find((p) => (p.symbol ?? '').toUpperCase() === this.symbol().toUpperCase()),
+  );
+
+  /** A Technicals row's indicator, with that row's inputs, onto the chart — then show the chart. */
+  addStudyFromTechnicals(study: StudyRef): void {
+    this.addIndicator(study.id, study.params);
+    this.technicalsOpen.set(false);
+  }
 
   // ── Side panes: Details and News ─────────────────────────────────────────
   private readonly newsIntel = inject(NewsIntelService);
@@ -904,7 +943,9 @@ export class ChartAnalysisPageComponent {
       return { name: g.id, title: g.title, sections, tools: sections.flatMap((sec) => sec.tools) };
     }),
   );
-  readonly railStandalone = RAIL_STANDALONE.map((k) => toolFor(k)).filter((t): t is ToolSpec => !!t);
+  readonly railStandalone = RAIL_STANDALONE.map((k) => toolFor(k)).filter(
+    (t): t is ToolSpec => !!t,
+  );
 
   /** Which tool each rail button currently shows — the family's last-used, as on TradingView. */
   readonly railPick = signal<Record<string, DrawingKind>>({});
@@ -2094,14 +2135,22 @@ export class ChartAnalysisPageComponent {
       .subscribe((cat) => this.scriptCatalog.set(cat));
   }
 
-  addIndicator(defId: string): void {
+  /** Add a study; `params` override its defaults. The same study with the same inputs is not added twice. */
+  addIndicator(defId: string, params?: Record<string, number | string>): void {
     if (!studyMeta(defId)) return;
+    const merged = { ...studyDefaults(defId), ...params };
+    const same = (a: Record<string, number | string>) =>
+      Object.keys(merged).every((k) => a[k] === merged[k]);
+    if (params && this.active().some((i) => i.defId === defId && same(i.params))) {
+      this.indicatorMenuOpen.set(false);
+      return;
+    }
     this.active.update((list) => [
       ...list,
       {
         uid: `${defId}-${Date.now().toString(36)}-${list.length}`,
         defId,
-        params: studyDefaults(defId),
+        params: merged,
         visible: true,
       },
     ]);
@@ -2452,7 +2501,8 @@ export class ChartAnalysisPageComponent {
     }
     const btn = (ev.currentTarget as HTMLElement).closest('.rail-slot') as HTMLElement | null;
     const body = btn?.closest('.chart-body') as HTMLElement | null;
-    if (btn && body) this.railFlyoutTop.set(btn.getBoundingClientRect().top - body.getBoundingClientRect().top);
+    if (btn && body)
+      this.railFlyoutTop.set(btn.getBoundingClientRect().top - body.getBoundingClientRect().top);
     this.magnetMenuOpen.set(true);
   }
 
@@ -2520,6 +2570,16 @@ export class ChartAnalysisPageComponent {
   onKeydown(ev: KeyboardEvent): void {
     const target = ev.target as HTMLElement | null;
     if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+
+    // The Technicals view covers the chart: Esc returns to it, and no chart shortcut acts
+    // on drawings the operator cannot see.
+    if (this.technicalsOpen()) {
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        this.technicalsOpen.set(false);
+      }
+      return;
+    }
 
     const mod = ev.metaKey || ev.ctrlKey;
     if (mod && ev.key.toLowerCase() === 'z') {

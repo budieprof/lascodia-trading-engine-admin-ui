@@ -1,0 +1,357 @@
+// TradingView's Technicals page: plain white canvas, 13px text, hairline-ruled
+// tables, Buy in blue and Sell in red. Theme colours come from the chart page's
+// --tv-* tokens, which this element inherits.
+:host {
+  --tt-chip: #f2f2f2;
+  --tt-buy: #2962ff;
+  --tt-sell: #f23645;
+  --tt-neutral: #4a4a4a;
+  display: block;
+  overflow-y: auto;
+  container-type: inline-size;
+  background: var(--tv-bg, #fff);
+  color: var(--tv-ink, #131722);
+  font-size: 13px;
+}
+
+:host-context([data-theme='dark']) {
+  --tt-chip: #2e2e2e;
+  --tt-buy: #3179f5;
+  --tt-neutral: #b8b8b8;
+}
+
+.tv-inner {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 14px 28px 32px;
+}
+
+// ── Header ──
+.tv-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+}
+
+.tv-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 400;
+}
+
+.tv-name {
+  font-weight: 600;
+}
+
+.tv-sub,
+.tv-sync {
+  color: var(--tv-muted, #787b86);
+}
+
+.tv-sync {
+  font-size: 12px;
+}
+
+.tv-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--tt-chip);
+  }
+}
+
+// ── Timeframe tabs, each with its own verdict ──
+.tv-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 14px 0 8px;
+}
+
+.tv-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--tt-chip);
+  }
+
+  &.active {
+    background: var(--tt-chip);
+
+    .tv-tab-name {
+      font-weight: 600;
+    }
+  }
+}
+
+.tv-tab-name {
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.tv-tab-rating {
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.buy {
+  color: var(--tt-buy);
+}
+
+.sell {
+  color: var(--tt-sell);
+}
+
+.neutral {
+  color: var(--tt-neutral);
+}
+
+.none {
+  color: var(--tv-muted, #787b86);
+  font-weight: 400;
+}
+
+.tv-empty {
+  padding: 60px 0;
+  text-align: center;
+  color: var(--tv-muted, #787b86);
+}
+
+// ── The three dials ──
+.tv-gauges {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: end;
+  gap: 16px;
+  padding: 24px 0 8px;
+}
+
+.tv-gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  app-rating-gauge {
+    width: 120px;
+  }
+
+  &.lg app-rating-gauge {
+    width: 168px;
+  }
+}
+
+.tv-g-title {
+  margin-top: 12px;
+  font-weight: 600;
+}
+
+.tv-g-label {
+  margin-top: 2px;
+  font-size: 17px;
+  font-weight: 600;
+
+  .lg & {
+    font-size: 19px;
+  }
+}
+
+.tv-counts {
+  display: flex;
+  gap: 18px;
+  margin-top: 12px;
+  text-align: center;
+
+  > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .k {
+    font-size: 12px;
+  }
+
+  .v {
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+// ── Tables ──
+.tv-tables {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 40px;
+  align-items: start;
+}
+
+@container (max-width: 760px) {
+  .tv-tables {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tv-block {
+  margin-top: 32px;
+}
+
+.tv-h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.tv-h3-sub {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--tv-muted, #787b86);
+}
+
+.tv-table {
+  width: 100%;
+  border-collapse: collapse;
+
+  th,
+  td {
+    height: 36px;
+    padding: 0 8px 0 0;
+    border-bottom: 1px solid var(--tv-line, #e0e3eb);
+    white-space: nowrap;
+  }
+
+  th {
+    height: 30px;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--tv-muted, #787b86);
+    text-align: left;
+  }
+
+  .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .act {
+    width: 72px;
+    padding-left: 32px;
+    cursor: help;
+  }
+
+  th.act {
+    cursor: default;
+  }
+
+  td.name {
+    position: relative;
+    max-width: 0;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  tbody tr:hover {
+    background: var(--tv-hover, #f0f3fa);
+  }
+}
+
+// Floats over the end of the name rather than sitting after it: in flow it took
+// its width from every name (all ellipsised) and was itself clipped off long ones.
+.tv-add {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--tt-chip);
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0;
+
+  tr:hover &,
+  &:focus-visible {
+    opacity: 1;
+  }
+
+  &:hover {
+    color: var(--tt-buy);
+  }
+}
+
+// Pivots: the method columns share the width; the level each method's price
+// sits between is tinted, resistance red and support blue.
+.tv-table.pivots {
+  td.name {
+    width: 80px;
+    max-width: none;
+  }
+
+  th.num,
+  td.num {
+    width: calc((100% - 80px) / 5);
+  }
+
+  .near-r {
+    background: rgba(242, 54, 69, 0.1);
+    color: var(--tt-sell);
+    font-weight: 600;
+  }
+
+  .near-s {
+    background: rgba(41, 98, 255, 0.1);
+    color: var(--tt-buy);
+    font-weight: 600;
+  }
+}
+
+.near-r-key {
+  color: var(--tt-sell);
+  font-weight: 600;
+}
+
+.near-s-key {
+  color: var(--tt-buy);
+  font-weight: 600;
+}
+
+.tv-note,
+.tv-foot {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--tv-muted, #787b86);
+}
+
+.tv-foot {
+  margin-top: 28px;
+  line-height: 1.5;
+}

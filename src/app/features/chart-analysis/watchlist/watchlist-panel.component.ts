@@ -105,6 +105,8 @@ export class WatchlistPanelComponent {
   readonly symbolsChange = output<string[]>();
   readonly closed = output<void>();
   readonly openNews = output<void>();
+  /** "More technicals" on the technicals gauge. */
+  readonly openTechnicals = output<void>();
 
   readonly flags = FLAGS;
   readonly split = splitPrice;
