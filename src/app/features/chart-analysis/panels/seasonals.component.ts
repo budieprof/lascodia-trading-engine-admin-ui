@@ -1,15 +1,25 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal } from '@angular/core';
-import { DecimalPipe } from '@angular/common';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+} from '@angular/core';
 import { DailyBarsService } from './daily-bars.service';
-import { seasonalYears, type DailyBar, type SeasonalYear } from './performance';
+import { seasonalColor, seasonalYears, type DailyBar, type SeasonalYear } from './performance';
 
 const W = 236;
 const H = 120;
 const PAD = { l: 4, r: 4, t: 6, b: 14 };
-/** Newest first: current year in the accent, prior years progressively muted. */
-const YEAR_COLORS = ['var(--accent, #2962ff)', '#f7a600', 'var(--text-muted, #787b86)'];
-const MONTHS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
-const MONTH_START_DAYS = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+/** TradingView's panel labels three months only. */
+const MONTH_TICKS = [
+  { label: 'Jan', day: 0 },
+  { label: 'May', day: 120 },
+  { label: 'Sep', day: 243 },
+];
 
 /**
  * Seasonals mini-chart: cumulative % change through each calendar year for the
@@ -19,7 +29,7 @@ const MONTH_START_DAYS = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
 @Component({
   selector: 'app-seasonals',
   standalone: true,
-  imports: [DecimalPipe],
+  imports: [],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="tree-title">Seasonals</div>
@@ -28,28 +38,40 @@ const MONTH_START_DAYS = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
     } @else if (years().length === 0) {
       <div class="pane-empty">No daily history.</div>
     } @else {
-      <svg [attr.viewBox]="'0 0 ' + W + ' ' + H" class="chart" role="img" aria-label="Year-over-year cumulative change">
-        <line class="zero" [attr.x1]="PAD.l" [attr.x2]="W - PAD.r" [attr.y1]="y(0)" [attr.y2]="y(0)" />
-        @for (m of months; track $index) {
-          <text class="axis" [attr.x]="x(m.day) + 1" [attr.y]="H - 3">{{ m.label }}</text>
+      <svg
+        [attr.viewBox]="'0 0 ' + W + ' ' + H"
+        class="chart"
+        role="img"
+        aria-label="Year-over-year cumulative change"
+      >
+        <line
+          class="zero"
+          [attr.x1]="PAD.l"
+          [attr.x2]="W - PAD.r"
+          [attr.y1]="y(0)"
+          [attr.y2]="y(0)"
+        />
+        @for (m of months; track m.label) {
+          <text class="axis" [attr.x]="x(m.day)" [attr.y]="H - 2">{{ m.label }}</text>
         }
-        @for (yr of years(); track yr.year; let i = $index) {
+        @for (yr of drawOrder(); track yr.year) {
           <polyline
             [attr.points]="path(yr)"
-            [attr.stroke]="color(i)"
-            [attr.stroke-width]="i === 0 ? 1.8 : 1.2"
+            [attr.stroke]="color(yr)"
+            [attr.stroke-width]="yr.year === latest() ? 1.8 : 1.2"
             fill="none"
           />
         }
+        @if (endPoint(); as e) {
+          <circle [attr.cx]="e.x" [attr.cy]="e.y" r="2.4" [attr.fill]="e.color" />
+        }
       </svg>
       <div class="legend">
-        @for (yr of years(); track yr.year; let i = $index) {
-          <span class="key">
-            <i [style.background]="color(i)"></i>{{ yr.year }}
-            <b [class.up]="lastPct(yr) > 0" [class.down]="lastPct(yr) < 0">{{ lastPct(yr) | number: '1.2-2' }}%</b>
-          </span>
+        @for (yr of years(); track yr.year) {
+          <span class="key"><i [style.background]="color(yr)"></i>{{ yr.year }}</span>
         }
       </div>
+      <button type="button" class="more" (click)="more.emit()">More seasonals</button>
     }
   `,
   styles: [
@@ -83,27 +105,35 @@ const MONTH_START_DAYS = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
       }
       .legend {
         display: flex;
-        flex-wrap: wrap;
-        gap: 4px 10px;
+        justify-content: center;
+        gap: 10px;
         padding: 4px 12px 0;
-        font-variant-numeric: tabular-nums;
+        font-size: 11px;
+        color: var(--text-muted, #787b86);
       }
       .key i {
         display: inline-block;
-        width: 8px;
-        height: 2px;
-        margin-right: 4px;
-        vertical-align: middle;
+        width: 6px;
+        height: 6px;
+        margin-right: 3px;
+        border-radius: 50%;
+        vertical-align: 1px;
       }
-      .key b {
-        margin-left: 3px;
-        font-weight: 600;
+      .more {
+        display: block;
+        height: 22px;
+        margin: 10px auto 0;
+        padding: 0 14px;
+        border: 0;
+        border-radius: 11px;
+        background: var(--tg-pill, #f2f2f2);
+        color: inherit;
+        font: inherit;
+        font-size: 12px;
+        cursor: pointer;
       }
-      .up {
-        color: #26a69a;
-      }
-      .down {
-        color: #ef5350;
+      :host-context([data-theme='dark']) .more {
+        background: #2e2e2e;
       }
     `,
   ],
@@ -120,7 +150,9 @@ export class SeasonalsComponent {
   protected readonly W = W;
   protected readonly H = H;
   protected readonly PAD = PAD;
-  protected readonly months = MONTHS.map((label, i) => ({ label, day: MONTH_START_DAYS[i] }));
+  protected readonly months = MONTH_TICKS;
+  /** "More seasonals": open the full Seasonals view. */
+  readonly more = output<void>();
 
   private readonly fetched = signal<readonly DailyBar[]>([]);
   readonly loading = signal(false);
@@ -164,14 +196,21 @@ export class SeasonalsComponent {
   }
 
   protected path(yr: SeasonalYear): string {
-    return yr.points.map((p) => `${this.x(p.day).toFixed(1)},${this.y(p.pct).toFixed(1)}`).join(' ');
+    return yr.points
+      .map((p) => `${this.x(p.day).toFixed(1)},${this.y(p.pct).toFixed(1)}`)
+      .join(' ');
   }
 
-  protected color(i: number): string {
-    return YEAR_COLORS[Math.min(i, YEAR_COLORS.length - 1)];
-  }
+  readonly latest = computed(() => this.years()[0]?.year ?? 0);
+  /** Oldest first, so the current year is drawn on top. */
+  readonly drawOrder = computed(() => [...this.years()].reverse());
+  readonly endPoint = computed(() => {
+    const cur = this.years()[0];
+    const last = cur?.points[cur.points.length - 1];
+    return last ? { x: this.x(last.day), y: this.y(last.pct), color: this.color(cur) } : null;
+  });
 
-  protected lastPct(yr: SeasonalYear): number {
-    return yr.points.length ? yr.points[yr.points.length - 1].pct : 0;
+  protected color(yr: SeasonalYear): string {
+    return seasonalColor(this.latest(), yr.year);
   }
 }

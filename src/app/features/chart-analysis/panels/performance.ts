@@ -20,7 +20,14 @@ export interface PerformanceTile {
   fromTime: number | null;
 }
 
-export const PERFORMANCE_PERIODS: readonly PerformancePeriod[] = ['1W', '1M', '3M', '6M', 'YTD', '1Y'];
+export const PERFORMANCE_PERIODS: readonly PerformancePeriod[] = [
+  '1W',
+  '1M',
+  '3M',
+  '6M',
+  'YTD',
+  '1Y',
+];
 
 /** Calendar anchor for a period, relative to `t` (ms UTC). */
 export function periodAnchor(period: PerformancePeriod, t: number): number {
@@ -59,7 +66,9 @@ export function lastIndexAtOrBefore(bars: readonly DailyBar[], t: number): numbe
 }
 
 export function pctChange(from: number, to: number): number | null {
-  return Number.isFinite(from) && Number.isFinite(to) && from !== 0 ? ((to - from) / from) * 100 : null;
+  return Number.isFinite(from) && Number.isFinite(to) && from !== 0
+    ? ((to - from) / from) * 100
+    : null;
 }
 
 /**
@@ -69,7 +78,8 @@ export function pctChange(from: number, to: number): number | null {
  * the first bar — that would mislabel a shorter span as the full period).
  */
 export function performanceTiles(bars: readonly DailyBar[]): PerformanceTile[] {
-  if (bars.length === 0) return PERFORMANCE_PERIODS.map((period) => ({ period, pct: null, fromTime: null }));
+  if (bars.length === 0)
+    return PERFORMANCE_PERIODS.map((period) => ({ period, pct: null, fromTime: null }));
   const latest = bars[bars.length - 1];
   return PERFORMANCE_PERIODS.map((period) => {
     const anchor = periodAnchor(period, latest.time);
@@ -122,6 +132,61 @@ export function seasonalYears(bars: readonly DailyBar[], priorYears = 2): Season
       if (pct !== null) points.push({ day: dayOfYear(b.time), pct });
     }
     out.push({ year, points });
+  }
+  return out;
+}
+
+/**
+ * Seasonal line colours by age, TradingView's: the current year blue, then
+ * green, orange, cyan, crimson, amber… Keyed on age, not year, so "last year"
+ * is always green in both the panel and the full view.
+ */
+export const SEASONAL_COLORS = [
+  '#2962ff',
+  '#4caf50',
+  '#ff9800',
+  '#00bcd4',
+  '#e91e63',
+  '#fbc02d',
+  '#9c27b0',
+  '#795548',
+  '#607d8b',
+  '#3f51b5',
+  '#009688',
+  '#f44336',
+  '#8bc34a',
+  '#ff5722',
+  '#00acc1',
+  '#ad1457',
+];
+
+export function seasonalColor(latestYear: number, year: number): string {
+  const age = Math.max(0, latestYear - year);
+  return SEASONAL_COLORS[age % SEASONAL_COLORS.length];
+}
+
+/** A year's cumulative % on `day`: its last point at or before that day, or null before its first. */
+export function pctOnDay(yr: SeasonalYear, day: number): number | null {
+  let out: number | null = null;
+  for (const p of yr.points) {
+    if (p.day > day) break;
+    out = p.pct;
+  }
+  return out;
+}
+
+/**
+ * The average path of `years` (TradingView's "Average"): for each day, the mean
+ * of every year's cumulative % on that day. Days before every year has a point
+ * are skipped, so the line never averages a partial set.
+ */
+export function seasonalAverage(years: readonly SeasonalYear[]): SeasonalPoint[] {
+  if (!years.length) return [];
+  const out: SeasonalPoint[] = [];
+  for (let day = 0; day <= 365; day++) {
+    const vals = years.map((y) => pctOnDay(y, day));
+    if (vals.some((v) => v === null)) continue;
+    out.push({ day, pct: (vals as number[]).reduce((a, b) => a + b, 0) / vals.length });
   }
   return out;
 }

@@ -35,6 +35,7 @@ import {
   type WatchHeadline,
 } from '../../watchlist/watchlist-panel.component';
 import { TechnicalsViewComponent } from '../../panels/technicals-view.component';
+import { SeasonalsViewComponent } from '../../panels/seasonals-view.component';
 import type { StudyRef } from '../../panels/technicals';
 import { IndicatorsDialogComponent } from '../../dialog/indicators-dialog.component';
 import type { DialogItem, DialogTab } from '../../dialog/dialog-items';
@@ -324,6 +325,7 @@ function loadWatchlistOpen(): boolean {
     SeasonalsComponent,
     TechnicalsGaugeComponent,
     TechnicalsViewComponent,
+    SeasonalsViewComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -780,6 +782,8 @@ export class ChartAnalysisPageComponent {
   // Laid over the chart area rather than replacing it, so the chart stays
   // mounted and "Back to chart" returns to exactly the same state.
   readonly technicalsOpen = signal(false);
+  /** "More seasonals": the Seasonals view, laid over the chart the same way. */
+  readonly seasonalsOpen = signal(false);
   readonly currentPair = computed(() =>
     this.symbols().find((p) => (p.symbol ?? '').toUpperCase() === this.symbol().toUpperCase()),
   );
@@ -2573,10 +2577,11 @@ export class ChartAnalysisPageComponent {
 
     // The Technicals view covers the chart: Esc returns to it, and no chart shortcut acts
     // on drawings the operator cannot see.
-    if (this.technicalsOpen()) {
+    if (this.technicalsOpen() || this.seasonalsOpen()) {
       if (ev.key === 'Escape') {
         ev.preventDefault();
         this.technicalsOpen.set(false);
+        this.seasonalsOpen.set(false);
       }
       return;
     }

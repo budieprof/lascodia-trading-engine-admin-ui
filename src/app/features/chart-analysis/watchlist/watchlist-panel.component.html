@@ -335,6 +335,6 @@
   }
 
   <app-performance-tiles [symbol]="d.symbol" />
-  <app-seasonals [symbol]="d.symbol" />
+  <app-seasonals [symbol]="d.symbol" (more)="openSeasonals.emit()" />
   <app-technicals-gauge [bars]="bars()" [timeframe]="timeframe()" (more)="openTechnicals.emit()" />
 </section>

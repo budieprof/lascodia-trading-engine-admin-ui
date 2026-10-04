@@ -739,7 +739,8 @@
           (selected)="selectSymbol($event)"
           (symbolsChange)="watchlistSymbols.set($event)"
           (openNews)="openSidePane('news')"
-          (openTechnicals)="technicalsOpen.set(true)"
+          (openTechnicals)="seasonalsOpen.set(false); technicalsOpen.set(true)"
+          (openSeasonals)="technicalsOpen.set(false); seasonalsOpen.set(true)"
           (closed)="watchlistOpen.set(false)"
         />
       </aside>
@@ -1172,6 +1173,16 @@
         [livePrice]="liveBids()[symbol()] ?? null"
         (closed)="technicalsOpen.set(false)"
         (addStudy)="addStudyFromTechnicals($event)"
+      />
+    }
+    @if (seasonalsOpen()) {
+      <app-seasonals-view
+        class="technicals-pane"
+        [class.with-dock]="watchlistOpen()"
+        [symbol]="symbol()"
+        [base]="currentPair()?.baseCurrency ?? null"
+        [quote]="currentPair()?.quoteCurrency ?? null"
+        (closed)="seasonalsOpen.set(false)"
       />
     }
   </div>

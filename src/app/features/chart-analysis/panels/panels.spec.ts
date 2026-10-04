@@ -353,3 +353,35 @@ describe('backfillDaily', () => {
     expect(seasonalYears(out, 0)[0].points[0].day).toBeLessThan(5);
   });
 });
+
+describe('seasonal colours and average', () => {
+  it('colours by age like TradingView: this year blue, last year green, then orange', async () => {
+    const { seasonalColor } = await import('./performance');
+    expect(seasonalColor(2026, 2026)).toBe('#2962ff');
+    expect(seasonalColor(2026, 2025)).toBe('#4caf50');
+    expect(seasonalColor(2026, 2024)).toBe('#ff9800');
+  });
+
+  it('averages the years day by day, only where every year has a value', async () => {
+    const { seasonalAverage } = await import('./performance');
+    const avg = seasonalAverage([
+      {
+        year: 2025,
+        points: [
+          { day: 0, pct: 1 },
+          { day: 2, pct: 3 },
+        ],
+      },
+      {
+        year: 2024,
+        points: [
+          { day: 1, pct: -1 },
+          { day: 2, pct: 1 },
+        ],
+      },
+    ]);
+    expect(avg[0]).toEqual({ day: 1, pct: 0 }); // day 0: 2024 has no value yet
+    expect(avg.find((p) => p.day === 2)?.pct).toBe(2);
+    expect(avg.find((p) => p.day === 300)?.pct).toBe(2); // carried forward
+  });
+});
