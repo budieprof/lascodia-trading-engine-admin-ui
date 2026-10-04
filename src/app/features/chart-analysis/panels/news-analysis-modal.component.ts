@@ -62,6 +62,13 @@ import type { NewsArticleAnalysis, NewsArticleView } from '@features/news-intel/
           {{ error() }} <button type="button" class="link" (click)="load(true)">Retry</button>
         </div>
       } @else if (result(); as r) {
+        @if (r.readFullText) {
+          <div class="na-read full">Read the full article · {{ host(r.sourceUrl) }}</div>
+        } @else {
+          <div class="na-read head">
+            Headline only — {{ r.contentNote ?? 'the article body was not available' }}
+          </div>
+        }
         <h3>Summary</h3>
         <p>{{ r.summary }}</p>
         <h3>Analysis</h3>
@@ -110,8 +117,8 @@ import type { NewsArticleAnalysis, NewsArticleView } from '@features/news-intel/
               >#{{ r.llmInvocationId }}</a
             >
           }
-          @if (article().url) {
-            <a [href]="article().url" target="_blank" rel="noopener noreferrer">Open article ↗</a>
+          @if (r.sourceUrl ?? article().url; as u) {
+            <a [href]="u" target="_blank" rel="noopener noreferrer">Open article ↗</a>
           }
           <button type="button" class="link" (click)="load(true)">Regenerate</button>
         </footer>
@@ -351,6 +358,14 @@ export class NewsAnalysisModalComponent {
       },
     });
     this.destroyRef.onDestroy(() => sub.unsubscribe());
+  }
+
+  protected host(url: string | null): string {
+    try {
+      return url ? new URL(url).hostname.replace(/^www\./, '') : '';
+    } catch {
+      return '';
+    }
   }
 
   protected tone(direction: string): string {

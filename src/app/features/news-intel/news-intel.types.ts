@@ -352,4 +352,10 @@ export interface NewsArticleAnalysis {
   llmInvocationId: number | null;
   generatedAtUtc: string;
   cached: boolean;
+  /** True when the model read the article's body; false when only its headline. */
+  readFullText: boolean;
+  /** The publisher URL the body came from (Google News links resolved). */
+  sourceUrl: string | null;
+  /** Why the body could not be read, when it could not. */
+  contentNote: string | null;
 }
