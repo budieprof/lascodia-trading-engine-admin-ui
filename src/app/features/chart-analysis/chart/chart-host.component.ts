@@ -517,7 +517,7 @@ export class ChartHostComponent implements OnDestroy {
     effect(() => {
       const el = this.container().nativeElement;
       const dark = this.theme.theme() === 'dark';
-      untracked(() => this.rebuildChart(el, dark));
+      untracked(() => (this.chart ? this.retheme(dark) : this.rebuildChart(el, dark)));
     });
 
     effect(() => {
@@ -877,6 +877,40 @@ export class ChartHostComponent implements OnDestroy {
       crosshairLabel: dark ? '#363A45' : '#131722',
       line: '#2962FF',
     };
+  }
+
+  /**
+   * Re-colour the live chart for a theme switch, in place. It used to be torn
+   * down and recreated, which threw away the operator's zoom and scroll — and
+   * Lightweight Charts 5.2 can request a frame while destroying itself that then
+   * lands on its disposed canvases ("Object is disposed", the second time the
+   * theme was switched).
+   */
+  private retheme(dark: boolean): void {
+    if (!this.chart) return;
+    const p = this.palette(dark);
+    this.chart.applyOptions({
+      layout: {
+        background: { type: ColorType.Solid, color: p.background },
+        textColor: p.text,
+        panes: { separatorColor: p.border, separatorHoverColor: p.border },
+      },
+      grid: { vertLines: { color: p.grid }, horzLines: { color: p.grid } },
+      rightPriceScale: { borderColor: p.border },
+      timeScale: { borderColor: p.border },
+      crosshair: {
+        vertLine: { color: p.crosshair, labelBackgroundColor: p.crosshairLabel },
+        horzLine: { color: p.crosshair, labelBackgroundColor: p.crosshairLabel },
+      },
+    });
+    // Series colours come from the palette when the data is applied. Replacing the price
+    // series drops the profile primitives that hang off it, so the studies are re-applied as
+    // a style change does.
+    this.applyData(this.bars(), this.style(), this.showVolume(), this.precision());
+    const active = this.indicators();
+    this.applyIndicators(active, this.plotted);
+    this.applyPatterns(active);
+    this.applyProfiles(active);
   }
 
   private rebuildChart(el: HTMLElement, dark: boolean): void {
