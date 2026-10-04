@@ -1,7 +1,10 @@
 import { Directive, ElementRef, inject, input, output } from '@angular/core';
 
 /**
- * `(appLongPress)` fires after the pointer is held still for `longPressMs`. The
+ * `(appLongPress)` fires on RELEASE after the pointer was held still for at least
+ * `longPressMs` — release, not the timer, because the release is a user gesture and a
+ * timer is not: browsers block `window.open` from a timeout, so a long press that
+ * opens a tab must act on pointerup. The
  * click that ends a long press is swallowed (capture phase), so long-pressing a
  * link opens the long-press UI instead of also following the link. Moving more
  * than a few pixels — a scroll on touch — cancels.
@@ -11,7 +14,7 @@ import { Directive, ElementRef, inject, input, output } from '@angular/core';
   standalone: true,
   host: {
     '(pointerdown)': 'start($event)',
-    '(pointerup)': 'cancel()',
+    '(pointerup)': 'release($event)',
     '(pointerleave)': 'cancel()',
     '(pointercancel)': 'cancel()',
     '(pointermove)': 'move($event)',
@@ -48,8 +51,13 @@ export class LongPressDirective {
     this.timer = setTimeout(() => {
       this.timer = null;
       this.fired = true;
-      this.appLongPress.emit(e);
     }, this.longPressMs());
+  }
+
+  protected release(e: PointerEvent): void {
+    const long = this.fired;
+    this.cancel();
+    if (long) this.appLongPress.emit(e);
   }
 
   protected move(e: PointerEvent): void {

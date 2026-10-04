@@ -1071,7 +1071,11 @@
             } @else {
               <ul class="news-list">
                 @for (a of articles(); track a.id) {
-                  <li (appLongPress)="newsAnalysis.set(a)" title="Long-press for the AI analysis">
+                  <li
+                    (appLongPress)="openArticle(a)"
+                    (click)="$event.preventDefault(); newsAnalysis.set(a)"
+                    title="Click for the AI analysis · long-press to open the article"
+                  >
                     <a [href]="a.url" target="_blank" rel="noopener noreferrer">{{ a.title }}</a>
                     <div class="muted news-meta">
                       {{ a.sourceName }} · {{ a.publishedAtUtc | date: 'MMM d HH:mm' }}

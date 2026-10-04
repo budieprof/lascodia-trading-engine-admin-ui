@@ -804,6 +804,11 @@ export class ChartAnalysisPageComponent {
   readonly articles = signal<NewsArticleView[]>([]);
   /** The news item long-pressed for its AI analysis modal. */
   readonly newsAnalysis = signal<NewsArticleView | null>(null);
+
+  /** Long-press on a news item: the article itself, in a new tab. */
+  openArticle(a: NewsArticleView): void {
+    if (a.url) window.open(a.url, '_blank', 'noopener,noreferrer');
+  }
   readonly newsLoading = signal(false);
   readonly newsFocus = signal<NewsFocusResult | null>(null);
 
