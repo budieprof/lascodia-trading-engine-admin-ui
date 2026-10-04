@@ -331,3 +331,25 @@ export const NEWS_CONFIG_SECTIONS: { match: string; title: string; blurb: string
       'How long articles, labels and roll-ups are kept. Articles are backtest input — keep them.',
   },
 ];
+
+/** One pair's reading of an article (`POST /news-intel/articles/{id}/analysis`). */
+export interface NewsPairImplication {
+  symbol: string;
+  bias: 'Bullish' | 'Bearish' | 'Neutral';
+  confidence: number;
+  horizon: string;
+  rationale: string;
+}
+
+/** On-demand AI read of one article — explanatory only, feeds no decision. */
+export interface NewsArticleAnalysis {
+  articleId: number;
+  summary: string;
+  analysis: string;
+  pairs: NewsPairImplication[];
+  risks: string[];
+  model: string;
+  llmInvocationId: number | null;
+  generatedAtUtc: string;
+  cached: boolean;
+}

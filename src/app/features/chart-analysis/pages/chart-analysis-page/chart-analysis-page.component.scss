@@ -1057,6 +1057,9 @@ $pane-gap: 4px;
 
 .news-list {
   list-style: none;
+  // Long-press opens the AI analysis: no text selection or iOS callout under the finger.
+  user-select: none;
+  -webkit-touch-callout: none;
   margin: 0;
   padding: 0 12px;
 
