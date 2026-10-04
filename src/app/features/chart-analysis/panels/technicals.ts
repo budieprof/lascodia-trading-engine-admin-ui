@@ -68,6 +68,24 @@ export function ratingLabel(r: number): RatingLabel {
   return 'Strong buy';
 }
 
+/** The edges of `ratingLabel`'s five bands, low to high. */
+const BAND_EDGES = [-1, -0.5, -0.1, 0.1, 0.5, 1];
+
+/**
+ * Where the gauge needle points: 0 = the Strong-sell end of the dial, 1 = the
+ * Strong-buy end. Piecewise-linear per label band, so the needle always lands
+ * on the segment its label names. The dial's five segments are equal but the
+ * bands are not (Neutral is ±0.1, Sell spans 0.4), so a straight linear map
+ * would show "Sell" with the needle on the Neutral segment for −0.2…−0.1.
+ */
+export function gaugePosition(rating: number): number {
+  if (!Number.isFinite(rating)) return 0.5;
+  const r = Math.max(-1, Math.min(1, rating));
+  let i = 0;
+  while (i < 4 && r > BAND_EDGES[i + 1]) i++;
+  return (i + (r - BAND_EDGES[i]) / (BAND_EDGES[i + 1] - BAND_EDGES[i])) / 5;
+}
+
 const last = (xs: Maybe[]): number | null => {
   const v = xs.length ? xs[xs.length - 1] : null;
   return v === null || v === undefined || !Number.isFinite(v) ? null : v;
@@ -187,7 +205,11 @@ function oscVotes(bars: Ohlc[]): IndicatorVote[] {
     push(
       'Momentum (10)',
       v,
-      v !== null && p !== null && v > p ? 'buy' : v !== null && p !== null && v < p ? 'sell' : 'neutral',
+      v !== null && p !== null && v > p
+        ? 'buy'
+        : v !== null && p !== null && v < p
+          ? 'sell'
+          : 'neutral',
     );
   }
   // MACD: line above signal → buy, below → sell.
@@ -198,7 +220,11 @@ function oscVotes(bars: Ohlc[]): IndicatorVote[] {
     push(
       'MACD level (12, 26)',
       m,
-      m !== null && g !== null && m > g ? 'buy' : m !== null && g !== null && m < g ? 'sell' : 'neutral',
+      m !== null && g !== null && m > g
+        ? 'buy'
+        : m !== null && g !== null && m < g
+          ? 'sell'
+          : 'neutral',
     );
   }
   // Stoch RSI: like Stochastic, gated on the trend (TV uses a downtrend/uptrend filter; omitted).
@@ -255,7 +281,11 @@ function oscVotes(bars: Ohlc[]): IndicatorVote[] {
   // Ultimate oscillator: above 70 → buy, below 30 → sell.
   {
     const v = last(ultimate(bars, 7, 14, 28));
-    push('Ultimate oscillator (7, 14, 28)', v, v !== null && v > 70 ? 'buy' : v !== null && v < 30 ? 'sell' : 'neutral');
+    push(
+      'Ultimate oscillator (7, 14, 28)',
+      v,
+      v !== null && v > 70 ? 'buy' : v !== null && v < 30 ? 'sell' : 'neutral',
+    );
   }
   return out;
 }
