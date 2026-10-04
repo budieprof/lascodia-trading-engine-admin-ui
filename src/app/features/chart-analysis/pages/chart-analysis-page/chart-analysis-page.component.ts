@@ -726,7 +726,8 @@ export class ChartAnalysisPageComponent {
 
   readonly overlays = computed(() => [...this.positionOverlays(), ...this.orderOverlays()]);
   readonly markers = computed(() => [...this.signalMarkers(), ...this.rungMarkers()]);
-  readonly showOverlays = signal(true);
+  /** Trades & signals (positions, orders, signal markers): off until the operator asks. */
+  readonly showOverlays = signal(false);
 
   // ── Analytical overlays ──────────────────────────────────────────────────
   //
