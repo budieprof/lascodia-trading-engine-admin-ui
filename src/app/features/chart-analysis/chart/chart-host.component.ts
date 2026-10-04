@@ -783,7 +783,8 @@ export class ChartHostComponent implements OnDestroy {
     if (!scale || !start || a === null || b === null) return this.setVisibleRange(fromMs, toMs);
     this.cancelGlide();
     const reduce =
-      typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     if (reduce) {
       scale.setVisibleLogicalRange({ from: a, to: b });
       return true;
@@ -880,6 +881,13 @@ export class ChartHostComponent implements OnDestroy {
 
   private rebuildChart(el: HTMLElement, dark: boolean): void {
     this.chart?.remove();
+    // Every series handle died with that chart. Left set, applyData below hands
+    // the old price series to the NEW chart's removeSeries, which throws "Value
+    // is undefined" for a series it never owned — a theme switch then left the
+    // chart empty — and the old volume series would be written to, not re-added.
+    this.price = null;
+    this.volume = null;
+    this.markerApi = null;
     this.indicatorSeries = [];
     const p = this.palette(dark);
 
@@ -937,7 +945,13 @@ export class ChartHostComponent implements OnDestroy {
     this.controller.onInlineEdit = (e) => {
       this.inlineEdit.set(e);
       // Focus once rendered; the textarea is created by the signal change.
-      setTimeout(() => (this.container().nativeElement.parentElement?.querySelector('.inline-edit') as HTMLTextAreaElement | null)?.select());
+      setTimeout(() =>
+        (
+          this.container().nativeElement.parentElement?.querySelector(
+            '.inline-edit',
+          ) as HTMLTextAreaElement | null
+        )?.select(),
+      );
     };
     this.controller.onDrawingContextMenu = (e) => this.drawingContextMenu.emit(e);
     this.controller.magnetMode = this.magnet();
