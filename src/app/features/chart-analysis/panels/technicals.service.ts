@@ -58,6 +58,8 @@ export interface SymbolTechnicals {
   frames: Record<TvResolution, TimeframeTechnicals>;
   /** Daily bars, ascending, today's forming one included — the pivots' source. */
   daily: Bar[];
+  /** Hourly bars, ascending, forming hour included — the source for session (day / week) pivots. */
+  hourly: Bar[];
 }
 
 interface FormingPlan {
@@ -183,6 +185,6 @@ export class TechnicalsService {
         rating: technicalRating(b),
       };
     }
-    return { symbol, frames, daily: bars['1D'] ?? [] };
+    return { symbol, frames, daily: bars['1D'] ?? [], hourly: bars['60'] ?? [] };
   }
 }

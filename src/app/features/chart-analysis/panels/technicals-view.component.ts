@@ -170,7 +170,10 @@ export class TechnicalsViewComponent implements OnInit {
     const f = this.frame();
     if (!d || f?.lastTime == null) return null;
     const period = pivotPeriodFor(this.selected());
-    const inputs = pivotInputs(d.daily, period, f.lastTime);
+    // Day and week pivots fold H1 into 17:00 New York sessions; the engine's D1 rolls at UTC
+    // midnight, which is not where TradingView (or the FX market) closes a day.
+    const source = period === 'day' || period === 'week' ? d.hourly : d.daily;
+    const inputs = pivotInputs(source, period, f.lastTime);
     if (!inputs) return null;
     const levels = pivotLevels(inputs.prev, inputs.currentOpen);
     const price = this.livePrice() ?? f.lastClose;

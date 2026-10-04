@@ -137,7 +137,8 @@ describe('pivotInputs', () => {
 
   it('uses the period of the newest bar: daily pivots on 2 Oct come from 1 Oct', () => {
     const r = pivotInputs(daily, 'day', Date.UTC(2026, 9, 2, 20, 55));
-    expect(r?.prev.start).toBe(Date.UTC(2026, 9, 1));
+    // Sessions roll at 17:00 New York: 1 Oct's D1 bar sits in the session that opened 30 Sep 21:00 UTC.
+    expect(r?.prev.start).toBe(Date.UTC(2026, 8, 30, 21));
     expect(r?.prev.close).toBe(1.135);
   });
 
@@ -153,6 +154,32 @@ describe('periodStart / periodLabel', () => {
     expect(periodStart('year', fri)).toBe(Date.UTC(2026, 0, 1));
     expect(periodLabel('month', SEPT)).toBe('September 2026');
     expect(periodLabel('year', Date.UTC(2025, 0, 1))).toBe('2025');
+  });
+});
+
+describe('sessionStart', () => {
+  it('rolls FX days at 17:00 New York in both EDT and EST', () => {
+    expect(periodStart('day', Date.UTC(2026, 9, 1, 21, 30))).toBe(Date.UTC(2026, 9, 1, 21));
+    expect(periodStart('day', Date.UTC(2026, 9, 1, 20, 59))).toBe(Date.UTC(2026, 8, 30, 21));
+    expect(periodStart('day', Date.UTC(2026, 11, 2, 23))).toBe(Date.UTC(2026, 11, 2, 22)); // EST
+    // The week opens Sunday 17:00 NY: Friday 2 Oct belongs to the week from Sunday 27 Sep 21:00 UTC.
+    expect(periodStart('week', Date.UTC(2026, 9, 2, 20, 55))).toBe(Date.UTC(2026, 8, 27, 21));
+  });
+
+  it("reproduces TradingView's EURUSD daily pivots from H1 sessions (Thu 1 Oct closes 21:00 UTC)", () => {
+    // Our broker's H1 for that session: H 1.13368, L 1.12150, close at 21:00 UTC 1.12443.
+    // TradingView (FXCM) printed P 1.12645 from H 1.13367 / L 1.12150 / C 1.12418 — same
+    // boundary, a 2.5-pip feed difference in the close; with UTC-midnight days the close was 1.12482.
+    const h = (t: number, hi: number, lo: number, c: number) => bar(t, c, hi, lo, c);
+    const hourly = [
+      h(Date.UTC(2026, 8, 30, 21), 1.13368, 1.133, 1.133),
+      h(Date.UTC(2026, 9, 1, 15), 1.13, 1.1215, 1.123),
+      h(Date.UTC(2026, 9, 1, 20), 1.12466, 1.12399, 1.12443),
+      h(Date.UTC(2026, 9, 1, 21), 1.12468, 1.12379, 1.12445), // next session
+    ];
+    const r = pivotInputs(hourly, 'day', Date.UTC(2026, 9, 2, 20, 58));
+    expect(r?.prev).toMatchObject({ high: 1.13368, low: 1.1215, close: 1.12443 });
+    expect(r?.currentOpen).toBe(1.12445);
   });
 });
 

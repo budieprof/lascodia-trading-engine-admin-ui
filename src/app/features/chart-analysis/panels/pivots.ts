@@ -13,7 +13,7 @@
  *
  * Pure: no Angular, unit-tested directly.
  */
-import { monthStartMs, weekStartMs } from '../datafeed/aggregate';
+import { monthStartMs } from '../datafeed/aggregate';
 import type { Ohlc } from '../indicators/math';
 
 export type PivotPeriod = 'day' | 'week' | 'month' | 'year';
@@ -55,13 +55,47 @@ export function pivotPeriodFor(resolution: string): PivotPeriod {
   return Number.isFinite(minutes) && minutes <= 15 ? 'day' : 'week';
 }
 
-/** Start of the period containing `ms`, in UTC. Weeks start on Sunday, as the chart's weekly bars do. */
+const HOUR = 3_600_000;
+
+/** New York's UTC offset at `ms`, in ms (−4h in EDT, −5h in EST). */
+function newYorkOffsetMs(ms: number): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+  }).formatToParts(new Date(ms));
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'));
+  return Math.round((asUtc - ms) / 60_000) * 60_000;
+}
+
+/**
+ * Start of the FX session containing `ms`: sessions roll at 17:00 New York, which is where
+ * TradingView ends an FX day (21:00 UTC in summer, 22:00 in winter). Checked against its EURUSD
+ * page: Thursday 1 Oct's pivot used the 21:00 UTC close (1.12418), not the UTC-midnight one.
+ */
+export function sessionStart(ms: number, weekly = false): number {
+  const off = newYorkOffsetMs(ms);
+  // Shift so a session boundary (17:00 NY) lands on midnight, then floor.
+  let day = Math.floor((ms + off - 17 * HOUR) / DAY) * DAY;
+  if (weekly) day -= new Date(day).getUTCDay() * DAY; // the week opens Sunday 17:00 NY
+  return day + 17 * HOUR - off;
+}
+
+/**
+ * Start of the period containing `ms`, in UTC. Days and weeks are FX sessions (17:00 New York),
+ * as TradingView's are; months and years are calendar ones.
+ */
 export function periodStart(period: PivotPeriod, ms: number): number {
   switch (period) {
     case 'day':
-      return Math.floor(ms / DAY) * DAY;
+      return sessionStart(ms);
     case 'week':
-      return weekStartMs(ms);
+      return sessionStart(ms, true);
     case 'month':
       return monthStartMs(ms);
     case 'year':
