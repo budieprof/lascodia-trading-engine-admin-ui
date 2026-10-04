@@ -17,6 +17,7 @@ import {
   NewsIngestBucket,
   NewsLivenessBackfillResult,
   NewsPressureSummaryView,
+  NewsArticleAnalysis,
 } from '@features/news-intel/news-intel.types';
 
 /**
@@ -96,6 +97,24 @@ export class NewsIntelService {
   /** Articles first seen per hour by channel — the visual form of a silently dead feed. */
   getIngestHistory(hours = 48): Observable<NewsIngestBucket[]> {
     return this.api.getEnvelope<NewsIngestBucket[]>(`/news-intel/ingest-history?hours=${hours}`);
+  }
+
+  /**
+   * AI summary + per-pair implications for one article; `symbol` is always included. Cached
+   * per article by the engine for a day; `refresh` regenerates (a new LLM call).
+   */
+  analyseArticle(
+    id: number,
+    symbol: string | null,
+    refresh = false,
+  ): Observable<NewsArticleAnalysis> {
+    const qs = new URLSearchParams();
+    if (symbol) qs.set('symbol', symbol);
+    if (refresh) qs.set('refresh', 'true');
+    return this.api.postEnvelope<NewsArticleAnalysis>(
+      `/news-intel/articles/${id}/analysis?${qs}`,
+      {},
+    );
   }
 
   /** Recompute liveness for roll-up rows written before it was tracked. Bounded; call until

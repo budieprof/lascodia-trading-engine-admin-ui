@@ -1071,7 +1071,7 @@
             } @else {
               <ul class="news-list">
                 @for (a of articles(); track a.id) {
-                  <li>
+                  <li (appLongPress)="newsAnalysis.set(a)" title="Long-press for the AI analysis">
                     <a [href]="a.url" target="_blank" rel="noopener noreferrer">{{ a.title }}</a>
                     <div class="muted news-meta">
                       {{ a.sourceName }} · {{ a.publishedAtUtc | date: 'MMM d HH:mm' }}
@@ -1465,3 +1465,7 @@
     </section>
   }
 </div>
+
+@if (newsAnalysis(); as a) {
+  <app-news-analysis-modal [article]="a" [symbol]="symbol()" (closed)="newsAnalysis.set(null)" />
+}

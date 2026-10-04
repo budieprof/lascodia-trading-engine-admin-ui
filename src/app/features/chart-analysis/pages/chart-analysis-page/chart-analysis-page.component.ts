@@ -36,6 +36,8 @@ import {
 } from '../../watchlist/watchlist-panel.component';
 import { TechnicalsViewComponent } from '../../panels/technicals-view.component';
 import { SeasonalsViewComponent } from '../../panels/seasonals-view.component';
+import { NewsAnalysisModalComponent } from '../../panels/news-analysis-modal.component';
+import { LongPressDirective } from '../../panels/long-press.directive';
 import type { StudyRef } from '../../panels/technicals';
 import { IndicatorsDialogComponent } from '../../dialog/indicators-dialog.component';
 import type { DialogItem, DialogTab } from '../../dialog/dialog-items';
@@ -326,6 +328,8 @@ function loadWatchlistOpen(): boolean {
     TechnicalsGaugeComponent,
     TechnicalsViewComponent,
     SeasonalsViewComponent,
+    NewsAnalysisModalComponent,
+    LongPressDirective,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -798,6 +802,8 @@ export class ChartAnalysisPageComponent {
   private readonly newsIntel = inject(NewsIntelService);
   readonly sidePane = signal<'none' | 'details' | 'news'>('none');
   readonly articles = signal<NewsArticleView[]>([]);
+  /** The news item long-pressed for its AI analysis modal. */
+  readonly newsAnalysis = signal<NewsArticleView | null>(null);
   readonly newsLoading = signal(false);
   readonly newsFocus = signal<NewsFocusResult | null>(null);
 
