@@ -382,6 +382,27 @@ export interface ScriptPublisherDto {
   publisher: string;
 }
 
+// ── §7b Chart scripts — scripting/indicators ──────────────────────────────
+
+/** A Pine script saved from the chart-analysis editor ("My scripts"); private to its owner. */
+export interface ChartIndicatorScriptDto {
+  id: number;
+  name: string;
+  kind: 'indicator' | 'strategy';
+  pineSource: string;
+  inputs?: ScriptInputValues | null;
+  createdBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Body of `POST scripting/indicators` and `PUT scripting/indicators/{id}`. */
+export interface SaveChartIndicatorScriptRequest {
+  name: string;
+  pineSource: string;
+  inputs?: ScriptInputValues | null;
+}
+
 // ── §8 Script strategies — strategy endpoints ─────────────────────────────
 
 export type ScriptExecutionPolicy = 'Standard' | 'Direct';

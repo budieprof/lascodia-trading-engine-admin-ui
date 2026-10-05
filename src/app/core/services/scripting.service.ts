@@ -12,6 +12,7 @@ import { ApiService, SUPPRESS_ERROR_TOAST } from '@core/api/api.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import type { ResponseData } from '@core/api/api.types';
 import type {
+  ChartIndicatorScriptDto,
   CreateScriptLibraryRequest,
   ImportStrategyRequest,
   PineCatalog,
@@ -25,6 +26,7 @@ import type {
   ScriptLibraryFilter,
   ScriptPublisherDto,
   ScriptRunRequest,
+  SaveChartIndicatorScriptRequest,
   ScriptRunResult,
   StrategyExportDto,
   UpdateStrategyScriptRequest,
@@ -287,6 +289,61 @@ export class ScriptingService {
     return this.api.get<ResponseData<ScriptPublisherDto>>('/scripting/libraries/me', SILENT).pipe(
       map((res) => (res?.status && res.data?.publisher ? res.data.publisher : null)),
       catchError(() => of(null)),
+    );
+  }
+
+  // ── §7b Chart scripts ───────────────────────────────────────────────────
+
+  /** `GET scripting/indicators` — the operator's saved chart scripts, with sources. */
+  listChartScripts(): Observable<ChartIndicatorScriptDto[]> {
+    return this.api
+      .get<ResponseData<ChartIndicatorScriptDto[]>>('/scripting/indicators', SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'Your scripts could not be loaded.') ?? []),
+        catchError((err) =>
+          throwError(() => toScriptingError(err, 'Your scripts could not be loaded.')),
+        ),
+      );
+  }
+
+  /**
+   * `POST scripting/indicators` — compiles and saves. A compile error (or a `library()`) rejects
+   * with `-11` and the compile response attached.
+   */
+  createChartScript(req: SaveChartIndicatorScriptRequest): Observable<ChartIndicatorScriptDto> {
+    return this.api
+      .post<ResponseData<ChartIndicatorScriptDto>>('/scripting/indicators', req, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The engine did not save the script.')),
+        catchError((err) => throwError(() => toScriptingError(err, 'Saving the script failed.'))),
+      );
+  }
+
+  /** `PUT scripting/indicators/{id}` — replaces name, source and inputs (recompiled). */
+  updateChartScript(
+    id: number,
+    req: SaveChartIndicatorScriptRequest,
+  ): Observable<ChartIndicatorScriptDto> {
+    return this.api
+      .put<ResponseData<ChartIndicatorScriptDto>>(`/scripting/indicators/${id}`, req, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The engine did not save the script.')),
+        catchError((err) => throwError(() => toScriptingError(err, 'Saving the script failed.'))),
+      );
+  }
+
+  /** `DELETE scripting/indicators/{id}` (soft). */
+  deleteChartScript(id: number): Observable<void> {
+    return this.api.delete<ResponseData<unknown>>(`/scripting/indicators/${id}`, SILENT).pipe(
+      map((res) => {
+        if (res && !res.status) {
+          throw new ScriptingApiError(
+            res.message || 'The engine did not delete the script.',
+            res.responseCode ?? null,
+          );
+        }
+      }),
+      catchError((err) => throwError(() => toScriptingError(err, 'Deleting the script failed.'))),
     );
   }
 

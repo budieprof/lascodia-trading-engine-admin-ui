@@ -15,6 +15,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { PineEditorComponent } from '@features/scripting/components/pine-editor/pine-editor.component';
 import type { ScriptCompileResult, ScriptDiagnostic } from '@core/api/scripting.types';
+import type { ScriptingApiError } from '@core/services/scripting.service';
 import { ChartScriptService } from './chart-script.service';
 import { detectScriptKind } from './chart-script.model';
 
@@ -55,12 +56,25 @@ export interface ScriptEditorSubmit {
         <button type="button" (click)="compile()" [disabled]="compiling()">
           {{ compiling() ? 'Compiling…' : 'Compile' }}
         </button>
-        <button type="button" (click)="save()">Save</button>
+        <button type="button" (click)="save()" [disabled]="saving()">
+          {{ saving() ? 'Saving…' : 'Save' }}
+        </button>
         @if (strategyId() !== null) {
-          <a class="editor__link" [href]="'/strategies/' + strategyId() + '/edit'" target="_blank" rel="noopener"
-            title="Saving there changes the engine strategy">Open in strategy editor</a>
+          <a
+            class="editor__link"
+            [href]="'/strategies/' + strategyId() + '/edit'"
+            target="_blank"
+            rel="noopener"
+            title="Saving there changes the engine strategy"
+            >Open in strategy editor</a
+          >
         }
-        <button type="button" class="primary" (click)="addToChart()" [disabled]="!source().trim() || loading()">
+        <button
+          type="button"
+          class="primary"
+          (click)="addToChart()"
+          [disabled]="!source().trim() || loading()"
+        >
           {{ onChart() ? 'Update on chart' : 'Add to chart' }}
         </button>
         <button
@@ -301,11 +315,29 @@ export class ScriptEditorPanelComponent {
       });
   }
 
+  protected readonly saving = signal(false);
+
   protected save(): void {
-    const s = this.scripts.saveScript(this.name(), this.source(), detectScriptKind(this.source()));
-    this.savedNote.set(`Saved “${s.name}” to My scripts (this browser).`);
-    this.result.set(null);
-    this.saved.emit(s.id);
+    if (this.saving()) return;
+    this.saving.set(true);
+    this.error.set(null);
+    this.scripts
+      .saveScript(this.name(), this.source(), detectScriptKind(this.source()))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (s) => {
+          this.saving.set(false);
+          this.savedNote.set(`Saved “${s.name}” to My scripts.`);
+          this.result.set(null);
+          this.saved.emit(s.id);
+        },
+        error: (e: ScriptingApiError) => {
+          this.saving.set(false);
+          // A compile refusal carries the compile response: mark every diagnostic in the editor.
+          if (e?.compile) this.result.set(e.compile);
+          this.error.set(e?.message || 'Saving the script failed.');
+        },
+      });
   }
 
   protected addToChart(): void {
