@@ -13,6 +13,8 @@ export const UI_ICONS: Record<string, string> = {
   fallback: '<rect x="7.5" y="7.5" width="13" height="13" rx="2"/>',
 
   // ── toolbar ──
+  'zoom-in': '<circle cx="12.5" cy="12.5" r="6"/><path d="M17 17l5 5M12.5 9.5v6M9.5 12.5h6"/>',
+  'zoom-out': '<circle cx="12.5" cy="12.5" r="6"/><path d="M17 17l5 5M9.5 12.5h6"/>',
   caret: '<path d="M10 12.5l4 4 4-4"/>',
   'chevron-right': '<path d="M12 9l5 5-5 5"/>',
   indicators:
@@ -121,14 +123,23 @@ export const UI_ICONS: Record<string, string> = {
   'draw-stay':
     '<path d="M15.5 5.5l4 4L10 19H6v-4z"/><path d="M13 8l4 4"/>' +
     '<rect x="16.5" y="18.5" width="7" height="5" rx="1"/><path d="M18 18.5v-1.5a2 2 0 0 1 4 0v1.5"/>',
-  grip: DOT(11, 8, 1.2) + DOT(17, 8, 1.2) + DOT(11, 14, 1.2) + DOT(17, 14, 1.2) + DOT(11, 20, 1.2) + DOT(17, 20, 1.2),
+  grip:
+    DOT(11, 8, 1.2) +
+    DOT(17, 8, 1.2) +
+    DOT(11, 14, 1.2) +
+    DOT(17, 14, 1.2) +
+    DOT(11, 20, 1.2) +
+    DOT(17, 20, 1.2),
   'line-width':
     '<path d="M6 8.5h16"/><path d="M6 13.5h16" stroke-width="2"/><path d="M6 19.5h16" stroke-width="3"/>',
   'line-solid': '<path d="M5 14h18" stroke-width="2"/>',
   'line-dashed': '<path d="M5 14h4M12 14h4M19 14h4" stroke-width="2"/>',
-  'line-dotted': DOT(6, 14, 1.2) + DOT(10, 14, 1.2) + DOT(14, 14, 1.2) + DOT(18, 14, 1.2) + DOT(22, 14, 1.2),
+  'line-dotted':
+    DOT(6, 14, 1.2) + DOT(10, 14, 1.2) + DOT(14, 14, 1.2) + DOT(18, 14, 1.2) + DOT(22, 14, 1.2),
   'text-color': '<path d="M9 19L14 7l5 12M10.8 15h6.4"/>',
   'line-color': '<path d="M17.5 5.5l4 4L12 19H8v-4z"/><path d="M15 8l4 4"/>',
-  'bring-front': '<rect x="5.5" y="5.5" width="11" height="11" fill="currentColor" stroke="none"/><rect x="11.5" y="11.5" width="11" height="11"/>',
-  'send-back': '<rect x="5.5" y="5.5" width="11" height="11"/><rect x="11.5" y="11.5" width="11" height="11" fill="currentColor" stroke="none"/>',
+  'bring-front':
+    '<rect x="5.5" y="5.5" width="11" height="11" fill="currentColor" stroke="none"/><rect x="11.5" y="11.5" width="11" height="11"/>',
+  'send-back':
+    '<rect x="5.5" y="5.5" width="11" height="11"/><rect x="11.5" y="11.5" width="11" height="11" fill="currentColor" stroke="none"/>',
 };

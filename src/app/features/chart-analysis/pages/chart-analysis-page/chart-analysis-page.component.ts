@@ -2122,7 +2122,12 @@ export class ChartAnalysisPageComponent {
   focusTrade(t: ChartTrade): void {
     const step = (resolutionMs(this.resolution()) ?? 3_600_000) / 1000;
     const w = tradeWindow(t, step, Math.floor(Date.now() / 1000));
-    this.host()?.glideToRange(w.fromMs, w.toMs);
+    // Pan only: the operator's zoom is theirs (the toolbar has zoom buttons).
+    this.host()?.panToRange(w.fromMs, w.toMs);
+  }
+
+  zoomChart(factor: number): void {
+    this.host()?.zoomBy(factor);
   }
 
   rerunStrategy(values: ScriptInputValues): void {
