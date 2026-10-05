@@ -4188,6 +4188,16 @@ export interface AnalysisMonitorDto {
   lastResultLlmInvocationId?: number | null;
   /** Last evaluation note (why it did / didn't fire). */
   lastEvalNote?: string | null;
+  /** Structure Watch: the Pine script following the setup (null on a plain watch). */
+  scriptSource?: string | null;
+  /** When the script's steps start counting. */
+  scriptStartUtc?: string | null;
+  /** The step the script last reported. */
+  scriptStep?: number | null;
+  /** First moment the script said ready (in shadow mode: when the watch would have fired). */
+  scriptReadyAtUtc?: string | null;
+  /** The newest script reading in words: step history, ready/broken, script stop. */
+  scriptLastReading?: string | null;
   /** 'operator' (chat-created) or 'hunter' (armed by the SpotSweep patient hunter). */
   origin?: string;
   /** Sweep run that armed this monitor, when origin is 'hunter'. */

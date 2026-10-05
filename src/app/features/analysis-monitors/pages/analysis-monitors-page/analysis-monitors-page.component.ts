@@ -278,6 +278,24 @@ const STATUS_FILTERS = [
                       @if (m.triggerExplanation) {
                         <span class="explain">{{ m.triggerExplanation }}</span>
                       }
+                      <!-- Structure Watch: the script that follows the setup step by step. -->
+                      @if (m.scriptSource) {
+                        <span class="script-line" [title]="m.scriptLastReading || ''">
+                          <span class="tag script">structure · step {{ m.scriptStep ?? 0 }}</span>
+                          @if (m.scriptReadyAtUtc) {
+                            <span class="tag script-ready"
+                              >ready {{ m.scriptReadyAtUtc | date: 'MMM d HH:mm' : 'UTC' }}Z</span
+                            >
+                          }
+                          <span class="explain">{{
+                            m.scriptLastReading || 'waiting for the first candle close'
+                          }}</span>
+                        </span>
+                        <details class="script-source" (click)="$event.stopPropagation()">
+                          <summary>Pine script</summary>
+                          <pre>{{ m.scriptSource }}</pre>
+                        </details>
+                      }
                     </td>
                     <td>
                       <span class="tag mode" [class.llm]="m.evaluationMode !== 'Deterministic'">{{
@@ -920,6 +938,32 @@ const STATUS_FILTERS = [
       }
       .intent .intent-text {
         display: block;
+      }
+      .intent .script-line {
+        display: block;
+        margin-top: 2px;
+      }
+      .tag.script {
+        background: rgba(37, 99, 235, 0.14);
+        color: #1d4ed8;
+        border-color: transparent;
+      }
+      .tag.script-ready {
+        background: rgba(22, 163, 74, 0.16);
+        color: #15803d;
+        border-color: transparent;
+      }
+      .intent .script-source summary {
+        cursor: pointer;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .intent .script-source pre {
+        max-height: 240px;
+        overflow: auto;
+        font-size: var(--text-xs);
+        white-space: pre;
+        margin: 4px 0 0;
       }
       .intent .explain {
         display: block;
