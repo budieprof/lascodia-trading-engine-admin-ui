@@ -25,6 +25,8 @@ import type {
   AnalysisMonitorBoardCounters,
   AnalysisMonitorDetail,
 } from '@features/analysis-monitors/analysis-monitors.types';
+import { PinePreviewComponent } from '@features/scripting/pine-preview/pine-preview.component';
+import type { PineRunRequest } from '@shared/pine-chart/model/pine-outputs.types';
 import { MonitorBuilderComponent } from '@features/analysis-monitors/components/monitor-builder/monitor-builder.component';
 import { MonitorTemplatesComponent } from '@features/analysis-monitors/components/monitor-templates/monitor-templates.component';
 
@@ -73,6 +75,7 @@ const STATUS_FILTERS = [
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    PinePreviewComponent,
     DatePipe,
     DecimalPipe,
     FormsModule,
@@ -291,6 +294,13 @@ const STATUS_FILTERS = [
                             m.scriptLastReading || 'waiting for the first candle close'
                           }}</span>
                         </span>
+                        <button
+                          type="button"
+                          class="link-btn"
+                          (click)="$event.stopPropagation(); openScriptChart(m)"
+                        >
+                          Show on chart
+                        </button>
                         <details class="script-source" (click)="$event.stopPropagation()">
                           <summary>Pine script</summary>
                           <pre>{{ m.scriptSource }}</pre>
@@ -680,6 +690,24 @@ const STATUS_FILTERS = [
         (instantiated)="onMonitorCreated()"
       />
     }
+
+    @if (scriptChart(); as sc) {
+      <div class="script-chart-backdrop" (click)="scriptChart.set(null)">
+        <div
+          class="script-chart-panel"
+          (click)="$event.stopPropagation()"
+          role="dialog"
+          aria-label="Structure Watch chart"
+        >
+          <div class="script-chart-head">
+            <strong>{{ sc.title }}</strong>
+            <span class="muted">steps count from {{ sc.start }}Z</span>
+            <button type="button" class="link-btn" (click)="scriptChart.set(null)">Close</button>
+          </div>
+          <app-pine-preview [request]="sc.request" />
+        </div>
+      </div>
+    }
   `,
   styles: [
     `
@@ -938,6 +966,45 @@ const STATUS_FILTERS = [
       }
       .intent .intent-text {
         display: block;
+      }
+      .link-btn {
+        background: none;
+        border: none;
+        padding: 0;
+        color: var(--accent, #2563eb);
+        cursor: pointer;
+        font-size: var(--text-xs);
+      }
+      .script-chart-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 1300;
+        background: rgba(0, 0, 0, 0.45);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .script-chart-panel {
+        width: min(1200px, 96vw);
+        height: min(760px, 90vh);
+        display: flex;
+        flex-direction: column;
+        background: var(--surface, #fff);
+        border-radius: 8px;
+        padding: 12px;
+        gap: 8px;
+      }
+      .script-chart-panel app-pine-preview {
+        flex: 1;
+        min-height: 0;
+      }
+      .script-chart-head {
+        display: flex;
+        gap: 12px;
+        align-items: baseline;
+      }
+      .script-chart-head .link-btn {
+        margin-left: auto;
       }
       .intent .script-line {
         display: block;
@@ -1277,6 +1344,28 @@ const STATUS_FILTERS = [
   ],
 })
 export class AnalysisMonitorsPageComponent {
+  /** Structure Watch shown on the Pine chart (the watch's own script, steps counted from its start). */
+  readonly scriptChart = signal<{ title: string; start: string; request: PineRunRequest } | null>(
+    null,
+  );
+
+  openScriptChart(m: AnalysisMonitorDto): void {
+    if (!m.scriptSource) return;
+    const startIso = m.scriptStartUtc ?? m.createdAtUtc;
+    const startMs = Date.parse(startIso.endsWith('Z') ? startIso : startIso + 'Z');
+    // The engine sets the script's armedAt input when it runs the watch; the chart does the same by
+    // writing the start time into the input's default, so the chart shows exactly the steps the watch saw.
+    const source = m.scriptSource.replace(
+      /input\.time\(\s*[^,()]+,\s*"armedAt"/,
+      `input.time(${startMs}, "armedAt"`,
+    );
+    this.scriptChart.set({
+      title: `#${m.id} ${m.symbol} ${m.timeframe} · structure watch`,
+      start: new Date(startMs).toISOString().slice(0, 16).replace('T', ' '),
+      request: { source, symbol: m.symbol, timeframe: m.timeframe, lastBars: 500, mode: 'preview' },
+    });
+  }
+
   private readonly svc = inject(AnalysisMonitorsService);
   private readonly pageContext = inject(PageContextService);
   private readonly uiCommands = inject(UiCommandService);

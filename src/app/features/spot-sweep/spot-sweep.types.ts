@@ -178,6 +178,8 @@ export interface WaitingScoreboard {
   plans: WaitingFateRow[];
   planTotals: WaitingFateRow;
   standAsides: StandAsideSummary;
+  /** Structure Watches: the same plans graded from the script's ready moment vs the price trigger. */
+  scriptTiming?: ScriptTimingComparison | null;
   recent: ForwardWalkRow[];
 }
 
@@ -370,3 +372,12 @@ export const DEFAULT_SWEEP_CONFIG: SpotSweepConfig = {
   hunterMaxExpiryHours: 72,
   hunterRefreshAfterMinutes: 240,
 };
+
+/** Gate C of the Structure Watches plan: is script timing at least as good as price timing? */
+export interface ScriptTimingComparison {
+  scriptWatches: number;
+  neverReady: number;
+  priceWinsScriptNeverReady: number;
+  scriptReady: WaitingFateRow;
+  priceTriggerSameWatches: WaitingFateRow;
+}

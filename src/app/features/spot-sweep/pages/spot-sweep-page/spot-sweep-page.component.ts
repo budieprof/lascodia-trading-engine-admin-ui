@@ -887,6 +887,29 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
                       H1 — and only plans armed with structured prices can be graded.
                     </p>
                   }
+                  @if (sb.scriptTiming; as st) {
+                    <p class="small stand-aside-line">
+                      Structure Watches: <strong>{{ st.scriptWatches }}</strong> finished. From the
+                      script's ready moment, {{ st.scriptReady.filled }} filled for
+                      <span class="mono">{{ st.scriptReady.netR | number: '1.2-2' }}R</span>
+                      @if (st.scriptReady.avgR !== null && st.scriptReady.avgR !== undefined) {
+                        (avg {{ st.scriptReady.avgR | number: '1.2-2' }}R)
+                      }
+                      vs the price trigger on the same watches
+                      <span class="mono"
+                        >{{ st.priceTriggerSameWatches.netR | number: '1.2-2' }}R</span
+                      >
+                      @if (
+                        st.priceTriggerSameWatches.avgR !== null &&
+                        st.priceTriggerSameWatches.avgR !== undefined
+                      ) {
+                        (avg {{ st.priceTriggerSameWatches.avgR | number: '1.2-2' }}R)
+                      }
+                      . Never ready: <strong>{{ st.neverReady }}</strong
+                      >, of which <strong>{{ st.priceWinsScriptNeverReady }}</strong> hit target on
+                      the price trigger.
+                    </p>
+                  }
                   @if (sb.standAsides.count > 0) {
                     <p class="small stand-aside-line">
                       Stood aside <strong>{{ sb.standAsides.count }}×</strong>. Over the next 6 bars
