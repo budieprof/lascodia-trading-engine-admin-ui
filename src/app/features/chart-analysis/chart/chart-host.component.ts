@@ -775,12 +775,42 @@ export class ChartHostComponent implements OnDestroy {
    * motion instead of jumping. A new call continues from wherever the current glide is; grabbing
    * the chart cancels it; reduced-motion users get the jump.
    */
+  /**
+   * Pan, without zooming, so [fromMs, toMs] is centred: the visible span stays the operator's
+   * own. Glides like `glideToRange`.
+   */
+  panToRange(fromMs: number, toMs: number): boolean {
+    const range = this.chart?.timeScale().getVisibleLogicalRange();
+    const a = this.logicalAtMs(Math.min(fromMs, toMs));
+    const b = this.logicalAtMs(Math.max(fromMs, toMs));
+    if (!range || a === null || b === null) return false;
+    const half = (range.to - range.from) / 2;
+    const mid = (a + b) / 2;
+    return this.glideToLogical(mid - half, mid + half);
+  }
+
+  /** Zoom the time axis about the centre of the view: factor < 1 zooms in, > 1 out. */
+  zoomBy(factor: number): void {
+    const range = this.chart?.timeScale().getVisibleLogicalRange();
+    if (!range) return;
+    const mid = (range.from + range.to) / 2;
+    const half = Math.max(5, ((range.to - range.from) / 2) * factor);
+    this.glideToLogical(mid - half, mid + half, 220);
+  }
+
   glideToRange(fromMs: number, toMs: number, durationMs = 520): boolean {
     const scale = this.chart?.timeScale();
     const start = scale?.getVisibleLogicalRange();
     const a = this.logicalAtMs(Math.min(fromMs, toMs));
     const b = this.logicalAtMs(Math.max(fromMs, toMs));
     if (!scale || !start || a === null || b === null) return this.setVisibleRange(fromMs, toMs);
+    return this.glideToLogical(a, b, durationMs);
+  }
+
+  private glideToLogical(a: number, b: number, durationMs = 520): boolean {
+    const scale = this.chart?.timeScale();
+    const start = scale?.getVisibleLogicalRange();
+    if (!scale || !start) return false;
     this.cancelGlide();
     const reduce =
       typeof window !== 'undefined' &&

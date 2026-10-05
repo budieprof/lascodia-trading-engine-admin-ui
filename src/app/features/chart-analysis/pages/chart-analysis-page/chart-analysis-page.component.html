@@ -373,6 +373,12 @@
     >
       <app-chart-icon name="redo" [size]="28" />
     </button>
+    <button type="button" class="tb-btn" (click)="zoomChart(0.7)" title="Zoom in">
+      <app-chart-icon name="zoom-in" [size]="28" />
+    </button>
+    <button type="button" class="tb-btn" (click)="zoomChart(1 / 0.7)" title="Zoom out">
+      <app-chart-icon name="zoom-out" [size]="28" />
+    </button>
 
     <span class="spacer"></span>
 
