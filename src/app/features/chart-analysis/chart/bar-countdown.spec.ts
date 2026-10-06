@@ -75,6 +75,6 @@ describe('countdownText', () => {
 
 describe('axisLabelHeight', () => {
   it('matches lightweight-charts’ label box at the default 12 px font', () => {
-    expect(axisLabelHeight(12)).toBe(20);
+    expect(axisLabelHeight(12)).toBe(18);
   });
 });

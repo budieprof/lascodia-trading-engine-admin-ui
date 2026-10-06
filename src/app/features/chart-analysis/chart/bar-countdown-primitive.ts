@@ -74,9 +74,8 @@ export class BarCountdownPrimitive implements ISeriesPrimitive<Time> {
 
 /**
  * Height of a price-axis label at `fontSize` — lightweight-charts' own sizing: the font plus
- * `2.5 * fontSize / 12` padding above and below, plus a 1 px border each side.
+ * `2.5 * fontSize / 12` padding above and below and a 1 px border (18 px at the default 12 px).
  */
 export function axisLabelHeight(fontSize: number): number {
-  const pad = Math.round((2.5 * fontSize) / 12);
-  return fontSize + 2 * pad + 2;
+  return Math.round(fontSize + (5 * fontSize) / 12 + 1);
 }
