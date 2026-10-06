@@ -3,6 +3,7 @@ import {
   Component,
   ElementRef,
   effect,
+  NgZone,
   inject,
   input,
   output,
@@ -11,6 +12,9 @@ import {
   viewChild,
   OnDestroy,
 } from '@angular/core';
+import { ServerClock } from '@core/time/server-clock';
+import { BarCountdownPrimitive, axisLabelHeight } from './bar-countdown-primitive';
+import { countdownText } from './bar-countdown';
 import {
   AreaSeries,
   BarSeries,
@@ -107,6 +111,17 @@ export type ChartStyle =
   | 'range';
 
 /** Styles whose bars are built from price movement, not time. */
+/** Styles whose last-value label is the line colour rather than the bar's up/down colour. */
+const LINE_LIKE: ReadonlySet<ChartStyle> = new Set<ChartStyle>([
+  'line',
+  'area',
+  'baseline',
+  'stepline',
+  'line-markers',
+  'hlc-area',
+  'column',
+]);
+
 const PRICE_BASED: ReadonlySet<ChartStyle> = new Set<ChartStyle>([
   'renko',
   'kagi',
@@ -332,6 +347,10 @@ export class ChartHostComponent implements OnDestroy {
   /** Whether strategy entry/exit arrows are drawn. */
   readonly showScriptTrades = input<boolean>(true);
   readonly resolution = input<string>('');
+  /** TradingView's countdown to bar close under the last-price label. */
+  readonly showCountdown = input(true);
+  /** When the last live price arrived (client ms); null = no live feed. Stale ⇒ no countdown. */
+  readonly liveAt = input<number | null>(null);
 
   /** Raised when the visible range reaches the oldest bar we hold. */
   /** Arrow-key nudge of the selected drawing (bars sideways, pixels vertically). */
@@ -507,6 +526,35 @@ export class ChartHostComponent implements OnDestroy {
 
   /** Bars currently on the chart, for legend lookups by time. */
   private plotted: Bar[] = [];
+  private readonly countdown = new BarCountdownPrimitive();
+  private readonly serverClock = inject(ServerClock);
+  private readonly zone = inject(NgZone);
+  private countdownTimer: ReturnType<typeof setInterval> | undefined;
+
+  /**
+   * One cheap tick: text + colour into the primitive, which repaints the axis label only. Runs
+   * outside Angular (no change detection) and skips hidden tabs.
+   */
+  private tickCountdown(): void {
+    if (typeof document !== 'undefined' && document.hidden) return;
+    const raw = this.bars();
+    const last = raw[raw.length - 1];
+    const shown = this.plotted[this.plotted.length - 1];
+    const text =
+      this.showCountdown() && last && shown
+        ? countdownText(
+            this.resolution(),
+            this.style(),
+            last.time,
+            this.serverClock.now(),
+            this.liveAt(),
+          )
+        : null;
+    const p = this.palette(this.theme.theme() === 'dark');
+    const lineLike = LINE_LIKE.has(this.style());
+    const color = lineLike ? p.line : (shown?.close ?? 0) >= (shown?.open ?? 0) ? p.up : p.down;
+    this.countdown.set(text, shown ? shown.close : null, color, axisLabelHeight(12));
+  }
   private computedCache = new Map<string, Record<string, Array<number | null>>>();
   private readonly overlayRenderer = new OverlayRenderer(
     () => this.price,
@@ -541,6 +589,9 @@ export class ChartHostComponent implements OnDestroy {
   };
 
   constructor() {
+    this.zone.runOutsideAngular(() => {
+      this.countdownTimer = setInterval(() => this.tickCountdown(), 1000);
+    });
     // Create once the view exists, then keep it in step with inputs. Each
     // effect reads exactly one input and does its work untracked, so changing
     // the bar set never rebuilds the indicator panes and vice versa.
@@ -676,6 +727,7 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
+    clearInterval(this.countdownTimer);
     this.cancelGlide();
     for (const h of this.scriptHandles) h.dispose();
     this.scriptHandles = [];
@@ -1386,6 +1438,8 @@ export class ChartHostComponent implements OnDestroy {
       this.price.attachPrimitive(this.analysisRenderer);
       this.price.attachPrimitive(this.eventRenderer);
       this.price.attachPrimitive(this.patternRenderer);
+      this.price.attachPrimitive(this.countdown);
+      this.tickCountdown();
       // The series was replaced (style change, or new bars), and every primitive hanging off
       // the old one went with it: profiles are re-made by the indicators effect, Pine runs here.
       this.profileRenderers.clear();

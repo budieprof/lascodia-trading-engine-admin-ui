@@ -851,6 +851,8 @@
         <app-chart-host
           #host
           (viewChanged)="onViewChanged()"
+          [showCountdown]="showCountdown()"
+          [liveAt]="liveAt()"
           [bars]="displayBars()"
           [style]="style()"
           [showVolume]="showVolume()"
@@ -956,6 +958,15 @@
         @if (contextMenu(); as cm) {
           <div class="context-menu" [style.left.px]="cm.x" [style.top.px]="cm.y">
             <button type="button" (click)="resetScales()">Reset scales</button>
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              data-testid="countdown-toggle"
+              [attr.aria-checked]="showCountdown()"
+              (click)="showCountdown.set(!showCountdown()); closeContextMenu()"
+            >
+              {{ showCountdown() ? '✓ ' : '' }}Countdown to bar close
+            </button>
             <button type="button" (click)="takeSnapshot()">Save image…</button>
             <button type="button" (click)="objectTreeOpen.set(true); closeContextMenu()">
               Show objects

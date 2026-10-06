@@ -12,6 +12,7 @@ import { provideEchartsCore } from 'ngx-echarts';
 import * as echarts from 'echarts';
 import { routes } from './app.routes';
 import { authInterceptor } from '@core/auth/auth.interceptor';
+import { serverClockInterceptor } from '@core/time/server-clock';
 import { errorInterceptor } from '@core/auth/error.interceptor';
 import { retryInterceptor } from '@core/api/retry.interceptor';
 import { RUNTIME_CONFIG, RuntimeConfig } from '@core/config/runtime-config';
@@ -89,7 +90,12 @@ export function buildAppConfig(runtimeConfig: RuntimeConfig): ApplicationConfig 
       // Order matters: auth → retry (so retries carry the token) → error (final toast).
       provideHttpClient(
         withXhr(),
-        withInterceptors([authInterceptor, retryInterceptor, errorInterceptor]),
+        withInterceptors([
+          authInterceptor,
+          retryInterceptor,
+          errorInterceptor,
+          serverClockInterceptor,
+        ]),
       ),
       provideAnimations(),
       provideEchartsCore({ echarts: themedEcharts }),
