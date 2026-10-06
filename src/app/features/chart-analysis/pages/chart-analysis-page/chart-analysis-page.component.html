@@ -139,6 +139,7 @@
         [initialTab]="dialogTab()"
         [loading]="!scriptCatalog()"
         (picked)="onDialogPick($event)"
+        (deleteRequested)="onDialogDelete($event)"
         (closed)="indicatorMenuOpen.set(false)"
       />
     }

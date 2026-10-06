@@ -104,15 +104,36 @@ function loadFavourites(): Set<string> {
                   [size]="16"
                 />
               </button>
-              <button type="button" class="pick" (click)="picked.emit(it)">
-                <span class="name">{{ it.name }}</span>
-                @if (query()) {
-                  <span class="muted">{{ tabLabel(it) }}</span>
+              @if (confirming() === key(it)) {
+                <span class="confirm" role="alert">
+                  <span class="name">Delete “{{ it.name }}”? This cannot be undone.</span>
+                  <button type="button" class="confirm-yes" (click)="confirmDelete(it)">
+                    Delete
+                  </button>
+                  <button type="button" class="confirm-no" (click)="cancelDelete()">Cancel</button>
+                </span>
+              } @else {
+                <button type="button" class="pick" (click)="picked.emit(it)">
+                  <span class="name">{{ it.name }}</span>
+                  @if (query()) {
+                    <span class="muted">{{ tabLabel(it) }}</span>
+                  }
+                  @if (it.tag) {
+                    <span class="muted">{{ it.tag }}</span>
+                  }
+                </button>
+                @if (it.deletable) {
+                  <button
+                    type="button"
+                    class="del"
+                    [attr.aria-label]="'Delete ' + it.name"
+                    title="Delete script"
+                    (click)="askDelete(it)"
+                  >
+                    <app-chart-icon name="trash" [size]="16" />
+                  </button>
                 }
-                @if (it.tag) {
-                  <span class="muted">{{ it.tag }}</span>
-                }
-              </button>
+              }
             </li>
           } @empty {
             <li class="empty">{{ emptyText() }}</li>
@@ -272,6 +293,44 @@ function loadFavourites(): Set<string> {
     .name {
       flex: 1;
     }
+    .del {
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      color: var(--muted, #9598a1);
+      opacity: 0;
+      padding: 6px 12px 6px 4px;
+    }
+    .items li:hover .del,
+    .del:focus-visible {
+      opacity: 1;
+    }
+    .del:hover {
+      color: var(--danger, #f23645);
+    }
+    .confirm {
+      flex: 1;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 4px 12px 4px 4px;
+      font-size: 13px;
+    }
+    .confirm button {
+      border: 1px solid var(--border, #e6e9ef);
+      background: transparent;
+      color: inherit;
+      border-radius: 4px;
+      padding: 2px 10px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+    }
+    .confirm .confirm-yes {
+      border-color: var(--danger, #f23645);
+      background: var(--danger, #f23645);
+      color: #fff;
+    }
     .muted {
       color: var(--muted, #787b86);
       font-size: 11px;
@@ -301,6 +360,11 @@ export class IndicatorsDialogComponent {
   readonly loading = input(false);
   readonly picked = output<DialogItem>();
   readonly closed = output<void>();
+  /** A deletable item the operator confirmed deleting; the page deletes it and refreshes `items`. */
+  readonly deleteRequested = output<DialogItem>();
+
+  /** Key of the row showing its "Delete …?" confirmation, if any. */
+  readonly confirming = signal<string | null>(null);
 
   readonly tabs = DIALOG_TABS;
   readonly favouritesLabel = FAVOURITES;
@@ -359,6 +423,20 @@ export class IndicatorsDialogComponent {
 
   tabLabel(it: DialogItem): string {
     return DIALOG_TABS.find((t) => t.id === TAB_FOR_KIND[it.kind])?.label ?? '';
+  }
+
+  askDelete(it: DialogItem): void {
+    if (it.deletable) this.confirming.set(itemKey(it));
+  }
+
+  cancelDelete(): void {
+    this.confirming.set(null);
+  }
+
+  confirmDelete(it: DialogItem): void {
+    if (this.confirming() !== itemKey(it)) return;
+    this.confirming.set(null);
+    this.deleteRequested.emit(it);
   }
 
   toggleFavourite(it: DialogItem): void {

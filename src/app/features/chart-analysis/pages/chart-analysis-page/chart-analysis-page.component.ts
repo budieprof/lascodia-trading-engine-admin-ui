@@ -524,6 +524,7 @@ export class ChartAnalysisPageComponent {
           description: it.description,
           category: it.kind === 'strategy' ? 'My scripts' : 'My scripts',
           tag: 'Pine',
+          deletable: true,
         });
       for (const it of cat.strategies)
         items.push({
@@ -2048,6 +2049,25 @@ export class ChartAnalysisPageComponent {
     const cat = this.scriptCatalog();
     if (!cat) return null;
     return [...cat.mine, ...cat.strategies, ...cat.examples].find((i) => i.key === key) ?? null;
+  }
+
+  /** Delete a "My scripts" entry (saved script or unsaved draft) confirmed in the dialog. */
+  onDialogDelete(item: DialogItem): void {
+    const script = this.scriptItemByKey(item.id);
+    if (!script || script.source !== 'mine') return;
+    const id = script.key.slice('mine:'.length);
+    this.chartScripts
+      .deleteScript(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.scriptCatalog.update((cat) =>
+            cat ? { ...cat, mine: cat.mine.filter((m) => m.key !== script.key) } : cat,
+          );
+          this.notify.success(`Deleted “${script.name}”.`);
+        },
+        error: (e: Error) => this.notify.error(e?.message || 'Deleting the script failed.'),
+      });
   }
 
   onDialogPick(item: DialogItem): void {
