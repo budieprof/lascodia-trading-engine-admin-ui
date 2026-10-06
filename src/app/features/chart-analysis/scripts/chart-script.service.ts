@@ -22,6 +22,7 @@ import type {
   ChartIndicatorScriptDto,
   ScriptCompileResult,
   ScriptInputValues,
+  ScriptRunBar,
   ScriptRunRequest,
 } from '@core/api/scripting.types';
 import type { StrategyDto } from '@core/api/api.types';
@@ -259,6 +260,7 @@ export class ChartScriptService {
     resolution: TvResolution,
     inputs?: ScriptInputValues,
     lastBars = DEFAULT_LAST_BARS,
+    liveBar?: ScriptRunBar | null,
   ): Observable<ChartScriptResult> {
     const req: ScriptRunRequest = {
       symbol,
@@ -269,6 +271,8 @@ export class ChartScriptService {
     if (item.strategyId !== undefined) req.strategyId = item.strategyId;
     else req.source = item.pineSource ?? '';
     if (inputs && Object.keys(inputs).length) req.inputs = inputs;
+    // Indicators run the chart's forming bar as the realtime bar; strategies backtest closed bars.
+    if (liveBar && req.mode === 'preview') req.liveBar = liveBar;
     return this.scripting.run(req).pipe(map((res) => toChartScriptResult(res)));
   }
 

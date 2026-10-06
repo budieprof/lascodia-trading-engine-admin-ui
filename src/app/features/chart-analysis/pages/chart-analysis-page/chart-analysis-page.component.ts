@@ -17,6 +17,10 @@ import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import type { CurrencyPairDto } from '@core/api/api.types';
 import { CandleFeedService, type Bar } from '../../datafeed/candle-feed.service';
+import { LiveRerunScheduler, formingLiveBar } from '../../scripts/live-bar';
+
+/** Live indicator re-runs: at most one per script per this many ms. */
+const LIVE_RERUN_MS = 2_000;
 import { SUPPORTED_RESOLUTIONS, resolutionMs, type TvResolution } from '../../datafeed/resolution';
 import {
   bucketStartFor,
@@ -1118,6 +1122,53 @@ export class ChartAnalysisPageComponent {
       });
     });
 
+    // Keep runs live. The engine runs the forming bar (folded from closed M1 candles) as the realtime bar,
+    // so a run is current to the minute it was made — and only then: left alone, the overlay falls a bar
+    // behind the chart every period. Re-run once a minute, the M1 cadence the forming bar moves at; not
+    // while the tab is hidden, during replay, or while a run is still in flight.
+    const liveTimer = setInterval(() => {
+      if (document.hidden || this.replayActive() || this.scriptRunning()) return;
+      const symbol = this.symbol();
+      const resolution = this.resolution();
+      for (const r of this.scriptRuns())
+        if (r.symbol === symbol && r.resolution === resolution)
+          this.runScript(r.item, r.values, true);
+    }, 60_000);
+    this.destroyRef.onDestroy(() => clearInterval(liveTimer));
+
+    // TradingView behaviour: an indicator's last value sits on the forming bar and moves with it.
+    // Every change to the chart's newest bar (a tick, an M1 resync, a new period opening) re-runs
+    // the indicators on this chart with that bar as `liveBar` — throttled per script to one run
+    // every 2 s, never two in flight. Strategies keep backtesting closed bars on the timer above.
+    const liveReruns = new LiveRerunScheduler((key, done) => {
+      const run = this.scriptRuns().find((r) => r.item.key === key);
+      if (
+        !run ||
+        run.result.kind === 'strategy' ||
+        run.symbol !== this.symbol() ||
+        run.resolution !== this.resolution()
+      ) {
+        done();
+        return;
+      }
+      this.runScript(run.item, run.values, true, () => done(), true);
+    }, LIVE_RERUN_MS);
+    this.destroyRef.onDestroy(() => liveReruns.dispose());
+    effect(() => {
+      const bars = this.bars();
+      const last = bars[bars.length - 1];
+      // Track the newest bar's identity and values only.
+      const sig = last ? `${last.time}|${last.open}|${last.high}|${last.low}|${last.close}` : '';
+      untracked(() => {
+        if (!sig || document.hidden || this.replayActive()) return;
+        const symbol = this.symbol();
+        const resolution = this.resolution();
+        for (const r of this.scriptRuns())
+          if (r.result.kind !== 'strategy' && r.symbol === symbol && r.resolution === resolution)
+            liveReruns.request(r.item.key);
+      });
+    });
+
     // Tell the assistant what this page is showing, and what it may do to it.
     //
     // Both halves matter. Without the FACTS the assistant cannot see the chart at all, and
@@ -2124,28 +2175,38 @@ export class ChartAnalysisPageComponent {
     values: ScriptInputValues,
     replace = false,
     done?: (r: ChartScriptResult | { error: string }) => void,
+    /** A live re-run as the forming bar ticks: no spinner, and a failure keeps the last plots. */
+    live = false,
   ): void {
-    this.scriptRunning.set(true);
-    this.scriptError.set(null);
+    if (!live) {
+      this.scriptRunning.set(true);
+      this.scriptError.set(null);
+    }
     const symbol = this.symbol();
     const resolution = this.resolution();
+    const liveBar = formingLiveBar(this.bars(), resolution, Date.now());
     // Never less than a full page: a run started while the chart is still loading would
     // otherwise cover only a sliver of history and stop short when the operator pans back.
     const requestedBars = Math.min(Math.max(this.bars().length, PAGE_BARS), MAX_SCRIPT_BARS);
     this.chartScripts
-      .runOnChart(item, symbol, resolution, values, requestedBars)
+      .runOnChart(item, symbol, resolution, values, requestedBars, liveBar)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
-          this.scriptRunning.set(false);
+          if (!live) this.scriptRunning.set(false);
           // A run for a symbol the operator has since left is stale.
           if (symbol !== this.symbol() || resolution !== this.resolution()) {
             done?.({ error: 'The chart moved to another symbol or timeframe during the run.' });
             return;
           }
           if (result.error) {
-            this.scriptError.set(`${item.name}: ${result.error}`);
+            if (!live) this.scriptError.set(`${item.name}: ${result.error}`);
             done?.({ error: result.error });
+            return;
+          }
+          // A live re-run for a script removed meanwhile must not bring it back.
+          if (live && !this.scriptRuns().some((r) => r.item.key === item.key)) {
+            done?.(result);
             return;
           }
           this.scriptRuns.update((runs) => {
@@ -2164,11 +2225,12 @@ export class ChartAnalysisPageComponent {
           done?.(result);
         },
         error: (err: unknown) => {
-          this.scriptRunning.set(false);
+          if (!live) this.scriptRunning.set(false);
           done?.({ error: err instanceof Error ? err.message : 'run failed' });
-          this.scriptError.set(
-            `${item.name}: ${err instanceof Error ? err.message : 'run failed'}`,
-          );
+          if (!live)
+            this.scriptError.set(
+              `${item.name}: ${err instanceof Error ? err.message : 'run failed'}`,
+            );
         },
       });
   }
