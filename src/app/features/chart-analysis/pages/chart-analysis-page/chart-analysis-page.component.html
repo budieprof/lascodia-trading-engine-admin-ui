@@ -448,10 +448,27 @@
         {{ currentLayoutName() }}
         <app-chart-icon name="caret" [size]="18" />
       </button>
+      @if (workspace.statusText(); as st) {
+        <span
+          class="layout-status"
+          data-testid="layout-status"
+          [class.layout-status--warn]="
+            workspace.status() === 'offline' || workspace.status() === 'error'
+          "
+          [title]="workspace.lastError() ?? st"
+          >{{ st }}</span
+        >
+      }
       @if (layoutMenuOpen()) {
         <div class="menu layout-menu">
-          <button type="button" class="menu-action" (click)="saveLayout()">
-            <app-chart-icon name="save" [size]="18" /> Save layout…
+          <button type="button" class="menu-action" (click)="newLayout()">
+            <app-chart-icon name="plus" [size]="18" /> New layout…
+          </button>
+          <button type="button" class="menu-action" (click)="renameLayout()">
+            <app-chart-icon name="text" [size]="18" /> Rename…
+          </button>
+          <button type="button" class="menu-action" (click)="duplicateLayout()">
+            <app-chart-icon name="save" [size]="18" /> Make a copy…
           </button>
           <button
             type="button"
@@ -461,16 +478,27 @@
           >
             <app-chart-icon name="star" [size]="18" /> Save studies as template…
           </button>
-          @if (layoutStore.layouts().length) {
+          @if (workspace.layouts().length) {
             <div class="menu-heading">Layouts</div>
-            <ul class="menu-list">
-              @for (l of layoutStore.layouts(); track l.id) {
+            <ul class="menu-list" data-testid="layout-list">
+              @for (l of workspace.layouts(); track l.id) {
                 <li>
-                  <button type="button" (click)="applyLayout(l)">
+                  <button
+                    type="button"
+                    [class.active]="l.id === workspace.active().id"
+                    (click)="switchLayout(l.id)"
+                  >
                     <span>{{ l.name }}</span>
-                    <span class="muted">{{ l.symbol }} {{ resolutionLabel(l.resolution) }}</span>
+                    @if (l.id === workspace.active().id) {
+                      <span class="muted">open</span>
+                    }
                   </button>
-                  <button type="button" class="tree-remove" (click)="removeLayout(l.id, $event)">
+                  <button
+                    type="button"
+                    class="tree-remove"
+                    [attr.aria-label]="'Delete layout ' + l.name"
+                    (click)="removeLayout(l.id, $event)"
+                  >
                     <app-chart-icon name="close" [size]="14" />
                   </button>
                 </li>
@@ -822,6 +850,7 @@
 
         <app-chart-host
           #host
+          (viewChanged)="onViewChanged()"
           [bars]="displayBars()"
           [style]="style()"
           [showVolume]="showVolume()"
@@ -939,7 +968,9 @@
                 Add alert at {{ cm.price | number: '1.' + precision() + '-' + precision() }}
               </button>
             }
-            <button type="button" (click)="saveLayout()">Save layout…</button>
+            <button type="button" (click)="duplicateLayout(); closeContextMenu()">
+              Save layout as…
+            </button>
             <button
               type="button"
               class="danger"

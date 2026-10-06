@@ -1326,6 +1326,16 @@ $pane-gap: 4px;
   text-overflow: ellipsis;
 }
 
+.layout-status {
+  align-self: center;
+  font-size: 11px;
+  color: var(--text-muted, #787b86);
+  white-space: nowrap;
+  &--warn {
+    color: var(--warning, #f7a600);
+  }
+}
+
 .tb-badge {
   min-width: 14px;
   height: 14px;
