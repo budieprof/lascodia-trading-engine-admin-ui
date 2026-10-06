@@ -230,3 +230,22 @@ describe('ChartWorkspaceSync', () => {
     expect(sync.incoming()?.state).toEqual(S('XAUUSD'));
   });
 });
+
+import { normaliseView } from '../pages/chart-analysis-page/chart-analysis-page.component';
+
+describe('normaliseView', () => {
+  it('rounds away sub-pixel and fractional-scroll jitter so it never reads as an edit', () => {
+    const a = normaliseView({
+      barSpacing: 6.000001,
+      rightOffset: 4.6,
+      paneHeights: [151.7, 211.2],
+    });
+    const b = normaliseView({
+      barSpacing: 6.000004,
+      rightOffset: 5.2,
+      paneHeights: [152.2, 210.9],
+    });
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+    expect(a).toEqual({ barSpacing: 6, rightOffset: 5, paneHeights: [152, 211] });
+  });
+});

@@ -59,7 +59,7 @@ import { FUNDAMENTAL_PANES, stepDifference, type PanePoint } from '../../panels/
 import { PerformanceTilesComponent } from '../../panels/performance-tiles.component';
 import { SeasonalsComponent } from '../../panels/seasonals.component';
 import { TechnicalsGaugeComponent } from '../../panels/technicals-gauge.component';
-import type { ExternalPane } from '../../chart/chart-host.component';
+import type { ChartViewState, ExternalPane } from '../../chart/chart-host.component';
 import {
   catchError,
   forkJoin,
@@ -2496,8 +2496,8 @@ export class ChartAnalysisPageComponent {
       countdown: this.showCountdown(),
       timezone: this.timezone(),
       indicators: this.active().map((i) => ({ ...i, params: { ...i.params } })),
-      scripts: this.workspaceScripts(),
-      view: untracked(() => this.host()?.viewState() ?? this.pendingView ?? null),
+      scripts: this.savedScriptsState(),
+      view: this.viewSnapshot() ?? this.pendingView ?? null,
       overlays: {
         showOverlays: this.showOverlays(),
         showVolumeProfile: this.showVolumeProfile(),
@@ -2587,6 +2587,7 @@ export class ChartAnalysisPageComponent {
       this.calendarAll.set(p.calendarAll ?? false);
       this.calendarMinImpact.set(p.calendarMinImpact ?? 'Low');
       this.pendingView = s.view ?? null;
+      this.viewSnapshot.set(s.view ? normaliseView(s.view) : null);
 
       // Pine scripts: the newest saved version of "My scripts", else the inline copy.
       this.scriptRuns.set([]);
@@ -2646,9 +2647,27 @@ export class ChartAnalysisPageComponent {
 
   /** Auto-save trigger for changes no signal sees (zoom, scroll, pane resize). */
   onViewChanged(): void {
-    if (this.restored && !this.applyingState && !this.pendingView)
-      this.workspace.markDirty(this.captureState());
+    if (!this.restored || this.applyingState || this.pendingView) return;
+    const v = this.host()?.viewState();
+    if (v) this.viewSnapshot.set(normaliseView(v));
   }
+
+  /**
+   * The zoom / scroll / pane heights as last set by the operator. A signal updated only by
+   * {@link onViewChanged}, so unrelated re-reads of the state (a live script re-run every 2 s)
+   * never pick up a drifting value and save again — that kept the header on "Saving…".
+   */
+  private readonly viewSnapshot = signal<ChartViewState | null>(null, {
+    equal: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+  });
+
+  /**
+   * The scripts as a layout saves them, changing only when the list or inputs change — not on every
+   * live re-run of a script's result.
+   */
+  private readonly savedScriptsState = computed(() => this.workspaceScripts(), {
+    equal: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+  });
 
   // ── Layout menu (server-backed) ──────────────────────────────────────────
 
@@ -3052,4 +3071,16 @@ function writePref(key: string, value: unknown): void {
     } catch {
       /* preference not remembered */
     }
+}
+
+/**
+ * A view state as layouts save it: whole bars of scroll and whole pixels, so sub-pixel jitter and
+ * fractional scroll positions never register as a change.
+ */
+export function normaliseView(v: ChartViewState): ChartViewState {
+  return {
+    barSpacing: Math.round(v.barSpacing * 100) / 100,
+    rightOffset: Math.round(v.rightOffset),
+    paneHeights: v.paneHeights.map((h) => Math.round(h)),
+  };
 }

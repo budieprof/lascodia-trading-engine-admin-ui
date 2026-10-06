@@ -17,6 +17,44 @@ export interface UpcomingEconomicEvent {
   actual: string | null;
   /** When the forecast was captured: PreRelease is the only point-in-time safe value. */
   forecastProvenance: 'None' | 'Unknown' | 'PreRelease' | 'PostRelease' | string;
+  /** Direct (higher is better for the currency), Inverse (lower is better) or Unknown. */
+  polarity?: 'Direct' | 'Inverse' | 'Unknown' | string;
+  /** Beat / Miss / Inline for the currency when measurable. */
+  result?: 'Beat' | 'Miss' | 'Inline' | null;
+}
+
+/** Post-event facts (engine-computed). */
+export interface EconomicEventOutcome {
+  kind: 'Data' | 'Speech' | 'Other' | string;
+  actual: string | null;
+  forecast: string | null;
+  previous: string | null;
+  vsForecast: number | null;
+  vsForecastDirection: 'Above' | 'Below' | 'Equal' | null;
+  vsPrevious: number | null;
+  polarity: string;
+  statement: string;
+}
+
+export interface EconomicEventCoverage {
+  id: number;
+  title: string;
+  source: string;
+  publishedAtUtc: string;
+  url: string | null;
+  summary: string | null;
+}
+
+export interface EconomicEventPairMove {
+  symbol: string;
+  before: number | null;
+  after15m: number | null;
+  after1h: number | null;
+  now: number | null;
+  pips15m: number | null;
+  pips1h: number | null;
+  pipsNow: number | null;
+  note: string | null;
 }
 
 export interface EconomicEventPairReaction {
@@ -34,7 +72,8 @@ export interface EconomicEventScenario {
 /** `POST economic-event/{id}/analysis` — a scenario reading, never a trade call. */
 export interface EconomicEventAnalysis {
   eventId: number;
-  phase: 'PreRelease' | 'Released' | string;
+  /** PreRelease before the event time; PostEvent once it has passed (decided by the clock). */
+  phase: 'PreRelease' | 'PostEvent' | string;
   summary: string;
   whyItMatters: string;
   analysis: string;
@@ -57,6 +96,14 @@ export interface EconomicEventAnalysis {
   llmInvocationId: number | null;
   generatedAtUtc: string;
   cached: boolean;
+  /** Post-event (phase PostEvent) only. */
+  outcome?: EconomicEventOutcome | null;
+  coverage?: EconomicEventCoverage[];
+  reaction?: EconomicEventPairMove[];
+  readLabel?: string | null;
+  read?: string | null;
+  reactionAgreement?: string | null;
+  implications?: { symbol: string; text: string }[];
 }
 
 /** The engine's economic calendar for the chart (engine `docs/api/economic-calendar-api.md`). */

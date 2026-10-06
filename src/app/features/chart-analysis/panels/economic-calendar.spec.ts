@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { currencyFlag, eventCountdown, groupByDay, impactDots, SOON_MS } from './economic-calendar';
+import {
+  currencyFlag,
+  eventCountdown,
+  groupByDay,
+  impactDots,
+  isEventPast,
+  SOON_MS,
+} from './economic-calendar';
 import type { UpcomingEconomicEvent } from '@core/services/economic-calendar.service';
 
 const ev = (id: number, iso: string, actual: string | null = null): UpcomingEconomicEvent => ({
@@ -39,5 +46,11 @@ describe('economic calendar helpers', () => {
     expect([impactDots('High'), impactDots('medium'), impactDots('Low')]).toEqual([3, 2, 1]);
     expect(currencyFlag('eur')).toBe('🇪🇺');
     expect(currencyFlag('XYZ')).toBe('');
+  });
+
+  it("an event is past two minutes after its time (the engine's post-event grace)", () => {
+    const at = '2026-10-06T12:40:00Z';
+    expect(isEventPast({ scheduledAt: at }, Date.parse(at) + 60_000)).toBe(false);
+    expect(isEventPast({ scheduledAt: at }, Date.parse(at) + 120_000)).toBe(true);
   });
 });
