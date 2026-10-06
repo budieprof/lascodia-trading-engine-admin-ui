@@ -893,6 +893,10 @@ export class ChartAnalysisPageComponent {
   /** Right-click menu on a drawing (page-relative coordinates). */
   readonly drawingMenu = signal<{ id: string; x: number; y: number } | null>(null);
   readonly scaleMode = signal<'normal' | 'log' | 'percent'>('normal');
+  /** TradingView's countdown to bar close under the last-price label (saved with the layout). */
+  readonly showCountdown = signal(true);
+  /** When this chart's symbol last had a live price (client ms): a silent feed hides the countdown. */
+  readonly liveAt = signal<number | null>(null);
   readonly objectTreeOpen = signal(false);
   readonly dashOptions: DashStyle[] = ['solid', 'dashed', 'dotted'];
 
@@ -1094,6 +1098,11 @@ export class ChartAnalysisPageComponent {
       // Nothing saves before the saved state was applied, nor while applying it.
       if (!this.restored || this.applyingState) return;
       untracked(() => this.workspace.markDirty(state));
+    });
+    // A live price belongs to one symbol: a switch waits for the new symbol's first tick.
+    effect(() => {
+      this.symbol();
+      untracked(() => this.liveAt.set(null));
     });
     // Leaving the page (route change) saves what is pending.
     this.destroyRef.onDestroy(() => void this.workspace.flush());
@@ -1974,6 +1983,7 @@ export class ChartAnalysisPageComponent {
     if (!tick?.symbol || tick.symbol.toUpperCase() !== this.symbol().toUpperCase()) return;
     const price = tick.bid ?? tick.price ?? tick.ask;
     if (typeof price !== 'number' || !Number.isFinite(price)) return;
+    this.liveAt.set(Date.now());
 
     const current = this.bars();
     if (current.length === 0) return;
@@ -2466,6 +2476,7 @@ export class ChartAnalysisPageComponent {
       style: this.style(),
       showVolume: this.showVolume(),
       scaleMode: this.scaleMode(),
+      countdown: this.showCountdown(),
       timezone: this.timezone(),
       indicators: this.active().map((i) => ({ ...i, params: { ...i.params } })),
       scripts: this.workspaceScripts(),
@@ -2539,6 +2550,7 @@ export class ChartAnalysisPageComponent {
       this.style.set(s.style ?? 'candles');
       this.showVolume.set(s.showVolume ?? true);
       this.scaleMode.set(s.scaleMode ?? 'normal');
+      this.showCountdown.set(s.countdown ?? true);
       this.timezone.set(s.timezone ?? 'UTC');
       this.active.set((s.indicators ?? []).map((i) => ({ ...i, params: { ...i.params } })));
       const o = s.overlays ?? {};

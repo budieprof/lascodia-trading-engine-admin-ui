@@ -27,6 +27,8 @@ export interface ChartWorkspaceState {
   style?: ChartStyle;
   showVolume?: boolean;
   scaleMode?: 'normal' | 'log' | 'percent';
+  /** Countdown to bar close on the price scale (default on). */
+  countdown?: boolean;
   timezone?: string;
   indicators?: ActiveIndicator[];
   scripts?: WorkspaceScript[];
