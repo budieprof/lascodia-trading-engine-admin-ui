@@ -72,6 +72,8 @@ import {
 } from '../patterns/candlestick-patterns';
 import { detectChartPatterns } from '../patterns/chart-patterns';
 import { renderScriptResult, type ScriptRenderHandle } from '../scripts/script-renderer';
+import { PineTableOverlayComponent } from '@shared/pine-chart/components/pine-table-overlay.component';
+import type { TableLayout } from '@shared/pine-chart/render/render-model';
 import type { ChartScriptResult } from '../scripts/chart-script.model';
 import { alignToBars, type PanePoint } from '../panels/fx-fundamentals';
 import { ALL_PATTERNS, profileIdOf, studyKind, studySubId } from '../studies';
@@ -167,7 +169,19 @@ interface IndicatorSeries {
 @Component({
   selector: 'app-chart-host',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PineTableOverlayComponent],
   template: `<div class="chart-host" #container></div>
+    @for (o of scriptTables(); track o.key) {
+      <div
+        class="script-tables"
+        [style.top.px]="o.top"
+        [style.left.px]="o.left"
+        [style.width.px]="o.width"
+        [style.height.px]="o.height"
+      >
+        <app-pine-table-overlay [tables]="o.tables" [paneWidth]="o.width" [paneHeight]="o.height" />
+      </div>
+    }
     @if (inlineEdit(); as ie) {
       <textarea
         class="inline-edit"
@@ -220,6 +234,11 @@ interface IndicatorSeries {
       .chart-host {
         position: absolute;
         inset: 0;
+      }
+      .script-tables {
+        position: absolute;
+        z-index: 5;
+        pointer-events: none;
       }
       .hold-tip {
         position: absolute;
@@ -649,6 +668,8 @@ export class ChartHostComponent implements OnDestroy {
     this.cancelGlide();
     for (const h of this.scriptHandles) h.dispose();
     this.scriptHandles = [];
+    cancelAnimationFrame(this.tablesFrame);
+    this.paneObserver?.disconnect();
     this.resizeObserver?.disconnect();
     this.controller.detach();
     this.chart?.remove();
@@ -997,7 +1018,10 @@ export class ChartHostComponent implements OnDestroy {
 
     this.sizeToContainer(el);
     this.resizeObserver?.disconnect();
-    this.resizeObserver = new ResizeObserver(() => this.sizeToContainer(el));
+    this.resizeObserver = new ResizeObserver(() => {
+      this.sizeToContainer(el);
+      this.layoutScriptTables();
+    });
     this.resizeObserver.observe(el);
 
     this.chart.subscribeCrosshairMove((param) => this.emitLegend(param));
@@ -1524,6 +1548,67 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   private scriptHandles: ScriptRenderHandle[] = [];
+  /** Pine tables of the runs on the chart, one entry per pane, placed over that pane's plot area. */
+  readonly scriptTables = signal<
+    {
+      key: string;
+      top: number;
+      left: number;
+      width: number;
+      height: number;
+      tables: readonly TableLayout[];
+    }[]
+  >([]);
+  private paneObserver: ResizeObserver | null = null;
+  private tablesFrame = 0;
+
+  /** Re-place the script tables (after a render, a resize, or a pane being dragged taller). */
+  private layoutScriptTables(): void {
+    cancelAnimationFrame(this.tablesFrame);
+    this.tablesFrame = requestAnimationFrame(() => {
+      const chart = this.chart;
+      const byPane = new Map<number, TableLayout[]>();
+      for (const h of this.scriptHandles)
+        for (const p of h.tables())
+          byPane.set(p.paneIndex, [...(byPane.get(p.paneIndex) ?? []), ...p.tables]);
+      if (!chart || byPane.size === 0) {
+        if (this.scriptTables().length) this.scriptTables.set([]);
+        return;
+      }
+      const host = this.container().nativeElement.getBoundingClientRect();
+      let left = 0;
+      try {
+        left = chart.priceScale('left').width();
+      } catch {
+        left = 0;
+      }
+      const panes = chart.panes();
+      const out: ReturnType<typeof this.scriptTables> = [];
+      for (const [index, tables] of byPane) {
+        const pane = panes[index];
+        if (!pane) continue;
+        const r = pane.getHTMLElement()?.getBoundingClientRect();
+        const size = chart.paneSize(index);
+        out.push({
+          key: `pane-${index}`,
+          top: r ? r.top - host.top : 0,
+          left,
+          width: size.width,
+          height: size.height,
+          tables,
+        });
+      }
+      this.scriptTables.set(out);
+      // Pane separators can be dragged with no chart event; watch the pane rows themselves.
+      this.paneObserver?.disconnect();
+      this.paneObserver ??= new ResizeObserver(() => this.layoutScriptTables());
+      for (const p of panes) {
+        const row = p.getHTMLElement();
+        if (row) this.paneObserver.observe(row);
+      }
+    });
+  }
+
   private applyScripts(results: ChartScriptResult[], showTrades: boolean): void {
     for (const h of this.scriptHandles) {
       try {
@@ -1543,6 +1628,7 @@ export class ChartHostComponent implements OnDestroy {
         }),
       );
     }
+    this.layoutScriptTables();
   }
 
   /** Candlestick + chart-pattern studies → the shared pattern renderer. */

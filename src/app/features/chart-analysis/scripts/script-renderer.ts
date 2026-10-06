@@ -16,7 +16,7 @@ import {
 
 import { PineLayersPrimitive } from '@shared/pine-chart/lwc/pine-layers-primitive';
 import { buildRenderModel } from '@shared/pine-chart/render/build-render-model';
-import type { PineRenderModel } from '@shared/pine-chart/render/render-model';
+import type { PineRenderModel, TableLayout } from '@shared/pine-chart/render/render-model';
 import type { ChartScriptResult } from './chart-script.model';
 
 export interface ScriptRenderOptions {
@@ -42,6 +42,11 @@ export interface ScriptRenderHandle {
    * that bar, or the two bar sequences differ) — the drawings would be misplaced, so they are hidden.
    */
   aligned(): boolean;
+  /**
+   * The run's Pine tables by host pane index. Tables are anchored to the pane, not to bars, so
+   * they are HTML over the chart (the host mounts the shared table overlay), not canvas.
+   */
+  tables(): { paneIndex: number; tables: readonly TableLayout[] }[];
 }
 
 /**
@@ -68,12 +73,22 @@ export function renderScriptResult(
   options: ScriptRenderOptions = {},
 ): ScriptRenderHandle {
   let showTrades = options.showTrades !== false;
-  const noop: ScriptRenderHandle = { dispose: () => undefined, setShowTrades: () => undefined, aligned: () => false };
+  const noop: ScriptRenderHandle = {
+    dispose: () => undefined,
+    setShowTrades: () => undefined,
+    aligned: () => false,
+    tables: () => [],
+  };
   const run = result.run;
   if (!run || !run.bars.length) return noop;
 
   const model: PineRenderModel = buildRenderModel(
-    { bars: run.bars, outputs: run.outputs, report: run.report, declaration: run.compile?.declaration ?? null },
+    {
+      bars: run.bars,
+      outputs: run.outputs,
+      report: run.report,
+      declaration: run.compile?.declaration ?? null,
+    },
     { pricePrecision: options.pricePrecision ?? null, trades: true },
   );
 
@@ -141,9 +156,7 @@ export function renderScriptResult(
     });
     // The anchor spans the host's own bar times so the pane shares the time axis.
     const base = 0;
-    anchor.setData(
-      mainSeries.data().map((d) => ({ time: d.time, value: base }) as LineData<Time>),
-    );
+    anchor.setData(mainSeries.data().map((d) => ({ time: d.time, value: base }) as LineData<Time>));
     anchor.attachPrimitive(scriptLayers);
     scriptLayers.setData(model.panes.script, model);
     const a = anchor;
@@ -167,6 +180,15 @@ export function renderScriptResult(
       mainLayers.redraw();
     },
     aligned: () => offset() !== null,
+    tables: () => {
+      if (disposed) return [];
+      const out: { paneIndex: number; tables: readonly TableLayout[] }[] = [];
+      if (model.panes.main.tables.length)
+        out.push({ paneIndex: 0, tables: model.panes.main.tables });
+      if (model.panes.script?.tables.length && paneIndex > 0)
+        out.push({ paneIndex, tables: model.panes.script.tables });
+      return out;
+    },
   };
 }
 
