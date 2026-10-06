@@ -252,6 +252,11 @@ export interface ScriptRunRequest {
   trace?: { fromBar: number; toBar: number };
   profile?: boolean;
   chartType?: ScriptChartType;
+  /**
+   * The chart's forming bar (preview only): the engine runs it as the realtime bar so the last
+   * value sits on the bar the chart is forming. Ignored for backtests and ranges.
+   */
+  liveBar?: ScriptRunBar | null;
 }
 
 export interface ScriptRunBar {

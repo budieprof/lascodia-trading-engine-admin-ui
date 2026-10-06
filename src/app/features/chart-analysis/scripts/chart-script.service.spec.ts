@@ -202,4 +202,48 @@ describe('ChartScriptService — engine-backed "My scripts"', () => {
     expect(deleteChartScript).toHaveBeenCalledWith(3);
     expect(svc.savedScripts()).toEqual([]);
   });
+
+  it('sends the forming bar for an indicator preview but never for a strategy backtest', () => {
+    const run = vi.fn(() => of({ compile: { success: true, diagnostics: [], inputs: [] } }));
+    const { svc } = make({ run });
+    const live = { t: 1, o: 1, h: 1, l: 1, c: 1, v: 0 };
+    svc
+      .runOnChart(
+        {
+          key: 'k',
+          source: 'mine',
+          name: 'i',
+          description: '',
+          kind: 'indicator',
+          pineSource: 's',
+        },
+        'EURUSD',
+        '60' as never,
+        {},
+        100,
+        live,
+      )
+      .subscribe();
+    svc
+      .runOnChart(
+        {
+          key: 'k2',
+          source: 'mine',
+          name: 's',
+          description: '',
+          kind: 'strategy',
+          pineSource: 's',
+        },
+        'EURUSD',
+        '60' as never,
+        {},
+        100,
+        live,
+      )
+      .subscribe();
+    const calls = run.mock.calls as unknown as [{ mode: string; liveBar?: unknown }][];
+    expect(calls[0][0]).toMatchObject({ mode: 'preview', liveBar: live });
+    expect(calls[1][0].mode).toBe('backtest');
+    expect(calls[1][0].liveBar).toBeUndefined();
+  });
 });
