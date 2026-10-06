@@ -1,12 +1,16 @@
-import { Injectable, computed, signal } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
 import type { ActiveIndicator, ChartStyle } from '../chart/chart-host.component';
 import type { TvResolution } from '../datafeed/resolution';
+import { ChartPrefsService } from './chart-prefs.service';
 
-const STORAGE_KEY = 'lascodia.chart.layouts.v1';
-const LAST_KEY = 'lascodia.chart.lastLayout.v1';
+/** Pre-engine storage: layouts + templates in one record, and the last layout's id. */
+export const LEGACY_LAYOUTS_KEY = 'lascodia.chart.layouts.v1';
+export const LEGACY_LAST_KEY = 'lascodia.chart.lastLayout.v1';
+/** Study templates — a synced chart preference. */
+export const TEMPLATES_KEY = 'lascodia.chart.studyTemplates.v1';
 
-/** Everything that defines how a chart is set up, minus the drawings. */
-export interface ChartLayout {
+/** A layout as browsers stored them before layouts moved to the engine (migration input only). */
+export interface LegacyChartLayout {
   id: string;
   name: string;
   symbol: string;
@@ -27,64 +31,29 @@ export interface StudyTemplate {
   savedAt: number;
 }
 
-interface Stored {
-  layouts: ChartLayout[];
-  templates: StudyTemplate[];
-}
-
 /**
- * Saved chart layouts and study templates.
- *
- * A layout captures the whole chart setup — symbol, timeframe, style, studies,
- * scale mode, timezone — so an operator can flip between "EURUSD scalping" and
- * "daily review" without rebuilding either.
- *
- * Templates deliberately DROP the symbol and timeframe: they are a set of
- * studies to apply to whatever is on screen. Conflating the two is the usual
- * mistake here, and it makes "apply my template" quietly move the chart to
- * another instrument.
- *
- * Storage is `localStorage` for now, per-browser. Swapping in an engine-backed
- * store changes `read`/`write` only — see plan §8.
+ * Study templates (a set of studies with no symbol or timeframe — "apply my template" must never
+ * move the chart to another instrument). Kept as the synced chart preference
+ * {@link TEMPLATES_KEY}, so they follow the operator across machines. Named layouts live in the
+ * engine (`ChartWorkspaceSync`); {@link legacyLayouts} only feeds the one-time upload.
  */
 @Injectable({ providedIn: 'root' })
 export class ChartLayoutStore {
-  private readonly state = signal<Stored>(this.read());
+  private readonly prefs = inject(ChartPrefsService);
+  private readonly state = signal<StudyTemplate[]>(this.read());
 
-  readonly layouts = computed(() =>
-    [...this.state().layouts].sort((a, b) => b.savedAt - a.savedAt),
-  );
-  readonly templates = computed(() =>
-    [...this.state().templates].sort((a, b) => b.savedAt - a.savedAt),
-  );
+  readonly templates = computed(() => [...this.state()].sort((a, b) => b.savedAt - a.savedAt));
 
-  saveLayout(name: string, snapshot: Omit<ChartLayout, 'id' | 'name' | 'savedAt'>): ChartLayout {
-    const trimmed = name.trim() || 'Untitled layout';
-    const existing = this.state().layouts.find((l) => l.name === trimmed);
-    const layout: ChartLayout = {
-      ...snapshot,
-      id: existing?.id ?? `l_${Date.now().toString(36)}`,
-      name: trimmed,
-      savedAt: Date.now(),
-    };
-    // Saving under an existing name REPLACES it rather than making a second
-    // entry with the same label, which is what "save" means to an operator.
-    this.state.update((s) => ({
-      ...s,
-      layouts: [...s.layouts.filter((l) => l.id !== layout.id), layout],
-    }));
-    this.write();
-    return layout;
-  }
-
-  removeLayout(id: string): void {
-    this.state.update((s) => ({ ...s, layouts: s.layouts.filter((l) => l.id !== id) }));
-    this.write();
+  /** Re-read after the engine's preferences were hydrated into the cache. */
+  reload(): void {
+    this.state.set(this.read());
+    // Templates only an older build's record holds: give them to the synced key once.
+    if (this.prefs.getItem(TEMPLATES_KEY) === null && this.state().length) this.write();
   }
 
   saveTemplate(name: string, indicators: ActiveIndicator[]): StudyTemplate {
     const trimmed = name.trim() || 'Untitled template';
-    const existing = this.state().templates.find((t) => t.name === trimmed);
+    const existing = this.state().find((t) => t.name === trimmed);
     const template: StudyTemplate = {
       id: existing?.id ?? `t_${Date.now().toString(36)}`,
       name: trimmed,
@@ -92,16 +61,13 @@ export class ChartLayoutStore {
       indicators: indicators.map((i) => ({ ...i, params: { ...i.params } })),
       savedAt: Date.now(),
     };
-    this.state.update((s) => ({
-      ...s,
-      templates: [...s.templates.filter((t) => t.id !== template.id), template],
-    }));
+    this.state.update((s) => [...s.filter((t) => t.id !== template.id), template]);
     this.write();
     return template;
   }
 
   removeTemplate(id: string): void {
-    this.state.update((s) => ({ ...s, templates: s.templates.filter((t) => t.id !== id) }));
+    this.state.update((s) => s.filter((t) => t.id !== id));
     this.write();
   }
 
@@ -120,44 +86,47 @@ export class ChartLayoutStore {
     }));
   }
 
-  /** Remember the last layout so the page reopens where it was left. */
-  rememberLast(layoutId: string | null): void {
+  /** Layouts this browser saved before they moved to the engine, and the one last opened. */
+  legacyLayouts(): { layouts: LegacyChartLayout[]; lastId: string | null } {
     try {
-      if (layoutId) localStorage.setItem(LAST_KEY, layoutId);
-      else localStorage.removeItem(LAST_KEY);
+      const raw = localStorage.getItem(LEGACY_LAYOUTS_KEY);
+      const parsed = raw ? (JSON.parse(raw) as { layouts?: LegacyChartLayout[] }) : {};
+      return {
+        layouts: Array.isArray(parsed.layouts) ? parsed.layouts : [],
+        lastId: localStorage.getItem(LEGACY_LAST_KEY),
+      };
     } catch {
-      /* storage unavailable; the chart still works */
+      return { layouts: [], lastId: null };
     }
   }
 
-  lastLayout(): ChartLayout | null {
+  /** After the upload succeeded: the engine owns them now. */
+  clearLegacyLayouts(): void {
     try {
-      const id = localStorage.getItem(LAST_KEY);
-      return id ? (this.state().layouts.find((l) => l.id === id) ?? null) : null;
+      localStorage.removeItem(LEGACY_LAYOUTS_KEY);
+      localStorage.removeItem(LEGACY_LAST_KEY);
     } catch {
-      return null;
+      /* ignore */
     }
   }
 
   private write(): void {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state()));
-    } catch {
-      /* keep the in-memory state; nothing else to do */
-    }
+    this.prefs.setItem(TEMPLATES_KEY, JSON.stringify(this.state()));
   }
 
-  private read(): Stored {
+  private read(): StudyTemplate[] {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return { layouts: [], templates: [] };
-      const parsed = JSON.parse(raw) as Partial<Stored>;
-      return {
-        layouts: Array.isArray(parsed.layouts) ? parsed.layouts : [],
-        templates: Array.isArray(parsed.templates) ? parsed.templates : [],
-      };
+      const raw = this.prefs.getItem(TEMPLATES_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        return Array.isArray(parsed) ? (parsed as StudyTemplate[]) : [];
+      }
+      // Older builds kept templates beside the layouts.
+      const legacy = localStorage.getItem(LEGACY_LAYOUTS_KEY);
+      const old = legacy ? (JSON.parse(legacy) as { templates?: StudyTemplate[] }) : {};
+      return Array.isArray(old.templates) ? old.templates : [];
     } catch {
-      return { layouts: [], templates: [] };
+      return [];
     }
   }
 }

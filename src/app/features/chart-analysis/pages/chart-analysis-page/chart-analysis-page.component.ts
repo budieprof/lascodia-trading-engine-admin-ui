@@ -135,9 +135,12 @@ import {
   CHART_TIMEZONES,
   timezoneOffsetMinutes,
   ChartLayoutStore,
-  type ChartLayout,
   type StudyTemplate,
 } from '../../workspace/layout-store.service';
+import { ChartWorkspaceSync } from '../../workspace/workspace-sync.service';
+import { ChartPrefsService } from '../../workspace/chart-prefs.service';
+import type { ChartWorkspaceState, WorkspaceScript } from '../../workspace/workspace-state';
+import { drawingTemplates } from '../../drawings/drawing-templates';
 import {
   DEFAULT_STYLE,
   RAIL_LAYOUT,
@@ -497,10 +500,7 @@ export class ChartAnalysisPageComponent {
     this.clock.set(shifted.toISOString().slice(11, 19));
   }
 
-  readonly currentLayoutName = computed(() => {
-    this.layoutStore.layouts();
-    return this.layoutStore.lastLayout()?.name ?? 'Unnamed';
-  });
+  readonly currentLayoutName = computed(() => this.workspace.active().name);
   readonly catalogue = INDICATORS;
 
   readonly symbols = signal<CurrencyPairDto[]>([]);
@@ -1064,8 +1064,39 @@ export class ChartAnalysisPageComponent {
    */
   private readonly subscribedSymbols = new Set<string>();
 
+  readonly workspace = inject(ChartWorkspaceSync);
+  private readonly prefs = inject(ChartPrefsService);
+
   constructor() {
     this.loadSymbols();
+
+    // ── Workspace: restore, then auto-save every change (engine `chart/layouts`). ──
+    // The route resolver settled the engine's preferences and active layout before this render.
+    drawingTemplates.useStorage(this.prefs.storage);
+    prefsRef = this.prefs;
+    this.layoutStore.reload();
+    this.magnetStrength.set(readPref('magnetStrength', 'weak'));
+    this.stayInDrawing.set(readPref('stayInDrawing', false));
+    const deepLink = !!this.route.snapshot.paramMap.get('symbol');
+    // "My scripts" first, so a restored script runs its newest saved version.
+    this.chartScripts
+      .loadSaved()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.applyState(this.workspace.initialState, deepLink));
+    // Switches, deletes and newer saves from elsewhere — only those made while this page is up.
+    const seenSeq = this.workspace.incoming()?.seq ?? 0;
+    effect(() => {
+      const incoming = this.workspace.incoming();
+      if (incoming && incoming.seq > seenSeq) untracked(() => this.applyState(incoming.state));
+    });
+    effect(() => {
+      const state = this.captureState();
+      // Nothing saves before the saved state was applied, nor while applying it.
+      if (!this.restored || this.applyingState) return;
+      untracked(() => this.workspace.markDirty(state));
+    });
+    // Leaving the page (route change) saves what is pending.
+    this.destroyRef.onDestroy(() => void this.workspace.flush());
 
     // FX-fundamental studies: fetched per symbol, drawn as their own panes.
     effect(() => {
@@ -1256,15 +1287,21 @@ export class ChartAnalysisPageComponent {
         scrollToRealtime: () => this.host()?.scrollToRealtime(),
         resetScales: () => this.resetScales(),
 
-        layouts: () => this.layoutStore.layouts(),
-        // The toolbar's Save asks for a name through prompt(), which nothing outside the
-        // browser can answer — so the store is called directly with the given name.
-        saveLayout: (name) => this.layoutStore.saveLayout(name, this.snapshotOfChart()).id,
-        applyLayout: (id) => {
-          const found = this.layoutStore.layouts().find((l) => l.id === id);
-          if (found) this.applyLayout(found);
+        layouts: () =>
+          this.workspace.layouts().map((l) => ({
+            id: String(l.id),
+            name: l.name,
+            symbol: l.isActive ? this.symbol() : '',
+            resolution: l.isActive ? this.resolution() : '',
+          })),
+        // The toolbar asks for names through prompt(), which nothing outside the browser can
+        // answer — so the workspace is called directly with the given name.
+        saveLayout: (name) => {
+          void this.workspace.duplicate(name);
+          return '';
         },
-        removeLayout: (id) => this.layoutStore.removeLayout(id),
+        applyLayout: (id) => void this.workspace.switchTo(Number(id)),
+        removeLayout: (id) => void this.workspace.remove(Number(id)),
         studyTemplates: () =>
           this.layoutStore.templates().map((t) => ({
             id: t.id,
@@ -1353,7 +1390,10 @@ export class ChartAnalysisPageComponent {
       this.timezone();
       untracked(() => {
         this.tickClock();
-        queueMicrotask(() => this.flushPendingRange());
+        queueMicrotask(() => {
+          this.flushPendingRange();
+          this.flushPendingView();
+        });
       });
     });
 
@@ -2218,6 +2258,7 @@ export class ChartAnalysisPageComponent {
             );
             return [...kept, { item, result, values, symbol, resolution, requestedBars }];
           });
+          this.restoringScripts.update((l) => l.filter((w) => w.key !== item.key));
           if (result.kind === 'strategy' && !replace) {
             this.testerOpen.set(true);
             this.dockPreference.set('tester');
@@ -2253,6 +2294,7 @@ export class ChartAnalysisPageComponent {
   }
 
   removeScript(key: string): void {
+    this.restoringScripts.update((l) => l.filter((w) => w.key !== key));
     this.scriptRuns.update((runs) => runs.filter((r) => r.item.key !== key));
   }
 
@@ -2414,8 +2456,11 @@ export class ChartAnalysisPageComponent {
 
   // ── Workspace actions ────────────────────────────────────────────────────
 
-  private snapshotOfChart(): Omit<ChartLayout, 'id' | 'name' | 'savedAt'> {
+  /** The whole chart set-up, as the engine saves it (`ChartLayout.state`). */
+  captureState(): ChartWorkspaceState {
+    const draft = this.editorDraft();
     return {
+      v: 1,
       symbol: this.symbol(),
       resolution: this.resolution(),
       style: this.style(),
@@ -2423,45 +2468,188 @@ export class ChartAnalysisPageComponent {
       scaleMode: this.scaleMode(),
       timezone: this.timezone(),
       indicators: this.active().map((i) => ({ ...i, params: { ...i.params } })),
+      scripts: this.workspaceScripts(),
+      view: untracked(() => this.host()?.viewState() ?? this.pendingView ?? null),
+      overlays: {
+        showOverlays: this.showOverlays(),
+        showVolumeProfile: this.showVolumeProfile(),
+        volumeProfileMode: this.volumeProfileMode(),
+        showSupportResistance: this.showSupportResistance(),
+        showStructure: this.showStructure(),
+        showEvents: this.showEvents(),
+        minEventImpact: this.minEventImpact(),
+      },
+      panel: {
+        watchlistOpen: this.watchlistOpen(),
+        width: this.dockWidth(),
+        sidePane: this.sidePane(),
+      },
+      dock: {
+        editorOpen: this.editorOpen(),
+        testerOpen: this.testerOpen(),
+        preference: this.dockPreference(),
+        editorKey: this.editorKey(),
+        editorText: draft?.text ?? null,
+      },
     };
   }
 
-  saveLayout(): void {
-    const name = prompt(
-      'Layout name',
-      `${this.symbol()} ${this.resolutionLabel(this.resolution())}`,
+  /** Scripts on the chart plus restored ones still running, in a stable order. */
+  private workspaceScripts(): WorkspaceScript[] {
+    const runs = this.scriptRuns().map(
+      (r): WorkspaceScript => ({
+        key: r.item.key,
+        source: r.item.source,
+        name: r.item.name,
+        kind: r.item.kind,
+        ...(r.item.pineSource !== undefined ? { pineSource: r.item.pineSource } : {}),
+        ...(r.item.strategyId !== undefined ? { strategyId: r.item.strategyId } : {}),
+        values: r.values,
+      }),
     );
+    const waiting = this.restoringScripts().filter((w) => !runs.some((r) => r.key === w.key));
+    return [...waiting, ...runs].sort((a, b) => a.key.localeCompare(b.key));
+  }
+
+  /** Zoom/scroll/pane heights waiting for the chart's first data. */
+  private pendingView: ChartWorkspaceState['view'] = null;
+  /** True while a saved state is being applied, so applying it does not save it back. */
+  private applyingState = false;
+  /** Set once the saved state (or the defaults) has been applied; nothing saves before. */
+  private restored = false;
+  /** Restored scripts whose run has not come back yet — still part of the layout. */
+  private readonly restoringScripts = signal<WorkspaceScript[]>([]);
+
+  /**
+   * Apply a saved workspace. Missing fields fall back to the chart's defaults, so a new layout
+   * (`{ v: 1 }`) opens a clean chart. `keepSymbol` lets a deep link's symbol/timeframe win.
+   */
+  applyState(st: ChartWorkspaceState | null, keepSymbol = false): void {
+    const s = st ?? { v: 1 as const };
+    this.applyingState = true;
+    try {
+      const symbolBefore = this.symbol();
+      const resBefore = this.resolution();
+      if (!keepSymbol) {
+        this.symbol.set(s.symbol ?? 'EURUSD');
+        if (s.resolution && (SUPPORTED_RESOLUTIONS as readonly string[]).includes(s.resolution))
+          this.resolution.set(s.resolution);
+        else this.resolution.set('60');
+      }
+      this.style.set(s.style ?? 'candles');
+      this.showVolume.set(s.showVolume ?? true);
+      this.scaleMode.set(s.scaleMode ?? 'normal');
+      this.timezone.set(s.timezone ?? 'UTC');
+      this.active.set((s.indicators ?? []).map((i) => ({ ...i, params: { ...i.params } })));
+      const o = s.overlays ?? {};
+      this.showOverlays.set(o.showOverlays ?? false);
+      this.showVolumeProfile.set(o.showVolumeProfile ?? false);
+      if (o.volumeProfileMode) this.volumeProfileMode.set(o.volumeProfileMode as VolumeProfileMode);
+      this.showSupportResistance.set(o.showSupportResistance ?? false);
+      this.showStructure.set(o.showStructure ?? false);
+      this.showEvents.set(o.showEvents ?? true);
+      this.minEventImpact.set(o.minEventImpact ?? 'Medium');
+      const p = s.panel ?? {};
+      if (p.watchlistOpen !== undefined) this.watchlistOpen.set(p.watchlistOpen);
+      if (p.width && p.width >= 240 && p.width <= 640) this.dockWidth.set(p.width);
+      this.sidePane.set(p.sidePane ?? 'none');
+      this.pendingView = s.view ?? null;
+
+      // Pine scripts: the newest saved version of "My scripts", else the inline copy.
+      this.scriptRuns.set([]);
+      this.restoringScripts.set(s.scripts ?? []);
+      const d = s.dock ?? {};
+      this.testerOpen.set(d.testerOpen ?? true);
+      this.dockPreference.set(d.preference ?? 'tester');
+      this.editorOpen.set(false);
+      for (const w of s.scripts ?? []) this.runScript(this.restoredItem(w), w.values ?? {}, true);
+      if (d.editorOpen) {
+        this.editorKey.set(d.editorKey ?? null);
+        this.editorOpen.set(true);
+        if (d.editorText) {
+          this.editorDraft.set({ key: d.editorKey ?? null, text: d.editorText });
+          this.assistSource.set({ text: d.editorText, seq: ++this.assistSeq });
+        }
+      }
+      if (!keepSymbol && (this.symbol() !== symbolBefore || this.resolution() !== resBefore))
+        void this.reload();
+      else queueMicrotask(() => this.flushPendingView());
+    } finally {
+      // Applying is over once the signals settled: the state as this chart reads it back is the
+      // new baseline, not an edit — so a load or a switch never writes itself back.
+      queueMicrotask(() => {
+        this.workspace.rebase(this.captureState());
+        this.applyingState = false;
+        this.restored = true;
+      });
+    }
+  }
+
+  private restoredItem(w: WorkspaceScript): ChartScriptItem {
+    const savedId = w.source === 'mine' && w.key.startsWith('mine:') ? w.key.slice(5) : null;
+    const saved = savedId ? this.chartScripts.savedScripts().find((x) => x.id === savedId) : null;
+    return {
+      key: w.key,
+      source: w.source,
+      name: saved?.name ?? w.name,
+      description: '',
+      kind: saved?.kind ?? w.kind,
+      ...(w.strategyId !== undefined ? { strategyId: w.strategyId } : {}),
+      ...((saved?.source ?? w.pineSource) !== undefined
+        ? { pineSource: saved?.source ?? w.pineSource }
+        : {}),
+    };
+  }
+
+  private flushPendingView(): void {
+    const v = this.pendingView;
+    const host = this.host();
+    if (!v || !host || !this.bars().length) return;
+    this.pendingView = null;
+    host.applyViewState(v);
+    // Indicator panes are created a moment after the data; size them once they exist.
+    setTimeout(() => host.applyViewState({ ...v, barSpacing: NaN, rightOffset: NaN }), 1_200);
+  }
+
+  /** Auto-save trigger for changes no signal sees (zoom, scroll, pane resize). */
+  onViewChanged(): void {
+    if (this.restored && !this.applyingState && !this.pendingView)
+      this.workspace.markDirty(this.captureState());
+  }
+
+  // ── Layout menu (server-backed) ──────────────────────────────────────────
+
+  newLayout(): void {
+    const name = prompt('New layout name', 'Unnamed');
     if (name === null) return;
-    const saved = this.layoutStore.saveLayout(name, this.snapshotOfChart());
-    this.layoutStore.rememberLast(saved.id);
     this.layoutMenuOpen.set(false);
+    void this.workspace.newLayout(name);
   }
 
-  applyLayout(layout: ChartLayout): void {
+  renameLayout(): void {
+    const name = prompt('Rename layout', this.workspace.active().name);
+    if (name === null || !name.trim()) return;
     this.layoutMenuOpen.set(false);
-    this.style.set(layout.style);
-    this.showVolume.set(layout.showVolume);
-    this.scaleMode.set(layout.scaleMode);
-    this.timezone.set(layout.timezone ?? 'UTC');
-    // Fresh uids: reapplying a layout must not collide with studies already on
-    // the chart, which would leave the new ones un-rendered.
-    this.active.set(
-      layout.indicators.map((i, n) => ({
-        ...i,
-        params: { ...i.params },
-        uid: `${i.defId}-${Date.now().toString(36)}-${n}`,
-      })),
-    );
-    this.layoutStore.rememberLast(layout.id);
-    const changed = layout.symbol !== this.symbol() || layout.resolution !== this.resolution();
-    this.symbol.set(layout.symbol);
-    this.resolution.set(layout.resolution);
-    if (changed) void this.reload();
+    void this.workspace.rename(name);
   }
 
-  removeLayout(id: string, ev: Event): void {
+  duplicateLayout(): void {
+    const name = prompt('Copy layout as', `${this.workspace.active().name} copy`);
+    if (name === null) return;
+    this.layoutMenuOpen.set(false);
+    void this.workspace.duplicate(name);
+  }
+
+  switchLayout(id: number): void {
+    this.layoutMenuOpen.set(false);
+    void this.workspace.switchTo(id);
+  }
+
+  removeLayout(id: number, ev: Event): void {
     ev.stopPropagation();
-    this.layoutStore.removeLayout(id);
+    const l = this.workspace.layouts().find((x) => x.id === id);
+    if (!confirm(`Delete layout “${l?.name ?? id}”? This cannot be undone.`)) return;
+    void this.workspace.remove(id);
   }
 
   saveTemplate(): void {
@@ -2821,10 +3009,14 @@ function readPref<T>(key: string, fallback: T): T {
   }
 }
 
+let prefsRef: ChartPrefsService | null = null;
 function writePref(key: string, value: unknown): void {
-  try {
-    localStorage.setItem(`lascodia.chart.pref.${key}`, JSON.stringify(value));
-  } catch {
-    /* preference not remembered */
-  }
+  // Synced across machines (engine `chart/preferences`); the cache is localStorage.
+  if (prefsRef) prefsRef.setItem(`lascodia.chart.pref.${key}`, JSON.stringify(value));
+  else
+    try {
+      localStorage.setItem(`lascodia.chart.pref.${key}`, JSON.stringify(value));
+    } catch {
+      /* preference not remembered */
+    }
 }

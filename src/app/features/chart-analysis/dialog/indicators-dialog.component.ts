@@ -3,6 +3,7 @@ import {
   Component,
   ElementRef,
   computed,
+  inject,
   input,
   output,
   signal,
@@ -10,6 +11,7 @@ import {
   afterNextRender,
 } from '@angular/core';
 import { ChartIconComponent } from '../icons/chart-icon.component';
+import { ChartPrefsService } from '../workspace/chart-prefs.service';
 import {
   ALL,
   DIALOG_TABS,
@@ -362,6 +364,7 @@ export class IndicatorsDialogComponent {
   readonly closed = output<void>();
   /** A deletable item the operator confirmed deleting; the page deletes it and refreshes `items`. */
   readonly deleteRequested = output<DialogItem>();
+  private readonly prefs = inject(ChartPrefsService);
 
   /** Key of the row showing its "Delete …?" confirmation, if any. */
   readonly confirming = signal<string | null>(null);
@@ -445,10 +448,7 @@ export class IndicatorsDialogComponent {
     if (next.has(k)) next.delete(k);
     else next.add(k);
     this.favourites.set(next);
-    try {
-      localStorage.setItem(FAV_STORAGE, JSON.stringify([...next]));
-    } catch {
-      /* private mode — favourites just don't persist */
-    }
+    // Synced across machines (engine `chart/preferences`); localStorage is the cache.
+    this.prefs.setItem(FAV_STORAGE, JSON.stringify([...next]));
   }
 }

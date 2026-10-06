@@ -44,6 +44,7 @@ import {
   type WatchQuote,
   type WatchRow,
 } from './watchlist.model';
+import { ChartPrefsService } from '../workspace/chart-prefs.service';
 
 const QUOTE_REFRESH_MS = 30_000;
 const FLASH_MS = 700;
@@ -89,6 +90,7 @@ interface SectionView {
 })
 export class WatchlistPanelComponent {
   readonly store = inject(WatchlistService);
+  private readonly prefs = inject(ChartPrefsService);
   private readonly host = inject(ElementRef<HTMLElement>);
 
   readonly pairs = input<CurrencyPairDto[]>([]);
@@ -464,11 +466,7 @@ export class WatchlistPanelComponent {
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-      try {
-        localStorage.setItem(SPLIT_KEY, String(this.listFraction()));
-      } catch {
-        // Per-viewer convenience only.
-      }
+      this.prefs.setItem(SPLIT_KEY, String(this.listFraction()));
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);

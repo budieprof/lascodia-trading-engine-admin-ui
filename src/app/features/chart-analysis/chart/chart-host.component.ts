@@ -122,6 +122,15 @@ export interface ExternalPane {
 }
 
 /** An indicator the operator has added to this chart. */
+/** Zoom, scroll and pane heights of a chart, as layouts save them. */
+export interface ChartViewState {
+  barSpacing: number;
+  /** Bars from the realtime edge (negative = scrolled back). */
+  rightOffset: number;
+  /** Height of each pane in px, main pane first. */
+  paneHeights: number[];
+}
+
 export interface ActiveIndicator {
   /** Instance id — an indicator can be added more than once with different inputs. */
   uid: string;
@@ -380,6 +389,8 @@ export class ChartHostComponent implements OnDestroy {
   readonly drawingSettings = output<string>();
   /** Right-click on a drawing — open the drawing context menu (client coords). */
   readonly drawingContextMenu = output<{ id: string; clientX: number; clientY: number }>();
+  /** Zoom/scroll or a pane resize settled — the page auto-saves {@link viewState}. */
+  readonly viewChanged = output<void>();
 
   private chart: IChartApi | null = null;
   // Includes 'Histogram' because the Column style plots the close as bars on
@@ -756,6 +767,41 @@ export class ChartHostComponent implements OnDestroy {
     }, 120);
   }
 
+  private viewTimer: ReturnType<typeof setTimeout> | undefined;
+  private scheduleViewChanged(): void {
+    clearTimeout(this.viewTimer);
+    this.viewTimer = setTimeout(() => this.viewChanged.emit(), 400);
+  }
+
+  /**
+   * Zoom, scroll and pane heights, as a layout saves them. Zoom is the bar spacing and the scroll
+   * is the offset from the realtime edge (TradingView keeps the same): an absolute time window
+   * would reopen tomorrow on yesterday's bars.
+   */
+  viewState(): ChartViewState | null {
+    if (!this.chart) return null;
+    const scale = this.chart.timeScale();
+    return {
+      barSpacing: scale.options().barSpacing,
+      rightOffset: Math.round(scale.scrollPosition() * 100) / 100,
+      paneHeights: this.chart.panes().map((p) => p.getHeight()),
+    };
+  }
+
+  /** Re-apply a saved {@link viewState}; panes not created yet keep their default height. */
+  applyViewState(v: ChartViewState | null | undefined): boolean {
+    if (!this.chart || !v) return false;
+    const scale = this.chart.timeScale();
+    if (Number.isFinite(v.barSpacing) && v.barSpacing > 0)
+      scale.applyOptions({ barSpacing: v.barSpacing });
+    if (Number.isFinite(v.rightOffset)) scale.scrollToPosition(v.rightOffset, false);
+    const panes = this.chart.panes();
+    (v.paneHeights ?? []).forEach((h, i) => {
+      if (i > 0 && panes[i] && Number.isFinite(h) && h > 20) panes[i].setHeight(h);
+    });
+    return true;
+  }
+
   /** Scroll to the most recent bar. */
   scrollToRealtime(): void {
     this.chart?.timeScale().scrollToRealTime();
@@ -1060,7 +1106,10 @@ export class ChartHostComponent implements OnDestroy {
       // profile per frame would make the pan stutter.
       this.scheduleAnalysis();
       this.scheduleVisibleProfiles();
+      this.scheduleViewChanged();
     });
+    // Pane separators are dragged with the pointer; heights have no change event of their own.
+    el.addEventListener('pointerup', () => this.scheduleViewChanged());
 
     this.applyData(this.bars(), this.style(), this.showVolume(), this.precision());
     this.applyIndicators(this.indicators(), this.bars());

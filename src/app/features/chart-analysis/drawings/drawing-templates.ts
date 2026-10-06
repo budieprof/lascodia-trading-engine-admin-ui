@@ -16,7 +16,9 @@ export interface DrawingTemplate {
   options?: Record<string, unknown>;
 }
 
-type Shelf = Partial<Record<DrawingKind, { templates: DrawingTemplate[]; default?: DrawingTemplate }>>;
+type Shelf = Partial<
+  Record<DrawingKind, { templates: DrawingTemplate[]; default?: DrawingTemplate }>
+>;
 
 const KEY = 'lascodia.chart.drawing-templates.v1';
 
@@ -30,10 +32,23 @@ export function templateStyle(style: DrawingStyle): Partial<DrawingStyle> {
 export class DrawingTemplates {
   private readonly shelf = signal<Shelf>({});
 
-  constructor(private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null) {
+  constructor(private storage: Pick<Storage, 'getItem' | 'setItem'> | null) {
+    this.reload();
+  }
+
+  /**
+   * Switch to another storage (the synced chart preferences) and re-read: the shelf is built at
+   * module load, before the engine's preferences were hydrated into the cache.
+   */
+  useStorage(storage: Pick<Storage, 'getItem' | 'setItem'>): void {
+    this.storage = storage;
+    this.reload();
+  }
+
+  reload(): void {
     try {
-      const raw = storage?.getItem(KEY);
-      if (raw) this.shelf.set(JSON.parse(raw) as Shelf);
+      const raw = this.storage?.getItem(KEY);
+      this.shelf.set(raw ? (JSON.parse(raw) as Shelf) : {});
     } catch {
       /* unreadable shelf: start empty */
     }

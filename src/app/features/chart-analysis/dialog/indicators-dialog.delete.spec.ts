@@ -9,6 +9,7 @@ vi.mock('@angular/core', async (orig) => ({
 
 import { IndicatorsDialogComponent } from './indicators-dialog.component';
 import type { DialogItem } from './dialog-items';
+import { ChartPrefsService } from '../workspace/chart-prefs.service';
 
 const mine: DialogItem = {
   kind: 'script',
@@ -21,7 +22,11 @@ const builtIn: DialogItem = { kind: 'indicator', id: 'rsi', name: 'RSI', categor
 
 function make(): IndicatorsDialogComponent {
   return runInInjectionContext(
-    Injector.create({ providers: [] }),
+    Injector.create({
+      providers: [
+        { provide: ChartPrefsService, useValue: { setItem: vi.fn(), getItem: () => null } },
+      ],
+    }),
     () => new IndicatorsDialogComponent(),
   );
 }
