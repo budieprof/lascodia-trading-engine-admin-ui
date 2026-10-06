@@ -6,7 +6,7 @@ import { ScriptingApiError, ScriptingService } from '@core/services/scripting.se
 import { StrategiesService } from '@core/services/strategies.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { ChartIndicatorScriptDto } from '@core/api/scripting.types';
-import { ChartScriptService, LEGACY_STORAGE_KEY } from './chart-script.service';
+import { ChartScriptService, DRAFTS_STORAGE_KEY, LEGACY_STORAGE_KEY } from './chart-script.service';
 
 function dto(
   id: number,
@@ -28,7 +28,7 @@ function legacy(id: string, name: string, source = `//@version=6\nindicator("${n
 }
 
 function make(scripting: Partial<Record<keyof ScriptingService, unknown>>) {
-  const notify = { error: vi.fn(), success: vi.fn() };
+  const notify = { error: vi.fn(), success: vi.fn(), warning: vi.fn() };
   const injector = Injector.create({
     providers: [
       { provide: ScriptingService, useValue: { listChartScripts: () => of([]), ...scripting } },
@@ -73,28 +73,96 @@ describe('ChartScriptService — engine-backed "My scripts"', () => {
     expect(notify.success).toHaveBeenCalled();
   });
 
-  it('keeps the key, the failed script and an error when one upload fails; skips already-uploaded ones on retry', () => {
+  it('keeps the key and retries only transient failures; skips already-uploaded ones on retry', () => {
     localStorage.setItem(
       LEGACY_STORAGE_KEY,
-      JSON.stringify([legacy('a', 'One'), legacy('b', 'Bad')]),
+      JSON.stringify([legacy('a', 'One'), legacy('b', 'Flaky')]),
     );
     const createChartScript = vi.fn((req: { name: string; pineSource: string }) =>
-      req.name === 'Bad'
-        ? throwError(() => new ScriptingApiError('PS1 at 1:1: nope', '-11'))
+      req.name === 'Flaky'
+        ? throwError(() => new ScriptingApiError('Engine unreachable', null, null, 0))
         : of(dto(1, req.name, req.pineSource)),
     );
     const { svc, notify } = make({ createChartScript });
-    expect(localStorage.getItem(LEGACY_STORAGE_KEY)).not.toBeNull();
+    expect(
+      JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY)!).map((s: { id: string }) => s.id),
+    ).toEqual(['b']);
     expect(svc.savedScriptsError()).toContain('could not be moved');
-    expect(notify.error).toHaveBeenCalled();
+    expect(notify.error).toHaveBeenCalledTimes(1);
     expect(svc.savedScripts().map((s) => s.id)).toEqual(['1', 'local-b']);
 
-    // Next load: "One" is already in the engine (same name + source) — only "Bad" is retried.
     createChartScript.mockClear();
     const scripting = (svc as unknown as { scripting: Record<string, unknown> }).scripting;
     scripting['listChartScripts'] = () => of([dto(1, 'One')]);
     svc.loadSaved().subscribe();
-    expect(createChartScript.mock.calls.map((c) => c[0].name)).toEqual(['Bad']);
+    expect(createChartScript.mock.calls.map((c) => c[0].name)).toEqual(['Flaky']);
+  });
+
+  it('a 5xx is transient too', () => {
+    localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify([legacy('a', 'One')]));
+    make({
+      createChartScript: () =>
+        throwError(() => new ScriptingApiError('Server error', null, null, 500)),
+    });
+    expect(localStorage.getItem(LEGACY_STORAGE_KEY)).not.toBeNull();
+    expect(localStorage.getItem(DRAFTS_STORAGE_KEY)).toBeNull();
+  });
+
+  it('a compile refusal (-11) becomes an unsaved draft, clears the main key and toasts once', async () => {
+    localStorage.setItem(
+      LEGACY_STORAGE_KEY,
+      JSON.stringify([legacy('a', 'One'), legacy('b', 'Bad', 'broken')]),
+    );
+    const createChartScript = vi.fn((req: { name: string; pineSource: string }) =>
+      req.name === 'Bad'
+        ? throwError(() => new ScriptingApiError('PS2001 at 3:6: nope', '-11'))
+        : of(dto(1, req.name, req.pineSource)),
+    );
+    const { svc, notify } = make({ createChartScript });
+    expect(localStorage.getItem(LEGACY_STORAGE_KEY)).toBeNull();
+    const drafts = JSON.parse(localStorage.getItem(DRAFTS_STORAGE_KEY)!);
+    expect(drafts.map((d: { id: string; source: string }) => [d.id, d.source])).toEqual([
+      ['draft-b', 'broken'],
+    ]);
+    expect(notify.warning).toHaveBeenCalledTimes(1);
+    expect(notify.error).not.toHaveBeenCalled();
+    expect(svc.savedScriptsError()).toBeNull();
+    expect(svc.savedScripts().map((s) => s.id)).toEqual(['1', 'draft-b']);
+
+    const cat = await firstValueFrom(svc.listItems());
+    const draft = cat.mine.find((m) => m.key === 'mine:draft-b')!;
+    expect(draft.description).toBe('Unsaved draft (compile error)');
+    expect(draft.pineSource).toBe('broken');
+
+    // Later loads: no upload attempt, no toast, draft still listed.
+    createChartScript.mockClear();
+    notify.warning.mockClear();
+    const scripting = (svc as unknown as { scripting: Record<string, unknown> }).scripting;
+    scripting['listChartScripts'] = () => of([dto(1, 'One')]);
+    await firstValueFrom(svc.loadSaved());
+    expect(createChartScript).not.toHaveBeenCalled();
+    expect(notify.warning).not.toHaveBeenCalled();
+    expect(svc.savedScripts().map((s) => s.id)).toEqual(['1', 'draft-b']);
+  });
+
+  it('saving a draft under its name retires it; deleting a draft removes it', async () => {
+    localStorage.setItem(
+      DRAFTS_STORAGE_KEY,
+      JSON.stringify([
+        { ...legacy('draft-x', 'Fixme', 'broken'), draftReason: 'nope' },
+        { ...legacy('draft-y', 'Other', 'broken') },
+      ]),
+    );
+    const createChartScript = vi.fn((req: { name: string; pineSource: string }) =>
+      of(dto(9, req.name, req.pineSource)),
+    );
+    const { svc } = make({ createChartScript });
+    await firstValueFrom(svc.saveScript('Fixme', 'fixed'));
+    expect(createChartScript).toHaveBeenCalledWith({ name: 'Fixme', pineSource: 'fixed' });
+    expect(svc.savedScripts().map((s) => s.id)).toEqual(['9', 'draft-y']);
+    await firstValueFrom(svc.deleteScript('draft-y'));
+    expect(localStorage.getItem(DRAFTS_STORAGE_KEY)).toBeNull();
+    expect(svc.savedScripts().map((s) => s.id)).toEqual(['9']);
   });
 
   it('a failed list keeps the error state and toasts', async () => {

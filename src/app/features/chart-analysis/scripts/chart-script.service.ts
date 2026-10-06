@@ -16,7 +16,7 @@ import {
 
 import { NotificationService } from '@core/notifications/notification.service';
 
-import { ScriptingService } from '@core/services/scripting.service';
+import { ScriptingApiError, ScriptingService } from '@core/services/scripting.service';
 import { StrategiesService } from '@core/services/strategies.service';
 import type {
   ChartIndicatorScriptDto,
@@ -61,16 +61,23 @@ export interface ChartScriptCatalog {
 
 /** A script the operator saved from the chart's Pine editor. */
 export interface SavedChartScript {
-  /** The engine id as a string; `local-…` for a script still only in this browser (not migrated). */
+  /**
+   * The engine id as a string; `local-…` for a script still only in this browser (not migrated
+   * yet, retried), `draft-…` for one the engine refused to compile (kept in this browser to fix).
+   */
   id: string;
   name: string;
   source: string;
   kind: 'indicator' | 'strategy';
   updatedAt: number;
+  /** Set on an unsaved draft: why the engine refused it. */
+  draftReason?: string;
 }
 
 /** Pre-engine storage of "My scripts"; read once to migrate, then cleared. */
 export const LEGACY_STORAGE_KEY = 'lascodia.chart-analysis.scripts.v1';
+/** Migrated scripts the engine refused to compile, kept so the operator can fix and re-save them. */
+export const DRAFTS_STORAGE_KEY = 'lascodia.chart-analysis.scripts.drafts.v1';
 const DEFAULT_LAST_BARS = 2000;
 /** The engine caps a preview at 20,000 bars. */
 const MAX_LAST_BARS = 20_000;
@@ -151,7 +158,7 @@ export class ChartScriptService {
     return this.scripting.listChartScripts().pipe(
       switchMap((remote) => this.migrateLegacy(remote)),
       map(({ remote, leftovers }) => {
-        const list = [...remote.map(fromDto), ...leftovers];
+        const list = [...remote.map(fromDto), ...leftovers, ...readDrafts().map(asDraftItem)];
         this.savedScripts.set(list);
         if (!leftovers.length) this.savedScriptsError.set(null);
         return list;
@@ -165,7 +172,13 @@ export class ChartScriptService {
     );
   }
 
-  /** Uploads localStorage scripts not already in the engine; clears the key only if all succeed. */
+  /**
+   * Uploads localStorage scripts not already in the engine. A script the engine refuses for good
+   * (`-11` compile error / `library()`, `-01` validation) becomes an unsaved draft under
+   * {@link DRAFTS_STORAGE_KEY} — still openable, fixable and re-savable — and the main key is
+   * cleared once every script has either uploaded or become a draft. Transient failures (network,
+   * 5xx) keep the key so the next load retries them. Each outcome toasts once, here.
+   */
   private migrateLegacy(
     remote: ChartIndicatorScriptDto[],
   ): Observable<{ remote: ChartIndicatorScriptDto[]; leftovers: SavedChartScript[] }> {
@@ -185,29 +198,51 @@ export class ChartScriptService {
           .createChartScript({ name: l.name.trim() || 'Untitled script', pineSource: l.source })
           .pipe(
             map((dto) => ({ ok: true as const, dto, local: l })),
-            catchError((e: Error) => of({ ok: false as const, error: e?.message ?? '', local: l })),
+            catchError((e: ScriptingApiError) =>
+              of({
+                ok: false as const,
+                error: e?.message ?? '',
+                permanent: isPermanentRefusal(e),
+                local: l,
+              }),
+            ),
           ),
       ),
       toArray(),
       map((results) => {
         const uploaded = results.flatMap((r) => (r.ok ? [r.dto] : []));
-        const failed = results.flatMap((r) => (r.ok ? [] : [r]));
-        if (!failed.length) {
-          clearLegacy();
-          if (uploaded.length)
-            this.notify.success(
-              `Moved ${uploaded.length} script(s) from this browser to the engine.`,
-            );
-        } else {
+        const refused = results.flatMap((r) => (!r.ok && r.permanent ? [r] : []));
+        const transient = results.flatMap((r) => (!r.ok && !r.permanent ? [r] : []));
+
+        if (refused.length) {
+          const drafts = readDrafts();
+          for (const r of refused)
+            drafts.push({ ...r.local, id: `draft-${r.local.id}`, draftReason: r.error });
+          writeDrafts(drafts);
+        }
+        // Everything either uploaded or became a draft: the legacy key has done its job.
+        if (!transient.length) clearLegacy();
+        else writeLegacy(transient.map((t) => t.local));
+
+        if (uploaded.length)
+          this.notify.success(
+            `Moved ${uploaded.length} script(s) from this browser to the engine.`,
+          );
+        if (refused.length)
+          this.notify.warning(
+            `${refused.length} script(s) from this browser do not compile and were kept as unsaved drafts ` +
+              `in My scripts (${refused[0].local.name}: ${refused[0].error || 'refused'}). Open one, fix it and Save.`,
+          );
+        if (transient.length) {
           const message =
-            `${failed.length} of ${pending.length} script(s) saved in this browser could not be moved to the engine ` +
-            `(${failed[0].local.name}: ${failed[0].error || 'failed'}). They stay in this browser and will be retried.`;
+            `${transient.length} script(s) saved in this browser could not be moved to the engine ` +
+            `(${transient[0].local.name}: ${transient[0].error || 'failed'}). They stay in this browser and will be retried.`;
           this.savedScriptsError.set(message);
           this.notify.error(message);
         }
         return {
           remote: [...uploaded, ...remote],
-          leftovers: failed.map((f) => ({ ...f.local, id: `local-${f.local.id}` })),
+          leftovers: transient.map((f) => ({ ...f.local, id: `local-${f.local.id}` })),
         };
       }),
     );
@@ -277,7 +312,7 @@ export class ChartScriptService {
   ): Observable<SavedChartScript> {
     const trimmed = name.trim() || 'Untitled script';
     const existing = this.savedScripts().find(
-      (s) => s.name === trimmed && !s.id.startsWith('local-'),
+      (s) => s.name === trimmed && !s.id.startsWith('local-') && !s.id.startsWith('draft-'),
     );
     const req = { name: trimmed, pineSource: source };
     const call$ = existing
@@ -285,6 +320,17 @@ export class ChartScriptService {
       : this.scripting.createChartScript(req);
     return call$.pipe(
       map(fromDto),
+      tap(() => {
+        // Saving a draft's name for real retires the draft.
+        const drafts = readDrafts();
+        const rest = drafts.filter((d) => d.name.trim() !== trimmed);
+        if (rest.length !== drafts.length) {
+          writeDrafts(rest);
+          this.savedScripts.update((list) =>
+            list.filter((s) => !(s.id.startsWith('draft-') && s.name.trim() === trimmed)),
+          );
+        }
+      }),
       tap((saved) =>
         this.savedScripts.update((list) => [saved, ...list.filter((s) => s.id !== saved.id)]),
       ),
@@ -294,6 +340,11 @@ export class ChartScriptService {
   /** Deletes a saved script (engine, or a not-yet-migrated local one). */
   deleteScript(id: string): Observable<void> {
     const drop = () => this.savedScripts.update((list) => list.filter((s) => s.id !== id));
+    if (id.startsWith('draft-')) {
+      writeDrafts(readDrafts().filter((s) => s.id !== id));
+      drop();
+      return of(undefined);
+    }
     if (id.startsWith('local-')) {
       const localId = id.slice('local-'.length);
       writeLegacy(readLegacy().filter((s) => s.id !== localId));
@@ -326,7 +377,11 @@ function savedItem(s: SavedChartScript): ChartScriptItem {
     key: `mine:${s.id}`,
     source: 'mine',
     name: s.name,
-    description: s.kind === 'strategy' ? 'Strategy' : 'Indicator',
+    description: s.id.startsWith('draft-')
+      ? 'Unsaved draft (compile error)'
+      : s.kind === 'strategy'
+        ? 'Strategy'
+        : 'Indicator',
     kind: s.kind,
     pineSource: s.source,
   };
@@ -365,4 +420,36 @@ function writeLegacy(list: SavedChartScript[]): void {
 
 function clearLegacy(): void {
   writeLegacy([]);
+}
+
+function asDraftItem(d: SavedChartScript): SavedChartScript {
+  return d.id.startsWith('draft-') ? d : { ...d, id: `draft-${d.id}` };
+}
+
+/** A refusal retrying cannot fix: the script itself is wrong (compile error, library(), validation). */
+function isPermanentRefusal(e: ScriptingApiError | null | undefined): boolean {
+  if (!e) return false;
+  if (e.code === '-11' || e.code === '-01') return true;
+  return e.httpStatus === 400 || e.httpStatus === 422;
+}
+
+function readDrafts(): SavedChartScript[] {
+  try {
+    const raw = localStorage.getItem(DRAFTS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((s) => s && typeof s.id === 'string' && typeof s.source === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeDrafts(list: SavedChartScript[]): void {
+  try {
+    if (list.length) localStorage.setItem(DRAFTS_STORAGE_KEY, JSON.stringify(list));
+    else localStorage.removeItem(DRAFTS_STORAGE_KEY);
+  } catch {
+    /* storage blocked */
+  }
 }
