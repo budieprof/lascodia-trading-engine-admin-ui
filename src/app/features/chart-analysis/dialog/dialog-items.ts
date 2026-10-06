@@ -28,6 +28,8 @@ export interface DialogItem {
   /** Short right-aligned tag ("overlay", "pane", "bullish"…). */
   tag?: string;
   keywords?: string[];
+  /** The operator can delete it from the dialog ("My scripts" entries and drafts). */
+  deletable?: boolean;
 }
 
 export const TAB_FOR_KIND: Record<DialogItemKind, DialogTab> = {
