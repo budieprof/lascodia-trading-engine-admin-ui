@@ -746,6 +746,16 @@
       <button
         type="button"
         class="strip-btn"
+        [class.active]="sidePane() === 'calendar'"
+        (click)="openSidePane('calendar')"
+        title="Economic calendar"
+        data-testid="calendar-button"
+      >
+        <app-chart-icon name="calendar" [size]="28" />
+      </button>
+      <button
+        type="button"
+        class="strip-btn"
         [class.active]="objectTreeOpen()"
         (click)="objectTreeOpen.set(!objectTreeOpen())"
         [disabled]="!drawings.visible().length"
@@ -1136,6 +1146,17 @@
           </aside>
         }
 
+        @if (sidePane() === 'calendar') {
+          <aside class="side-pane">
+            <app-economic-calendar-pane
+              [currencies]="calendarCurrencies()"
+              [(allCurrencies)]="calendarAll"
+              [(minImpact)]="calendarMinImpact"
+              (opened)="calendarEvent.set($event)"
+            />
+          </aside>
+        }
+
         <!-- Object tree. -->
         @if (objectTreeOpen() && drawings.visible().length) {
           <div class="object-tree">
@@ -1519,6 +1540,9 @@
   }
 </div>
 
+@if (calendarEvent(); as ev) {
+  <app-economic-event-modal [event]="ev" [symbol]="symbol()" (closed)="calendarEvent.set(null)" />
+}
 @if (newsAnalysis(); as a) {
   <app-news-analysis-modal [article]="a" [symbol]="symbol()" (closed)="newsAnalysis.set(null)" />
 }
