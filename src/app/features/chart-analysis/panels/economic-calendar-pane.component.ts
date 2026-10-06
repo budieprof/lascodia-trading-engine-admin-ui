@@ -115,12 +115,17 @@ import { currencyFlag, eventCountdown, groupByDay, impactDots } from './economic
       :host {
         display: block;
       }
+      .tree-title {
+        padding: 2px 10px 6px;
+        font-weight: 600;
+        color: var(--text-muted, #787b86);
+      }
       .ec-filters {
         display: flex;
         gap: 10px;
         align-items: center;
         justify-content: space-between;
-        padding: 4px 12px 8px;
+        padding: 0 10px 8px;
         font-size: 12px;
         color: var(--tv-muted, #787b86);
       }
