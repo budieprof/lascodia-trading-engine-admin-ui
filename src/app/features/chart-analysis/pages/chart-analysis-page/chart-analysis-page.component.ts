@@ -287,6 +287,8 @@ const CHART_STYLES: Array<{ id: ChartStyle; label: string }> = [
 
 /** How many bars to pull per request / per scroll-back page. */
 const PAGE_BARS = 1500;
+/** A chart script run covers the loaded history up to the engine's preview cap. */
+const MAX_SCRIPT_BARS = 20_000;
 
 const WATCHLIST_OPEN_KEY = 'lascodia.chart.watchlistOpen';
 /** TradingView keeps the watchlist docked by default; the operator's last choice wins. */
@@ -556,6 +558,8 @@ export class ChartAnalysisPageComponent {
       values: ScriptInputValues;
       symbol: string;
       resolution: TvResolution;
+      /** Bars this run asked for — history loaded past it triggers a re-run. */
+      requestedBars: number;
     }[]
   >([]);
   readonly scriptResults = computed(() => this.scriptRuns().map((r) => r.result));
@@ -1083,6 +1087,34 @@ export class ChartAnalysisPageComponent {
         if (runs.some((r) => r.symbol !== symbol || r.resolution !== resolution)) {
           for (const r of runs) this.runScript(r.item, r.values, true);
         }
+      });
+    });
+
+    // Scroll-back paging prepends history; a run only covers the bars it asked for, so its plots
+    // would stop where its window began. Re-run (debounced: one page = one run, not one per
+    // page while the operator keeps dragging) once the loaded history outgrows a run's window.
+    let extendTimer: ReturnType<typeof setTimeout> | undefined;
+    this.destroyRef.onDestroy(() => clearTimeout(extendTimer));
+    effect(() => {
+      const loaded = this.bars().length;
+      untracked(() => {
+        clearTimeout(extendTimer);
+        const want = Math.min(loaded, MAX_SCRIPT_BARS);
+        if (!this.scriptRuns().some((r) => r.requestedBars < want)) return;
+        const extend = (): void => {
+          // A run still in flight has not recorded its window yet; wait rather than duplicate it.
+          if (this.scriptRunning()) {
+            extendTimer = setTimeout(extend, 600);
+            return;
+          }
+          const symbol = this.symbol();
+          const resolution = this.resolution();
+          for (const r of this.scriptRuns()) {
+            if (r.symbol === symbol && r.resolution === resolution && r.requestedBars < want)
+              this.runScript(r.item, r.values, true);
+          }
+        };
+        extendTimer = setTimeout(extend, 600);
       });
     });
 
@@ -2097,8 +2129,11 @@ export class ChartAnalysisPageComponent {
     this.scriptError.set(null);
     const symbol = this.symbol();
     const resolution = this.resolution();
+    // Never less than a full page: a run started while the chart is still loading would
+    // otherwise cover only a sliver of history and stop short when the operator pans back.
+    const requestedBars = Math.min(Math.max(this.bars().length, PAGE_BARS), MAX_SCRIPT_BARS);
     this.chartScripts
-      .runOnChart(item, symbol, resolution, values, Math.min(this.bars().length || PAGE_BARS, 5000))
+      .runOnChart(item, symbol, resolution, values, requestedBars)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
@@ -2120,7 +2155,7 @@ export class ChartAnalysisPageComponent {
                 r.item.key !== item.key &&
                 !(result.kind === 'strategy' && r.result.kind === 'strategy'),
             );
-            return [...kept, { item, result, values, symbol, resolution }];
+            return [...kept, { item, result, values, symbol, resolution, requestedBars }];
           });
           if (result.kind === 'strategy' && !replace) {
             this.testerOpen.set(true);
