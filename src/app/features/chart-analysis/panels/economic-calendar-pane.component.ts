@@ -19,7 +19,13 @@ import {
   type UpcomingEconomicEvent,
 } from '@core/services/economic-calendar.service';
 import { ServerClock } from '@core/time/server-clock';
-import { currencyFlag, eventCountdown, groupByDay, impactDots } from './economic-calendar';
+import {
+  currencyFlag,
+  eventCountdown,
+  groupByDay,
+  impactDots,
+  isEventPast,
+} from './economic-calendar';
 
 /**
  * The chart's economic-calendar side pane: upcoming releases (the last 6 hours through 7 days),
@@ -61,15 +67,19 @@ import { currencyFlag, eventCountdown, groupByDay, impactDots } from './economic
     } @else if (error()) {
       <div class="pane-empty">{{ error() }}</div>
     } @else if (!events().length) {
-      <div class="pane-empty">No events in the next 7 days.</div>
+      <div class="pane-empty">No events today or in the next 7 days.</div>
     } @else {
       @for (day of days(); track day.key) {
         <div class="ec-day">{{ day.dayMs | date: 'EEE d MMM' }}</div>
         <ul class="ec-list">
-          @for (e of day.events; track e.id) {
+          @for (e of day.events; track e.id; let i = $index) {
+            @if (i > 0 && past(day.events[i - 1]) && !past(e)) {
+              <li class="ec-now" aria-hidden="true"><span>Now</span></li>
+            }
             <li
               class="ec-row"
               [class.released]="!!e.actual"
+              [class.past]="past(e)"
               (click)="opened.emit(e)"
               data-testid="ec-event"
               [title]="'Open the AI reading of ' + e.title"
@@ -84,6 +94,10 @@ import { currencyFlag, eventCountdown, groupByDay, impactDots } from './economic
                 </span>
                 @if (countdown(e); as c) {
                   <span class="ec-count">{{ c }}</span>
+                } @else if (past(e)) {
+                  <span class="ec-done" title="Event has happened — open for the post-event reading"
+                    >✓ done</span
+                  >
                 }
               </div>
               <div class="ec-title">{{ e.title }}</div>
@@ -101,7 +115,14 @@ import { currencyFlag, eventCountdown, groupByDay, impactDots } from './economic
                   >{{ e.forecast && e.forecastProvenance !== 'PreRelease' ? '*' : '' }}</span
                 >
                 <span
-                  >Act <b class="ec-act">{{ e.actual ?? '—' }}</b></span
+                  >Act
+                  <b
+                    class="ec-act"
+                    [class.beat]="e.result === 'Beat'"
+                    [class.miss]="e.result === 'Miss'"
+                    [title]="e.result ? e.result + ' for ' + e.currency : ''"
+                    >{{ e.actual ?? '—' }}</b
+                  ></span
                 >
               </div>
             </li>
@@ -209,6 +230,38 @@ import { currencyFlag, eventCountdown, groupByDay, impactDots } from './economic
       .released .ec-act {
         color: var(--tv-blue, #2962ff);
       }
+      .ec-act.beat {
+        color: #089981;
+      }
+      .ec-act.miss {
+        color: #f23645;
+      }
+      .ec-row.past .ec-title,
+      .ec-row.past .ec-time {
+        color: var(--tv-muted, #787b86);
+      }
+      .ec-done {
+        margin-left: auto;
+        font-size: 11px;
+        color: #089981;
+      }
+      .ec-now {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 12px;
+        font-size: 10px;
+        font-weight: 600;
+        color: #f23645;
+        text-transform: uppercase;
+      }
+      .ec-now::before,
+      .ec-now::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: #f23645;
+      }
     `,
   ],
 })
@@ -274,6 +327,10 @@ export class EconomicCalendarPaneComponent {
 
   protected flag = currencyFlag;
   protected dots = impactDots;
+  protected past(e: UpcomingEconomicEvent): boolean {
+    return isEventPast(e, this.now());
+  }
+
   protected countdown(e: UpcomingEconomicEvent): string | null {
     return eventCountdown(e, this.now());
   }

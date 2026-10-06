@@ -75,3 +75,11 @@ export function eventCountdown(
     ? `in ${h}h ${String(m).padStart(2, '0')}m`
     : `in ${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
+
+/** The engine's post-event grace: an event counts as having happened 2 minutes after its time. */
+export const POST_EVENT_GRACE_MS = 2 * 60_000;
+
+/** Whether the event has happened (by the clock, as the engine decides it). Pure. */
+export function isEventPast(e: Pick<UpcomingEconomicEvent, 'scheduledAt'>, nowMs: number): boolean {
+  return nowMs >= Date.parse(e.scheduledAt) + POST_EVENT_GRACE_MS;
+}

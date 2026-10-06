@@ -16,10 +16,11 @@ import { RouterLink } from '@angular/router';
 import {
   EconomicCalendarService,
   type EconomicEventAnalysis,
+  type EconomicEventOutcome,
   type UpcomingEconomicEvent,
 } from '@core/services/economic-calendar.service';
 import { ServerClock } from '@core/time/server-clock';
-import { currencyFlag, eventCountdown, impactDots } from './economic-calendar';
+import { currencyFlag, eventCountdown, impactDots, isEventPast } from './economic-calendar';
 
 /**
  * An economic event's detail: the stored numbers (previous, forecast = consensus, actual), and an
@@ -73,7 +74,9 @@ import { currencyFlag, eventCountdown, impactDots } from './economic-calendar';
                 >
               }
             </td>
-            <td class="ee-act">{{ event().actual ?? 'not released' }}</td>
+            <td class="ee-act">
+              {{ event().actual ?? (isPast() ? 'none stored' : 'not released') }}
+            </td>
             <td>
               <span class="ee-dots">
                 @for (i of [1, 2, 3]; track i) {
@@ -92,52 +95,153 @@ import { currencyFlag, eventCountdown, impactDots } from './economic-calendar';
           {{ error() }} <button type="button" class="link" (click)="load(true)">Retry</button>
         </div>
       } @else if (result(); as r) {
-        <h3>Summary</h3>
-        <p data-testid="ee-summary">{{ r.summary }}</p>
-        @if (r.whyItMatters) {
-          <h3>Why it matters</h3>
-          <p>{{ r.whyItMatters }}</p>
-        }
-        @if (r.releaseReading) {
-          <h3>The release</h3>
-          <p class="ee-release">{{ r.releaseReading }}</p>
-        }
-        <h3>Analysis</h3>
-        <p>{{ r.analysis }}</p>
-        @if (r.expectation) {
-          <h3>What is expected</h3>
-          <p>{{ r.expectation }}</p>
-        }
-
-        <h3>Scenarios</h3>
-        @if (r.scenarios.length) {
-          <table class="na-pairs ee-scen" data-testid="ee-scenarios">
-            <tbody>
-              @for (s of r.scenarios; track s.case) {
-                <tr>
-                  <td class="sym">{{ caseLabel(s.case) }}</td>
-                  <td class="why">
-                    {{ s.whatItMeans }}
-                    <div class="muted">{{ s.likelyReaction }}</div>
-                    @if (s.pairs.length) {
-                      <div class="ee-pairs">
-                        @for (p of s.pairs; track p.symbol) {
-                          <span
-                            class="chip"
-                            [class]="tone(p.reaction)"
-                            [class.focus]="p.symbol === symbol()"
-                            >{{ p.symbol }} {{ arrow(p.reaction) }}</span
-                          >
-                        }
-                      </div>
-                    }
-                  </td>
-                </tr>
+        @if (r.phase === 'PostEvent') {
+          <div class="ee-badge" data-testid="ee-post">Event has happened · post-event reading</div>
+          @if (r.summary) {
+            <p>{{ r.summary }}</p>
+          }
+          <h3>Outcome</h3>
+          @if (r.outcome; as o) {
+            <p class="ee-fact" data-testid="ee-outcome">
+              {{ o.statement }}
+              @if (o.vsForecastDirection && o.polarity !== 'Unknown') {
+                <span class="chip" [class]="outcomeTone(o)"
+                  >{{ outcomeWord(o) }} for {{ event().currency }}</span
+                >
               }
-            </tbody>
-          </table>
+            </p>
+          }
+          @if (r.releaseReading) {
+            <p>{{ r.releaseReading }}</p>
+          }
+
+          @if (r.coverage?.length) {
+            <h3>Coverage cited</h3>
+            <ul class="ee-cov" data-testid="ee-coverage">
+              @for (c of r.coverage; track c.id) {
+                <li>
+                  @if (c.url) {
+                    <a [href]="c.url" target="_blank" rel="noopener noreferrer">{{ c.title }}</a>
+                  } @else {
+                    {{ c.title }}
+                  }
+                  <span class="muted">
+                    · {{ c.source }} · {{ c.publishedAtUtc | date: 'd MMM HH:mm' }}</span
+                  >
+                </li>
+              }
+            </ul>
+          } @else if (r.outcome?.kind === 'Speech') {
+            <p class="muted" data-testid="ee-no-coverage">
+              No news coverage of this event was found, so what was said is not known here.
+            </p>
+          }
+
+          <h3>Market reaction</h3>
+          @if (r.reaction?.length) {
+            <table class="ee-react" data-testid="ee-reaction">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Before</th>
+                  <th>+15 min</th>
+                  <th>+1 h</th>
+                  <th>Now</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (m of r.reaction; track m.symbol) {
+                  <tr [class.focus]="m.symbol === symbol()" [title]="m.note ?? ''">
+                    <td class="sym">{{ m.symbol }}</td>
+                    <td>{{ m.before ?? '—' }}</td>
+                    <td [class]="pipTone(m.pips15m)">{{ pips(m.pips15m) }}</td>
+                    <td [class]="pipTone(m.pips1h)">{{ pips(m.pips1h) }}</td>
+                    <td [class]="pipTone(m.pipsNow)">{{ pips(m.pipsNow) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+            <p class="muted ee-small">
+              Pips from the last M1 close before the event. Measured facts, not a forecast.
+            </p>
+          } @else {
+            <p class="muted">No pairs to measure.</p>
+          }
+
+          <h3>
+            The read
+            @if (r.readLabel) {
+              <span class="chip" [class]="readTone(r.readLabel)" data-testid="ee-read-label">{{
+                r.readLabel
+              }}</span>
+            }
+          </h3>
+          <p data-testid="ee-read">{{ r.read }}</p>
+          @if (r.reactionAgreement) {
+            <p class="muted">{{ r.reactionAgreement }}</p>
+          }
+
+          @if (r.implications?.length) {
+            <h3>Implications</h3>
+            <table class="na-pairs" data-testid="ee-implications">
+              <tbody>
+                @for (i of r.implications; track i.symbol) {
+                  <tr [class.focus]="i.symbol === symbol()">
+                    <td class="sym">{{ i.symbol }}</td>
+                    <td class="why">{{ i.text }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          }
         } @else {
-          <p class="muted">The model gave no scenarios.</p>
+          <h3>Summary</h3>
+          <p data-testid="ee-summary">{{ r.summary }}</p>
+          @if (r.whyItMatters) {
+            <h3>Why it matters</h3>
+            <p>{{ r.whyItMatters }}</p>
+          }
+          @if (r.releaseReading) {
+            <h3>The release</h3>
+            <p class="ee-release">{{ r.releaseReading }}</p>
+          }
+          <h3>Analysis</h3>
+          <p>{{ r.analysis }}</p>
+          @if (r.expectation) {
+            <h3>What is expected</h3>
+            <p>{{ r.expectation }}</p>
+          }
+
+          <h3>Scenarios</h3>
+          @if (r.scenarios.length) {
+            <table class="na-pairs ee-scen" data-testid="ee-scenarios">
+              <tbody>
+                @for (s of r.scenarios; track s.case) {
+                  <tr>
+                    <td class="sym">{{ caseLabel(s.case) }}</td>
+                    <td class="why">
+                      {{ s.whatItMeans }}
+                      <div class="muted">{{ s.likelyReaction }}</div>
+                      @if (s.pairs.length) {
+                        <div class="ee-pairs">
+                          @for (p of s.pairs; track p.symbol) {
+                            <span
+                              class="chip"
+                              [class]="tone(p.reaction)"
+                              [class.focus]="p.symbol === symbol()"
+                              >{{ p.symbol }} {{ arrow(p.reaction) }}</span
+                            >
+                          }
+                        </div>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          } @else {
+            <p class="muted">The model gave no scenarios.</p>
+          }
         }
 
         <h3>How sure is this?</h3>
@@ -417,6 +521,57 @@ import { currencyFlag, eventCountdown, impactDots } from './economic-calendar';
       .ee-release {
         font-weight: 500;
       }
+      .ee-badge {
+        display: inline-block;
+        margin: 10px 0 2px;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 11px;
+        background: var(--tv-hover, #f0f3fa);
+        color: var(--tv-muted, #787b86);
+      }
+      .ee-fact {
+        font-weight: 500;
+      }
+      .ee-fact .chip {
+        margin-left: 6px;
+      }
+      .ee-cov {
+        margin: 0;
+        padding-left: 18px;
+      }
+      .ee-cov a {
+        color: var(--tv-blue, #2962ff);
+        text-decoration: none;
+      }
+      .ee-react {
+        border-collapse: collapse;
+        font-variant-numeric: tabular-nums;
+      }
+      .ee-react th {
+        font-weight: 500;
+        font-size: 11px;
+        color: var(--tv-muted, #787b86);
+        text-align: right;
+        padding: 0 0 2px 14px;
+      }
+      .ee-react td {
+        text-align: right;
+        padding: 3px 0 3px 14px;
+        border-bottom: 1px solid var(--tv-line, #e0e3eb);
+      }
+      .ee-react td.sym {
+        text-align: left;
+        padding-left: 0;
+        font-weight: 600;
+      }
+      .ee-react tr.focus td.sym {
+        font-weight: 700;
+      }
+      .ee-small {
+        font-size: 11px;
+        margin-top: 4px;
+      }
       @keyframes spin {
         to {
           transform: rotate(360deg);
@@ -444,6 +599,7 @@ export class EconomicEventModalComponent {
   readonly id = computed(() => this.event().id);
   readonly dots = computed(() => impactDots(this.event().impact));
   readonly countdown = computed(() => eventCountdown(this.event(), this.now()));
+  readonly isPast = computed(() => isEventPast(this.event(), this.now()));
 
   constructor() {
     effect(() => {
@@ -474,6 +630,34 @@ export class EconomicEventModalComponent {
   }
 
   protected flag = currencyFlag;
+
+  protected pips(p: number | null): string {
+    return p === null ? '—' : `${p > 0 ? '+' : ''}${p.toFixed(1)}`;
+  }
+
+  protected pipTone(p: number | null): string {
+    return p === null || p === 0 ? 'neutral' : p > 0 ? 'bullish' : 'bearish';
+  }
+
+  /** Beat / Miss for the currency: above the forecast is better unless the indicator is inverse. */
+  protected outcomeWord(o: EconomicEventOutcome): string {
+    if (o.vsForecastDirection === 'Equal') return 'In line';
+    const higher = o.vsForecastDirection === 'Above';
+    return higher === (o.polarity !== 'Inverse') ? 'Beat' : 'Miss';
+  }
+
+  protected outcomeTone(o: EconomicEventOutcome): string {
+    const w = this.outcomeWord(o);
+    return w === 'Beat' ? 'bullish' : w === 'Miss' ? 'bearish' : 'neutral';
+  }
+
+  protected readTone(label: string): string {
+    return label === 'Hawkish' || label === 'Beat'
+      ? 'bullish'
+      : label === 'Dovish' || label === 'Miss'
+        ? 'bearish'
+        : 'neutral';
+  }
 
   protected caseLabel(c: string): string {
     return c === 'Inline' ? 'In line' : c;
