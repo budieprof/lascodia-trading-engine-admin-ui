@@ -45,7 +45,9 @@ export interface ChartWorkspaceState {
   panel?: {
     watchlistOpen?: boolean;
     width?: number;
-    sidePane?: 'none' | 'details' | 'news';
+    sidePane?: 'none' | 'details' | 'news' | 'calendar';
+    calendarAll?: boolean;
+    calendarMinImpact?: 'Low' | 'Medium' | 'High';
   };
   dock?: {
     editorOpen?: boolean;

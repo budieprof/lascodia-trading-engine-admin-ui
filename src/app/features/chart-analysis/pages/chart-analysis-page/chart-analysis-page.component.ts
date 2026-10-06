@@ -138,6 +138,12 @@ import {
   type StudyTemplate,
 } from '../../workspace/layout-store.service';
 import { ChartWorkspaceSync } from '../../workspace/workspace-sync.service';
+import { EconomicCalendarPaneComponent } from '../../panels/economic-calendar-pane.component';
+import { EconomicEventModalComponent } from '../../panels/economic-event-modal.component';
+import type {
+  EconomicImpact,
+  UpcomingEconomicEvent,
+} from '@core/services/economic-calendar.service';
 import { ChartPrefsService } from '../../workspace/chart-prefs.service';
 import type { ChartWorkspaceState, WorkspaceScript } from '../../workspace/workspace-state';
 import { drawingTemplates } from '../../drawings/drawing-templates';
@@ -338,6 +344,8 @@ function loadWatchlistOpen(): boolean {
     TechnicalsViewComponent,
     SeasonalsViewComponent,
     NewsAnalysisModalComponent,
+    EconomicCalendarPaneComponent,
+    EconomicEventModalComponent,
     LongPressDirective,
   ],
   templateUrl: './chart-analysis-page.component.html',
@@ -810,7 +818,16 @@ export class ChartAnalysisPageComponent {
 
   // ── Side panes: Details and News ─────────────────────────────────────────
   private readonly newsIntel = inject(NewsIntelService);
-  readonly sidePane = signal<'none' | 'details' | 'news'>('none');
+  readonly sidePane = signal<'none' | 'details' | 'news' | 'calendar'>('none');
+  /** Economic calendar pane: every currency rather than the pair's two; minimum importance. */
+  readonly calendarAll = signal(false);
+  readonly calendarMinImpact = signal<EconomicImpact>('Low');
+  /** The calendar event whose AI reading is open. */
+  readonly calendarEvent = signal<UpcomingEconomicEvent | null>(null);
+  readonly calendarCurrencies = computed(
+    () => [this.details().base, this.details().quote].filter((c) => c && c !== '—'),
+    { equal: (a, b) => a.join() === b.join() },
+  );
   readonly articles = signal<NewsArticleView[]>([]);
   /** The news item long-pressed for its AI analysis modal. */
   readonly newsAnalysis = signal<NewsArticleView | null>(null);
@@ -1759,7 +1776,7 @@ export class ChartAnalysisPageComponent {
     this.minEventImpact.set(next);
   }
 
-  openSidePane(pane: 'details' | 'news'): void {
+  openSidePane(pane: 'details' | 'news' | 'calendar'): void {
     this.sidePane.set(this.sidePane() === pane ? 'none' : pane);
     if (this.sidePane() === 'news') this.loadNews();
   }
@@ -2494,6 +2511,8 @@ export class ChartAnalysisPageComponent {
         watchlistOpen: this.watchlistOpen(),
         width: this.dockWidth(),
         sidePane: this.sidePane(),
+        calendarAll: this.calendarAll(),
+        calendarMinImpact: this.calendarMinImpact(),
       },
       dock: {
         editorOpen: this.editorOpen(),
@@ -2565,6 +2584,8 @@ export class ChartAnalysisPageComponent {
       if (p.watchlistOpen !== undefined) this.watchlistOpen.set(p.watchlistOpen);
       if (p.width && p.width >= 240 && p.width <= 640) this.dockWidth.set(p.width);
       this.sidePane.set(p.sidePane ?? 'none');
+      this.calendarAll.set(p.calendarAll ?? false);
+      this.calendarMinImpact.set(p.calendarMinImpact ?? 'Low');
       this.pendingView = s.view ?? null;
 
       // Pine scripts: the newest saved version of "My scripts", else the inline copy.
