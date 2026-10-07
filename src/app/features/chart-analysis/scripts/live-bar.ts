@@ -3,18 +3,46 @@ import { bucketStartFor } from '../datafeed/aggregate';
 import type { TvResolution } from '../datafeed/resolution';
 import type { ScriptRunBar } from '@core/api/scripting.types';
 
+/** The symbol and resolution a bar series, or a run made over one, belongs to. */
+export interface SeriesId {
+  symbol: string;
+  resolution: TvResolution;
+}
+
+export function sameSeries(
+  a: SeriesId | null | undefined,
+  b: SeriesId | null | undefined,
+): boolean {
+  return (
+    !!a && !!b && a.resolution === b.resolution && a.symbol.toUpperCase() === b.symbol.toUpperCase()
+  );
+}
+
 /**
- * The chart's forming bar as `scripting/run` takes it (`liveBar`), or null when the newest bar is
- * not the period containing `nowMs` (market closed, history still loading, non-time resolution).
+ * Whether a run's outputs may be drawn: it was computed for the chart's symbol and resolution, and
+ * the bars on screen are that series too — after a switch the previous series stays up until the new
+ * one loads, and a run is drawn by matching its bars' times, which another symbol's bars share.
+ */
+export function runMatchesChart(run: SeriesId, chart: SeriesId, bars: SeriesId | null): boolean {
+  return sameSeries(run, chart) && sameSeries(run, bars);
+}
+
+/**
+ * The chart's forming bar as a run for `run` takes it (`liveBar`), or null when the newest bar is
+ * not the period containing `nowMs` (market closed, history still loading, non-time resolution) —
+ * or when the bars are another series' (`barsFor`): right after a switch they are still the previous
+ * symbol's or timeframe's, and the engine would merge that bar into this one's.
  */
 export function formingLiveBar(
   bars: readonly Bar[],
-  resolution: TvResolution,
+  barsFor: SeriesId | null,
+  run: SeriesId,
   nowMs: number,
 ): ScriptRunBar | null {
+  if (!sameSeries(barsFor, run)) return null;
   const last = bars[bars.length - 1];
   if (!last) return null;
-  const bucket = bucketStartFor(resolution, nowMs);
+  const bucket = bucketStartFor(run.resolution, nowMs);
   if (bucket === null || bucket !== last.time) return null;
   return { t: last.time, o: last.open, h: last.high, l: last.low, c: last.close, v: last.volume };
 }

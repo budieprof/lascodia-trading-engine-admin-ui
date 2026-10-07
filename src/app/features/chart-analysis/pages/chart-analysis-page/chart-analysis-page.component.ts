@@ -17,7 +17,13 @@ import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import type { CurrencyPairDto } from '@core/api/api.types';
 import { CandleFeedService, type Bar } from '../../datafeed/candle-feed.service';
-import { LiveRerunScheduler, formingLiveBar } from '../../scripts/live-bar';
+import {
+  LiveRerunScheduler,
+  formingLiveBar,
+  runMatchesChart,
+  sameSeries,
+  type SeriesId,
+} from '../../scripts/live-bar';
 import { ThemeService } from '@core/theme/theme.service';
 
 /**
@@ -522,6 +528,14 @@ export class ChartAnalysisPageComponent {
   readonly style = signal<ChartStyle>('candles');
   readonly showVolume = signal(true);
   readonly bars = signal<Bar[]>([]);
+  /**
+   * The symbol and resolution `bars` hold. A switch changes the chart's at once, but the previous
+   * series stays on screen until the new one loads — so whatever takes the bars to be this
+   * symbol's (a run's forming bar, a run's drawings, a tick) checks this first.
+   */
+  private readonly barsFor = signal<SeriesId | null>(null, {
+    equal: (a, b) => a === b || sameSeries(a, b),
+  });
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
   readonly active = signal<ActiveIndicator[]>([]);
@@ -579,7 +593,21 @@ export class ChartAnalysisPageComponent {
       requestedBars: number;
     }[]
   >([]);
-  readonly scriptResults = computed(() => this.scriptRuns().map((r) => r.result));
+  /**
+   * The runs drawn on the chart: those computed for its symbol and resolution, once its bars are
+   * that series. Through a switch the previous runs' plots, drawings and tables go at once, and the
+   * new runs wait for the new bars — "Running script…" shows meanwhile.
+   */
+  readonly scriptResults = computed(
+    () => {
+      const chart = { symbol: this.symbol(), resolution: this.resolution() };
+      const bars = this.barsFor();
+      return this.scriptRuns()
+        .filter((r) => runMatchesChart(r, chart, bars))
+        .map((r) => r.result);
+    },
+    { equal: (a, b) => a.length === b.length && a.every((r, i) => r === b[i]) },
+  );
   readonly strategyRun = computed(
     () => this.scriptRuns().find((r) => r.result.kind === 'strategy') ?? null,
   );
@@ -1144,7 +1172,8 @@ export class ChartAnalysisPageComponent {
     });
 
     // A Pine run describes ONE symbol+timeframe; re-run on a switch rather than paint
-    // another instrument's plots over this one.
+    // another instrument's plots over this one. Its outputs leave the chart at once
+    // (scriptResults).
     effect(() => {
       const symbol = this.symbol();
       const resolution = this.resolution();
@@ -1935,33 +1964,40 @@ export class ChartAnalysisPageComponent {
   }
 
   async reload(): Promise<void> {
+    const symbol = this.symbol();
+    const resolution = this.resolution();
+    /** Still the chart's series? A switch made while this loads has a reload of its own. */
+    const current = () => symbol === this.symbol() && resolution === this.resolution();
     this.loading.set(true);
     this.error.set(null);
     // Drawings belong to a symbol AND timeframe, so the scope has to move with
     // the chart before any drawing is read or written.
-    this.drawings.setScope(this.symbol(), this.resolution());
+    this.drawings.setScope(symbol, resolution);
     this.loadTradingOverlays();
-    this.feed.invalidate(this.symbol(), this.resolution());
+    this.feed.invalidate(symbol, resolution);
     const now = Date.now();
     try {
-      const { bars } = await this.feed.getBars(this.symbol(), this.resolution(), 0, now, PAGE_BARS);
+      const { bars } = await this.feed.getBars(symbol, resolution, 0, now, PAGE_BARS);
+      // Landing after a switch, these would go on screen under the next symbol's name.
+      if (!current()) return;
       this.bars.set(bars);
-      this.lastStored = lastCompleteBarTime(bars, this.resolution());
+      this.barsFor.set({ symbol, resolution });
+      this.lastStored = lastCompleteBarTime(bars, resolution);
       // The history ends at the last CLOSED bar; build the one still forming from real data
       // rather than from whatever tick happens to arrive first.
       void this.syncFormingBars();
       // After the bars, so the calendar window matches what is on screen.
       this.loadEvents();
       if (bars.length === 0) {
-        this.error.set(
-          `No ${this.resolutionLabel(this.resolution())} candles stored for ${this.symbol()}.`,
-        );
+        this.error.set(`No ${this.resolutionLabel(resolution)} candles stored for ${symbol}.`);
       }
     } catch {
-      this.error.set('Could not load candles.');
+      if (current()) this.error.set('Could not load candles.');
     } finally {
-      this.loading.set(false);
-      this.host()?.historyLoaded();
+      if (current()) {
+        this.loading.set(false);
+        this.host()?.historyLoaded();
+      }
     }
   }
 
@@ -1972,26 +2008,30 @@ export class ChartAnalysisPageComponent {
    * backwards with no gap and no overlap to reconcile.
    */
   async loadOlder(): Promise<void> {
-    const current = this.bars();
-    if (current.length === 0 || this.loading()) {
+    const series: SeriesId = { symbol: this.symbol(), resolution: this.resolution() };
+    const held = this.bars();
+    // Nothing to extend, a load under way, or the bars on screen are not this series' yet.
+    if (held.length === 0 || this.loading() || !sameSeries(this.barsFor(), series)) {
       this.host()?.historyLoaded();
       return;
     }
-    const oldest = current[0].time;
-    const step = resolutionMs(this.resolution()) ?? 60_000;
+    const oldest = held[0].time;
+    const step = resolutionMs(series.resolution) ?? 60_000;
     this.loading.set(true);
     try {
       const { bars } = await this.feed.getBars(
-        this.symbol(),
-        this.resolution(),
+        series.symbol,
+        series.resolution,
         0,
         oldest - step,
         PAGE_BARS,
       );
-      if (bars.length > 0) {
+      // After a switch made meanwhile these are another series' history: not prepended.
+      if (bars.length > 0 && sameSeries(this.barsFor(), series)) {
         const merged = new Map<number, Bar>();
         for (const b of bars) merged.set(b.time, b);
-        for (const b of current) merged.set(b.time, b);
+        // The bars as they are now: ticks may have moved the newest one during the load.
+        for (const b of this.bars()) merged.set(b.time, b);
         this.bars.set([...merged.values()].sort((a, b) => a.time - b.time));
       }
     } finally {
@@ -2021,12 +2061,19 @@ export class ChartAnalysisPageComponent {
     const resolution = this.resolution();
     const symbol = this.symbol();
     const stored = this.lastStored;
-    if (resolution === '1' || stored === null || this.bars().length === 0) return;
+    // While a switch loads, the bars (and `lastStored`) are still the previous series'.
+    const onScreen = () => sameSeries(this.barsFor(), { symbol, resolution });
+    if (resolution === '1' || stored === null || this.bars().length === 0 || !onScreen()) return;
 
     const minutes = await this.feed.minuteBarsSince(symbol, stored + 1);
     if (!minutes || minutes.length === 0) return;
     // The operator may have switched symbol or timeframe while the request was in flight.
-    if (symbol !== this.symbol() || resolution !== this.resolution() || stored !== this.lastStored)
+    if (
+      symbol !== this.symbol() ||
+      resolution !== this.resolution() ||
+      stored !== this.lastStored ||
+      !onScreen()
+    )
       return;
 
     this.bars.set(mergeForming(this.bars(), foldBars(minutes, resolution), stored));
@@ -2038,6 +2085,9 @@ export class ChartAnalysisPageComponent {
     if (typeof price !== 'number' || !Number.isFinite(price)) return;
     this.liveAt.set(Date.now());
 
+    // Right after a switch the bars on screen are still the previous series': not this tick's.
+    if (!sameSeries(this.barsFor(), { symbol: this.symbol(), resolution: this.resolution() }))
+      return;
     const current = this.bars();
     if (current.length === 0) return;
 
@@ -2287,7 +2337,8 @@ export class ChartAnalysisPageComponent {
     }
     const symbol = this.symbol();
     const resolution = this.resolution();
-    const liveBar = formingLiveBar(this.bars(), resolution, Date.now());
+    // The chart's forming bar — only once the bars on screen are this symbol's and timeframe's.
+    const liveBar = formingLiveBar(this.bars(), this.barsFor(), { symbol, resolution }, Date.now());
     // Never less than a full page: a run started while the chart is still loading would
     // otherwise cover only a sliver of history and stop short when the operator pans back.
     const requestedBars = Math.min(Math.max(this.bars().length, PAGE_BARS), MAX_SCRIPT_BARS);

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { LiveRerunScheduler, formingLiveBar } from './live-bar';
+import { LiveRerunScheduler, formingLiveBar, runMatchesChart, sameSeries } from './live-bar';
 
 const H = 3_600_000;
 const bar = (time: number, close = 1.1) => ({
@@ -11,11 +11,15 @@ const bar = (time: number, close = 1.1) => ({
   close,
   volume: 5,
 });
+const EURUSD_H1 = { symbol: 'EURUSD', resolution: '60' };
+const USDJPY_H1 = { symbol: 'USDJPY', resolution: '60' };
+const EURUSD_H4 = { symbol: 'EURUSD', resolution: '240' };
 
 describe('formingLiveBar', () => {
+  const t = 1_759_708_800_000; // 2025-10-06 00:00 UTC
+
   it('is the newest bar when it is the period containing now', () => {
-    const t = 1_759_708_800_000; // 2025-10-06 00:00 UTC
-    expect(formingLiveBar([bar(t - H), bar(t, 1.15)], '60' as never, t + 90_000)).toEqual({
+    expect(formingLiveBar([bar(t - H), bar(t, 1.15)], EURUSD_H1, EURUSD_H1, t + 90_000)).toEqual({
       t,
       o: 1,
       h: 1.2,
@@ -26,9 +30,41 @@ describe('formingLiveBar', () => {
   });
 
   it('is null when the newest bar is an older period or there are no bars', () => {
-    const t = 1_759_708_800_000;
-    expect(formingLiveBar([bar(t - H)], '60' as never, t + 90_000)).toBeNull();
-    expect(formingLiveBar([], '60' as never, t)).toBeNull();
+    expect(formingLiveBar([bar(t - H)], EURUSD_H1, EURUSD_H1, t + 90_000)).toBeNull();
+    expect(formingLiveBar([], EURUSD_H1, EURUSD_H1, t)).toBeNull();
+  });
+
+  it("is null while the chart still holds another series' bars", () => {
+    const bars = [bar(t - H), bar(t, 1.1191)];
+    // Switched to USDJPY: the EURUSD forming bar must not be sent as USDJPY's.
+    expect(formingLiveBar(bars, EURUSD_H1, USDJPY_H1, t + 90_000)).toBeNull();
+    // Switched to 4h (00:00 is a 4h bucket too): the 1h bar is not the 4h bar.
+    expect(formingLiveBar(bars, EURUSD_H1, EURUSD_H4, t + 90_000)).toBeNull();
+    // Nothing loaded yet.
+    expect(formingLiveBar(bars, null, EURUSD_H1, t + 90_000)).toBeNull();
+    // Case of the symbol does not matter.
+    expect(
+      formingLiveBar(bars, { symbol: 'eurusd', resolution: '60' }, EURUSD_H1, t + 90_000),
+    ).not.toBeNull();
+  });
+});
+
+describe('sameSeries / runMatchesChart', () => {
+  it('matches symbol and resolution', () => {
+    expect(sameSeries(EURUSD_H1, { ...EURUSD_H1 })).toBe(true);
+    expect(sameSeries(EURUSD_H1, USDJPY_H1)).toBe(false);
+    expect(sameSeries(EURUSD_H1, EURUSD_H4)).toBe(false);
+    expect(sameSeries(EURUSD_H1, null)).toBe(false);
+    expect(sameSeries(null, null)).toBe(false);
+  });
+
+  it("draws a run only on its own series, once that series' bars are on screen", () => {
+    expect(runMatchesChart(EURUSD_H1, EURUSD_H1, EURUSD_H1)).toBe(true);
+    // Switched away: the previous run is hidden at once.
+    expect(runMatchesChart(EURUSD_H1, EURUSD_H4, EURUSD_H1)).toBe(false);
+    // The new run came back before the new bars: not over the previous symbol's candles.
+    expect(runMatchesChart(USDJPY_H1, USDJPY_H1, EURUSD_H1)).toBe(false);
+    expect(runMatchesChart(USDJPY_H1, USDJPY_H1, null)).toBe(false);
   });
 });
 
