@@ -101,6 +101,52 @@ export interface ChartWorkspaceState {
     editorKey?: string | null;
     /** The editor's unsaved buffer. */
     editorText?: string | null;
+    /**
+     * The operator removed the script the editor showed: it opens on the starter template until it
+     * is pointed at a script again, rather than on the chart's strategy or newest script. Written
+     * only when set; a layout without it is not cleared.
+     */
+    editorCleared?: boolean;
+  };
+}
+
+/** The Pine Editor and Strategy Tester dock, as the page holds it. */
+export interface DockView {
+  editorOpen: boolean;
+  testerOpen: boolean;
+  preference: 'editor' | 'tester';
+  /** The chart script the editor shows (its run key); null when it is unlinked. */
+  editorKey: string | null;
+  /** The editor's unsaved buffer. */
+  editorText: string | null;
+  /** Unlinked by removing its script: it opens blank (see `ChartWorkspaceState.dock`). */
+  editorCleared: boolean;
+}
+
+/** The dock as a layout saves it. */
+export function dockStateOf(v: DockView): NonNullable<ChartWorkspaceState['dock']> {
+  return {
+    editorOpen: v.editorOpen,
+    testerOpen: v.testerOpen,
+    preference: v.preference,
+    editorKey: v.editorKey,
+    editorText: v.editorText,
+    ...(v.editorCleared ? { editorCleared: true } : {}),
+  };
+}
+
+/**
+ * A layout's dock as the page restores it, with the chart's defaults for whatever the layout leaves
+ * out — a new layout, or one saved before a field existed, opens the dock as it always did.
+ */
+export function restoredDock(d: ChartWorkspaceState['dock']): DockView {
+  return {
+    editorOpen: d?.editorOpen ?? false,
+    testerOpen: d?.testerOpen ?? true,
+    preference: d?.preference ?? 'tester',
+    editorKey: d?.editorKey ?? null,
+    editorText: d?.editorText ?? null,
+    editorCleared: d?.editorCleared === true,
   };
 }
 

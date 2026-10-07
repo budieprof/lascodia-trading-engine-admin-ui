@@ -166,4 +166,28 @@ describe('ScriptSettings — a Pine chip’s Settings on the chart', () => {
     expect(settings.saving()).toBe(false);
     expect(host.notify).toHaveBeenCalledWith('error', 'Script 20 not found.');
   });
+
+  it('inputsOf: any run’s inputs with the defaults it runs on — what the Strategy Tester measures against', () => {
+    const stored = new Subject<ScriptInputValues>();
+    const strategy = item('strategy:1181', { strategyId: 1181, pineSource: undefined });
+    const { host, settings } = make([runOf(strategy)], { storedInputs: vi.fn(() => stored) });
+    const run = runOf(strategy);
+    // A script with no stored inputs: its own.
+    expect(settings.inputsOf(runOf(item('mine:20')))?.map((i) => inputDefault(i))).toEqual([
+      true,
+      1.3,
+    ]);
+    // An engine strategy: nothing until its stored inputs are read — once, however often asked.
+    expect(settings.inputsOf(run)).toBeNull();
+    settings.loadStoredInputs(strategy);
+    settings.loadStoredInputs(strategy);
+    expect(host.storedInputs).toHaveBeenCalledTimes(1);
+    stored.next({ 'Signals::Sensitivity': 2.2 });
+    expect(settings.inputsOf(run)?.map((i) => inputDefault(i))).toEqual([true, 2.2]);
+    // Its Settings dialog reads the same ones, without asking again.
+    settings.open('strategy:1181');
+    expect(settings.inputs()?.map((i) => inputDefault(i))).toEqual([true, 2.2]);
+    expect(host.storedInputs).toHaveBeenCalledTimes(1);
+    expect(settings.inputsOf(null)).toBeNull();
+  });
 });

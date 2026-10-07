@@ -1,4 +1,5 @@
-import type { Ohlc } from '../indicators/math';
+import { periodKey, type Ohlc } from '../indicators/math';
+import type { TradingDays } from '../datafeed/session-calendar';
 
 /**
  * Profile studies — pure math. Bar `time` is UTC epoch milliseconds (the chart's `Ohlc`
@@ -6,6 +7,10 @@ import type { Ohlc } from '../indicators/math';
  *
  * Each bar's volume is spread uniformly across its high–low range (overlap-weighted per row),
  * not dumped on the close, so total row volume always equals total bar volume.
+ *
+ * Days, weeks and months are the symbol's TRADING days when the chart knows its session (`days`,
+ * a `TradingCalendar` — for FX, days from 17:00 to 17:00 New York), as TradingView's session and
+ * periodic profiles and TPO count them; without one, UTC days.
  */
 
 export interface ProfileRow {
@@ -209,10 +214,24 @@ export interface SessionOptions extends ProfileOptions {
   session: SessionName;
   /** Offset of the session clock from UTC in minutes (e.g. -300 for New York EST). */
   tzOffsetMinutes?: number;
+  /** The symbol's trading days: what a `daily` session is when no clock offset is set. */
+  days?: TradingDays;
 }
 
-/** Start (UTC ms) of the session containing t, or null when t is outside the window. */
-export function sessionStartOf(t: number, session: SessionName, tzOffsetMinutes = 0): number | null {
+/**
+ * Start (UTC ms) of the session containing t, or null when t is outside the window.
+ *
+ * <p>`daily` with no clock offset is the symbol's trading session when `days` is given — for FX
+ * from 17:00 New York (21:00 or 22:00 UTC) — as TradingView's session profile and TPO count
+ * sessions. An explicit offset keeps a midnight-to-midnight day on that clock.</p>
+ */
+export function sessionStartOf(
+  t: number,
+  session: SessionName,
+  tzOffsetMinutes = 0,
+  days?: TradingDays,
+): number | null {
+  if (session === 'daily' && days && tzOffsetMinutes === 0) return days.sessionAt(t).start;
   const off = tzOffsetMinutes * MIN;
   const local = t + off;
   const dayStart = Math.floor(local / DAY) * DAY;
@@ -249,13 +268,24 @@ function groupProfiles(
 
 /** One profile per session occurrence (contiguous bars sharing a session start). */
 export function sessionProfiles(bars: readonly Ohlc[], opts: SessionOptions): SessionProfile[] {
-  return groupProfiles(bars, (t) => sessionStartOf(t, opts.session, opts.tzOffsetMinutes ?? 0), opts);
+  return groupProfiles(
+    bars,
+    (t) => sessionStartOf(t, opts.session, opts.tzOffsetMinutes ?? 0, opts.days),
+    opts,
+  );
 }
 
 export type ProfilePeriod = 'day' | 'week' | 'month';
 
-/** Start (UTC ms) of the UTC day / ISO week (Monday) / month containing t. */
-export function periodStartOf(t: number, period: ProfilePeriod): number {
+/**
+ * The day / ISO week (Monday) / month containing t. With the symbol's trading days (`days`), the
+ * period of its trading DATE — a key ({@link periodKey}), not an instant: an FX session's evening
+ * bars belong to the next day. Without them, the start (UTC ms) of the UTC one.
+ */
+export function periodStartOf(t: number, period: ProfilePeriod, days?: TradingDays): number {
+  if (days) {
+    return periodKey(t, period === 'day' ? 'Day' : period === 'week' ? 'Week' : 'Month', days.dayOf);
+  }
   const day = Math.floor(t / DAY) * DAY;
   if (period === 'day') return day;
   if (period === 'week') {
@@ -268,20 +298,21 @@ export function periodStartOf(t: number, period: ProfilePeriod): number {
 
 export function periodicProfiles(
   bars: readonly Ohlc[],
-  opts: ProfileOptions & { period: ProfilePeriod },
+  opts: ProfileOptions & { period: ProfilePeriod; days?: TradingDays },
 ): SessionProfile[] {
-  return groupProfiles(bars, (t) => periodStartOf(t, opts.period), opts);
+  return groupProfiles(bars, (t) => periodStartOf(t, opts.period, opts.days), opts);
 }
 
 export type AutoAnchor = 'highestHigh' | 'lowestLow' | 'session' | 'week';
 
 /**
  * Profile from an automatically chosen anchor bar to the last bar. highestHigh/lowestLow
- * search the last `lookback` bars (default 100); session = current UTC day, week = current week.
+ * search the last `lookback` bars (default 100); session = the current trading day (the UTC day
+ * without `days`), week = the current week.
  */
 export function autoAnchoredProfile(
   bars: readonly Ohlc[],
-  opts: ProfileOptions & { anchor: AutoAnchor; lookback?: number },
+  opts: ProfileOptions & { anchor: AutoAnchor; lookback?: number; days?: TradingDays },
 ): VolumeProfile | null {
   if (bars.length === 0) return null;
   const last = bars.length - 1;
@@ -293,8 +324,11 @@ export function autoAnchoredProfile(
       if (opts.anchor === 'highestHigh' ? bars[i].high > bars[anchor].high : bars[i].low < bars[anchor].low) anchor = i;
     }
   } else {
-    const key = periodStartOf(bars[last].time, opts.anchor === 'session' ? 'day' : 'week');
-    while (anchor > 0 && bars[anchor - 1].time >= key) anchor--;
+    // Back over the bars of the newest bar's period. Compared by period, not by time: a trading
+    // day's key is its date, and its session opened the evening before.
+    const period = opts.anchor === 'session' ? 'day' : 'week';
+    const key = periodStartOf(bars[last].time, period, opts.days);
+    while (anchor > 0 && periodStartOf(bars[anchor - 1].time, period, opts.days) === key) anchor--;
   }
   return profileRange(bars, anchor, last, opts);
 }
@@ -350,6 +384,8 @@ export interface TpoOptions {
   rows?: number;
   valueAreaPct?: number;
   tzOffsetMinutes?: number;
+  /** The symbol's trading days: with no clock offset, each profile is one trading session. */
+  days?: TradingDays;
 }
 
 /** A..Z then a..z, then wraps. */
@@ -364,9 +400,11 @@ export function tpoProfile(bars: readonly Ohlc[], opts: TpoOptions = {}): TpoPro
   const out: TpoProfile[] = [];
   let i = 0;
   while (i < bars.length) {
-    const key = sessionStartOf(bars[i].time, 'daily', tz) as number;
+    // The session's open is also where its brackets count from: A is its first half hour.
+    const key = sessionStartOf(bars[i].time, 'daily', tz, opts.days) as number;
     let j = i;
-    while (j + 1 < bars.length && sessionStartOf(bars[j + 1].time, 'daily', tz) === key) j++;
+    while (j + 1 < bars.length && sessionStartOf(bars[j + 1].time, 'daily', tz, opts.days) === key)
+      j++;
     const tpo = buildTpo(bars, i, j, key, bracketMs, opts);
     if (tpo) out.push(tpo);
     i = j + 1;

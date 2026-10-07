@@ -13,6 +13,7 @@ import {
   volumeProfile,
 } from './profile-math';
 import { PROFILE_STUDIES, computeProfileStudy } from './profile-studies';
+import { TradingCalendar } from '../datafeed/session-calendar';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -201,5 +202,63 @@ describe('profile studies catalogue', () => {
     }
     const sess = computeProfileStudy('vp-session', bars, { session: 'london' });
     expect(sess.kind === 'volume' && sess.blocks.length).toBe(10);
+  });
+});
+
+// FX trades from 17:00 New York to 17:00 New York (21:00 UTC on EDT): TradingView's session profiles,
+// TPO and periodic profiles count those sessions, and so does every study here given the calendar.
+describe('profiles on FX trading sessions', () => {
+  const FX = new TradingCalendar({ session: '1700-1700:23456', timeZone: 'America/New_York' });
+  // H1 from Mon 5 Oct 2026 18:00 UTC: Monday's session ends at 21:00, Tuesday's runs to Tue 21:00.
+  const START = Date.UTC(2026, 9, 5, 18);
+  const bars = walk(30, HOUR, START);
+
+  it('a daily session profile spans 21:00 to 21:00 UTC, not midnight to midnight', () => {
+    const s = sessionProfiles(bars, { session: 'daily', days: FX });
+    expect(s.map((x) => x.startIdx)).toEqual([0, 3, 27]);
+    expect(s[1].sessionStart).toBe(Date.UTC(2026, 9, 5, 21));
+    // An explicit clock offset keeps its midnight-to-midnight day.
+    const utcPlus3 = sessionProfiles(bars, { session: 'daily', tzOffsetMinutes: 180, days: FX });
+    expect(utcPlus3[1].sessionStart).toBe(Date.UTC(2026, 9, 5, 21)); // 00:00 at UTC+3
+    expect(sessionProfiles(bars, { session: 'daily', tzOffsetMinutes: 60, days: FX })[1].sessionStart).toBe(
+      Date.UTC(2026, 9, 5, 23),
+    );
+  });
+
+  it('TPO letters count from the session’s open: A is 21:00–21:30 UTC', () => {
+    const tp = tpoProfile(bars, { bracketMinutes: 30, rows: 20, days: FX });
+    expect(tp.map((t) => t.sessionStart)).toEqual([
+      Date.UTC(2026, 9, 4, 21),
+      Date.UTC(2026, 9, 5, 21),
+      Date.UTC(2026, 9, 6, 21),
+    ]);
+    // Tuesday's session: 24 hourly bars, one per even bracket → A, C, E … up to bracket 46.
+    expect(tp[1].bracketCount).toBe(47);
+  });
+
+  it('periodic: the session opening Sunday evening is Monday’s week; a month turns at its first session', () => {
+    const sunday = walk(6, HOUR, Date.UTC(2026, 9, 11, 19)); // Sun 19:00 … 00:00 UTC
+    const weeks = periodicProfiles(sunday, { period: 'week', days: FX });
+    // 19:00 and 20:00 still belong to the week that traded to Friday; 21:00 opens Monday's.
+    expect(weeks.map((w) => w.startIdx)).toEqual([0, 2]);
+    const month = walk(6, HOUR, Date.UTC(2026, 8, 30, 18)); // 30 Sep 18:00 … 23:00 UTC
+    expect(periodicProfiles(month, { period: 'month', days: FX }).map((m) => m.startIdx)).toEqual([
+      0, 3,
+    ]);
+    expect(periodicProfiles(month, { period: 'day', days: FX }).map((m) => m.startIdx)).toEqual([
+      0, 3,
+    ]);
+  });
+
+  it('auto-anchored “session” starts at the current session’s open, the evening before', () => {
+    const vp = autoAnchoredProfile(bars, { anchor: 'session', days: FX })!;
+    expect(bars[vp.fromIdx].time).toBe(Date.UTC(2026, 9, 6, 21));
+    const tuesday = autoAnchoredProfile(bars.slice(0, 20), { anchor: 'session', days: FX })!;
+    expect(bars[tuesday.fromIdx].time).toBe(Date.UTC(2026, 9, 5, 21));
+  });
+
+  it('computeProfileStudy passes the sessions on', () => {
+    const m = computeProfileStudy('tpo', bars, {}, null, FX);
+    expect(m.kind === 'tpo' && m.sessions[1].sessionStart).toBe(Date.UTC(2026, 9, 5, 21));
   });
 });

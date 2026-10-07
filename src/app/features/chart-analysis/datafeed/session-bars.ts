@@ -29,8 +29,16 @@ export type SessionTick =
   /** The newest bar is the current period: here it is with the price applied. */
   | { kind: 'update'; bars: Bar[] }
   /**
-   * The newest bar's period is over. The next one is the engine's to open — the next 4h block, or
-   * Monday's session after a weekend — so the chart asks for the newest bars rather than invent it.
+   * The newest bar's period is over and the price opened the next one, as TradingView opens a bar on
+   * its period's first tick: open = high = low = close = the price, over the period `nextPeriod`
+   * laid out. The engine builds its forming bar from closed M1, so it has none in a period's first
+   * minute; its own replaces this one at the next resync ({@link mergeSessionTail}).
+   */
+  | { kind: 'open'; bars: Bar[] }
+  /**
+   * The newest bar's period is over, and where the next one opens is the engine's to say — after a
+   * gap the chart cannot lay out, or with no calendar to lay it out by — so the chart asks for the
+   * newest bars rather than invent it.
    */
   | { kind: 'rollover' }
   /** Nothing to do: no bars, no close to compare with, or a clock behind the newest bar's open. */
@@ -38,15 +46,35 @@ export type SessionTick =
 
 /**
  * A live price on a session-grid series at `nowMs` (the engine's clock): it moves the newest bar
- * while `nowMs` is before that bar's close, and asks for a rollover from its close on.
+ * while `nowMs` is before that bar's close. From its close on, it opens the next period's bar when
+ * `nextPeriod` can say where that period lies (`nextSessionPeriod`, from the symbol's session), and
+ * asks for a rollover when it cannot.
  */
-export function applySessionTick(bars: readonly Bar[], price: number, nowMs: number): SessionTick {
+export function applySessionTick(
+  bars: readonly Bar[],
+  price: number,
+  nowMs: number,
+  nextPeriod?: (last: Bar, nowMs: number) => { time: number; closeTime: number } | null,
+): SessionTick {
   const last = bars[bars.length - 1];
   const close = last?.closeTime;
   if (!last || close === undefined || !Number.isFinite(close) || nowMs < last.time) {
     return { kind: 'ignore' };
   }
-  if (nowMs >= close) return { kind: 'rollover' };
+  if (nowMs >= close) {
+    const next = nextPeriod?.(last, nowMs) ?? null;
+    if (!next || next.time < close) return { kind: 'rollover' };
+    const opened: Bar = {
+      time: next.time,
+      open: price,
+      high: price,
+      low: price,
+      close: price,
+      volume: 0,
+      closeTime: next.closeTime,
+    };
+    return { kind: 'open', bars: [...bars, opened] };
+  }
   const updated: Bar = {
     ...last,
     high: Math.max(last.high, price),
@@ -68,8 +96,10 @@ export function applySessionTick(bars: readonly Bar[], price: number, nowMs: num
  *       last merge: a tick is newer than the engine's forming bar, which is folded from closed M1 and
  *       trails by up to a minute. Its high and low widen to take in both. Without ticks since, the
  *       engine's close is the newer one and wins.</li>
- *   <li>A bar the chart holds after the tail's last (none in practice) is kept: nothing on screen
- *       disappears because a request came back short.</li>
+ *   <li>A bar the chart holds after the tail's last is kept: the period a live price opened before
+ *       the engine had a bar for it ({@link applySessionTick}) — nothing on screen disappears because
+ *       a request came back short. Unless it opens inside the engine's forming period: the engine
+ *       laid that period out otherwise, and its bar is the truth.</li>
  * </ul>
  */
 export function mergeSessionTail(
@@ -79,7 +109,9 @@ export function mergeSessionTail(
 ): Bar[] {
   if (tail.length === 0) return held.slice();
   const first = tail[0].time;
-  const last = tail[tail.length - 1].time;
+  const newest = tail[tail.length - 1];
+  const last = newest.time;
+  const formingClose = newest.forming ? (newest.closeTime ?? last) : last;
   const heldByTime = new Map(held.map((b) => [b.time, b]));
   const merged = tail.map((t): Bar => {
     const bar = asBar(t);
@@ -93,7 +125,11 @@ export function mergeSessionTail(
       volume: Math.max(bar.volume, h.volume),
     };
   });
-  return [...held.filter((b) => b.time < first), ...merged, ...held.filter((b) => b.time > last)];
+  return [
+    ...held.filter((b) => b.time < first),
+    ...merged,
+    ...held.filter((b) => b.time > last && b.time >= formingClose),
+  ];
 }
 
 /** A session bar as the chart holds it: the period's open and close, without the request-time flag. */
@@ -129,7 +165,8 @@ export function tailCount(resolution: TvResolution, sinceMs: number, nowMs: numb
  * Monday 21:00 UTC, is Tuesday; a month's bar, which closes with its last trading day, is in its own
  * month and year even when it opens on the last evening of the one before (January's opens
  * 31 December). Read off the engine's `closeTime`, not a calendar. A bar without one: the date of its
- * open + 12 h — the evening open's next day, the session's own.
+ * open + 12 h — the evening open's next day, the session's own. (Any instant's trading day, a
+ * stored-grid bar's included, comes from the symbol's session by the same rule: `TradingCalendar`.)
  */
 export function tradingDayMs(bar: Pick<Bar, 'time' | 'closeTime'>): number {
   const close = bar.closeTime;
@@ -144,18 +181,25 @@ export function tradingDayMs(bar: Pick<Bar, 'time' | 'closeTime'>): number {
  * The bars of the newest bar's day, for a "today" figure (open, range, change). On the session grid
  * (bars with a close): the bars that close on the newest bar's trading day — every 2h and 4h block
  * of a 17:00 New York session closes on that session's date, so this is the session, opening the
- * evening before; on 1D, the session bar itself. On the stored grid (1m … 1h): the UTC day.
+ * evening before; on 1D, the session bar itself. On the stored grid (1m … 1h): the newest bar's
+ * trading day by the symbol's session (`dayOf`, a `TradingCalendar`'s) — the same session — or,
+ * for a symbol without one, the UTC day.
  */
-export function currentDayBars<T extends Pick<Bar, 'time' | 'closeTime'>>(bars: readonly T[]): T[] {
+export function currentDayBars<T extends Pick<Bar, 'time' | 'closeTime'>>(
+  bars: readonly T[],
+  dayOf?: (ms: number) => number,
+): T[] {
   const last = bars[bars.length - 1];
   if (!last) return [];
-  if (last.closeTime === undefined) {
+  const dayOfBar =
+    last.closeTime !== undefined ? tradingDayMs : dayOf ? (b: T) => dayOf(b.time) : null;
+  if (!dayOfBar) {
     const dayStart = Math.floor(last.time / DAY) * DAY;
     return bars.filter((b) => b.time >= dayStart);
   }
-  const day = tradingDayMs(last);
+  const day = dayOfBar(last);
   let i = bars.length - 1;
-  while (i > 0 && tradingDayMs(bars[i - 1]) === day) i--;
+  while (i > 0 && dayOfBar(bars[i - 1]) === day) i--;
   return bars.slice(i);
 }
 

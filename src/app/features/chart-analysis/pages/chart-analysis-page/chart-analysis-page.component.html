@@ -882,6 +882,7 @@
           [showStructure]="showStructure()"
           [symbol]="symbol()"
           [resolution]="resolution()"
+          [session]="sessionSpec()"
           [overlays]="overlays()"
           [markers]="markers()"
           [compareBars]="compareBars()"
@@ -892,6 +893,13 @@
           (toolComplete)="onToolComplete()"
           (drawingSettings)="settingsFor.set($event)"
           (drawingContextMenu)="openDrawingMenu($event, chartArea)"
+        />
+
+        <!-- A strategy the operator added replaced the one on the chart: say so, with Undo. -->
+        <app-undo-notice
+          [message]="replacedNotice()?.message ?? null"
+          (action)="undoReplace()"
+          (dismissed)="replacedNotice.set(null)"
         />
 
         <!-- TradingView's floating drawing toolbar for the selected drawing. -->
@@ -1551,6 +1559,7 @@
       } @else if (strategyRun(); as run) {
         <app-strategy-tester-panel
           [result]="run.result"
+          [inputs]="testerInputs()"
           [values]="run.values"
           [resolution]="run.resolution"
           [running]="scriptRunning()"

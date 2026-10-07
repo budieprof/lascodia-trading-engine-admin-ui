@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
+  computed,
   effect,
   NgZone,
   inject,
@@ -50,8 +51,9 @@ import {
 } from './trading-date';
 import { ThemeService } from '@core/theme/theme.service';
 import type { Bar } from '../datafeed/candle-feed.service';
+import { TradingCalendar, type SessionSpec } from '../datafeed/session-calendar';
 import { indicatorById, indicatorLabel, type IndicatorDef } from '../indicators/registry';
-import type { Ohlc } from '../indicators/math';
+import type { DayOf, Ohlc } from '../indicators/math';
 import { HiLoSeries, VolCandleSeries, type OhlcvData } from './custom-series';
 import {
   averageTrueRange,
@@ -389,6 +391,12 @@ export class ChartHostComponent implements OnDestroy {
   /** Whether strategy entry/exit arrows are drawn. */
   readonly showScriptTrades = input<boolean>(true);
   readonly resolution = input<string>('');
+  /**
+   * The symbol's session as the engine reports it (`scripting/chart-bars`): the trading days the
+   * day-based studies count in — the session VWAP, daily pivots, the Day / Week / Month anchors,
+   * session and periodic profiles. Null: UTC days.
+   */
+  readonly session = input<SessionSpec | null>(null);
   /** TradingView's countdown to bar close under the last-price label. */
   readonly showCountdown = input(true);
   /** When the last live price arrived (client ms); null = no live feed. Stale ⇒ no countdown. */
@@ -568,6 +576,38 @@ export class ChartHostComponent implements OnDestroy {
 
   /** Bars currently on the chart, for legend lookups by time. */
   private plotted: Bar[] = [];
+  /** {@link plotted} before the display zone's shift: the same bars, one for one, at their UTC times. */
+  private plottedUtc: Bar[] = [];
+  /** A plotted time → its UTC time, built the first time a study asks ({@link plottedDayOf}). */
+  private utcByPlotted: Map<number, number> | null = null;
+
+  /** The session's identity, so an equal spec from a later answer changes nothing downstream. */
+  private readonly sessionKey = computed(() => {
+    const s = this.session();
+    return s ? `${s.session}|${s.timeZone}` : '';
+  });
+  /** The symbol's trading days; null without a session — the studies then count UTC days. */
+  private readonly calendar = computed(() => {
+    const [session, timeZone] = this.sessionKey().split('|');
+    return session ? new TradingCalendar({ session, timeZone }) : null;
+  });
+
+  /**
+   * The trading day of a PLOTTED bar time. Studies run on the plotted bars, whose times the display
+   * zone shifted, while a trading day is a property of the instant: each time goes back to its bar's
+   * UTC time first, so a session VWAP resets at 17:00 New York whatever zone the axis is drawn in.
+   * Undefined without a session: the studies' own UTC days.
+   */
+  private plottedDayOf(): DayOf | undefined {
+    const calendar = this.calendar();
+    if (!calendar) return undefined;
+    if (this.timezone() === 'UTC') return calendar.dayOf;
+    this.utcByPlotted ??= new Map(
+      this.plotted.map((b, i) => [b.time, this.plottedUtc[i]?.time ?? b.time]),
+    );
+    const byPlotted = this.utcByPlotted;
+    return (t) => calendar.dayOf(byPlotted.get(t) ?? t - this.timezoneShiftMs(t));
+  }
   /**
    * On 1D/1W/1M, each plotted bar's trading date (00:00 UTC ms) by its plotted time in seconds — what
    * the time axis, the crosshair, the legend and the hold tooltip print for it. Empty otherwise.
@@ -692,6 +732,8 @@ export class ChartHostComponent implements OnDestroy {
       this.bars();
       this.style();
       this.compareBars();
+      // The day-based studies recount when the symbol's session becomes known.
+      this.calendar();
       untracked(() => {
         this.applyIndicators(active, this.plotted);
         this.applyPatterns(active);
@@ -778,6 +820,7 @@ export class ChartHostComponent implements OnDestroy {
       this.volumeProfileMode();
       this.showSupportResistance();
       this.showStructure();
+      this.calendar();
       untracked(() => this.recomputeAnalysis());
     });
 
@@ -856,9 +899,12 @@ export class ChartHostComponent implements OnDestroy {
       wantProfile && mode === 'visible' ? profileWithValueArea(window) : null,
     );
     // Period profiles cover every loaded bar — the renderer culls off-screen periods, and
-    // re-slicing on pan would split a session in two at the viewport edge.
+    // re-slicing on pan would split a session in two at the viewport edge. Their sessions, weeks
+    // and months are the symbol's trading ones (on the unshifted bars, where a day is an instant's).
     this.analysisRenderer.setPeriodProfiles(
-      wantProfile && mode !== 'visible' ? periodProfiles(bars, mode) : [],
+      wantProfile && mode !== 'visible'
+        ? periodProfiles(bars, mode, { dayOf: this.calendar()?.dayOf })
+        : [],
     );
     this.analysisRenderer.setLevels(wantLevels ? supportResistance(window) : []);
     this.analysisRenderer.setStructure(wantStructure ? marketStructure(window) : null);
@@ -1371,12 +1417,15 @@ export class ChartHostComponent implements OnDestroy {
     }
 
     const p = this.palette(this.theme.theme() === 'dark');
-    const source = this.shiftForTimezone(this.transformed(bars, style), this.timezone());
+    const unshifted = this.transformed(bars, style);
+    const source = this.shiftForTimezone(unshifted, this.timezone());
     // Indicators and the legend follow the PLOTTED bars, so a price-based
     // style recomputes both against its synthetic series rather than against
     // the time bars underneath — otherwise an RSI on a Renko chart would be
     // reading a different series from the one on screen.
     this.plotted = source;
+    this.plottedUtc = unshifted;
+    this.utcByPlotted = null;
     // Scripts' barcolor() goes into the rows themselves. The series is rebuilt on every tick, so
     // colours applied to it afterwards would drop out and back with each one. The handles still
     // hold the current runs (re-rendered below) and read no chart state, so they can be asked now.
@@ -1693,18 +1742,18 @@ export class ChartHostComponent implements OnDestroy {
     def: IndicatorDef,
     ohlc: Ohlc[],
   ): Record<string, Array<number | null>> {
-    // Compare studies also depend on the other symbol's bars, so those are part of the key.
+    // Compare studies also depend on the other symbol's bars, so those are part of the key; the
+    // day-based ones, on the trading days they count in.
     const symbol = def.needsCompare ? String(item.params['symbol'] ?? '').toUpperCase() : '';
     const compare = symbol ? this.compareBars()[symbol] : undefined;
-    const cacheKey = `${item.uid}:${JSON.stringify(item.params)}:${ohlc.length}:${ohlc[0]?.time ?? 0}:${symbol}:${compare?.length ?? 0}`;
+    const cacheKey = `${item.uid}:${JSON.stringify(item.params)}:${ohlc.length}:${ohlc[0]?.time ?? 0}:${symbol}:${compare?.length ?? 0}:${this.sessionKey()}`;
     const hit = this.computedCache.get(cacheKey);
     if (hit) return hit;
-    const computed = def.compute(
-      ohlc,
-      item.params,
+    const computed = def.compute(ohlc, item.params, {
       // Same zone shift as the plotted bars, or alignByTime would pair the wrong bars.
-      compare ? { compareBars: this.shiftForTimezone(compare, this.timezone()) } : undefined,
-    );
+      ...(compare ? { compareBars: this.shiftForTimezone(compare, this.timezone()) } : {}),
+      tradingDay: this.plottedDayOf(),
+    });
     this.computedCache.set(cacheKey, computed);
     return computed;
   }
@@ -2002,6 +2051,7 @@ export class ChartHostComponent implements OnDestroy {
           bars,
           a.params,
           range ? { from: range.from, to: range.to } : null,
+          this.calendar() ?? undefined,
         ),
       );
     }

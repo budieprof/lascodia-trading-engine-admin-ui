@@ -35,6 +35,11 @@ import {
   formatPercent,
   formatRatio,
 } from '@features/scripting/report/report-format';
+import {
+  inputDefault,
+  inputOverrides,
+  resolveInputValues,
+} from '@features/scripting/pine/pine-inputs';
 import type { ReportSplit } from '@features/scripting/report/strategy-report.model';
 import type { ChartScriptResult, ChartTrade } from './chart-script.model';
 
@@ -212,65 +217,76 @@ interface SummaryRow {
             </table>
           }
           @case ('inputs') {
-            <form class="tester__inputs" (submit)="$event.preventDefault(); emitRerun()">
-              @for (i of editableInputs(); track i.id) {
-                <label class="field">
-                  <span>{{ i.title }}</span>
-                  @switch (i.kind) {
-                    @case ('bool') {
-                      <input
-                        type="checkbox"
-                        [checked]="value(i) === true"
-                        (change)="set(i, $any($event.target).checked)"
-                      />
-                    }
-                    @case ('int') {
-                      <input
-                        type="number"
-                        step="1"
-                        [min]="i.minValue ?? null"
-                        [max]="i.maxValue ?? null"
-                        [value]="value(i)"
-                        (change)="set(i, toNumber($any($event.target).value, true))"
-                      />
-                    }
-                    @case ('float') {
-                      <input
-                        type="number"
-                        [step]="i.step ?? 'any'"
-                        [min]="i.minValue ?? null"
-                        [max]="i.maxValue ?? null"
-                        [value]="value(i)"
-                        (change)="set(i, toNumber($any($event.target).value, false))"
-                      />
-                    }
-                    @default {
-                      @if (i.options?.length) {
-                        <select (change)="set(i, i.options![$any($event.target).selectedIndex])">
-                          @for (o of i.options; track $index) {
-                            <option [selected]="o === value(i)">
-                              {{ i.optionTexts?.[$index] ?? o }}
-                            </option>
-                          }
-                        </select>
-                      } @else {
+            @if (inputs() === null) {
+              <p class="tester__muted" role="status">Loading the strategy's saved inputs…</p>
+            } @else {
+              <!-- novalidate: Pine's step is a spinner increment, not a constraint — the browser
+                   read input.float(1.0, minval = 0.05)'s step 1 as one and silently refused every
+                   Re-run. Values are coerced on the way out (emitRerun). -->
+              <form
+                class="tester__inputs"
+                novalidate
+                (submit)="$event.preventDefault(); emitRerun()"
+              >
+                @for (i of editableInputs(); track i.id) {
+                  <label class="field">
+                    <span>{{ i.title }}</span>
+                    @switch (i.kind) {
+                      @case ('bool') {
                         <input
-                          type="text"
-                          [value]="value(i)"
-                          (change)="set(i, $any($event.target).value)"
+                          type="checkbox"
+                          [checked]="value(i) === true"
+                          (change)="set(i, $any($event.target).checked)"
                         />
                       }
+                      @case ('int') {
+                        <input
+                          type="number"
+                          step="1"
+                          [min]="i.minValue ?? null"
+                          [max]="i.maxValue ?? null"
+                          [value]="value(i)"
+                          (change)="set(i, toNumber($any($event.target).value, true))"
+                        />
+                      }
+                      @case ('float') {
+                        <input
+                          type="number"
+                          [step]="i.step ?? 'any'"
+                          [min]="i.minValue ?? null"
+                          [max]="i.maxValue ?? null"
+                          [value]="value(i)"
+                          (change)="set(i, toNumber($any($event.target).value, false))"
+                        />
+                      }
+                      @default {
+                        @if (i.options?.length) {
+                          <select (change)="set(i, i.options![$any($event.target).selectedIndex])">
+                            @for (o of i.options; track $index) {
+                              <option [selected]="o === value(i)">
+                                {{ i.optionTexts?.[$index] ?? o }}
+                              </option>
+                            }
+                          </select>
+                        } @else {
+                          <input
+                            type="text"
+                            [value]="value(i)"
+                            (change)="set(i, $any($event.target).value)"
+                          />
+                        }
+                      }
                     }
-                  }
-                </label>
-              } @empty {
-                <p class="tester__muted">This script has no inputs.</p>
-              }
-              <div class="tester__actions">
-                <button type="button" (click)="reset()">Defaults</button>
-                <button type="submit" class="primary" [disabled]="running()">Re-run</button>
-              </div>
-            </form>
+                  </label>
+                } @empty {
+                  <p class="tester__muted">This script has no inputs.</p>
+                }
+                <div class="tester__actions">
+                  <button type="button" (click)="reset()">Defaults</button>
+                  <button type="submit" class="primary" [disabled]="running()">Re-run</button>
+                </div>
+              </form>
+            }
           }
         }
       </div>
@@ -540,7 +556,11 @@ export class StrategyTesterPanelComponent implements OnDestroy {
 
   /** The run to show (null while the first run is in flight). */
   readonly result = input<ChartScriptResult | null>(null);
-  /** Input definitions (from compile); defaults to the result's own. */
+  /**
+   * The strategy's inputs with the defaults it runs on (`ScriptSettings.inputsOf`, as its Settings
+   * dialog shows them): an engine strategy's stored inputs in place of its source's. Null while
+   * those are read.
+   */
   readonly inputs = input<readonly ScriptInputDto[] | null>(null);
   /** Override values the current result was run with. */
   readonly values = input<ScriptInputValues>({});
@@ -619,7 +639,7 @@ export class StrategyTesterPanelComponent implements OnDestroy {
   protected readonly trades = computed<ChartTrade[]>(() => this.result()?.strategy?.trades ?? []);
 
   protected readonly editableInputs = computed(() =>
-    (this.inputs() ?? this.result()?.inputs ?? []).filter((i) => i.display !== 'none'),
+    (this.inputs() ?? []).filter((i) => i.display !== 'none'),
   );
   private readonly draft = signal<ScriptInputValues>({});
 
@@ -712,9 +732,10 @@ export class StrategyTesterPanelComponent implements OnDestroy {
   }
 
   // ── inputs editor ──
+  /** What an input's field shows: its value on the chart (or edited here), else its default. */
   protected value(i: ScriptInputDto): ScriptInputValue | null {
     const d = this.draft();
-    return i.id in d ? d[i.id] : i.defaultValue;
+    return i.id in d ? d[i.id] : inputDefault(i);
   }
   protected set(i: ScriptInputDto, v: ScriptInputValue | null): void {
     if (v === null) return;
@@ -728,14 +749,17 @@ export class StrategyTesterPanelComponent implements OnDestroy {
   protected reset(): void {
     this.draft.set({});
   }
+  /**
+   * Re-run with the inputs that differ from the defaults the strategy runs on — the Settings
+   * dialog's rule (`inputOverrides` over `inputs`). For an engine strategy those are its stored
+   * inputs, so a value back at its SOURCE's default goes as an explicit override while the stored
+   * one differs: left out, the stored one would win and the input could never return to it. Every
+   * input counts, those the form hides (`display.none`) included, so a value set in Settings stays.
+   */
   protected emitRerun(): void {
-    // Only send overrides that differ from the defaults.
-    const out: ScriptInputValues = {};
-    for (const i of this.editableInputs()) {
-      const v = this.draft()[i.id];
-      if (v !== undefined && v !== i.defaultValue) out[i.id] = v;
-    }
-    this.rerun.emit(out);
+    const list = this.inputs();
+    if (!list) return;
+    this.rerun.emit(inputOverrides(list, resolveInputValues(list, this.draft())));
   }
 
   // ── equity chart ──

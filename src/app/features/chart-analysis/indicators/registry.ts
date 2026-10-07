@@ -107,6 +107,7 @@ import {
   FIB_RETRACEMENT_LEVELS,
   PIVOT_TYPES,
   type AnchorPeriod,
+  type DayOf,
   type PivotType,
   type Maybe,
   type Ohlc,
@@ -170,6 +171,12 @@ export type IndicatorCategory = (typeof INDICATOR_CATEGORIES)[number];
 export interface IndicatorContext {
   /** Bars of the `symbol` input's instrument, ascending; aligned by time inside compute. */
   compareBars?: Ohlc[];
+  /**
+   * The trading day of a bar's `time`, for the studies that reset by day, week or month (session
+   * VWAP, daily pivots, the anchored ones): the symbol's own trading days — for FX, days that roll
+   * at 17:00 New York. Absent: UTC days.
+   */
+  tradingDay?: DayOf;
 }
 
 export type PriceSource = 'close' | 'open' | 'high' | 'low' | 'hl2' | 'hlc3' | 'ohlc4';
@@ -359,12 +366,12 @@ export const INDICATORS: readonly IndicatorDef[] = [
     id: 'vwap',
     name: 'VWAP (Session)',
     category: 'Volume',
-    description: 'Volume-weighted average price, reset each UTC day.',
+    description: 'Volume-weighted average price, reset at the open of each trading session.',
     keywords: ['session'],
     target: 'overlay',
     inputs: [],
     plots: [{ key: 'vwap', title: 'VWAP', kind: 'line', color: '#00BCD4' }],
-    compute: (bars) => ({ vwap: vwap(bars) }),
+    compute: (bars, _p, ctx) => ({ vwap: vwap(bars, ctx?.tradingDay) }),
   },
   {
     id: 'donchian',
@@ -601,8 +608,8 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { key: 's1', title: 'S1', kind: 'line', color: '#26A69A' },
       { key: 's2', title: 'S2', kind: 'line', color: '#26A69A' },
     ],
-    compute: (bars) => {
-      const r = pivotPoints(bars);
+    compute: (bars, _p, ctx) => {
+      const r = pivotPoints(bars, ctx?.tradingDay);
       return { pivot: r.pivot, r1: r.r1, r2: r.r2, s1: r.s1, s2: r.s2 };
     },
   },
@@ -1912,12 +1919,13 @@ export const INDICATORS: readonly IndicatorDef[] = [
       NUM('mult2', 'Band 2 ×', 2, 0.1, 10),
     ],
     plots: VWAP_BAND_PLOTS,
-    compute: (bars, p) => {
+    compute: (bars, p, ctx) => {
       const r = vwapBands(
         bars,
         num(p, 'mult1', 1),
         num(p, 'mult2', 2),
         str(p, 'anchor', 'Day') as AnchorPeriod,
+        ctx?.tradingDay,
       );
       return { ...r };
     },
@@ -1974,8 +1982,12 @@ export const INDICATORS: readonly IndicatorDef[] = [
     inputs: [SELECT('anchor', 'Reset period', ['Day', 'Week', 'Month', 'None'], 'Day')],
     plots: [{ key: 'cvd', title: 'CVD est', kind: 'line', color: '#2962FF' }],
     levels: [{ value: 0, color: '#787B86' }],
-    compute: (bars, p) => ({
-      cvd: cumulativeDeltaByPeriod(bars, str(p, 'anchor', 'Day') as AnchorPeriod | 'None'),
+    compute: (bars, p, ctx) => ({
+      cvd: cumulativeDeltaByPeriod(
+        bars,
+        str(p, 'anchor', 'Day') as AnchorPeriod | 'None',
+        ctx?.tradingDay,
+      ),
     }),
   },
   {
@@ -2082,11 +2094,12 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { key: 's2', title: 'S2', kind: 'line', color: '#26A69A' },
       { key: 's3', title: 'S3', kind: 'line', color: '#26A69A' },
     ],
-    compute: (bars, p) => ({
+    compute: (bars, p, ctx) => ({
       ...pivotPointsStandard(
         bars,
         str(p, 'type', 'Traditional') as PivotType,
         str(p, 'timeframe', 'Day') as AnchorPeriod,
+        ctx?.tradingDay,
       ),
     }),
   },

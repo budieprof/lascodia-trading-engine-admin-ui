@@ -134,6 +134,47 @@ export function foldBars(bars: readonly FoldBar[], resolution: TvResolution): Fo
 }
 
 /**
+ * A live price on the STORED grid (1m … 1h) at `nowMs`, on the engine's clock — the one the bar
+ * countdown and a run's `liveBar` read, so all three agree on which bucket is forming.
+ *
+ * <ul>
+ *   <li>In the newest bar's bucket it moves that bar.</li>
+ *   <li>Past it, the price opens the bar of ITS bucket — open = high = low = close = the price, as
+ *       TradingView opens a bar on its period's first tick — so the chart never stalls a whole
+ *       timeframe behind the market. After a gap (a weekend, a silent feed) that is the bucket the
+ *       price is in, not the one after the old bar: the grid is fixed widths on the UTC epoch, so the
+ *       bucket is exact. The next M1 resync folds the real open, high and low under it
+ *       ({@link mergeForming}).</li>
+ * </ul>
+ *
+ * Null when the price changes nothing: no bars, a session-grid or unknown resolution, or a clock
+ * behind the newest bar's bucket.
+ */
+export function applyStoredTick(
+  bars: readonly FoldBar[],
+  price: number,
+  nowMs: number,
+  resolution: TvResolution,
+): FoldBar[] | null {
+  const last = bars[bars.length - 1];
+  const bucket = bucketStartFor(resolution, nowMs);
+  if (!last || bucket === null || bucket < last.time) return null;
+  if (bucket > last.time) {
+    return [
+      ...bars,
+      { time: bucket, open: price, high: price, low: price, close: price, volume: 0 },
+    ];
+  }
+  const updated: FoldBar = {
+    ...last,
+    high: Math.max(last.high, price),
+    low: Math.min(last.low, price),
+    close: price,
+  };
+  return [...bars.slice(0, -1), updated];
+}
+
+/**
  * Lay the forming bars over the chart's bars, without disturbing anything already stored.
  *
  * <ul>

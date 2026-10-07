@@ -1,9 +1,9 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { MarketDataService } from '@core/services/market-data.service';
 import { ScriptingService } from '@core/services/scripting.service';
 import type { CandleDto } from '@core/api/api.types';
-import type { ChartBarDto } from '@core/api/scripting.types';
+import type { ChartBarDto, ChartBarsResult } from '@core/api/scripting.types';
 import { aggregateCandles } from './aggregate';
 import {
   isSessionResolution,
@@ -12,6 +12,7 @@ import {
   type TvResolution,
 } from './resolution';
 import { MAX_CHART_BARS, asBar, tailCount } from './session-bars';
+import type { SessionSpec } from './session-calendar';
 
 /** One bar in TradingView's shape. `time` is the bar's open, in ms. */
 export interface Bar {
@@ -89,6 +90,61 @@ export class CandleFeedService {
 
   private key(symbol: string, resolution: TvResolution): string {
     return `${symbol}|${resolution}`;
+  }
+
+  /**
+   * Each symbol's session as the engine reported it with its chart bars (`session`, `timeZone`):
+   * the trading days its day-based studies count in (`TradingCalendar`). A signal, so a chart that
+   * learns it after drawing recomputes them. A symbol whose session never came stays out, and
+   * counts UTC days.
+   */
+  private readonly sessions = signal<ReadonlyMap<string, SessionSpec>>(new Map());
+  /** {@link learnSession} requests in flight, by symbol. */
+  private readonly learning = new Map<string, Promise<SessionSpec | null>>();
+
+  /** `symbol`'s session, once the engine has reported it; null until then (or if it has none). */
+  sessionOf(symbol: string): SessionSpec | null {
+    return this.sessions().get(symbol.toUpperCase()) ?? null;
+  }
+
+  /**
+   * Make sure `symbol`'s session is known. Any session-grid load reports it (`fetchSession`); a chart
+   * on the stored grid (1m … 1h) loads none, so it asks once — the smallest `scripting/chart-bars`
+   * request, one daily bar, nothing forming — and remembers the answer for the page's life. A failure
+   * is not remembered: the next switch to the symbol asks again.
+   */
+  learnSession(symbol: string): Promise<SessionSpec | null> {
+    const key = symbol.toUpperCase();
+    const known = this.sessionOf(key);
+    if (known) return Promise.resolve(known);
+    let pending = this.learning.get(key);
+    if (!pending) {
+      pending = firstValueFrom(
+        this.scripting.chartBars({ symbol: key, timeframe: '1D', count: 1, includeForming: false }),
+      )
+        .then((res) => this.recordSession(key, res))
+        .catch(() => null)
+        .finally(() => this.learning.delete(key));
+      this.learning.set(key, pending);
+    }
+    return pending;
+  }
+
+  /** Keep the session a `scripting/chart-bars` answer reports for `symbol`. */
+  private recordSession(
+    symbol: string,
+    res: Pick<ChartBarsResult, 'session' | 'timeZone'>,
+  ): SessionSpec | null {
+    const session = typeof res?.session === 'string' ? res.session.trim() : '';
+    if (!session) return null;
+    const key = symbol.toUpperCase();
+    const zone = typeof res.timeZone === 'string' ? res.timeZone.trim() : '';
+    const timeZone = zone || 'Etc/UTC';
+    const held = this.sessions().get(key);
+    if (held?.session === session && held.timeZone === timeZone) return held;
+    const spec: SessionSpec = { session, timeZone };
+    this.sessions.update((m) => new Map(m).set(key, spec));
+    return spec;
   }
 
   /** Drop cached bars. Call when the symbol's data is known to have changed. */
@@ -256,7 +312,10 @@ export class CandleFeedService {
     return bars;
   }
 
-  /** One `scripting/chart-bars` request. `to` null: up to now, with the period still forming. */
+  /**
+   * One `scripting/chart-bars` request. `to` null: up to now, with the period still forming. The
+   * session the bars are laid out on comes with them, and is kept ({@link sessionOf}).
+   */
   private async fetchSession(
     symbol: string,
     resolution: TvResolution,
@@ -272,6 +331,7 @@ export class CandleFeedService {
         includeForming: to === null,
       }),
     );
+    this.recordSession(symbol, res);
     return res.bars.map(toSessionBar);
   }
 

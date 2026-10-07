@@ -12,6 +12,7 @@ import {
   tailCount,
   tradingDayMs,
 } from './session-bars';
+import { TradingCalendar, nextSessionPeriod } from './session-calendar';
 
 /**
  * EURUSD 4h on the engine's session grid, October 2026 (New York on EDT, UTC−4): the blocks of a
@@ -83,6 +84,105 @@ describe('applySessionTick', () => {
         .kind,
     ).toBe('ignore');
     expect(applySessionTick(held, 1.17, at('2026-10-09T16:00:00Z')).kind).toBe('ignore');
+  });
+});
+
+describe('applySessionTick — the first price of a period opens its bar (TradingView)', () => {
+  // The engine builds its forming bar from closed M1, so for a period's first minute it has none: the
+  // chart opens it from the price, laid out by the symbol's session, until the minute resync brings
+  // the engine's own.
+  const FX = new TradingCalendar({ session: '1700-1700:23456', timeZone: 'America/New_York' });
+  const next4h = (last: Bar, now: number) => nextSessionPeriod(FX, '240', last, now);
+  const held = [FRI_13, FRI_17];
+  const MON_01 = bar('2026-10-12T01:00:00Z', '2026-10-12T05:00:00Z');
+
+  it('a price before the close moves the forming bar, as before', () => {
+    const r = applySessionTick(held, 1.1731, at('2026-10-09T20:59:59Z'), next4h);
+    expect(r.kind).toBe('update');
+  });
+
+  it('a price at the close opens the next block from it: o = h = l = c, at the old close', () => {
+    // Monday's 01:00 block closes at 05:00; the 05:00 block's first price arrives on the dot.
+    const r = applySessionTick([SUN_21, MON_01], 1.1655, at('2026-10-12T05:00:00Z'), next4h);
+    expect(r).toEqual({
+      kind: 'open',
+      bars: [
+        SUN_21,
+        MON_01,
+        {
+          time: at('2026-10-12T05:00:00Z'),
+          closeTime: at('2026-10-12T09:00:00Z'),
+          open: 1.1655,
+          high: 1.1655,
+          low: 1.1655,
+          close: 1.1655,
+          volume: 0,
+        },
+      ],
+    });
+    // The next price moves it like any forming bar: the countdown and a run's liveBar follow it.
+    const opened = r.kind === 'open' ? r.bars : [];
+    const t = applySessionTick(opened, 1.1662, at('2026-10-12T05:00:20Z'), next4h);
+    expect(t.kind === 'update' && t.bars[2]).toMatchObject({
+      time: at('2026-10-12T05:00:00Z'),
+      open: 1.1655,
+      high: 1.1662,
+      close: 1.1662,
+    });
+    expect(isCurrentPeriod(opened[2], at('2026-10-12T05:00:20Z'))).toBe(true);
+  });
+
+  it('after a gap — the weekend — opens Monday’s first block at Sunday 21:00 UTC, not Friday’s close', () => {
+    const r = applySessionTick(held, 1.1688, at('2026-10-11T21:00:40Z'), next4h);
+    expect(r.kind).toBe('open');
+    const opened = r.kind === 'open' ? r.bars[2] : null;
+    expect(opened).toMatchObject({
+      time: SUN_21.time,
+      closeTime: SUN_21.closeTime,
+      open: 1.1688,
+      close: 1.1688,
+    });
+    // A price a few minutes into a block opens it at the block's open, not at the price's minute.
+    const late = applySessionTick([SUN_21, MON_01], 1.17, at('2026-10-12T05:07:00Z'), next4h);
+    expect(late.kind === 'open' && late.bars[2].time).toBe(at('2026-10-12T05:00:00Z'));
+  });
+
+  it('asks the engine when the period cannot be told here: a stray weekend price, a whole block missed', () => {
+    expect(applySessionTick(held, 1.17, at('2026-10-10T09:00:00Z'), next4h).kind).toBe('rollover');
+    const r = applySessionTick([SUN_21, MON_01], 1.17, at('2026-10-12T09:30:00Z'), next4h);
+    expect(r.kind).toBe('rollover');
+    // …and without a calendar at all, as before.
+    expect(applySessionTick(held, 1.17, at('2026-10-11T21:00:40Z')).kind).toBe('rollover');
+  });
+
+  it('the minute resync replaces the opened bar with the engine’s, keeping the newer tick close', () => {
+    let bars: Bar[] = [SUN_21, MON_01];
+    const r = applySessionTick(bars, 1.1655, at('2026-10-12T05:00:00Z'), next4h);
+    bars = r.kind === 'open' ? r.bars : bars;
+    const t = applySessionTick(bars, 1.1661, at('2026-10-12T05:00:30Z'), next4h);
+    bars = t.kind === 'update' ? t.bars : bars;
+
+    // A resync inside the first minute: the engine has no bar for 05:00 yet — the opened one stays.
+    bars = mergeSessionTail(bars, [engine(SUN_21), engine(MON_01)], true);
+    expect(bars.map((b) => b.time)).toEqual([SUN_21.time, MON_01.time, at('2026-10-12T05:00:00Z')]);
+
+    // The next one brings the engine's forming 05:00 block, folded from M1: its open, the wider
+    // range, and the tick's close (newer than M1).
+    const MON_05 = bar('2026-10-12T05:00:00Z', '2026-10-12T09:00:00Z');
+    const fromM1 = engine(
+      { ...MON_05, open: 1.1652, high: 1.1659, low: 1.1648, close: 1.1657 },
+      true,
+    );
+    bars = mergeSessionTail(bars, [engine(SUN_21), engine(MON_01), fromM1], true);
+    expect(bars[2]).toEqual({
+      time: MON_05.time,
+      closeTime: MON_05.closeTime,
+      open: 1.1652,
+      high: 1.1661,
+      low: 1.1648,
+      close: 1.1661,
+      volume: 100,
+    });
   });
 });
 
@@ -173,6 +273,24 @@ describe('mergeSessionTail', () => {
       false,
     );
     expect(out.map((b) => b.time)).toEqual([FRI_13.time, FRI_17.time, after.time]);
+  });
+
+  it('drops a held bar that opens inside the engine’s forming period — the engine laid it out', () => {
+    // A bar the chart opened from a price where the engine's period began earlier.
+    const misplaced = bar('2026-10-11T22:00:00Z', '2026-10-12T02:00:00Z');
+    const out = mergeSessionTail(
+      [FRI_17, misplaced],
+      [engine(FRI_17), engine(SUN_21, true)],
+      false,
+    );
+    expect(out.map((b) => b.time)).toEqual([FRI_17.time, SUN_21.time]);
+    // One after the forming period (a clock ahead of the engine's) is kept.
+    const ahead = bar('2026-10-12T01:00:00Z', '2026-10-12T05:00:00Z');
+    expect(
+      mergeSessionTail([FRI_17, ahead], [engine(FRI_17), engine(SUN_21, true)], false).map(
+        (b) => b.time,
+      ),
+    ).toEqual([FRI_17.time, SUN_21.time, ahead.time]);
   });
 
   it('an empty tail changes nothing', () => {
@@ -294,6 +412,15 @@ describe('currentDayBars', () => {
     const mon = bar('2026-10-04T21:00:00Z', '2026-10-05T21:00:00Z');
     const tue = bar('2026-10-05T21:00:00Z', '2026-10-06T21:00:00Z');
     expect(currentDayBars([mon, tue])).toEqual([tue]);
+  });
+
+  it('on the stored grid, is the trading session when the symbol’s session is known', () => {
+    const FX = new TradingCalendar({ session: '1700-1700:23456', timeZone: 'America/New_York' });
+    const h1 = (iso: string) => ({ ...bar(iso, iso), closeTime: undefined });
+    const bars = ['20', '21', '22', '23'].map((h) => h1(`2026-10-05T${h}:00:00Z`));
+    bars.push(h1('2026-10-06T00:00:00Z'));
+    // Tuesday's session opened at 21:00 UTC on Monday: the 20:00 hour is Monday's.
+    expect(currentDayBars(bars, FX.dayOf)).toEqual(bars.slice(1));
   });
 
   it('on the stored grid (no closes), is the UTC day as before', () => {

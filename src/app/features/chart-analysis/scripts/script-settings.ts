@@ -49,24 +49,17 @@ export class ScriptSettings<R extends SettingsRun> {
     const item = this.item();
     return item ? (this.runs().find((r) => r.item === item) ?? null) : null;
   });
-  /** Engine strategies' stored inputs by id, read when their settings first open. */
+  /** Engine strategies' stored inputs by id, read once each ({@link loadStoredInputs}). */
   private readonly stored = signal<Record<number, ScriptInputValues>>({});
+  /** Ids whose stored inputs are being read. */
+  private readonly reading = new Set<number>();
   /**
-   * The open dialog's inputs. An engine strategy's stored inputs are its defaults — every run
-   * applies them beneath the chart's overrides — so its dialog waits for them (null). Compared by
-   * content: each live re-run brings an equal copy, which must not re-render the form.
+   * The open dialog's inputs ({@link inputsOf}). Compared by content: each live re-run brings an
+   * equal copy, which must not re-render the form.
    */
-  readonly inputs = computed<readonly ScriptInputDto[] | null>(
-    () => {
-      const run = this.run();
-      if (!run) return null;
-      const id = run.item.strategyId;
-      if (id === undefined || id === null) return run.result.inputs;
-      const stored = this.stored();
-      return id in stored ? withSavedDefaults(run.result.inputs, stored[id]) : null;
-    },
-    { equal: (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b) },
-  );
+  readonly inputs = computed<readonly ScriptInputDto[] | null>(() => this.inputsOf(this.run()), {
+    equal: (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b),
+  });
   /** A "Save as default" is on its way. */
   readonly saving = signal(false);
 
@@ -80,12 +73,39 @@ export class ScriptSettings<R extends SettingsRun> {
     const run = this.runs().find((r) => r.item.key === key);
     if (!run) return;
     this.item.set(run.item);
+    this.loadStoredInputs(run.item);
+  }
+
+  /**
+   * A run's inputs with the defaults it runs on — what "unchanged" means for each of them. An
+   * engine strategy's stored inputs are its defaults: every run applies them beneath the chart's
+   * overrides, so a value equal to its SOURCE's default is still a change to send while the stored
+   * one differs. Null while those are read ({@link loadStoredInputs}): a form that showed the source's
+   * defaults meanwhile would show values the strategy does not run with.
+   */
+  inputsOf(run: SettingsRun | null): readonly ScriptInputDto[] | null {
+    if (!run) return null;
     const id = run.item.strategyId;
-    if (id === undefined || id === null || id in this.stored()) return;
+    if (id === undefined || id === null) return run.result.inputs;
+    const stored = this.stored();
+    return id in stored ? withSavedDefaults(run.result.inputs, stored[id]) : null;
+  }
+
+  /** Read an engine strategy's stored inputs (`GET strategy/{id}`), once per id; others have none. */
+  loadStoredInputs(item: ChartScriptItem): void {
+    const id = item.strategyId;
+    if (id === undefined || id === null || id in this.stored() || this.reading.has(id)) return;
+    this.reading.add(id);
     this.host.storedInputs(id).subscribe({
-      next: (inputs) => this.stored.update((m) => ({ ...m, [id]: inputs })),
+      next: (inputs) => {
+        this.reading.delete(id);
+        this.stored.update((m) => ({ ...m, [id]: inputs }));
+      },
       // Unreadable: the source's defaults, rather than a dialog that never shows its inputs.
-      error: () => this.stored.update((m) => ({ ...m, [id]: {} })),
+      error: () => {
+        this.reading.delete(id);
+        this.stored.update((m) => ({ ...m, [id]: {} }));
+      },
     });
   }
 

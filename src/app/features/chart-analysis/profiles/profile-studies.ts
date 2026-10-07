@@ -1,3 +1,4 @@
+import type { TradingDays } from '../datafeed/session-calendar';
 import type { Ohlc } from '../indicators/math';
 import type { IndicatorInput } from '../indicators/registry';
 import {
@@ -123,13 +124,15 @@ function baseOpts(p: ProfileParams): ProfileOptions {
 /**
  * Compute the render model for a profile study. `visibleRange` = logical bar indices
  * (from the time scale's getVisibleLogicalRange()); only vp-visible needs it, and it falls
- * back to all bars when absent.
+ * back to all bars when absent. `days`: the symbol's trading days, which the daily sessions,
+ * periods and anchors count in (UTC days without them).
  */
 export function computeProfileStudy(
   id: ProfileStudyId,
   bars: readonly Ohlc[],
   params: ProfileParams = {},
   visibleRange?: { from: number; to: number } | null,
+  days?: TradingDays,
 ): ProfileRenderModel {
   const p = profileStudyParams(id, params);
   const o = baseOpts(p);
@@ -152,13 +155,14 @@ export function computeProfileStudy(
           ...o,
           session: String(p['session']) as SessionName,
           tzOffsetMinutes: Number(p['tzOffsetMinutes']) || 0,
+          days,
         }).map((s) => ({ profile: s.profile, t0: s.profile.t0, t1: s.profile.t1 })),
       };
     case 'vp-periodic':
       return {
         kind: 'volume',
         anchor: 'span',
-        blocks: periodicProfiles(bars, { ...o, period: String(p['period']) as ProfilePeriod }).map((s) => ({
+        blocks: periodicProfiles(bars, { ...o, period: String(p['period']) as ProfilePeriod, days }).map((s) => ({
           profile: s.profile,
           t0: s.profile.t0,
           t1: s.profile.t1,
@@ -171,7 +175,12 @@ export function computeProfileStudy(
     }
     case 'vp-auto-anchored':
       return one(
-        autoAnchoredProfile(bars, { ...o, anchor: String(p['anchor']) as AutoAnchor, lookback: Number(p['lookback']) || 100 }),
+        autoAnchoredProfile(bars, {
+          ...o,
+          anchor: String(p['anchor']) as AutoAnchor,
+          lookback: Number(p['lookback']) || 100,
+          days,
+        }),
         'span',
       );
     case 'tpo':
@@ -183,6 +192,7 @@ export function computeProfileStudy(
           rows: o.rows,
           tickSize: o.tickSize,
           valueAreaPct: o.valueAreaPct,
+          days,
         }),
       };
   }

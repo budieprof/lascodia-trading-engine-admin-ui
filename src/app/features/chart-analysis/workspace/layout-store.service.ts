@@ -150,16 +150,16 @@ export const CHART_TIMEZONES: ReadonlyArray<{ id: string; label: string }> = [
 ];
 
 /**
- * Offset in minutes between UTC and `timezone` at `atMs`.
- *
- * Computed from `Intl` at the given instant rather than from a fixed table,
- * because the offset changes with DST — a chart that hardcodes London at UTC+0
- * is an hour wrong for seven months of the year.
+ * One formatter per time zone. Building an `Intl.DateTimeFormat` costs about fifteen times as much as
+ * using one (~55 µs against ~3.5 µs in Node), and the chart asks for an offset per bar on every
+ * repaint and per trading day when it counts sessions.
  */
-export function timezoneOffsetMinutes(timezone: string, atMs: number): number {
-  if (timezone === 'UTC') return 0;
-  try {
-    const formatter = new Intl.DateTimeFormat('en-US', {
+const zoneFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function zoneFormatter(timezone: string): Intl.DateTimeFormat {
+  let formatter = zoneFormatters.get(timezone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-US', {
       timeZone: timezone,
       hour12: false,
       year: 'numeric',
@@ -169,7 +169,22 @@ export function timezoneOffsetMinutes(timezone: string, atMs: number): number {
       minute: '2-digit',
       second: '2-digit',
     });
-    const parts = formatter.formatToParts(new Date(atMs));
+    zoneFormatters.set(timezone, formatter);
+  }
+  return formatter;
+}
+
+/**
+ * Offset in minutes between UTC and `timezone` at `atMs`.
+ *
+ * Computed from `Intl` at the given instant rather than from a fixed table,
+ * because the offset changes with DST — a chart that hardcodes London at UTC+0
+ * is an hour wrong for seven months of the year.
+ */
+export function timezoneOffsetMinutes(timezone: string, atMs: number): number {
+  if (timezone === 'UTC') return 0;
+  try {
+    const parts = zoneFormatter(timezone).formatToParts(new Date(atMs));
     const get = (type: string): number => Number(parts.find((p) => p.type === type)?.value ?? '0');
     const asUtc = Date.UTC(
       get('year'),
