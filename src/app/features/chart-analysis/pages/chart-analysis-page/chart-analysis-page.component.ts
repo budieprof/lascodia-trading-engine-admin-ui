@@ -19,7 +19,10 @@ import type { CurrencyPairDto } from '@core/api/api.types';
 import { CandleFeedService, type Bar } from '../../datafeed/candle-feed.service';
 import { LiveRerunScheduler, formingLiveBar } from '../../scripts/live-bar';
 
-/** Live indicator re-runs: at most one per script per this many ms. */
+/**
+ * Live indicator re-runs: at least this many ms between two runs of a script — longer for a slow
+ * one, whose runs are spaced by 4× their round trip (LiveRerunScheduler).
+ */
 const LIVE_RERUN_MS = 2_000;
 import { SUPPORTED_RESOLUTIONS, resolutionMs, type TvResolution } from '../../datafeed/resolution';
 import {
@@ -1195,29 +1198,43 @@ export class ChartAnalysisPageComponent {
 
     // TradingView behaviour: an indicator's last value sits on the forming bar and moves with it.
     // Every change to the chart's newest bar (a tick, an M1 resync, a new period opening) re-runs
-    // the indicators on this chart with that bar as `liveBar` — throttled per script to one run
-    // every 2 s, never two in flight. Strategies keep backtesting closed bars on the timer above.
-    const liveReruns = new LiveRerunScheduler((key, done) => {
-      const run = this.scriptRuns().find((r) => r.item.key === key);
-      if (
-        !run ||
-        run.result.kind === 'strategy' ||
-        run.symbol !== this.symbol() ||
-        run.resolution !== this.resolution()
-      ) {
-        done();
-        return;
-      }
-      this.runScript(run.item, run.values, true, () => done(), true);
-    }, LIVE_RERUN_MS);
-    this.destroyRef.onDestroy(() => liveReruns.dispose());
+    // the indicators on this chart with that bar as `liveBar` — never two in flight per script, at
+    // least 2 s apart and 4× the last run's round trip apart for a slow script (a heavy one ran
+    // back to back: 40 runs of ~600 KB in 98 s), and not at all while the tab is hidden: the ticks
+    // that arrive meanwhile collapse into one run when it is shown again. Strategies keep
+    // backtesting closed bars on the timer above.
+    const liveReruns = new LiveRerunScheduler(
+      (key, done) => {
+        const run = this.scriptRuns().find((r) => r.item.key === key);
+        if (
+          !run ||
+          run.result.kind === 'strategy' ||
+          run.symbol !== this.symbol() ||
+          run.resolution !== this.resolution()
+        ) {
+          done();
+          return;
+        }
+        this.runScript(run.item, run.values, true, () => done(), true);
+      },
+      LIVE_RERUN_MS,
+      () => Date.now(),
+      () => document.hidden,
+    );
+    const resumeLiveReruns = () => liveReruns.resume();
+    document.addEventListener('visibilitychange', resumeLiveReruns);
+    this.destroyRef.onDestroy(() => {
+      document.removeEventListener('visibilitychange', resumeLiveReruns);
+      liveReruns.dispose();
+    });
     effect(() => {
       const bars = this.bars();
       const last = bars[bars.length - 1];
       // Track the newest bar's identity and values only.
       const sig = last ? `${last.time}|${last.open}|${last.high}|${last.low}|${last.close}` : '';
       untracked(() => {
-        if (!sig || document.hidden || this.replayActive()) return;
+        // A hidden tab still requests: the scheduler holds them until it is visible.
+        if (!sig || this.replayActive()) return;
         const symbol = this.symbol();
         const resolution = this.resolution();
         for (const r of this.scriptRuns())
