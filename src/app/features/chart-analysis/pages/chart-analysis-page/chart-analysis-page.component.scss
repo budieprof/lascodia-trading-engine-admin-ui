@@ -14,6 +14,9 @@ $pane-gap: 4px;
 // theme switch; the chart canvas itself is themed in ChartHostComponent,
 // which has to be told the palette in JS rather than via CSS.
 
+// A `fill-height` page: the shell lays .content out as a column for it, so 100% shrinks to what
+// the breadcrumbs leave. In block flow it ran under the footer pill, which swallowed taps on the
+// bottom bar (see LayoutComponent).
 :host {
   display: block;
   height: 100%;
@@ -1140,6 +1143,58 @@ $pane-gap: 4px;
   }
 }
 
+// The Strategy Tester opened with no strategy on the chart, laid out like the tester's own bar.
+.tester-empty {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border-top: 1px solid var(--border, #e6e9ef);
+  font-size: 12px;
+}
+
+.tester-empty-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border, #e6e9ef);
+}
+
+.tester-empty-x {
+  display: inline-flex;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--tv-muted);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--tv-hover);
+  }
+}
+
+.tester-empty-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px;
+  color: var(--tv-muted);
+  font-size: 13px;
+
+  p {
+    margin: 0;
+  }
+
+  .tb-primary {
+    margin: 0;
+    padding: 0 16px;
+  }
+}
+
 // Many studies must not push the chart off the page.
 .studies {
   max-height: 112px;
@@ -1786,6 +1841,26 @@ $strip-width: 46px;
 
 .bb-status {
   margin-right: 8px;
+}
+
+// A finger needs ~40px. The bar's buttons (26px), the dock's tabs and the studies chips' icon
+// buttons (~24px) are sized for a mouse; on a touch screen they get the room, desktop is unchanged.
+@media (pointer: coarse) {
+  .bottom-bar {
+    height: 40px;
+  }
+
+  .bb-btn,
+  .dock-tabs button {
+    min-height: 40px;
+  }
+
+  .study-toggle,
+  .study-remove {
+    justify-content: center;
+    min-width: 40px;
+    min-height: 40px;
+  }
 }
 
 // ── Legend: one line, like TradingView ─────────────────────────────────────

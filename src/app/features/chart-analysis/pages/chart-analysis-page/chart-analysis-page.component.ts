@@ -89,6 +89,7 @@ import { PerformanceTilesComponent } from '../../panels/performance-tiles.compon
 import { SeasonalsComponent } from '../../panels/seasonals.component';
 import { TechnicalsGaugeComponent } from '../../panels/technicals-gauge.component';
 import type { ChartViewState, ExternalPane } from '../../chart/chart-host.component';
+import { endChartTouchesOnCancel } from '../../chart/lwc-touch-cancel';
 import {
   catchError,
   forkJoin,
@@ -410,6 +411,8 @@ function loadWatchlistOpen(): boolean {
     '(keydown)': 'onKeydown($event)',
     '(document:click)': 'closeRailFlyout()',
     tabindex: '0',
+    // The shell gives a fill-height page the height its breadcrumbs leave (LayoutComponent).
+    class: 'fill-height',
   },
 })
 export class ChartAnalysisPageComponent {
@@ -539,11 +542,18 @@ export class ChartAnalysisPageComponent {
 
   toggleTester(): void {
     if (this.dockTab() === 'tester') {
-      this.testerOpen.set(false);
+      this.closeTester();
     } else {
       this.testerOpen.set(true);
+      // With no strategy on the chart it opens on how to add one, as TradingView's does.
+      this.testerPrompt.set(!this.strategyRun());
       this.dockPreference.set('tester');
     }
+  }
+
+  closeTester(): void {
+    this.testerOpen.set(false);
+    this.testerPrompt.set(false);
   }
 
   autoScale(): void {
@@ -658,6 +668,14 @@ export class ChartAnalysisPageComponent {
   readonly scriptRunning = computed(() => this.runningKeys().size > 0);
   readonly scriptError = signal<string | null>(null);
   readonly testerOpen = signal(true);
+  /**
+   * The operator opened the Strategy Tester with no strategy on the chart: it shows how to add
+   * one. The tab used to be disabled then, explained only by a tooltip — which touch never shows.
+   */
+  readonly testerPrompt = signal(false);
+  readonly testerShown = computed(
+    () => this.testerOpen() && (!!this.strategyRun() || this.testerPrompt()),
+  );
   readonly editorOpen = signal(false);
 
   // ── Pine Editor ↔ chart script (TradingView: the editor shows the script on the chart) ──
@@ -784,7 +802,7 @@ export class ChartAnalysisPageComponent {
   readonly dockPreference = signal<'editor' | 'tester'>('tester');
   readonly dockTab = computed<'editor' | 'tester' | null>(() => {
     const editor = this.editorOpen();
-    const tester = !!this.strategyRun() && this.testerOpen();
+    const tester = this.testerShown();
     if (editor && tester) return this.dockPreference();
     return editor ? 'editor' : tester ? 'tester' : null;
   });
@@ -1243,6 +1261,8 @@ export class ChartAnalysisPageComponent {
       document.removeEventListener('visibilitychange', resumeReruns);
       this.runScheduler.dispose();
     });
+    // A chart touch the browser cancels must not swallow the next tap on the page.
+    this.destroyRef.onDestroy(endChartTouchesOnCancel(document));
     /** Quiet re-runs of the scripts on this chart (`filter`: which of them). */
     const rerunScripts = (filter: (r: ChartScriptRun) => boolean) => {
       const chart = { symbol: this.symbol(), resolution: this.resolution() };
@@ -2956,6 +2976,7 @@ export class ChartAnalysisPageComponent {
       this.restoringScripts.set(s.scripts ?? []);
       const d = s.dock ?? {};
       this.testerOpen.set(d.testerOpen ?? true);
+      this.testerPrompt.set(false);
       this.dockPreference.set(d.preference ?? 'tester');
       this.editorOpen.set(false);
       for (const w of s.scripts ?? [])
@@ -3298,7 +3319,10 @@ export class ChartAnalysisPageComponent {
    */
   onKeydown(ev: KeyboardEvent): void {
     const target = ev.target as HTMLElement | null;
-    if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+    // The Pine editor is a contenteditable, not a field: typing "m" there toggled the magnet, and
+    // Backspace deleted the selected drawing.
+    if (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable))
+      return;
 
     // The Technicals view covers the chart: Esc returns to it, and no chart shortcut acts
     // on drawings the operator cannot see.
