@@ -7,6 +7,7 @@ import {
   PagerRequest,
   TradeSignalDto,
   RejectTradeSignalRequest,
+  CancelTradeSignalResult,
   CreateTradeSignalRequest,
 } from '@core/api/api.types';
 
@@ -55,5 +56,19 @@ export class TradeSignalsService {
 
   expire(id: number): Observable<ResponseData<TradeSignalDto>> {
     return this.api.put(`/trade-signal/${id}/expire`);
+  }
+
+  /**
+   * Cancel a signal: it becomes Cancelled (terminal — never executed again) and the engine
+   * immediately closes every open position and cancels every pending order it produced, on
+   * every account. Callable from any status; calling it again re-sweeps anything the first call
+   * could not reach (e.g. an offline EA). Labelled `admin-ui` in the engine's audit trail.
+   */
+  cancel(id: number, reason: string): Observable<ResponseData<CancelTradeSignalResult>> {
+    return this.api.put(
+      `/trade-signal/${id}/cancel`,
+      { reason },
+      { headers: { 'X-Lascodia-Actor': 'admin-ui' } },
+    );
   }
 }

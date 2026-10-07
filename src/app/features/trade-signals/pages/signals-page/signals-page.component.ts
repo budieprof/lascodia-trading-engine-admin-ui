@@ -370,6 +370,7 @@ type DirectionChip = 'all' | TradeDirection;
                     [class.status-chip--rejected]="s.status === 'Rejected'"
                     [class.status-chip--executed]="s.status === 'Executed'"
                     [class.status-chip--expired]="s.status === 'Expired'"
+                    [class.status-chip--cancelled]="s.status === 'Cancelled'"
                   >
                     {{ s.status }}
                   </span>
@@ -536,17 +537,31 @@ type DirectionChip = 'all' | TradeDirection;
               </dl>
             </section>
 
-            @if (s.status === 'Pending') {
+            @if (s.status !== 'Cancelled') {
               <footer class="drawer-actions">
+                @if (s.status === 'Pending') {
+                  <button
+                    class="btn btn-success"
+                    (click)="approveSignal(s)"
+                    [disabled]="processing()"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    class="btn btn-danger"
+                    (click)="rejectSignal(s)"
+                    [disabled]="processing()"
+                  >
+                    Reject
+                  </button>
+                }
                 <button
-                  class="btn btn-success"
-                  (click)="approveSignal(s)"
+                  class="btn btn-danger"
+                  (click)="cancelSignal(s)"
                   [disabled]="processing()"
+                  title="Cancel the signal and close every position / pending order it opened"
                 >
-                  Approve
-                </button>
-                <button class="btn btn-danger" (click)="rejectSignal(s)" [disabled]="processing()">
-                  Reject
+                  Cancel signal
                 </button>
               </footer>
             }
@@ -564,6 +579,28 @@ type DirectionChip = 'all' | TradeDirection;
         (confirm)="confirmReject()"
         (cancelled)="showRejectDialog.set(false)"
       />
+
+      <app-confirm-dialog
+        [open]="cancelTarget() !== null"
+        title="Cancel signal"
+        [message]="cancelDialogMessage()"
+        confirmLabel="Cancel signal"
+        confirmVariant="destructive"
+        [loading]="processing()"
+        (confirm)="confirmCancel()"
+        (cancelled)="cancelTarget.set(null)"
+      >
+        <label class="cancel-reason">
+          <span>Reason (recorded in the audit trail)</span>
+          <textarea
+            rows="2"
+            maxlength="400"
+            placeholder="e.g. thesis invalidated by the NFP print"
+            [value]="cancelReason()"
+            (input)="cancelReason.set($any($event.target).value)"
+          ></textarea>
+        </label>
+      </app-confirm-dialog>
     </div>
   `,
   styles: [
@@ -912,6 +949,27 @@ type DirectionChip = 'all' | TradeDirection;
         background: rgba(110, 110, 115, 0.18);
         color: var(--text-secondary);
       }
+      .status-chip--cancelled {
+        background: rgba(175, 82, 222, 0.14);
+        color: #8944ab;
+      }
+      .cancel-reason {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        margin-top: 0.75rem;
+        font-size: 0.8125rem;
+        color: var(--text-secondary);
+      }
+      .cancel-reason textarea {
+        font: inherit;
+        color: var(--text-primary);
+        background: var(--bg-secondary, transparent);
+        border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+        border-radius: 8px;
+        padding: 0.5rem 0.625rem;
+        resize: vertical;
+      }
       .head-sub {
         margin-top: 0.3rem;
         font-size: 0.78rem;
@@ -1109,6 +1167,7 @@ export class SignalsPageComponent {
     'Executed',
     'Rejected',
     'Expired',
+    'Cancelled',
   ];
   readonly directionChips: DirectionChip[] = ['all', 'Buy', 'Sell'];
 
@@ -1127,6 +1186,18 @@ export class SignalsPageComponent {
     const ids = this.pendingRejectIds();
     if (ids.length === 1) return `Reject signal #${ids[0]}?`;
     return `Reject ${ids.length} pending signals?`;
+  });
+
+  // ── Cancel confirm state ─────────────────────────────────────────────
+  readonly cancelTarget = signal<TradeSignalDto | null>(null);
+  readonly cancelReason = signal('');
+  readonly cancelDialogMessage = computed(() => {
+    const s = this.cancelTarget();
+    if (!s) return '';
+    return (
+      `Cancel signal #${s.id} (${s.direction} ${s.symbol})? It will never execute again, and every ` +
+      `open position and pending order it produced will be closed immediately on every account.`
+    );
   });
 
   readonly selectedDetail = signal<TradeSignalDto | null>(null);
@@ -1270,6 +1341,7 @@ export class SignalsPageComponent {
       { name: 'Pending', color: '#FF9500' },
       { name: 'Rejected', color: '#FF3B30' },
       { name: 'Expired', color: '#8E8E93' },
+      { name: 'Cancelled', color: '#AF52DE' },
     ].map((s) => ({
       name: s.name,
       type: 'bar' as const,
@@ -1533,6 +1605,7 @@ export class SignalsPageComponent {
           Executed: { bg: 'rgba(52,199,89,0.12)', color: '#248A3D' },
           Rejected: { bg: 'rgba(255,59,48,0.12)', color: '#D70015' },
           Expired: { bg: 'rgba(142,142,147,0.12)', color: '#636366' },
+          Cancelled: { bg: 'rgba(175,82,222,0.12)', color: '#8944AB' },
         };
         const s = map[p.value] ?? map['Expired'];
         const reason =
@@ -1715,6 +1788,47 @@ export class SignalsPageComponent {
           }
         },
       });
+    });
+  }
+
+  cancelSignal(s: TradeSignalDto): void {
+    this.cancelReason.set('');
+    this.cancelTarget.set(s);
+  }
+
+  confirmCancel(): void {
+    const s = this.cancelTarget();
+    if (!s) return;
+    const reason = this.cancelReason().trim() || 'Cancelled from admin UI';
+    this.processing.set(true);
+    this.signalsService.cancel(s.id, reason).subscribe({
+      next: (res) => {
+        this.processing.set(false);
+        if (!res.status || !res.data) {
+          this.notifications.error(res.message ?? 'Failed to cancel signal');
+          return;
+        }
+        this.cancelTarget.set(null);
+        this.selectedDetail.set(null);
+        const r = res.data;
+        if (r.unresolvedCount > 0) {
+          this.notifications.warning(
+            `Signal #${s.id} cancelled — ${r.unresolvedCount} position(s)/order(s) not reachable yet (EA offline?); the engine keeps retrying.`,
+          );
+        } else {
+          this.notifications.success(
+            r.issuedCount > 0
+              ? `Signal #${s.id} cancelled — ${r.issuedCount} position(s)/order(s) closing.`
+              : `Signal #${s.id} cancelled.`,
+          );
+        }
+        this.dataTable()?.loadData();
+        this.loadRecent();
+      },
+      error: () => {
+        this.processing.set(false);
+        this.notifications.error('Failed to cancel signal');
+      },
     });
   }
 

@@ -28,13 +28,16 @@ export const SUPPRESS_ERROR_TOAST = new HttpContextToken<boolean>(() => false);
 export interface ApiCallOptions {
   /** True to suppress the interceptor's error toast; the caller shows the error itself. */
   silent?: boolean;
+  /** Extra request headers (e.g. `X-Lascodia-Actor` to label the caller in audit trails). */
+  headers?: Record<string, string>;
 }
 
 function requestOptions(opts?: ApiCallOptions) {
-  if (!opts?.silent) return WITH_CREDENTIALS;
+  if (!opts?.silent && !opts?.headers) return WITH_CREDENTIALS;
   return {
     ...WITH_CREDENTIALS,
-    context: new HttpContext().set(SUPPRESS_ERROR_TOAST, true),
+    ...(opts.silent ? { context: new HttpContext().set(SUPPRESS_ERROR_TOAST, true) } : {}),
+    ...(opts.headers ? { headers: opts.headers } : {}),
   };
 }
 

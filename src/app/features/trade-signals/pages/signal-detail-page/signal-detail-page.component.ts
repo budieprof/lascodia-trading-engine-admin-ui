@@ -21,6 +21,8 @@ import {
 } from '@shared/components/spot-rec-chart/spot-rec-chart.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+import { NotificationService } from '@core/notifications/notification.service';
 
 /**
  * Per-signal detail surface. Two panels:
@@ -51,6 +53,7 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
     SpotRecChartComponent,
     PageHeaderComponent,
     ErrorStateComponent,
+    ConfirmDialogComponent,
   ],
   template: `
     <div class="page">
@@ -79,8 +82,44 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
             }
           }
         </span>
+        @if (signal(); as s) {
+          @if (s.status !== 'Cancelled') {
+            <button
+              class="btn btn-danger"
+              (click)="showCancelDialog.set(true)"
+              title="Cancel the signal and close every position / pending order it opened"
+            >
+              Cancel signal
+            </button>
+          }
+        }
         <a class="btn btn-secondary" routerLink="/trade-signals">← All signals</a>
       </app-page-header>
+
+      <app-confirm-dialog
+        [open]="showCancelDialog()"
+        title="Cancel signal"
+        [message]="
+          'Cancel signal #' +
+          (signalId() ?? '') +
+          '? It will never execute again, and every open position and pending order it produced will be closed immediately on every account.'
+        "
+        confirmLabel="Cancel signal"
+        confirmVariant="destructive"
+        [loading]="cancelling()"
+        (confirm)="confirmCancel()"
+        (cancelled)="showCancelDialog.set(false)"
+      >
+        <label class="cancel-reason">
+          <span>Reason (recorded in the audit trail)</span>
+          <textarea
+            rows="2"
+            maxlength="400"
+            [value]="cancelReason()"
+            (input)="cancelReason.set($any($event.target).value)"
+          ></textarea>
+        </label>
+      </app-confirm-dialog>
 
       @if (signalId() !== null) {
         @if (signal(); as s) {
@@ -170,6 +209,33 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
         background: rgba(52, 199, 89, 0.15);
         color: var(--profit);
       }
+      .btn-danger {
+        background: rgba(255, 59, 48, 0.15);
+        color: #d70015;
+      }
+      .btn-danger:hover:not(:disabled) {
+        background: rgba(255, 59, 48, 0.25);
+      }
+      .chip[data-status='Cancelled'] {
+        background: rgba(175, 82, 222, 0.15);
+        color: #8944ab;
+      }
+      .cancel-reason {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        margin-top: 0.75rem;
+        font-size: 0.8125rem;
+        color: var(--text-secondary);
+      }
+      .cancel-reason textarea {
+        font: inherit;
+        color: var(--text-primary);
+        border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+        border-radius: 8px;
+        padding: 0.5rem 0.625rem;
+        resize: vertical;
+      }
       .chip[data-status='Rejected'] {
         background: rgba(255, 59, 48, 0.15);
         color: var(--loss);
@@ -244,6 +310,42 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
 export class SignalDetailPageComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly signalsService = inject(TradeSignalsService);
+  private readonly notifications = inject(NotificationService);
+
+  readonly showCancelDialog = signal(false);
+  readonly cancelReason = signal('');
+  readonly cancelling = signal(false);
+
+  confirmCancel(): void {
+    const id = this.signalId();
+    if (id === null) return;
+    this.cancelling.set(true);
+    this.signalsService
+      .cancel(id, this.cancelReason().trim() || 'Cancelled from admin UI')
+      .subscribe({
+        next: (res) => {
+          this.cancelling.set(false);
+          if (!res.status || !res.data) {
+            this.notifications.error(res.message ?? 'Failed to cancel signal');
+            return;
+          }
+          this.showCancelDialog.set(false);
+          this.cancelReason.set('');
+          if (res.data.unresolvedCount > 0) {
+            this.notifications.warning(
+              `Signal #${id} cancelled — ${res.data.unresolvedCount} position(s)/order(s) not reachable yet (EA offline?); the engine keeps retrying.`,
+            );
+          } else {
+            this.notifications.success(`Signal #${id} cancelled.`);
+          }
+          this.load();
+        },
+        error: () => {
+          this.cancelling.set(false);
+          this.notifications.error('Failed to cancel signal');
+        },
+      });
+  }
 
   /**
    * Parses :id from the route param into a number. Null when the
@@ -387,6 +489,9 @@ export class SignalDetailPageComponent {
    * next to a filled order, which contradicted the Orders panel.
    */
   outcomeLabel(s: TradeSignalDto): { text: string; tone: 'ok' | 'warn' | 'neutral' } | null {
+    if (s.status === 'Cancelled') {
+      return { text: 'Cancelled', tone: 'warn' };
+    }
     if (s.orderId !== null) {
       return { text: `Executed — order #${s.orderId}`, tone: 'ok' };
     }
