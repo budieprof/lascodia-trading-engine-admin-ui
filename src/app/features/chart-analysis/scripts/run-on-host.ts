@@ -1,13 +1,19 @@
 /**
  * How a Pine run lands on the chart-analysis chart beyond what its primitives paint: the bars its
- * `barcolor()` recolours and the room its future drawings need right of the last bar. Pure, so the
- * host can ask while it rebuilds its series, and every rule is testable without a chart.
+ * `barcolor()` recolours and the room its future drawings — and its labels' text — need right of
+ * the last bar. Pure, so the host can ask while it rebuilds its series, and every rule is testable
+ * without a chart.
  *
  * <p>Alignment is `script-renderer`'s: the run's last bar is found on the host axis by time and
  * every other run bar sits at the same distance from it (run index + offset = host index), which
  * holds because both are the engine's candles at the same resolution. Host times are the plotted
  * ones — zone-shifted, Lightweight Charts seconds.</p>
  */
+
+import { splitLines } from '@shared/pine-chart/lwc/canvas-kit';
+import { labelGeometry } from '@shared/pine-chart/lwc/paint-drawings';
+import { FONT_MONOSPACE } from '@shared/pine-chart/render/build-render-model';
+import type { LabelDrawing } from '@shared/pine-chart/render/render-model';
 
 /** TradingView's default space right of the last bar, in bars (the time scale's `rightOffset`). */
 export const DEFAULT_RIGHT_OFFSET = 5;
@@ -120,18 +126,95 @@ export function withBarColor<T extends object>(
   return { ...row, color, borderColor: color, wickColor: color };
 }
 
+const NARROW = new Set([...' .,:;\'"!|()[]{}`ijlI']);
+const MEDIUM = new Set([...'frt-']);
+const WIDE = new Set([...'mwMW@%']);
+
 /**
- * Bars past the host's last bar that a run's outputs reach (future labels, lines and boxes,
- * positive plot offsets): its own future slots, less the bars the host has opened since the run.
+ * Advance of one character of label text, in em, in the chart's sans-serif stack (-apple-system
+ * first), by kind — fitted to canvas measurements at label sizes, where it lands within a few % on
+ * prices, signal words and mixed text. Anything past ASCII (arrows, ✓, CJK, emoji) counts a full em.
+ */
+function charEm(ch: string): number {
+  if (NARROW.has(ch)) return 0.3;
+  if (MEDIUM.has(ch)) return 0.4;
+  if (WIDE.has(ch)) return 0.9;
+  if (ch >= '0' && ch <= '9') return 0.62;
+  if (ch >= 'A' && ch <= 'Z') return 0.7;
+  return ch.charCodeAt(0) > 0x7e ? 1 : 0.56;
+}
+/** Bold text runs about 7% wider. */
+const BOLD_FACTOR = 1.07;
+/** Monospace advances are 0.6 em exactly. */
+const MONO_EM = 0.6;
+/** Erring wide: a margin a few px too wide costs less than a label cut off at the price axis. */
+const TEXT_SLACK = 1.05;
+
+/** Estimated width in px of one line of label text at `fontSize` px (no canvas to measure it on). */
+export function estimateTextWidth(
+  text: string,
+  fontSize: number,
+  font: { monospace?: boolean; bold?: boolean } = {},
+): number {
+  let em = 0;
+  for (const ch of text) em += font.monospace ? MONO_EM : charEm(ch);
+  const bold = font.bold && !font.monospace ? BOLD_FACTOR : 1;
+  return em * fontSize * bold * TEXT_SLACK;
+}
+
+/** The fields of a label that size and place its box. */
+export type LabelBox = Pick<
+  LabelDrawing,
+  'style' | 'text' | 'fontSize' | 'fontFamily' | 'bold' | 'yloc'
+>;
+
+/**
+ * How far right of its anchor a label reaches, in px, laid out as the chart paints it
+ * (`labelGeometry`, with an estimated text width): a label_left bubble its whole width plus the
+ * pointer; label_center, label_up / label_down, plain text and the shape styles half their width;
+ * label_right nothing, as it ends at the anchor.
+ */
+export function labelRightPx(l: LabelBox): number {
+  const lines = splitLines(l.text);
+  const font = { monospace: l.fontFamily === FONT_MONOSPACE, bold: l.bold };
+  let textW = 0;
+  for (const line of lines) textW = Math.max(textW, estimateTextWidth(line, l.fontSize, font));
+  const textH = lines.length * Math.round(l.fontSize * 1.25);
+  // As paintLabel: under the bar a label_down becomes a label_up (the same horizontally).
+  const style = l.yloc === 'belowbar' && l.style === 'label_down' ? 'label_up' : l.style;
+  const g = labelGeometry(style, 0, 0, textW, textH, l.fontSize);
+  let right = g.box.x + g.box.w;
+  for (const p of g.pointer ?? []) right = Math.max(right, p.x);
+  if (g.shape) right = Math.max(right, g.shape.cx + g.shape.size / 2);
+  return right;
+}
+
+/** A label's anchor (logical index in its run) and how far right of it its box reaches, px. */
+export interface LabelReach {
+  x: number;
+  px: number;
+}
+
+/**
+ * Bars past the host's last bar that a run's outputs reach, less the bars the host has opened since
+ * the run: its future slots (future labels, lines and boxes, positive plot offsets), and the text of
+ * its labels — a label's box runs `px` right of its anchor, which is `px / barSpacing` bars at the
+ * chart's zoom (labels count only when the spacing is given). Fractional.
  */
 export function futureBarsOnHost(
   offset: number | null,
   lastIndex: number,
   futureSlots: number,
   hostLength: number,
+  labels: readonly LabelReach[] = [],
+  barSpacing = 0,
 ): number {
-  if (offset === null || !(futureSlots > 0) || hostLength === 0) return 0;
-  return Math.max(0, offset + lastIndex + futureSlots - (hostLength - 1));
+  if (offset === null || hostLength === 0) return 0;
+  const hostLast = hostLength - 1;
+  let reach = futureSlots > 0 ? offset + lastIndex + futureSlots - hostLast : 0;
+  if (barSpacing > 0)
+    for (const l of labels) reach = Math.max(reach, offset + l.x + l.px / barSpacing - hostLast);
+  return Math.max(0, reach);
 }
 
 /**

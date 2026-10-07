@@ -579,7 +579,12 @@ export class ChartHostComponent implements OnDestroy {
         : null;
     const p = this.palette(this.theme.theme() === 'dark');
     const lineLike = LINE_LIKE.has(this.style());
-    const color = lineLike ? p.line : (shown?.close ?? 0) >= (shown?.open ?? 0) ? p.up : p.down;
+    // The last-value label above takes the last bar's colour, a script's barcolor() included — but
+    // not on hollow candles, where that colour paints only the border and wick.
+    const scripted =
+      this.priceStyle === 'hollow' ? null : (this.barColors?.[this.plotted.length - 1] ?? null);
+    const up = (shown?.close ?? 0) >= (shown?.open ?? 0);
+    const color = lineLike ? p.line : (scripted ?? (up ? p.up : p.down));
     this.countdown.set(text, shown ? shown.close : null, color, axisLabelHeight(12));
   }
   private computedCache = new Map<string, Record<string, Array<number | null>>>();
@@ -755,6 +760,7 @@ export class ChartHostComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     clearInterval(this.countdownTimer);
+    clearTimeout(this.marginTimer);
     this.cancelGlide();
     for (const h of this.scriptHandles) h.dispose();
     this.scriptHandles = [];
@@ -1194,6 +1200,7 @@ export class ChartHostComponent implements OnDestroy {
       this.scheduleAnalysis();
       this.scheduleVisibleProfiles();
       this.scheduleViewChanged();
+      this.scheduleMarginSync();
     });
     // Pane separators are dragged with the pointer; heights have no change event of their own.
     el.addEventListener('pointerup', () => this.scheduleViewChanged());
@@ -1800,12 +1807,14 @@ export class ChartHostComponent implements OnDestroy {
         : ohlcRows(this.plotted, colors, barPaint(style));
     // Same bars, same times: the view and every primitive on the series stay as they are.
     this.price.setData(rows as CandlestickData<Time>[]);
+    this.tickCountdown(); // the last bar's colour may have changed with them
   }
 
   /**
    * Room right of the last bar for what the scripts draw ahead of it (labels, lines and boxes in
-   * the future, positive plot offsets): the furthest plus two bars, capped (scriptRightOffset);
-   * the default again once nothing reaches past the last bar.
+   * the future, positive plot offsets, and labels' text — a label_left bubble runs its whole width
+   * right of its anchor, so labels near the last bar count too): the furthest plus two bars, capped
+   * (scriptRightOffset); the default again once nothing reaches past the last bar.
    *
    * <p>It is the time scale's own `rightOffset` that changes, so "scroll to realtime" and "fit"
    * keep the room. The view follows only at the live edge: an operator who scrolled into history,
@@ -1815,18 +1824,36 @@ export class ChartHostComponent implements OnDestroy {
   private syncScriptMargin(): void {
     const scale = this.chart?.timeScale();
     if (!scale) return;
+    const { rightOffset: current, barSpacing } = scale.options();
+    // Labels' text is px wide, so how many bars it takes depends on the zoom: a zoom re-syncs.
+    this.marginSpacing = barSpacing;
     let reach = 0;
     if (this.scriptHandles.length) {
       const times = plottedSeconds(this.plotted);
-      for (const h of this.scriptHandles) reach = Math.max(reach, h.futureBars(times));
+      for (const h of this.scriptHandles) reach = Math.max(reach, h.futureBars(times, barSpacing));
     }
-    const { rightOffset: current, barSpacing } = scale.options();
     const next = scriptRightOffset(current, reach, marginCap(scale.width(), barSpacing));
     if (next === current) return;
     const position = scale.scrollPosition();
     // Setting the option scrolls to it as well; put a view that is not ours to move back.
     scale.applyOptions({ rightOffset: next });
     if (!marginMovesView(current, next, position)) scale.scrollToPosition(position, false);
+  }
+
+  /** The bar spacing the margin was last fitted at. */
+  private marginSpacing = 0;
+  private marginTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /**
+   * Re-fit the margin once a zoom settles (not on every frame of a pinch or wheel, which would fight
+   * the gesture). Pans leave the spacing alone and cost nothing here.
+   */
+  private scheduleMarginSync(): void {
+    const spacing = this.chart?.timeScale().options().barSpacing;
+    if (!this.scriptHandles.length || spacing === undefined || spacing === this.marginSpacing)
+      return;
+    clearTimeout(this.marginTimer);
+    this.marginTimer = setTimeout(() => this.syncScriptMargin(), 150);
   }
 
   /** Candlestick + chart-pattern studies → the shared pattern renderer. */

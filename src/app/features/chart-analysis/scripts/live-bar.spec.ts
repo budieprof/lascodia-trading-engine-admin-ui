@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { LiveRerunScheduler, formingLiveBar } from './live-bar';
+import { LiveRerunScheduler, formingLiveBar, runMatchesChart, sameSeries } from './live-bar';
 
 const H = 3_600_000;
 const bar = (time: number, close = 1.1) => ({
@@ -11,11 +11,15 @@ const bar = (time: number, close = 1.1) => ({
   close,
   volume: 5,
 });
+const EURUSD_H1 = { symbol: 'EURUSD', resolution: '60' };
+const USDJPY_H1 = { symbol: 'USDJPY', resolution: '60' };
+const EURUSD_H4 = { symbol: 'EURUSD', resolution: '240' };
 
 describe('formingLiveBar', () => {
+  const t = 1_759_708_800_000; // 2025-10-06 00:00 UTC
+
   it('is the newest bar when it is the period containing now', () => {
-    const t = 1_759_708_800_000; // 2025-10-06 00:00 UTC
-    expect(formingLiveBar([bar(t - H), bar(t, 1.15)], '60' as never, t + 90_000)).toEqual({
+    expect(formingLiveBar([bar(t - H), bar(t, 1.15)], EURUSD_H1, EURUSD_H1, t + 90_000)).toEqual({
       t,
       o: 1,
       h: 1.2,
@@ -26,20 +30,55 @@ describe('formingLiveBar', () => {
   });
 
   it('is null when the newest bar is an older period or there are no bars', () => {
-    const t = 1_759_708_800_000;
-    expect(formingLiveBar([bar(t - H)], '60' as never, t + 90_000)).toBeNull();
-    expect(formingLiveBar([], '60' as never, t)).toBeNull();
+    expect(formingLiveBar([bar(t - H)], EURUSD_H1, EURUSD_H1, t + 90_000)).toBeNull();
+    expect(formingLiveBar([], EURUSD_H1, EURUSD_H1, t)).toBeNull();
+  });
+
+  it("is null while the chart still holds another series' bars", () => {
+    const bars = [bar(t - H), bar(t, 1.1191)];
+    // Switched to USDJPY: the EURUSD forming bar must not be sent as USDJPY's.
+    expect(formingLiveBar(bars, EURUSD_H1, USDJPY_H1, t + 90_000)).toBeNull();
+    // Switched to 4h (00:00 is a 4h bucket too): the 1h bar is not the 4h bar.
+    expect(formingLiveBar(bars, EURUSD_H1, EURUSD_H4, t + 90_000)).toBeNull();
+    // Nothing loaded yet.
+    expect(formingLiveBar(bars, null, EURUSD_H1, t + 90_000)).toBeNull();
+    // Case of the symbol does not matter.
+    expect(
+      formingLiveBar(bars, { symbol: 'eurusd', resolution: '60' }, EURUSD_H1, t + 90_000),
+    ).not.toBeNull();
   });
 });
+
+describe('sameSeries / runMatchesChart', () => {
+  it('matches symbol and resolution', () => {
+    expect(sameSeries(EURUSD_H1, { ...EURUSD_H1 })).toBe(true);
+    expect(sameSeries(EURUSD_H1, USDJPY_H1)).toBe(false);
+    expect(sameSeries(EURUSD_H1, EURUSD_H4)).toBe(false);
+    expect(sameSeries(EURUSD_H1, null)).toBe(false);
+    expect(sameSeries(null, null)).toBe(false);
+  });
+
+  it("draws a run only on its own series, once that series' bars are on screen", () => {
+    expect(runMatchesChart(EURUSD_H1, EURUSD_H1, EURUSD_H1)).toBe(true);
+    // Switched away: the previous run is hidden at once.
+    expect(runMatchesChart(EURUSD_H1, EURUSD_H4, EURUSD_H1)).toBe(false);
+    // The new run came back before the new bars: not over the previous symbol's candles.
+    expect(runMatchesChart(USDJPY_H1, USDJPY_H1, EURUSD_H1)).toBe(false);
+    expect(runMatchesChart(USDJPY_H1, USDJPY_H1, null)).toBe(false);
+  });
+});
+
+/** Quiet re-runs the scheduler started; `done()` settles one. */
+type Started = { key: string; ticket: number; done: () => void };
 
 describe('LiveRerunScheduler', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
   function make() {
-    const runs: { key: string; done: () => void }[] = [];
-    const s = new LiveRerunScheduler(
-      (key, done) => runs.push({ key, done }),
+    const runs: Started[] = [];
+    const s: LiveRerunScheduler = new LiveRerunScheduler(
+      (key, ticket) => runs.push({ key, ticket, done: () => s.settle(key, ticket) }),
       2_000,
       () => Date.now(),
     );
@@ -89,6 +128,112 @@ describe('LiveRerunScheduler', () => {
     vi.advanceTimersByTime(5_000);
     expect(runs.length).toBe(2);
   });
+
+  it('settling twice, or settling a superseded run, frees nothing', () => {
+    const { s, runs } = make();
+    s.request('a');
+    const first = runs[0];
+    first.done();
+    first.done();
+    s.request('a'); // spaced: due in 2 s
+    vi.advanceTimersByTime(2_000);
+    expect(runs.length).toBe(2);
+    first.done(); // a stale settle must not free the run now in flight
+    s.request('a');
+    vi.advanceTimersByTime(10_000);
+    expect(runs.length).toBe(2);
+  });
+});
+
+describe('LiveRerunScheduler — explicit runs and the newest result', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  function make() {
+    let t = 0;
+    const runs: Started[] = [];
+    const s: LiveRerunScheduler = new LiveRerunScheduler(
+      (key, ticket) => runs.push({ key, ticket, done: () => s.settle(key, ticket) }),
+      2_000,
+      () => t,
+    );
+    const advance = (ms: number) => {
+      t += ms;
+      vi.advanceTimersByTime(ms);
+    };
+    return { s, runs, advance };
+  }
+
+  it("an update supersedes a slow re-run of the old source in flight (the editor's race)", () => {
+    const { s, runs, advance } = make();
+    s.request('editor:current'); // a 4 s re-run of the OLD source starts
+    const stale = runs[0];
+    advance(600);
+    const update = s.begin('editor:current'); // "Update on chart"
+    expect(s.isCurrent('editor:current', stale.ticket)).toBe(false);
+    expect(s.isCurrent('editor:current', update)).toBe(true);
+    advance(150);
+    s.settle('editor:current', update); // the update lands first and is drawn
+    advance(3_250);
+    // The old re-run lands last: not current, so it is dropped, and settling it changes nothing.
+    expect(s.isCurrent('editor:current', stale.ticket)).toBe(false);
+    stale.done();
+    expect(runs.length).toBe(1);
+  });
+
+  it('quiet re-runs wait for an explicit run in flight, then follow it spaced', () => {
+    const { s, runs, advance } = make();
+    const t = s.begin('a');
+    s.request('a'); // a tick, the minute timer, a theme switch…
+    s.request('a');
+    advance(5_000);
+    expect(runs.length).toBe(0); // never beside the explicit run
+    s.settle('a', t); // a 5 s round trip: the next run may start 20 s after it started
+    expect(runs.length).toBe(0);
+    advance(14_999);
+    expect(runs.length).toBe(0);
+    advance(1);
+    expect(runs.length).toBe(1);
+    expect(s.isCurrent('a', runs[0].ticket)).toBe(true);
+  });
+
+  it('a timer that comes due during an explicit run waits for it', () => {
+    const { s, runs, advance } = make();
+    s.request('a');
+    runs[0].done();
+    s.request('a'); // spaced: due at 2 s
+    advance(1_000);
+    const t = s.begin('a');
+    advance(2_000);
+    expect(runs.length).toBe(1);
+    s.settle('a', t); // started at 1 s, took 2 s: next start no sooner than 9 s (now: 3 s)
+    advance(5_999);
+    expect(runs.length).toBe(1);
+    advance(1);
+    expect(runs.length).toBe(2);
+  });
+
+  it('only the newest of two explicit runs is current', () => {
+    const { s } = make();
+    const first = s.begin('a');
+    const second = s.begin('a');
+    expect(s.isCurrent('a', first)).toBe(false);
+    expect(s.isCurrent('a', second)).toBe(true);
+    s.settle('a', first);
+    expect(s.isCurrent('a', second)).toBe(true);
+  });
+
+  it('cancel makes every run of the key stale (removed script, replaced layout)', () => {
+    const { s, runs } = make();
+    s.request('a');
+    const t = s.begin('b');
+    s.cancelAll();
+    expect(s.isCurrent('a', runs[0].ticket)).toBe(false);
+    expect(s.isCurrent('b', t)).toBe(false);
+    // The key starts afresh.
+    s.request('a');
+    expect(runs.length).toBe(2);
+  });
 });
 
 describe('LiveRerunScheduler — slow runs and hidden tabs', () => {
@@ -99,9 +244,9 @@ describe('LiveRerunScheduler — slow runs and hidden tabs', () => {
   function make() {
     let t = 0;
     let hidden = false;
-    const runs: { key: string; done: () => void }[] = [];
-    const s = new LiveRerunScheduler(
-      (key, done) => runs.push({ key, done }),
+    const runs: Started[] = [];
+    const s: LiveRerunScheduler = new LiveRerunScheduler(
+      (key, ticket) => runs.push({ key, ticket, done: () => s.settle(key, ticket) }),
       2_000,
       () => t,
       () => hidden,

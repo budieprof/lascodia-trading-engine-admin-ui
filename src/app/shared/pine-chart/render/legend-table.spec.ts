@@ -201,3 +201,115 @@ describe('tableView', () => {
     expect(v.cells[0].style['border-bottom']).toBe('1px solid rgb(136, 136, 136)');
   });
 });
+
+describe('tableView — rows and columns with no cells collapse, as on TradingView', () => {
+  /** A 2 × 14 dashboard (`table.new(pos, 2, 14)`) with `filled` rows of key/value cells. */
+  function dashboard(filled: number) {
+    return buildTableLayout(
+      {
+        id: 7,
+        position: 'top_right',
+        columns: 2,
+        rows: 14,
+        bgColor: '#0F172AEB',
+        frameColor: '#1E293BFF',
+        frameWidth: 1,
+        borderColor: '#1E293BFF',
+        borderWidth: 1,
+        forceOverlay: false,
+        cells: Array.from({ length: filled }, (_, row) => [
+          cell({ column: 0, row, text: `key ${row}` }),
+          cell({ column: 1, row, text: `value ${row}` }),
+        ]).flat(),
+      },
+      'main',
+    )!;
+  }
+
+  it('draws only the rows that hold cells — no blank bands for the rows it reserved', () => {
+    const v = tableView(dashboard(8), 800, 400);
+    expect(v.containerStyle['grid-template-rows']).toBe('repeat(8, auto)');
+    expect(v.containerStyle['grid-template-columns']).toBe('repeat(2, auto)');
+    expect(v.cells.length).toBe(16);
+    expect(v.cells.map((c) => c.text).slice(-2)).toEqual(['key 7', 'value 7']);
+    // The last row drawn is the bottom of the table: no border under it.
+    const bottom = v.cells.slice(-2);
+    expect(bottom.every((c) => c.style['border-bottom'] === undefined)).toBe(true);
+    expect(v.cells[0].style['border-bottom']).toBe('1px solid rgb(30, 41, 59)');
+  });
+
+  it('closes up gaps, renumbering the grid tracks, and keeps empty cells inside used tracks', () => {
+    const layout = buildTableLayout(
+      {
+        id: 3,
+        position: 'bottom_left',
+        columns: 4,
+        rows: 6,
+        bgColor: null,
+        frameColor: null,
+        frameWidth: 0,
+        borderColor: '#888888FF',
+        borderWidth: 1,
+        forceOverlay: false,
+        cells: [
+          cell({ column: 0, row: 1, text: 'a' }),
+          cell({ column: 3, row: 1, text: 'b' }),
+          cell({ column: 3, row: 4, text: 'c' }),
+        ],
+      },
+      'main',
+    )!;
+    const v = tableView(layout, 800, 400);
+    // Rows 1 and 4, columns 0 and 3: a 2 × 2 grid, the (row 4, column 0) position an empty cell.
+    expect(v.containerStyle['grid-template-rows']).toBe('repeat(2, auto)');
+    expect(v.containerStyle['grid-template-columns']).toBe('repeat(2, auto)');
+    expect(v.cells.map((c) => [c.text, c.style['grid-row'], c.style['grid-column']])).toEqual([
+      ['a', '1 / span 1', '1 / span 1'],
+      ['b', '1 / span 1', '2 / span 1'],
+      ['', '2 / span 1', '1 / span 1'],
+      ['c', '2 / span 1', '2 / span 1'],
+    ]);
+    const c = v.cells[3];
+    expect(c.style['border-right']).toBeUndefined();
+    expect(c.style['border-bottom']).toBeUndefined();
+    expect(v.cells[0].style['border-right']).toBe('1px solid rgb(136, 136, 136)');
+  });
+
+  it('keeps every row and column a merged cell spans, counting only kept tracks', () => {
+    const layout = buildTableLayout(
+      {
+        id: 4,
+        position: 'top_left',
+        columns: 3,
+        rows: 5,
+        bgColor: null,
+        frameColor: null,
+        frameWidth: 0,
+        borderColor: null,
+        borderWidth: 0,
+        forceOverlay: false,
+        cells: [
+          // Rows 0–2 merged in column 0; column 2 has cells in rows 0 and 4 only.
+          cell({ column: 0, row: 0, rowSpan: 3, text: 'merged' }),
+          cell({ column: 2, row: 0, text: 'x' }),
+          cell({ column: 2, row: 4, text: 'y' }),
+        ],
+      },
+      'main',
+    )!;
+    const v = tableView(layout, 800, 400);
+    // Rows 0, 1, 2 (the merge) and 4; row 3 collapses. Column 1 collapses.
+    expect(v.containerStyle['grid-template-rows']).toBe('repeat(4, auto)');
+    expect(v.containerStyle['grid-template-columns']).toBe('repeat(2, auto)');
+    const merged = v.cells.find((c) => c.text === 'merged')!;
+    expect(merged.style['grid-row']).toBe('1 / span 3');
+    const y = v.cells.find((c) => c.text === 'y')!;
+    expect(y.style['grid-row']).toBe('4 / span 1');
+    expect(y.style['grid-column']).toBe('2 / span 1');
+  });
+
+  it('draws nothing for a table with no cells', () => {
+    const v = tableView(dashboard(0), 800, 400);
+    expect(v.cells).toEqual([]);
+  });
+});

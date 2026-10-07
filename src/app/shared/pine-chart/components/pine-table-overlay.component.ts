@@ -96,7 +96,10 @@ export class PineTableOverlayComponent {
   readonly paneWidth = input(0);
   readonly paneHeight = input(0);
 
+  /** A table with no cell is not drawn at all — its frame alone would be a speck on the pane. */
   readonly views = computed<TableView[]>(() =>
-    this.tables().map((t) => tableView(t, this.paneWidth(), this.paneHeight())),
+    this.tables()
+      .map((t) => tableView(t, this.paneWidth(), this.paneHeight()))
+      .filter((v) => v.cells.length > 0),
   );
 }
