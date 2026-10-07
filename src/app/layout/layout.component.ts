@@ -138,6 +138,20 @@ import { FooterVersionPillComponent } from './footer-version-pill/footer-version
         flex-direction: column;
       }
 
+      /* The floating Ask button (AssistantDockComponent: 48px tall, 20px off the bottom) covers the
+         bottom-right corner of whatever is under it. A scrolling page moves out from under it; a
+         fill-height page never does, and on a tablet the chart's bottom bar — "log" and "auto",
+         the Pine Editor's own bottom edge when docked — sat under it, so a tap there opened the
+         assistant. Such a page ends 8px above the button: 20 + 48 + 8, less the 32px footer row
+         below the content. Desktop, with a mouse, keeps its layout. */
+      @media (pointer: coarse), (max-width: 1279.98px) {
+        .content:has(> .fill-height) {
+          padding-bottom: calc(
+            var(--space-5) + 48px + var(--space-2) - 32px + env(safe-area-inset-bottom, 0px)
+          );
+        }
+      }
+
       .mobile-scrim {
         display: none;
         position: fixed;
