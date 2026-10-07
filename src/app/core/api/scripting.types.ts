@@ -257,7 +257,15 @@ export interface ScriptRunRequest {
    * value sits on the bar the chart is forming. Ignored for backtests and ranges.
    */
   liveBar?: ScriptRunBar | null;
+  /**
+   * The console's theme when the run is requested — the chart the outputs are drawn on. Pine's
+   * `chart.bg_color` / `chart.fg_color` answer #131722 / #D1D4DC for `dark`, white / #131722
+   * otherwise (the engine's default is light).
+   */
+  theme?: ScriptChartTheme;
 }
+
+export type ScriptChartTheme = 'light' | 'dark';
 
 export interface ScriptRunBar {
   t: number;

@@ -15,6 +15,7 @@ import {
 } from 'rxjs';
 
 import { NotificationService } from '@core/notifications/notification.service';
+import { ThemeService } from '@core/theme/theme.service';
 
 import { ScriptingApiError, ScriptingService } from '@core/services/scripting.service';
 import { StrategiesService } from '@core/services/strategies.service';
@@ -97,6 +98,7 @@ export class ChartScriptService {
   private readonly scripting = inject(ScriptingService);
   private readonly strategies = inject(StrategiesService);
   private readonly notify = inject(NotificationService);
+  private readonly theme = inject(ThemeService);
 
   /** The operator's saved scripts (engine-backed; local leftovers that failed to migrate included). */
   readonly savedScripts = signal<SavedChartScript[]>([]);
@@ -252,7 +254,8 @@ export class ChartScriptService {
   /**
    * Runs an item over the chart's symbol and resolution. Strategies run as `backtest`, indicators
    * as `preview`. A script that does not compile resolves (with `error` and `diagnostics` set);
-   * only transport failures reject (`ScriptingApiError`).
+   * only transport failures reject (`ScriptingApiError`). The chart follows the console's theme,
+   * so the run is told the theme of the moment (Pine `chart.bg_color` / `chart.fg_color`).
    */
   runOnChart(
     item: ChartScriptItem,
@@ -267,6 +270,7 @@ export class ChartScriptService {
       timeframe: runTimeframeFor(resolution),
       lastBars: Math.max(1, Math.min(MAX_LAST_BARS, Math.round(lastBars))),
       mode: item.kind === 'strategy' ? 'backtest' : 'preview',
+      theme: this.theme.theme(),
     };
     if (item.strategyId !== undefined) req.strategyId = item.strategyId;
     else req.source = item.pineSource ?? '';

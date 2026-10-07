@@ -5,8 +5,14 @@ import { firstValueFrom, of, throwError } from 'rxjs';
 import { ScriptingApiError, ScriptingService } from '@core/services/scripting.service';
 import { StrategiesService } from '@core/services/strategies.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { ThemeService, type Theme } from '@core/theme/theme.service';
 import type { ChartIndicatorScriptDto } from '@core/api/scripting.types';
-import { ChartScriptService, DRAFTS_STORAGE_KEY, LEGACY_STORAGE_KEY } from './chart-script.service';
+import {
+  ChartScriptService,
+  DRAFTS_STORAGE_KEY,
+  LEGACY_STORAGE_KEY,
+  type ChartScriptItem,
+} from './chart-script.service';
 
 function dto(
   id: number,
@@ -29,6 +35,7 @@ function legacy(id: string, name: string, source = `//@version=6\nindicator("${n
 
 function make(scripting: Partial<Record<keyof ScriptingService, unknown>>) {
   const notify = { error: vi.fn(), success: vi.fn(), warning: vi.fn() };
+  const theme = { current: 'light' as Theme };
   const injector = Injector.create({
     providers: [
       { provide: ScriptingService, useValue: { listChartScripts: () => of([]), ...scripting } },
@@ -37,10 +44,11 @@ function make(scripting: Partial<Record<keyof ScriptingService, unknown>>) {
         useValue: { list: () => of({ status: true, data: { data: [] } }) },
       },
       { provide: NotificationService, useValue: notify },
+      { provide: ThemeService, useValue: { theme: () => theme.current } },
       { provide: ChartScriptService, useClass: ChartScriptService },
     ],
   });
-  return { svc: injector.get(ChartScriptService), notify };
+  return { svc: injector.get(ChartScriptService), notify, theme };
 }
 
 describe('ChartScriptService — engine-backed "My scripts"', () => {
@@ -245,5 +253,26 @@ describe('ChartScriptService — engine-backed "My scripts"', () => {
     expect(calls[0][0]).toMatchObject({ mode: 'preview', liveBar: live });
     expect(calls[1][0].mode).toBe('backtest');
     expect(calls[1][0].liveBar).toBeUndefined();
+  });
+
+  it("sends the console's theme as it is when each run is requested (chart.bg_color)", () => {
+    const run = vi.fn(() => of({ compile: { success: true, diagnostics: [], inputs: [] } }));
+    const { svc, theme } = make({ run });
+    const indicator: ChartScriptItem = {
+      key: 'k',
+      source: 'mine',
+      name: 'i',
+      description: '',
+      kind: 'indicator',
+      pineSource: 's',
+    };
+    const strategy: ChartScriptItem = { ...indicator, key: 'k2', kind: 'strategy' };
+    theme.current = 'dark';
+    svc.runOnChart(indicator, 'EURUSD', '60' as never).subscribe();
+    svc.runOnChart(strategy, 'EURUSD', '60' as never).subscribe();
+    theme.current = 'light';
+    svc.runOnChart(indicator, 'EURUSD', '60' as never).subscribe();
+    const calls = run.mock.calls as unknown as [{ theme?: string }][];
+    expect(calls.map((c) => c[0].theme)).toEqual(['dark', 'dark', 'light']);
   });
 });

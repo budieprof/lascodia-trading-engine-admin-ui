@@ -6,6 +6,7 @@ import { ApiService } from '@core/api/api.service';
 import { ApiError } from '@core/api/api.types';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { ScriptingApiError, ScriptingService } from '@core/services/scripting.service';
+import { ThemeService, type Theme } from '@core/theme/theme.service';
 import { ReplaySession } from '../replay/replay-session';
 import { ScriptingRunService } from './scripting-run.service';
 
@@ -16,6 +17,7 @@ function setup(
     post?: (url: string, body: unknown) => unknown;
     delete?: (url: string) => unknown;
   } = {},
+  theme: { current: Theme } = { current: 'light' },
 ) {
   const http = {
     post: vi.fn((url: string, body: unknown) => {
@@ -36,6 +38,7 @@ function setup(
       { provide: RUNTIME_CONFIG, useValue: { apiBaseUrl: 'http://engine' } },
       { provide: ApiService, useClass: ApiService },
       { provide: ScriptingService, useClass: ScriptingService },
+      { provide: ThemeService, useValue: { theme: () => theme.current } },
       { provide: ScriptingRunService, useClass: ScriptingRunService },
     ],
   });
@@ -73,7 +76,7 @@ describe('ScriptingRunService', () => {
     const res = await firstValueFrom(api.run(req));
     expect(http.post).toHaveBeenCalledWith(
       `${BASE}/scripting/run`,
-      req,
+      { ...req, theme: 'light' },
       expect.objectContaining({ withCredentials: true }),
     );
     expect(res.compile?.declaration?.overlay).toBe(false);
@@ -166,7 +169,7 @@ describe('ScriptingRunService', () => {
     await session.start({ source: 's', symbol: 'EURUSD', timeframe: '60' }, 99, null);
     expect(http.post).toHaveBeenCalledWith(
       `${BASE}/scripting/replay`,
-      { source: 's', symbol: 'EURUSD', timeframe: '60', startBar: 99 },
+      { source: 's', symbol: 'EURUSD', timeframe: '60', startBar: 99, theme: 'light' },
       expect.anything(),
     );
     await session.step(5);
@@ -192,5 +195,27 @@ describe('ScriptingRunService', () => {
     await expect(
       firstValueFrom(api.startReplay({ source: 's', symbol: 'X', timeframe: '60', startBar: 1 })),
     ).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("sends the console's theme of the moment, over one a reused request still carries", async () => {
+    const theme: { current: Theme } = { current: 'dark' };
+    const { http, api } = setup(
+      {
+        post: (url) =>
+          url.endsWith('/scripting/replay')
+            ? ok({ sessionId: 's1', frame: { barIndex: 0, bars: [] } })
+            : ok({ compile: { success: true, diagnostics: [] }, bars: [] }),
+      },
+      theme,
+    );
+    const req = { source: 'x', symbol: 'EURUSD', timeframe: '60', theme: 'light' as const };
+    await firstValueFrom(api.run(req));
+    await firstValueFrom(api.startReplay({ ...req, startBar: 3 }));
+    theme.current = 'light';
+    await firstValueFrom(api.run({ ...req, theme: 'dark' }));
+    const sent = http.post.mock.calls.map((c) => (c[1] as { theme?: string }).theme);
+    expect(sent).toEqual(['dark', 'dark', 'light']);
+    // The caller's request object is not modified.
+    expect(req.theme).toBe('light');
   });
 });

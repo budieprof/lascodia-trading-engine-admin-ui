@@ -3,6 +3,7 @@ import { map, type Observable } from 'rxjs';
 import { ApiService } from '@core/api/api.service';
 import { ApiError, type ResponseData } from '@core/api/api.types';
 import { ScriptingService } from '@core/services/scripting.service';
+import { ThemeService } from '@core/theme/theme.service';
 import { normalizeReplayFrame, normalizeReplayStart, normalizeRunResult } from '../model/normalize';
 import type {
   PineReplayFrame,
@@ -24,11 +25,17 @@ const SILENT = { silent: true } as const;
  * `run` goes through {@link ScriptingService} — the console's one client for the scripting
  * endpoints — and only reshapes its result for the chart. The §5 replay endpoints serve the chart
  * alone and are called from here.
+ *
+ * Every run and replay goes out with the console's theme of the moment, which is the Pine chart's
+ * (`PINE_CHART_DARK` / `PINE_CHART_LIGHT` follow it), so `chart.bg_color` / `chart.fg_color` match
+ * the chart they are drawn on — also for a re-run (trace, profile, replay) of a request made under
+ * the other theme.
  */
 @Injectable({ providedIn: 'root' })
 export class ScriptingRunService {
   private readonly api = inject(ApiService);
   private readonly scripting = inject(ScriptingService);
+  private readonly theme = inject(ThemeService);
 
   /**
    * `POST scripting/run`. A script that does not compile still resolves — with `compile.success`
@@ -36,7 +43,7 @@ export class ScriptingRunService {
    * `data`; transport and other engine failures reject with a `ScriptingApiError`.
    */
   run(request: PineRunRequest): Observable<PineRunResult> {
-    return this.scripting.run(request).pipe(
+    return this.scripting.run(this.themed(request)).pipe(
       map((res) => {
         const run = normalizeRunResult(res);
         if (!run) throw new Error('The engine did not return a run result.');
@@ -47,7 +54,7 @@ export class ScriptingRunService {
 
   /** `POST scripting/replay`: the §3 request plus `startBar`; the first frame carries every bar up to it. */
   startReplay(request: PineReplayStartRequest): Observable<PineReplayStartResponse> {
-    return this.api.postEnvelope<unknown>('/scripting/replay', request, SILENT).pipe(
+    return this.api.postEnvelope<unknown>('/scripting/replay', this.themed(request), SILENT).pipe(
       map((data) => {
         const start = normalizeReplayStart(data);
         if (!start)
@@ -79,5 +86,10 @@ export class ScriptingRunService {
     return this.api
       .delete<ResponseData<unknown>>(`/scripting/replay/${encodeURIComponent(sessionId)}`, SILENT)
       .pipe(map((res) => res?.status !== false));
+  }
+
+  /** The request with the console's current theme (it replaces one a reused request carries). */
+  private themed<T extends PineRunRequest>(request: T): T {
+    return { ...request, theme: this.theme.theme() };
   }
 }

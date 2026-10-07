@@ -18,6 +18,7 @@ import type {
   ScriptRunResult,
 } from '@core/api/scripting.types';
 import { ScriptingService, toScriptingError } from '@core/services/scripting.service';
+import { ThemeService } from '@core/theme/theme.service';
 import type { PineLineJump } from '@shared/pine-chart/panes/pine-logs-pane.component';
 import { PinePreviewComponent } from '../../pine-preview/pine-preview.component';
 import { StrategyReportComponent } from '../../report/strategy-report.component';
@@ -303,6 +304,7 @@ export class ScriptPreviewComponent {
   readonly reveal = output<{ line: number; column: number }>();
 
   private readonly scripting = inject(ScriptingService);
+  private readonly theme = inject(ThemeService);
   readonly barChoices = BAR_CHOICES;
   readonly bars = signal<number>(2000);
   readonly running = signal(false);
@@ -379,6 +381,8 @@ export class ScriptPreviewComponent {
       lastBars: this.bars(),
       inputs: this.inputs(),
       mode: this.kind() === 'strategy' ? 'backtest' : 'preview',
+      // The preview's Pine chart follows the console's theme: `chart.bg_color` must match it.
+      theme: this.theme.theme(),
     };
     this.running.set(true);
     this.error.set(null);
