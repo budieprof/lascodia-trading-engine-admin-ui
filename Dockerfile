@@ -1,5 +1,6 @@
 # ─── Stage 1: build ──────────────────────────────────────────────
-FROM node:20-alpine AS build
+# Node major as in .nvmrc: Angular 22 refuses to build on Node 20.
+FROM node:24-alpine AS build
 WORKDIR /app
 
 # Build-time metadata baked into public/config.json so the runtime image
