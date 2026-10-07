@@ -36,13 +36,26 @@ const LIVE_RERUN_MS = 2_000;
 type RunOutcome = ChartScriptResult | { error: string };
 /** Told to whoever waits on a run that a newer run of the same script replaced. */
 const SUPERSEDED = 'A newer run of this script replaced this one.';
-import { SUPPORTED_RESOLUTIONS, resolutionMs, type TvResolution } from '../../datafeed/resolution';
+import {
+  SUPPORTED_RESOLUTIONS,
+  isSessionResolution,
+  resolutionMs,
+  type TvResolution,
+} from '../../datafeed/resolution';
 import {
   bucketStartFor,
   foldBars,
   lastCompleteBarTime,
   mergeForming,
 } from '../../datafeed/aggregate';
+import {
+  SessionRollover,
+  applySessionTick,
+  currentDayBars,
+  isCurrentPeriod,
+  mergeSessionTail,
+} from '../../datafeed/session-bars';
+import { ServerClock } from '@core/time/server-clock';
 import { priceScaleFor } from '../../datafeed/symbol-info';
 import { StrategiesService } from '@core/services/strategies.service';
 import { ChartIconComponent } from '../../icons/chart-icon.component';
@@ -397,6 +410,12 @@ export class ChartAnalysisPageComponent {
   private readonly theme = inject(ThemeService);
   private readonly fundamentals = inject(FxFundamentalsService);
   private readonly dailyBars = inject(DailyBarsService);
+  /**
+   * The engine's clock, for "is the newest bar's period still open" on the session grid: its
+   * periods' opens and closes are the engine's instants, and a browser clock a few seconds off would
+   * roll a bar early or late (the countdown reads the same clock).
+   */
+  private readonly serverClock = inject(ServerClock);
 
   /** Fetched FX-fundamental series, keyed by the study's uid. */
   readonly externalPanes = signal<ExternalPane[]>([]);
@@ -885,7 +904,8 @@ export class ChartAnalysisPageComponent {
   /**
    * Symbol facts for the Details pane, assembled from what the console already
    * knows rather than a new endpoint: the pair's own metadata, the loaded bar
-   * range, and the session's move.
+   * range, and the session's move — the 17:00 New York session on 2h … 1D, the
+   * UTC day on 1m … 1h (`currentDayBars`).
    */
   readonly details = computed(() => {
     const symbol = this.symbol();
@@ -893,8 +913,7 @@ export class ChartAnalysisPageComponent {
     const bars = this.bars();
     const first = bars[0];
     const last = bars[bars.length - 1];
-    const dayStart = last ? Math.floor(last.time / 86_400_000) * 86_400_000 : 0;
-    const today = bars.filter((b) => b.time >= dayStart);
+    const today = currentDayBars(bars);
     const dayOpen = today[0]?.open ?? null;
     return {
       symbol,
@@ -990,8 +1009,16 @@ export class ChartAnalysisPageComponent {
   readonly marketStatus = computed<'open' | 'closed' | 'stale'>(() => {
     const bars = this.bars();
     if (bars.length === 0) return 'closed';
+    const last = bars[bars.length - 1];
+    // A session-grid bar says where its period ends: open while it lasts, closed after — a weekly
+    // bar opened on Sunday no longer reads "open" through Saturday.
+    if (last.closeTime !== undefined) {
+      const now = this.serverClock.now();
+      if (isCurrentPeriod(last, now)) return 'open';
+      return now - last.closeTime <= 3 * 86_400_000 ? 'closed' : 'stale';
+    }
     const step = resolutionMs(this.resolution()) ?? 60_000;
-    const age = Date.now() - bars[bars.length - 1].time;
+    const age = Date.now() - last.time;
     if (age <= step * 2) return 'open';
     // Beyond two bars but inside a weekend is "closed"; beyond that, the feed
     // itself is suspect and saying "open" would be a lie.
@@ -1524,10 +1551,11 @@ export class ChartAnalysisPageComponent {
         this.recordQuote(tick);
       });
 
-    // Re-read the forming bar from M1 every minute. Ticks arrive throttled to ~1 Hz, so a spike
-    // between two of them never reaches the live bar's high or low; and a bar that closed while the
-    // page was open was built entirely from those throttled ticks. One small request a minute keeps
-    // the newest candle honest without waiting for a reload.
+    // Re-read the forming bar every minute — folded from M1 on 1m … 1h, the engine's newest bars on
+    // the session grid. Ticks arrive throttled to ~1 Hz, so a spike between two of them never reaches
+    // the live bar's high or low; and a bar that closed while the page was open was built entirely
+    // from those throttled ticks. One small request a minute keeps the newest candle honest without
+    // waiting for a reload.
     const resync = setInterval(() => void this.syncFormingBars(), 60_000);
     this.destroyRef.onDestroy(() => clearInterval(resync));
   }
@@ -1965,6 +1993,7 @@ export class ChartAnalysisPageComponent {
     this.drawings.setScope(symbol, resolution);
     this.loadTradingOverlays();
     this.feed.invalidate(symbol, resolution);
+    this.rollover.reset();
     const now = Date.now();
     try {
       const { bars } = await this.feed.getBars(symbol, resolution, 0, now, PAGE_BARS);
@@ -1972,17 +2001,24 @@ export class ChartAnalysisPageComponent {
       if (!current()) return;
       this.bars.set(bars);
       this.barsFor.set({ symbol, resolution });
+      this.tailMergedAt = this.ticksApplied;
       this.lastStored = lastCompleteBarTime(bars, resolution);
-      // The history ends at the last CLOSED bar; build the one still forming from real data
-      // rather than from whatever tick happens to arrive first.
-      void this.syncFormingBars();
+      // The stored history ends at the last CLOSED bar; build the one still forming from real data
+      // rather than from whatever tick happens to arrive first. (The session grid's came with it.)
+      if (!isSessionResolution(resolution)) void this.syncFormingBars();
       // After the bars, so the calendar window matches what is on screen.
       this.loadEvents();
       if (bars.length === 0) {
         this.error.set(`No ${this.resolutionLabel(resolution)} candles stored for ${symbol}.`);
       }
-    } catch {
-      if (current()) this.error.set('Could not load candles.');
+    } catch (e) {
+      if (current()) {
+        this.error.set(
+          e instanceof Error && e.message
+            ? `Could not load candles: ${e.message}`
+            : 'Could not load candles.',
+        );
+      }
     } finally {
       if (current()) {
         this.loading.set(false);
@@ -1992,10 +2028,16 @@ export class ChartAnalysisPageComponent {
   }
 
   /**
-   * Scroll-back paging: fetch the window ENDING at the oldest bar we hold and
-   * prepend it. Asking by `to` rather than by `from` matches how the engine
+   * Scroll-back paging: fetch the window ENDING just before the oldest bar we hold
+   * and prepend it. Asking by `to` rather than by `from` matches how the engine
    * pages (newest-first from a cutoff), so each page is a clean extension
    * backwards with no gap and no overlap to reconcile.
+   *
+   * The cutoff is the oldest bar's open less 1 ms, not less one bar width: on the
+   * session grid a period is not a fixed width (a month, a week across a DST
+   * change), and `oldest − width` skipped the bar before; on 30m it cut the M15
+   * page between the two halves of the bar before, which then joined the chart
+   * half-built.
    */
   async loadOlder(): Promise<void> {
     const series: SeriesId = { symbol: this.symbol(), resolution: this.resolution() };
@@ -2006,14 +2048,13 @@ export class ChartAnalysisPageComponent {
       return;
     }
     const oldest = held[0].time;
-    const step = resolutionMs(series.resolution) ?? 60_000;
     this.loading.set(true);
     try {
       const { bars } = await this.feed.getBars(
         series.symbol,
         series.resolution,
         0,
-        oldest - step,
+        oldest - 1,
         PAGE_BARS,
       );
       // After a switch made meanwhile these are another series' history: not prepended.
@@ -2024,6 +2065,9 @@ export class ChartAnalysisPageComponent {
         for (const b of this.bars()) merged.set(b.time, b);
         this.bars.set([...merged.values()].sort((a, b) => a.time - b.time));
       }
+    } catch {
+      // The engine refused or could not be reached: the history stays as it is, and the next
+      // scroll to the left edge asks again.
     } finally {
       this.loading.set(false);
       this.host()?.historyLoaded();
@@ -2046,10 +2090,14 @@ export class ChartAnalysisPageComponent {
    * market by at most a minute, so it gives the real ones.</p>
    *
    * <p>Ticks still move the close between syncs; this corrects everything else.</p>
+   *
+   * <p>On the session grid (2h … 1M) the engine builds the forming bar itself, on its own calendar:
+   * this re-reads the newest bars from it instead ({@link syncSessionTail}).</p>
    */
   private async syncFormingBars(): Promise<void> {
     const resolution = this.resolution();
     const symbol = this.symbol();
+    if (isSessionResolution(resolution)) return this.syncSessionTail();
     const stored = this.lastStored;
     // While a switch loads, the bars (and `lastStored`) are still the previous series'.
     const onScreen = () => sameSeries(this.barsFor(), { symbol, resolution });
@@ -2069,6 +2117,51 @@ export class ChartAnalysisPageComponent {
     this.bars.set(mergeForming(this.bars(), foldBars(minutes, resolution), stored));
   }
 
+  /** Ticks applied to the chart's newest bar, ever; against {@link tailMergedAt}: any since the last merge. */
+  private ticksApplied = 0;
+  /** {@link ticksApplied} when the engine's newest bars were last laid over the chart's. */
+  private tailMergedAt = 0;
+  /** The request for the newest session bars in flight, by series — shared by the minute resync and a rollover. */
+  private tailInFlight: { series: string; done: Promise<void> } | null = null;
+  /** One request per bar change when ticks pass the newest session bar's close (`SessionRollover`). */
+  private readonly rollover = new SessionRollover(() => Date.now());
+
+  /**
+   * Re-read the newest session-grid bars from the engine — the bar still forming, the one or two
+   * before it (a period that just closed may have been built before its last minute was stored), and
+   * any period that opened since the chart last asked — and lay them over the chart's
+   * ({@link mergeSessionTail}). Shared by the minute resync and a tick past the newest bar's close:
+   * one request at a time per series.
+   */
+  private syncSessionTail(): Promise<void> {
+    const series = `${this.symbol()}|${this.resolution()}`;
+    if (this.tailInFlight?.series === series) return this.tailInFlight.done;
+    const done: Promise<void> = this.fetchSessionTail().finally(() => {
+      if (this.tailInFlight?.done === done) this.tailInFlight = null;
+    });
+    this.tailInFlight = { series, done };
+    return done;
+  }
+
+  private async fetchSessionTail(): Promise<void> {
+    const symbol = this.symbol();
+    const resolution = this.resolution();
+    const onScreen = () =>
+      symbol === this.symbol() &&
+      resolution === this.resolution() &&
+      sameSeries(this.barsFor(), { symbol, resolution });
+    const held = this.bars();
+    if (held.length === 0 || !onScreen()) return;
+
+    const tail = await this.feed.sessionTail(symbol, resolution, held[held.length - 1].time);
+    // A failed request leaves the chart as it is; a switch made meanwhile has bars of its own.
+    if (!tail || !onScreen()) return;
+    // Ticks since the last merge are newer than the engine's forming bar: they keep its close.
+    const ticked = this.ticksApplied !== this.tailMergedAt;
+    this.tailMergedAt = this.ticksApplied;
+    this.bars.set(mergeSessionTail(this.bars(), tail, ticked));
+  }
+
   private applyTick(tick: { symbol?: string; bid?: number; ask?: number; price?: number }): void {
     if (!tick?.symbol || tick.symbol.toUpperCase() !== this.symbol().toUpperCase()) return;
     const price = tick.bid ?? tick.price ?? tick.ask;
@@ -2081,10 +2174,14 @@ export class ChartAnalysisPageComponent {
     const current = this.bars();
     if (current.length === 0) return;
 
+    if (isSessionResolution(this.resolution())) {
+      this.applyTickOnSessionGrid(current, price);
+      return;
+    }
+
     const last = current[current.length - 1];
-    // The same bucketing the history uses. `floor(now / step)` put weekly bars on an
-    // epoch-aligned week (which starts on a THURSDAY) and treated a month as a flat 31 days,
-    // so on 1W and 1M a live tick could open a bar that no stored bar would ever line up with.
+    // The same bucketing the stored history uses — the UTC epoch grid, exact for 1m … 1h. (The
+    // session grid's periods are not fixed widths, which is why it never comes here.)
     const bucket = bucketStartFor(this.resolution(), Date.now());
     if (bucket === null) return;
 
@@ -2107,6 +2204,26 @@ export class ChartAnalysisPageComponent {
       close: price,
     };
     this.bars.set([...current.slice(0, -1), updated]);
+  }
+
+  /**
+   * A live price on the session grid (2h … 1M), on the engine's clock: it moves the newest bar while
+   * that bar's period lasts. From the bar's close on, the next period is the engine's to open — the
+   * next 4h block, or Monday's session after the weekend gap — so instead of seeding a bar the chart
+   * asks for the newest bars, once per bar ({@link SessionRollover}); ticks are not drawn until the
+   * new period arrives.
+   */
+  private applyTickOnSessionGrid(current: Bar[], price: number): void {
+    const outcome = applySessionTick(current, price, this.serverClock.now());
+    if (outcome.kind === 'update') {
+      this.ticksApplied++;
+      this.bars.set(outcome.bars);
+      return;
+    }
+    if (outcome.kind !== 'rollover') return;
+    const key = `${this.symbol()}|${this.resolution()}|${current[current.length - 1].time}`;
+    if (!this.rollover.request(key)) return;
+    void this.syncSessionTail().finally(() => this.rollover.done(key));
   }
 
   // ── Toolbar actions ──────────────────────────────────────────────────────
@@ -2368,8 +2485,14 @@ export class ChartAnalysisPageComponent {
     if (explicit) this.runningKeys.update((m) => new Map(m).set(key, ticket));
     const symbol = this.symbol();
     const resolution = this.resolution();
-    // The chart's forming bar — only once the bars on screen are this symbol's and timeframe's.
-    const liveBar = formingLiveBar(this.bars(), this.barsFor(), { symbol, resolution }, Date.now());
+    // The chart's forming bar — only once the bars on screen are this symbol's and timeframe's. On
+    // the engine's clock: the session grid's periods open and close at the engine's instants.
+    const liveBar = formingLiveBar(
+      this.bars(),
+      this.barsFor(),
+      { symbol, resolution },
+      this.serverClock.now(),
+    );
     // Never less than a full page: a run started while the chart is still loading would
     // otherwise cover only a sliver of history and stop short when the operator pans back.
     const requestedBars = Math.min(Math.max(this.bars().length, PAGE_BARS), MAX_SCRIPT_BARS);

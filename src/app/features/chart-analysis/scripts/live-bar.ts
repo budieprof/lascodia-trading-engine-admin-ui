@@ -1,6 +1,7 @@
 import type { Bar } from '../datafeed/candle-feed.service';
 import { bucketStartFor } from '../datafeed/aggregate';
-import type { TvResolution } from '../datafeed/resolution';
+import { isSessionResolution, type TvResolution } from '../datafeed/resolution';
+import { isCurrentPeriod } from '../datafeed/session-bars';
 import type { ScriptRunBar } from '@core/api/scripting.types';
 
 /** The symbol and resolution a bar series, or a run made over one, belongs to. */
@@ -32,6 +33,10 @@ export function runMatchesChart(run: SeriesId, chart: SeriesId, bars: SeriesId |
  * not the period containing `nowMs` (market closed, history still loading, non-time resolution) —
  * or when the bars are another series' (`barsFor`): right after a switch they are still the previous
  * symbol's or timeframe's, and the engine would merge that bar into this one's.
+ *
+ * On the session grid (2h … 1M) the newest bar is the period containing `nowMs` when `nowMs` is in
+ * [its open, its close) — the engine's period, as the engine laid it out; on the stored grid, when it
+ * opens at `nowMs`'s bucket.
  */
 export function formingLiveBar(
   bars: readonly Bar[],
@@ -42,8 +47,12 @@ export function formingLiveBar(
   if (!sameSeries(barsFor, run)) return null;
   const last = bars[bars.length - 1];
   if (!last) return null;
-  const bucket = bucketStartFor(run.resolution, nowMs);
-  if (bucket === null || bucket !== last.time) return null;
+  if (isSessionResolution(run.resolution)) {
+    if (!isCurrentPeriod(last, nowMs)) return null;
+  } else {
+    const bucket = bucketStartFor(run.resolution, nowMs);
+    if (bucket === null || bucket !== last.time) return null;
+  }
   return { t: last.time, o: last.open, h: last.high, l: last.low, c: last.close, v: last.volume };
 }
 

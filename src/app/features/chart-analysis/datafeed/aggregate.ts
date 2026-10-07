@@ -2,47 +2,24 @@ import type { CandleDto } from '@core/api/api.types';
 import { resolutionSource, timeframeMs, type TvResolution } from './resolution';
 
 /**
- * Client-side bar aggregation for the resolutions the engine does not store.
+ * Client-side bar aggregation — for the STORED grid only (`resolution.ts`).
  *
- * The engine persists M1/M5/M15/H1/H4/D1 only, so `30`, `120`, `1W` and `1M` are
- * built here from the nearest stored timeframe.
+ * The engine persists M1/M5/M15/H1/H4/D1, so `30` is built here from M15, and the bar still forming
+ * on 5m … 1h is folded from M1. Fixed-width buckets on the UTC epoch grid are exact there.
  *
- * ── Why the week starts on SUNDAY ────────────────────────────────────────────
- * Verified against the live `Candle` table on 2026-09-19: D1 bars are stamped at
- * 00:00 and **Sunday bars exist** — 1,493 of them, the same count as Mondays —
- * with no Saturdays. The broker's trading week therefore runs Sunday→Friday
- * (the Sunday row is the short open session).
- *
- * Bucketing by ISO week (Monday start) would push every Sunday bar into the
- * PREVIOUS week, so each weekly candle would carry the wrong open and the wrong
- * low/high whenever the gap-open mattered. Nothing would error — the chart would
- * just quietly disagree with every other platform the operator cross-checks
- * against, which is the worst way for a charting bug to present.
+ * 2h, 4h, 1D, 1W and 1M are NOT bucketed here, nor anywhere in the client: they sit on the engine's
+ * FX session grid (17:00 New York days, Monday–Friday weeks, DST-shifted UTC opens, the weekend
+ * gap), which the engine lays out and `scripting/chart-bars` serves with each bar's close. Every
+ * function below answers null / nothing for them rather than guess a calendar.
  */
 
-/** Start of the Sunday-anchored trading week containing `ms`, in UTC. */
-export function weekStartMs(ms: number): number {
-  const d = new Date(ms);
-  const dayStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  // getUTCDay(): 0 = Sunday. Subtracting it lands on the Sunday at or before.
-  return dayStart - new Date(dayStart).getUTCDay() * 86_400_000;
-}
-
-/** Start of the UTC calendar month containing `ms`. */
-export function monthStartMs(ms: number): number {
-  const d = new Date(ms);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
-}
-
 /**
- * Bucket key for a source bar at `ms`, given the target resolution.
- * Returns the bucket's START time, which is also the aggregated bar's time.
+ * Bucket key for a source bar at `ms`, given the target resolution: the bucket's START time, which is
+ * also the aggregated bar's time. Null for an unknown or a session-grid resolution.
  */
 export function bucketStartFor(resolution: TvResolution, ms: number): number | null {
   const src = resolutionSource(resolution);
-  if (!src) return null;
-  if (src.aggregate === 'week') return weekStartMs(ms);
-  if (src.aggregate === 'month') return monthStartMs(ms);
+  if (!src || src.kind !== 'stored') return null;
   // Fixed-width buckets align to the UTC epoch grid, which is also where the
   // brokers emit (M30 → :00 and :30). Flooring is therefore exact, not an
   // approximation of the broker's own boundaries.
@@ -63,7 +40,7 @@ export function bucketStartFor(resolution: TvResolution, ms: number): number | n
  */
 export function aggregateCandles(candles: CandleDto[], resolution: TvResolution): CandleDto[] {
   const src = resolutionSource(resolution);
-  if (!src) return [];
+  if (!src || src.kind !== 'stored') return [];
   if (src.aggregate === 1) return candles;
   if (candles.length === 0) return [];
 
@@ -103,7 +80,7 @@ export function aggregateCandles(candles: CandleDto[], resolution: TvResolution)
   }
 
   // Every bucket is closed out when its successor appears. The last one has no
-  // successor, so it stays open: we cannot tell a complete week from a week
+  // successor, so it stays open: we cannot tell a complete bucket from one
   // still in progress without fetching bars beyond the window we were asked for.
   if (out.length > 0) out[out.length - 1].isClosed = false;
   return out;
@@ -202,18 +179,22 @@ export function mergeForming(
  * The newest bar in freshly loaded history that can be trusted as COMPLETE.
  *
  * <p>For a timeframe the engine stores, that is simply the last bar — the engine writes a bar only
- * once it has closed. For one this app builds by aggregation (30m from M15, weeks and months from
- * D1) the last bucket is usually still open: it holds only the source bars that have closed so far.
- * Treating it as complete would freeze a half-built candle, so the cut-off sits just before it and
- * the bucket is rebuilt from M1 with the rest of the forming bars.</p>
+ * once it has closed. For one this app builds by aggregation (30m from M15) the last bucket is
+ * usually still open: it holds only the source bars that have closed so far. Treating it as complete
+ * would freeze a half-built candle, so the cut-off sits just before it and the bucket is rebuilt from
+ * M1 with the rest of the forming bars.</p>
+ *
+ * <p>Null for a session-grid resolution: its bars come from the engine with the forming one already
+ * built, and nothing is folded from M1 for them.</p>
  */
 export function lastCompleteBarTime(
   bars: readonly FoldBar[],
   resolution: TvResolution,
 ): number | null {
   if (bars.length === 0) return null;
-  const last = bars[bars.length - 1].time;
   const src = resolutionSource(resolution);
-  const aggregated = !!src && src.aggregate !== 1;
+  if (src?.kind === 'session') return null;
+  const last = bars[bars.length - 1].time;
+  const aggregated = src?.kind === 'stored' && src.aggregate !== 1;
   return aggregated ? last - 1 : last;
 }

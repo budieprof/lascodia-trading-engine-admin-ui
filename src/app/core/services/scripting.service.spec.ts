@@ -10,6 +10,7 @@ import {
   ScriptingApiError,
   ScriptingService,
   compileResultOf,
+  normaliseChartBars,
   normaliseCompile,
   normaliseInputKind,
   toScriptingError,
@@ -174,6 +175,96 @@ describe('ScriptingService — run (the one scripting/run path)', () => {
       message: 'No bars',
       code: '-14',
     });
+  });
+});
+
+describe('ScriptingService — chart bars (scripting/chart-bars)', () => {
+  // EURUSD 4h on the session grid, summer: blocks open 21/01/05… UTC.
+  const H = 3_600_000;
+  const T0 = Date.UTC(2026, 9, 6, 13); // Tue 6 Oct 13:00 UTC = 09:00 New York
+  const bar = (t: number, forming = false) => ({
+    t,
+    tc: t + 4 * H,
+    o: 1.17,
+    h: 1.172,
+    l: 1.168,
+    c: 1.171,
+    v: 900,
+    forming,
+  });
+  const ok = (bars: unknown[]) => ({
+    status: true,
+    message: null,
+    responseCode: '00',
+    data: {
+      symbol: 'EURUSD',
+      timeframe: '240',
+      session: '1700-1700:23456',
+      timeZone: 'America/New_York',
+      bars,
+    },
+  });
+
+  it('posts the request as given and returns the bars, ascending, with their closes', async () => {
+    const post = vi.fn().mockReturnValue(of(ok([bar(T0 - 4 * H), bar(T0, true)])));
+    const req = { symbol: 'EURUSD', timeframe: '240', to: null, count: 1500, includeForming: true };
+    const r = await firstValueFrom(make({ post } as any).chartBars(req));
+    expect(post).toHaveBeenCalledWith('/scripting/chart-bars', req, { silent: true });
+    expect(r.session).toBe('1700-1700:23456');
+    expect(r.timeZone).toBe('America/New_York');
+    expect(r.bars.map((b) => [b.t, b.tc, b.forming])).toEqual([
+      [T0 - 4 * H, T0, false],
+      [T0, T0 + 4 * H, true],
+    ]);
+  });
+
+  it('rejects a refusal with the engine code and message (no "empty chart" in its place)', async () => {
+    const post = vi
+      .fn()
+      .mockReturnValue(
+        of({ status: false, data: null, message: 'Unknown symbol XXXYYY', responseCode: '-14' }),
+      );
+    const err = await firstValueFrom(
+      make({ post } as any).chartBars({ symbol: 'XXXYYY', timeframe: '1D' }),
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(ScriptingApiError);
+    expect(err).toMatchObject({ code: '-14', message: 'Unknown symbol XXXYYY', isNotFound: true });
+  });
+
+  it('rejects a transport failure readably — e.g. an engine without the endpoint yet (404)', async () => {
+    const post = vi.fn().mockReturnValue(throwError(() => new HttpErrorResponse({ status: 404 })));
+    await expect(
+      firstValueFrom(make({ post } as any).chartBars({ symbol: 'EURUSD', timeframe: '240' })),
+    ).rejects.toMatchObject({
+      httpStatus: 404,
+      message: 'The chart bars could not be loaded. (not found)',
+    });
+  });
+
+  it('normalises: sorted, one bar per open, unusable rows dropped, forming only on the last', () => {
+    const r = normaliseChartBars({
+      symbol: 'EURUSD',
+      timeframe: '240',
+      session: '1700-1700:23456',
+      timeZone: 'America/New_York',
+      bars: [
+        bar(T0, true),
+        { ...bar(T0 - 8 * H), forming: true }, // only the newest bar can be forming
+        { ...bar(T0 - 4 * H), c: Number.NaN }, // a NaN price: dropped
+        { ...bar(T0 - 4 * H), c: 1.2 }, // …its good copy stays
+        { ...bar(T0 - 12 * H), v: null as unknown as number, tc: undefined as unknown as number },
+        null as unknown as ReturnType<typeof bar>,
+      ],
+    });
+    expect(r.bars.map((b) => b.t)).toEqual([T0 - 12 * H, T0 - 8 * H, T0 - 4 * H, T0]);
+    expect(r.bars.map((b) => b.forming)).toEqual([false, false, false, true]);
+    expect(r.bars[2].c).toBe(1.2);
+    expect(r.bars[0].v).toBe(0);
+    expect(r.bars[0].tc).toBeNaN(); // no close sent: none invented
+  });
+
+  it('reads a missing bar list as no bars', () => {
+    expect(normaliseChartBars({ bars: null } as any).bars).toEqual([]);
   });
 });
 

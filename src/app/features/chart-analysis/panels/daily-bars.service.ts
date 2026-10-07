@@ -1,43 +1,53 @@
 import { Injectable, inject } from '@angular/core';
 import { CandleFeedService, type Bar } from '../datafeed/candle-feed.service';
-import { foldBars } from '../datafeed/aggregate';
+import { MAX_CHART_BARS, tradingDayMs } from '../datafeed/session-bars';
 
-/** Daily bars covering the current year plus two full prior years (FX ≈ 260 bars/yr). */
-const DAILY_COUNT_BACK = 900;
+const DAY = 86_400_000;
 const TTL_MS = 5 * 60_000;
 /** The side panels compare this many prior years to the current one. */
 const DEFAULT_YEARS = 2;
-const H1_PAGE = 5000;
-/** ~6,200 H1 bars per FX year; one spare page for the base close and gaps. */
-const pagesFor = (years: number) => Math.ceil(((years + 1) * 6300) / H1_PAGE) + 1;
 
 /**
- * Prepend days folded from H1 where the engine holds no D1. Its D1 history is
- * short (EURUSD: from 2024-10-01) while H1 goes back to 2010, so without this a
- * prior year in Seasonals began in October at 0% — a gap and a jump where
- * TradingView draws the full year. Pure, so tested directly.
+ * Session days stamped with their TRADING DAY — 00:00 UTC of the date each session closes on
+ * (`tradingDayMs`) — the calendar the side panels count in. Tuesday's session opens on Monday at
+ * 21:00 UTC: stamped at its open, the week-ago anchor of a performance tile and a seasonal's day of
+ * year would both be a day early, and a 1 January session would count in the year before. Each bar
+ * keeps its session's values; `closeTime` goes, as `time` is no longer the open. Pure, so tested
+ * directly.
  */
-export function backfillDaily(d1: readonly Bar[], h1: readonly Bar[]): Bar[] {
-  const first = d1[0]?.time ?? Infinity;
-  const older = foldBars(
-    h1.filter((b) => b.time < first),
-    '1D',
-  ) as Bar[];
-  return [...older, ...d1];
+export function tradingDayBars(sessions: readonly Bar[]): Bar[] {
+  return sessions.map((b) => ({
+    time: tradingDayMs(b),
+    open: b.open,
+    high: b.high,
+    low: b.low,
+    close: b.close,
+    volume: b.volume,
+  }));
+}
+
+/** How many session days to ask for to reach back to 1 January `priorYears` years before `nowMs`'s year. */
+export function dailyCountFor(priorYears: number, nowMs: number): number {
+  // A week before that 1 January, so the earliest year has a prior close as its base. Calendar days
+  // over-count trading days by the weekends, which is the headroom.
+  const target = Date.UTC(new Date(nowMs).getUTCFullYear() - priorYears, 0, 1) - 7 * DAY;
+  return Math.min(MAX_CHART_BARS, Math.ceil((nowMs - target) / DAY) + 1);
 }
 
 /**
- * One shared daily-bar fetch per symbol for the side panels (performance tiles
- * and seasonals both read the same ~3 years of D1 bars). Goes through the
- * chart's `CandleFeedService`, so it uses the same nested-filter candle query
- * and cache as the chart itself.
+ * One shared daily-bar fetch per symbol for the side panels: the performance tiles, the seasonals
+ * and the swap / carry pane. Session days from the engine (`scripting/chart-bars` — days roll at
+ * 17:00 New York, as TradingView's do), through the chart's `CandleFeedService` and its cache, in one
+ * request. The engine lays them out from the candles it stores below a day — H1 reaches back to
+ * 2010 — so no older stretch is stitched on from another source, as was done when the stored D1
+ * (UTC days, from late 2024) was the source.
  */
 @Injectable({ providedIn: 'root' })
 export class DailyBarsService {
   private readonly feed = inject(CandleFeedService);
   private readonly inflight = new Map<string, { at: number; p: Promise<Bar[]> }>();
 
-  /** Daily bars reaching back to 1 January `priorYears` years before the latest. */
+  /** Daily bars, stamped by trading day, reaching back to 1 January `priorYears` years before this one. */
   daily(symbol: string, priorYears = DEFAULT_YEARS): Promise<Bar[]> {
     const key = `${symbol.toUpperCase()}|${priorYears}`;
     const hit = this.inflight.get(key);
@@ -51,23 +61,8 @@ export class DailyBarsService {
   }
 
   private async load(symbol: string, priorYears: number): Promise<Bar[]> {
-    const d1 = (await this.feed.getBars(symbol, '1D', 0, Date.now(), DAILY_COUNT_BACK)).bars;
-    const latest = d1.length
-      ? new Date(d1[d1.length - 1].time).getUTCFullYear()
-      : new Date().getUTCFullYear();
-    // A few days before the earliest year, so that year has a prior close as its base.
-    const target = Date.UTC(latest - priorYears, 0, 1) - 7 * 86_400_000;
-    let to = (d1[0]?.time ?? Date.now()) - 1;
-    if (to <= target) return d1;
-    const h1: Bar[] = [];
-    for (let page = 0; page < pagesFor(priorYears) && to > target; page++) {
-      const chunk = (await this.feed.getBars(symbol, '60', 0, to, H1_PAGE)).bars.filter(
-        (b) => b.time <= to,
-      );
-      if (!chunk.length) break;
-      h1.unshift(...chunk);
-      to = chunk[0].time - 1;
-    }
-    return backfillDaily(d1, h1);
+    const now = Date.now();
+    const { bars } = await this.feed.getBars(symbol, '1D', 0, now, dailyCountFor(priorYears, now));
+    return tradingDayBars(bars);
   }
 }

@@ -575,6 +575,8 @@ export class ChartHostComponent implements OnDestroy {
             last.time,
             this.serverClock.now(),
             this.liveAt(),
+            // The session grid's bars carry the engine's close for their period (2h … 1M).
+            last.closeTime ?? null,
           )
         : null;
     const p = this.palette(this.theme.theme() === 'dark');

@@ -166,7 +166,13 @@
       <p class="tv-foot">
         Rated on {{ f.barCount }} bars ({{ tabLabel() }}) to
         {{ f.lastTime | date: 'd MMM yyyy, HH:mm' : 'UTC' }} UTC, the forming bar included, from the
-        engine's stored candles. Hover an action for the rule behind it.
+        engine's
+        @if (sessionGrid()) {
+          session bars (days roll at 17:00 New York).
+        } @else {
+          stored candles.
+        }
+        Hover an action for the rule behind it.
         @if (missing() > 0) {
           {{ missing() }} {{ missing() === 1 ? 'row shows' : 'rows show' }} — because its lookback
           is longer than the {{ tabLabel() }} history the engine holds.
