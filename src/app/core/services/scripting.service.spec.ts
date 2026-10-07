@@ -339,6 +339,47 @@ describe('ScriptingService — libraries and strategy scripts', () => {
   });
 });
 
+describe('ScriptingService — chart scripts (scripting/indicators)', () => {
+  const saved = {
+    id: 20,
+    name: 'Smart Algo v2',
+    kind: 'indicator',
+    pineSource: 'src',
+    inputs: { 'Display::Colour candles': false },
+    createdAt: '2026-10-07T00:00:00Z',
+    updatedAt: '2026-10-07T00:00:00Z',
+  };
+
+  it('reads one saved script, inputs included', async () => {
+    const get = vi
+      .fn()
+      .mockReturnValue(of({ status: true, data: saved, message: null, responseCode: '00' }));
+    expect(await firstValueFrom(make({ get } as any).getChartScript(20))).toEqual(saved);
+    expect(get).toHaveBeenCalledWith('/scripting/indicators/20', { silent: true });
+  });
+
+  it('rejects a script that is not found with its code', async () => {
+    const get = vi
+      .fn()
+      .mockReturnValue(
+        of({ status: false, data: null, message: 'Script 9 not found.', responseCode: '-14' }),
+      );
+    await expect(firstValueFrom(make({ get } as any).getChartScript(9))).rejects.toMatchObject({
+      isNotFound: true,
+      message: 'Script 9 not found.',
+    });
+  });
+
+  it('sends the inputs with an update', async () => {
+    const put = vi
+      .fn()
+      .mockReturnValue(of({ status: true, data: saved, message: null, responseCode: '00' }));
+    const body = { name: 'Smart Algo v2', pineSource: 'src', inputs: saved.inputs };
+    await firstValueFrom(make({ put } as any).updateChartScript(20, body));
+    expect(put).toHaveBeenCalledWith('/scripting/indicators/20', body, { silent: true });
+  });
+});
+
 describe('helpers', () => {
   it('finds a compile result directly or inside a run result', () => {
     expect(compileResultOf(COMPILE)).toBe(COMPILE);

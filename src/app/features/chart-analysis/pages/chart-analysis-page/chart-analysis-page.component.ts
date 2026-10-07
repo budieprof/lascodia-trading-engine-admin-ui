@@ -101,9 +101,11 @@ import {
 } from 'rxjs';
 import {
   ChartScriptService,
+  startingValues,
   type ChartScriptCatalog,
   type ChartScriptItem,
 } from '../../scripts/chart-script.service';
+import { ScriptSettingsDialogComponent } from '../../scripts/script-settings-dialog.component';
 import type { ChartScriptResult, ChartTrade } from '../../scripts/chart-script.model';
 import { tradeWindow } from '../../scripts/trade-detail';
 import { chartPineAdapter } from '../../scripts/chart-pine-adapter';
@@ -117,6 +119,8 @@ import { firstValueFrom } from 'rxjs';
 import { MarketDataService } from '@core/services/market-data.service';
 import { AssistantDockService } from '@core/assistant/assistant-dock.service';
 import type { ScriptInputValues } from '@core/api/scripting.types';
+import { parseSavedInputs, pruneInputValues } from '@features/scripting/pine/pine-inputs';
+import { ScriptSettings } from '../../scripts/script-settings';
 import { StrategyTesterPanelComponent } from '../../scripts/strategy-tester-panel.component';
 import {
   ScriptEditorPanelComponent,
@@ -175,7 +179,12 @@ import type {
   UpcomingEconomicEvent,
 } from '@core/services/economic-calendar.service';
 import { ChartPrefsService } from '../../workspace/chart-prefs.service';
-import type { ChartWorkspaceState, WorkspaceScript } from '../../workspace/workspace-state';
+import {
+  restoredScriptItem,
+  workspaceScriptOf,
+  type ChartWorkspaceState,
+  type WorkspaceScript,
+} from '../../workspace/workspace-state';
 import { drawingTemplates } from '../../drawings/drawing-templates';
 import {
   DEFAULT_STYLE,
@@ -193,6 +202,10 @@ import {
 export interface ChartScriptRun {
   item: ChartScriptItem;
   result: ChartScriptResult;
+  /**
+   * The input overrides the script runs with. Set from its Settings dialog at once, so while a
+   * run with new values is in flight they are ahead of `result`; every later run takes them.
+   */
   values: ScriptInputValues;
   /** The series the run was computed over. */
   symbol: string;
@@ -380,6 +393,7 @@ function loadWatchlistOpen(): boolean {
     WatchlistPanelComponent,
     StrategyTesterPanelComponent,
     ScriptEditorPanelComponent,
+    ScriptSettingsDialogComponent,
     PerformanceTilesComponent,
     SeasonalsComponent,
     TechnicalsGaugeComponent,
@@ -669,14 +683,23 @@ export class ChartAnalysisPageComponent {
     };
   });
 
+  /**
+   * The operator removed the script the editor showed ({@link removeScriptFromChart}): until it
+   * is pointed at a script again, the editor opens on the starter template.
+   */
+  private editorCleared = false;
+
   /** Point the editor at a chart script, loading an engine strategy's source when needed. */
   openScriptSource(key: string | null): void {
     if (key !== this.editorKey()) this.assistSource.set(null);
     const runs = this.scriptRuns();
-    const target =
-      key ??
-      (runs.find((r) => r.result.kind === 'strategy') ?? runs[runs.length - 1])?.item.key ??
-      null;
+    // Unlinked, it shows the chart's strategy or newest script — unless a removal just cleared it.
+    const fallback = this.editorCleared
+      ? null
+      : ((runs.find((r) => r.result.kind === 'strategy') ?? runs[runs.length - 1])?.item.key ??
+        null);
+    const target = key ?? fallback;
+    if (target !== null) this.editorCleared = false;
     this.editorKey.set(target);
     const item = runs.find((r) => r.item.key === target)?.item;
     const id = item?.strategyId;
@@ -736,19 +759,7 @@ export class ChartAnalysisPageComponent {
       this.scriptEditor()?.showCompile(r);
       return r;
     },
-    runDraft: (source) =>
-      new Promise((resolve) => {
-        const target = this.editorTarget();
-        if (target) this.removeScript(target.key);
-        const item = this.chartScripts.itemForSource(
-          source,
-          detectScriptKind(source),
-          target?.name ?? 'Untitled script',
-        );
-        this.editorKey.set(item.key);
-        this.editorDraft.set({ key: item.key, text: source });
-        this.runScript(item, {}, false, resolve);
-      }),
+    runDraft: (source) => new Promise((resolve) => this.runDraftOnChart(source, resolve)),
     currentRun: () => {
       const run =
         this.scriptRuns().find((r) => r.item.key === this.editorKey()) ?? this.strategyRun();
@@ -2417,7 +2428,13 @@ export class ChartAnalysisPageComponent {
   onDialogPick(item: DialogItem): void {
     if (item.kind === 'strategy' || item.kind === 'script') {
       const script = this.scriptItemByKey(item.id);
-      if (script) this.runScript(script, {});
+      // A saved script starts with its default inputs; one already on the chart keeps its own.
+      if (script)
+        this.runScript(
+          script,
+          this.scriptRuns().find((r) => r.item.key === script.key)?.values ??
+            startingValues(script, this.chartScripts.savedScripts()),
+        );
       this.indicatorMenuOpen.set(false);
       return;
     }
@@ -2527,8 +2544,12 @@ export class ChartAnalysisPageComponent {
               done?.({ error: result.error });
               return;
             }
+            // The overrides as they apply to the script that ran: one for an input its source no
+            // longer declares, or declares with another type, range or options, is dropped — that
+            // input runs on its default (the run fell back to that) and leaves the layout.
+            const fitting = result.compile ? pruneInputValues(result.inputs, values) : values;
             this.scriptRuns.update((runs) => {
-              const entry = { item, result, values, symbol, resolution, requestedBars };
+              const entry = { item, result, values: fitting, symbol, resolution, requestedBars };
               // One strategy at a time (its tester owns the bottom panel).
               const kept = runs.filter(
                 (r) =>
@@ -2614,14 +2635,74 @@ export class ChartAnalysisPageComponent {
     this.scriptRuns.update((runs) => runs.filter((r) => r.item.key !== key));
   }
 
+  /**
+   * The chip's Remove: the operator takes the script off the chart. When the Pine Editor shows it
+   * — in front, behind the tester or closed — the editor goes with it: closed and unlinked, its
+   * draft and any text the assistant wrote into it dropped (unsaved edits too: the script was
+   * removed), so the next open starts from the starter template. Removing any other script leaves
+   * the editor exactly as it is. Its Settings close too.
+   *
+   * <p>Not part of {@link removeScript}: "Update on chart" and the assistant's run replace the
+   * script the editor shows through it, and the editor follows them to the edited copy.</p>
+   */
+  removeScriptFromChart(key: string): void {
+    if (this.settings.run()?.item.key === key) this.settings.close();
+    this.removeScript(key);
+    if (this.editorKey() !== key) return;
+    this.editorOpen.set(false);
+    this.editorKey.set(null);
+    this.editorDraft.set(null);
+    this.assistSource.set(null);
+    this.editorCleared = true;
+  }
+
+  /** A script's input overrides on the chart (none when it is not on it). */
+  private scriptValues(key: string | null | undefined): ScriptInputValues {
+    return this.scriptRuns().find((r) => r.item.key === key)?.values ?? {};
+  }
+
   onEditorAdd(submit: ScriptEditorSubmit): void {
-    // Editing a script that is on the chart updates it in place (the edited copy replaces it).
+    // Editing a script that is on the chart updates it in place (the edited copy replaces it). Its
+    // inputs carry over; those the edit removed or retyped are dropped by the run (runScript).
     const replacing = this.editorTarget();
+    const values = this.scriptValues(replacing?.key);
     if (replacing) this.removeScript(replacing.key);
     const item = this.chartScripts.itemForSource(submit.source, submit.kind, submit.name);
     this.editorKey.set(item.key);
-    this.runScript(item, {});
+    this.runScript(item, values);
   }
+
+  /**
+   * The assistant's `pine.run`, as "Update on chart": the edited copy replaces the script the
+   * editor shows, keeps its inputs, and the editor follows it.
+   */
+  private runDraftOnChart(source: string, done: (r: RunOutcome) => void): void {
+    const target = this.editorTarget();
+    const values = this.scriptValues(target?.key);
+    if (target) this.removeScript(target.key);
+    const item = this.chartScripts.itemForSource(
+      source,
+      detectScriptKind(source),
+      target?.name ?? 'Untitled script',
+    );
+    this.editorKey.set(item.key);
+    this.editorDraft.set({ key: item.key, text: source });
+    this.runScript(item, values, false, done);
+  }
+
+  /** A Pine script's Settings dialog (TradingView's study Settings): its inputs, applied live. */
+  readonly settings = new ScriptSettings(this.scriptRuns, {
+    run: (item, values) => this.runScript(item, values, true),
+    storedInputs: (id) =>
+      this.strategies.getById(id).pipe(
+        map((res) => parseSavedInputs(res?.data?.scriptInputs)),
+        takeUntilDestroyed(this.destroyRef),
+      ),
+    saveDefault: (id, values) =>
+      this.chartScripts.saveDefaultInputs(id, values).pipe(takeUntilDestroyed(this.destroyRef)),
+    notify: (kind, message) =>
+      kind === 'success' ? this.notify.success(message) : this.notify.error(message),
+  });
 
   onEditorSaved(): void {
     // Refresh "My scripts" in the dialog.
@@ -2815,17 +2896,7 @@ export class ChartAnalysisPageComponent {
 
   /** Scripts on the chart plus restored ones still running, in a stable order. */
   private workspaceScripts(): WorkspaceScript[] {
-    const runs = this.scriptRuns().map(
-      (r): WorkspaceScript => ({
-        key: r.item.key,
-        source: r.item.source,
-        name: r.item.name,
-        kind: r.item.kind,
-        ...(r.item.pineSource !== undefined ? { pineSource: r.item.pineSource } : {}),
-        ...(r.item.strategyId !== undefined ? { strategyId: r.item.strategyId } : {}),
-        values: r.values,
-      }),
-    );
+    const runs = this.scriptRuns().map(workspaceScriptOf);
     const waiting = this.restoringScripts().filter((w) => !runs.some((r) => r.key === w.key));
     return [...waiting, ...runs].sort((a, b) => a.key.localeCompare(b.key));
   }
@@ -2887,7 +2958,12 @@ export class ChartAnalysisPageComponent {
       this.testerOpen.set(d.testerOpen ?? true);
       this.dockPreference.set(d.preference ?? 'tester');
       this.editorOpen.set(false);
-      for (const w of s.scripts ?? []) this.runScript(this.restoredItem(w), w.values ?? {}, true);
+      for (const w of s.scripts ?? [])
+        this.runScript(
+          restoredScriptItem(w, this.chartScripts.savedScripts()),
+          w.values ?? {},
+          true,
+        );
       if (d.editorOpen) {
         this.editorKey.set(d.editorKey ?? null);
         this.editorOpen.set(true);
@@ -2908,22 +2984,6 @@ export class ChartAnalysisPageComponent {
         this.restored = true;
       });
     }
-  }
-
-  private restoredItem(w: WorkspaceScript): ChartScriptItem {
-    const savedId = w.source === 'mine' && w.key.startsWith('mine:') ? w.key.slice(5) : null;
-    const saved = savedId ? this.chartScripts.savedScripts().find((x) => x.id === savedId) : null;
-    return {
-      key: w.key,
-      source: w.source,
-      name: saved?.name ?? w.name,
-      description: '',
-      kind: saved?.kind ?? w.kind,
-      ...(w.strategyId !== undefined ? { strategyId: w.strategyId } : {}),
-      ...((saved?.source ?? w.pineSource) !== undefined
-        ? { pineSource: saved?.source ?? w.pineSource }
-        : {}),
-    };
   }
 
   private flushPendingView(): void {

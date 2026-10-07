@@ -11,6 +11,7 @@ import {
   inputDefault,
   inputOptions,
   inputOverrides,
+  inputValueFits,
   isInputActive,
   layoutInputs,
   msToUtcInput,
@@ -18,9 +19,12 @@ import {
   parseColor,
   parseSavedInputs,
   parseSession,
+  pruneInputValues,
   resolveInputValues,
+  sameInputValues,
   timeframeLabel,
   utcInputToMs,
+  withSavedDefaults,
 } from './pine-inputs';
 
 const input = (
@@ -150,6 +154,190 @@ describe('values round-trip', () => {
     expect(parseSavedInputs('not json')).toEqual({});
     expect(parseSavedInputs({ a: true })).toEqual({ a: true });
     expect(parseSavedInputs(null)).toEqual({});
+  });
+});
+
+// As the engine compiles "Smart Algo Signals Suite v2" (chart script #20): ids are group::title,
+// untitled inputs get their position (#17).
+const V2: ScriptInputDto[] = [
+  input({
+    id: 'Display::Colour candles',
+    kind: 'bool',
+    title: 'Colour candles',
+    defaultValue: true,
+    defaultText: 'true',
+    group: 'Display',
+    display: 'none',
+    tooltip: "Off: the chart's own green and red candles.",
+  }),
+  input({
+    id: 'Display::Candle colour style',
+    kind: 'enum',
+    title: 'Candle colour style',
+    defaultValue: 'trend',
+    defaultText: 'Trend (two-tone)',
+    options: ['trend', 'volume'],
+    optionTexts: ['Trend (two-tone)', 'Volume (two-tone)'],
+    enumName: 'CandleMode',
+    group: 'Display',
+  }),
+  input({
+    id: 'Signals::Sensitivity',
+    kind: 'float',
+    title: 'Sensitivity',
+    defaultValue: 1.3,
+    minValue: 0.4,
+    maxValue: 5,
+    step: 0.1,
+    group: 'Signals',
+  }),
+  input({
+    id: 'Trade plan::Targets shown',
+    kind: 'int',
+    title: 'Targets shown',
+    defaultValue: 3,
+    minValue: 0,
+    maxValue: 3,
+    group: 'Trade plan',
+  }),
+  input({
+    id: 'Pullback mode (RSI-2)::#17',
+    kind: 'session',
+    title: '',
+    defaultValue: '0600-1100',
+    inline: 'pbs1',
+    group: 'Pullback mode (RSI-2)',
+  }),
+  input({
+    id: 'Dashboard::Text size',
+    kind: 'string',
+    title: 'Text size',
+    defaultValue: 'Small',
+    options: ['Tiny', 'Small', 'Normal'],
+    group: 'Dashboard',
+  }),
+  input({ id: 'Context::#54', kind: 'timeframe', title: '', defaultValue: '', inline: 'htf' }),
+  input({ id: 'Lines::Colour', kind: 'color', title: 'Colour', defaultValue: '#2962FFFF' }),
+  input({ id: 'Lines::Source', kind: 'source', title: 'Source', defaultText: 'close' }),
+];
+const v2 = (id: string) => V2.find((i) => i.id === id)!;
+
+describe('inputValueFits — what an override must be to be sent', () => {
+  it('needs the wire type of its kind', () => {
+    expect(inputValueFits(v2('Display::Colour candles'), false)).toBe(true);
+    expect(inputValueFits(v2('Display::Colour candles'), 'false')).toBe(false);
+    expect(inputValueFits(v2('Display::Colour candles'), 0)).toBe(false);
+    expect(inputValueFits(v2('Signals::Sensitivity'), 2.5)).toBe(true);
+    expect(inputValueFits(v2('Signals::Sensitivity'), '2.5')).toBe(false);
+    expect(inputValueFits(v2('Pullback mode (RSI-2)::#17'), '0700-1200')).toBe(true);
+    expect(inputValueFits(v2('Pullback mode (RSI-2)::#17'), true)).toBe(false);
+    expect(inputValueFits(v2('Lines::Colour'), '#FF000080')).toBe(true);
+    expect(inputValueFits(v2('Lines::Colour'), 'red')).toBe(false);
+  });
+
+  it('whole for int, inside minval/maxval, one of the options', () => {
+    expect(inputValueFits(v2('Trade plan::Targets shown'), 2)).toBe(true);
+    expect(inputValueFits(v2('Trade plan::Targets shown'), 2.5)).toBe(false);
+    expect(inputValueFits(v2('Trade plan::Targets shown'), 4)).toBe(false);
+    expect(inputValueFits(v2('Signals::Sensitivity'), 0.2)).toBe(false);
+    expect(inputValueFits(v2('Dashboard::Text size'), 'Normal')).toBe(true);
+    expect(inputValueFits(v2('Dashboard::Text size'), 'Huge')).toBe(false);
+    expect(inputValueFits(v2('Display::Candle colour style'), 'volume')).toBe(true);
+    expect(inputValueFits(v2('Display::Candle colour style'), 'CandleMode.volume')).toBe(false);
+    expect(inputValueFits(v2('Display::Candle colour style'), 'gradient')).toBe(false);
+  });
+
+  it('a series name for a source, a timeframe string for a timeframe', () => {
+    expect(inputValueFits(v2('Lines::Source'), 'hlc3')).toBe(true);
+    expect(inputValueFits(v2('Lines::Source'), 'typical')).toBe(false);
+    expect(inputValueFits(v2('Context::#54'), '240')).toBe(true);
+    expect(inputValueFits(v2('Context::#54'), '')).toBe(true);
+  });
+});
+
+describe('pruneInputValues — overrides after the source changed', () => {
+  it('keeps overrides that still fit, and returns the same object when all do', () => {
+    const values = { 'Display::Colour candles': false, 'Signals::Sensitivity': 2 };
+    expect(pruneInputValues(V2, values)).toBe(values);
+  });
+
+  it('drops an input the script no longer declares (renamed or removed)', () => {
+    expect(
+      pruneInputValues(V2, { 'Display::Colour Candles': false, 'Signals::Sensitivity': 2 }),
+    ).toEqual({ 'Signals::Sensitivity': 2 });
+  });
+
+  it('drops a value whose input changed type, range or options', () => {
+    const edited = [
+      { ...v2('Display::Colour candles'), kind: 'string' as const, options: ['On', 'Off'] },
+      { ...v2('Trade plan::Targets shown'), maxValue: 2 },
+      { ...v2('Dashboard::Text size'), options: ['Small', 'Normal'] },
+    ];
+    expect(
+      pruneInputValues(edited, {
+        'Display::Colour candles': false,
+        'Trade plan::Targets shown': 3,
+        'Dashboard::Text size': 'Tiny',
+      }),
+    ).toEqual({});
+  });
+
+  it('keeps an override equal to the default: it may differ from a strategy’s stored value', () => {
+    expect(pruneInputValues(V2, { 'Trade plan::Targets shown': 3 })).toEqual({
+      'Trade plan::Targets shown': 3,
+    });
+  });
+
+  it('sends only what differs from the defaults once the form resolves the rest', () => {
+    const values = resolveInputValues(V2, { 'Display::Colour candles': false });
+    expect(values['Display::Colour candles']).toBe(false);
+    expect(values['Display::Candle colour style']).toBe('trend');
+    expect(inputOverrides(V2, values)).toEqual({ 'Display::Colour candles': false });
+    // Ticked again: nothing differs, nothing is sent.
+    expect(inputOverrides(V2, { ...values, 'Display::Colour candles': true })).toEqual({});
+  });
+});
+
+describe('sameInputValues', () => {
+  it('compares ids and values in any order', () => {
+    expect(sameInputValues({ a: 1, b: true }, { b: true, a: 1 })).toBe(true);
+    expect(sameInputValues({ a: 1 }, { a: 2 })).toBe(false);
+    expect(sameInputValues({ a: 1 }, { a: 1, b: false })).toBe(false);
+    expect(sameInputValues({}, {})).toBe(true);
+  });
+});
+
+describe('withSavedDefaults — a strategy’s stored inputs as its defaults', () => {
+  it('makes the stored values that fit the defaults, and leaves the rest', () => {
+    const inputs = withSavedDefaults(V2, {
+      'Trade plan::Targets shown': 1,
+      'Display::Colour candles': 'no', // does not fit a bool: the engine ignores it too
+      'Gone::Input': 5,
+    });
+    expect(inputDefault(inputs.find((i) => i.id === 'Trade plan::Targets shown')!)).toBe(1);
+    expect(inputDefault(inputs.find((i) => i.id === 'Display::Colour candles')!)).toBe(true);
+    expect(inputs).toHaveLength(V2.length);
+    // Back to the source's value is now an override worth sending.
+    expect(inputOverrides(inputs, { 'Trade plan::Targets shown': 3 })).toEqual({
+      'Trade plan::Targets shown': 3,
+    });
+    expect(inputOverrides(inputs, { 'Trade plan::Targets shown': 1 })).toEqual({});
+  });
+
+  it('is the inputs themselves without stored values', () => {
+    expect(withSavedDefaults(V2, {})).toBe(V2);
+    expect(withSavedDefaults(V2, null)).toBe(V2);
+  });
+
+  it('an enum or source default comes from the stored name', () => {
+    const inputs = withSavedDefaults(V2, {
+      'Display::Candle colour style': 'volume',
+      'Lines::Source': 'hl2',
+    });
+    expect(inputDefault(inputs.find((i) => i.id === 'Display::Candle colour style')!)).toBe(
+      'volume',
+    );
+    expect(inputDefault(inputs.find((i) => i.id === 'Lines::Source')!)).toBe('hl2');
   });
 });
 

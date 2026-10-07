@@ -1392,10 +1392,20 @@
     <aside class="studies">
       @for (run of scriptRuns(); track run.item.key) {
         <div class="study script-study">
-          <span class="study-label">
+          <span class="study-label" (dblclick)="settings.open(run.item.key)">
             <span class="pine-tag">{{ run.result.kind === 'strategy' ? 'Strategy' : 'Pine' }}</span>
             {{ run.result.title || run.item.name }}
           </span>
+          <button
+            type="button"
+            class="study-toggle"
+            (click)="settings.open(run.item.key)"
+            title="Settings"
+            [attr.aria-label]="(run.result.title || run.item.name) + ' settings'"
+            data-testid="script-settings"
+          >
+            <app-chart-icon name="settings" [size]="16" />
+          </button>
           <button
             type="button"
             class="study-toggle"
@@ -1417,7 +1427,7 @@
           <button
             type="button"
             class="study-remove"
-            (click)="removeScript(run.item.key)"
+            (click)="removeScriptFromChart(run.item.key)"
             title="Remove"
           >
             <app-chart-icon name="close" [size]="14" />
@@ -1488,6 +1498,19 @@
         </div>
       }
     </aside>
+  }
+  <!-- A Pine script's Settings: its inputs, applied live; Ok keeps them, Cancel puts them back. -->
+  @if (settings.run(); as run) {
+    <app-script-settings-dialog
+      [title]="run.result.title || run.item.name"
+      [inputs]="settings.inputs()"
+      [values]="run.values"
+      [canSaveDefault]="settings.canSaveDefault(run.item)"
+      [savingDefault]="settings.saving()"
+      (changed)="settings.apply(run.item.key, $event)"
+      (saveDefault)="settings.saveDefault(run.item.key, $event)"
+      (closed)="settings.close()"
+    />
   }
   @if (dockTab(); as tab) {
     <section class="bottom-panel">

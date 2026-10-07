@@ -11,6 +11,7 @@ import {
   shareReplay,
   switchMap,
   tap,
+  throwError,
   toArray,
 } from 'rxjs';
 
@@ -21,12 +22,15 @@ import { ScriptingApiError, ScriptingService } from '@core/services/scripting.se
 import { StrategiesService } from '@core/services/strategies.service';
 import type {
   ChartIndicatorScriptDto,
+  SaveChartIndicatorScriptRequest,
   ScriptCompileResult,
   ScriptInputValues,
   ScriptRunBar,
   ScriptRunRequest,
 } from '@core/api/scripting.types';
 import type { StrategyDto } from '@core/api/api.types';
+import { parseSavedInputs } from '@features/scripting/pine/pine-saved-inputs';
+import { pruneInputValues, sameInputValues } from '@features/scripting/pine/pine-inputs';
 import type { TvResolution } from '../datafeed/resolution';
 import { EXAMPLE_STRATEGIES } from './example-strategies';
 import { runTimeframeFor, toChartScriptResult, type ChartScriptResult } from './chart-script.model';
@@ -74,6 +78,11 @@ export interface SavedChartScript {
   updatedAt: number;
   /** Set on an unsaved draft: why the engine refused it. */
   draftReason?: string;
+  /**
+   * Input values saved with the script ("Save as default" in its settings): what a copy added to a
+   * chart starts with. Only scripts in the engine have them.
+   */
+  inputs?: ScriptInputValues;
 }
 
 /** Pre-engine storage of "My scripts"; read once to migrate, then cleared. */
@@ -256,6 +265,13 @@ export class ChartScriptService {
    * as `preview`. A script that does not compile resolves (with `error` and `diagnostics` set);
    * only transport failures reject (`ScriptingApiError`). The chart follows the console's theme,
    * so the run is told the theme of the moment (Pine `chart.bg_color` / `chart.fg_color`).
+   *
+   * <p>Input overrides may have been made for an earlier version of the script — a restored layout,
+   * a saved default, the editor's update of a script on the chart. An id the script no longer
+   * declares is ignored by the engine, but a value that no longer fits its input (the type, range
+   * or options changed) gets the whole run refused. So a refused run with overrides learns the
+   * inputs from a run on the defaults and runs again with only the overrides that still fit; when
+   * all of them still fit, the refusal was about something else and stands.</p>
    */
   runOnChart(
     item: ChartScriptItem,
@@ -265,19 +281,36 @@ export class ChartScriptService {
     lastBars = DEFAULT_LAST_BARS,
     liveBar?: ScriptRunBar | null,
   ): Observable<ChartScriptResult> {
-    const req: ScriptRunRequest = {
-      symbol,
-      timeframe: runTimeframeFor(resolution),
-      lastBars: Math.max(1, Math.min(MAX_LAST_BARS, Math.round(lastBars))),
-      mode: item.kind === 'strategy' ? 'backtest' : 'preview',
-      theme: this.theme.theme(),
+    const run = (overrides: ScriptInputValues | undefined): Observable<ChartScriptResult> => {
+      const req: ScriptRunRequest = {
+        symbol,
+        timeframe: runTimeframeFor(resolution),
+        lastBars: Math.max(1, Math.min(MAX_LAST_BARS, Math.round(lastBars))),
+        mode: item.kind === 'strategy' ? 'backtest' : 'preview',
+        theme: this.theme.theme(),
+      };
+      if (item.strategyId !== undefined) req.strategyId = item.strategyId;
+      else req.source = item.pineSource ?? '';
+      if (overrides && Object.keys(overrides).length) req.inputs = overrides;
+      // Indicators run the chart's forming bar as the realtime bar; strategies backtest closed
+      // bars.
+      if (liveBar && req.mode === 'preview') req.liveBar = liveBar;
+      return this.scripting.run(req).pipe(map((res) => toChartScriptResult(res)));
     };
-    if (item.strategyId !== undefined) req.strategyId = item.strategyId;
-    else req.source = item.pineSource ?? '';
-    if (inputs && Object.keys(inputs).length) req.inputs = inputs;
-    // Indicators run the chart's forming bar as the realtime bar; strategies backtest closed bars.
-    if (liveBar && req.mode === 'preview') req.liveBar = liveBar;
-    return this.scripting.run(req).pipe(map((res) => toChartScriptResult(res)));
+    if (!inputs || !Object.keys(inputs).length) return run(undefined);
+    return run(inputs).pipe(
+      catchError((err: unknown) => {
+        if (!isRefusal(err)) throw err;
+        return run(undefined).pipe(
+          switchMap((base) => {
+            if (base.error || !base.compile) return of(base);
+            const kept = pruneInputValues(base.inputs, inputs);
+            if (sameInputValues(kept, inputs)) throw err;
+            return Object.keys(kept).length ? run(kept) : of(base);
+          }),
+        );
+      }),
+    );
   }
 
   /** `POST scripting/compile` — diagnostics, declaration and inputs for the editor. */
@@ -312,6 +345,8 @@ export class ChartScriptService {
   /**
    * Saves (or overwrites by name) a script in "My scripts" on the engine. Rejects with
    * `ScriptingApiError` (compile errors carry the compile response) and leaves the list unchanged.
+   * An overwrite keeps the inputs saved with the script — the engine replaces them on every
+   * update — as the engine has them now, not as this page last read them.
    */
   saveScript(
     name: string,
@@ -322,9 +357,18 @@ export class ChartScriptService {
     const existing = this.savedScripts().find(
       (s) => s.name === trimmed && !s.id.startsWith('local-') && !s.id.startsWith('draft-'),
     );
-    const req = { name: trimmed, pineSource: source };
+    const req: SaveChartIndicatorScriptRequest = { name: trimmed, pineSource: source };
     const call$ = existing
-      ? this.scripting.updateChartScript(Number(existing.id), req)
+      ? this.scripting.getChartScript(Number(existing.id)).pipe(
+          map((latest) => parseSavedInputs(latest.inputs)),
+          catchError(() => of(existing.inputs ?? {})),
+          switchMap((inputs) =>
+            this.scripting.updateChartScript(
+              Number(existing.id),
+              Object.keys(inputs).length ? { ...req, inputs } : req,
+            ),
+          ),
+        )
       : this.scripting.createChartScript(req);
     return call$.pipe(
       map(fromDto),
@@ -345,6 +389,33 @@ export class ChartScriptService {
     );
   }
 
+  /**
+   * "Save as default": stores `inputs` (overrides only; none clears them) with a script in "My
+   * scripts" — what a copy added to a chart starts with. The update replaces name, source and
+   * inputs, so it re-sends the name and source the engine has NOW: this page's copy may predate an
+   * edit saved from another tab. Rejects with `ScriptingApiError`; only engine scripts have inputs.
+   */
+  saveDefaultInputs(id: string, inputs: ScriptInputValues): Observable<SavedChartScript> {
+    if (!/^\d+$/.test(id)) {
+      return throwError(
+        () => new ScriptingApiError('Only a script saved in the engine can keep default inputs.'),
+      );
+    }
+    return this.scripting.getChartScript(Number(id)).pipe(
+      switchMap((latest) =>
+        this.scripting.updateChartScript(Number(id), {
+          name: latest.name,
+          pineSource: latest.pineSource,
+          inputs: Object.keys(inputs).length ? inputs : null,
+        }),
+      ),
+      map(fromDto),
+      tap((saved) =>
+        this.savedScripts.update((list) => list.map((s) => (s.id === saved.id ? saved : s))),
+      ),
+    );
+  }
+
   /** Deletes a saved script (engine, or a not-yet-migrated local one). */
   deleteScript(id: string): Observable<void> {
     const drop = () => this.savedScripts.update((list) => list.filter((s) => s.id !== id));
@@ -361,6 +432,26 @@ export class ChartScriptService {
     }
     return this.scripting.deleteChartScript(Number(id)).pipe(tap(drop));
   }
+}
+
+/**
+ * The engine id of a "My scripts" item (`mine:<id>`) — the only scripts that can keep default
+ * inputs. Null for a draft or a script still only in this browser, and for anything not saved
+ * there (an engine strategy, an example, the editor's).
+ */
+export function savedScriptId(item: Pick<ChartScriptItem, 'key' | 'source'>): string | null {
+  const m = item.source === 'mine' ? /^mine:(\d+)$/.exec(item.key) : null;
+  return m ? m[1] : null;
+}
+
+/** The inputs a script added to the chart starts with: a saved script's defaults, else none. */
+export function startingValues(
+  item: Pick<ChartScriptItem, 'key' | 'source'>,
+  saved: readonly SavedChartScript[],
+): ScriptInputValues {
+  const id = savedScriptId(item);
+  const inputs = id === null ? undefined : saved.find((s) => s.id === id)?.inputs;
+  return inputs ? { ...inputs } : {};
 }
 
 function isPineStrategy(s: StrategyDto): boolean {
@@ -402,7 +493,13 @@ function fromDto(d: ChartIndicatorScriptDto): SavedChartScript {
     source: d.pineSource,
     kind: d.kind === 'strategy' ? 'strategy' : 'indicator',
     updatedAt: Date.parse(d.updatedAt) || Date.now(),
+    inputs: parseSavedInputs(d.inputs),
   };
+}
+
+/** A refusal of the run itself (validation, `-11`) that carries no compile failure. */
+function isRefusal(err: unknown): err is ScriptingApiError {
+  return err instanceof ScriptingApiError && err.code === '-11' && !err.compile;
 }
 
 function readLegacy(): SavedChartScript[] {

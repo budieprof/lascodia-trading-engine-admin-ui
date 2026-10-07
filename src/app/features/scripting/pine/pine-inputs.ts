@@ -383,6 +383,104 @@ export function isInputActive(input: ScriptInputDto, values: ScriptInputValues):
   return values[gate] === true;
 }
 
+function oneOfOptions(input: ScriptInputDto, value: ScriptInputValue): boolean {
+  const opts = optionValues(input);
+  if (!opts) return true;
+  if (typeof value === 'number')
+    return opts.some((o) => typeof o === 'number' && sameValue(o, value));
+  if (input.kind === 'timeframe') {
+    return opts.some((o) => normaliseTimeframe(String(o)) === normaliseTimeframe(value as string));
+  }
+  return opts.some((o) => String(o) === value);
+}
+
+/**
+ * Whether a value can override the input as it is declared NOW: the wire type of its kind (a number
+ * for int/float/price/time, true/false for bool, a string for the rest), whole for int, inside
+ * minval/maxval and one of the options. The engine refuses a whole run over an override that does
+ * not fit, so a value saved for an earlier version of the script must pass this before it is sent.
+ */
+export function inputValueFits(input: ScriptInputDto, value: unknown): value is ScriptInputValue {
+  switch (input.kind) {
+    case 'int':
+    case 'float':
+    case 'price':
+    case 'time': {
+      if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+      if (input.kind === 'int' && !Number.isInteger(value)) return false;
+      if (input.minValue !== null && input.minValue !== undefined && value < input.minValue)
+        return false;
+      if (input.maxValue !== null && input.maxValue !== undefined && value > input.maxValue)
+        return false;
+      return oneOfOptions(input, value);
+    }
+    case 'bool':
+      return typeof value === 'boolean';
+    case 'color':
+      return parseColor(value) !== null;
+    case 'enum': {
+      // A member by its bare name, the wire form (`volume`, not `CandleMode.volume`).
+      if (typeof value !== 'string' || !value) return false;
+      const opts = optionValues(input);
+      return !opts || opts.some((o) => enumMember(o) === value);
+    }
+    case 'source':
+      return (
+        typeof value === 'string' &&
+        (optionValues(input) ?? PINE_SOURCES).map(String).includes(value)
+      );
+    default:
+      // string, textArea, symbol, session, timeframe
+      return typeof value === 'string' && oneOfOptions(input, value);
+  }
+}
+
+/**
+ * The overrides that still apply to the inputs as declared: ids the script no longer declares (an
+ * input renamed or removed) and values that no longer fit (its type, range or options changed) are
+ * dropped, and that input falls back to its default — the engine's own rule for stored inputs.
+ * Returns `values` itself when nothing was dropped.
+ */
+export function pruneInputValues(
+  inputs: readonly ScriptInputDto[],
+  values: ScriptInputValues,
+): ScriptInputValues {
+  const byId = new Map(inputs.map((i) => [i.id, i]));
+  const out: ScriptInputValues = {};
+  let dropped = false;
+  for (const [id, value] of Object.entries(values)) {
+    const input = byId.get(id);
+    if (input && inputValueFits(input, value)) out[id] = value;
+    else dropped = true;
+  }
+  return dropped ? out : values;
+}
+
+/** Same ids with the same values, in any order. */
+export function sameInputValues(a: ScriptInputValues, b: ScriptInputValues): boolean {
+  if (a === b) return true;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((k) => Object.prototype.hasOwnProperty.call(b, k) && a[k] === b[k]);
+}
+
+/**
+ * The inputs with saved values that still fit as their defaults. An engine strategy's stored inputs
+ * are applied by every run beneath the request's overrides, so they — not the source's — are the
+ * values an empty override set runs with.
+ */
+export function withSavedDefaults(
+  inputs: readonly ScriptInputDto[],
+  saved: ScriptInputValues | null | undefined,
+): readonly ScriptInputDto[] {
+  if (!saved || Object.keys(saved).length === 0) return inputs;
+  return inputs.map((i) =>
+    Object.prototype.hasOwnProperty.call(saved, i.id) && inputValueFits(i, saved[i.id])
+      ? { ...i, defaultValue: saved[i.id], defaultText: null }
+      : i,
+  );
+}
+
 // ── Layout ─────────────────────────────────────────────────────────────────
 
 export interface InputRow {
