@@ -141,6 +141,18 @@ type ScaleMode = 'normal' | 'log' | 'percent';
       container: bottom-bar / inline-size;
     }
 
+    /* With a mouse at 1280px and up the shell keeps the page under the floating Ask button
+       (layout.component.ts lifts it only for touch or narrow screens), and Ask covered the lower
+       half of "log" and "auto". Keep the bar's right end clear of it rather than give up chart
+       height: Ask is ~76px wide and 20px off the window's edge, the page ends ~33px from it, plus
+       an 8px gap. On the host, so the container queries below measure what is left. */
+    @media (min-width: 1280px) and (not (pointer: coarse)) {
+      :host {
+        padding-right: 68px;
+        background: var(--tv-bg);
+      }
+    }
+
     .bottom-bar {
       display: flex;
       align-items: center;
