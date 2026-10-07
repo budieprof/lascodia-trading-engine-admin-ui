@@ -73,8 +73,13 @@ import { TV_PALETTE, formatColor, parseColor } from './colors';
       position: relative; width: 22px; height: 22px; border-radius: 4px;
       border: 1px dashed var(--tv-muted, #787b86); display: inline-flex;
       align-items: center; justify-content: center; cursor: pointer; color: var(--tv-muted, #787b86);
+      /* the invisible colour input must not reach past the "+": mobile browsers size form inputs themselves */
+      overflow: hidden;
     }
-    .cp-plus input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .cp-plus input {
+      position: absolute; inset: 0; width: 100%; height: 100%; min-width: 0;
+      margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer;
+    }
     .cp-current { width: 22px; height: 22px; border-radius: 4px; border: 1px solid var(--tv-line, #e0e3eb); }
     .cp-opacity { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12px; }
     .cp-opacity input { flex: 1; accent-color: var(--cp-color); }
