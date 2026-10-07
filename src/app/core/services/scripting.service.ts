@@ -323,6 +323,18 @@ export class ScriptingService {
       );
   }
 
+  /** `GET scripting/indicators/{id}` — one saved chart script as the engine has it now. */
+  getChartScript(id: number): Observable<ChartIndicatorScriptDto> {
+    return this.api
+      .get<ResponseData<ChartIndicatorScriptDto>>(`/scripting/indicators/${id}`, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The script could not be loaded.')),
+        catchError((err) =>
+          throwError(() => toScriptingError(err, 'The script could not be loaded.')),
+        ),
+      );
+  }
+
   /**
    * `POST scripting/indicators` — compiles and saves. A compile error (or a `library()`) rejects
    * with `-11` and the compile response attached.

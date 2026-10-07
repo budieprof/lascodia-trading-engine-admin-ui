@@ -6,11 +6,18 @@ import { ScriptingApiError, ScriptingService } from '@core/services/scripting.se
 import { StrategiesService } from '@core/services/strategies.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { ThemeService, type Theme } from '@core/theme/theme.service';
-import type { ChartIndicatorScriptDto } from '@core/api/scripting.types';
+import type {
+  ChartIndicatorScriptDto,
+  ScriptInputDto,
+  ScriptInputValues,
+  ScriptRunRequest,
+} from '@core/api/scripting.types';
 import {
   ChartScriptService,
   DRAFTS_STORAGE_KEY,
   LEGACY_STORAGE_KEY,
+  savedScriptId,
+  startingValues,
   type ChartScriptItem,
 } from './chart-script.service';
 
@@ -18,12 +25,14 @@ function dto(
   id: number,
   name: string,
   pineSource = `//@version=6\nindicator("${name}")`,
+  inputs: ScriptInputValues | null = null,
 ): ChartIndicatorScriptDto {
   return {
     id,
     name,
     kind: 'indicator',
     pineSource,
+    inputs,
     createdAt: '2026-10-06T00:00:00Z',
     updatedAt: '2026-10-06T00:00:00Z',
   };
@@ -193,6 +202,7 @@ describe('ChartScriptService — engine-backed "My scripts"', () => {
     );
     const { svc } = make({
       listChartScripts: () => of([dto(3, 'Existing')]),
+      getChartScript: (id: number) => of(dto(id, 'Existing')),
       createChartScript,
       updateChartScript,
     });
@@ -274,5 +284,201 @@ describe('ChartScriptService — engine-backed "My scripts"', () => {
     svc.runOnChart(indicator, 'EURUSD', '60' as never).subscribe();
     const calls = run.mock.calls as unknown as [{ theme?: string }][];
     expect(calls.map((c) => c[0].theme)).toEqual(['dark', 'dark', 'light']);
+  });
+});
+
+describe('ChartScriptService — saved default inputs ("Save as default")', () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  const COLOUR_OFF = { 'Display::Colour candles': false };
+
+  it('reads the inputs saved with each script', () => {
+    const { svc } = make({
+      listChartScripts: () => of([dto(20, 'Smart Algo v2', 'src', COLOUR_OFF), dto(5, 'v1')]),
+    });
+    expect(svc.savedScripts().map((s) => [s.id, s.inputs])).toEqual([
+      ['20', COLOUR_OFF],
+      ['5', {}],
+    ]);
+  });
+
+  it('stores the overrides with the name and source the engine has now; none clears them', async () => {
+    const getChartScript = vi.fn((id: number) => of(dto(id, 'Renamed elsewhere', 'newer src')));
+    const updateChartScript = vi.fn(
+      (id: number, req: { name: string; pineSource: string; inputs?: ScriptInputValues | null }) =>
+        of(dto(id, req.name, req.pineSource, req.inputs ?? null)),
+    );
+    const { svc } = make({
+      listChartScripts: () => of([dto(20, 'Smart Algo v2', 'old src')]),
+      getChartScript,
+      updateChartScript,
+    });
+
+    const saved = await firstValueFrom(svc.saveDefaultInputs('20', COLOUR_OFF));
+    expect(getChartScript).toHaveBeenCalledWith(20);
+    expect(updateChartScript).toHaveBeenCalledWith(20, {
+      name: 'Renamed elsewhere',
+      pineSource: 'newer src',
+      inputs: COLOUR_OFF,
+    });
+    expect(saved.inputs).toEqual(COLOUR_OFF);
+    expect(svc.savedScripts()[0]).toMatchObject({ id: '20', inputs: COLOUR_OFF });
+
+    await firstValueFrom(svc.saveDefaultInputs('20', {}));
+    expect(updateChartScript.mock.calls[1][1].inputs).toBeNull();
+    expect(svc.savedScripts()[0].inputs).toEqual({});
+  });
+
+  it('only a script in the engine keeps default inputs', async () => {
+    const getChartScript = vi.fn();
+    const { svc } = make({ getChartScript });
+    await expect(firstValueFrom(svc.saveDefaultInputs('draft-x', COLOUR_OFF))).rejects.toThrow(
+      'Only a script saved in the engine',
+    );
+    await expect(firstValueFrom(svc.saveDefaultInputs('local-y', COLOUR_OFF))).rejects.toThrow();
+    expect(getChartScript).not.toHaveBeenCalled();
+  });
+
+  it('saving the source again keeps the inputs saved with it — as the engine has them now', async () => {
+    const updateChartScript = vi.fn(
+      (id: number, req: { name: string; pineSource: string; inputs?: ScriptInputValues | null }) =>
+        of(dto(id, req.name, req.pineSource, req.inputs ?? null)),
+    );
+    const { svc } = make({
+      listChartScripts: () => of([dto(20, 'Smart Algo v2', 'old src')]),
+      // Saved as default from another tab after this page loaded its list.
+      getChartScript: (id: number) => of(dto(id, 'Smart Algo v2', 'old src', COLOUR_OFF)),
+      updateChartScript,
+    });
+    const saved = await firstValueFrom(svc.saveScript('Smart Algo v2', 'edited src'));
+    expect(updateChartScript).toHaveBeenCalledWith(20, {
+      name: 'Smart Algo v2',
+      pineSource: 'edited src',
+      inputs: COLOUR_OFF,
+    });
+    expect(saved.inputs).toEqual(COLOUR_OFF);
+  });
+
+  it('a script added to the chart starts with its saved inputs; anything else with none', () => {
+    const { svc } = make({
+      listChartScripts: () => of([dto(20, 'Smart Algo v2', 'src', COLOUR_OFF)]),
+    });
+    const mine = (key: string): ChartScriptItem => ({
+      key,
+      source: 'mine',
+      name: 'x',
+      description: '',
+      kind: 'indicator',
+    });
+    expect(savedScriptId(mine('mine:20'))).toBe('20');
+    expect(savedScriptId(mine('mine:draft-a'))).toBeNull();
+    expect(savedScriptId(mine('editor:current'))).toBeNull();
+    expect(savedScriptId({ key: 'example:ema', source: 'example' })).toBeNull();
+    const start = startingValues(mine('mine:20'), svc.savedScripts());
+    expect(start).toEqual(COLOUR_OFF);
+    start['Display::Colour candles'] = true; // a copy: the saved script is untouched
+    expect(svc.savedScripts()[0].inputs).toEqual(COLOUR_OFF);
+    expect(startingValues(mine('mine:21'), svc.savedScripts())).toEqual({});
+    expect(startingValues({ key: 'strategy:7', source: 'strategy' }, svc.savedScripts())).toEqual(
+      {},
+    );
+  });
+});
+
+describe('ChartScriptService — overrides made for an earlier version of the script', () => {
+  const ITEM: ChartScriptItem = {
+    key: 'mine:20',
+    source: 'mine',
+    name: 'Smart Algo v2',
+    description: '',
+    kind: 'indicator',
+    pineSource: 'edited src',
+  };
+  // The edited script: "Colour candles" became a string input; "Sensitivity" is unchanged.
+  const EDITED: ScriptInputDto[] = [
+    {
+      id: 'Display::Colour candles',
+      kind: 'string',
+      title: 'Colour candles',
+      defaultValue: 'On',
+      options: ['On', 'Off'],
+    },
+    { id: 'Signals::Sensitivity', kind: 'float', title: 'Sensitivity', defaultValue: 1.3 },
+  ];
+  const result = (title: string) => ({
+    compile: {
+      success: true,
+      diagnostics: [],
+      declaration: { kind: 'indicator', title },
+      inputs: EDITED,
+    },
+  });
+  const refused = () =>
+    throwError(
+      () => new ScriptingApiError("Input 'Colour candles' must be a string.", '-11', null, 200),
+    );
+  const sent = (run: { mock: { calls: unknown[] } }) =>
+    (run.mock.calls as [ScriptRunRequest][]).map((c) => c[0].inputs);
+
+  it('a refused run learns the inputs and runs again with the overrides that still fit', async () => {
+    const run = vi.fn((req: ScriptRunRequest) =>
+      req.inputs?.['Display::Colour candles'] === false
+        ? refused()
+        : of(result(req.inputs ? 'with overrides' : 'defaults')),
+    );
+    const { svc } = make({ run });
+    const r = await firstValueFrom(
+      svc.runOnChart(ITEM, 'EURUSD', '60' as never, {
+        'Display::Colour candles': false,
+        'Signals::Sensitivity': 2,
+      }),
+    );
+    expect(sent(run)).toEqual([
+      { 'Display::Colour candles': false, 'Signals::Sensitivity': 2 },
+      undefined,
+      { 'Signals::Sensitivity': 2 },
+    ]);
+    expect(r.title).toBe('with overrides');
+    expect(r.error).toBeNull();
+  });
+
+  it('with nothing left that fits, the run on the defaults is the result', async () => {
+    const run = vi.fn((req: ScriptRunRequest) => (req.inputs ? refused() : of(result('defaults'))));
+    const { svc } = make({ run });
+    const r = await firstValueFrom(
+      svc.runOnChart(ITEM, 'EURUSD', '60' as never, { 'Display::Colour candles': false }),
+    );
+    expect(sent(run)).toEqual([{ 'Display::Colour candles': false }, undefined]);
+    expect(r.title).toBe('defaults');
+  });
+
+  it('when every override still fits, the refusal was about something else and stands', async () => {
+    const run = vi.fn((req: ScriptRunRequest) => (req.inputs ? refused() : of(result('defaults'))));
+    const { svc } = make({ run });
+    await expect(
+      firstValueFrom(svc.runOnChart(ITEM, 'EURUSD', '60' as never, { 'Signals::Sensitivity': 2 })),
+    ).rejects.toThrow("Input 'Colour candles' must be a string.");
+    expect(sent(run)).toHaveLength(2);
+  });
+
+  it('a transport failure is not a refusal: no second run', async () => {
+    const run = vi.fn(() =>
+      throwError(() => new ScriptingApiError('The engine could not be reached.', null, null, 0)),
+    );
+    const { svc } = make({ run });
+    await expect(
+      firstValueFrom(svc.runOnChart(ITEM, 'EURUSD', '60' as never, { 'Signals::Sensitivity': 2 })),
+    ).rejects.toThrow('could not be reached');
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('a run without overrides is never retried', async () => {
+    const run = vi.fn(() => refused());
+    const { svc } = make({ run });
+    await expect(firstValueFrom(svc.runOnChart(ITEM, 'EURUSD', '60' as never, {}))).rejects.toThrow(
+      'must be a string',
+    );
+    expect(sent(run)).toEqual([undefined]);
   });
 });
