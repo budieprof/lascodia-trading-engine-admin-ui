@@ -67,6 +67,8 @@ export interface TimeframeTechnicals {
   barCount: number;
   /** Open time of the newest bar rated, UTC ms; null with no bars. */
   lastTime: number | null;
+  /** Its period's close on the session grid (2h … 1M), UTC ms; null on the stored grid. */
+  lastCloseTime: number | null;
   lastClose: number | null;
   rating: TechnicalRating;
 }
@@ -216,6 +218,7 @@ export class TechnicalsService {
         resolution: id,
         barCount: b.length,
         lastTime: tail?.time ?? null,
+        lastCloseTime: tail?.closeTime ?? null,
         lastClose: tail?.close ?? null,
         rating: technicalRating(b),
       };

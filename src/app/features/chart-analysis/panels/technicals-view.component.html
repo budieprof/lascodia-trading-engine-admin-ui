@@ -165,8 +165,12 @@
 
       <p class="tv-foot">
         Rated on {{ f.barCount }} bars ({{ tabLabel() }}) to
-        {{ f.lastTime | date: 'd MMM yyyy, HH:mm' : 'UTC' }} UTC, the forming bar included, from the
-        engine's
+        @if (lastBarDate(); as d) {
+          {{ d }},
+        } @else {
+          {{ f.lastTime | date: 'd MMM yyyy, HH:mm' : 'UTC' }} UTC,
+        }
+        the forming bar included, from the engine's
         @if (sessionGrid()) {
           session bars (days roll at 17:00 New York).
         } @else {

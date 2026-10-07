@@ -26,18 +26,28 @@ import {
   LineSeries,
   LineStyle,
   LineType,
-  createChart,
+  createChartEx,
   createSeriesMarkers,
   type CandlestickData,
+  type ChartOptions,
   type DeepPartial,
   type IChartApi,
   type ISeriesApi,
   type ISeriesMarkersPluginApi,
   type MouseEventParams,
   type SeriesDataItemTypeMap,
+  type TickMarkType,
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts';
+import {
+  TradingDateTimeScale,
+  formatTradingDate,
+  labelsByTradingDate,
+  tradingDateOf,
+  tradingDateTick,
+  tradingDatesByPlottedTime,
+} from './trading-date';
 import { ThemeService } from '@core/theme/theme.service';
 import type { Bar } from '../datafeed/candle-feed.service';
 import { indicatorById, indicatorLabel, type IndicatorDef } from '../indicators/registry';
@@ -184,6 +194,11 @@ export interface ActiveIndicator {
 /** What the legend shows for the bar under the crosshair. */
 export interface LegendSnapshot {
   time: number | null;
+  /**
+   * The bar's trading date as the chart prints it on 1D/1W/1M ("Tue 6 Oct 2026"); null where its
+   * `time` prints as a clock time.
+   */
+  dateLabel?: string | null;
   open: number | null;
   high: number | null;
   low: number | null;
@@ -516,8 +531,8 @@ export class ChartHostComponent implements OnDestroy {
     const pct = change !== null && s.open ? (change / s.open) * 100 : null;
     const up = change === null || change >= 0;
     const tone = up ? '#089981' : '#F23645';
-    const shifted = new Date(s.time + this.timezoneShiftMs(s.time));
-    const date = shifted.toISOString().replace('T', ' ').slice(0, 16);
+    // The snapshot's time is the plotted one, already on the display clock.
+    const date = s.dateLabel ?? new Date(s.time).toISOString().replace('T', ' ').slice(0, 16);
     const rows = [
       { label: 'Open', value: fmt(s.open), color: tone },
       { label: 'High', value: fmt(s.high), color: tone },
@@ -553,6 +568,32 @@ export class ChartHostComponent implements OnDestroy {
 
   /** Bars currently on the chart, for legend lookups by time. */
   private plotted: Bar[] = [];
+  /**
+   * On 1D/1W/1M, each plotted bar's trading date (00:00 UTC ms) by its plotted time in seconds — what
+   * the time axis, the crosshair, the legend and the hold tooltip print for it. Empty otherwise.
+   */
+  private tradingDates = new Map<number, number>();
+  /** The resolution the time axis's tick labels were last formatted for. */
+  private labelsFor: string | null = null;
+  /** Tick labels on 1D/1W/1M: year, month or day of the bar's trading date. Null: the library's own. */
+  private readonly tickMarkFormatter = (time: Time, type: TickMarkType): string | null => {
+    const date = typeof time === 'number' ? this.tradingDateAt(time) : null;
+    return date === null ? null : tradingDateTick(date, type);
+  };
+
+  /**
+   * The trading date of whatever is plotted at `seconds` on 1D/1W/1M — a bar's from the engine's open
+   * and close; anything else plotted there (a script's slot past the last bar, a price-based brick)
+   * by the open it stands for. Null on a resolution labelled by clock time.
+   */
+  private tradingDateAt(seconds: number): number | null {
+    const resolution = this.resolution();
+    if (!labelsByTradingDate(resolution)) return null;
+    const known = this.tradingDates.get(seconds);
+    if (known !== undefined) return known;
+    const plotted = seconds * 1000;
+    return tradingDateOf({ time: plotted - this.timezoneShiftMs(plotted) }, resolution);
+  }
   private readonly countdown = new BarCountdownPrimitive();
   private readonly serverClock = inject(ServerClock);
   private readonly zone = inject(NgZone);
@@ -1117,7 +1158,18 @@ export class ChartHostComponent implements OnDestroy {
     this.indicatorSeries = [];
     const p = this.palette(dark);
 
-    this.chart = createChart(el, {
+    // The library's time scale, but weighing and labelling 1D/1W/1M bars by trading date — the
+    // bars' times stay their opens (see trading-date.ts).
+    const timeScale = new TradingDateTimeScale();
+    timeScale.source = {
+      dateAt: (seconds) => this.tradingDateAt(seconds),
+      resolution: () => this.resolution(),
+    };
+    // This chart's labels are not formatted yet, whatever an earlier chart's were.
+    this.labelsFor = null;
+    const options: DeepPartial<ChartOptions> = {
+      // createChart()'s one default, which createChartEx() leaves to its caller.
+      localization: { dateFormat: "dd MMM 'yy" },
       layout: {
         background: { type: ColorType.Solid, color: p.background },
         textColor: p.text,
@@ -1136,6 +1188,7 @@ export class ChartHostComponent implements OnDestroy {
         // 6px per bar. Scripts drawing into the future widen the margin (syncScriptMargin).
         rightOffset: DEFAULT_RIGHT_OFFSET,
         barSpacing: 6,
+        tickMarkFormatter: this.tickMarkFormatter,
       },
       crosshair: {
         mode: CrosshairMode.Normal,
@@ -1155,7 +1208,13 @@ export class ChartHostComponent implements OnDestroy {
       autoSize: false,
       handleScroll: true,
       handleScale: true,
-    });
+    };
+    // createChart() is createChartEx() with the library's own time scale; the chart is the same.
+    this.chart = createChartEx<Time, TradingDateTimeScale>(
+      el,
+      timeScale,
+      options,
+    ) as unknown as IChartApi;
 
     this.sizeToContainer(el);
     this.resizeObserver?.disconnect();
@@ -1300,6 +1359,16 @@ export class ChartHostComponent implements OnDestroy {
     if (!this.chart) return;
     this.plotted = bars;
     this.computedCache.clear();
+    // Before the series are set: the time scale weighs and labels their times by these.
+    this.tradingDates = tradingDatesByPlottedTime(bars, this.resolution(), (t) =>
+      this.timezoneShiftMs(t),
+    );
+    if (this.labelsFor !== this.resolution()) {
+      this.labelsFor = this.resolution();
+      // The library caches tick labels by time: re-setting the formatter clears them, so a switch
+      // to or from 1D/1W/1M relabels every tick.
+      this.chart.applyOptions({ timeScale: { tickMarkFormatter: this.tickMarkFormatter } });
+    }
 
     const p = this.palette(this.theme.theme() === 'dark');
     const source = this.shiftForTimezone(this.transformed(bars, style), this.timezone());
@@ -2080,8 +2149,10 @@ export class ChartHostComponent implements OnDestroy {
       })
       .filter((v): v is NonNullable<typeof v> => v !== null);
 
+    const tradingDate = this.tradingDateAt(Math.floor(bar.time / 1000));
     this.emitSnapshot({
       time: bar.time,
+      dateLabel: tradingDate === null ? null : formatTradingDate(tradingDate, this.resolution()),
       open: bar.open,
       high: bar.high,
       low: bar.low,

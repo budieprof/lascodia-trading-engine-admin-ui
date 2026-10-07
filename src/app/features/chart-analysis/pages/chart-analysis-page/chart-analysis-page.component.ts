@@ -56,6 +56,7 @@ import {
   mergeSessionTail,
 } from '../../datafeed/session-bars';
 import { ServerClock } from '@core/time/server-clock';
+import { tradingDateLabel } from '../../chart/trading-date';
 import { priceScaleFor } from '../../datafeed/symbol-info';
 import { StrategiesService } from '@core/services/strategies.service';
 import { ChartIconComponent } from '../../icons/chart-icon.component';
@@ -925,8 +926,8 @@ export class ChartAnalysisPageComponent {
       maxLot: pair?.maxLotSize ?? null,
       lotStep: pair?.lotStep ?? null,
       bars: bars.length,
-      from: first ? this.formatTime(first.time) : '—',
-      to: last ? this.formatTime(last.time) : '—',
+      from: first ? this.barTimeLabel(first) : '—',
+      to: last ? this.barTimeLabel(last) : '—',
       last: last?.close ?? null,
       dayOpen,
       dayHigh: today.length ? Math.max(...today.map((b) => b.high)) : null,
@@ -1785,7 +1786,7 @@ export class ChartAnalysisPageComponent {
   /** The time at the replay head, for the toolbar readout. */
   replayTime(): string {
     const bars = this.displayBars();
-    return bars.length ? this.formatTime(bars[bars.length - 1].time) : '';
+    return bars.length ? this.barTimeLabel(bars[bars.length - 1]) : '';
   }
 
   /**
@@ -3331,6 +3332,20 @@ export class ChartAnalysisPageComponent {
     const zone = this.timezone();
     const label = this.timezones.find((t) => t.id === zone)?.label ?? zone;
     return new Date(ms).toISOString().replace('T', ' ').slice(0, 16) + ` ${label}`;
+  }
+
+  /**
+   * How the page prints one of the chart's bars (the Details pane, the replay head): its trading
+   * date on 1D/1W/1M — a calendar date, so no clock time and no time zone — else its open on the
+   * chart's display clock. These bars are the page's own, in UTC: handed to `formatTime` as they
+   * were, their UTC clock was printed under the display zone's name.
+   */
+  barTimeLabel(bar: Bar): string {
+    const date = tradingDateLabel(bar, this.resolution());
+    if (date !== null) return date;
+    const zone = this.timezone();
+    const shift = zone === 'UTC' ? 0 : timezoneOffsetMinutes(zone, bar.time) * 60_000;
+    return this.formatTime(bar.time + shift);
   }
 }
 

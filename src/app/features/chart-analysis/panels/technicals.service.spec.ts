@@ -151,6 +151,9 @@ describe('TechnicalsService — where each tab’s bars come from', () => {
     expect(t.weekly).toEqual(data['1W']);
     expect(t.monthly).toEqual(data['1M']);
     expect(t.frames['1D'].lastTime).toBe(SESSION_OPEN);
+    // Its close too, so the view can name the newest bar by its trading date.
+    expect(t.frames['1D'].lastCloseTime).toBe(SESSION_OPEN + DAY);
+    expect(t.frames['60'].lastCloseTime).toBeNull();
     expect(t.frames['240'].lastTime).toBe(TODAY + 13 * HOUR);
     // Daily pivots for the 15m tab: yesterday's session, the engine's 17:00 New York day.
     const r = pivotInputs(pivotPeriodBars('day', t), t.frames['15'].lastTime!);

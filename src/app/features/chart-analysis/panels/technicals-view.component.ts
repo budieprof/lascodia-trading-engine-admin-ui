@@ -13,6 +13,7 @@ import {
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { isSessionResolution, type TvResolution } from '../datafeed/resolution';
+import { tradingDateLabel } from '../chart/trading-date';
 import { RatingGaugeComponent } from './rating-gauge.component';
 import {
   PIVOT_METHODS,
@@ -131,6 +132,16 @@ export class TechnicalsViewComponent implements OnInit {
 
   /** The tab's bars are the engine's session bars (2 hours and up), not its stored candles. */
   readonly sessionGrid = computed(() => isSessionResolution(this.selected()));
+
+  /** The newest rated bar's trading date on 1D/1W/1M ("Tue 6 Oct 2026"); null where it prints a time. */
+  readonly lastBarDate = computed(() => {
+    const f = this.frame();
+    if (f?.lastTime == null) return null;
+    return tradingDateLabel(
+      { time: f.lastTime, closeTime: f.lastCloseTime ?? undefined },
+      this.selected(),
+    );
+  });
 
   readonly gauges = computed(() => {
     const r = this.frame()?.rating;

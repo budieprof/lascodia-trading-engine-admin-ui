@@ -128,13 +128,15 @@ export function tailCount(resolution: TvResolution, sinceMs: number, nowMs: numb
  * closes at 17:00 New York — 21:00 or 22:00 UTC, the same date — so Tuesday's session, which opens
  * Monday 21:00 UTC, is Tuesday; a month's bar, which closes with its last trading day, is in its own
  * month and year even when it opens on the last evening of the one before (January's opens
- * 31 December). Read off the engine's `closeTime`, not a calendar; a bar without one keeps its open's
- * date.
+ * 31 December). Read off the engine's `closeTime`, not a calendar. A bar without one: the date of its
+ * open + 12 h — the evening open's next day, the session's own.
  */
 export function tradingDayMs(bar: Pick<Bar, 'time' | 'closeTime'>): number {
   const close = bar.closeTime;
   const ref =
-    close !== undefined && Number.isFinite(close) && close > bar.time ? close - 1 : bar.time;
+    close !== undefined && Number.isFinite(close) && close > bar.time
+      ? close - 1
+      : bar.time + DAY / 2;
   return Math.floor(ref / DAY) * DAY;
 }
 

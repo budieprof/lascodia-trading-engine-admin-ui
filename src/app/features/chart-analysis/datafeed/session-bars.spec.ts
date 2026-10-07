@@ -265,8 +265,9 @@ describe('tradingDayMs', () => {
     expect(new Date(tradingDayMs(jan)).getUTCFullYear()).toBe(2026);
   });
 
-  it("keeps the open's date for a bar without a close", () => {
-    expect(tradingDayMs({ time: at('2026-10-05T21:00:00Z') })).toBe(at('2026-10-05T00:00:00Z'));
+  it('without a close, takes the date of its open + 12 h — the evening open’s next day', () => {
+    expect(tradingDayMs({ time: at('2026-10-05T21:00:00Z') })).toBe(at('2026-10-06T00:00:00Z'));
+    expect(tradingDayMs({ time: at('2026-12-01T22:00:00Z') })).toBe(at('2026-12-02T00:00:00Z'));
   });
 });
 

@@ -1,4 +1,4 @@
-import { tradeDetail, type TradeDetail } from './trade-detail';
+import { tradeDetail, tradeTimeLabel, type TradeDetail } from './trade-detail';
 import { ChartIconComponent } from '../icons/chart-icon.component';
 import {
   ChangeDetectionStrategy,
@@ -14,7 +14,6 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { DatePipe } from '@angular/common';
 import {
   AreaSeries,
   ColorType,
@@ -59,7 +58,7 @@ interface SummaryRow {
   selector: 'app-strategy-tester-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ChartIconComponent, DatePipe],
+  imports: [ChartIconComponent],
   template: `
     <section class="tester" aria-label="Strategy tester">
       <header class="tester__bar">
@@ -192,15 +191,9 @@ interface SummaryRow {
                       {{ t.side === 'long' ? 'Long' : 'Short' }}{{ t.isOpen ? ' (open)' : '' }}
                     </td>
                     <td>{{ t.entrySignal }}{{ t.exitSignal ? ' → ' + t.exitSignal : '' }}</td>
-                    <td>{{ t.entryTime * 1000 | date: 'yyyy-MM-dd HH:mm' : 'UTC' }}</td>
+                    <td>{{ tradeTime(t.entryTime) }}</td>
                     <td>{{ t.entryPrice }}</td>
-                    <td>
-                      {{
-                        t.exitTime !== null
-                          ? (t.exitTime * 1000 | date: 'yyyy-MM-dd HH:mm' : 'UTC')
-                          : '—'
-                      }}
-                    </td>
+                    <td>{{ tradeTime(t.exitTime) }}</td>
                     <td>{{ t.exitPrice ?? '—' }}</td>
                     <td>{{ num(t.qty, 0) }}</td>
                     <td [class]="tone(t.profit)">
@@ -552,6 +545,8 @@ export class StrategyTesterPanelComponent implements OnDestroy {
   /** Override values the current result was run with. */
   readonly values = input<ScriptInputValues>({});
   readonly running = input(false);
+  /** The resolution the run is on: on 1D/1W/1M a trade's bar is named by its trading date. */
+  readonly resolution = input<string>('');
 
   /** Re-run with these input overrides. */
   readonly rerun = output<ScriptInputValues>();
@@ -599,7 +594,12 @@ export class StrategyTesterPanelComponent implements OnDestroy {
     if (!r) return;
     this.selected.set(t.number);
     this.detailTrade.set(t);
-    this.detail.set(tradeDetail(r, t, this.values()));
+    this.detail.set(tradeDetail(r, t, this.values(), undefined, this.resolution()));
+  }
+
+  /** A trade's entry or exit time (Lightweight Charts seconds) as the list prints it. */
+  protected tradeTime(sec: number | null): string {
+    return tradeTimeLabel(sec, this.resolution());
   }
 
   protected readonly tabs: { id: TesterTab; label: string }[] = [
