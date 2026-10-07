@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import type { ChartScriptItem, SavedChartScript } from '../scripts/chart-script.service';
 import {
+  dockStateOf,
   isWorkspaceState,
+  restoredDock,
   restoredScriptItem,
   workspaceScriptOf,
   type ChartWorkspaceState,
+  type DockView,
 } from './workspace-state';
 
 const V2: ChartScriptItem = {
@@ -124,5 +127,48 @@ describe('workspace persistence of script settings', () => {
       ['mine:20', COLOUR_OFF],
       ['mine:5', { '🎨 Candle Coloring::Colour Candles': false }],
     ]);
+  });
+});
+
+describe('workspace persistence of the dock', () => {
+  const dock = (over: Partial<DockView> = {}): DockView => ({
+    editorOpen: false,
+    testerOpen: true,
+    preference: 'tester',
+    editorKey: null,
+    editorText: null,
+    editorCleared: false,
+    ...over,
+  });
+
+  it('an editor cleared by removing its script stays cleared through a reload', () => {
+    const saved = throughTheEngine({ v: 1, dock: dockStateOf(dock({ editorCleared: true })) });
+    expect(saved.dock?.editorCleared).toBe(true);
+    expect(restoredDock(saved.dock)).toEqual(dock({ editorCleared: true }));
+  });
+
+  it('is written only while set, so a layout that never cleared it reads as before', () => {
+    const state = dockStateOf(dock({ editorOpen: true, editorKey: 'mine:20', editorText: 'x' }));
+    expect(state).not.toHaveProperty('editorCleared');
+    expect(state).toEqual({
+      editorOpen: true,
+      testerOpen: true,
+      preference: 'tester',
+      editorKey: 'mine:20',
+      editorText: 'x',
+    });
+  });
+
+  it('an older layout without the field — or without a dock — opens it as before: not cleared', () => {
+    const old = {
+      editorOpen: true,
+      testerOpen: false,
+      preference: 'editor' as const,
+      editorKey: 'mine:5',
+    };
+    expect(restoredDock(old)).toEqual(
+      dock({ editorOpen: true, testerOpen: false, preference: 'editor', editorKey: 'mine:5' }),
+    );
+    expect(restoredDock(undefined)).toEqual(dock());
   });
 });

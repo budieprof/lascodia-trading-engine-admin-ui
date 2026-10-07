@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { TradingCalendar } from '../datafeed/session-calendar';
 import * as M5 from './math';
 import {
   adx,
@@ -1171,5 +1172,107 @@ describe('fifth wave', () => {
     const r = M5.spreadRatio([4, 6], [2, null], 1);
     expect(r.spread).toEqual([2, null]);
     expect(r.ratio).toEqual([2, null]);
+  });
+});
+
+// ── Trading days: the studies that reset by day, week or month on the symbol's session ─────────────
+//
+// FX trades `1700-1700:23456` in America/New_York: a trading day runs from 17:00 New York on the
+// evening before to 17:00 New York — 21:00 UTC on EDT, 22:00 UTC on EST — as TradingView counts it.
+// The chart hands the studies that calendar's `dayOf`; without it they count UTC days.
+describe('day-based studies on FX trading days', () => {
+  const FX = new TradingCalendar({ session: '1700-1700:23456', timeZone: 'America/New_York' });
+  const HOUR = 3_600_000;
+  /** Hourly bars from `startIso`, each at a flat price. */
+  const hourly = (startIso: string, prices: number[]): Ohlc[] =>
+    prices.map((p, i) => ({
+      time: Date.parse(startIso) + i * HOUR,
+      open: p,
+      high: p,
+      low: p,
+      close: p,
+      volume: 100,
+    }));
+
+  it('session VWAP resets at 17:00 New York — 21:00 UTC in summer — not at midnight UTC', () => {
+    // 19:00 … 01:00 UTC on 6–7 Oct 2026 (EDT): the session that opens at 21:00 trades at 20.
+    const b = hourly('2026-10-06T19:00:00Z', [10, 10, 20, 20, 20, 20, 20]);
+    const out = vwap(b, FX.dayOf);
+    expect(out[1]).toBe(10); // 20:00, Tuesday's session
+    expect(out[2]).toBe(20); // 21:00, Wednesday's opens
+    expect(out[5]).toBe(20); // 00:00 UTC — the same session, no reset
+    // On UTC days the 21:00 bar would have averaged in Tuesday's, and midnight reset it.
+    expect(vwap(b)[2]).toBeCloseTo((10 + 10 + 20) / 3, 10);
+  });
+
+  it('…and at 22:00 UTC in winter (EST)', () => {
+    const b = hourly('2026-12-01T20:00:00Z', [10, 10, 20, 20]);
+    const out = vwap(b, FX.dayOf);
+    expect(out[1]).toBe(10); // 21:00 UTC is still Tuesday's session in winter
+    expect(out[2]).toBe(20); // 22:00 opens Wednesday's
+  });
+
+  it('daily pivots come from the previous TRADING day, 21:00 to 21:00 UTC', () => {
+    // Tuesday's session (Mon 21:00 → Tue 21:00 UTC): high 12, low 8, close 11. Its first hour sits
+    // before midnight UTC, on Monday's date, so a UTC day would split it off.
+    const b: Ohlc[] = [
+      {
+        time: Date.parse('2026-10-05T21:00:00Z'),
+        open: 10,
+        high: 12,
+        low: 9,
+        close: 10,
+        volume: 1,
+      },
+      {
+        time: Date.parse('2026-10-06T20:00:00Z'),
+        open: 10,
+        high: 11,
+        low: 8,
+        close: 11,
+        volume: 1,
+      },
+      {
+        time: Date.parse('2026-10-06T21:00:00Z'),
+        open: 11,
+        high: 11,
+        low: 11,
+        close: 11,
+        volume: 1,
+      },
+    ];
+    const r = pivotPoints(b, FX.dayOf);
+    expect(r.pivot[1]).toBeNull(); // still Tuesday: no completed day before it
+    expect(r.pivot[2]).toBeCloseTo((12 + 8 + 11) / 3, 10); // Wednesday's, from Tuesday's
+  });
+
+  it('a Sunday-open week: Sunday evening’s bars open Monday’s week', () => {
+    const friday = Date.parse('2026-10-09T20:00:00Z');
+    const sundayOpen = Date.parse('2026-10-11T21:00:00Z');
+    const monday = Date.parse('2026-10-12T10:00:00Z');
+    expect(M5.periodKey(sundayOpen, 'Week', FX.dayOf)).toBe(M5.periodKey(monday, 'Week', FX.dayOf));
+    expect(M5.periodKey(sundayOpen, 'Week', FX.dayOf)).toBe(
+      M5.periodKey(friday, 'Week', FX.dayOf) + 1,
+    );
+    // On UTC days Sunday evening was the old week's tail.
+    expect(M5.periodKey(sundayOpen, 'Week')).toBe(M5.periodKey(friday, 'Week'));
+    // So a week-anchored VWAP starts the week with Sunday's first bar.
+    const b = hourly('2026-10-11T20:00:00Z', [10, 20, 20]); // a stray 16:00 New York print, then the open
+    b.unshift({ ...b[0], time: friday, open: 5, high: 5, low: 5, close: 5 });
+    expect(M5.vwapBands(b, 1, 2, 'Week', FX.dayOf).vwap[2]).toBe(20);
+  });
+
+  it('a month boundary: the session opening 30 September at 17:00 New York is October’s', () => {
+    const b = hourly('2026-09-30T19:00:00Z', [10, 10, 20, 20]);
+    expect(M5.periodKey(b[1].time, 'Month', FX.dayOf)).toBe(2026 * 12 + 8); // September
+    expect(M5.periodKey(b[2].time, 'Month', FX.dayOf)).toBe(2026 * 12 + 9); // October
+    expect(M5.vwapBands(b, 1, 2, 'Month', FX.dayOf).vwap[2]).toBe(20);
+    expect(M5.pivotPointsStandard(b, 'Traditional', 'Month', FX.dayOf).p[3]).toBe(10);
+  });
+
+  it('cumulative delta resets with the trading day', () => {
+    // Every bar closes at its high: delta = +volume.
+    const b = hourly('2026-10-06T20:00:00Z', [1, 1, 1]).map((x) => ({ ...x, high: 2, close: 2 }));
+    expect(M5.cumulativeDeltaByPeriod(b, 'Day', FX.dayOf)).toEqual([100, 100, 200]);
   });
 });

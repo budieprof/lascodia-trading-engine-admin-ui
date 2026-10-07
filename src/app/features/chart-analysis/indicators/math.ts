@@ -24,6 +24,19 @@ export interface Ohlc {
   volume: number;
 }
 
+const DAY_MS = 86_400_000;
+
+/**
+ * A bar's time → its trading day, as 00:00 UTC ms of the date. What every day-based study (session
+ * VWAP, daily pivots, the Day / Week / Month anchors) counts in: the chart passes the symbol's own
+ * trading days (`TradingCalendar.dayOf` — for FX, days that roll at 17:00 New York), and without one
+ * a day is the UTC day ({@link utcDay}).
+ */
+export type DayOf = (time: number) => number;
+
+/** The UTC day of `time`: the trading day of a symbol with no session of its own. */
+export const utcDay: DayOf = (time) => Math.floor(time / DAY_MS) * DAY_MS;
+
 const nulls = (n: number): Maybe[] => new Array<Maybe>(Math.max(0, n)).fill(null);
 
 /** Simple moving average. */
@@ -232,18 +245,20 @@ function smoothDense(series: Maybe[], period: number): Maybe[] {
 
 /**
  * Session VWAP — cumulative typical-price × volume over volume, reset at each
- * new UTC day.
+ * session's open: the first bar of each trading day (`dayOf`; the UTC day when
+ * the symbol has no session of its own). For FX that is 17:00 New York, where
+ * TradingView resets it — 21:00 or 22:00 UTC, not midnight.
  *
  * VWAP without a session reset is a different (and far less useful) indicator:
  * it drifts toward the all-time mean and stops tracking the day's value area.
  */
-export function vwap(bars: Ohlc[]): Maybe[] {
+export function vwap(bars: Ohlc[], dayOf: DayOf = utcDay): Maybe[] {
   const out: Maybe[] = nulls(bars.length);
   let day = -1;
   let pv = 0;
   let vol = 0;
   for (let i = 0; i < bars.length; i++) {
-    const d = Math.floor(bars[i].time / 86_400_000);
+    const d = dayOf(bars[i].time);
     if (d !== day) {
       day = d;
       pv = 0;
@@ -599,10 +614,12 @@ export interface PivotResult {
 /**
  * Classic daily pivot points, carried across each session.
  *
- * Computed from the PREVIOUS day's high/low/close and held flat through the
- * current day — a pivot that recomputed intrabar would not be a pivot.
+ * Computed from the PREVIOUS trading day's high/low/close (`dayOf`: the FX day
+ * that rolls at 17:00 New York; the UTC day without a session) and held flat
+ * through the current day — a pivot that recomputed intrabar would not be a
+ * pivot.
  */
-export function pivotPoints(bars: Ohlc[]): PivotResult {
+export function pivotPoints(bars: Ohlc[], dayOf: DayOf = utcDay): PivotResult {
   const n = bars.length;
   const result: PivotResult = {
     pivot: nulls(n),
@@ -616,7 +633,7 @@ export function pivotPoints(bars: Ohlc[]): PivotResult {
   let current: { high: number; low: number; close: number } | null = null;
 
   for (let i = 0; i < n; i++) {
-    const d = Math.floor(bars[i].time / 86_400_000);
+    const d = dayOf(bars[i].time);
     if (d !== day) {
       prev = current;
       current = { high: bars[i].high, low: bars[i].low, close: bars[i].close };
@@ -2114,25 +2131,31 @@ function vwapCore(
 
 export type AnchorPeriod = 'Day' | 'Week' | 'Month';
 
-/** Calendar period key for a UTC ms timestamp. Weeks start Monday. */
-export function periodKey(time: number, period: AnchorPeriod): number {
-  const day = Math.floor(time / 86_400_000);
+/**
+ * Key of the trading day, week (Monday–Sunday) or month `time` falls in — the period of its trading
+ * DATE (`dayOf`), as TradingView anchors them: an FX bar from Sunday 17:00 New York trades Monday, so
+ * it opens Monday's week, and the session opening on 30 September at 17:00 New York is 1 October's,
+ * so it opens October. With the default {@link utcDay}, calendar periods of the UTC day.
+ */
+export function periodKey(time: number, period: AnchorPeriod, dayOf: DayOf = utcDay): number {
+  const day = Math.floor(dayOf(time) / DAY_MS);
   if (period === 'Week') return Math.floor((day + 3) / 7); // 1970-01-01 was a Thursday
   if (period === 'Month') {
-    const d = new Date(time);
+    const d = new Date(day * DAY_MS);
     return d.getUTCFullYear() * 12 + d.getUTCMonth();
   }
   return day;
 }
 
-/** Session VWAP with ±mult1/±mult2 standard-deviation bands. */
+/** Session VWAP with ±mult1/±mult2 standard-deviation bands, reset with each `anchor` period. */
 export function vwapBands(
   bars: Ohlc[],
   mult1 = 1,
   mult2 = 2,
   anchor: AnchorPeriod = 'Day',
+  dayOf: DayOf = utcDay,
 ): VwapBands {
-  return vwapCore(bars, mult1, mult2, 0, (t) => periodKey(t, anchor));
+  return vwapCore(bars, mult1, mult2, 0, (t) => periodKey(t, anchor, dayOf));
 }
 
 /**
@@ -2173,13 +2196,17 @@ export function upDownVolume(bars: Ohlc[]): { up: Maybe[]; down: Maybe[]; delta:
   return { up, down, delta: up.map((u, i) => u + down[i]) };
 }
 
-/** Cumulative ESTIMATED delta that resets each period (see `estimatedDelta`). */
-export function cumulativeDeltaByPeriod(bars: Ohlc[], period: AnchorPeriod | 'None'): Maybe[] {
+/** Cumulative ESTIMATED delta that resets each period (see `estimatedDelta`) of trading days. */
+export function cumulativeDeltaByPeriod(
+  bars: Ohlc[],
+  period: AnchorPeriod | 'None',
+  dayOf: DayOf = utcDay,
+): Maybe[] {
   const d = estimatedDelta(bars);
   let key = NaN;
   let cum = 0;
   return bars.map((b, i) => {
-    const k = period === 'None' ? 0 : periodKey(b.time, period);
+    const k = period === 'None' ? 0 : periodKey(b.time, period, dayOf);
     if (k !== key) {
       key = k;
       cum = 0;
@@ -2446,13 +2473,14 @@ export function pivotLevels(
 
 /**
  * Pivot Points Standard: each period's levels come from the PREVIOUS period's
- * OHLC. A null on the first bar of each period breaks the step so periods are
- * not joined by a diagonal.
+ * OHLC — periods of trading days (`dayOf`). A null on the first bar of each
+ * period breaks the step so periods are not joined by a diagonal.
  */
 export function pivotPointsStandard(
   bars: Ohlc[],
   type: PivotType = 'Traditional',
   period: AnchorPeriod = 'Day',
+  dayOf: DayOf = utcDay,
 ): Record<'p' | 'r1' | 's1' | 'r2' | 's2' | 'r3' | 's3', Maybe[]> {
   const n = bars.length;
   const keys = ['p', 'r1', 's1', 'r2', 's2', 'r3', 's3'] as const;
@@ -2465,7 +2493,7 @@ export function pivotPointsStandard(
   let lv: PivotLevels | null = null;
   for (let i = 0; i < n; i++) {
     const b = bars[i];
-    const k = periodKey(b.time, period);
+    const k = periodKey(b.time, period, dayOf);
     if (k !== key) {
       if (cur) lv = pivotLevels(type, cur.o, cur.h, cur.l, cur.c);
       cur = { o: b.open, h: b.high, l: b.low, c: b.close };

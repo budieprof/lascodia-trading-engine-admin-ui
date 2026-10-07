@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { foldBars, lastCompleteBarTime, mergeForming, type FoldBar } from './aggregate';
+import {
+  applyStoredTick,
+  foldBars,
+  lastCompleteBarTime,
+  mergeForming,
+  type FoldBar,
+} from './aggregate';
 
 /**
  * The bar that is still forming.
@@ -134,5 +140,62 @@ describe('lastCompleteBarTime', () => {
   it('is null on the session grid, whose forming bar the engine builds (nothing is folded from M1)', () => {
     expect(lastCompleteBarTime([{ time: T0 } as FoldBar], '240')).toBeNull();
     expect(lastCompleteBarTime([{ time: T0 } as FoldBar], '1D')).toBeNull();
+  });
+});
+
+describe('applyStoredTick — a live price on 1m … 1h', () => {
+  // History ends with the 12:00 H1 bar; prices arrive on the engine's clock.
+  const held: FoldBar[] = [
+    { time: T0 - H, open: 1.151, high: 1.153, low: 1.15, close: 1.152, volume: 500 },
+    { time: T0, open: 1.152, high: 1.156, low: 1.1515, close: 1.154, volume: 600 },
+  ];
+
+  it('before the close it moves the forming bar', () => {
+    const out = applyStoredTick(held, 1.1571, T0 + 59 * MIN, '60')!;
+    expect(out).toHaveLength(2);
+    expect(out[1]).toEqual({ ...held[1], high: 1.1571, close: 1.1571 });
+  });
+
+  it('at the close it opens the next bar from the price, as TradingView does', () => {
+    const out = applyStoredTick(held, 1.1548, T0 + H, '60')!;
+    expect(out[2]).toEqual({
+      time: T0 + H,
+      open: 1.1548,
+      high: 1.1548,
+      low: 1.1548,
+      close: 1.1548,
+      volume: 0,
+    });
+  });
+
+  it('after a gap it opens the bar of the bucket the price is in, not the one after the old bar', () => {
+    // Nothing for three hours (a quiet feed); the price at 15:20 belongs to the 15:00 bar.
+    const out = applyStoredTick(held, 1.153, T0 + 3 * H + 20 * MIN, '60')!;
+    expect(out.map((b) => b.time)).toEqual([T0 - H, T0, T0 + 3 * H]);
+    // On 30m — built from M15 — the bucket is the half hour.
+    const m30 = applyStoredTick(held, 1.153, T0 + 3 * H + 40 * MIN, '30')!;
+    expect(m30[2].time).toBe(T0 + 3 * H + 30 * MIN);
+  });
+
+  it('a clock behind the newest bar, or a session-grid resolution, changes nothing', () => {
+    expect(applyStoredTick(held, 1.15, T0 - 1, '60')).toBeNull();
+    expect(applyStoredTick(held, 1.15, T0 + H, '240')).toBeNull();
+    expect(applyStoredTick([], 1.15, T0, '60')).toBeNull();
+  });
+
+  it('the minute resync folds the real open, high and low under the opened bar, keeping its close', () => {
+    const opened = applyStoredTick(held, 1.1548, T0 + H + 5_000, '60')!;
+    const ticked = applyStoredTick(opened, 1.1541, T0 + H + 40_000, '60')!;
+    // M1 has the 13:00 minute by now: it opened at 1.1540 and traded 1.1536 – 1.1549.
+    const folded = foldBars([m1(60, 1.154, 1.1549, 1.1536, 1.1544)], '60');
+    const merged = mergeForming(ticked, folded, T0);
+    expect(merged[2]).toEqual({
+      time: T0 + H,
+      open: 1.154,
+      high: 1.1549,
+      low: 1.1536,
+      close: 1.1541,
+      volume: 10,
+    });
   });
 });

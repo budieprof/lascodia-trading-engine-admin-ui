@@ -48,6 +48,7 @@ describe('volumeProfileSpan', () => {
 
 import { volumeProfile } from '../indicators/math';
 import { periodProfiles, periodStart } from '../overlays/analysis-overlays';
+import { TradingCalendar } from '../datafeed/session-calendar';
 
 describe('volume profile up/down split', () => {
   it('attributes each bar to up or down by its own direction, and they sum to volume', () => {
@@ -95,5 +96,46 @@ describe('periodProfiles', () => {
     const sunday = Date.UTC(2026, 8, 27, 22);
     expect(periodStart(sunday, 'week')).toBe(t0);
     expect(periodStart(t0 + 5 * 24 * H, 'week')).toBe(t0);
+  });
+});
+
+describe('periodProfiles on the symbol’s trading sessions', () => {
+  const H = 3_600_000;
+  const FX = new TradingCalendar({ session: '1700-1700:23456', timeZone: 'America/New_York' });
+  const hourly = (startMs: number, n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      time: startMs + i * H,
+      open: 1,
+      high: 1.002,
+      low: 0.999,
+      close: 1.001,
+      volume: 10,
+    }));
+
+  it('session: one profile per 17:00-New-York session — 21:00 UTC in summer, 22:00 in winter', () => {
+    const summer = periodProfiles(hourly(Date.UTC(2026, 9, 6, 15), 12), 'session', {
+      dayOf: FX.dayOf,
+    });
+    expect(summer.map((p) => p.t0)).toEqual([Date.UTC(2026, 9, 6, 15), Date.UTC(2026, 9, 6, 21)]);
+    const winter = periodProfiles(hourly(Date.UTC(2026, 11, 1, 16), 12), 'session', {
+      dayOf: FX.dayOf,
+    });
+    expect(winter.map((p) => p.t0)).toEqual([Date.UTC(2026, 11, 1, 16), Date.UTC(2026, 11, 1, 22)]);
+  });
+
+  it('week: Sunday evening’s session opens Monday’s week; month: 30 September’s opens October', () => {
+    const sunday = hourly(Date.UTC(2026, 9, 11, 17), 8); // 17:00 … 00:00 UTC
+    expect(periodProfiles(sunday, 'week', { dayOf: FX.dayOf }).map((p) => p.t0)).toEqual([
+      Date.UTC(2026, 9, 11, 17),
+      Date.UTC(2026, 9, 11, 21),
+    ]);
+    expect(periodStart(Date.UTC(2026, 8, 30, 21), 'month', FX.dayOf)).not.toBe(
+      periodStart(Date.UTC(2026, 8, 30, 20), 'month', FX.dayOf),
+    );
+  });
+
+  it('without a session, UTC days as before', () => {
+    const ps = periodProfiles(hourly(Date.UTC(2026, 9, 6, 15), 12), 'session');
+    expect(ps.map((p) => p.t0)).toEqual([Date.UTC(2026, 9, 6, 15), Date.UTC(2026, 9, 7, 0)]);
   });
 });

@@ -273,6 +273,62 @@ describe('CandleFeedService — session-grid paging and cache', () => {
   });
 });
 
+describe('CandleFeedService — the symbol’s session', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const FX = { session: '1700-1700:23456', timeZone: 'America/New_York' };
+
+  it('keeps the session every session-grid load reports, per symbol', async () => {
+    const { feed } = makeFeed(() => sessions(3));
+    expect(feed.sessionOf('EURUSD')).toBeNull();
+    await feed.getBars('EURUSD', '240', 0, Date.now(), 1500);
+    expect(feed.sessionOf('EURUSD')).toEqual(FX);
+    expect(feed.sessionOf('eurusd')).toEqual(FX);
+    expect(feed.sessionOf('GBPUSD')).toBeNull();
+  });
+
+  it('a stored-grid chart learns it with one small request, once per symbol', async () => {
+    const { feed, chartBars } = makeFeed(() => sessions(0, false));
+    const [a, b] = await Promise.all([feed.learnSession('EURUSD'), feed.learnSession('EURUSD')]);
+    expect(a).toEqual(FX);
+    expect(b).toEqual(FX);
+    expect(chartBars).toHaveBeenCalledTimes(1);
+    expect(chartBars.mock.calls[0][0]).toEqual({
+      symbol: 'EURUSD',
+      timeframe: '1D',
+      count: 1,
+      includeForming: false,
+    });
+    await feed.learnSession('EURUSD');
+    expect(chartBars).toHaveBeenCalledTimes(1);
+    // Nothing of it went into the bar cache: the chart's own daily load still asks.
+    await feed.getBars('EURUSD', '1D', WED - 2 * DAY, WED - DAY, 1);
+    expect(chartBars).toHaveBeenCalledTimes(2);
+  });
+
+  it('a failure is not remembered: the next ask tries again', async () => {
+    let down = true;
+    const { feed, chartBars } = makeFeed(() => (down ? new Error('down') : sessions(0, false)));
+    expect(await feed.learnSession('EURUSD')).toBeNull();
+    down = false;
+    expect(await feed.learnSession('EURUSD')).toEqual(FX);
+    expect(chartBars).toHaveBeenCalledTimes(2);
+  });
+
+  it('an answer without a session leaves the symbol on UTC days', async () => {
+    const { feed, chartBars } = makeFeed(() => sessions(0, false));
+    chartBars.mockImplementation((req: ChartBarsRequest) =>
+      of({ symbol: req.symbol, timeframe: req.timeframe, session: '', timeZone: '', bars: [] }),
+    );
+    expect(await feed.learnSession('BTCUSD')).toBeNull();
+    expect(feed.sessionOf('BTCUSD')).toBeNull();
+  });
+});
+
 describe('toSessionBar', () => {
   it('keeps the engine’s close, and invents none when it sent none', () => {
     const dto: ChartBarDto = {

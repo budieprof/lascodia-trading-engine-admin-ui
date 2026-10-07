@@ -43,7 +43,7 @@ import {
   type TvResolution,
 } from '../../datafeed/resolution';
 import {
-  bucketStartFor,
+  applyStoredTick,
   foldBars,
   lastCompleteBarTime,
   mergeForming,
@@ -55,6 +55,7 @@ import {
   isCurrentPeriod,
   mergeSessionTail,
 } from '../../datafeed/session-bars';
+import { TradingCalendar, nextSessionPeriod } from '../../datafeed/session-calendar';
 import { ServerClock } from '@core/time/server-clock';
 import { tradingDateLabel } from '../../chart/trading-date';
 import { priceScaleFor } from '../../datafeed/symbol-info';
@@ -123,6 +124,8 @@ import type { ScriptInputValues } from '@core/api/scripting.types';
 import { parseSavedInputs, pruneInputValues } from '@features/scripting/pine/pine-inputs';
 import { ScriptSettings } from '../../scripts/script-settings';
 import { StrategyTesterPanelComponent } from '../../scripts/strategy-tester-panel.component';
+import { UndoNoticeComponent } from '../../scripts/undo-notice.component';
+import { placeRun } from '../../scripts/run-on-host';
 import {
   ScriptEditorPanelComponent,
   type ScriptEditorSubmit,
@@ -181,9 +184,12 @@ import type {
 } from '@core/services/economic-calendar.service';
 import { ChartPrefsService } from '../../workspace/chart-prefs.service';
 import {
+  dockStateOf,
+  restoredDock,
   restoredScriptItem,
   workspaceScriptOf,
   type ChartWorkspaceState,
+  type DockView,
   type WorkspaceScript,
 } from '../../workspace/workspace-state';
 import { drawingTemplates } from '../../drawings/drawing-templates';
@@ -413,6 +419,7 @@ function loadWatchlistOpen(): boolean {
     EconomicCalendarPaneComponent,
     EconomicEventModalComponent,
     LongPressDirective,
+    UndoNoticeComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -607,6 +614,16 @@ export class ChartAnalysisPageComponent {
   private readonly barsFor = signal<SeriesId | null>(null, {
     equal: (a, b) => a === b || sameSeries(a, b),
   });
+  /**
+   * The symbol's session as the engine reports it with its chart bars: the trading days the chart's
+   * day-based studies and the Details pane count in, and the calendar a live price opens the next
+   * session-grid period by. Null until it is known — and for a symbol without one: UTC days.
+   */
+  readonly sessionSpec = computed(() => this.feed.sessionOf(this.symbol()));
+  private readonly tradingCalendar = computed(() => {
+    const spec = this.sessionSpec();
+    return spec ? new TradingCalendar(spec) : null;
+  });
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
   readonly active = signal<ActiveIndicator[]>([]);
@@ -712,21 +729,22 @@ export class ChartAnalysisPageComponent {
 
   /**
    * The operator removed the script the editor showed ({@link removeScriptFromChart}): until it
-   * is pointed at a script again, the editor opens on the starter template.
+   * is pointed at a script again, the editor opens on the starter template. Saved with the layout's
+   * dock, so a reload does not bring a chart script back into it.
    */
-  private editorCleared = false;
+  private readonly editorCleared = signal(false);
 
   /** Point the editor at a chart script, loading an engine strategy's source when needed. */
   openScriptSource(key: string | null): void {
     if (key !== this.editorKey()) this.assistSource.set(null);
     const runs = this.scriptRuns();
-    // Unlinked, it shows the chart's strategy or newest script — unless a removal just cleared it.
-    const fallback = this.editorCleared
+    // Unlinked, it shows the chart's strategy or newest script — unless a removal cleared it.
+    const fallback = this.editorCleared()
       ? null
       : ((runs.find((r) => r.result.kind === 'strategy') ?? runs[runs.length - 1])?.item.key ??
         null);
     const target = key ?? fallback;
-    if (target !== null) this.editorCleared = false;
+    if (target !== null) this.editorCleared.set(false);
     this.editorKey.set(target);
     const item = runs.find((r) => r.item.key === target)?.item;
     const id = item?.strategyId;
@@ -943,8 +961,9 @@ export class ChartAnalysisPageComponent {
   /**
    * Symbol facts for the Details pane, assembled from what the console already
    * knows rather than a new endpoint: the pair's own metadata, the loaded bar
-   * range, and the session's move — the 17:00 New York session on 2h … 1D, the
-   * UTC day on 1m … 1h (`currentDayBars`).
+   * range, and the session's move — the 17:00 New York session on every
+   * timeframe once the symbol's session is known, the UTC day on 1m … 1h
+   * before then (`currentDayBars`).
    */
   readonly details = computed(() => {
     const symbol = this.symbol();
@@ -952,7 +971,7 @@ export class ChartAnalysisPageComponent {
     const bars = this.bars();
     const first = bars[0];
     const last = bars[bars.length - 1];
-    const today = currentDayBars(bars);
+    const today = currentDayBars(bars, this.tradingCalendar()?.dayOf);
     const dayOpen = today[0]?.open ?? null;
     return {
       symbol,
@@ -2053,6 +2072,9 @@ export class ChartAnalysisPageComponent {
     this.loadTradingOverlays();
     this.feed.invalidate(symbol, resolution);
     this.rollover.reset();
+    // The symbol's session, which the day-based studies count trading days by, comes with every
+    // session-grid load; the stored grid's candles carry none, so it is asked for once beside them.
+    if (!isSessionResolution(resolution)) void this.feed.learnSession(symbol);
     const now = Date.now();
     try {
       const { bars } = await this.feed.getBars(symbol, resolution, 0, now, PAGE_BARS);
@@ -2238,43 +2260,33 @@ export class ChartAnalysisPageComponent {
       return;
     }
 
-    const last = current[current.length - 1];
-    // The same bucketing the stored history uses — the UTC epoch grid, exact for 1m … 1h. (The
-    // session grid's periods are not fixed widths, which is why it never comes here.)
-    const bucket = bucketStartFor(this.resolution(), Date.now());
-    if (bucket === null) return;
-
-    if (bucket > last.time) {
-      // A new bar opened. Seed it from the tick rather than waiting for the
-      // next history fetch, so the chart does not stall a whole timeframe
-      // behind the market.
-      this.bars.set([
-        ...current,
-        { time: bucket, open: price, high: price, low: price, close: price, volume: 0 },
-      ]);
-      return;
-    }
-    if (bucket < last.time) return;
-
-    const updated: Bar = {
-      ...last,
-      high: Math.max(last.high, price),
-      low: Math.min(last.low, price),
-      close: price,
-    };
-    this.bars.set([...current.slice(0, -1), updated]);
+    // The same bucketing the stored history uses — the UTC epoch grid, exact for 1m … 1h — on the
+    // engine's clock, as the countdown and a run's live bar read it. A price past the newest bar's
+    // bucket opens its own bucket's bar, so the chart never stalls a timeframe behind the market.
+    const next = applyStoredTick(current, price, this.serverClock.now(), this.resolution());
+    if (next) this.bars.set(next);
   }
 
   /**
    * A live price on the session grid (2h … 1M), on the engine's clock: it moves the newest bar while
-   * that bar's period lasts. From the bar's close on, the next period is the engine's to open — the
-   * next 4h block, or Monday's session after the weekend gap — so instead of seeding a bar the chart
-   * asks for the newest bars, once per bar ({@link SessionRollover}); ticks are not drawn until the
-   * new period arrives.
+   * that bar's period lasts. From the bar's close on, it opens the next period's bar itself — at the
+   * old bar's close, or with the session it is in after the weekend, laid out by the symbol's session
+   * (`nextSessionPeriod`) — as TradingView does on a period's first tick: the engine's forming bar is
+   * folded from closed M1, so for a period's first minute there is none to ask for. The minute
+   * resync then lays the engine's own bar over it. Where the chart cannot tell the period (a gap of
+   * a whole period, no session known), it asks for the newest bars instead, once per bar
+   * ({@link SessionRollover}).
    */
   private applyTickOnSessionGrid(current: Bar[], price: number): void {
-    const outcome = applySessionTick(current, price, this.serverClock.now());
-    if (outcome.kind === 'update') {
+    const calendar = this.tradingCalendar();
+    const resolution = this.resolution();
+    const outcome = applySessionTick(
+      current,
+      price,
+      this.serverClock.now(),
+      calendar ? (last, now) => nextSessionPeriod(calendar, resolution, last, now) : undefined,
+    );
+    if (outcome.kind === 'update' || outcome.kind === 'open') {
       this.ticksApplied++;
       this.bars.set(outcome.bars);
       return;
@@ -2595,24 +2607,27 @@ export class ChartAnalysisPageComponent {
             // longer declares, or declares with another type, range or options, is dropped — that
             // input runs on its default (the run fell back to that) and leaves the layout.
             const fitting = result.compile ? pruneInputValues(result.inputs, values) : values;
-            this.scriptRuns.update((runs) => {
-              const entry = { item, result, values: fitting, symbol, resolution, requestedBars };
-              // One strategy at a time (its tester owns the bottom panel).
-              const kept = runs.filter(
-                (r) =>
-                  r.item.key === item.key ||
-                  !(result.kind === 'strategy' && r.result.kind === 'strategy'),
-              );
-              // A re-run replaces its run IN PLACE; a new script goes last. The order is the order
-              // scripts were added: the later one's barcolor() wins, and panes stack in it. A re-run
-              // used to move to the end, so with two scripts that order flipped on every live re-run.
-              const at = kept.findIndex((r) => r.item.key === item.key);
-              return at < 0 ? [...kept, entry] : kept.map((r, i) => (i === at ? entry : r));
-            });
+            const entry = { item, result, values: fitting, symbol, resolution, requestedBars };
+            // One strategy at a time (its tester owns the bottom panel), in place for a re-run.
+            const placed = placeRun(this.scriptRuns(), entry);
+            this.scriptRuns.set(placed.runs);
+            // A strategy this one replaced is off the chart: its run in flight and its quiet re-runs
+            // go with it — one landing late would put it back in place of this one.
+            for (const r of placed.replaced) {
+              this.abortRun(r.item.key, 'Another strategy took its place on the chart.');
+              this.runScheduler.cancel(r.item.key);
+            }
             this.restoringScripts.update((l) => l.filter((w) => w.key !== item.key));
-            if (result.kind === 'strategy' && !replace) {
-              this.testerOpen.set(true);
-              this.dockPreference.set('tester');
+            if (result.kind === 'strategy') {
+              // The defaults its Strategy Tester inputs are measured against (engine strategies).
+              this.settings.loadStoredInputs(item);
+              if (!replace) {
+                this.testerOpen.set(true);
+                this.dockPreference.set('tester');
+                // Added by the operator over another strategy: say so, with the way back.
+                const previous = placed.replaced[0];
+                if (previous) this.offerUndoReplace(previous, entry);
+              }
             }
             done?.(result);
           } finally {
@@ -2669,10 +2684,23 @@ export class ChartAnalysisPageComponent {
     this.host()?.zoomBy(factor);
   }
 
+  /**
+   * The Strategy Tester's Re-run: as its Settings apply them — the strategy's values from now on (the
+   * live re-runs and the saved layout take them at once), and a run with them.
+   */
   rerunStrategy(values: ScriptInputValues): void {
     const run = this.strategyRun();
-    if (run) this.runScript(run.item, values, true);
+    if (run) this.settings.apply(run.item.key, values);
   }
+
+  /**
+   * The Strategy Tester's inputs, with the defaults the strategy runs on: an engine strategy's
+   * stored inputs in place of its source's, as its Settings dialog shows them. Null while those are
+   * read. Compared by content: each live re-run brings an equal copy.
+   */
+  readonly testerInputs = computed(() => this.settings.inputsOf(this.strategyRun()), {
+    equal: (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b),
+  });
 
   removeScript(key: string): void {
     // Its run in flight must not bring it back, nor a re-run waiting to start.
@@ -2680,6 +2708,36 @@ export class ChartAnalysisPageComponent {
     this.runScheduler.cancel(key);
     this.restoringScripts.update((l) => l.filter((w) => w.key !== key));
     this.scriptRuns.update((runs) => runs.filter((r) => r.item.key !== key));
+  }
+
+  /**
+   * Shown when a strategy the operator added took the place of the one on the chart (one strategy at
+   * a time): what happened, and Undo — which puts the previous one back with its own inputs and takes
+   * the new one off.
+   */
+  readonly replacedNotice = signal<{
+    message: string;
+    previous: { item: ChartScriptItem; values: ScriptInputValues };
+    replacementKey: string;
+  } | null>(null);
+
+  private offerUndoReplace(previous: ChartScriptRun, replacement: ChartScriptRun): void {
+    const name = (r: ChartScriptRun) => r.result.title || r.item.name;
+    this.replacedNotice.set({
+      message: `Replaced ${name(previous)} with ${name(replacement)}: one strategy at a time on the chart`,
+      previous: { item: previous.item, values: previous.values },
+      replacementKey: replacement.item.key,
+    });
+  }
+
+  /** The notice's Undo: the strategy that was replaced comes back, the one that replaced it goes. */
+  undoReplace(): void {
+    const notice = this.replacedNotice();
+    if (!notice) return;
+    this.replacedNotice.set(null);
+    this.removeScript(notice.replacementKey);
+    // A run like a layout's restore: it lands in the tester already open, with no notice of its own.
+    this.runScript(notice.previous.item, notice.previous.values, true);
   }
 
   /**
@@ -2700,7 +2758,7 @@ export class ChartAnalysisPageComponent {
     this.editorKey.set(null);
     this.editorDraft.set(null);
     this.assistSource.set(null);
-    this.editorCleared = true;
+    this.editorCleared.set(true);
   }
 
   /** A script's input overrides on the chart (none when it is not on it). */
@@ -2716,6 +2774,7 @@ export class ChartAnalysisPageComponent {
     if (replacing) this.removeScript(replacing.key);
     const item = this.chartScripts.itemForSource(submit.source, submit.kind, submit.name);
     this.editorKey.set(item.key);
+    this.editorCleared.set(false); // it shows a chart script again
     this.runScript(item, values);
   }
 
@@ -2733,6 +2792,7 @@ export class ChartAnalysisPageComponent {
       target?.name ?? 'Untitled script',
     );
     this.editorKey.set(item.key);
+    this.editorCleared.set(false);
     this.editorDraft.set({ key: item.key, text: source });
     this.runScript(item, values, false, done);
   }
@@ -2902,7 +2962,6 @@ export class ChartAnalysisPageComponent {
 
   /** The whole chart set-up, as the engine saves it (`ChartLayout.state`). */
   captureState(): ChartWorkspaceState {
-    const draft = this.editorDraft();
     return {
       v: 1,
       symbol: this.symbol(),
@@ -2931,14 +2990,39 @@ export class ChartAnalysisPageComponent {
         calendarAll: this.calendarAll(),
         calendarMinImpact: this.calendarMinImpact(),
       },
-      dock: {
-        editorOpen: this.editorOpen(),
-        testerOpen: this.testerOpen(),
-        preference: this.dockPreference(),
-        editorKey: this.editorKey(),
-        editorText: draft?.text ?? null,
-      },
+      dock: dockStateOf(this.dockView()),
     };
+  }
+
+  /** The Pine Editor and Strategy Tester dock as it stands, for the layout. */
+  private dockView(): DockView {
+    return {
+      editorOpen: this.editorOpen(),
+      testerOpen: this.testerOpen(),
+      preference: this.dockPreference(),
+      editorKey: this.editorKey(),
+      editorText: this.editorDraft()?.text ?? null,
+      editorCleared: this.editorCleared(),
+    };
+  }
+
+  /** A layout's dock, after its scripts were started again ({@link applyState}). */
+  private applyDock(d: DockView): void {
+    this.testerOpen.set(d.testerOpen);
+    this.testerPrompt.set(false);
+    this.dockPreference.set(d.preference);
+    this.editorOpen.set(false);
+    // Removed with its script before the layout was saved: unlinked, the editor still opens blank.
+    this.editorCleared.set(d.editorCleared);
+    if (d.editorCleared) this.editorKey.set(null);
+    if (d.editorOpen) {
+      this.editorKey.set(d.editorKey);
+      this.editorOpen.set(true);
+      if (d.editorText) {
+        this.editorDraft.set({ key: d.editorKey, text: d.editorText });
+        this.assistSource.set({ text: d.editorText, seq: ++this.assistSeq });
+      }
+    }
   }
 
   /** Scripts on the chart plus restored ones still running, in a stable order. */
@@ -2997,29 +3081,19 @@ export class ChartAnalysisPageComponent {
       this.viewSnapshot.set(s.view ? normaliseView(s.view) : null);
 
       // Pine scripts: the newest saved version of "My scripts", else the inline copy. Runs of the
-      // layout being replaced that are still in flight must not land on this one.
+      // layout being replaced that are still in flight must not land on this one, nor an Undo for
+      // a strategy it replaced.
       this.abortAllRuns('The chart layout was replaced.');
       this.scriptRuns.set([]);
+      this.replacedNotice.set(null);
       this.restoringScripts.set(s.scripts ?? []);
-      const d = s.dock ?? {};
-      this.testerOpen.set(d.testerOpen ?? true);
-      this.testerPrompt.set(false);
-      this.dockPreference.set(d.preference ?? 'tester');
-      this.editorOpen.set(false);
       for (const w of s.scripts ?? [])
         this.runScript(
           restoredScriptItem(w, this.chartScripts.savedScripts()),
           w.values ?? {},
           true,
         );
-      if (d.editorOpen) {
-        this.editorKey.set(d.editorKey ?? null);
-        this.editorOpen.set(true);
-        if (d.editorText) {
-          this.editorDraft.set({ key: d.editorKey ?? null, text: d.editorText });
-          this.assistSource.set({ text: d.editorText, seq: ++this.assistSeq });
-        }
-      }
+      this.applyDock(restoredDock(s.dock));
       if (!keepSymbol && (this.symbol() !== symbolBefore || this.resolution() !== resBefore))
         void this.reload();
       else queueMicrotask(() => this.flushPendingView());

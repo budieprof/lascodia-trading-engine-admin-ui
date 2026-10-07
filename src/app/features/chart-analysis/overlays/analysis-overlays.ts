@@ -1,4 +1,11 @@
-import { atr, volumeProfile, type Ohlc, type VolumeProfileBin } from '../indicators/math';
+import {
+  atr,
+  periodKey,
+  volumeProfile,
+  type DayOf,
+  type Ohlc,
+  type VolumeProfileBin,
+} from '../indicators/math';
 
 /**
  * Analytical overlays computed from the loaded bars: volume profile, auto-detected
@@ -102,9 +109,9 @@ export const VOLUME_PROFILE_MODES: ReadonlyArray<{
     label: 'Visible Range',
     hint: 'One profile of the bars on screen, re-profiled as you pan',
   },
-  { id: 'session', label: 'Session', hint: 'One profile per trading day (UTC)' },
-  { id: 'week', label: 'Periodic · Week', hint: 'One profile per week (Monday UTC)' },
-  { id: 'month', label: 'Periodic · Month', hint: 'One profile per calendar month (UTC)' },
+  { id: 'session', label: 'Session', hint: 'One profile per trading session' },
+  { id: 'week', label: 'Periodic · Week', hint: 'One profile per trading week' },
+  { id: 'month', label: 'Periodic · Month', hint: 'One profile per month of trading days' },
 ];
 
 export interface PeriodProfile {
@@ -114,8 +121,26 @@ export interface PeriodProfile {
   profile: VolumeProfileResult;
 }
 
-/** Start of the period `time` falls in, in UTC ms. */
-export function periodStart(time: number, mode: Exclude<VolumeProfileMode, 'visible'>): number {
+/**
+ * Key of the period `time` falls in.
+ *
+ * <p>With the symbol's trading days (`dayOf`), the trading day, week or month of its trading
+ * DATE ({@link periodKey}): an FX session opens at 17:00 New York the evening before its date, so
+ * a session profile spans 17:00 to 17:00 New York, Sunday evening's bars open Monday's week and the
+ * session opening on 30 September opens October.</p>
+ *
+ * <p>Without them, the UTC day / Monday week / month the instant falls in — a start in UTC ms —
+ * with Sunday folded into the following week, so FX's Sunday-evening open is not left as a
+ * one-candle profile of its own.</p>
+ */
+export function periodStart(
+  time: number,
+  mode: Exclude<VolumeProfileMode, 'visible'>,
+  dayOf?: DayOf,
+): number {
+  if (dayOf) {
+    return periodKey(time, mode === 'session' ? 'Day' : mode === 'week' ? 'Week' : 'Month', dayOf);
+  }
   const d = new Date(time);
   if (mode === 'month') return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
   const day = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
@@ -128,7 +153,8 @@ export function periodStart(time: number, mode: Exclude<VolumeProfileMode, 'visi
 }
 
 /**
- * One profile per session / week / month over `bars`.
+ * One profile per session / week / month over `bars` — of the symbol's trading days when `dayOf`
+ * is given ({@link periodStart}).
  *
  * <p>Bins are sized per period rather than once for the whole chart: a quiet Asian session
  * and a busy NFP day each get a distribution fine enough to show where inside ITS range the
@@ -137,13 +163,14 @@ export function periodStart(time: number, mode: Exclude<VolumeProfileMode, 'visi
 export function periodProfiles(
   bars: readonly Ohlc[],
   mode: Exclude<VolumeProfileMode, 'visible'>,
-  minBars = 3,
+  opts: { minBars?: number; dayOf?: DayOf } = {},
 ): PeriodProfile[] {
+  const minBars = opts.minBars ?? 3;
+  const keyOf = (t: number) => periodStart(t, mode, opts.dayOf);
   const out: PeriodProfile[] = [];
   let start = 0;
   for (let i = 1; i <= bars.length; i++) {
-    const boundary =
-      i === bars.length || periodStart(bars[i].time, mode) !== periodStart(bars[start].time, mode);
+    const boundary = i === bars.length || keyOf(bars[i].time) !== keyOf(bars[start].time);
     if (!boundary) continue;
     const slice = bars.slice(start, i);
     if (slice.length >= minBars) {

@@ -11,7 +11,13 @@ import { ChartAnalysisPageComponent } from './chart-analysis-page.component';
 type Page = ChartAnalysisPageComponent & Record<string, any>;
 
 function setup(url: { tf?: string } = {}) {
-  const feed = { invalidate: vi.fn(), getBars: vi.fn(() => new Promise(() => undefined)) };
+  const feed = {
+    invalidate: vi.fn(),
+    getBars: vi.fn(() => new Promise(() => undefined)),
+    // 1m … 1h charts ask the symbol's session once (a one-bar `scripting/chart-bars`), not a load.
+    learnSession: vi.fn(() => Promise.resolve(null)),
+    sessionOf: vi.fn(() => null),
+  };
   const router = { navigate: vi.fn(() => Promise.resolve(true)) };
   const p = Object.create(ChartAnalysisPageComponent.prototype) as Page;
   Object.assign(p, {
@@ -54,6 +60,18 @@ describe('chart page — one load per symbol switch', () => {
     follow({ symbol: 'USDJPY' });
     expect(feed.getBars).toHaveBeenCalledTimes(1);
     expect(feed.invalidate).toHaveBeenCalledTimes(1);
+  });
+
+  it('a stored-grid switch also asks the symbol’s session; a session-grid switch does not', () => {
+    const { p, feed } = setup();
+    p.selectSymbol('USDJPY');
+    expect(feed.learnSession).toHaveBeenCalledTimes(1);
+    expect(feed.learnSession).toHaveBeenLastCalledWith('USDJPY');
+
+    p.resolution.set('240');
+    p.selectSymbol('GBPUSD');
+    // The session-grid load reports the session itself.
+    expect(feed.learnSession).toHaveBeenCalledTimes(1);
   });
 
   it('switching back loads the symbol again, once', () => {

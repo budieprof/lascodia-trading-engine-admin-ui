@@ -271,3 +271,37 @@ export function savedRightOffset(scrollPos: number, rightOffset: number): number
 export function restoredRightOffset(saved: number, rightOffset: number): number {
   return Math.abs(saved - DEFAULT_RIGHT_OFFSET) < 0.5 ? rightOffset : saved;
 }
+
+/** The part of a run on the chart that decides where it goes in the chart's list of runs. */
+export interface PlacedRun {
+  item: { key: string };
+  result: { kind: string };
+}
+
+/**
+ * A run landing on the chart's runs, in the order the scripts were added — the later one's
+ * `barcolor()` wins and panes stack in it:
+ *
+ * <ul>
+ *   <li>a re-run takes its own place (one that moved to the end flipped two scripts' order on every
+ *       live re-run);</li>
+ *   <li>a new script goes last;</li>
+ *   <li>and one strategy at a time, as TradingView: a strategy takes the place of any other strategy,
+ *       which comes back as `replaced` — the page drops its runs and offers the way back.</li>
+ * </ul>
+ */
+export function placeRun<R extends PlacedRun>(
+  runs: readonly R[],
+  run: R,
+): { runs: R[]; replaced: R[] } {
+  const replaced = runs.filter(
+    (r) =>
+      r.item.key !== run.item.key && run.result.kind === 'strategy' && r.result.kind === 'strategy',
+  );
+  const kept = runs.filter((r) => !replaced.includes(r));
+  const at = kept.findIndex((r) => r.item.key === run.item.key);
+  return {
+    runs: at < 0 ? [...kept, run] : kept.map((r, i) => (i === at ? run : r)),
+    replaced,
+  };
+}

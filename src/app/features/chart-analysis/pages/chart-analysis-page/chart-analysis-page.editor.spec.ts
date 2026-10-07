@@ -5,6 +5,7 @@ import { of } from 'rxjs';
 import type { ScriptInputValues } from '@core/api/scripting.types';
 import type { ChartScriptItem } from '../../scripts/chart-script.service';
 import { ScriptSettings } from '../../scripts/script-settings';
+import { dockStateOf, restoredDock } from '../../workspace/workspace-state';
 import { ChartAnalysisPageComponent, type ChartScriptRun } from './chart-analysis-page.component';
 
 // The page's own methods, run against just the state they touch: the component's prototype with
@@ -47,8 +48,11 @@ function page(runs: ChartScriptRun[]): Page {
     editorDraft: signal(null),
     assistSource: signal(null),
     dockPreference: signal('tester'),
+    testerOpen: signal(true),
+    testerPrompt: signal(false),
+    assistSeq: 0,
     strategySources: signal({}),
-    editorCleared: false,
+    editorCleared: signal(false),
     runScript: vi.fn(),
     chartScripts: {
       itemForSource: (source: string, kind: 'indicator' | 'strategy', name: string) => ({
@@ -189,5 +193,46 @@ describe('chart page — removing a Pine script from the chart clears the editor
       false,
       done,
     );
+  });
+
+  it('stays cleared through a reload: the layout saves it, and the reopened editor is blank', () => {
+    const before = page([run(item('mine:20')), run(item('mine:5'))]);
+    editing(before, 'mine:20');
+    before.removeScriptFromChart('mine:20');
+    // What the engine stores with the layout, and a reload reads back.
+    const saved = JSON.parse(JSON.stringify(dockStateOf(before['dockView']())));
+    expect(saved.editorCleared).toBe(true);
+
+    // The reload: the layout's scripts are back on the chart, then its dock is applied.
+    const after = page([run(item('mine:5'))]);
+    after['applyDock'](restoredDock(saved));
+    after.toggleEditor();
+    expect(after.editorOpen()).toBe(true);
+    expect(after.editorKey()).toBeNull(); // the starter template — not mine:5
+    expect(after.editorTarget()).toBeNull();
+
+    // Pointed at a script again, it is linked — and the next save no longer says cleared.
+    after.openScriptSource('mine:5');
+    expect(after.editorTarget()?.source).toBe('// mine:5');
+    expect(dockStateOf(after['dockView']())).not.toHaveProperty('editorCleared');
+  });
+
+  it('a layout saved before the flag existed opens the editor on the chart’s newest script, as before', () => {
+    const p = page([run(item('mine:20')), run(item('mine:5'))]);
+    p['applyDock'](
+      restoredDock({ editorOpen: false, testerOpen: true, preference: 'tester', editorKey: null }),
+    );
+    p.toggleEditor();
+    expect(p.editorKey()).toBe('mine:5');
+  });
+
+  it('a script added from the cleared editor links it again, so the layout no longer clears it', () => {
+    const p = page([run(item('mine:20'))]);
+    editing(p, 'mine:20');
+    p.removeScriptFromChart('mine:20');
+    p.toggleEditor(); // the starter template
+    p.onEditorAdd({ source: '// new', kind: 'indicator', name: 'New' });
+    expect(p.editorKey()).toBe('editor:current');
+    expect(dockStateOf(p['dockView']())).not.toHaveProperty('editorCleared');
   });
 });
