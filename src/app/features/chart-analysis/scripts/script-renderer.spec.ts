@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { IChartApi, IChartApiBase, ISeriesApi, SeriesType, Time } from 'lightweight-charts';
 import { cssColor } from '@shared/pine-chart/core/color';
+import { FONT_DEFAULT } from '@shared/pine-chart/render/build-render-model';
+import { labelRightPx } from './run-on-host';
 import { renderScriptResult, shiftedChart } from './script-renderer';
 import { toChartScriptResult } from './chart-script.model';
 import { BOLLINGER_RUN } from './__fixtures__/bollinger-run';
@@ -197,5 +199,24 @@ describe('renderScriptResult barcolor() and future drawings', () => {
     expect(h.futureBars(host.slice(0, -1))).toBe(0);
     h.dispose();
     expect(h.futureBars(host)).toBe(0);
+  });
+
+  it("counts the label's text right of its anchor, in bars at the zoom it is asked at", () => {
+    const { result, times } = run();
+    const { chart, series } = fakeHost();
+    const h = renderScriptResult(chart, series, result);
+    const host = times.map((t) => t / 1000);
+    // "target", label_left, size.normal (12 px): its bubble runs right of the anchor 16 bars out.
+    const px = labelRightPx({
+      style: 'label_left',
+      text: 'target',
+      fontSize: 12,
+      fontFamily: FONT_DEFAULT,
+      bold: false,
+      yloc: 'price',
+    });
+    expect(px).toBeGreaterThan(40);
+    expect(h.futureBars(host, 6)).toBeCloseTo(16 + px / 6);
+    expect(h.futureBars(host, 12)).toBeCloseTo(16 + px / 12);
   });
 });

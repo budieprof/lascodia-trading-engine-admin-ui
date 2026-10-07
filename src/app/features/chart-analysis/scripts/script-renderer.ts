@@ -18,7 +18,13 @@ import { PineLayersPrimitive } from '@shared/pine-chart/lwc/pine-layers-primitiv
 import { buildRenderModel } from '@shared/pine-chart/render/build-render-model';
 import type { PineRenderModel, TableLayout } from '@shared/pine-chart/render/render-model';
 import type { ChartScriptResult } from './chart-script.model';
-import { barColorsOnHost, futureBarsOnHost, runOffsetOnHost } from './run-on-host';
+import {
+  barColorsOnHost,
+  futureBarsOnHost,
+  labelRightPx,
+  runOffsetOnHost,
+  type LabelReach,
+} from './run-on-host';
 
 export interface ScriptRenderOptions {
   /**
@@ -57,9 +63,10 @@ export interface ScriptRenderHandle {
   barColors(hostTimes: ArrayLike<number>): (string | null)[] | null;
   /**
    * How many bars past the host's last bar the run's outputs reach (future labels, lines and
-   * boxes, positive plot offsets); 0 when none do or the run is not on the host axis.
+   * boxes, positive plot offsets, and — at `barSpacing` px per bar — the text of labels running
+   * right of their anchors); 0 when none do or the run is not on the host axis. Fractional.
    */
-  futureBars(hostTimes: ArrayLike<number>): number;
+  futureBars(hostTimes: ArrayLike<number>, barSpacing?: number): number;
 }
 
 /**
@@ -117,6 +124,15 @@ export function renderScriptResult(
   // own order only when it never went back in time (`buildPriceBars` repairs one that does).
   const lastBar = model.bars.time.length - 1;
   const lastTime = hostTime(model.bars.time[lastBar]);
+  // Labels whose text runs right of their anchors (a label_left bubble's whole width): measured
+  // once, in px, and turned into bars at whatever zoom the host asks at.
+  const labelReach: LabelReach[] = [];
+  for (const pane of [model.panes.main, model.panes.script]) {
+    for (const l of pane?.drawings.labels ?? []) {
+      const px = labelRightPx(l);
+      if (px > 0) labelReach.push({ x: l.x, px });
+    }
+  }
 
   /** Host logical index of run bar 0, or null when the run is not on the host axis. */
   const offset = (): number | null => {
@@ -218,7 +234,7 @@ export function renderScriptResult(
             runOffsetOnHost(hostTimes, lastTime, lastBar),
             hostTimes.length,
           ),
-    futureBars: (hostTimes) =>
+    futureBars: (hostTimes, barSpacing) =>
       disposed
         ? 0
         : futureBarsOnHost(
@@ -226,6 +242,8 @@ export function renderScriptResult(
             lastBar,
             model.futureSlots,
             hostTimes.length,
+            labelReach,
+            barSpacing,
           ),
   };
 }

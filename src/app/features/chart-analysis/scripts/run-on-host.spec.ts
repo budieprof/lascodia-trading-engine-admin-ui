@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
+import { FONT_DEFAULT } from '@shared/pine-chart/render/build-render-model';
 import {
   DEFAULT_RIGHT_OFFSET,
   MAX_SCRIPT_RIGHT_OFFSET,
   barColorsOnHost,
+  estimateTextWidth,
   futureBarsOnHost,
+  labelRightPx,
   marginCap,
   marginMovesView,
   mergeBarColors,
@@ -14,6 +17,7 @@ import {
   savedRightOffset,
   scriptRightOffset,
   withBarColor,
+  type LabelBox,
 } from './run-on-host';
 
 /** Host bar times (seconds), hourly from `from`. */
@@ -120,6 +124,113 @@ describe('futureBarsOnHost', () => {
     expect(futureBarsOnHost(0, 49, 0, 50)).toBe(0);
     expect(futureBarsOnHost(null, 49, 16, 50)).toBe(0);
     expect(futureBarsOnHost(0, 49, 1, 60)).toBe(0);
+  });
+
+  it("adds labels' text at the chart's zoom: 150 px of bubble is 25 bars at 6 px a bar", () => {
+    const labels = [{ x: 52, px: 150 }]; // anchored 3 bars past a 50-bar run's last bar
+    expect(futureBarsOnHost(0, 49, 3, 50, labels, 6)).toBeCloseTo(28);
+    // Zoomed in to 12 px a bar, the same text takes half the bars.
+    expect(futureBarsOnHost(0, 49, 3, 50, labels, 12)).toBeCloseTo(15.5);
+    // No spacing given: anchors only.
+    expect(futureBarsOnHost(0, 49, 3, 50, labels)).toBe(3);
+  });
+
+  it('counts a label near the last bar whose text runs past it, not one far back', () => {
+    // label_left on the last bar, nothing anchored in the future: 60 px of bubble = 10 bars.
+    expect(futureBarsOnHost(0, 49, 0, 50, [{ x: 49, px: 60 }], 6)).toBeCloseTo(10);
+    expect(futureBarsOnHost(0, 49, 0, 50, [{ x: 20, px: 60 }], 6)).toBe(0);
+    // The host opened a bar since the run: one bar less.
+    expect(futureBarsOnHost(0, 49, 0, 51, [{ x: 49, px: 60 }], 6)).toBeCloseTo(9);
+    expect(futureBarsOnHost(null, 49, 0, 50, [{ x: 49, px: 60 }], 6)).toBe(0);
+  });
+});
+
+describe('estimateTextWidth', () => {
+  /** canvas measureText() widths in the chart's font stack (Chromium on macOS), px. */
+  const MEASURED: [text: string, size: number, bold: boolean, width: number][] = [
+    ['Short 1.12388  now +1.7R', 10, false, 121.4],
+    ['Stop 1.12671  -1R', 10, false, 82.7],
+    ['✓ 1R 1.12105', 10, false, 61.7],
+    ['Reverse -0.8R', 10, false, 68.1],
+    ['BUY', 12, false, 24.6],
+    ['1234567890', 12, false, 72.6],
+    ['Bullish Engulfing', 12, false, 93.8],
+    ['Short 1.12388  now +1.7R', 12, true, 151.9],
+  ];
+
+  it('errs wide of the measured width of label text, but not by much', () => {
+    for (const [text, size, bold, width] of MEASURED) {
+      const estimate = estimateTextWidth(text, size, { bold });
+      expect(estimate, text).toBeGreaterThanOrEqual(width);
+      expect(estimate, text).toBeLessThanOrEqual(width * 1.25);
+    }
+  });
+
+  it('counts characters, not UTF-16 units, and every monospace character alike', () => {
+    expect(estimateTextWidth('', 12)).toBe(0);
+    expect(estimateTextWidth('😀', 10)).toBeCloseTo(estimateTextWidth('✓', 10));
+    expect(estimateTextWidth('iii', 10, { monospace: true })).toBeCloseTo(
+      estimateTextWidth('WWW', 10, { monospace: true }),
+    );
+    expect(estimateTextWidth('abc', 12, { bold: true })).toBeGreaterThan(
+      estimateTextWidth('abc', 12),
+    );
+  });
+});
+
+describe('labelRightPx', () => {
+  const TEXT = 'Short 1.12388  now +1.7R';
+  /** A size.small (10 px) price label, as the v2 script draws its trade levels. */
+  const label = (style: string, text = TEXT): LabelBox => ({
+    style: style as LabelBox['style'],
+    text,
+    fontSize: 10,
+    fontFamily: FONT_DEFAULT,
+    bold: false,
+    yloc: 'price',
+  });
+  const textW = estimateTextWidth(TEXT, 10);
+
+  it('reaches the whole bubble right of the anchor for label_left', () => {
+    // A 5 px pointer, then 5 px of padding either side of the text.
+    expect(labelRightPx(label('label_left'))).toBeCloseTo(5 + 5 + textW + 5);
+    expect(labelRightPx(label('label_upper_left'))).toBeGreaterThan(textW);
+  });
+
+  it('reaches half a centred bubble, and nothing past the anchor for label_right', () => {
+    for (const style of ['label_center', 'label_down', 'label_up', 'none'])
+      expect(labelRightPx(label(style)), style).toBeCloseTo((textW + 10) / 2, 0);
+    expect(labelRightPx(label('label_right'))).toBe(0);
+    expect(labelRightPx(label('label_lower_right'))).toBe(0);
+  });
+
+  it('measures the widest line, bold wider, and the shape of a shape style', () => {
+    expect(labelRightPx(label('label_left', `a\n${TEXT}`))).toBeCloseTo(
+      labelRightPx(label('label_left')),
+    );
+    expect(labelRightPx({ ...label('label_left'), bold: true })).toBeGreaterThan(
+      labelRightPx(label('label_left')),
+    );
+    // An xcross with no text: half the 13 px shape (size = round(10 × 1.3)).
+    expect(labelRightPx(label('xcross', ''))).toBeCloseTo(6.5);
+  });
+
+  it("fits the v2 script's level labels: anchored 3 bars out at 6 px a bar", () => {
+    const reach = (anchor: number) =>
+      futureBarsOnHost(
+        0,
+        49,
+        anchor,
+        50,
+        [{ x: 49 + anchor, px: labelRightPx(label('label_left')) }],
+        6,
+      );
+    // The margin stayed at the default 5 bars with only the anchor counted; the text needs ~25 more.
+    expect(scriptRightOffset(DEFAULT_RIGHT_OFFSET, reach(3))).toBe(30);
+    // Anchored 14 bars out it would need 41: the cap holds.
+    expect(scriptRightOffset(DEFAULT_RIGHT_OFFSET, reach(14), marginCap(1744, 6))).toBe(
+      MAX_SCRIPT_RIGHT_OFFSET,
+    );
   });
 });
 
