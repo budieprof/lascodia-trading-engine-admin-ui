@@ -27,6 +27,7 @@ const LABEL_MAPS: Record<string, Record<string, string>> = {
     Executed: 'Executed',
     Rejected: 'Rejected',
     Expired: 'Expired',
+    Cancelled: 'Cancelled',
   },
   brokerStatus: {
     Connected: 'Connected',

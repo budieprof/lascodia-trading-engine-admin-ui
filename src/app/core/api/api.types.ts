@@ -232,7 +232,13 @@ export type PositionDirection = 'Long' | 'Short';
 
 export type TradeDirection = 'Buy' | 'Sell';
 
-export type TradeSignalStatus = 'Pending' | 'Approved' | 'Executed' | 'Rejected' | 'Expired';
+export type TradeSignalStatus =
+  | 'Pending'
+  | 'Approved'
+  | 'Executed'
+  | 'Rejected'
+  | 'Expired'
+  | 'Cancelled';
 
 export type StrategyType =
   | 'MovingAverageCrossover'
@@ -4865,6 +4871,27 @@ export interface SaveBacktestPreviewSnapshotRequest {
   expectancy: number;
   exposurePct: number;
   equityCurveJson?: string | null;
+}
+
+/** Result of `PUT /trade-signal/{id}/cancel`. */
+export interface CancelTradeSignalResult {
+  tradeSignalId: number;
+  status: TradeSignalStatus;
+  /** True when the signal was already Cancelled; the exposure sweep still re-ran. */
+  alreadyCancelled: boolean;
+  /** Positions closed / closes queued, orders cancelled. */
+  issuedCount: number;
+  /** Targets with an equivalent action already in flight. */
+  pendingCount: number;
+  /** Not reachable yet (e.g. EA offline) — the engine retries them automatically. */
+  unresolvedCount: number;
+  outcomes: {
+    target: string;
+    id: number;
+    tradingAccountId: number | null;
+    status: string;
+    detail: string | null;
+  }[];
 }
 
 export interface RejectTradeSignalRequest {
