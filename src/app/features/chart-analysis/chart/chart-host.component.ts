@@ -579,7 +579,12 @@ export class ChartHostComponent implements OnDestroy {
         : null;
     const p = this.palette(this.theme.theme() === 'dark');
     const lineLike = LINE_LIKE.has(this.style());
-    const color = lineLike ? p.line : (shown?.close ?? 0) >= (shown?.open ?? 0) ? p.up : p.down;
+    // The last-value label above takes the last bar's colour, a script's barcolor() included — but
+    // not on hollow candles, where that colour paints only the border and wick.
+    const scripted =
+      this.priceStyle === 'hollow' ? null : (this.barColors?.[this.plotted.length - 1] ?? null);
+    const up = (shown?.close ?? 0) >= (shown?.open ?? 0);
+    const color = lineLike ? p.line : (scripted ?? (up ? p.up : p.down));
     this.countdown.set(text, shown ? shown.close : null, color, axisLabelHeight(12));
   }
   private computedCache = new Map<string, Record<string, Array<number | null>>>();
@@ -1802,6 +1807,7 @@ export class ChartHostComponent implements OnDestroy {
         : ohlcRows(this.plotted, colors, barPaint(style));
     // Same bars, same times: the view and every primitive on the series stay as they are.
     this.price.setData(rows as CandlestickData<Time>[]);
+    this.tickCountdown(); // the last bar's colour may have changed with them
   }
 
   /**
