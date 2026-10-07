@@ -18,6 +18,7 @@ import { RealtimeService } from '@core/realtime/realtime.service';
 import type { CurrencyPairDto } from '@core/api/api.types';
 import { CandleFeedService, type Bar } from '../../datafeed/candle-feed.service';
 import { LiveRerunScheduler, formingLiveBar } from '../../scripts/live-bar';
+import { ThemeService } from '@core/theme/theme.service';
 
 /**
  * Live indicator re-runs: at least this many ms between two runs of a script — longer for a slow
@@ -369,6 +370,7 @@ export class ChartAnalysisPageComponent {
   private readonly pageContext = inject(PageContextService);
   private readonly uiCommands = inject(UiCommandService);
   private readonly chartScripts = inject(ChartScriptService);
+  private readonly theme = inject(ThemeService);
   private readonly fundamentals = inject(FxFundamentalsService);
   private readonly dailyBars = inject(DailyBarsService);
 
@@ -1240,6 +1242,23 @@ export class ChartAnalysisPageComponent {
         for (const r of this.scriptRuns())
           if (r.result.kind !== 'strategy' && r.symbol === symbol && r.resolution === resolution)
             liveReruns.request(r.item.key);
+      });
+    });
+
+    // `chart.bg_color` / `chart.fg_color` answer with the theme a run was requested in (every run
+    // sends it): a theme switch re-runs the scripts on the chart, quietly, so whatever they draw in
+    // the chart's colours follows the chart.
+    let runTheme = this.theme.theme();
+    effect(() => {
+      const theme = this.theme.theme();
+      untracked(() => {
+        if (theme === runTheme) return;
+        runTheme = theme;
+        const symbol = this.symbol();
+        const resolution = this.resolution();
+        for (const r of this.scriptRuns())
+          if (r.symbol === symbol && r.resolution === resolution)
+            this.runScript(r.item, r.values, true, undefined, true);
       });
     });
 

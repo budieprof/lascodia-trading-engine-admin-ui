@@ -583,7 +583,14 @@ export interface PineRunRequest {
   trace?: { fromBar: number; toBar: number };
   profile?: boolean;
   chartType?: PineChartType;
+  /**
+   * The chart's theme, which Pine's `chart.bg_color` / `chart.fg_color` read (light when absent).
+   * `ScriptingRunService` sets it to the console's theme on every run and replay it sends.
+   */
+  theme?: PineChartTheme;
 }
+
+export type PineChartTheme = 'light' | 'dark';
 
 // ── §5 replay ────────────────────────────────────────────────────────────────────────────────────
 

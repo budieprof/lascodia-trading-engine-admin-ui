@@ -5,6 +5,7 @@ import { of, switchMap, throwError, timer } from 'rxjs';
 
 import type { ScriptRunResult } from '@core/api/scripting.types';
 import { ScriptingApiError, ScriptingService } from '@core/services/scripting.service';
+import { ThemeService } from '@core/theme/theme.service';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
 import { PinePreviewComponent } from '../../pine-preview/pine-preview.component';
 import { StrategyReportComponent } from '../../report/strategy-report.component';
@@ -114,7 +115,10 @@ describe('ScriptPreviewComponent', () => {
     run = vi.fn(() => of(RUN));
     TestBed.configureTestingModule({
       imports: [ScriptPreviewComponent],
-      providers: [{ provide: ScriptingService, useValue: { run } }],
+      providers: [
+        { provide: ScriptingService, useValue: { run } },
+        { provide: ThemeService, useValue: { theme: () => 'dark' } },
+      ],
     });
     TestBed.overrideComponent(ScriptPreviewComponent, {
       remove: {
@@ -143,6 +147,8 @@ describe('ScriptPreviewComponent', () => {
       lastBars: 2000,
       inputs: { in_len: 21 },
       mode: 'backtest',
+      // The console's theme, which the preview's Pine chart follows (chart.bg_color).
+      theme: 'dark',
     };
     expect(run).toHaveBeenCalledWith(request);
     const slot = el.querySelector('[data-slot="script-chart-overlay"]')!;
