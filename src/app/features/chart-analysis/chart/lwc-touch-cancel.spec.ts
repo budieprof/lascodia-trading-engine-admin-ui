@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { endChartTouchesOnCancel } from './lwc-touch-cancel';
 
@@ -118,6 +118,37 @@ describe('a cancelled chart touch must not swallow the next tap', () => {
 
     button.dispatchEvent(touchEvent('touchcancel', [touchOf(3, button)]));
 
+    expect(ends).toBe(0);
+  });
+
+  it('stays quiet where a TouchEvent cannot be constructed (older WebKit)', () => {
+    const { canvas } = page();
+    uninstall = endChartTouchesOnCancel(document);
+    const cancel = touchEvent('touchcancel', [touchOf(5, canvas)]);
+    let ends = 0;
+    onRoot('touchend', () => ends++);
+    const errors: unknown[] = [];
+    const onError = (e: ErrorEvent): void => {
+      errors.push(e.error);
+      e.preventDefault();
+    };
+    window.addEventListener('error', onError);
+    vi.stubGlobal(
+      'TouchEvent',
+      class {
+        constructor() {
+          throw new TypeError('Illegal constructor');
+        }
+      },
+    );
+    try {
+      canvas.dispatchEvent(cancel);
+    } finally {
+      vi.unstubAllGlobals();
+      window.removeEventListener('error', onError);
+    }
+
+    expect(errors).toEqual([]);
     expect(ends).toBe(0);
   });
 

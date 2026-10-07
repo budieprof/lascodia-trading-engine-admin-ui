@@ -16,16 +16,21 @@ export function endChartTouchesOnCancel(doc: Document): () => void {
   const onCancel = (ev: TouchEvent): void => {
     const target = ev.target;
     if (!(target instanceof Element) || !target.closest('.tv-lightweight-charts')) return;
-    target.dispatchEvent(
-      new TouchEvent('touchend', {
+    let end: TouchEvent;
+    try {
+      end = new TouchEvent('touchend', {
         bubbles: true,
         cancelable: true,
         composed: true,
         touches: [...ev.touches],
         targetTouches: [...ev.targetTouches],
         changedTouches: [...ev.changedTouches],
-      }),
-    );
+      });
+    } catch {
+      // No TouchEvent constructor (older WebKit): the library's own behaviour stands.
+      return;
+    }
+    target.dispatchEvent(end);
   };
   // Bubble phase: the chart sees the cancel itself first, then its end.
   doc.addEventListener('touchcancel', onCancel, { passive: true });
