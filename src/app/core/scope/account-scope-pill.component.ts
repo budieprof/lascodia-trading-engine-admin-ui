@@ -117,6 +117,26 @@ import { AccountScopeService } from './account-scope.service';
         outline-offset: 2px;
         border-radius: 2px;
       }
+      /* A select is as wide as its longest option: with its label the pill took ~290px of a
+         tablet's header and ran it past the screen. Below 1280px the label leaves the screen (it
+         still names the select) and the value is capped; the open list still shows every option
+         in full. Desktop is unchanged. */
+      @media (max-width: 1279.98px) {
+        .scope-label {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          overflow: hidden;
+          clip-path: inset(50%);
+          white-space: nowrap;
+        }
+        .scope-select,
+        .scope-value {
+          max-width: 9.5rem;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+      }
     `,
   ],
 })

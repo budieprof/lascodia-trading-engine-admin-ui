@@ -10,7 +10,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, type ParamMap } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
@@ -89,7 +89,6 @@ import { PerformanceTilesComponent } from '../../panels/performance-tiles.compon
 import { SeasonalsComponent } from '../../panels/seasonals.component';
 import { TechnicalsGaugeComponent } from '../../panels/technicals-gauge.component';
 import type { ChartViewState, ExternalPane } from '../../chart/chart-host.component';
-import { endChartTouchesOnCancel } from '../../chart/lwc-touch-cancel';
 import {
   catchError,
   forkJoin,
@@ -107,6 +106,7 @@ import {
   type ChartScriptItem,
 } from '../../scripts/chart-script.service';
 import { ScriptSettingsDialogComponent } from '../../scripts/script-settings-dialog.component';
+import { ChartBottomBarComponent, type BottomBarMenu } from './chart-bottom-bar.component';
 import type { ChartScriptResult, ChartTrade } from '../../scripts/chart-script.model';
 import { tradeWindow } from '../../scripts/trade-detail';
 import { chartPineAdapter } from '../../scripts/chart-pine-adapter';
@@ -287,7 +287,15 @@ const RANGE_PRESETS: Array<{
   { id: 'All', title: 'All data in 1 month intervals', resolution: '1M', spanMs: 'all' },
 ];
 
-type ToolbarMenu = 'interval' | 'style' | 'templates' | 'overlays' | 'alert' | 'split' | 'tz';
+type ToolbarMenu =
+  | 'interval'
+  | 'style'
+  | 'templates'
+  | 'overlays'
+  | 'alert'
+  | 'split'
+  | 'more'
+  | BottomBarMenu;
 
 /** The chart-type menu, grouped as TradingView groups it. TPO and Session volume profile toggle studies. */
 type StyleChoice = ChartStyle | 'tpo' | 'session-vp';
@@ -395,6 +403,7 @@ function loadWatchlistOpen(): boolean {
     StrategyTesterPanelComponent,
     ScriptEditorPanelComponent,
     ScriptSettingsDialogComponent,
+    ChartBottomBarComponent,
     PerformanceTilesComponent,
     SeasonalsComponent,
     TechnicalsGaugeComponent,
@@ -1261,8 +1270,6 @@ export class ChartAnalysisPageComponent {
       document.removeEventListener('visibilitychange', resumeReruns);
       this.runScheduler.dispose();
     });
-    // A chart touch the browser cancels must not swallow the next tap on the page.
-    this.destroyRef.onDestroy(endChartTouchesOnCancel(document));
     /** Quiet re-runs of the scripts on this chart (`filter`: which of them). */
     const rerunScripts = (filter: (r: ChartScriptRun) => boolean) => {
       const chart = { symbol: this.symbol(), resolution: this.resolution() };
@@ -1565,13 +1572,9 @@ export class ChartAnalysisPageComponent {
 
     // Deep link: /chart-analysis/EURUSD?tf=60 so a chart can be linked to from
     // a position or a signal without the operator re-selecting anything.
-    this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
-      const s = params.get('symbol');
-      if (s) this.symbol.set(s.toUpperCase());
-      const tf = this.route.snapshot.queryParamMap.get('tf') as TvResolution | null;
-      if (tf && (SUPPORTED_RESOLUTIONS as readonly string[]).includes(tf)) this.resolution.set(tf);
-      void this.reload();
-    });
+    this.route.paramMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((params) => this.followRoute(params));
 
     // Live price → update the forming bar. The engine throttles these, so this
     // is a repaint of the last candle rather than a tick stream.
@@ -2013,9 +2016,33 @@ export class ChartAnalysisPageComponent {
       });
   }
 
+  /** The series the newest {@link reload} loads (or loaded). */
+  private requested: SeriesId | null = null;
+
+  /**
+   * The URL's symbol and timeframe onto the chart: a deep link, or a link to another symbol
+   * followed while the chart is open. The chart's own switches navigate as well
+   * ({@link selectSymbol}), and come back here with the series the switch is already loading —
+   * loading it a second time sent every history and forming-bar request of a symbol switch twice
+   * (`reload` starts by invalidating the feed's cache, so the second load shared nothing).
+   */
+  private followRoute(params: ParamMap): void {
+    const symbol = params.get('symbol')?.toUpperCase() || this.symbol();
+    const tf = this.route.snapshot.queryParamMap.get('tf');
+    const resolution =
+      tf && (SUPPORTED_RESOLUTIONS as readonly string[]).includes(tf)
+        ? (tf as TvResolution)
+        : this.resolution();
+    if (sameSeries(this.requested, { symbol, resolution })) return;
+    this.symbol.set(symbol);
+    this.resolution.set(resolution);
+    void this.reload();
+  }
+
   async reload(): Promise<void> {
     const symbol = this.symbol();
     const resolution = this.resolution();
+    this.requested = { symbol, resolution };
     /** Still the chart's series? A switch made while this loads has a reload of its own. */
     const current = () => symbol === this.symbol() && resolution === this.resolution();
     this.loading.set(true);

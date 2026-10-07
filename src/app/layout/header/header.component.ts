@@ -112,6 +112,7 @@ import { NotificationBellComponent } from './notification-bell.component';
 
       .header-left {
         flex: 1;
+        min-width: 0;
         display: flex;
         align-items: center;
         gap: var(--space-3);
@@ -150,6 +151,9 @@ import { NotificationBellComponent } from './notification-bell.component';
         font-weight: var(--font-semibold);
         color: var(--text-primary);
         margin: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       .header-center {
@@ -285,7 +289,33 @@ import { NotificationBellComponent } from './notification-bell.component';
         color: var(--loss);
       }
 
-      @media (max-width: 768px) {
+      /* Tablet widths. The full header — a 240px search box, the account pill as wide as its
+         longest option, the operator's name — needs ~990px; on a 712px or 800px portrait screen it
+         ran past the edge, the whole page panned sideways, and the Ask button (fixed to the right
+         edge of that wider page) sat off-screen. The search box keeps its icon below 1025px, and
+         below 1280px the name goes (the avatar stays) and the spacing tightens; the account pill
+         compacts itself. Desktop, 1280px and up, is unchanged. */
+      @media (max-width: 1279.98px) {
+        .header {
+          padding: 0 var(--space-4);
+        }
+        .header-left,
+        .header-right {
+          gap: var(--space-2);
+        }
+        .user-pill {
+          padding: 4px;
+        }
+        .user-name {
+          display: none;
+        }
+      }
+
+      @media (max-width: 1024px) {
+        /* An icon now: it no longer needs a third of the header, which the title can use. */
+        .header-center {
+          flex: none;
+        }
         .search-trigger {
           min-width: auto;
         }
