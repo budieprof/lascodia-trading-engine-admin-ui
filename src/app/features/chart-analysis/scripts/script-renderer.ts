@@ -18,6 +18,7 @@ import { PineLayersPrimitive } from '@shared/pine-chart/lwc/pine-layers-primitiv
 import { buildRenderModel } from '@shared/pine-chart/render/build-render-model';
 import type { PineRenderModel, TableLayout } from '@shared/pine-chart/render/render-model';
 import type { ChartScriptResult } from './chart-script.model';
+import { barColorsOnHost, futureBarsOnHost, runOffsetOnHost } from './run-on-host';
 
 export interface ScriptRenderOptions {
   /**
@@ -47,6 +48,18 @@ export interface ScriptRenderHandle {
    * they are HTML over the chart (the host mounts the shared table overlay), not canvas.
    */
   tables(): { paneIndex: number; tables: readonly TableLayout[] }[];
+  /**
+   * The run's `barcolor()` on the host's bars: given the host's bar times as plotted (zone-shifted
+   * seconds, ascending), one CSS colour per host bar, null where the run leaves a bar alone. Null
+   * when the run colours nothing on the host axis. Reads no chart state, so the host can ask while
+   * it rebuilds its price series — the price series is drawn with these colours, not painted over.
+   */
+  barColors(hostTimes: ArrayLike<number>): (string | null)[] | null;
+  /**
+   * How many bars past the host's last bar the run's outputs reach (future labels, lines and
+   * boxes, positive plot offsets); 0 when none do or the run is not on the host axis.
+   */
+  futureBars(hostTimes: ArrayLike<number>): number;
 }
 
 /**
@@ -65,6 +78,10 @@ export interface ScriptRenderHandle {
  * <p>`declaration.overlay` is respected: an overlay script paints on the price pane (attached to
  * `mainSeries`, sharing its scale, extending its autoscale); a non-overlay script gets its own pane
  * below, anchored by an invisible line series whose autoscale is the script's value range.</p>
+ *
+ * <p>Two things belong to the host's own series rather than to a primitive, so the handle only
+ * reports them: `barcolor()` (the host draws its candles in those colours) and how far drawings
+ * reach past the last bar (the host widens its right margin).</p>
  */
 export function renderScriptResult(
   chart: IChartApi,
@@ -78,6 +95,8 @@ export function renderScriptResult(
     setShowTrades: () => undefined,
     aligned: () => false,
     tables: () => [],
+    barColors: () => null,
+    futureBars: () => 0,
   };
   const run = result.run;
   if (!run || !run.bars.length) return noop;
@@ -94,8 +113,10 @@ export function renderScriptResult(
 
   const shift = options.shiftMs ?? (() => 0);
   const hostTime = (ms: number) => Math.floor((ms + shift(ms)) / 1000) as UTCTimestamp;
-  const lastBar = run.bars.length - 1;
-  const lastTime = hostTime(run.bars[lastBar].t);
+  // The model's bars, which every logical index (drawings, bar colours) counts — the payload's
+  // own order only when it never went back in time (`buildPriceBars` repairs one that does).
+  const lastBar = model.bars.time.length - 1;
+  const lastTime = hostTime(model.bars.time[lastBar]);
 
   /** Host logical index of run bar 0, or null when the run is not on the host axis. */
   const offset = (): number | null => {
@@ -189,6 +210,23 @@ export function renderScriptResult(
         out.push({ paneIndex, tables: model.panes.script.tables });
       return out;
     },
+    barColors: (hostTimes) =>
+      disposed || !model.bars.colors
+        ? null
+        : barColorsOnHost(
+            model.bars.colors,
+            runOffsetOnHost(hostTimes, lastTime, lastBar),
+            hostTimes.length,
+          ),
+    futureBars: (hostTimes) =>
+      disposed
+        ? 0
+        : futureBarsOnHost(
+            runOffsetOnHost(hostTimes, lastTime, lastBar),
+            lastBar,
+            model.futureSlots,
+            hostTimes.length,
+          ),
   };
 }
 

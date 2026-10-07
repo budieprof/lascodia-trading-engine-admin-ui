@@ -76,6 +76,18 @@ import {
 } from '../patterns/candlestick-patterns';
 import { detectChartPatterns } from '../patterns/chart-patterns';
 import { renderScriptResult, type ScriptRenderHandle } from '../scripts/script-renderer';
+import {
+  DEFAULT_RIGHT_OFFSET,
+  marginCap,
+  marginMovesView,
+  mergeBarColors,
+  restoredRightOffset,
+  sameBarColors,
+  savedRightOffset,
+  scriptRightOffset,
+  withBarColor,
+  type BarPaint,
+} from '../scripts/run-on-host';
 import { PineTableOverlayComponent } from '@shared/pine-chart/components/pine-table-overlay.component';
 import type { TableLayout } from '@shared/pine-chart/render/render-model';
 import type { ChartScriptResult } from '../scripts/chart-script.model';
@@ -128,6 +140,21 @@ const PRICE_BASED: ReadonlySet<ChartStyle> = new Set<ChartStyle>([
   'pnf',
   'line-break',
   'range',
+]);
+
+/**
+ * Styles a script's `barcolor()` recolours: those drawn from each time bar's own OHLC (Heikin-Ashi
+ * recomputes them one for one). Lines, areas and columns show no bar to colour, and the
+ * price-based styles' bricks are not the script's bars.
+ */
+const BAR_COLOR_STYLES: ReadonlySet<ChartStyle> = new Set<ChartStyle>([
+  'candles',
+  'hollow',
+  'heikin-ashi',
+  'bars',
+  'hlc-bars',
+  'hilo',
+  'vol-candle',
 ]);
 
 /** A pane of externally fetched series (FX fundamentals). */
@@ -833,9 +860,13 @@ export class ChartHostComponent implements OnDestroy {
   viewState(): ChartViewState | null {
     if (!this.chart) return null;
     const scale = this.chart.timeScale();
+    const options = scale.options();
+    // Sitting at the live edge of a margin the scripts opened saves as the default live edge: the
+    // margin is theirs, not a scroll the operator chose (syncScriptMargin).
+    const position = savedRightOffset(scale.scrollPosition(), options.rightOffset);
     return {
-      barSpacing: scale.options().barSpacing,
-      rightOffset: Math.round(scale.scrollPosition() * 100) / 100,
+      barSpacing: options.barSpacing,
+      rightOffset: Math.round(position * 100) / 100,
       paneHeights: this.chart.panes().map((p) => p.getHeight()),
     };
   }
@@ -846,7 +877,11 @@ export class ChartHostComponent implements OnDestroy {
     const scale = this.chart.timeScale();
     if (Number.isFinite(v.barSpacing) && v.barSpacing > 0)
       scale.applyOptions({ barSpacing: v.barSpacing });
-    if (Number.isFinite(v.rightOffset)) scale.scrollToPosition(v.rightOffset, false);
+    if (Number.isFinite(v.rightOffset))
+      scale.scrollToPosition(
+        restoredRightOffset(v.rightOffset, scale.options().rightOffset),
+        false,
+      );
     const panes = this.chart.panes();
     (v.paneHeights ?? []).forEach((h, i) => {
       if (i > 0 && panes[i] && Number.isFinite(h) && h > 20) panes[i].setHeight(h);
@@ -1090,8 +1125,8 @@ export class ChartHostComponent implements OnDestroy {
         timeVisible: true,
         secondsVisible: false,
         // TradingView's defaults: ~5 bars of empty space right of the last bar,
-        // 6px per bar.
-        rightOffset: 5,
+        // 6px per bar. Scripts drawing into the future widen the margin (syncScriptMargin).
+        rightOffset: DEFAULT_RIGHT_OFFSET,
         barSpacing: 6,
       },
       crosshair: {
@@ -1264,6 +1299,12 @@ export class ChartHostComponent implements OnDestroy {
     // the time bars underneath — otherwise an RSI on a Renko chart would be
     // reading a different series from the one on screen.
     this.plotted = source;
+    // Scripts' barcolor() goes into the rows themselves. The series is rebuilt on every tick, so
+    // colours applied to it afterwards would drop out and back with each one. The handles still
+    // hold the current runs (re-rendered below) and read no chart state, so they can be asked now.
+    const barColors = this.scriptBarColors(style, source);
+    this.barColors = barColors;
+    this.priceStyle = style;
 
     // Series type is part of the chart's structure, not its options, so a style
     // change means replacing the series rather than setting an option.
@@ -1370,7 +1411,7 @@ export class ChartHostComponent implements OnDestroy {
         priceFormat,
         ...lastPrice,
       });
-      this.price.setData(source.map(toOhlcData) as SeriesDataItemTypeMap['Bar'][]);
+      this.price.setData(ohlcRows(source, barColors, 'bar') as SeriesDataItemTypeMap['Bar'][]);
     } else if (style === 'hilo' || style === 'vol-candle') {
       // The only two styles with no built-in series: HiLo draws the range with
       // neither tick, and VolCandle varies body width by volume. Both are
@@ -1382,18 +1423,7 @@ export class ChartHostComponent implements OnDestroy {
         priceFormat,
         ...lastPrice,
       });
-      custom.setData(
-        source.map(
-          (b): OhlcvData => ({
-            time: asTime(b.time),
-            open: b.open,
-            high: b.high,
-            low: b.low,
-            close: b.close,
-            volume: b.volume,
-          }),
-        ),
-      );
+      custom.setData(ohlcvRows(source, barColors));
       this.price = custom;
     } else if (style === 'column') {
       const column = this.chart.addSeries(HistogramSeries, {
@@ -1421,7 +1451,9 @@ export class ChartHostComponent implements OnDestroy {
         priceFormat,
         ...lastPrice,
       });
-      this.price.setData(source.map(toOhlcData) as CandlestickData<Time>[]);
+      this.price.setData(
+        ohlcRows(source, barColors, hollow ? 'hollow' : 'candle') as CandlestickData<Time>[],
+      );
     }
 
     // Re-bind drawings: the series above is a NEW object whenever the style
@@ -1722,6 +1754,7 @@ export class ChartHostComponent implements OnDestroy {
     }
     this.scriptHandles = [];
     if (!this.chart || !this.price) return;
+    // In the order the scripts were added: a later script's barcolor() wins (mergeBarColors).
     for (const r of results) {
       this.scriptHandles.push(
         renderScriptResult(this.chart, this.price, r, {
@@ -1731,7 +1764,69 @@ export class ChartHostComponent implements OnDestroy {
         }),
       );
     }
+    this.refreshBarColors();
+    this.syncScriptMargin();
     this.layoutScriptTables();
+  }
+
+  /** barcolor() per plotted bar as the price series draws it; null = the style's own colours. */
+  private barColors: (string | null)[] | null = null;
+  /** The style the price series was built for (the style input can be ahead of it mid-update). */
+  private priceStyle: ChartStyle | null = null;
+
+  /**
+   * The scripts' barcolor() on `plotted`, a later-added script winning; null when none colours a
+   * bar or the style has no time bars of its own to colour ({@link BAR_COLOR_STYLES}).
+   */
+  private scriptBarColors(style: ChartStyle, plotted: readonly Bar[]): (string | null)[] | null {
+    if (!BAR_COLOR_STYLES.has(style) || this.scriptHandles.length === 0) return null;
+    const times = plottedSeconds(plotted);
+    return mergeBarColors(this.scriptHandles.map((h) => h.barColors(times)));
+  }
+
+  /**
+   * Re-draw the bars when the scripts' colours changed without the bars changing — a run came
+   * back, a script was added or removed. A tick goes through applyData, which builds them in.
+   */
+  private refreshBarColors(): void {
+    const style = this.priceStyle;
+    if (!this.price || !style || !BAR_COLOR_STYLES.has(style)) return;
+    const colors = this.scriptBarColors(style, this.plotted);
+    if (sameBarColors(colors, this.barColors)) return;
+    this.barColors = colors;
+    const rows =
+      style === 'hilo' || style === 'vol-candle'
+        ? ohlcvRows(this.plotted, colors)
+        : ohlcRows(this.plotted, colors, barPaint(style));
+    // Same bars, same times: the view and every primitive on the series stay as they are.
+    this.price.setData(rows as CandlestickData<Time>[]);
+  }
+
+  /**
+   * Room right of the last bar for what the scripts draw ahead of it (labels, lines and boxes in
+   * the future, positive plot offsets): the furthest plus two bars, capped (scriptRightOffset);
+   * the default again once nothing reaches past the last bar.
+   *
+   * <p>It is the time scale's own `rightOffset` that changes, so "scroll to realtime" and "fit"
+   * keep the room. The view follows only at the live edge: an operator who scrolled into history,
+   * or set the space themselves, keeps their view (marginMovesView), and a layout never saves the
+   * margin as their scroll (viewState).</p>
+   */
+  private syncScriptMargin(): void {
+    const scale = this.chart?.timeScale();
+    if (!scale) return;
+    let reach = 0;
+    if (this.scriptHandles.length) {
+      const times = plottedSeconds(this.plotted);
+      for (const h of this.scriptHandles) reach = Math.max(reach, h.futureBars(times));
+    }
+    const { rightOffset: current, barSpacing } = scale.options();
+    const next = scriptRightOffset(current, reach, marginCap(scale.width(), barSpacing));
+    if (next === current) return;
+    const position = scale.scrollPosition();
+    // Setting the option scrolls to it as well; put a view that is not ours to move back.
+    scale.applyOptions({ rightOffset: next });
+    if (!marginMovesView(current, next, position)) scale.scrollToPosition(position, false);
   }
 
   /** Candlestick + chart-pattern studies → the shared pattern renderer. */
@@ -2008,6 +2103,44 @@ export function asTime(ms: number): Time {
 
 function toOhlcData(b: Bar) {
   return { time: asTime(b.time), open: b.open, high: b.high, low: b.low, close: b.close };
+}
+
+/** The plotted bars' times as the time scale holds them (zone-shifted seconds). */
+function plottedSeconds(bars: readonly Bar[]): number[] {
+  return bars.map((b) => Math.floor(b.time / 1000));
+}
+
+/** How a script's colour paints a bar of `style` (one of BAR_COLOR_STYLES). */
+function barPaint(style: ChartStyle): BarPaint {
+  if (style === 'hollow') return 'hollow';
+  return style === 'candles' || style === 'heikin-ashi' ? 'candle' : 'bar';
+}
+
+/** Candle / bar rows, each bar a script coloured painted per `paint` (body, border, wick…). */
+function ohlcRows(
+  source: readonly Bar[],
+  colors: readonly (string | null)[] | null,
+  paint: BarPaint,
+) {
+  return source.map((b, i) => withBarColor(toOhlcData(b), colors?.[i], paint));
+}
+
+/** Rows of the HiLo and volume-candle custom series; a script's colour is the bar's one colour. */
+function ohlcvRows(source: readonly Bar[], colors: readonly (string | null)[] | null): OhlcvData[] {
+  return source.map((b, i) =>
+    withBarColor<OhlcvData>(
+      {
+        time: asTime(b.time),
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume,
+      },
+      colors?.[i],
+      'bar',
+    ),
+  );
 }
 
 /**

@@ -33,6 +33,8 @@ export interface OhlcvData extends WhitespaceData<Time> {
   low: number;
   close: number;
   volume: number;
+  /** A script's `barcolor()` for this bar, over the up/down colour (the library's price line too). */
+  color?: string;
 }
 
 export interface CustomSeriesStyle extends CustomSeriesOptions {
@@ -93,7 +95,8 @@ class HiLoRenderer extends BaseRenderer {
       const high = toY(item.high);
       const low = toY(item.low);
       if (high === null || low === null) continue;
-      ctx.fillStyle = item.close >= item.open ? this.style.upColor : this.style.downColor;
+      ctx.fillStyle =
+        item.color ?? (item.close >= item.open ? this.style.upColor : this.style.downColor);
       ctx.fillRect(bar.x - width / 2, Math.min(high, low), width, Math.abs(low - high) || 1);
     }
   }
@@ -134,7 +137,7 @@ class VolCandleRenderer extends BaseRenderer {
       if (open === null || high === null || low === null || close === null) continue;
 
       const up = item.close >= item.open;
-      ctx.fillStyle = up ? this.style.upColor : this.style.downColor;
+      ctx.fillStyle = item.color ?? (up ? this.style.upColor : this.style.downColor);
 
       // Wick at full-bar width regardless of volume — it marks the range, and
       // a wick that thins with volume reads as a different price, not a

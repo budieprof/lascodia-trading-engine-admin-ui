@@ -2294,13 +2294,18 @@ export class ChartAnalysisPageComponent {
             return;
           }
           this.scriptRuns.update((runs) => {
-            // One strategy at a time (its tester owns the bottom panel); a re-run replaces.
+            const entry = { item, result, values, symbol, resolution, requestedBars };
+            // One strategy at a time (its tester owns the bottom panel).
             const kept = runs.filter(
               (r) =>
-                r.item.key !== item.key &&
+                r.item.key === item.key ||
                 !(result.kind === 'strategy' && r.result.kind === 'strategy'),
             );
-            return [...kept, { item, result, values, symbol, resolution, requestedBars }];
+            // A re-run replaces its run IN PLACE; a new script goes last. The order is the order
+            // scripts were added: the later one's barcolor() wins, and panes stack in it. A re-run
+            // used to move to the end, so with two scripts that order flipped on every live re-run.
+            const at = kept.findIndex((r) => r.item.key === item.key);
+            return at < 0 ? [...kept, entry] : kept.map((r, i) => (i === at ? entry : r));
           });
           this.restoringScripts.update((l) => l.filter((w) => w.key !== item.key));
           if (result.kind === 'strategy' && !replace) {
