@@ -1,5 +1,6 @@
 import type { ChartScriptResult, ChartTrade } from './chart-script.model';
 import type { ScriptInputValues } from '@core/api/scripting.types';
+import { tradingDateLabel } from '../chart/trading-date';
 
 /**
  * Everything the Strategy Tester knows about one trade, assembled for the trade-detail popup:
@@ -58,8 +59,18 @@ const money = (v: number | null | undefined, ccy: string): string =>
 const pct = (v: number | null | undefined): string =>
   v === null || v === undefined || !Number.isFinite(v) ? '' : ` (${v >= 0 ? '+' : ''}${fmt(v, 2)}%)`;
 
-const when = (sec: number | null): string =>
-  sec === null ? '—' : new Date(sec * 1000).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+/**
+ * A trade's entry or exit time (Lightweight Charts seconds — the open of the bar it filled on). On
+ * 1D/1W/1M that bar is named by its trading date, as the chart names it; elsewhere the instant is
+ * printed in UTC.
+ */
+export function tradeTimeLabel(sec: number | null, resolution = ''): string {
+  if (sec === null) return '—';
+  return (
+    tradingDateLabel({ time: sec * 1000 }, resolution) ??
+    new Date(sec * 1000).toISOString().replace('T', ' ').slice(0, 16) + ' UTC'
+  );
+}
 
 function duration(fromSec: number, toSec: number): string {
   const m = Math.max(0, Math.round((toSec - fromSec) / 60));
@@ -92,7 +103,10 @@ export function tradeDetail(
   t: ChartTrade,
   values: ScriptInputValues = {},
   precision = 5,
+  /** The run's resolution: on 1D/1W/1M the entry and exit bars are named by trading date. */
+  resolution = '',
 ): TradeDetail {
+  const when = (sec: number | null) => tradeTimeLabel(sec, resolution);
   const ccy = result.strategy?.metrics.currency ?? '';
   const raw = ((result.strategy?.report as { trades?: ReportTradeLike[] } | undefined)?.trades ?? []).find(
     (x) => Number(x.number) === t.number,

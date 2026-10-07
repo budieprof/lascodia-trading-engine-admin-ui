@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  signal,
+} from '@angular/core';
 import { DecimalPipe, DatePipe } from '@angular/common';
 import { DailyBarsService } from './daily-bars.service';
 import { performanceTiles, type DailyBar } from './performance';
@@ -6,7 +14,8 @@ import { performanceTiles, type DailyBar } from './performance';
 /**
  * 1W / 1M / 3M / 6M / YTD / 1Y % change tiles for a symbol, from daily candles.
  * Pass `bars` to render from data the host already holds; otherwise the
- * component fetches D1 bars for `symbol` itself.
+ * component fetches the engine's daily sessions for `symbol` itself
+ * (`DailyBarsService`: 17:00 New York days, stamped by trading day).
  */
 @Component({
   selector: 'app-performance-tiles',
@@ -24,7 +33,11 @@ import { performanceTiles, type DailyBar } from './performance';
             class="tile"
             [class.up]="(t.pct ?? 0) > 0"
             [class.down]="(t.pct ?? 0) < 0"
-            [attr.title]="t.fromTime === null ? 'Not enough history' : 'Since close of ' + (t.fromTime | date: 'yyyy-MM-dd' : 'UTC')"
+            [attr.title]="
+              t.fromTime === null
+                ? 'Not enough history'
+                : 'Since close of ' + (t.fromTime | date: 'yyyy-MM-dd' : 'UTC')
+            "
           >
             <span class="pct">{{ t.pct === null ? '—' : (t.pct | number: '1.2-2') + '%' }}</span>
             <span class="period">{{ t.period }}</span>

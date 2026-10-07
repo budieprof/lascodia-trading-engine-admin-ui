@@ -1,9 +1,17 @@
 import { Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { MarketDataService } from '@core/services/market-data.service';
+import { ScriptingService } from '@core/services/scripting.service';
 import type { CandleDto } from '@core/api/api.types';
+import type { ChartBarDto } from '@core/api/scripting.types';
 import { aggregateCandles } from './aggregate';
-import { resolutionSource, sourceBarsNeeded, type TvResolution } from './resolution';
+import {
+  isSessionResolution,
+  resolutionSource,
+  sourceBarsNeeded,
+  type TvResolution,
+} from './resolution';
+import { MAX_CHART_BARS, asBar, tailCount } from './session-bars';
 
 /** One bar in TradingView's shape. `time` is the bar's open, in ms. */
 export interface Bar {
@@ -13,6 +21,17 @@ export interface Bar {
   low: number;
   close: number;
   volume: number;
+  /**
+   * The exclusive close of the bar's period, in ms — set on the session grid (2h … 1M), where the
+   * engine lays periods out and says where each one ends. Absent on the stored grid (1m … 1h), whose
+   * bars are fixed widths on the UTC epoch grid.
+   */
+  closeTime?: number;
+}
+
+/** A session-grid bar as `scripting/chart-bars` sent it: with its close, and whether it is the period still forming. */
+export interface SessionBar extends Bar {
+  forming: boolean;
 }
 
 export interface BarsResult {
@@ -23,11 +42,17 @@ export interface BarsResult {
 
 /** Hard ceiling on rows per request, so a wide window can't ask for millions. */
 const MAX_PAGE = 5000;
+/**
+ * A window ending this close to now is a live one: on the session grid it is asked for with no `to`,
+ * so the engine adds the period still forming.
+ */
+const LIVE_EDGE_MS = 5_000;
 
 /**
- * Fetches candles for the chart, in TradingView's terms.
+ * Fetches candles for the chart, in TradingView's terms, from one of two engine sources
+ * (`resolution.ts`): stored candles for 1m … 1h, the session grid for 2h, 4h, 1D, 1W and 1M.
  *
- * Two engine behaviours drive this design, both verified against
+ * Two engine behaviours drive the stored path, both verified against
  * `GetCandlesQueryHandler` on 2026-09-19:
  *
  * 1. **The handler orders by `Timestamp` DESCENDING and then pages.** So page 1
@@ -41,10 +66,15 @@ const MAX_PAGE = 5000;
  *    page 1 of the entire unfiltered table — HTTP 200, well-formed rows, wrong
  *    data. The engine now rejects flat filter fields with responseCode `-12`,
  *    but the nested shape is the contract; don't rely on the guard.
+ *
+ * The session path (`scripting/chart-bars`) pages the same way — "the last `count` bars whose open
+ * is before `to`" — and answers ascending, each bar with its own close. A window that ends now is
+ * asked for with no `to`, so the period still forming comes too, built by the engine.
  */
 @Injectable({ providedIn: 'root' })
 export class CandleFeedService {
   private readonly marketData = inject(MarketDataService);
+  private readonly scripting = inject(ScriptingService);
 
   /**
    * Cache of ascending bars per `symbol|resolution`.
@@ -115,6 +145,10 @@ export class CandleFeedService {
    * `countBack` rather than `fromMs` is the authority: from v29 the library
    * asks for a bar count ending at `to` and a short answer leaves a visibly
    * truncated chart. `fromMs` is used only to trim the result.
+   *
+   * A session-grid resolution rejects when the engine refuses or cannot be reached — "no bars" would
+   * read as "the engine has no data"; the stored path answers that with an empty result, as it
+   * always has.
    */
   async getBars(
     symbol: string,
@@ -123,15 +157,18 @@ export class CandleFeedService {
     toMs: number,
     countBack: number,
   ): Promise<BarsResult> {
+    if (isSessionResolution(resolution)) {
+      return this.getSessionBars(symbol, resolution, fromMs, toMs, countBack);
+    }
     const src = resolutionSource(resolution);
-    if (!src) return { bars: [], noData: true };
+    if (!src || src.kind !== 'stored') return { bars: [], noData: true };
 
     const cached = this.cache.get(this.key(symbol, resolution)) ?? [];
     const servedFromCache = this.sliceCache(cached, fromMs, toMs, countBack);
     if (servedFromCache) return { bars: servedFromCache, noData: false };
 
-    // Over-fetch by the aggregation factor: 10 weekly bars need up to 70 daily
-    // ones, and asking for 10 would render a chart ten times too short.
+    // Over-fetch by the aggregation factor: 10 thirty-minute bars need 20 M15
+    // ones, and asking for 10 would render a chart half as long.
     const rows = Math.min(MAX_PAGE, Math.max(1, sourceBarsNeeded(resolution, countBack)));
 
     const res = await firstValueFrom(
@@ -157,6 +194,85 @@ export class CandleFeedService {
     // An empty window with bars present means the request reached past the
     // start of history — tell the library so it stops walking backwards.
     return { bars: windowed, noData: windowed.length === 0 };
+  }
+
+  /**
+   * `getBars` on the session grid: the same cache and the same "the last `countBack` bars at or
+   * before `toMs`", from `scripting/chart-bars`. A window ending now asks with no `to` — the engine
+   * then adds the period still forming; an earlier one asks for the bars whose open is before
+   * `toMs + 1` (the endpoint's `to` is exclusive, `toMs` here is not).
+   */
+  private async getSessionBars(
+    symbol: string,
+    resolution: TvResolution,
+    fromMs: number,
+    toMs: number,
+    countBack: number,
+  ): Promise<BarsResult> {
+    const live = toMs >= Date.now() - LIVE_EDGE_MS;
+    if (!live) {
+      const cached = this.cache.get(this.key(symbol, resolution)) ?? [];
+      const servedFromCache = this.sliceCache(cached, fromMs, toMs, countBack);
+      if (servedFromCache) return { bars: servedFromCache, noData: false };
+    }
+
+    const fetched = await this.fetchSession(
+      symbol,
+      resolution,
+      live ? null : toMs + 1,
+      Math.min(MAX_CHART_BARS, Math.max(1, Math.round(countBack))),
+    );
+    const bars = fetched.map(asBar);
+    if (bars.length === 0) return { bars: [], noData: true };
+
+    this.mergeIntoCache(symbol, resolution, bars);
+
+    // A live window is "up to now" on the engine's clock: a period it opened is not cut off for
+    // starting after a browser clock that runs behind.
+    const windowed = bars.filter((b) => b.time >= fromMs && (live || b.time <= toMs));
+    return { bars: windowed, noData: windowed.length === 0 };
+  }
+
+  /**
+   * The newest bars of a session-grid resolution — from the one before the bar opening at `sinceMs`
+   * (the newest the caller holds) to the period still forming — straight from the engine on every
+   * call: this is how the chart learns that a period closed and the next one opened, so nothing
+   * cached may answer it. Merged into the cache too. Null when the request fails or the resolution
+   * is not on the session grid.
+   */
+  async sessionTail(
+    symbol: string,
+    resolution: TvResolution,
+    sinceMs: number,
+  ): Promise<SessionBar[] | null> {
+    if (!isSessionResolution(resolution)) return null;
+    const bars = await this.fetchSession(
+      symbol,
+      resolution,
+      null,
+      tailCount(resolution, sinceMs, Date.now()),
+    ).catch(() => null);
+    if (bars?.length) this.mergeIntoCache(symbol, resolution, bars.map(asBar));
+    return bars;
+  }
+
+  /** One `scripting/chart-bars` request. `to` null: up to now, with the period still forming. */
+  private async fetchSession(
+    symbol: string,
+    resolution: TvResolution,
+    to: number | null,
+    count: number,
+  ): Promise<SessionBar[]> {
+    const res = await firstValueFrom(
+      this.scripting.chartBars({
+        symbol,
+        timeframe: resolution,
+        to,
+        count,
+        includeForming: to === null,
+      }),
+    );
+    return res.bars.map(toSessionBar);
   }
 
   /**
@@ -219,4 +335,19 @@ export function toBar(c: CandleDto): Bar {
     close: c.close,
     volume: c.volume,
   };
+}
+
+/** A `scripting/chart-bars` bar in the chart's shape; `closeTime` only when the engine sent a real one. */
+export function toSessionBar(b: ChartBarDto): SessionBar {
+  const bar: SessionBar = {
+    time: b.t,
+    open: b.o,
+    high: b.h,
+    low: b.l,
+    close: b.c,
+    volume: b.v,
+    forming: b.forming,
+  };
+  if (Number.isFinite(b.tc) && b.tc > b.t) bar.closeTime = b.tc;
+  return bar;
 }

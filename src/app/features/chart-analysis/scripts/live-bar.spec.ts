@@ -49,6 +49,45 @@ describe('formingLiveBar', () => {
   });
 });
 
+describe('formingLiveBar — the session grid (2h … 1M)', () => {
+  // The engine's 4h block 13:00–17:00 UTC (09:00–13:00 New York, EDT) and its 1D session for
+  // Tuesday 6 Oct, which opens Monday 21:00 UTC: neither is on a UTC-epoch bucket.
+  const block = { ...bar(Date.UTC(2026, 9, 6, 13), 1.1702), closeTime: Date.UTC(2026, 9, 6, 17) };
+  const tuesday = {
+    ...bar(Date.UTC(2026, 9, 5, 21), 1.1688),
+    closeTime: Date.UTC(2026, 9, 6, 21),
+  };
+  const EURUSD_D1 = { symbol: 'EURUSD', resolution: '1D' };
+
+  it('is the newest bar while now is inside its [open, close)', () => {
+    expect(
+      formingLiveBar([block], EURUSD_H4, EURUSD_H4, Date.UTC(2026, 9, 6, 15, 30)),
+    ).toMatchObject({ t: block.time, c: 1.1702 });
+    // 23:30 UTC Monday is already Tuesday's session.
+    expect(
+      formingLiveBar([tuesday], EURUSD_D1, EURUSD_D1, Date.UTC(2026, 9, 5, 23, 30)),
+    ).toMatchObject({ t: tuesday.time, c: 1.1688 });
+  });
+
+  it('is null from the close on, before the open, and for a bar without a close', () => {
+    expect(formingLiveBar([block], EURUSD_H4, EURUSD_H4, Date.UTC(2026, 9, 6, 17))).toBeNull();
+    expect(formingLiveBar([block], EURUSD_H4, EURUSD_H4, Date.UTC(2026, 9, 6, 12, 59))).toBeNull();
+    const noClose = { ...block, closeTime: undefined };
+    expect(
+      formingLiveBar([noClose], EURUSD_H4, EURUSD_H4, Date.UTC(2026, 9, 6, 15, 30)),
+    ).toBeNull();
+  });
+
+  it("keeps the provenance guard: another series' session bar is never sent", () => {
+    const now = Date.UTC(2026, 9, 6, 15, 30);
+    expect(formingLiveBar([block], EURUSD_H1, EURUSD_H4, now)).toBeNull();
+    expect(
+      formingLiveBar([block], { symbol: 'USDJPY', resolution: '240' }, EURUSD_H4, now),
+    ).toBeNull();
+    expect(formingLiveBar([block], null, EURUSD_H4, now)).toBeNull();
+  });
+});
+
 describe('sameSeries / runMatchesChart', () => {
   it('matches symbol and resolution', () => {
     expect(sameSeries(EURUSD_H1, { ...EURUSD_H1 })).toBe(true);

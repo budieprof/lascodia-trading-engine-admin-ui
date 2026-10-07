@@ -23,24 +23,18 @@ describe('formatCountdown', () => {
 describe('barCloseMs', () => {
   it('fixed widths close on the UTC grid', () => {
     expect(barCloseMs('1', at('2026-10-06T13:07:00Z'))).toBe(at('2026-10-06T13:08:00Z'));
+    expect(barCloseMs('30', at('2026-10-06T13:30:00Z'))).toBe(at('2026-10-06T14:00:00Z'));
     expect(barCloseMs('60', at('2026-10-06T13:00:00Z'))).toBe(at('2026-10-06T14:00:00Z'));
-    expect(barCloseMs('240', at('2026-10-06T12:00:00Z'))).toBe(at('2026-10-06T16:00:00Z'));
-    expect(barCloseMs('1D', at('2026-10-06T00:00:00Z'))).toBe(at('2026-10-07T00:00:00Z'));
-  });
-
-  it('weeks are Sunday-anchored like the candle feed; months end on the UTC calendar', () => {
-    // 2026-10-04 is a Sunday.
-    expect(barCloseMs('1W', at('2026-10-04T00:00:00Z'))).toBe(at('2026-10-11T00:00:00Z'));
-    expect(barCloseMs('1M', at('2026-10-01T00:00:00Z'))).toBe(at('2026-11-01T00:00:00Z'));
-    expect(barCloseMs('1M', at('2026-12-01T00:00:00Z'))).toBe(at('2027-01-01T00:00:00Z'));
-    expect(barCloseMs('1M', at('2028-02-01T00:00:00Z'))).toBe(at('2028-03-01T00:00:00Z'));
   });
 
   it('is DST-agnostic: the hour around a European DST change is still 60 minutes', () => {
     expect(barCloseMs('60', at('2026-10-25T00:00:00Z'))).toBe(at('2026-10-25T01:00:00Z'));
-    expect(barCloseMs('1D', at('2026-03-29T00:00:00Z'))! - at('2026-03-29T00:00:00Z')).toBe(
-      86_400_000,
-    );
+  });
+
+  it('computes no close on the session grid — those bars carry the engine’s own', () => {
+    for (const r of ['120', '240', '1D', '1W', '1M']) {
+      expect(barCloseMs(r, at('2026-10-05T21:00:00Z')), r).toBeNull();
+    }
   });
 
   it('unknown resolution has no close', () => {
@@ -54,7 +48,36 @@ describe('countdownText', () => {
 
   it('counts down to the forming bar’s close', () => {
     expect(countdownText('60', 'candles', open, now, now - 1_000)).toBe('26:51');
-    expect(countdownText('1W', 'candles', at('2026-10-04T00:00:00Z'), now, now)).toBe('4d 10:26');
+  });
+
+  it('on the session grid, counts to the close the engine sent for the bar', () => {
+    // The week of Sunday 4 Oct: opens 21:00 UTC (17:00 New York), closes Friday 9 Oct 21:00 UTC.
+    const weekOpen = at('2026-10-04T21:00:00Z');
+    const weekClose = at('2026-10-09T21:00:00Z');
+    expect(countdownText('1W', 'candles', weekOpen, now, now, weekClose)).toBe('3d 07:26');
+    // Tuesday's session opened Monday 21:00 UTC and closes Tuesday 21:00 UTC.
+    const day = at('2026-10-05T21:00:00Z');
+    expect(countdownText('1D', 'candles', day, now, now, at('2026-10-06T21:00:00Z'))).toBe(
+      '07:26:51',
+    );
+    // A 4h block of the session grid: 13:00–17:00 UTC.
+    expect(countdownText('240', 'candles', open, now, now, at('2026-10-06T17:00:00Z'))).toBe(
+      '03:26:51',
+    );
+  });
+
+  it('on the session grid, shows nothing past the close — the weekend gap — or before the open', () => {
+    const friClose = at('2026-10-09T21:00:00Z');
+    const saturday = at('2026-10-10T12:00:00Z');
+    expect(
+      countdownText('240', 'candles', at('2026-10-09T17:00:00Z'), saturday, saturday, friClose),
+    ).toBeNull();
+    expect(
+      countdownText('240', 'candles', at('2026-10-09T17:00:00Z'), friClose, friClose, friClose),
+    ).toBeNull();
+    expect(countdownText('240', 'candles', open, open - 1, open, open + 4 * 3_600_000)).toBeNull();
+    // Without the engine's close, a session-grid bar has no countdown at all.
+    expect(countdownText('240', 'candles', open, now, now)).toBeNull();
   });
 
   it('hides on non-time chart types, a closed market (newest bar not current) and a silent feed', () => {

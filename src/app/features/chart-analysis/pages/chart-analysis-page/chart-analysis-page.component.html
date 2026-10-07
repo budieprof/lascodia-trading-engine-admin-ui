@@ -840,7 +840,7 @@
                 <span class="change">{{ l.changePct | number: '1.2-2' }}%</span>
               }
             </div>
-            <div class="legend-time muted">{{ formatTime(l.time) }}</div>
+            <div class="legend-time muted">{{ l.dateLabel ?? formatTime(l.time) }}</div>
             @for (ind of l.indicators; track ind.uid) {
               <div class="legend-indicator">
                 <span class="muted">{{ ind.label }}</span>
@@ -1530,6 +1530,7 @@
         <app-strategy-tester-panel
           [result]="run.result"
           [values]="run.values"
+          [resolution]="run.resolution"
           [running]="scriptRunning()"
           (rerun)="rerunStrategy($event)"
           (tradeFocus)="focusTrade($event)"

@@ -335,22 +335,57 @@ describe('fx-fundamentals helpers', () => {
   });
 });
 
-describe('backfillDaily', () => {
-  it('fills the years before the first stored D1 bar from H1, so a prior seasonal year is whole', async () => {
-    const { backfillDaily } = await import('./daily-bars.service');
-    const H = 3_600_000;
-    const firstD1 = Date.UTC(2024, 9, 1);
-    const h1 = Array.from({ length: 24 * 300 }, (_, i) => {
-      const t = Date.UTC(2023, 11, 20) + i * H;
-      return { time: t, open: 1, high: 1.1, low: 0.9, close: 1 + i / 1e6, volume: 1 };
+describe('daily bars for the side panels (session days, stamped by trading day)', () => {
+  /** A 17:00 New York session as the engine sends it: opens the evening before, closes on its day. */
+  const session = (y: number, m: number, d: number, close: number, offsetH = 5) => ({
+    time: Date.UTC(y, m, d - 1, 17 + offsetH),
+    closeTime: Date.UTC(y, m, d, 17 + offsetH),
+    open: close,
+    high: close,
+    low: close,
+    close,
+    volume: 1,
+  });
+
+  it('stamps each session at 00:00 UTC of the day it closes on, keeping its values', async () => {
+    const { tradingDayBars } = await import('./daily-bars.service');
+    const [tue] = tradingDayBars([session(2026, 9, 6, 1.17, 4)]); // opens Mon 5 Oct 21:00 UTC
+    expect(tue).toEqual({
+      time: Date.UTC(2026, 9, 6),
+      open: 1.17,
+      high: 1.17,
+      low: 1.17,
+      close: 1.17,
+      volume: 1,
     });
-    const d1 = [{ time: firstD1, open: 1, high: 1, low: 1, close: 1, volume: 1 }];
-    const out = backfillDaily(d1, h1);
-    expect(out[0].time).toBe(Date.UTC(2023, 11, 20));
-    expect(out.every((b, i) => i === 0 || b.time > out[i - 1].time)).toBe(true);
-    expect(out.filter((b) => b.time >= firstD1)).toEqual(d1);
-    // 2024 now has January bars and a 2023 close to measure from.
-    expect(seasonalYears(out, 0)[0].points[0].day).toBeLessThan(5);
+  });
+
+  it('counts a 1 January session in its own year — it opens on 31 December', async () => {
+    const { tradingDayBars } = await import('./daily-bars.service');
+    const bars = tradingDayBars([
+      session(2025, 11, 30, 1.0),
+      session(2025, 11, 31, 1.1), // the year's last close
+      session(2026, 0, 1, 1.2), // opens 31 Dec 22:00 UTC
+      session(2026, 0, 2, 1.32),
+    ]);
+    const [y2026] = seasonalYears(bars, 0);
+    expect(y2026.year).toBe(2026);
+    expect(y2026.points[0]).toEqual({ day: 0, pct: expect.closeTo(((1.2 - 1.1) / 1.1) * 100, 10) });
+    // YTD measures from 31 December's close, not from the 1 January session that opened that evening.
+    const ytd = performanceTiles(bars).find((t) => t.period === 'YTD')!;
+    expect(ytd.fromTime).toBe(Date.UTC(2025, 11, 31));
+    expect(ytd.pct).toBeCloseTo(20, 10);
+  });
+
+  it('asks for enough sessions to reach 1 January, priorYears before this one', async () => {
+    const { dailyCountFor } = await import('./daily-bars.service');
+    const now = Date.UTC(2026, 9, 7, 12);
+    // 1 Jan 2024 less a week, to now: 1,013 calendar days — more than the trading days in it.
+    expect(dailyCountFor(2, now)).toBe(
+      Math.ceil((now - (Date.UTC(2024, 0, 1) - 7 * 86_400_000)) / 86_400_000) + 1,
+    );
+    expect(dailyCountFor(15, now)).toBeLessThanOrEqual(20_000);
+    expect(dailyCountFor(200, now)).toBe(20_000);
   });
 });
 

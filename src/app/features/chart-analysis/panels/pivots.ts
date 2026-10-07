@@ -11,9 +11,14 @@
  *   size of the error a close-based Woodie shows.
  * - DM picks its X by the previous period's close against its OPEN.
  *
+ * The periods themselves are the engine's (`scripting/chart-bars`): session days that roll at 17:00
+ * New York — where TradingView, and the FX market, end a day — Monday–Friday weeks and calendar
+ * months of trading days, each bar with its own open and close. Nothing here works out where a
+ * period starts or ends; years are the engine's months grouped by the year they close in.
+ *
  * Pure: no Angular, unit-tested directly.
  */
-import { monthStartMs } from '../datafeed/aggregate';
+import { tradingDayMs } from '../datafeed/session-bars';
 import type { Ohlc } from '../indicators/math';
 
 export type PivotPeriod = 'day' | 'week' | 'month' | 'year';
@@ -33,15 +38,21 @@ export type PivotRow = (typeof PIVOT_ROWS)[number];
 export type PivotLevels = Record<PivotRow, number | null>;
 
 export interface PeriodHloc {
-  /** Start of the period, UTC ms. */
+  /** The period's open, UTC ms. */
   start: number;
+  /** The period's exclusive close, UTC ms, when the engine sent one. */
+  closeTime?: number;
   open: number;
   high: number;
   low: number;
   close: number;
 }
 
-const DAY = 86_400_000;
+/** One period of the pivots' timeframe as the engine built it: a session day, a week, a month, a year. */
+export interface PeriodBar extends Ohlc {
+  /** The period's exclusive close (`scripting/chart-bars` `tc`). */
+  closeTime?: number;
+}
 
 /**
  * The pivot period for a chart resolution — TradingView's "Auto" rule: up to
@@ -55,92 +66,89 @@ export function pivotPeriodFor(resolution: string): PivotPeriod {
   return Number.isFinite(minutes) && minutes <= 15 ? 'day' : 'week';
 }
 
-const HOUR = 3_600_000;
-
-/** New York's UTC offset at `ms`, in ms (−4h in EDT, −5h in EST). */
-function newYorkOffsetMs(ms: number): number {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    hourCycle: 'h23',
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: 'numeric',
-  }).formatToParts(new Date(ms));
-  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
-  const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'));
-  return Math.round((asUtc - ms) / 60_000) * 60_000;
-}
-
 /**
- * Start of the FX session containing `ms`: sessions roll at 17:00 New York, which is where
- * TradingView ends an FX day (21:00 UTC in summer, 22:00 in winter). Checked against its EURUSD
- * page: Thursday 1 Oct's pivot used the 21:00 UTC close (1.12418), not the UTC-midnight one.
+ * The engine's months folded into years — the one period the engine has no timeframe for. A month
+ * belongs to the year it closes in (its trading days' year): January's bar opens on the evening of
+ * 31 December, and by its open it would land in the year before.
  */
-export function sessionStart(ms: number, weekly = false): number {
-  const off = newYorkOffsetMs(ms);
-  // Shift so a session boundary (17:00 NY) lands on midnight, then floor.
-  let day = Math.floor((ms + off - 17 * HOUR) / DAY) * DAY;
-  if (weekly) day -= new Date(day).getUTCDay() * DAY; // the week opens Sunday 17:00 NY
-  return day + 17 * HOUR - off;
-}
-
-/**
- * Start of the period containing `ms`, in UTC. Days and weeks are FX sessions (17:00 New York),
- * as TradingView's are; months and years are calendar ones.
- */
-export function periodStart(period: PivotPeriod, ms: number): number {
-  switch (period) {
-    case 'day':
-      return sessionStart(ms);
-    case 'week':
-      return sessionStart(ms, true);
-    case 'month':
-      return monthStartMs(ms);
-    case 'year':
-      return Date.UTC(new Date(ms).getUTCFullYear(), 0, 1);
-  }
-}
-
-/**
- * The completed period before the one containing `refMs`, folded from daily
- * bars, plus the open of the period containing `refMs` (Woodie needs it; null
- * when no daily bar of the current period has been stored yet).
- *
- * "The period containing `refMs`" is the period of the newest bar on screen, so
- * over a weekend the daily pivots are Thursday's — what TradingView shows for
- * Friday's session — and the monthly pivots in early October are September's.
- */
-export function pivotInputs(
-  daily: readonly Ohlc[],
-  period: PivotPeriod,
-  refMs: number,
-): { prev: PeriodHloc; currentOpen: number | null } | null {
-  const current = periodStart(period, refMs);
-  let prevStart: number | null = null;
-  for (const b of daily) {
-    const s = periodStart(period, b.time);
-    if (s < current && (prevStart === null || s > prevStart)) prevStart = s;
-  }
-  if (prevStart === null) return null;
-
-  let prev: PeriodHloc | null = null;
-  let currentOpen: number | null = null;
-  for (const b of daily) {
-    const s = periodStart(period, b.time);
-    if (s === prevStart) {
-      if (!prev) prev = { start: s, open: b.open, high: b.high, low: b.low, close: b.close };
-      else {
-        prev.high = Math.max(prev.high, b.high);
-        prev.low = Math.min(prev.low, b.low);
-        prev.close = b.close;
-      }
-    } else if (s === current && currentOpen === null) {
-      currentOpen = b.open;
+export function yearBars(months: readonly PeriodBar[]): PeriodBar[] {
+  const out: PeriodBar[] = [];
+  let year: number | null = null;
+  for (const m of months) {
+    const y = new Date(tradingDayMs(m)).getUTCFullYear();
+    const tail = out[out.length - 1];
+    if (tail && y === year) {
+      tail.high = Math.max(tail.high, m.high);
+      tail.low = Math.min(tail.low, m.low);
+      tail.close = m.close;
+      tail.volume += m.volume;
+      tail.closeTime = m.closeTime;
+    } else {
+      year = y;
+      out.push({ ...m });
     }
   }
-  return prev ? { prev, currentOpen } : null;
+  return out;
+}
+
+/** The engine's bars for the pivots of `period`: its days, weeks and months; years folded from the months. */
+export function pivotPeriodBars(
+  period: PivotPeriod,
+  bars: {
+    daily: readonly PeriodBar[];
+    weekly: readonly PeriodBar[];
+    monthly: readonly PeriodBar[];
+  },
+): readonly PeriodBar[] {
+  switch (period) {
+    case 'day':
+      return bars.daily;
+    case 'week':
+      return bars.weekly;
+    case 'month':
+      return bars.monthly;
+    case 'year':
+      return yearBars(bars.monthly);
+  }
+}
+
+/**
+ * The completed period before the one containing `refMs`, and the open of the one containing it
+ * (Woodie needs it; null when `refMs` is past the newest period's close — no bar of the current
+ * period yet).
+ *
+ * `periods` are the pivot period's own bars, ascending (`pivotPeriodBars`). "The period containing
+ * `refMs`" is the period of the newest bar on screen, so over a weekend the daily pivots are
+ * Thursday's — what TradingView shows for Friday's session — and the monthly pivots in early October
+ * are September's. The chart's bars and these are on the same grid, so a period opens with its
+ * first chart bar: `refMs` at a period's open is in that period.
+ */
+export function pivotInputs(
+  periods: readonly PeriodBar[],
+  refMs: number,
+): { prev: PeriodHloc; currentOpen: number | null } | null {
+  // The newest period opening at or before refMs.
+  let i = -1;
+  for (let k = periods.length - 1; k >= 0; k--) {
+    if (periods[k].time <= refMs) {
+      i = k;
+      break;
+    }
+  }
+  if (i < 0) return null;
+  const at = periods[i];
+  const containsRef = at.closeTime === undefined || refMs < at.closeTime;
+  const prevBar = containsRef ? periods[i - 1] : at;
+  if (!prevBar) return null;
+  const prev: PeriodHloc = {
+    start: prevBar.time,
+    open: prevBar.open,
+    high: prevBar.high,
+    low: prevBar.low,
+    close: prevBar.close,
+  };
+  if (prevBar.closeTime !== undefined) prev.closeTime = prevBar.closeTime;
+  return { prev, currentOpen: containsRef ? at.open : null };
 }
 
 /** All five methods' levels for one previous period. `currentOpen` null → Woodie falls back to the close. */
@@ -213,9 +221,19 @@ export function bracket(
   return { above, below };
 }
 
-/** Human label for the period the pivots came from, e.g. "September 2026", "week of 27 Sep". */
-export function periodLabel(period: PivotPeriod, start: number): string {
-  const d = new Date(start);
+/**
+ * Human label for the period the pivots came from, e.g. "Thu 1 Oct", "week of 27 Sep",
+ * "September 2026". Days, months and years are named by the trading day they close on — Thursday's
+ * session opens on Wednesday evening, September's on the last evening of August; a week by the date
+ * it opens (Sunday's evening session).
+ */
+export function periodLabel(
+  period: PivotPeriod,
+  p: Pick<PeriodHloc, 'start' | 'closeTime'>,
+): string {
+  const d = new Date(
+    period === 'week' ? p.start : tradingDayMs({ time: p.start, closeTime: p.closeTime }),
+  );
   switch (period) {
     case 'day':
       return d.toLocaleDateString('en-GB', {

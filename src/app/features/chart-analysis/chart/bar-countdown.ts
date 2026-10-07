@@ -1,8 +1,6 @@
-import { bucketStartFor, monthStartMs, weekStartMs } from '../datafeed/aggregate';
+import { bucketStartFor } from '../datafeed/aggregate';
 import { resolutionSource, timeframeMs, type TvResolution } from '../datafeed/resolution';
 import type { ChartStyle } from './chart-host.component';
-
-const DAY = 86_400_000;
 
 /** Chart types whose bars are built from price movement — no bar "closes" on the clock. */
 const NON_TIME_STYLES: ReadonlySet<ChartStyle> = new Set<ChartStyle>([
@@ -18,19 +16,15 @@ export function isTimeStyle(style: ChartStyle): boolean {
 }
 
 /**
- * Close time (exclusive end, UTC ms) of the bar opening at `openMs`, aligned exactly as the candle
- * feed buckets periods (`bucketStartFor`): fixed widths on the UTC epoch grid, weeks Sunday-
- * anchored, months on the UTC calendar. UTC throughout, so DST never moves a boundary. Null for a
- * resolution the feed does not know.
+ * Close time (exclusive end, UTC ms) of the bar opening at `openMs` on the STORED grid (1m … 1h),
+ * aligned exactly as the candle feed buckets periods (`bucketStartFor`): fixed widths on the UTC
+ * epoch grid, so DST never moves a boundary. Null for a resolution the feed does not know, and for
+ * the session grid (2h … 1M), where the engine sends each bar's close (`Bar.closeTime`) — weekends,
+ * DST and month lengths are its calendar, not arithmetic here.
  */
 export function barCloseMs(resolution: TvResolution, openMs: number): number | null {
   const src = resolutionSource(resolution);
-  if (!src) return null;
-  if (src.aggregate === 'week') return weekStartMs(openMs) + 7 * DAY;
-  if (src.aggregate === 'month') {
-    const d = new Date(monthStartMs(openMs));
-    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
-  }
+  if (!src || src.kind !== 'stored') return null;
   const width = timeframeMs(src.timeframe) * src.aggregate;
   return Math.floor(openMs / width) * width + width;
 }
@@ -57,6 +51,10 @@ export const STALE_FEED_MS = 3 * 60_000;
  * `nowMs` (market closed / weekend / history only), or a live feed silent for {@link STALE_FEED_MS}.
  * At the boundary the bar it belongs to is over, so it shows nothing until the next bar opens —
  * never a negative count.
+ *
+ * `lastBarCloseMs` is the newest bar's own close when the engine sent one (the session grid): the bar
+ * is current while `nowMs` is in [its open, that close), and the count runs to that close. Without
+ * one, the stored grid's buckets decide both.
  */
 export function countdownText(
   resolution: TvResolution,
@@ -64,12 +62,19 @@ export function countdownText(
   lastBarOpenMs: number | null,
   nowMs: number,
   lastLiveMs: number | null,
+  lastBarCloseMs: number | null = null,
 ): string | null {
   if (lastBarOpenMs === null || !isTimeStyle(style)) return null;
   if (lastLiveMs === null || nowMs - lastLiveMs > STALE_FEED_MS) return null;
-  const current = bucketStartFor(resolution, nowMs);
-  if (current === null || current !== lastBarOpenMs) return null;
-  const close = barCloseMs(resolution, lastBarOpenMs);
+  let close: number | null;
+  if (lastBarCloseMs !== null && Number.isFinite(lastBarCloseMs)) {
+    if (nowMs < lastBarOpenMs) return null;
+    close = lastBarCloseMs;
+  } else {
+    const current = bucketStartFor(resolution, nowMs);
+    if (current === null || current !== lastBarOpenMs) return null;
+    close = barCloseMs(resolution, lastBarOpenMs);
+  }
   if (close === null || close <= nowMs) return null;
   return formatCountdown(close - nowMs);
 }

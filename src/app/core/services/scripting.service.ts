@@ -12,6 +12,9 @@ import { ApiService, SUPPRESS_ERROR_TOAST } from '@core/api/api.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import type { ResponseData } from '@core/api/api.types';
 import type {
+  ChartBarDto,
+  ChartBarsRequest,
+  ChartBarsResult,
   ChartIndicatorScriptDto,
   CreateScriptLibraryRequest,
   ImportStrategyRequest,
@@ -219,6 +222,20 @@ export class ScriptingService {
     );
   }
 
+  /**
+   * `POST scripting/chart-bars` — the bars a run computes on, for the chart to draw: the engine's
+   * session grid (FX: 17:00 New York days), every bar with its own close, the period still forming
+   * last when asked. Rejects with {@link ScriptingApiError} on a refusal or a transport failure.
+   */
+  chartBars(req: ChartBarsRequest): Observable<ChartBarsResult> {
+    return this.api.post<ResponseData<ChartBarsResult>>('/scripting/chart-bars', req, SILENT).pipe(
+      map((res) => normaliseChartBars(envelopeData(res, 'The engine did not return chart bars.'))),
+      catchError((err) =>
+        throwError(() => toScriptingError(err, 'The chart bars could not be loaded.')),
+      ),
+    );
+  }
+
   // ── §7 Libraries ────────────────────────────────────────────────────────
 
   listLibraries(filter: ScriptLibraryFilter = {}): Observable<ScriptLibraryDto[]> {
@@ -416,6 +433,35 @@ function normaliseSeverity(s: unknown): ScriptDiagnosticSeverity {
     : v === 'information' || v === 'hint'
       ? 'info'
       : 'error';
+}
+
+const finiteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/**
+ * A `scripting/chart-bars` result the chart can draw as it is: bars with a non-finite time or price
+ * dropped (one NaN time makes the chart library reject the whole series), ascending by open, one
+ * per open (the later copy wins), a missing volume read as 0. `tc` is kept only when it is a real
+ * close after the open — the bars' consumers treat a bar without one as not current.
+ */
+export function normaliseChartBars(r: ChartBarsResult): ChartBarsResult {
+  const byOpen = new Map<number, ChartBarDto>();
+  for (const b of Array.isArray(r?.bars) ? r.bars : []) {
+    if (!b || ![b.t, b.o, b.h, b.l, b.c].every(finiteNumber)) continue;
+    byOpen.set(b.t, {
+      t: b.t,
+      tc: finiteNumber(b.tc) && b.tc > b.t ? b.tc : Number.NaN,
+      o: b.o,
+      h: b.h,
+      l: b.l,
+      c: b.c,
+      v: finiteNumber(b.v) ? b.v : 0,
+      forming: b.forming === true,
+    });
+  }
+  const bars = [...byOpen.values()].sort((a, b) => a.t - b.t);
+  // Only the newest bar can be the period still forming.
+  for (let i = 0; i < bars.length - 1; i++) bars[i].forming = false;
+  return { ...r, bars };
 }
 
 /**

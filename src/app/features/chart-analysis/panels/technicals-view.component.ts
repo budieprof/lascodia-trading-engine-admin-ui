@@ -12,7 +12,8 @@ import {
   untracked,
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
-import type { TvResolution } from '../datafeed/resolution';
+import { isSessionResolution, type TvResolution } from '../datafeed/resolution';
+import { tradingDateLabel } from '../chart/trading-date';
 import { RatingGaugeComponent } from './rating-gauge.component';
 import {
   PIVOT_METHODS,
@@ -21,6 +22,7 @@ import {
   periodLabel,
   pivotInputs,
   pivotLevels,
+  pivotPeriodBars,
   pivotPeriodFor,
   type PivotMethod,
   type PivotPeriod,
@@ -128,6 +130,19 @@ export class TechnicalsViewComponent implements OnInit {
 
   readonly frame = computed(() => this.data()?.frames[this.selected()] ?? null);
 
+  /** The tab's bars are the engine's session bars (2 hours and up), not its stored candles. */
+  readonly sessionGrid = computed(() => isSessionResolution(this.selected()));
+
+  /** The newest rated bar's trading date on 1D/1W/1M ("Tue 6 Oct 2026"); null where it prints a time. */
+  readonly lastBarDate = computed(() => {
+    const f = this.frame();
+    if (f?.lastTime == null) return null;
+    return tradingDateLabel(
+      { time: f.lastTime, closeTime: f.lastCloseTime ?? undefined },
+      this.selected(),
+    );
+  });
+
   readonly gauges = computed(() => {
     const r = this.frame()?.rating;
     if (!r) return [];
@@ -170,10 +185,9 @@ export class TechnicalsViewComponent implements OnInit {
     const f = this.frame();
     if (!d || f?.lastTime == null) return null;
     const period = pivotPeriodFor(this.selected());
-    // Day and week pivots fold H1 into 17:00 New York sessions; the engine's D1 rolls at UTC
-    // midnight, which is not where TradingView (or the FX market) closes a day.
-    const source = period === 'day' || period === 'week' ? d.hourly : d.daily;
-    const inputs = pivotInputs(source, period, f.lastTime);
+    // The engine's session days (17:00 New York, where TradingView and the FX market close a
+    // day), weeks and months — years folded from the months.
+    const inputs = pivotInputs(pivotPeriodBars(period, d), f.lastTime);
     if (!inputs) return null;
     const levels = pivotLevels(inputs.prev, inputs.currentOpen);
     const price = this.livePrice() ?? f.lastClose;
@@ -183,7 +197,7 @@ export class TechnicalsViewComponent implements OnInit {
     }
     return {
       periodName: PERIOD_NAMES[period],
-      from: periodLabel(period, inputs.prev.start),
+      from: periodLabel(period, inputs.prev),
       levels,
       brackets,
       price,

@@ -130,4 +130,9 @@ describe('lastCompleteBarTime', () => {
   it('is null with no history', () => {
     expect(lastCompleteBarTime([], '60')).toBeNull();
   });
+
+  it('is null on the session grid, whose forming bar the engine builds (nothing is folded from M1)', () => {
+    expect(lastCompleteBarTime([{ time: T0 } as FoldBar], '240')).toBeNull();
+    expect(lastCompleteBarTime([{ time: T0 } as FoldBar], '1D')).toBeNull();
+  });
 });

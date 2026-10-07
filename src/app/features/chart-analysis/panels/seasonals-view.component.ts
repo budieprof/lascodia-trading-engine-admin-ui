@@ -180,8 +180,8 @@ const CURRENCY_NAMES: Readonly<Record<string, string>> = {
         }
       </div>
       <p class="sv-foot">
-        Cumulative % change from each year's previous close, from the engine's candles (days before
-        its first daily bar are built from hourly bars).
+        Cumulative % change from each year's previous close, from the engine's daily sessions (days
+        roll at 17:00 New York, each counted on the date it closes).
         @if (showAverage()) {
           The dashed line averages the prior years shown.
         }

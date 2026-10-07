@@ -360,6 +360,53 @@ export interface ScriptRunResult {
   elapsedMs?: number;
 }
 
+// ── Chart bars on the session grid — POST scripting/chart-bars ────────────
+//
+// The bars a run computes on, for the chart to draw: built by the engine on the symbol's session
+// layout (FX: `1700-1700:23456` in America/New_York — days roll at 17:00 New York, weeks are
+// Monday–Friday sessions, DST moves the UTC open). The client never works out where one of these
+// periods starts or ends: every bar carries both.
+
+export interface ChartBarsRequest {
+  symbol: string;
+  /** Pine timeframe — `120`, `240`, `1D`, `1W`, `1M` (engine codes are accepted too). */
+  timeframe: string;
+  /** Bars whose OPEN is before this, epoch ms (paging back); null = up to now. */
+  to?: number | null;
+  /** The last `count` bars before `to`. Engine default 1500, max 20000. */
+  count?: number | null;
+  /**
+   * The last bar may be the period still forming (built by the engine from closed H1 and closed
+   * M1). Engine default: true when `to` is null.
+   */
+  includeForming?: boolean | null;
+}
+
+export interface ChartBarDto {
+  /** The period's open, epoch ms. */
+  t: number;
+  /** The period's exclusive close, epoch ms. */
+  tc: number;
+  o: number;
+  h: number;
+  l: number;
+  c: number;
+  v: number;
+  /** True only on a last bar that is the current period. */
+  forming: boolean;
+}
+
+export interface ChartBarsResult {
+  symbol: string;
+  timeframe: string;
+  /** The session the bars are laid out on, e.g. `1700-1700:23456`. */
+  session: string;
+  /** Its time zone, e.g. `America/New_York`. */
+  timeZone: string;
+  /** Ascending by `t`. */
+  bars: ChartBarDto[];
+}
+
 // ── §7 Libraries — scripting/libraries ────────────────────────────────────
 
 export type ScriptLibraryVisibility = 'Private' | 'Shared';
