@@ -23,6 +23,7 @@ export class BarCountdownPrimitive implements ISeriesPrimitive<Time> {
   private price: number | null = null;
   private text: string | null = null;
   private color = '#2962ff';
+  private textColor = '#ffffff';
   private labelHeight = 18;
 
   private readonly view: ISeriesPrimitiveAxisView = {
@@ -32,7 +33,7 @@ export class BarCountdownPrimitive implements ISeriesPrimitive<Time> {
       return y === null ? -1 : y + this.labelHeight;
     },
     text: () => this.text ?? '',
-    textColor: () => '#ffffff',
+    textColor: () => this.textColor,
     backColor: () => this.color,
     visible: () => this.text !== null && this.price !== null,
     tickVisible: () => false,
@@ -54,19 +55,29 @@ export class BarCountdownPrimitive implements ISeriesPrimitive<Time> {
 
   /**
    * The label's state. `labelHeight` is the price-axis label height at the chart's font size, so
-   * the countdown sits flush under the built-in last-value label.
+   * the countdown sits flush under the built-in last-value label. `color` must be opaque: the
+   * library paints a primitive's label exactly as given, so a translucent one let the axis prices
+   * show through it (`opaqueOver`, axis-label-color.ts).
    */
-  set(text: string | null, price: number | null, color: string, labelHeight: number): void {
+  set(
+    text: string | null,
+    price: number | null,
+    color: string,
+    textColor: string,
+    labelHeight: number,
+  ): void {
     if (
       text === this.text &&
       price === this.price &&
       color === this.color &&
+      textColor === this.textColor &&
       labelHeight === this.labelHeight
     )
       return;
     this.text = text;
     this.price = price;
     this.color = color;
+    this.textColor = textColor;
     this.labelHeight = labelHeight;
     this.requestUpdate?.();
   }

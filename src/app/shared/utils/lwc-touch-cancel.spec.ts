@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  APP_INITIALIZER,
+  DOCUMENT,
+  Injector,
+  createEnvironmentInjector,
+  runInInjectionContext,
+  type EnvironmentInjector,
+} from '@angular/core';
 
-import { endChartTouchesOnCancel } from './lwc-touch-cancel';
+import { endChartTouchesOnCancel, provideChartTouchCancel } from './lwc-touch-cancel';
 
 // jsdom has TouchEvent but no Touch constructor: plain touch-likes stand in for Touch objects.
 const touchOf = (identifier: number, target: EventTarget): Touch =>
@@ -161,5 +169,51 @@ describe('a cancelled chart touch must not swallow the next tap', () => {
     canvas.dispatchEvent(touchEvent('touchcancel', [touchOf(4, canvas)]));
 
     expect(ends).toBe(0);
+  });
+});
+
+describe('the shim is installed once', () => {
+  const endsPerCancel = (canvas: Element): number => {
+    let ends = 0;
+    const count = (): void => void ends++;
+    document.documentElement.addEventListener('touchend', count);
+    canvas.dispatchEvent(touchEvent('touchcancel', [touchOf(9, canvas)]));
+    document.documentElement.removeEventListener('touchend', count);
+    return ends;
+  };
+
+  it('a second install ends a cancelled chart touch once, not twice', () => {
+    const { canvas } = page();
+    const first = endChartTouchesOnCancel(document);
+    const second = endChartTouchesOnCancel(document);
+
+    expect(endsPerCancel(canvas)).toBe(1);
+
+    // It stays for as long as anyone installed it, and goes with the last of them.
+    second();
+    second();
+    expect(endsPerCancel(canvas)).toBe(1);
+    first();
+    expect(endsPerCancel(canvas)).toBe(0);
+  });
+
+  it('the app installs it at bootstrap, for its whole life', () => {
+    const { canvas } = page();
+    const root = Injector.create({
+      providers: [{ provide: DOCUMENT, useValue: document }],
+    }) as EnvironmentInjector;
+    const app = createEnvironmentInjector([provideChartTouchCancel()], root);
+    expect(endsPerCancel(canvas)).toBe(0); // nothing until the initializers run
+
+    for (const init of app.get(APP_INITIALIZER)) runInInjectionContext(app, init);
+    expect(endsPerCancel(canvas)).toBe(1);
+
+    // A chart page installing it as well (as the chart workstation used to) adds no second end.
+    const page2 = endChartTouchesOnCancel(document);
+    expect(endsPerCancel(canvas)).toBe(1);
+    page2();
+
+    app.destroy();
+    expect(endsPerCancel(canvas)).toBe(0);
   });
 });

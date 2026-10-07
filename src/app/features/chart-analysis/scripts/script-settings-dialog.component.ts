@@ -270,6 +270,16 @@ export const SCRIPT_SETTINGS_APPLY_MS = 200;
         padding: 0 12px;
       }
     }
+    /* A finger needs ~40px: Ok, Cancel, Defaults and the Defaults menu are sized for a mouse (34px
+       buttons, ~35px items). The chart page gives its own controls the same room on touch. */
+    @media (pointer: coarse) {
+      .sd-btn {
+        height: 40px;
+      }
+      .sd-menu button {
+        min-height: 40px;
+      }
+    }
   `,
 })
 export class ScriptSettingsDialogComponent implements OnDestroy {

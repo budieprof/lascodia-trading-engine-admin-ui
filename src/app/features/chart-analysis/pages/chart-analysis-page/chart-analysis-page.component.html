@@ -130,8 +130,9 @@
       class="tb-btn tb-text"
       (click)="openStudiesDialog()"
       data-testid="open-studies"
+      aria-label="Indicators"
     >
-      <app-chart-icon name="indicators" [size]="28" /> Indicators
+      <app-chart-icon name="indicators" [size]="28" /><span class="tb-label">Indicators</span>
     </button>
     @if (indicatorMenuOpen()) {
       <app-indicators-dialog
@@ -318,7 +319,7 @@
         [class.open]="openMenu() === 'alert'"
         title="Create price alert"
       >
-        <app-chart-icon name="alert" [size]="28" /> Alert
+        <app-chart-icon name="alert" [size]="28" /><span class="tb-label">Alert</span>
       </button>
       @if (openMenu() === 'alert') {
         <div class="tb-menu tb-alert-menu" (click)="$event.stopPropagation()">
@@ -351,14 +352,15 @@
       (click)="replayActive() ? exitReplay() : startReplay()"
       title="Bar replay"
     >
-      <app-chart-icon name="replay" [size]="28" /> Replay
+      <app-chart-icon name="replay" [size]="28" /><span class="tb-label">Replay</span>
     </button>
 
-    <div class="tb-sep"></div>
+    <!-- tb-wide: moved into the ⋯ menu on a narrow toolbar. -->
+    <div class="tb-sep tb-wide"></div>
 
     <button
       type="button"
-      class="tb-btn"
+      class="tb-btn tb-wide"
       (click)="drawings.undo()"
       [disabled]="!drawings.canUndo()"
       title="Undo (⌘Z)"
@@ -367,17 +369,17 @@
     </button>
     <button
       type="button"
-      class="tb-btn"
+      class="tb-btn tb-wide"
       (click)="drawings.redo()"
       [disabled]="!drawings.canRedo()"
       title="Redo (⇧⌘Z)"
     >
       <app-chart-icon name="redo" [size]="28" />
     </button>
-    <button type="button" class="tb-btn" (click)="zoomChart(0.7)" title="Zoom in">
+    <button type="button" class="tb-btn tb-wide" (click)="zoomChart(0.7)" title="Zoom in">
       <app-chart-icon name="zoom-in" [size]="28" />
     </button>
-    <button type="button" class="tb-btn" (click)="zoomChart(1 / 0.7)" title="Zoom out">
+    <button type="button" class="tb-btn tb-wide" (click)="zoomChart(1 / 0.7)" title="Zoom out">
       <app-chart-icon name="zoom-out" [size]="28" />
     </button>
 
@@ -529,16 +531,90 @@
 
     <button
       type="button"
-      class="tb-btn"
+      class="tb-btn tb-wide"
       (click)="toggleFullscreen()"
       [class.active]="isFullscreen()"
       title="Fullscreen"
     >
       <app-chart-icon name="fullscreen" [size]="28" />
     </button>
-    <button type="button" class="tb-btn" (click)="takeSnapshot()" title="Take a snapshot (PNG)">
+    <button
+      type="button"
+      class="tb-btn tb-wide"
+      (click)="takeSnapshot()"
+      title="Take a snapshot (PNG)"
+    >
       <app-chart-icon name="camera" [size]="28" />
     </button>
+    <!-- A narrow toolbar's ⋯ menu: the tb-wide buttons, as TradingView's narrow layout has them. -->
+    <div class="tb-menu-anchor tb-more-anchor">
+      <button
+        type="button"
+        class="tb-btn tb-more"
+        (click)="toggleMenu('more', $event)"
+        [class.open]="openMenu() === 'more'"
+        title="More"
+        aria-haspopup="menu"
+        [attr.aria-expanded]="openMenu() === 'more'"
+      >
+        <app-chart-icon name="more" [size]="28" />
+      </button>
+      @if (openMenu() === 'more') {
+        <div class="tb-menu tb-right" role="menu" (click)="$event.stopPropagation()">
+          <button
+            type="button"
+            role="menuitem"
+            class="tb-menu-item"
+            (click)="drawings.undo(); openMenu.set(null)"
+            [disabled]="!drawings.canUndo()"
+          >
+            <app-chart-icon name="undo" [size]="28" /> Undo
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            class="tb-menu-item"
+            (click)="drawings.redo(); openMenu.set(null)"
+            [disabled]="!drawings.canRedo()"
+          >
+            <app-chart-icon name="redo" [size]="28" /> Redo
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            class="tb-menu-item"
+            (click)="zoomChart(0.7); openMenu.set(null)"
+          >
+            <app-chart-icon name="zoom-in" [size]="28" /> Zoom in
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            class="tb-menu-item"
+            (click)="zoomChart(1 / 0.7); openMenu.set(null)"
+          >
+            <app-chart-icon name="zoom-out" [size]="28" /> Zoom out
+          </button>
+          <div class="tb-menu-sep"></div>
+          <button
+            type="button"
+            role="menuitem"
+            class="tb-menu-item"
+            (click)="toggleFullscreen(); openMenu.set(null)"
+          >
+            <app-chart-icon name="fullscreen" [size]="28" /> Fullscreen
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            class="tb-menu-item"
+            (click)="takeSnapshot(); openMenu.set(null)"
+          >
+            <app-chart-icon name="camera" [size]="28" /> Take a snapshot
+          </button>
+        </div>
+      }
+    </div>
   </header>
 
   <div class="chart-body" [style.--dock-width.px]="dockWidth()">
@@ -1269,96 +1345,26 @@
     }
   </div>
 
-  <footer class="bottom-bar">
-    <div class="bb-ranges" role="group" aria-label="Date range">
-      @for (r of rangePresets; track r.id) {
-        <button type="button" class="bb-btn" (click)="applyRangePreset(r.id)" [title]="r.title">
-          {{ r.id }}
-        </button>
-      }
-    </div>
-    <div class="bb-sep"></div>
-    <label class="bb-btn bb-goto" title="Go to date">
-      <app-chart-icon name="goto-date" [size]="22" />
-      <input type="date" (change)="goToDate($any($event.target).value)" aria-label="Go to date" />
-    </label>
-    <div class="bb-sep"></div>
-    <button
-      type="button"
-      class="bb-btn bb-tab"
-      [class.active]="dockTab() === 'editor'"
-      (click)="toggleEditor()"
-    >
-      Pine Editor
-    </button>
-    <button
-      type="button"
-      class="bb-btn bb-tab"
-      [class.active]="dockTab() === 'tester'"
-      (click)="toggleTester()"
-      [title]="strategyRun() ? 'Strategy Tester' : 'Add a strategy to the chart to test it'"
-    >
-      Strategy Tester
-    </button>
-    <span class="spacer"></span>
-    <span class="bb-status muted">{{ bars().length }} bars</span>
-    <div class="tb-menu-anchor">
-      <button
-        type="button"
-        class="bb-btn bb-clock"
-        (click)="toggleMenu('tz', $event)"
-        title="Timezone"
-      >
-        {{ clock() }} {{ timezoneShort() }}
-      </button>
-      @if (openMenu() === 'tz') {
-        <div
-          class="tb-menu tb-tz-menu tb-up tb-right"
-          role="menu"
-          (click)="$event.stopPropagation()"
-        >
-          @for (tz of timezones; track tz.id) {
-            <button
-              type="button"
-              class="tb-menu-item"
-              [class.selected]="timezone() === tz.id"
-              (click)="timezone.set(tz.id); openMenu.set(null)"
-            >
-              {{ tz.label }}
-            </button>
-          }
-        </div>
-      }
-    </div>
-    <div class="bb-sep"></div>
-    <button
-      type="button"
-      class="bb-btn"
-      [class.on]="scaleMode() === 'percent'"
-      (click)="scaleMode.set(scaleMode() === 'percent' ? 'normal' : 'percent')"
-      title="Percentage scale"
-    >
-      %
-    </button>
-    <button
-      type="button"
-      class="bb-btn"
-      [class.on]="scaleMode() === 'log'"
-      (click)="scaleMode.set(scaleMode() === 'log' ? 'normal' : 'log')"
-      title="Logarithmic scale"
-    >
-      log
-    </button>
-    <button
-      type="button"
-      class="bb-btn"
-      [class.on]="scaleMode() === 'normal'"
-      (click)="autoScale()"
-      title="Auto (fits data to screen)"
-    >
-      auto
-    </button>
-  </footer>
+  <app-chart-bottom-bar
+    [presets]="rangePresets"
+    [barCount]="bars().length"
+    [clock]="clock()"
+    [zone]="timezoneShort()"
+    [timezone]="timezone()"
+    [timezones]="timezones"
+    [scaleMode]="scaleMode()"
+    [dockTab]="dockTab()"
+    [hasStrategy]="!!strategyRun()"
+    [menu]="openMenu()"
+    (range)="applyRangePreset($event); openMenu.set(null)"
+    (goToDate)="goToDate($event)"
+    (editor)="toggleEditor()"
+    (tester)="toggleTester()"
+    (menuToggle)="toggleMenu($event.menu, $event.event)"
+    (timezoneChange)="timezone.set($event); openMenu.set(null)"
+    (scaleModeChange)="scaleMode.set($event)"
+    (autoScale)="autoScale()"
+  />
 
   @if (replayActive()) {
     <div class="replay-bar">

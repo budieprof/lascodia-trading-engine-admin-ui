@@ -19,6 +19,7 @@ import { RUNTIME_CONFIG, RuntimeConfig } from '@core/config/runtime-config';
 import { GlobalErrorHandler } from '@core/errors/global-error-handler';
 import { sentryProviders } from '@core/observability/sentry';
 import { webVitalsProviders } from '@core/observability/web-vitals';
+import { provideChartTouchCancel } from '@shared/utils/lwc-touch-cancel';
 import { lascodiaTheme, lascodiaDarkTheme } from '../styles/echarts-theme';
 
 // Register both themes at bootstrap so ChartCardComponent can swap between them
@@ -99,6 +100,9 @@ export function buildAppConfig(runtimeConfig: RuntimeConfig): ApplicationConfig 
       ),
       provideAnimations(),
       provideEchartsCore({ echarts: themedEcharts }),
+      // Once for the app: a touch the browser cancels on any Lightweight Charts chart must not
+      // swallow the next tap, on whatever page the chart is.
+      provideChartTouchCancel(),
       { provide: ErrorHandler, useClass: GlobalErrorHandler },
       ...sentryProviders(),
       ...webVitalsProviders(),

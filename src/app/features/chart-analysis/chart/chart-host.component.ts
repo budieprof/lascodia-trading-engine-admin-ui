@@ -16,6 +16,7 @@ import {
 import { ServerClock } from '@core/time/server-clock';
 import { BarCountdownPrimitive, axisLabelHeight } from './bar-countdown-primitive';
 import { countdownText } from './bar-countdown';
+import { labelTextColor, lastValueLabelColor, opaqueOver } from './axis-label-color';
 import {
   AreaSeries,
   BarSeries,
@@ -27,6 +28,7 @@ import {
   LineSeries,
   LineStyle,
   LineType,
+  MismatchDirection,
   createChartEx,
   createSeriesMarkers,
   type CandlestickData,
@@ -667,8 +669,36 @@ export class ChartHostComponent implements OnDestroy {
     const scripted =
       this.priceStyle === 'hollow' ? null : (this.barColors?.[this.plotted.length - 1] ?? null);
     const up = (shown?.close ?? 0) >= (shown?.open ?? 0);
-    const color = lineLike ? p.line : (scripted ?? (up ? p.up : p.down));
-    this.countdown.set(text, shown ? shown.close : null, color, axisLabelHeight(12));
+    // A faded bar's colour as it shows over the canvas: the label is opaque, as the one above it.
+    const color = opaqueOver(lineLike ? p.line : (scripted ?? (up ? p.up : p.down)), p.background);
+    const price = shown ? shown.close : null;
+    this.countdown.set(text, price, color, labelTextColor(color), axisLabelHeight(12));
+  }
+
+  /** The `priceLineColor` the price series was last given ('' = the library's own colouring). */
+  private lastValueColor = '';
+
+  /**
+   * The series' own last-value label is the colour of the bar it labels — the last one on screen,
+   * as the library picks it (`lastValueData`: the visible range's right edge, nearest bar to its
+   * left) — and the library drops that colour's alpha: a script's faded bar got a full-strength
+   * label. A translucent colour is laid over the canvas instead, through `priceLineColor` (the
+   * label's colour, and the price line's); an opaque one, or none, leaves the library to it.
+   * After every new series, a change of the scripts' colours, and every pan or zoom.
+   */
+  private syncLastValueLabel(): void {
+    const series = this.price;
+    const range = this.chart?.timeScale().getVisibleLogicalRange();
+    if (!series || !range) return;
+    const bar = series.dataByIndex(Math.ceil(range.to), MismatchDirection.NearestLeft);
+    const barColor = bar && 'color' in bar ? (bar.color as string | undefined) : undefined;
+    const color = lastValueLabelColor(
+      barColor,
+      this.palette(this.theme.theme() === 'dark').background,
+    );
+    if (color === this.lastValueColor) return;
+    this.lastValueColor = color;
+    series.applyOptions({ priceLineColor: color });
   }
   private computedCache = new Map<string, Record<string, Array<number | null>>>();
   private readonly overlayRenderer = new OverlayRenderer(
@@ -1308,6 +1338,8 @@ export class ChartHostComponent implements OnDestroy {
       this.scheduleVisibleProfiles();
       this.scheduleViewChanged();
       this.scheduleMarginSync();
+      // The last-value label moves to the last bar on screen, and takes that bar's colour.
+      this.syncLastValueLabel();
     });
     // Pane separators are dragged with the pointer; heights have no change event of their own.
     el.addEventListener('pointerup', () => this.scheduleViewChanged());
@@ -1599,6 +1631,8 @@ export class ChartHostComponent implements OnDestroy {
       this.price.attachPrimitive(this.patternRenderer);
       this.price.attachPrimitive(this.countdown);
       this.tickCountdown();
+      this.lastValueColor = ''; // a new series starts on the library's own colouring
+      this.syncLastValueLabel();
       // The series was replaced (style change, or new bars), and every primitive hanging off
       // the old one went with it: profiles are re-made by the indicators effect, Pine runs here.
       this.profileRenderers.clear();
@@ -1928,6 +1962,7 @@ export class ChartHostComponent implements OnDestroy {
     // Same bars, same times: the view and every primitive on the series stay as they are.
     this.price.setData(rows as CandlestickData<Time>[]);
     this.tickCountdown(); // the last bar's colour may have changed with them
+    this.syncLastValueLabel();
   }
 
   /**
