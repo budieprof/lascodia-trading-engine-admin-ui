@@ -1828,6 +1828,9 @@ $strip-width: 46px;
 // and the Pine Editor tab, so tapping the tab opened the date picker. Size it to the icon AND clip it.
 .bb-goto {
   position: relative;
+  // Clipping drops a flex item's content-sized minimum: without this a crowded bar squeezed the
+  // label to its padding and hid the icon.
+  flex: none;
   padding: 0 4px;
   overflow: hidden;
 
