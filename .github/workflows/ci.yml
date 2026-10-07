@@ -18,9 +18,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Node comes from .nvmrc. Angular 22 refuses to build on Node 20 (it needs ^22.22.3 or
+      # ^24.15.0) while Vitest still runs there, so a Node 20 pin passed the tests and failed
+      # every production build.
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
           cache: npm
 
       - name: Install dependencies
@@ -79,7 +82,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
           cache: npm
 
       - name: Install dependencies
