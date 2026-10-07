@@ -126,6 +126,18 @@ import { FooterVersionPillComponent } from './footer-version-pill/footer-version
         outline: none;
       }
 
+      /* A page that fills the screen (the chart workstation) sizes itself height: 100% of
+         .content — which also holds the breadcrumbs. In block flow that 100% starts below
+         them, so the page ran past .content by their height less the bottom padding (12px,
+         20px under 768px) and under the footer pill, which comes later in the tree and so
+         paints and hit-tests on top: taps on the lower part of the chart's bottom bar, and
+         under 768px on its middle, landed on the pill and did nothing. As a column flexbox
+         .content gives such a page what the breadcrumbs leave. Other pages are untouched. */
+      .content:has(> .fill-height) {
+        display: flex;
+        flex-direction: column;
+      }
+
       .mobile-scrim {
         display: none;
         position: fixed;

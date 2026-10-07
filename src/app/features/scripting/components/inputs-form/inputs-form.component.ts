@@ -365,6 +365,12 @@ const OPTION_KINDS = new Set(['int', 'float', 'string', 'enum', 'source', 'timef
         gap: 8px;
         cursor: pointer;
       }
+      /* A finger needs ~40px: on a touch screen the whole row is the checkbox's target. */
+      @media (pointer: coarse) {
+        .in-check {
+          min-height: 40px;
+        }
+      }
       .in-textarea {
         height: auto;
         padding: 6px 8px;
