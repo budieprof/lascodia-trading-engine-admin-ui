@@ -68,14 +68,17 @@ describe('sameSeries / runMatchesChart', () => {
   });
 });
 
+/** Quiet re-runs the scheduler started; `done()` settles one. */
+type Started = { key: string; ticket: number; done: () => void };
+
 describe('LiveRerunScheduler', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
   function make() {
-    const runs: { key: string; done: () => void }[] = [];
-    const s = new LiveRerunScheduler(
-      (key, done) => runs.push({ key, done }),
+    const runs: Started[] = [];
+    const s: LiveRerunScheduler = new LiveRerunScheduler(
+      (key, ticket) => runs.push({ key, ticket, done: () => s.settle(key, ticket) }),
       2_000,
       () => Date.now(),
     );
@@ -125,6 +128,112 @@ describe('LiveRerunScheduler', () => {
     vi.advanceTimersByTime(5_000);
     expect(runs.length).toBe(2);
   });
+
+  it('settling twice, or settling a superseded run, frees nothing', () => {
+    const { s, runs } = make();
+    s.request('a');
+    const first = runs[0];
+    first.done();
+    first.done();
+    s.request('a'); // spaced: due in 2 s
+    vi.advanceTimersByTime(2_000);
+    expect(runs.length).toBe(2);
+    first.done(); // a stale settle must not free the run now in flight
+    s.request('a');
+    vi.advanceTimersByTime(10_000);
+    expect(runs.length).toBe(2);
+  });
+});
+
+describe('LiveRerunScheduler — explicit runs and the newest result', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  function make() {
+    let t = 0;
+    const runs: Started[] = [];
+    const s: LiveRerunScheduler = new LiveRerunScheduler(
+      (key, ticket) => runs.push({ key, ticket, done: () => s.settle(key, ticket) }),
+      2_000,
+      () => t,
+    );
+    const advance = (ms: number) => {
+      t += ms;
+      vi.advanceTimersByTime(ms);
+    };
+    return { s, runs, advance };
+  }
+
+  it("an update supersedes a slow re-run of the old source in flight (the editor's race)", () => {
+    const { s, runs, advance } = make();
+    s.request('editor:current'); // a 4 s re-run of the OLD source starts
+    const stale = runs[0];
+    advance(600);
+    const update = s.begin('editor:current'); // "Update on chart"
+    expect(s.isCurrent('editor:current', stale.ticket)).toBe(false);
+    expect(s.isCurrent('editor:current', update)).toBe(true);
+    advance(150);
+    s.settle('editor:current', update); // the update lands first and is drawn
+    advance(3_250);
+    // The old re-run lands last: not current, so it is dropped, and settling it changes nothing.
+    expect(s.isCurrent('editor:current', stale.ticket)).toBe(false);
+    stale.done();
+    expect(runs.length).toBe(1);
+  });
+
+  it('quiet re-runs wait for an explicit run in flight, then follow it spaced', () => {
+    const { s, runs, advance } = make();
+    const t = s.begin('a');
+    s.request('a'); // a tick, the minute timer, a theme switch…
+    s.request('a');
+    advance(5_000);
+    expect(runs.length).toBe(0); // never beside the explicit run
+    s.settle('a', t); // a 5 s round trip: the next run may start 20 s after it started
+    expect(runs.length).toBe(0);
+    advance(14_999);
+    expect(runs.length).toBe(0);
+    advance(1);
+    expect(runs.length).toBe(1);
+    expect(s.isCurrent('a', runs[0].ticket)).toBe(true);
+  });
+
+  it('a timer that comes due during an explicit run waits for it', () => {
+    const { s, runs, advance } = make();
+    s.request('a');
+    runs[0].done();
+    s.request('a'); // spaced: due at 2 s
+    advance(1_000);
+    const t = s.begin('a');
+    advance(2_000);
+    expect(runs.length).toBe(1);
+    s.settle('a', t); // started at 1 s, took 2 s: next start no sooner than 9 s (now: 3 s)
+    advance(5_999);
+    expect(runs.length).toBe(1);
+    advance(1);
+    expect(runs.length).toBe(2);
+  });
+
+  it('only the newest of two explicit runs is current', () => {
+    const { s } = make();
+    const first = s.begin('a');
+    const second = s.begin('a');
+    expect(s.isCurrent('a', first)).toBe(false);
+    expect(s.isCurrent('a', second)).toBe(true);
+    s.settle('a', first);
+    expect(s.isCurrent('a', second)).toBe(true);
+  });
+
+  it('cancel makes every run of the key stale (removed script, replaced layout)', () => {
+    const { s, runs } = make();
+    s.request('a');
+    const t = s.begin('b');
+    s.cancelAll();
+    expect(s.isCurrent('a', runs[0].ticket)).toBe(false);
+    expect(s.isCurrent('b', t)).toBe(false);
+    // The key starts afresh.
+    s.request('a');
+    expect(runs.length).toBe(2);
+  });
 });
 
 describe('LiveRerunScheduler — slow runs and hidden tabs', () => {
@@ -135,9 +244,9 @@ describe('LiveRerunScheduler — slow runs and hidden tabs', () => {
   function make() {
     let t = 0;
     let hidden = false;
-    const runs: { key: string; done: () => void }[] = [];
-    const s = new LiveRerunScheduler(
-      (key, done) => runs.push({ key, done }),
+    const runs: Started[] = [];
+    const s: LiveRerunScheduler = new LiveRerunScheduler(
+      (key, ticket) => runs.push({ key, ticket, done: () => s.settle(key, ticket) }),
       2_000,
       () => t,
       () => hidden,
