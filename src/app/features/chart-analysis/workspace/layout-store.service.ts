@@ -132,6 +132,20 @@ export class ChartLayoutStore {
 }
 
 /**
+ * The browser's own time zone, as a saved choice: resolved on each machine when the chart draws
+ * ({@link resolveTimezone}), so a layout opened elsewhere shows that browser's clock rather than the
+ * zone of whichever machine saved it.
+ */
+export const BROWSER_TIMEZONE = 'browser';
+
+/**
+ * The broker server's clock. The candle-source broker is an EU-DST EET server — UTC+2 in winter and
+ * UTC+3 in summer, switching on the EU dates (engine candle repair of 2026-09-30) — which is the clock
+ * MT5 prints its bars and deals in. `Europe/Athens` keeps exactly those rules.
+ */
+export const BROKER_SERVER_TIMEZONE = 'Europe/Athens';
+
+/**
  * Time zones offered for the time axis.
  *
  * Deliberately short and trading-relevant rather than the full IANA list: the
@@ -140,6 +154,8 @@ export class ChartLayoutStore {
  */
 export const CHART_TIMEZONES: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'UTC', label: 'UTC' },
+  { id: BROWSER_TIMEZONE, label: 'Browser local' },
+  { id: BROKER_SERVER_TIMEZONE, label: 'Broker server (EET)' },
   { id: 'Europe/London', label: 'London' },
   { id: 'Europe/Berlin', label: 'Frankfurt' },
   { id: 'America/New_York', label: 'New York' },
@@ -148,6 +164,19 @@ export const CHART_TIMEZONES: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'Asia/Singapore', label: 'Singapore' },
   { id: 'Australia/Sydney', label: 'Sydney' },
 ];
+
+/**
+ * The IANA zone a chart time-zone choice stands for: {@link BROWSER_TIMEZONE} is this browser's zone
+ * (UTC when the browser will not say); every other id is a zone already.
+ */
+export function resolveTimezone(id: string): string {
+  if (id !== BROWSER_TIMEZONE) return id;
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
 
 /**
  * One formatter per time zone. Building an `Intl.DateTimeFormat` costs about fifteen times as much as
@@ -174,14 +203,49 @@ function zoneFormatter(timezone: string): Intl.DateTimeFormat {
   return formatter;
 }
 
+const HOUR_MS = 3_600_000;
+/** UTC hours a zone's cache remembers before it starts again (~5.7 years of hours). */
+const OFFSET_CACHE_LIMIT = 50_000;
+/** Each zone's offset per UTC hour; NaN marks an hour in which the zone changes its clock. */
+const offsetsByHour = new Map<string, Map<number, number>>();
+
 /**
- * Offset in minutes between UTC and `timezone` at `atMs`.
+ * Offset in minutes between UTC and `timezone` at `atMs` ({@link BROWSER_TIMEZONE} is this browser's
+ * zone).
  *
  * Computed from `Intl` at the given instant rather than from a fixed table,
  * because the offset changes with DST — a chart that hardcodes London at UTC+0
  * is an hour wrong for seven months of the year.
+ *
+ * <p>Remembered per zone and UTC hour: the chart shifts every bar it plots by its own instant's
+ * offset, and asking `Intl` for each one cost a `formatToParts` per bar on every tick. An hour is
+ * remembered only when its first and last millisecond agree; an hour in which the zone changes its
+ * clock (a DST switch, wherever in the hour it falls — some zones switch on the half hour) is worked
+ * out per instant every time.</p>
  */
 export function timezoneOffsetMinutes(timezone: string, atMs: number): number {
+  const zone = resolveTimezone(timezone);
+  if (zone === 'UTC') return 0;
+  if (!Number.isFinite(atMs)) return exactOffsetMinutes(zone, atMs);
+  const hour = Math.floor(atMs / HOUR_MS);
+  let hours = offsetsByHour.get(zone);
+  if (!hours) {
+    hours = new Map();
+    offsetsByHour.set(zone, hours);
+  }
+  let offset = hours.get(hour);
+  if (offset === undefined) {
+    const start = exactOffsetMinutes(zone, hour * HOUR_MS);
+    const end = exactOffsetMinutes(zone, (hour + 1) * HOUR_MS - 1);
+    offset = start === end ? start : Number.NaN;
+    if (hours.size >= OFFSET_CACHE_LIMIT) hours.clear();
+    hours.set(hour, offset);
+  }
+  return Number.isNaN(offset) ? exactOffsetMinutes(zone, atMs) : offset;
+}
+
+/** {@link timezoneOffsetMinutes} straight from `Intl`, at exactly `atMs`. */
+function exactOffsetMinutes(timezone: string, atMs: number): number {
   if (timezone === 'UTC') return 0;
   try {
     const parts = zoneFormatter(timezone).formatToParts(new Date(atMs));
@@ -190,7 +254,8 @@ export function timezoneOffsetMinutes(timezone: string, atMs: number): number {
       get('year'),
       get('month') - 1,
       get('day'),
-      get('hour'),
+      // Some engines print midnight as "24" under hour12: false; it is hour 0 of the same date.
+      get('hour') % 24,
       get('minute'),
       get('second'),
     );
