@@ -144,6 +144,7 @@ import {
 } from '../../chart/chart-host.component';
 import { DrawingStore } from '../../drawings/drawing-store.service';
 import { PositionsService } from '@core/services/positions.service';
+import { AccountScopeService } from '@core/scope/account-scope.service';
 import { EconomicEventsService } from '@core/services/economic-events.service';
 import { AlertsService } from '@core/services/alerts.service';
 import { OrdersService } from '@core/services/orders.service';
@@ -851,6 +852,7 @@ export class ChartAnalysisPageComponent {
   // ── Drawings ─────────────────────────────────────────────────────────────
   readonly drawings = inject(DrawingStore);
   private readonly positions = inject(PositionsService);
+  private readonly accountScope = inject(AccountScopeService);
   private readonly signals = inject(TradeSignalsService);
 
   /** Engine state drawn on the chart: position levels and signal markers. */
@@ -1234,6 +1236,16 @@ export class ChartAnalysisPageComponent {
       .subscribe(() => this.applyState(this.workspace.initialState, deepLink));
     // Switches, deletes and newer saves from elsewhere — only those made while this page is up.
     const seenSeq = this.workspace.incoming()?.seq ?? 0;
+    // Trades & signals follow the header's account selection: switching account redraws the
+    // positions, working orders and martingale rungs for that account only. Depend on the KEY —
+    // accountIds() is rebuilt on the scope service's 30 s refresh and would loop — and keep the
+    // body untracked (loadTradingOverlays reads accountIds() itself).
+    effect(() => {
+      this.accountScope.accountIdsKey();
+      untracked(() => {
+        if (this.showOverlays()) this.loadTradingOverlays();
+      });
+    });
     effect(() => {
       const incoming = this.workspace.incoming();
       if (incoming && incoming.seq > seenSeq) untracked(() => this.applyState(incoming.state));
@@ -1624,6 +1636,11 @@ export class ChartAnalysisPageComponent {
    */
   private loadTradingOverlays(): void {
     const symbol = this.symbol();
+    // The header's account scope. Positions and orders belong to an account, so only the selected
+    // account's are drawn (an aggregate scope draws its accounts'). An empty scope means no live
+    // account — draw none rather than falling back to the whole fleet.
+    const accountIds = Array.from(this.accountScope.accountIds());
+    const inScope = (id: number | null | undefined) => id != null && accountIds.includes(id);
     if (!this.showOverlays()) {
       this.positionOverlays.set([]);
       this.orderOverlays.set([]);
@@ -1633,12 +1650,19 @@ export class ChartAnalysisPageComponent {
     }
 
     this.positions
-      .list({ currentPage: 1, itemCountPerPage: 50, filter: { symbol, status: 'Open' } })
+      .list({
+        currentPage: 1,
+        itemCountPerPage: 50,
+        filter: { symbol, status: 'Open', tradingAccountIds: accountIds },
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((res) => {
         if (!res?.status || !res.data) return;
+        // Re-checked client-side too: an engine that drops a filter answers with the whole
+        // table, which would paint another account's stop loss onto this chart.
         const rows = (res.data.data ?? []).filter(
-          (p) => (p.symbol ?? '').toUpperCase() === symbol.toUpperCase(),
+          (p) =>
+            (p.symbol ?? '').toUpperCase() === symbol.toUpperCase() && inScope(p.tradingAccountId),
         );
         const out: PriceOverlay[] = [];
         for (const p of rows) {
@@ -1667,7 +1691,7 @@ export class ChartAnalysisPageComponent {
       .list({
         currentPage: 1,
         itemCountPerPage: 50,
-        filter: { symbol },
+        filter: { symbol, tradingAccountIds: accountIds },
         sortBy: 'id',
         sortDirection: 'desc',
       })
@@ -1677,6 +1701,7 @@ export class ChartAnalysisPageComponent {
         const working = (res.data.data ?? []).filter(
           (o) =>
             (o.symbol ?? '').toUpperCase() === symbol.toUpperCase() &&
+            inScope(o.tradingAccountId) &&
             ['Pending', 'Submitted', 'PartialFill'].includes(String(o.status)),
         );
         const lines: PriceOverlay[] = [];
@@ -1707,7 +1732,9 @@ export class ChartAnalysisPageComponent {
       .subscribe({
         next: (overview) => {
           const chains = (overview?.chains ?? []).filter(
-            (c) => (c.symbol ?? '').toUpperCase() === symbol.toUpperCase(),
+            (c) =>
+              (c.symbol ?? '').toUpperCase() === symbol.toUpperCase() &&
+              inScope(c.tradingAccountId),
           );
           const marks: ChartMarker[] = [];
           for (const chain of chains) {
