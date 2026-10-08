@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Bar } from '../datafeed/candle-feed.service';
 import {
   averageTrueRange,
+  boxBase,
   toKagi,
   toLineBreak,
   toPointAndFigure,
@@ -71,6 +72,67 @@ describe('toRenko', () => {
 
   it('refuses a non-positive brick size rather than looping forever', () => {
     expect(toRenko(series([100, 110]), 0)).toEqual([]);
+  });
+
+  // CC-16: the reversal brick used to open at the last close (`anchor + brickSize * 0`), so every
+  // reversal drew a brick over the previous brick's range plus a second one beside it.
+  it('a reversal draws exactly one brick, starting where the last brick started', () => {
+    // Up 3 bricks (100→103), then down to 101: two bricks against the trend = ONE reversal brick.
+    const bricks = toRenko(series([100, 101, 102, 103, 101]), 1);
+    expect(bricks.map((b) => [b.open, b.close])).toEqual([
+      [100, 101],
+      [101, 102],
+      [102, 103],
+      [102, 101],
+    ]);
+  });
+
+  it('an up reversal after a down run also starts one brick back', () => {
+    const bricks = toRenko(series([100, 99, 98, 100]), 1);
+    expect(bricks.map((b) => [b.open, b.close])).toEqual([
+      [100, 99],
+      [99, 98],
+      [99, 100],
+    ]);
+  });
+
+  it('bricks never overlap the brick before them', () => {
+    const bricks = toRenko(series([100, 103, 99, 104, 96, 101, 95, 102]), 1);
+    for (let i = 1; i < bricks.length; i++) {
+      const [a, b] = [bricks[i - 1], bricks[i]];
+      const lo = Math.max(Math.min(a.open, a.close), Math.min(b.open, b.close));
+      const hi = Math.min(Math.max(a.open, a.close), Math.max(b.open, b.close));
+      expect(hi - lo, `bricks ${i - 1} and ${i} overlap`).toBeLessThanOrEqual(1e-9);
+    }
+  });
+
+  it('wicks hang the furthest price traded against a brick before it formed', () => {
+    const bars: Bar[] = [
+      { time: 0, open: 100, high: 100, low: 100, close: 100, volume: 1 },
+      // Dips to 99.4 before closing at 100.5: still inside the first brick.
+      { time: 3_600_000, open: 100, high: 100.6, low: 99.4, close: 100.5, volume: 1 },
+      { time: 7_200_000, open: 100.5, high: 101.2, low: 100.4, close: 101.1, volume: 1 },
+    ];
+    const [plain] = toRenko(bars, 1);
+    expect([plain.low, plain.high]).toEqual([100, 101]);
+    const [wicked] = toRenko(bars, 1, { wicks: true });
+    expect(wicked.low).toBe(99.4);
+    expect(wicked.high).toBe(101);
+  });
+});
+
+describe('boxBase — the ATR box size is fixed at load (CC-16)', () => {
+  it('leaves the forming bar out, so a tick on it never moves the box', () => {
+    const closed = series([100, 101, 102, 101, 103, 102, 104, 103, 105, 104, 106, 105, 107, 106, 108]);
+    const forming = { ...closed[closed.length - 1], time: closed[closed.length - 1].time + 3_600_000 };
+    const quiet = boxBase([...closed, { ...forming, high: 108.1, low: 107.9, close: 108 }], true);
+    const spike = boxBase([...closed, { ...forming, high: 140, low: 80, close: 120 }], true);
+    expect(spike).toBe(quiet);
+    expect(quiet).toBe(boxBase(closed, false));
+  });
+
+  it('never returns zero for a flat series', () => {
+    expect(boxBase(series([1.1, 1.1, 1.1, 1.1]), true)).toBeGreaterThan(0);
   });
 });
 

@@ -43,56 +43,89 @@ export function averageTrueRange(bars: Bar[], period = 14): number {
 }
 
 /**
- * Renko bricks.
- *
- * A brick is only emitted once price has travelled a full `brickSize` from the
- * last brick's close, and a REVERSAL needs two bricks' worth of movement —
- * that asymmetry is what filters the noise Renko exists to filter. Dropping it
- * produces a chart that oscillates on every tick and looks nothing like Renko.
+ * The price a box size in ATR multiples is a multiple OF, fixed when the chart loads (CC-16): ATR(14)
+ * over the bars that have closed — the forming one left out (`excludeLast`), so it is the same
+ * number tick after tick, as TradingView sizes ATR boxes once at load. A flat series falls back to a
+ * tenth of a percent of price so the box is never zero.
  */
-export function toRenko(bars: Bar[], brickSize: number): Bar[] {
+export function boxBase(bars: readonly Bar[], excludeLast: boolean): number {
+  const closed = excludeLast && bars.length > 2 ? bars.slice(0, -1) : [...bars];
+  if (closed.length === 0) return 0;
+  const atr = averageTrueRange(closed, 14);
+  return atr > 0 ? atr : Math.abs(closed[closed.length - 1].close) * 0.001;
+}
+
+/** How a Renko brick is drawn. */
+export interface RenkoOptions {
+  /**
+   * TradingView's "Show wicks": each brick's wick reaches the furthest price traded against it
+   * before it formed — below an up brick, above a down brick. Off, a brick is its body only.
+   */
+  wicks?: boolean;
+}
+
+/**
+ * Renko bricks, built on closes.
+ *
+ * A brick is only emitted once price has travelled a full `brickSize` from the last brick's close,
+ * and a REVERSAL needs two bricks' worth of movement — that asymmetry is what filters the noise
+ * Renko exists to filter. A reversal brick starts where the last brick STARTED (one brick back from
+ * its close) — the two bricks never overlap. Until 2026-10 it started at the last close, so every
+ * reversal drew one brick over the last one's range and a second beside it (CC-16).
+ *
+ * With `wicks`, the furthest high or low traded since the last brick closed hangs off the next brick
+ * against its direction. Bars carry no intrabar order, so a bar that forms a brick lends it its own
+ * extreme too.
+ */
+export function toRenko(bars: Bar[], brickSize: number, options: RenkoOptions = {}): Bar[] {
   if (bars.length === 0 || brickSize <= 0) return [];
   const out: Bar[] = [];
   let anchor = bars[0].close;
   let direction: 1 | -1 | 0 = 0;
+  // Extremes traded since the last brick closed: the next brick's wick.
+  let extHigh = anchor;
+  let extLow = anchor;
 
   for (const bar of bars) {
+    extHigh = Math.max(extHigh, bar.high);
+    extLow = Math.min(extLow, bar.low);
     // Guard the loop: a tiny brick size against a large move would otherwise
     // try to emit hundreds of thousands of bricks and hang the tab.
     let guard = 0;
     for (;;) {
       if (guard++ > 1000) break;
-      const up = bar.close - anchor;
-      const reversalBricks = direction === 0 ? 1 : 2;
+      const move = bar.close - anchor;
 
-      if (up >= brickSize * (direction === -1 ? reversalBricks : 1)) {
-        const open = direction === -1 ? anchor + brickSize * 0 : anchor;
+      if (move >= brickSize * (direction === -1 ? 2 : 1)) {
+        const open = direction === -1 ? anchor + brickSize : anchor;
         const close = open + brickSize;
         out.push({
           time: bar.time,
           open,
           close,
           high: close,
-          low: open,
+          low: options.wicks ? Math.min(open, extLow) : open,
           volume: bar.volume,
         });
         anchor = close;
         direction = 1;
+        extHigh = extLow = close;
         continue;
       }
-      if (-up >= brickSize * (direction === 1 ? reversalBricks : 1)) {
-        const open = anchor;
+      if (-move >= brickSize * (direction === 1 ? 2 : 1)) {
+        const open = direction === 1 ? anchor - brickSize : anchor;
         const close = open - brickSize;
         out.push({
           time: bar.time,
           open,
           close,
-          high: open,
+          high: options.wicks ? Math.max(open, extHigh) : open,
           low: close,
           volume: bar.volume,
         });
         anchor = close;
         direction = -1;
+        extHigh = extLow = close;
         continue;
       }
       break;
