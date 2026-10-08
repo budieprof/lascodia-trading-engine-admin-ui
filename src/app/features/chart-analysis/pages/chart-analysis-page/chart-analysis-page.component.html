@@ -224,11 +224,29 @@
           <button
             type="button"
             class="tb-menu-item tb-check"
+            [class.on]="showPositions()"
+            (click)="togglePositions()"
+            title="Open positions for the selected account: entry, SL and TP lines"
+          >
+            <app-chart-icon name="trades" [size]="28" /> Open positions
+          </button>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="showOrders()"
+            (click)="toggleOrders()"
+            title="Pending orders for the selected account: limit/stop price and O·SL / O·TP lines"
+          >
+            <app-chart-icon name="trades" [size]="28" /> Pending orders
+          </button>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
             [class.on]="showOverlays()"
             (click)="toggleOverlays()"
-            title="Open positions, orders and trade signals"
+            title="Trade-signal markers and martingale rungs"
           >
-            <app-chart-icon name="trades" [size]="28" /> Trades &amp; signals
+            <app-chart-icon name="trades" [size]="28" /> Signals
           </button>
           <div class="tb-menu-row">
             <button

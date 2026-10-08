@@ -17,7 +17,11 @@ export interface ChartCommandHost {
   resolution: { (): string; set(v: string): void };
   style: { (): ChartStyle; set(v: ChartStyle): void };
   showVolume: { (): boolean; set(v: boolean): void };
+  /** All trade layers together (reads true when any is on). */
   showOverlays: { (): boolean; set(v: boolean): void };
+  showPositions?: { (): boolean; set(v: boolean): void };
+  showOrders?: { (): boolean; set(v: boolean): void };
+  showSignals?: { (): boolean; set(v: boolean): void };
   showEvents: { (): boolean; set(v: boolean): void };
   magnet: { (): boolean; set(v: boolean): void };
   scaleMode: { (): string; set(v: 'normal' | 'log' | 'percent'): void };
@@ -294,6 +298,9 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
             splitLayout: host.splitLayout(),
             volume: host.showVolume(),
             trades: host.showOverlays(),
+            positions: host.showPositions?.() ?? host.showOverlays(),
+            pendingOrders: host.showOrders?.() ?? host.showOverlays(),
+            signals: host.showSignals?.() ?? host.showOverlays(),
             events: host.showEvents(),
             magnet: host.magnet(),
             boxSizeAtr: host.boxSizeAtr(),
@@ -499,6 +506,40 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
         return ok(`Trade overlays ${bool(a, 'visible') ? 'shown' : 'hidden'}.`);
       },
     },
+    ...(
+      [
+        [
+          'chart.setPositions',
+          'open-position lines (entry, SL, TP)',
+          'showPositions',
+          'Open positions',
+        ],
+        [
+          'chart.setPendingOrders',
+          'pending-order lines (limit/stop price, O·SL, O·TP)',
+          'showOrders',
+          'Pending orders',
+        ],
+        ['chart.setSignals', 'trade-signal markers and martingale rungs', 'showSignals', 'Signals'],
+      ] as const
+    )
+      .filter(([, , key]) => host[key])
+      .map(([id, what, key, label]) => ({
+        id,
+        description: `Show or hide ${what} for the selected account, independently of the other trade layers.`,
+        params: [
+          {
+            name: 'visible',
+            type: 'boolean' as const,
+            required: true,
+            description: 'true to show.',
+          },
+        ],
+        run: (a: Record<string, unknown>) => {
+          host[key]!.set(bool(a, 'visible'));
+          return ok(`${label} ${bool(a, 'visible') ? 'shown' : 'hidden'}.`);
+        },
+      })),
     {
       id: 'chart.setEvents',
       description: 'Show or hide economic-event marks on the time axis.',

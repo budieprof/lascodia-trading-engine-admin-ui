@@ -79,6 +79,11 @@ export interface ChartWorkspaceState {
   scripts?: WorkspaceScript[];
   view?: ChartViewState | null;
   overlays?: {
+    /** Open-position lines. Absent in layouts saved before the split: follow showOverlays. */
+    showPositions?: boolean;
+    /** Pending (working) order lines. Absent before the split: follow showOverlays. */
+    showOrders?: boolean;
+    /** Trade-signal markers + martingale rungs (before the split: all trade overlays). */
     showOverlays?: boolean;
     showVolumeProfile?: boolean;
     volumeProfileMode?: string;
