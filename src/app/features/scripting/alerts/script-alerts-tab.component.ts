@@ -8,10 +8,14 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { catchError, forkJoin, of } from 'rxjs';
+import { DatePipe } from '@angular/common';
+import { catchError, forkJoin, map, of } from 'rxjs';
 
-import type { AlertChannel, StrategyDto } from '@core/api/api.types';
+import type { AlertChannel, AlertChannelStatusDto, StrategyDto } from '@core/api/api.types';
+import type { ScriptAlertDeliveryDto } from '@core/api/alerts.types';
 import { NotificationService } from '@core/notifications/notification.service';
+import { AlertsService } from '@core/services/alerts.service';
+import { ConfigService } from '@core/services/config.service';
 import { ScriptingService } from '@core/services/scripting.service';
 
 import { ScriptStrategyService } from '../api/script-strategy.service';
@@ -20,20 +24,32 @@ import { describeFailure, isOk } from '../shared/api-error';
 import { scriptSourceOf } from '../shared/script-strategy';
 import {
   ALERT_CHANNELS,
+  DEFAULT_STORM_GUARD,
+  FREQUENCY_OPTIONS,
   alertRowsDiffer,
   buildAlertRows,
+  channelChip,
+  channelLabel,
+  channelWarnings,
+  deliveryAlertTitle,
+  deliveryStatusLabel,
   extractAlertConditions,
   extractPlots,
   insertAt,
   placeholderGroupsFor,
+  renderSampleMessage,
   rowTitle,
   scriptKind,
+  stormGuardText,
+  strategyConditionWarning,
   toAlertBindings,
   validateRow,
   type AlertConditionScan,
   type AlertRow,
   type PlaceholderGroup,
   type PlotInfo,
+  type ScriptAlertBindingView,
+  type StormGuard,
 } from './alerts.model';
 
 const KIND_LABELS: Record<AlertRow['kind'], string> = {
@@ -43,23 +59,38 @@ const KIND_LABELS: Record<AlertRow['kind'], string> = {
 };
 
 const KIND_HINTS: Record<AlertRow['kind'], string> = {
-  condition: 'Fires when this alertcondition() is true on a bar close.',
+  condition: 'Fires when this alertcondition() is true, as often as its trigger allows.',
   'alert-calls':
-    'Every alert() the script calls. Leave the message empty to send the script’s own text.',
+    'Every alert() the script calls, with the text the script passes — and the frequency it sets (alert.freq_*).',
   'order-fills':
     'Every order the strategy fills (entries, exits, reversals). The strategy.order placeholders describe the fill.',
 };
+
+/** One channel's answer to "Send test". */
+interface TestOutcome {
+  channel: AlertChannel;
+  state: 'sending' | 'sent' | 'not-sent';
+  text: string;
+}
+
+interface RowTest {
+  message: string;
+  outcomes: TestOutcome[];
+}
 
 /**
  * Alerts tab of a script strategy (§10 `GET|PUT strategy/{id}/script/alerts`): one row per
  * alertcondition title (read from the compiled script), plus alert() calls and order fills — each
  * with an enable switch, channels, a webhook URL when Webhook is chosen and a message template
- * with a Pine placeholder picker.
+ * with a Pine placeholder picker. PE-I10 (2026-10-09): the channels' state, each alertcondition's
+ * trigger (frequency), the storm guard, why the engine switched an alert off, "Send test" with the
+ * rendered message, and the delivery log.
  */
 @Component({
   selector: 'app-script-alerts-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [DatePipe],
   template: `
     <div class="stack">
       <header class="head">
@@ -74,6 +105,15 @@ const KIND_HINTS: Record<AlertRow['kind'], string> = {
           Reload
         </button>
       </header>
+
+      <div class="chips" aria-label="Alert channels" data-testid="channel-chips">
+        @for (chip of chips(); track chip.channel) {
+          <span class="chip" [attr.data-state]="chip.state" [title]="chip.title">{{
+            chip.label
+          }}</span>
+        }
+      </div>
+      <p class="sub">{{ stormText() }}</p>
 
       @if (loading()) {
         <p class="muted" role="status">Loading alerts…</p>
@@ -123,6 +163,25 @@ const KIND_HINTS: Record<AlertRow['kind'], string> = {
               }
             </div>
             <p class="hint">{{ kindHint(row) }}</p>
+            @if (row.disabledReason && !row.enabled) {
+              <p class="row-disabled" data-testid="disabled-reason">
+                Switched off by the engine{{
+                  row.disabledAt ? ' on ' + (row.disabledAt | date: 'MMM d, HH:mm') : ''
+                }}: {{ row.disabledReason }} Switch it on to re-arm it.
+              </p>
+            }
+            @if (row.lastFiredAt || row.lastDeliveryError) {
+              <p class="hint">
+                @if (row.lastFiredAt) {
+                  Last fired {{ row.lastFiredAt | date: 'MMM d, HH:mm:ss' }}.
+                }
+                @if (row.lastDeliveryError) {
+                  <span class="row-warn-inline"
+                    >Last delivery problem: {{ row.lastDeliveryError }}</span
+                  >
+                }
+              </p>
+            }
 
             <fieldset class="channels">
               <legend>Channels</legend>
@@ -133,10 +192,28 @@ const KIND_HINTS: Record<AlertRow['kind'], string> = {
                     [checked]="row.channels.includes(c)"
                     (change)="toggleChannel(i, c, $any($event.target).checked)"
                   />
-                  <span>{{ c }}</span>
+                  <span>{{ channelName(c) }}</span>
                 </label>
               }
             </fieldset>
+
+            @if (row.kind === 'condition') {
+              <label class="field">
+                <span class="field-label">Trigger</span>
+                <select
+                  class="picker trigger"
+                  data-testid="frequency"
+                  (change)="patch(i, { frequency: $any($event.target).value })"
+                >
+                  @for (f of frequencies; track f.id) {
+                    <option [value]="f.id" [selected]="f.id === row.frequency">
+                      {{ f.label }}
+                    </option>
+                  }
+                </select>
+                <span class="hint">{{ frequencyHint(row) }}</span>
+              </label>
+            }
 
             @if (row.channels.includes('Webhook')) {
               <label class="field">
@@ -154,35 +231,41 @@ const KIND_HINTS: Record<AlertRow['kind'], string> = {
               </label>
             }
 
-            <div class="field">
-              <label class="field-label" [attr.for]="uid + '-tpl-' + i">Message</label>
-              <div class="tpl-tools">
-                <label class="sr-only" [attr.for]="uid + '-ph-' + i">Insert a placeholder</label>
-                <select
-                  [id]="uid + '-ph-' + i"
-                  class="picker"
-                  (change)="onPick(i, tpl, $any($event.target))"
-                >
-                  <option value="">Insert placeholder…</option>
-                  @for (g of groupsFor(row); track g.label) {
-                    <optgroup [label]="g.label">
-                      @for (p of g.items; track p.token) {
-                        <option [value]="p.token">{{ p.token }} — {{ p.label }}</option>
-                      }
-                    </optgroup>
-                  }
-                </select>
+            @if (row.kind === 'alert-calls') {
+              <p class="hint">
+                Message: the text the script passes to alert() — the engine sends it as it is.
+              </p>
+            } @else {
+              <div class="field">
+                <label class="field-label" [attr.for]="uid + '-tpl-' + i">Message</label>
+                <div class="tpl-tools">
+                  <label class="sr-only" [attr.for]="uid + '-ph-' + i">Insert a placeholder</label>
+                  <select
+                    [id]="uid + '-ph-' + i"
+                    class="picker"
+                    (change)="onPick(i, tpl, $any($event.target))"
+                  >
+                    <option value="">Insert placeholder…</option>
+                    @for (g of groupsFor(row); track g.label) {
+                      <optgroup [label]="g.label">
+                        @for (p of g.items; track p.token) {
+                          <option [value]="p.token">{{ p.token }} — {{ p.label }}</option>
+                        }
+                      </optgroup>
+                    }
+                  </select>
+                </div>
+                <textarea
+                  #tpl
+                  [id]="uid + '-tpl-' + i"
+                  rows="3"
+                  spellcheck="false"
+                  [placeholder]="templatePlaceholder(row)"
+                  [value]="row.messageTemplate ?? ''"
+                  (input)="patch(i, { messageTemplate: $any($event.target).value })"
+                ></textarea>
               </div>
-              <textarea
-                #tpl
-                [id]="uid + '-tpl-' + i"
-                rows="3"
-                spellcheck="false"
-                [placeholder]="templatePlaceholder(row)"
-                [value]="row.messageTemplate ?? ''"
-                (input)="patch(i, { messageTemplate: $any($event.target).value })"
-              ></textarea>
-            </div>
+            }
 
             @if (issues()[i]; as is) {
               @for (e of is.errors; track $index) {
@@ -191,6 +274,35 @@ const KIND_HINTS: Record<AlertRow['kind'], string> = {
               @for (w of is.warnings; track $index) {
                 <p class="row-warn">{{ w }}</p>
               }
+            }
+
+            <div class="test-row">
+              <button
+                type="button"
+                class="btn small"
+                data-testid="send-test"
+                [disabled]="row.channels.length === 0 || testing(row)"
+                (click)="sendTest(row)"
+              >
+                {{ testing(row) ? 'Sending…' : 'Send test' }}
+              </button>
+              <span class="hint">
+                Sends this message with sample values through the chosen channels{{
+                  row.channels.includes('Webhook')
+                    ? ' (Webhook goes to the engine’s alert webhook, not this alert’s URL)'
+                    : ''
+                }}.
+              </span>
+            </div>
+            @if (tests()[row.alertKey]; as t) {
+              <div class="test-result" data-testid="test-result">
+                <code class="test-msg">{{ t.message }}</code>
+                <div class="chips">
+                  @for (o of t.outcomes; track o.channel) {
+                    <span class="chip" [attr.data-state]="o.state">{{ o.text }}</span>
+                  }
+                </div>
+              </div>
             }
           </section>
         } @empty {
@@ -213,6 +325,64 @@ const KIND_HINTS: Record<AlertRow['kind'], string> = {
             {{ saving() ? 'Saving…' : 'Save alerts' }}
           </button>
         </div>
+
+        <section class="log" aria-label="Recent deliveries">
+          <div class="log-head">
+            <button
+              type="button"
+              class="btn small"
+              data-testid="toggle-log"
+              [attr.aria-expanded]="logOpen()"
+              (click)="toggleLog()"
+            >
+              {{ logOpen() ? 'Hide recent deliveries' : 'Show recent deliveries' }}
+            </button>
+            @if (logOpen()) {
+              <button type="button" class="btn small" [disabled]="logLoading()" (click)="loadLog()">
+                Refresh
+              </button>
+            }
+          </div>
+          @if (logOpen()) {
+            @if (logError()) {
+              <p class="row-error" role="alert">{{ logError() }}</p>
+            } @else if (logLoading() && deliveries().length === 0) {
+              <p class="muted" role="status">Loading deliveries…</p>
+            } @else if (deliveries().length === 0) {
+              <p class="muted">Nothing has been sent for this script yet.</p>
+            } @else {
+              <div class="log-scroll">
+                <table class="log-table" data-testid="delivery-log">
+                  <thead>
+                    <tr>
+                      <th>When</th>
+                      <th>Alert</th>
+                      <th>Channel</th>
+                      <th>Outcome</th>
+                      <th>Message</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (d of deliveries(); track d.id) {
+                      <tr [attr.data-status]="d.status">
+                        <td class="nowrap">{{ d.createdAt | date: 'MMM d, HH:mm:ss' }}</td>
+                        <td>{{ alertTitle(d.alertKey) }}</td>
+                        <td>{{ channelName(d.channel) }}</td>
+                        <td [title]="d.lastError ?? ''">
+                          {{ outcome(d) }}
+                          @if (d.lastError) {
+                            <span class="muted">— {{ d.lastError }}</span>
+                          }
+                        </td>
+                        <td class="msg">{{ d.message }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
+          }
+        </section>
       }
     </div>
   `,
@@ -455,6 +625,97 @@ const KIND_HINTS: Record<AlertRow['kind'], string> = {
         white-space: nowrap;
         border: 0;
       }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+      }
+      .chip {
+        padding: 1px 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        background: var(--bg-primary);
+      }
+      .chip[data-state='ready'],
+      .chip[data-state='sent'] {
+        border-color: var(--profit, #34c759);
+        color: var(--text-primary);
+      }
+      .chip[data-state='off'],
+      .chip[data-state='unset'],
+      .chip[data-state='not-sent'] {
+        border-color: #b25000;
+        color: #b25000;
+      }
+      .row-disabled {
+        margin: 0;
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-sm);
+        background: rgba(255, 149, 0, 0.1);
+        color: #b25000;
+        font-size: var(--text-xs);
+      }
+      .row-warn-inline {
+        color: #b25000;
+      }
+      .trigger {
+        align-self: flex-start;
+      }
+      .test-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+      }
+      .test-result {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+      }
+      .test-msg {
+        font-size: var(--text-xs);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        color: var(--text-secondary);
+      }
+      .log {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .log-head {
+        display: flex;
+        gap: var(--space-2);
+      }
+      .log-scroll {
+        max-height: 360px;
+        overflow: auto;
+      }
+      .log-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--text-xs);
+      }
+      .log-table th,
+      .log-table td {
+        padding: 4px 6px;
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+        vertical-align: top;
+      }
+      .log-table tr[data-status='Failed'] td,
+      .log-table tr[data-status='Expired'] td {
+        color: var(--loss);
+      }
+      .log-table .msg {
+        max-width: 320px;
+        overflow-wrap: anywhere;
+      }
+      .nowrap {
+        white-space: nowrap;
+      }
     `,
   ],
 })
@@ -462,12 +723,15 @@ export class ScriptAlertsTabComponent {
   private readonly api = inject(ScriptStrategyService);
   private readonly scripting = inject(ScriptingService);
   private readonly notifications = inject(NotificationService);
+  private readonly alertsApi = inject(AlertsService);
+  private readonly config = inject(ConfigService);
 
   readonly strategy = input.required<StrategyDto & ScriptStrategyFields>();
 
   private static nextUid = 0;
   readonly uid = `alerts-${ScriptAlertsTabComponent.nextUid++}`;
   readonly channels = ALERT_CHANNELS;
+  readonly frequencies = FREQUENCY_OPTIONS;
 
   readonly loading = signal(true);
   readonly loadError = signal<string | null>(null);
@@ -478,12 +742,40 @@ export class ScriptAlertsTabComponent {
   readonly scan = signal<AlertConditionScan>({ conditions: [], untitled: 0 });
   readonly plots = signal<PlotInfo[]>([]);
   readonly plotsKnown = signal(false);
+  readonly isStrategy = signal(false);
   readonly savedRows = signal<AlertRow[]>([]);
   readonly rows = signal<AlertRow[]>([]);
 
+  /** The engine's channels (`GET alert/channel/status`); null until read (or when it cannot be). */
+  readonly channelStatuses = signal<AlertChannelStatusDto[] | null>(null);
+  readonly stormGuard = signal<StormGuard>(DEFAULT_STORM_GUARD);
+  readonly chips = computed(() =>
+    ALERT_CHANNELS.map((c) => channelChip(c, this.channelStatuses())),
+  );
+  readonly stormText = computed(() => stormGuardText(this.stormGuard()));
+
+  /** "Send test" per row (by alert key). */
+  readonly tests = signal<Record<string, RowTest>>({});
+
+  readonly logOpen = signal(false);
+  readonly logLoading = signal(false);
+  readonly logError = signal<string | null>(null);
+  readonly deliveries = signal<ScriptAlertDeliveryDto[]>([]);
+
   readonly dirty = computed(() => alertRowsDiffer(this.savedRows(), this.rows()));
   readonly issues = computed(() =>
-    this.rows().map((r) => validateRow(r, this.groupsFor(r), this.plotsKnown())),
+    this.rows().map((r) => {
+      const issues = validateRow(r, this.groupsFor(r), this.plotsKnown());
+      const strategyWarning = strategyConditionWarning(r, this.isStrategy());
+      return {
+        errors: issues.errors,
+        warnings: [
+          ...issues.warnings,
+          ...channelWarnings(r, this.channelStatuses()),
+          ...(strategyWarning ? [strategyWarning] : []),
+        ],
+      };
+    }),
   );
   readonly hasErrors = computed(() => this.issues().some((i) => i.errors.length > 0));
 
@@ -492,6 +784,35 @@ export class ScriptAlertsTabComponent {
     effect(() => {
       if (this.strategy()) untracked(() => this.reload());
     });
+    this.loadDeliveryContext();
+  }
+
+  /** The channels' state and the storm guard's limits — context for every row, read once. */
+  private loadDeliveryContext(): void {
+    this.alertsApi
+      .getChannelStatus()
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => this.channelStatuses.set(res?.status && res.data ? res.data : null));
+    const intOf = (key: string) =>
+      this.config.getByKey(key, { silent: true }).pipe(
+        map((res) =>
+          res?.status && res.data?.value != null ? Number.parseInt(res.data.value, 10) : NaN,
+        ),
+        catchError(() => of(NaN)),
+      );
+    forkJoin({
+      maxFires: intOf('ScriptAlerts:StormMaxFires'),
+      windowMinutes: intOf('ScriptAlerts:StormWindowMinutes'),
+    }).subscribe(({ maxFires, windowMinutes }) =>
+      this.stormGuard.set({
+        maxFires:
+          Number.isFinite(maxFires) && maxFires >= 0 ? maxFires : DEFAULT_STORM_GUARD.maxFires,
+        windowMinutes:
+          Number.isFinite(windowMinutes) && windowMinutes > 0
+            ? windowMinutes
+            : DEFAULT_STORM_GUARD.windowMinutes,
+      }),
+    );
   }
 
   reload(): void {
@@ -501,6 +822,8 @@ export class ScriptAlertsTabComponent {
     this.loadError.set(null);
     this.saveError.set(null);
     this.compileNote.set(null);
+    this.tests.set({});
+    if (this.logOpen()) this.loadLog();
     forkJoin({
       alerts: this.api.getAlerts(s.id),
       compile: source
@@ -538,11 +861,18 @@ export class ScriptAlertsTabComponent {
         const plots: PlotInfo[] = compiled?.plots?.length
           ? compiled.plots.map((p, index) => ({ index, title: p.title || null }))
           : extractPlots(source);
-        const isStrategy = scriptKind(compiled, source) !== 'indicator';
-        const rows = buildAlertRows(alerts.data ?? [], scan.conditions, isStrategy);
+        const kind = scriptKind(compiled, source);
+        const isStrategy = kind !== 'indicator';
+        const rows = buildAlertRows(
+          (alerts.data ?? []) as ScriptAlertBindingView[],
+          scan.conditions,
+          isStrategy,
+        );
         this.scan.set(scan);
         this.plots.set(plots);
         this.plotsKnown.set(!!source);
+        // Only a script KNOWN to be a strategy gets the "alertcondition() is not sent" warning.
+        this.isStrategy.set(kind === 'strategy');
         this.savedRows.set(rows);
         this.rows.set(rows.map((r) => ({ ...r, channels: [...r.channels] })));
         this.loading.set(false);
@@ -556,6 +886,104 @@ export class ScriptAlertsTabComponent {
 
   rowTitle(row: AlertRow): string {
     return rowTitle(row);
+  }
+
+  channelName(channel: AlertChannel | string): string {
+    return channelLabel(channel);
+  }
+
+  frequencyHint(row: AlertRow): string {
+    return FREQUENCY_OPTIONS.find((f) => f.id === row.frequency)?.hint ?? '';
+  }
+
+  alertTitle(alertKey: string): string {
+    return deliveryAlertTitle(alertKey);
+  }
+
+  outcome(d: ScriptAlertDeliveryDto): string {
+    return deliveryStatusLabel(d);
+  }
+
+  testing(row: AlertRow): boolean {
+    return this.tests()[row.alertKey]?.outcomes.some((o) => o.state === 'sending') ?? false;
+  }
+
+  /**
+   * Sends the row's message, its placeholders filled with SAMPLE values, through each chosen channel
+   * (`POST alert/channel/test`) and shows what each channel did. Webhook tests the engine's alert webhook: a binding's
+   * own URL is only used by real alerts.
+   */
+  sendTest(row: AlertRow): void {
+    if (row.channels.length === 0 || this.testing(row)) return;
+    const s = this.strategy();
+    const key = row.alertKey;
+    const message = renderSampleMessage(row, {
+      symbol: s.symbol,
+      timeframe: s.timeframe,
+      now: new Date(),
+      plots: this.plots(),
+    });
+    const channels = [...row.channels];
+    const set = (outcomes: TestOutcome[]) =>
+      this.tests.update((t) => ({ ...t, [key]: { message, outcomes } }));
+    set(
+      channels.map((channel) => ({
+        channel,
+        state: 'sending',
+        text: `${channelLabel(channel)}: sending…`,
+      })),
+    );
+    forkJoin(
+      channels.map((channel) =>
+        this.alertsApi.testChannel({ channel, message }).pipe(
+          map((res): TestOutcome => {
+            const sent = !!res?.status && res.data?.delivered === true;
+            return sent
+              ? {
+                  channel,
+                  state: 'sent',
+                  text: `${channelLabel(channel)}: sent to ${res.data!.destination}`,
+                }
+              : {
+                  channel,
+                  state: 'not-sent',
+                  text: `${channelLabel(channel)}: not sent — ${res?.data?.reason ?? res?.message ?? 'no answer'}`,
+                };
+          }),
+          catchError(() =>
+            of<TestOutcome>({
+              channel,
+              state: 'not-sent',
+              text: `${channelLabel(channel)}: the engine did not answer`,
+            }),
+          ),
+        ),
+      ),
+    ).subscribe((outcomes) => set(outcomes));
+  }
+
+  toggleLog(): void {
+    this.logOpen.update((open) => !open);
+    if (this.logOpen()) this.loadLog();
+  }
+
+  /** The script's recent deliveries (`GET alert/script-deliveries`), newest first. */
+  loadLog(): void {
+    const id = this.strategy().id;
+    this.logLoading.set(true);
+    this.logError.set(null);
+    this.alertsApi.scriptDeliveries(id, 50).subscribe({
+      next: (res) => {
+        if (this.strategy().id !== id) return;
+        this.logLoading.set(false);
+        if (res?.status) this.deliveries.set(res.data ?? []);
+        else this.logError.set(res?.message || 'Could not load the deliveries.');
+      },
+      error: () => {
+        this.logLoading.set(false);
+        this.logError.set('Could not load the deliveries.');
+      },
+    });
   }
 
   kindLabel(row: AlertRow): string {

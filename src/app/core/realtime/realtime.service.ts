@@ -81,6 +81,9 @@ export const REALTIME_EVENTS = [
   //    throttled ~1 Hz). Only reaches clients that called SubscribePrice — used by
   //    the spot-rec chart's live-price marker. ──
   'priceUpdated',
+  // ── In-app alert delivery (contract C2, 2026-10-09): a chart or script alert fired on the
+  //    InApp channel (IInAppAlertPublisher, broadcast). Drives the alert pop-ups. ──
+  'alertFired',
 ] as const;
 export type RealtimeEventName = (typeof REALTIME_EVENTS)[number];
 

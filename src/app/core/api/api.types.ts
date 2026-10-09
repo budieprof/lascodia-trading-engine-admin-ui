@@ -438,7 +438,8 @@ export type AlertType =
 
 export type AlertSeverity = 'Info' | 'Medium' | 'High' | 'Critical';
 
-export type AlertChannel = 'Email' | 'Webhook' | 'Telegram';
+/** `InApp` (2026-10-09, contract C2): the notification bell + an `alertFired` pop-up — chart and script alerts only. */
+export type AlertChannel = 'Email' | 'Webhook' | 'Telegram' | 'InApp';
 
 export type TrailingStopType = 'FixedPips' | 'ATR' | 'Percentage';
 
@@ -835,6 +836,8 @@ export interface TestAlertChannelResultDto {
   destination: string;
   message: string;
   attemptedAt: string;
+  /** Why it was not delivered — switched off / not set up, or the error (2026-10-09). */
+  reason?: string | null;
 }
 
 export interface SetAlertChannelEnabledRequest {
@@ -2406,7 +2409,14 @@ export interface NotificationFeedItem {
   /** Stable composite id (`alert:123`, `ealog:42`, `rej:7`, `ea:9:1`). */
   id: string;
   /** Source bucket — drives filter chips + iconography. */
-  source: 'Alert' | 'EALog' | 'SignalRejection' | 'EAState';
+  source:
+    | 'Alert'
+    | 'EALog'
+    | 'SignalRejection'
+    | 'EAState'
+    | 'AnalysisMonitor'
+    | 'ChartAlert'
+    | 'ScriptAlert';
   /** Mute axis — `alert:PriceLevel`, `ealog:ERROR:OrderExecutor`, etc. */
   typeKey: string;
   /** "Info" | "Medium" | "High" | "Critical" — mirrors `AlertSeverity`. */
