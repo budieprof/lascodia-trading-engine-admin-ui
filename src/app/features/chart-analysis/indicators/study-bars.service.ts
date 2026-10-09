@@ -6,12 +6,13 @@ import type { TvResolution } from '../datafeed/resolution';
 const PAGE = 5_000;
 
 /**
- * Lower-timeframe bars for the profile studies (DR-I7): one series per `symbol|resolution`, loaded over the chart's
- * range in pages through the candle feed (and its cache), extended at either end as the chart scrolls back or a new
- * bar opens. `version` bumps when bars land, so the chart re-profiles.
+ * Bars of another timeframe for the studies: the LOWER timeframe the profiles are built from (DR-I7) and the HIGHER
+ * one a multi-timeframe built-in is computed on (DR-I5). One series per `symbol|resolution`, loaded over the range
+ * asked for in pages through the candle feed (and its cache), extended at either end as the chart scrolls back or a
+ * new bar opens. `version` bumps when bars land, so the chart computes again.
  */
 @Injectable({ providedIn: 'root' })
-export class ProfileBarsService {
+export class StudyBarsService {
   private readonly feed = inject(CandleFeedService);
   private readonly held = new Map<string, Bar[]>();
   private readonly loading = new Map<string, Promise<void>>();
@@ -48,7 +49,7 @@ export class ProfileBarsService {
     if (
       needNew &&
       !needOld &&
-      Date.now() - (this.tailAt.get(key) ?? 0) < ProfileBarsService.TAIL_EVERY_MS
+      Date.now() - (this.tailAt.get(key) ?? 0) < StudyBarsService.TAIL_EVERY_MS
     )
       needNew = false;
     if (!needOld && !needNew) return;

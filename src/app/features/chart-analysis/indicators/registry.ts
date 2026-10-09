@@ -114,6 +114,7 @@ import {
   type Maybe,
   type Ohlc,
 } from './math';
+import type { ColorBy } from './study-settings';
 import {
   SESSION_WINDOWS,
   SESSION_ZONES,
@@ -163,6 +164,16 @@ export interface PlotSpec {
   gaps?: 'join' | 'break';
   /** For `markers`: the shape, and whether it sits on top of or under the value. */
   marker?: { shape: 'arrowUp' | 'arrowDown' | 'circle' | 'square'; position: 'above' | 'below' };
+  /** Each bar coloured by its value (DR-I4): MACD's four histogram shades, AO's rising / falling, volume by bar. */
+  colorBy?: ColorBy;
+}
+
+/** A band or cloud filled between two plots (DR-I4); `colorBelow` while `a` is under `b` (Ichimoku). */
+export interface FillSpec {
+  a: string;
+  b: string;
+  color: string;
+  colorBelow?: string;
 }
 
 /**
@@ -249,6 +260,8 @@ export interface IndicatorDef {
   levels?: IndicatorLevel[];
   /** Fixed pane scale, for bounded oscillators. */
   range?: { min: number; max: number };
+  /** Bands / clouds between plots, drawn under them (off with the Style tab's Fill). */
+  fills?: FillSpec[];
   compute: (
     bars: Ohlc[],
     params: Record<string, number | string>,
@@ -408,6 +421,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { key: 'middle', title: 'Basis', kind: 'line', color: '#FF6D00' },
       { key: 'lower', title: 'Lower', kind: 'line', color: '#2962FF' },
     ],
+    fills: [{ a: 'upper', b: 'lower', color: 'rgba(41, 98, 255, 0.06)' }],
     compute: (bars, p) => {
       const r = bollinger(sourceValues(bars, src(p)), num(p, 'length', 20), num(p, 'mult', 2));
       return { upper: r.upper, middle: r.middle, lower: r.lower };
@@ -437,6 +451,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { key: 'middle', title: 'Mid', kind: 'line', color: '#787B86' },
       { key: 'lower', title: 'Lower', kind: 'line', color: '#EF5350' },
     ],
+    fills: [{ a: 'upper', b: 'lower', color: 'rgba(41, 98, 255, 0.06)' }],
     compute: (bars, p) => {
       const r = donchian(bars, num(p, 'length', 20));
       return { upper: r.upper, middle: r.middle, lower: r.lower };
@@ -472,7 +487,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
       SOURCE,
     ],
     plots: [
-      { key: 'histogram', title: 'Hist', kind: 'histogram', color: '#26A69A' },
+      { key: 'histogram', title: 'Hist', kind: 'histogram', color: '#26A69A', colorBy: 'macd' },
       { key: 'macd', title: 'MACD', kind: 'line', color: '#2962FF' },
       { key: 'signal', title: 'Signal', kind: 'line', color: '#FF6D00' },
     ],
@@ -578,6 +593,15 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { key: 'spanB', title: 'Span B', kind: 'line', color: '#FF6D00' },
       { key: 'lagging', title: 'Chikou', kind: 'line', color: '#787B86' },
     ],
+    // TradingView's cloud: green while Span A is over Span B, red while under — ahead of price too.
+    fills: [
+      {
+        a: 'spanA',
+        b: 'spanB',
+        color: 'rgba(67, 160, 71, 0.18)',
+        colorBelow: 'rgba(244, 67, 54, 0.18)',
+      },
+    ],
     compute: (bars, p) => {
       const r = ichimoku(
         bars,
@@ -658,6 +682,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { key: 'middle', title: 'Basis', kind: 'line', color: '#FF6D00' },
       { key: 'lower', title: 'Lower', kind: 'line', color: '#2962FF' },
     ],
+    fills: [{ a: 'upper', b: 'lower', color: 'rgba(41, 98, 255, 0.06)' }],
     compute: (bars, p) => {
       const r = keltner(bars, num(p, 'length', 20), num(p, 'mult', 2), num(p, 'atrPeriod', 10));
       return { upper: r.upper, middle: r.middle, lower: r.lower };
@@ -767,7 +792,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { key: 'fast', label: 'Fast', type: 'number', default: 5, min: 1, max: 100 },
       { key: 'slow', label: 'Slow', type: 'number', default: 34, min: 1, max: 200 },
     ],
-    plots: [{ key: 'ao', title: 'AO', kind: 'histogram', color: '#26A69A' }],
+    plots: [{ key: 'ao', title: 'AO', kind: 'histogram', color: '#26A69A', colorBy: 'rising' }],
     levels: [{ value: 0, color: '#787B86' }],
     compute: (bars, p) => ({ ao: awesome(bars, num(p, 'fast', 5), num(p, 'slow', 34)) }),
   },
@@ -879,6 +904,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { key: 'middle', title: 'Basis', kind: 'line', color: '#787B86' },
       { key: 'lower', title: 'Lower', kind: 'line', color: '#2962FF' },
     ],
+    fills: [{ a: 'upper', b: 'lower', color: 'rgba(41, 98, 255, 0.06)' }],
     compute: (bars, p) => {
       const r = envelope(sourceValues(bars, src(p)), num(p, 'length', 20), num(p, 'percent', 2));
       return { upper: r.upper, middle: r.middle, lower: r.lower };
@@ -1290,7 +1316,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
       SOURCE,
     ],
     plots: [
-      { key: 'histogram', title: 'Hist', kind: 'histogram', color: '#26A69A' },
+      { key: 'histogram', title: 'Hist', kind: 'histogram', color: '#26A69A', colorBy: 'macd' },
       { key: 'ppo', title: 'PPO', kind: 'line', color: '#2962FF' },
       { key: 'signal', title: 'Signal', kind: 'line', color: '#FF6D00' },
     ],
@@ -1620,7 +1646,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     keywords: ['delta', 'order flow', 'est'],
     target: 'pane',
     inputs: [],
-    plots: [{ key: 'delta', title: 'Δ est', kind: 'histogram', color: '#26A69A' }],
+    plots: [{ key: 'delta', title: 'Δ est', kind: 'histogram', color: '#26A69A', colorBy: 'sign' }],
     levels: [{ value: 0, color: '#787B86' }],
     // NOT order flow. There is no aggressor tape for FX here, so this is the standard
     // OHLCV proxy: a bar closing near its high is assumed bought, near its low sold. The
@@ -1649,7 +1675,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     keywords: ['net'],
     target: 'pane',
     inputs: [],
-    plots: [{ key: 'nv', title: 'Net Vol', kind: 'histogram', color: '#26A69A' }],
+    plots: [{ key: 'nv', title: 'Net Vol', kind: 'histogram', color: '#26A69A', colorBy: 'sign' }],
     levels: [{ value: 0, color: '#787B86' }],
     compute: (bars) => ({ nv: netVolume(bars) }),
   },
@@ -1821,7 +1847,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     keywords: ['bbtrend', 'bollinger'],
     target: 'pane',
     inputs: [NUM('short', 'Short', 20), NUM('long', 'Long', 50), NUM('mult', 'StdDev', 2, 0.1, 10)],
-    plots: [{ key: 'bbt', title: 'BBTrend', kind: 'histogram', color: '#26A69A' }],
+    plots: [{ key: 'bbt', title: 'BBTrend', kind: 'histogram', color: '#26A69A', colorBy: 'sign' }],
     levels: [{ value: 0, color: '#787B86' }],
     compute: (bars, p) => ({
       bbt: bbTrend(
@@ -2001,7 +2027,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     target: 'pane',
     inputs: [LENGTH(20, 'MA length')],
     plots: [
-      { key: 'volume', title: 'Volume', kind: 'histogram', color: '#26A69A' },
+      { key: 'volume', title: 'Volume', kind: 'histogram', color: '#26A69A', colorBy: 'candle' },
       { key: 'ma', title: 'Vol MA', kind: 'line', color: '#2962FF' },
     ],
     compute: (bars, p) => volumeWithMa(bars, num(p, 'length', 20)),
