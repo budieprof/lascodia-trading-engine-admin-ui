@@ -75,6 +75,15 @@ interface ChannelField {
 
 const CHANNEL_DEFS: ChannelDef[] = [
   {
+    // Contract C2 (2026-10-09): delivered inside this admin UI — nothing to set up, only the on/off switch
+    // (InAppAlertOptions:IsEnabled). Chart alerts and script alert bindings can choose it.
+    channel: 'InApp',
+    title: 'In app',
+    description:
+      'Shows chart and script alerts inside this admin UI: a pop-up (with an optional sound and browser notification, set in the notification bell) and an entry in the bell. Switching it off silences it for every operator; those deliveries are recorded as not sent.',
+    fields: [],
+  },
+  {
     channel: 'Email',
     title: 'Email (SMTP)',
     description:
