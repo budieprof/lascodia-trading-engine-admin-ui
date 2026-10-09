@@ -196,7 +196,12 @@ describe('ScriptingService — run (the one scripting/run path)', () => {
     const withBody = toScriptingError(
       new HttpErrorResponse({
         status: 429,
-        error: { status: false, data: { retryAfterMs: 2500 }, message: 'busy', responseCode: '-429' },
+        error: {
+          status: false,
+          data: { retryAfterMs: 2500 },
+          message: 'busy',
+          responseCode: '-429',
+        },
       }),
       'x',
     );
@@ -598,5 +603,99 @@ describe('helpers', () => {
     );
     expect(toScriptingError(new Error('boom'), 'x').message).toBe('boom');
     expect(toScriptingError('?', 'fallback').message).toBe('fallback');
+  });
+});
+
+describe('ScriptingService — rename, convert, format (runtime2)', () => {
+  it('posts each request and returns its data', async () => {
+    const post = vi.fn((url: string) =>
+      of({
+        status: true,
+        responseCode: '00',
+        message: 'ok',
+        data:
+          url === '/scripting/rename'
+            ? { oldName: 'len', newName: 'period', edits: [] }
+            : url === '/scripting/format'
+              ? { source: 'plot(close + 1)\n', changed: true }
+              : { source: 's', fromVersion: 4, toVersion: 6, changes: [], refusals: [] },
+      }),
+    );
+    const svc = make({ post });
+    expect((await firstValueFrom(svc.renameSymbol('src', 3, 'period'))).newName).toBe('period');
+    expect(post).toHaveBeenCalledWith(
+      '/scripting/rename',
+      { source: 'src', offset: 3, newName: 'period' },
+      { silent: true },
+    );
+    expect((await firstValueFrom(svc.format('plot(close+1)'))).changed).toBe(true);
+    expect((await firstValueFrom(svc.convert('//@version=4'))).toVersion).toBe(6);
+  });
+
+  it('a refused rename rejects with the engine’s reason', async () => {
+    const post = vi.fn(() =>
+      of({
+        status: false,
+        responseCode: '-11',
+        message: "Renaming to 'close' would capture a name.",
+        data: null,
+      }),
+    );
+    const svc = make({ post });
+    await expect(firstValueFrom(svc.renameSymbol('src', 0, 'close'))).rejects.toMatchObject({
+      message: "Renaming to 'close' would capture a name.",
+    });
+  });
+});
+
+describe('ScriptingService — AI assist (PE-I6)', () => {
+  it('posts the request once and returns the proposal; no answer rejects with the reason', async () => {
+    const post = vi.fn(() =>
+      of({
+        status: true,
+        responseCode: '00',
+        message: 'ok',
+        data: { mode: 'fix', explanation: 'Closed it.', source: 'plot(close)\n', warnings: [] },
+      }),
+    );
+    const svc = make({ post });
+    const r = await firstValueFrom(
+      svc.assist({
+        mode: 'fix',
+        source: 'plot(close',
+        problem: { code: 'PS1001', message: 'x', line: 1 },
+      }),
+    );
+    expect(r.source).toBe('plot(close)\n');
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith(
+      '/scripting/assist',
+      { mode: 'fix', source: 'plot(close', problem: { code: 'PS1001', message: 'x', line: 1 } },
+      { silent: true },
+    );
+
+    const down = make({
+      post: vi.fn(() =>
+        of({ status: false, responseCode: '-19', message: 'The AI did not answer.', data: null }),
+      ),
+    });
+    await expect(
+      firstValueFrom(down.assist({ mode: 'explain', source: 'plot(close)' })),
+    ).rejects.toMatchObject({ message: 'The AI did not answer.' });
+  });
+});
+
+describe('ScriptingService — port (PE-I6)', () => {
+  it('posts the pasted source with the chart context', async () => {
+    const post = vi.fn(() =>
+      of({ status: true, responseCode: '00', message: 'ok', data: { source: 's', checklist: [] } }),
+    );
+    const svc = make({ post });
+    expect((await firstValueFrom(svc.port('src', 'EURUSD', null))).source).toBe('s');
+    expect(post).toHaveBeenCalledWith(
+      '/scripting/port',
+      { source: 'src', symbol: 'EURUSD', timeframe: undefined },
+      { silent: true },
+    );
   });
 });

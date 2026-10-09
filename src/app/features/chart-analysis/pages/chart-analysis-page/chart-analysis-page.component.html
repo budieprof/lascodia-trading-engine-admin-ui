@@ -2080,7 +2080,9 @@
           [precision]="precision()"
           [deep]="deepBacktestTarget()"
           [reveal]="testerReveal()"
+          [properties]="run.item.strategyProperties ?? null"
           (rerun)="rerunStrategy($event)"
+          (rerunProperties)="settings.applyProperties(run.item.key, $event)"
           (tradeFocus)="focusTrade($event)"
           (closed)="closeTester()"
         />

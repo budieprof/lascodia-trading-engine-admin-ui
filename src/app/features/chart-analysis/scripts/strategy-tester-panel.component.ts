@@ -19,6 +19,7 @@ import type {
   ScriptInputDto,
   ScriptInputValue,
   ScriptInputValues,
+  ScriptStrategyPropertyOverrides,
 } from '@core/api/scripting.types';
 import { ScriptStrategyService } from '@features/scripting/api/script-strategy.service';
 import { formatMoney, formatNumber, formatPercent } from '@features/scripting/report/report-format';
@@ -31,6 +32,15 @@ import {
 } from '@features/scripting/pine/pine-inputs';
 import { ChartIconComponent } from '../icons/chart-icon.component';
 import type { ChartScriptResult, ChartTrade } from './chart-script.model';
+import {
+  COMMISSION_TYPES,
+  QTY_TYPES,
+  draftFromReport,
+  draftProblems,
+  overriddenLabel,
+  overridesFrom,
+  type PropertyDraft,
+} from './strategy-properties';
 import { tradeDetail, tradeTimeLabel, type TradeDetail } from './trade-detail';
 import {
   deepBacktestRequest,
@@ -40,7 +50,7 @@ import {
   type DeepBacktestTarget,
 } from './tester-trades';
 
-type TesterTab = 'report' | 'trades' | 'inputs';
+type TesterTab = 'report' | 'trades' | 'inputs' | 'properties';
 
 /** Trades the chart asked the tester to show (a fill arrow clicked, PC-I5): `seq` re-asks for the same. */
 export interface TradeReveal {
@@ -140,7 +150,9 @@ const isoDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
       <div class="tester__body" [class.tester__body--list]="tab() === 'trades' && !suspended()">
         @if (suspended() && tab() !== 'inputs') {
           <!-- Bar Replay (PC-08): the run's trades reach past the head — not shown until the run to the head lands. -->
-          <p class="tester__muted" role="status" data-testid="tester-suspended">{{ suspended() }}</p>
+          <p class="tester__muted" role="status" data-testid="tester-suspended">
+            {{ suspended() }}
+          </p>
         } @else {
           @switch (tab()) {
             @case ('report') {
@@ -151,7 +163,9 @@ const isoDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
                   [hideTabs]="hiddenReportTabs"
                 />
               } @else {
-                <p class="tester__muted">No strategy report — run a strategy() script to see results.</p>
+                <p class="tester__muted">
+                  No strategy report — run a strategy() script to see results.
+                </p>
               }
             }
             @case ('trades') {
@@ -197,7 +211,9 @@ const isoDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
                           [attr.data-trade]="t.number"
                           [class.selected]="selected().has(t.number)"
                           [attr.aria-selected]="selected().has(t.number)"
-                          [attr.aria-label]="'Trade ' + t.number + ': click to show on chart, long-press for details'"
+                          [attr.aria-label]="
+                            'Trade ' + t.number + ': click to show on chart, long-press for details'
+                          "
                           title="Click: show on chart · Long-press or right-click: trade details"
                           (pointerdown)="pressStart(t, $event)"
                           (pointerup)="pressEnd(t, $event)"
@@ -209,16 +225,20 @@ const isoDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
                         >
                           <span role="cell">{{ t.number }}</span>
                           <span role="cell" [class]="t.side === 'long' ? 'pos' : 'neg'">
-                            {{ t.side === 'long' ? 'Long' : 'Short' }}{{ t.isOpen ? ' (open)' : '' }}
+                            {{ t.side === 'long' ? 'Long' : 'Short'
+                            }}{{ t.isOpen ? ' (open)' : '' }}
                           </span>
-                          <span role="cell" class="tl__signal" [title]="signalOf(t)">{{ signalOf(t) }}</span>
+                          <span role="cell" class="tl__signal" [title]="signalOf(t)">{{
+                            signalOf(t)
+                          }}</span>
                           <span role="cell">{{ tradeTime(t.entryTime) }}</span>
                           <span role="cell" class="num">{{ price(t.entryPrice) }}</span>
                           <span role="cell">{{ t.isOpen ? 'Open' : tradeTime(t.exitTime) }}</span>
                           <span role="cell" class="num">{{ price(t.exitPrice) }}</span>
                           <span role="cell" class="num">{{ num(t.qty, 0) }}</span>
                           <span role="cell" class="num" [class]="tone(t.profit)">
-                            {{ money(t.profit, true) }} <small>{{ pct(t.profitPercent, true) }}</small>
+                            {{ money(t.profit, true) }}
+                            <small>{{ pct(t.profitPercent, true) }}</small>
                           </span>
                           <span role="cell" class="num" [class]="tone(t.cumulativeProfit)">
                             {{ money(t.cumulativeProfit, true) }}
@@ -275,7 +295,9 @@ const isoDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
                         }
                         @default {
                           @if (i.options?.length) {
-                            <select (change)="set(i, i.options![$any($event.target).selectedIndex])">
+                            <select
+                              (change)="set(i, i.options![$any($event.target).selectedIndex])"
+                            >
                               @for (o of i.options; track $index) {
                                 <option [selected]="o === value(i)">
                                   {{ i.optionTexts?.[$index] ?? o }}
@@ -300,6 +322,238 @@ const isoDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
                     <button type="submit" class="primary" [disabled]="running()">Re-run</button>
                   </div>
                 </form>
+              }
+            }
+            @case ('properties') {
+              @if (propertyDraft(); as p) {
+                <!-- PC-I5: TradingView's Properties dialog. novalidate: values are checked by
+                     draftProblems (the engine's own limits) and named in plain words. -->
+                <form
+                  class="tester__inputs tester__props"
+                  novalidate
+                  data-testid="tester-properties"
+                  (submit)="$event.preventDefault(); emitProperties()"
+                >
+                  <label class="field">
+                    <span>Initial capital</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      [value]="p.initialCapital"
+                      (change)="
+                        setProp('initialCapital', toNumber($any($event.target).value, false))
+                      "
+                    />
+                  </label>
+                  <label class="field">
+                    <span>Base currency</span>
+                    <input
+                      type="text"
+                      maxlength="4"
+                      [value]="p.currency"
+                      (change)="setProp('currency', $any($event.target).value)"
+                    />
+                  </label>
+                  <label class="field">
+                    <span>Order size</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      [value]="p.defaultQtyValue"
+                      (change)="
+                        setProp('defaultQtyValue', toNumber($any($event.target).value, false))
+                      "
+                    />
+                  </label>
+                  <label class="field">
+                    <span>Order size type</span>
+                    <select
+                      (change)="
+                        setProp('defaultQtyType', qtyTypes[$any($event.target).selectedIndex].value)
+                      "
+                    >
+                      @for (o of qtyTypes; track o.value) {
+                        <option [selected]="o.value === p.defaultQtyType">{{ o.label }}</option>
+                      }
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Pyramiding (orders)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      [value]="p.pyramiding"
+                      (change)="setProp('pyramiding', toNumber($any($event.target).value, true))"
+                    />
+                  </label>
+                  <label class="field">
+                    <span>Commission</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      [value]="p.commissionValue"
+                      (change)="
+                        setProp('commissionValue', toNumber($any($event.target).value, false))
+                      "
+                    />
+                  </label>
+                  <label class="field">
+                    <span>Commission type</span>
+                    <select
+                      (change)="
+                        setProp(
+                          'commissionType',
+                          commissionTypes[$any($event.target).selectedIndex].value
+                        )
+                      "
+                    >
+                      @for (o of commissionTypes; track o.value) {
+                        <option [selected]="o.value === p.commissionType">{{ o.label }}</option>
+                      }
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Verify price for limit orders (ticks)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      [value]="p.backtestFillLimitsAssumption"
+                      (change)="
+                        setProp(
+                          'backtestFillLimitsAssumption',
+                          toNumber($any($event.target).value, true)
+                        )
+                      "
+                    />
+                  </label>
+                  <label class="field">
+                    <span>Slippage (ticks)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      [value]="p.slippage"
+                      (change)="setProp('slippage', toNumber($any($event.target).value, true))"
+                    />
+                  </label>
+                  <label class="field">
+                    <span>Margin for long positions (%)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="any"
+                      [value]="p.marginLong"
+                      (change)="setProp('marginLong', toNumber($any($event.target).value, false))"
+                    />
+                  </label>
+                  <label class="field">
+                    <span>Margin for short positions (%)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="any"
+                      [value]="p.marginShort"
+                      (change)="setProp('marginShort', toNumber($any($event.target).value, false))"
+                    />
+                  </label>
+                  <label class="field">
+                    <span>Close entries rule</span>
+                    <select (change)="setProp('closeEntriesRule', $any($event.target).value)">
+                      <option value="FIFO" [selected]="p.closeEntriesRule === 'FIFO'">FIFO</option>
+                      <option value="ANY" [selected]="p.closeEntriesRule === 'ANY'">Any</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Risk-free rate (%)</span>
+                    <input
+                      type="number"
+                      step="any"
+                      [value]="p.riskFreeRate"
+                      (change)="setProp('riskFreeRate', toNumber($any($event.target).value, false))"
+                    />
+                  </label>
+                  <label class="field check">
+                    <input
+                      type="checkbox"
+                      [checked]="p.calcOnOrderFills"
+                      (change)="setProp('calcOnOrderFills', $any($event.target).checked)"
+                    />
+                    <span>Recalculate after an order fills</span>
+                  </label>
+                  <label class="field check">
+                    <input
+                      type="checkbox"
+                      [checked]="p.calcOnEveryTick"
+                      (change)="setProp('calcOnEveryTick', $any($event.target).checked)"
+                    />
+                    <span>Recalculate on every tick (live only differs)</span>
+                  </label>
+                  <label class="field check">
+                    <input
+                      type="checkbox"
+                      [checked]="p.processOrdersOnClose"
+                      (change)="setProp('processOrdersOnClose', $any($event.target).checked)"
+                    />
+                    <span>Fill orders on bar close</span>
+                  </label>
+                  <label class="field check">
+                    <input
+                      type="checkbox"
+                      [checked]="p.useBarMagnifier"
+                      (change)="setProp('useBarMagnifier', $any($event.target).checked)"
+                    />
+                    <span>Use bar magnifier</span>
+                  </label>
+                  <label class="field check">
+                    <input
+                      type="checkbox"
+                      [checked]="p.fillOrdersOnStandardOhlc"
+                      (change)="setProp('fillOrdersOnStandardOhlc', $any($event.target).checked)"
+                    />
+                    <span>Fill orders on standard OHLC</span>
+                  </label>
+                  @if (propertyProblems().length) {
+                    <ul class="tester__problems" role="alert">
+                      @for (m of propertyProblems(); track m) {
+                        <li>{{ m }}</li>
+                      }
+                    </ul>
+                  }
+                  <p class="tester__muted tester__props-note">
+                    @if (overridden()) {
+                      Overridden for this chart: {{ overridden() }}. Deep backtests queued from here
+                      use them too; such a backtest never counts as evidence for the strategy.
+                    } @else {
+                      The run uses the script's own strategy() properties.
+                    }
+                  </p>
+                  <div class="tester__actions">
+                    <button
+                      type="button"
+                      (click)="resetProperties()"
+                      [disabled]="!overridden() || running()"
+                    >
+                      Script's own
+                    </button>
+                    <button
+                      type="submit"
+                      class="primary"
+                      [disabled]="running() || propertyProblems().length > 0"
+                    >
+                      Re-run
+                    </button>
+                  </div>
+                </form>
+              } @else {
+                <p class="tester__muted">Run a strategy() script to edit its properties.</p>
               }
             }
           }
@@ -632,6 +886,21 @@ const isoDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
         text-align: right;
         font-variant-numeric: tabular-nums;
       }
+      .tester__props .check {
+        flex-direction: row;
+        align-items: center;
+        gap: 6px;
+      }
+      .tester__problems {
+        grid-column: 1 / -1;
+        margin: 0;
+        padding-left: 18px;
+        color: var(--loss);
+      }
+      .tester__props-note {
+        grid-column: 1 / -1;
+        margin: 0;
+      }
       .tester__inputs {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -857,9 +1126,13 @@ export class StrategyTesterPanelComponent implements OnDestroy {
   readonly deep = input<DeepBacktestTarget | null>(null);
   /** Trades to show — a fill arrow clicked on the chart (PC-I5). */
   readonly reveal = input<TradeReveal | null>(null);
+  /** The `strategy()` property overrides the strategy runs with on this chart (PC-I5); null = its own. */
+  readonly properties = input<ScriptStrategyPropertyOverrides | null>(null);
 
   /** Re-run with these input overrides. */
   readonly rerun = output<ScriptInputValues>();
+  /** Re-run with these `strategy()` property overrides (`{}` = the script's own). */
+  readonly rerunProperties = output<ScriptStrategyPropertyOverrides>();
   readonly closed = output<void>();
   /** A trade row was clicked: the page frames that trade on the chart. */
   readonly tradeFocus = output<ChartTrade>();
@@ -868,6 +1141,7 @@ export class StrategyTesterPanelComponent implements OnDestroy {
     { id: 'report', label: 'Report' },
     { id: 'trades', label: 'List of trades' },
     { id: 'inputs', label: 'Inputs' },
+    { id: 'properties', label: 'Properties' },
   ];
   readonly tab = signal<TesterTab>('report');
   /** The report's own List of trades: this panel has its own. */
@@ -906,6 +1180,21 @@ export class StrategyTesterPanelComponent implements OnDestroy {
   );
   private readonly draft = signal<ScriptInputValues>({});
 
+  // ── Properties (PC-I5) ──
+  protected readonly qtyTypes = QTY_TYPES;
+  protected readonly commissionTypes = COMMISSION_TYPES;
+  /** What the shown run used: the form's starting point. */
+  private readonly propertyStart = computed<PropertyDraft | null>(() => {
+    const p = this.result()?.strategy?.report?.meta.properties;
+    return p ? draftFromReport(p) : null;
+  });
+  protected readonly propertyDraft = signal<PropertyDraft | null>(null);
+  protected readonly propertyProblems = computed(() => {
+    const d = this.propertyDraft();
+    return d ? draftProblems(d) : [];
+  });
+  protected readonly overridden = computed(() => overriddenLabel(this.properties()));
+
   // ── Deep backtest ──
   readonly deepOpen = signal(false);
   readonly deepFrom = signal(isoDate(Date.now() - 365 * 86_400_000));
@@ -920,6 +1209,11 @@ export class StrategyTesterPanelComponent implements OnDestroy {
     effect(() => {
       const v = this.values();
       untracked(() => this.draft.set({ ...v }));
+    });
+    // The Properties form follows the run on screen.
+    effect(() => {
+      const start = this.propertyStart();
+      untracked(() => this.propertyDraft.set(start ? { ...start } : null));
     });
     // The list's viewport comes and goes with its tab: follow its height while it is there.
     effect(() => {
@@ -1080,6 +1374,23 @@ export class StrategyTesterPanelComponent implements OnDestroy {
     this.rerun.emit(inputOverrides(list, resolveInputValues(list, this.draft())));
   }
 
+  // ── properties ──
+  protected setProp<K extends keyof PropertyDraft>(key: K, value: PropertyDraft[K] | null): void {
+    this.propertyDraft.update((d) => (d ? { ...d, [key]: value } : d));
+  }
+
+  /** Re-run with the overrides already applied plus every property changed here. */
+  protected emitProperties(): void {
+    const start = this.propertyStart();
+    const edited = this.propertyDraft();
+    if (!start || !edited || draftProblems(edited).length) return;
+    this.rerunProperties.emit(overridesFrom(this.properties() ?? {}, start, edited));
+  }
+
+  protected resetProperties(): void {
+    this.rerunProperties.emit({});
+  }
+
   // ── deep backtest ──
   openDeep(): void {
     if (!this.deep()) return;
@@ -1103,6 +1414,7 @@ export class StrategyTesterPanelComponent implements OnDestroy {
       target,
       { fromDate: this.deepFrom(), toDate: this.deepTo() },
       this.values(),
+      this.properties(),
     );
     if (typeof req === 'string') {
       this.deepError.set(req);

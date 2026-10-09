@@ -780,3 +780,187 @@ export interface ScriptDiagnostic {
   /** Text edits that apply the hint; absent when there are none. */
   fixes?: readonly ScriptDiagnosticFix[] | null;
 }
+
+// ── runtime2: strategy() property overrides (PC-I5, scripting API §3d) ──
+
+/**
+ * The Strategy Tester's Properties for one run, over the script's `strategy()`: every field optional
+ * (absent = the script's own). The engine refuses a bad value or an unknown field (`-11`, naming it).
+ */
+export interface ScriptStrategyPropertyOverrides {
+  initialCapital?: number;
+  /** ISO code or `NONE` (the symbol's currency). */
+  currency?: string;
+  defaultQtyType?: 'fixed' | 'cash' | 'percent_of_equity';
+  defaultQtyValue?: number;
+  pyramiding?: number;
+  commissionType?: 'percent' | 'cash_per_contract' | 'cash_per_order';
+  commissionValue?: number;
+  /** "Verify price for limit orders", ticks. */
+  backtestFillLimitsAssumption?: number;
+  /** Ticks. */
+  slippage?: number;
+  marginLong?: number;
+  marginShort?: number;
+  processOrdersOnClose?: boolean;
+  calcOnOrderFills?: boolean;
+  calcOnEveryTick?: boolean;
+  useBarMagnifier?: boolean;
+  fillOrdersOnStandardOhlc?: boolean;
+  closeEntriesRule?: 'FIFO' | 'ANY';
+  riskFreeRate?: number;
+}
+
+/** `scripting/run` / `scripting/replay` accept the overrides (merged into `ScriptRunRequest`). */
+export interface ScriptRunRequest {
+  strategyProperties?: ScriptStrategyPropertyOverrides;
+}
+
+// ── runtime2: semantic model and rename (PR-I8 / PE-I5, scripting API §2a/§2b) ──
+
+/** A location: 1-based line/column (end exclusive), 0-based offset/length; `unit` = the library it is in. */
+export interface ScriptLocation {
+  line: number;
+  column: number;
+  endLine: number;
+  endColumn: number;
+  offset: number;
+  length: number;
+  unit?: string | null;
+}
+
+export type ScriptSymbolKind =
+  | 'variable'
+  | 'parameter'
+  | 'loopVariable'
+  | 'function'
+  | 'method'
+  | 'type'
+  | 'field'
+  | 'enum'
+  | 'enumMember'
+  | 'import';
+
+export interface ScriptSymbol {
+  id: number;
+  name: string;
+  kind: ScriptSymbolKind;
+  declaration: ScriptLocation;
+  /** "series float"; "a | b" for a template called with several types. */
+  type?: string | null;
+  detail?: string | null;
+  doc?: string | null;
+  container?: string | null;
+  exported: boolean;
+}
+
+export interface ScriptOutlineItem {
+  name: string;
+  kind: string;
+  range: ScriptLocation;
+  nameRange: ScriptLocation;
+  detail?: string | null;
+  children: ScriptOutlineItem[];
+}
+
+/** §2a: `references` are `[symbol, offset, length, kind]` (0 declaration, 1 read, 2 write, 3 call, 4 named argument, 5 type, 6 member). */
+export interface ScriptSemantic {
+  symbols: ScriptSymbol[];
+  references: [number, number, number, number][];
+  outline: ScriptOutlineItem[];
+}
+
+export interface ScriptCompileRequest {
+  /** Also return the semantic model (§2a). */
+  semantic?: boolean;
+}
+
+export interface ScriptCompileResult {
+  /** The semantic model when the compile asked for it. */
+  semantic?: ScriptSemantic | null;
+}
+
+/** §2b: one edit of a rename (0-based offset/length in the source it was planned on). */
+export interface ScriptRenameEdit {
+  offset: number;
+  length: number;
+  text: string;
+  line: number;
+  column: number;
+  endLine: number;
+  endColumn: number;
+}
+
+export interface ScriptRenamePlan {
+  oldName: string;
+  newName: string;
+  edits: ScriptRenameEdit[];
+}
+
+// ── runtime2: v4/v5 → v6 converter (PR-I10, scripting API §2c) ──
+
+export interface ScriptConversion {
+  source: string;
+  fromVersion: number | null;
+  /** 6, or 5 when a refused construct keeps the script on v5; null when nothing was converted. */
+  toVersion: number | null;
+  changes: { line: number; what: string }[];
+  refusals: { line: number; construct: string; why: string }[];
+  /** Why nothing was converted. */
+  problem?: string | null;
+  compile?: ScriptCompileResult | null;
+}
+
+/** §2d: a formatted script (or the input unchanged with the reason). */
+export interface ScriptFormatResult {
+  source: string;
+  changed: boolean;
+  problem?: string | null;
+}
+
+/** §2e AI explain / fix request (PE-I6). */
+export interface ScriptAssistRequest {
+  mode: 'explain' | 'fix';
+  source: string;
+  selectionFrom?: number;
+  selectionTo?: number;
+  problem?: { code: string; message: string; line: number };
+  question?: string;
+}
+
+/** §2e response: an explanation, and for `fix` a proposed script (never applied by the engine). */
+export interface ScriptAssistResult {
+  mode: 'explain' | 'fix';
+  explanation: string;
+  source?: string | null;
+  compile?: ScriptCompileResult | null;
+  warnings: string[];
+  llmInvocationId: number;
+  model: string;
+}
+
+/** §2f one line of the "Port from TradingView" checklist. */
+export interface ScriptPortCheck {
+  id:
+    | 'version'
+    | 'compile'
+    | 'kind'
+    | 'size'
+    | 'margin'
+    | 'stops'
+    | 'lookahead'
+    | 'repaint'
+    | string;
+  status: 'ok' | 'check' | 'problem';
+  title: string;
+  detail: string;
+  line?: number | null;
+}
+
+/** §2f response: the script to use (converted when it was v4/v5), its compile and the broker checklist. */
+export interface ScriptPortResult {
+  source: string;
+  conversion?: Omit<ScriptConversion, 'source' | 'compile'> | null;
+  compile: ScriptCompileResult;
+  checklist: ScriptPortCheck[];
+}

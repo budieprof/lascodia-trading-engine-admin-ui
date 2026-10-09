@@ -441,6 +441,19 @@ export function liveWarningHint(code: string): string | null {
   return LIVE_WARNING_HINTS[code.toUpperCase()] ?? null;
 }
 
+/** The engine's own suggestion for a finding, else the hint its code gets here, else null. */
+export function liveFindingHint(w: Pick<ScriptLiveWarning, 'code' | 'hint'>): string | null {
+  const own = typeof w.hint === 'string' ? w.hint.trim() : '';
+  return own || liveWarningHint(w.code);
+}
+
+/** "(line 12)", or "(line 12 of library a/b/1)" when the finding is in an imported library. */
+export function liveFindingWhere(w: Pick<ScriptLiveWarning, 'line' | 'unit'>): string | null {
+  if (!(w.line > 0)) return null;
+  const unit = typeof w.unit === 'string' ? w.unit.trim() : '';
+  return unit ? `(line ${w.line} of library ${unit})` : `(line ${w.line})`;
+}
+
 /** Findings that change what the session trades come first. */
 export function sortLiveWarnings(warnings: readonly ScriptLiveWarning[]): ScriptLiveWarning[] {
   const rank = (w: ScriptLiveWarning) => (w.code === 'PS9301' ? 0 : w.code === 'PS9302' ? 1 : 2);

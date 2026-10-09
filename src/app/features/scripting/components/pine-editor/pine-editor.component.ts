@@ -16,7 +16,12 @@ import {
   untracked,
 } from '@angular/core';
 
-import type { ScriptDiagnostic, ScriptDiagnosticFix } from '@core/api/scripting.types';
+import type {
+  ScriptDiagnostic,
+  ScriptDiagnosticFix,
+  ScriptRenameEdit,
+  ScriptSemantic,
+} from '@core/api/scripting.types';
 import { ThemeService } from '@core/theme/theme.service';
 import { PineCatalogService } from '../../services/pine-catalog.service';
 import type { PineEditorHandle } from '../../editor/pine-editor-setup';
@@ -128,11 +133,31 @@ export class PineEditorComponent implements AfterViewInit, OnDestroy {
   readonly ariaLabel = input('Pine Script editor');
   /** Shown while the editor is empty. */
   readonly placeholder = input<string | null>(null);
+  /**
+   * The engine's semantic model (PR-I8) and the source it was compiled from: go to definition
+   * (F12, Ctrl/Cmd-click), select references (Shift-F12), rename (F2) and hover for the script's
+   * own names — while the editor shows exactly that source.
+   */
+  readonly semantic = input<ScriptSemantic | null>(null);
+  readonly semanticSource = input<string | null>(null);
 
   /** 1-based cursor position. */
   readonly cursorChange = output<{ line: number; column: number }>();
   /** Mod-S pressed in the editor. */
   readonly saveRequested = output<void>();
+  /** Shift-Alt-F in the editor. */
+  readonly formatRequested = output<void>();
+  /** F2 on a name of the script: the host asks for the new name and plans the rename. */
+  readonly renameRequested = output<{ offset: number; name: string }>();
+  /** Go to definition reached a name declared in an imported library. */
+  readonly libraryDefinition = output<{
+    unit: string;
+    line: number;
+    column: number;
+    name: string;
+  }>();
+  /** Something the semantic commands could not do, in plain words. */
+  readonly notice = output<string>();
   readonly ready = output<void>();
 
   readonly state = signal<'loading' | 'ready' | 'failed'>('loading');
@@ -158,6 +183,11 @@ export class PineEditorComponent implements AfterViewInit, OnDestroy {
     effect(() => {
       const d = this.diagnostics();
       untracked(() => this.handle?.setDiagnostics(d));
+    });
+    effect(() => {
+      const model = this.semantic();
+      const source = this.semanticSource();
+      untracked(() => this.handle?.setSemantic(model, source));
     });
     effect(() => {
       const c = this.language.catalog();
@@ -192,8 +222,24 @@ export class PineEditorComponent implements AfterViewInit, OnDestroy {
             onCursor: (line, column) =>
               this.zone.run(() => this.cursorChange.emit({ line, column })),
             onSave: () => this.zone.run(() => this.saveRequested.emit()),
+            onFormat: () => this.zone.run(() => this.formatRequested.emit()),
+            semantic: {
+              onRename: (offset, name) =>
+                this.zone.run(() => this.renameRequested.emit({ offset, name })),
+              onLibraryDefinition: (d) =>
+                this.zone.run(() =>
+                  this.libraryDefinition.emit({
+                    unit: d.unit,
+                    line: d.line,
+                    column: d.column,
+                    name: d.symbol.name,
+                  }),
+                ),
+              onNotice: (message) => this.zone.run(() => this.notice.emit(message)),
+            },
           });
           this.handle.setDiagnostics(this.diagnostics());
+          this.handle.setSemantic(this.semantic(), this.semanticSource());
           this.zone.run(() => {
             this.state.set('ready');
             this.ready.emit();
@@ -251,6 +297,20 @@ export class PineEditorComponent implements AfterViewInit, OnDestroy {
   applyFix(fix: ScriptDiagnosticFix): void {
     if (this.readOnly()) return;
     this.handle?.applyFix(fix);
+  }
+
+  /**
+   * Applies a rename planned on `source` as one undoable edit. False (nothing changes) when the
+   * editor's text is no longer that source, or before the editor has loaded.
+   */
+  applyRename(source: string, edits: readonly ScriptRenameEdit[]): boolean {
+    if (this.readOnly()) return false;
+    return this.handle?.applyEdits(source, edits) ?? false;
+  }
+
+  /** The editor's selection as offsets [from, to); null when nothing is selected. */
+  selection(): { from: number; to: number } | null {
+    return this.handle?.getSelection() ?? null;
   }
 
   /** The live source (the editor's own document, even mid-keystroke). */

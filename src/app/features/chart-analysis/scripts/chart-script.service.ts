@@ -30,6 +30,7 @@ import type {
   ScriptLibraryVisibility,
   ScriptRunBar,
   ScriptRunRequest,
+  ScriptStrategyPropertyOverrides,
   TradingViewScriptImportDto,
   UpdateChartScriptRequest,
 } from '@core/api/scripting.types';
@@ -63,6 +64,11 @@ export interface ChartScriptItem {
   /** A saved strategy's own symbol / timeframe (informational; the chart's are used to run). */
   symbol?: string | null;
   timeframe?: string | null;
+  /**
+   * PC-I5: a strategy's `strategy()` property overrides from the Strategy Tester's Properties, sent
+   * with each of its runs (scripting API §3d). For this chart session; absent = the script's own.
+   */
+  strategyProperties?: ScriptStrategyPropertyOverrides;
 }
 
 /** How a run for the chart is made, beyond the script, series, inputs and window (`runOnChart`). */
@@ -370,6 +376,12 @@ export class ChartScriptService {
       if (item.strategyId !== undefined) req.strategyId = item.strategyId;
       else req.source = item.pineSource ?? '';
       if (overrides && Object.keys(overrides).length) req.inputs = overrides;
+      if (
+        item.kind === 'strategy' &&
+        item.strategyProperties &&
+        Object.keys(item.strategyProperties).length
+      )
+        req.strategyProperties = { ...item.strategyProperties };
       // Indicators run the chart's forming bar as the realtime bar; strategies backtest closed
       // bars. The engine takes it on the standard chart only, for a run that ends now.
       const liveBar = opts.liveBar ?? null;
@@ -377,7 +389,14 @@ export class ChartScriptService {
         req.liveBar = liveBar;
       if (opts.trace) req.trace = opts.trace;
       if (opts.profile) req.profile = true;
-      if (opts.keepWarm && req.mode === 'preview' && chartType === 'standard' && toMs === null && !opts.trace && !opts.profile)
+      if (
+        opts.keepWarm &&
+        req.mode === 'preview' &&
+        chartType === 'standard' &&
+        toMs === null &&
+        !opts.trace &&
+        !opts.profile
+      )
         req.keepWarm = true;
       return this.scripting.run(req).pipe(map((res) => toChartScriptResult(res)));
     };

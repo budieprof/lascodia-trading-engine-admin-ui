@@ -14,6 +14,12 @@ export interface ProblemFix {
   fix: ScriptDiagnosticFix;
 }
 
+/** An AI request on a Problems row (PE-I6). */
+export interface ProblemAsk {
+  diagnostic: ScriptDiagnostic;
+  mode: 'explain' | 'fix';
+}
+
 /**
  * Every diagnostic of the last compile, in reading order — like the Pine Editor's console.
  * Clicking one moves the editor's cursor to it. A row shows the engine's hint under its message and
@@ -83,7 +89,7 @@ export interface ProblemFix {
                   }
                 </span>
               </button>
-              @if (fixesOf(d).length > 0) {
+              @if (fixesOf(d).length > 0 || (assist() && !isLibrary(d))) {
                 <div class="fixes">
                   @for (f of fixesOf(d); track $index) {
                     <button
@@ -98,6 +104,29 @@ export interface ProblemFix {
                       "
                     >
                       Fix: {{ f.title }}
+                    </button>
+                  }
+                  @if (assist() && !isLibrary(d)) {
+                    <button
+                      type="button"
+                      class="fix ai"
+                      (click)="ask.emit({ diagnostic: d, mode: 'explain' })"
+                      title="Ask the AI what this means and how to fix it"
+                    >
+                      Explain
+                    </button>
+                    <button
+                      type="button"
+                      class="fix ai"
+                      [disabled]="readOnly()"
+                      (click)="ask.emit({ diagnostic: d, mode: 'fix' })"
+                      [title]="
+                        readOnly()
+                          ? 'The editor is read-only'
+                          : 'Ask the AI for a fix — shown as a comparison you accept or reject'
+                      "
+                    >
+                      AI fix
                     </button>
                   }
                 </div>
@@ -263,6 +292,10 @@ export class ProblemsPanelComponent {
   readonly selected = output<ScriptDiagnostic>();
   /** A quick fix was picked. */
   readonly fix = output<ProblemFix>();
+  /** Offer the AI's Explain / AI fix on each row of the script's own code (PE-I6). */
+  readonly assist = input(false);
+  /** Explain / AI fix was picked on a row. */
+  readonly ask = output<ProblemAsk>();
 
   readonly collapsed = signal(false);
   readonly sorted = computed(() => sortDiagnostics(this.diagnostics()));

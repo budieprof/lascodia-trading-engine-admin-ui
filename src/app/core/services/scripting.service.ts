@@ -34,6 +34,12 @@ import type {
   StrategyTrialLedgerDto,
   ScriptLibraryVisibility,
   ScriptPublisherDto,
+  ScriptConversion,
+  ScriptFormatResult,
+  ScriptAssistRequest,
+  ScriptAssistResult,
+  ScriptPortResult,
+  ScriptRenamePlan,
   ScriptRunRequest,
   ScriptRunResult,
   ScriptSessionFrame,
@@ -232,6 +238,79 @@ export class ScriptingService {
         return e.compile ? of(normaliseCompile(e.compile)) : throwError(() => e);
       }),
     );
+  }
+
+  /** `POST scripting/format` (§2d) — TradingView spacing, proven token-identical by the engine. */
+  /**
+   * PE-I6: asks the AI to explain or fix (§2e). A fix comes back as a proposal — the caller shows
+   * it for review; nothing is applied here. No retries: every call is a paid model call.
+   */
+  assist(request: ScriptAssistRequest): Observable<ScriptAssistResult> {
+    return this.api
+      .post<ResponseData<ScriptAssistResult>>('/scripting/assist', request, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The AI could not answer.')),
+        catchError((err) => throwError(() => toScriptingError(err, 'The AI could not answer.'))),
+      );
+  }
+
+  format(source: string): Observable<ScriptFormatResult> {
+    return this.api
+      .post<ResponseData<ScriptFormatResult>>('/scripting/format', { source }, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The engine could not format the script.')),
+        catchError((err) =>
+          throwError(() => toScriptingError(err, 'The engine could not format the script.')),
+        ),
+      );
+  }
+
+  /** `POST scripting/convert` (§2c) — a Pine v4/v5 script converted to v6 (or kept on v5, with the reasons). */
+  /** PE-I6 Port from TradingView (§2f): convert when v4/v5, compile, broker checklist. Persists nothing. */
+  port(
+    source: string,
+    symbol?: string | null,
+    timeframe?: string | null,
+  ): Observable<ScriptPortResult> {
+    return this.api
+      .post<
+        ResponseData<ScriptPortResult>
+      >('/scripting/port', { source, symbol: symbol ?? undefined, timeframe: timeframe ?? undefined }, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The engine could not check the script.')),
+        catchError((err) =>
+          throwError(() => toScriptingError(err, 'The engine could not check the script.')),
+        ),
+      );
+  }
+
+  convert(source: string): Observable<ScriptConversion> {
+    return this.api
+      .post<ResponseData<ScriptConversion>>('/scripting/convert', { source }, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The engine could not convert the script.')),
+        catchError((err) =>
+          throwError(() => toScriptingError(err, 'The engine could not convert the script.')),
+        ),
+      );
+  }
+
+  /**
+   * `POST scripting/rename` (§2b) — the edits renaming the name at `offset` everywhere it is used,
+   * proven by the engine compiling the result. A refusal (the new name collides or captures)
+   * rejects with the engine's reason as the error message.
+   */
+  renameSymbol(source: string, offset: number, newName: string): Observable<ScriptRenamePlan> {
+    return this.api
+      .post<
+        ResponseData<ScriptRenamePlan>
+      >('/scripting/rename', { source, offset, newName }, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The engine could not rename it.')),
+        catchError((err) =>
+          throwError(() => toScriptingError(err, 'The engine could not rename it.')),
+        ),
+      );
   }
 
   // ── §3 Run / preview ────────────────────────────────────────────────────
@@ -532,7 +611,9 @@ export class ScriptingService {
     const path = `/scripting/sessions/${encodeURIComponent(sessionId)}/frame?sinceSeq=${Math.max(0, Math.trunc(sinceSeq))}`;
     return this.api.get<ResponseData<ScriptSessionFrame>>(path, SILENT).pipe(
       map((res) => envelopeData(res, 'The chart session could not be read.')),
-      catchError((err) => throwError(() => toScriptingError(err, 'The chart session could not be read.'))),
+      catchError((err) =>
+        throwError(() => toScriptingError(err, 'The chart session could not be read.')),
+      ),
     );
   }
 
