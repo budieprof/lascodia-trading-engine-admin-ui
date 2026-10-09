@@ -431,7 +431,8 @@ export class ScriptAuthoringComponent {
           });
         } else {
           this.autosaver.cancel();
-          clearDraft(key);
+          // A kept draft on offer stays stored until the operator restores or discards it.
+          if (!this.restorable()) clearDraft(key);
         }
       });
     });
