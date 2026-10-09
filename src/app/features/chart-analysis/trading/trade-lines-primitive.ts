@@ -41,6 +41,9 @@ export class TradeLinesPrimitive implements ISeriesPrimitive<Time> {
     pointerId: number;
     price: number;
     restore: { handleScroll: unknown; handleScale: unknown };
+    /** Where the press started, and how far it travelled (a clickable line that never travelled is clicked). */
+    startY: number;
+    travelled: number;
   } | null = null;
 
   private press: { line: TradeLine; pointerId: number; y: number } | null = null;
@@ -210,6 +213,8 @@ export class TradeLinesPrimitive implements ISeriesPrimitive<Time> {
       pointerId: ev.pointerId,
       price: line.price,
       restore: { handleScroll: options.handleScroll, handleScale: options.handleScale },
+      startY: y,
+      travelled: 0,
     };
     this.chart.applyOptions({ handleScroll: false, handleScale: false });
     try {
@@ -234,6 +239,7 @@ export class TradeLinesPrimitive implements ISeriesPrimitive<Time> {
       const hovering = !!over;
       if (this.element && (hovering !== this.hovering || hovering)) {
         this.element.style.cursor = !over ? '' : over.draggable ? 'ns-resize' : 'pointer';
+        // (a working order's entry is both: drag to move it, click to cancel it)
         this.hovering = hovering;
       }
       return;
@@ -241,6 +247,9 @@ export class TradeLinesPrimitive implements ISeriesPrimitive<Time> {
     if (ev.pointerId !== this.drag.pointerId) return;
     ev.preventDefault();
     ev.stopPropagation();
+    this.drag.travelled = Math.max(this.drag.travelled, Math.abs(y - this.drag.startY));
+    // A line that can also be clicked (a working order's entry) only starts moving past the click slop.
+    if (this.drag.line.clickable && this.drag.travelled <= CLICK_SLOP_PX) return;
     const price = tradeDragPrice(y, (py) => series.coordinateToPrice(py), this.precision());
     if (price !== null) {
       this.drag.price = price;
@@ -262,7 +271,8 @@ export class TradeLinesPrimitive implements ISeriesPrimitive<Time> {
     ev.preventDefault();
     ev.stopPropagation();
     this.endDrag();
-    if (drag.price !== drag.line.price) this.onMove({ line: drag.line, price: drag.price });
+    if (drag.line.clickable && drag.travelled <= CLICK_SLOP_PX) this.onClick(drag.line);
+    else if (drag.price !== drag.line.price) this.onMove({ line: drag.line, price: drag.price });
   };
 
   private readonly onPointerCancel = (ev: PointerEvent): void => {

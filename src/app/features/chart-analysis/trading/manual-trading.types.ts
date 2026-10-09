@@ -146,6 +146,47 @@ export interface PositionChangePreview {
   refusedReason: string | null;
 }
 
+/**
+ * `POST order/{id}/move-preview` — the confirm dialog of moving a working order's entry (with its stop and target);
+ * the same checks `move-entry` enforces (engine `OrderEntryMovePreviewDto`).
+ */
+export interface OrderEntryMovePreview {
+  orderId: number;
+  tradingAccountId: number;
+  accountId: string;
+  accountName: string;
+  accountType: string;
+  currency: string;
+  symbol: string;
+  isBuy: boolean;
+  /** Limit, Stop or StopLimit. */
+  orderKind: string;
+  lots: number;
+  currentPrice: number;
+  currentStop: number | null;
+  currentTarget: number | null;
+  newPrice: number;
+  newStop: number | null;
+  newTarget: number | null;
+  bid: number | null;
+  ask: number | null;
+  pipSize: number;
+  pipValuePerLot: number | null;
+  atr: ManualTradeAtr | null;
+  /** From the price that would fill it (ask for a buy, bid for a sell). */
+  distanceFromMarketPips: number | null;
+  stopDistancePips: number | null;
+  stopDistanceAtr: number | null;
+  riskAtStop: number | null;
+  rewardAtTarget: number | null;
+  targetR: number | null;
+  gates: TradeGate[];
+  canApply: boolean;
+  refusedReason: string | null;
+  /** The refusing check's key (stopGuard, side, eaSafety, eaVersion, …); null when it can be applied. */
+  refusedGate: string | null;
+}
+
 /** `GET position/command-status?correlationId=` — the EA command an operator action queued. */
 export interface EaCommandStatus {
   commandId: number;
