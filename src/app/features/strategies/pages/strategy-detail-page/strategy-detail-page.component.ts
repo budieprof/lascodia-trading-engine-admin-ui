@@ -67,6 +67,7 @@ import { ScriptBacktestLauncherComponent } from '@features/scripting/backtest/sc
 import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
 import { isNewsBlackoutExempt } from '@features/scripting/execution/news-blackout-exemption.model';
 import { FirstStrategyChecklistComponent } from '@features/scripting/onboarding/first-strategy-checklist.component';
+import { RunComparisonComponent } from '@features/scripting/backtest/run-comparison.component';
 import type { ChecklistAction } from '@features/scripting/onboarding/first-strategy-checklist';
 import { AuthService } from '@core/auth/auth.service';
 import { OPERATOR_PERMISSION } from '@features/scripting/shared/permissions';
@@ -109,6 +110,7 @@ import {
     RouterLink,
     StrategyScriptCardComponent,
     FirstStrategyChecklistComponent,
+    RunComparisonComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -597,6 +599,8 @@ import {
               [fetchData]="fetchBacktests"
               (rowClick)="onBacktestRowClick($event)"
             />
+            <!-- PE-I7: two runs side by side — metrics, equity and how each was made. -->
+            <app-run-comparison [strategyId]="strategyId" />
           }
 
           <!-- Walk-Forward Tab — runs filtered to this strategy. -->

@@ -677,3 +677,14 @@ export interface StrategyTrialLedgerDto {
     whyNot?: string | null;
   }[];
 }
+
+/**
+ * Fields of the engine's `BacktestRunDto` the shared UI type does not carry yet (PE-I7): the
+ * override a run was made with, and the equity curve `GET backtest/{id}` fills (≤ 2,000 points).
+ */
+export interface BacktestRunCompareFields {
+  /** Set when the run tested the strategy on another symbol (`symbol` then holds it). */
+  symbolOverride?: string | null;
+  timeframeOverride?: string | null;
+  equityCurve?: { time: string; equity: number; drawdownPct: number }[] | null;
+}
