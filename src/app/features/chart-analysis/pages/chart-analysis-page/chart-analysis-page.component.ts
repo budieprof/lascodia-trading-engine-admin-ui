@@ -15,7 +15,7 @@ import { FormsModule } from '@angular/forms';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
-import type { CurrencyPairDto } from '@core/api/api.types';
+import type { CurrencyPairDto, OrderDto } from '@core/api/api.types';
 import { CandleFeedService, type Bar } from '../../datafeed/candle-feed.service';
 import {
   LiveRerunScheduler,
@@ -175,7 +175,14 @@ import {
 } from '../../overlays/analysis-overlays';
 import { marketStructure } from '../../overlays/market-structure';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
-import type { PriceOverlay } from '../../overlays/overlay-renderer';
+import {
+  closedTradeMarkers,
+  concernsSymbol,
+  orderLines,
+  positionLines,
+  type ChartPosition,
+  type LiveQuote,
+} from '../../overlays/trade-layer';
 import type { ChartMarker } from '../../chart/chart-host.component';
 import {
   CHART_TIMEZONES,
@@ -873,15 +880,58 @@ export class ChartAnalysisPageComponent {
   private readonly accountScope = inject(AccountScopeService);
   private readonly signals = inject(TradeSignalsService);
 
-  /** Engine state drawn on the chart: position levels and signal markers. */
-  /** Position levels. Kept separate from order levels so each can refresh alone. */
-  private readonly positionOverlays = signal<PriceOverlay[]>([]);
-  private readonly orderOverlays = signal<PriceOverlay[]>([]);
+  /**
+   * Engine state drawn on the chart, each layer held and refreshed on its own: the symbol's open
+   * positions, working orders and closed positions as the engine last sent them, and the signal and
+   * martingale-rung markers. The position lines are re-drawn from these on every live price (their
+   * P&L), never re-fetched for it.
+   */
+  private readonly openPositions = signal<ChartPosition[]>([]);
+  private readonly workingOrders = signal<OrderDto[]>([]);
+  private readonly closedPositions = signal<ChartPosition[]>([]);
   private readonly signalMarkers = signal<ChartMarker[]>([]);
   private readonly rungMarkers = signal<ChartMarker[]>([]);
+  /** The chart symbol's live quote (bid and ask), for the open positions' P&L at the exit side. */
+  private readonly liveQuote = signal<LiveQuote | null>(null);
+
+  /** The account scope, as a filter: only the selected account's positions and orders are drawn. */
+  private inTradeScope(): (accountId: number | null | undefined) => boolean {
+    const ids = this.accountScope.accountIds();
+    return (id) => id != null && ids.includes(id);
+  }
+
+  private readonly positionOverlays = computed(() =>
+    this.showPositions()
+      ? positionLines(
+          this.openPositions(),
+          this.symbol(),
+          this.inTradeScope(),
+          this.liveQuote(),
+          this.pipSize(),
+          (id) => this.accountScope.accounts().find((a) => a.id === id)?.currency ?? null,
+        )
+      : [],
+  );
+  private readonly orderOverlays = computed(() =>
+    this.showOrders() ? orderLines(this.workingOrders(), this.symbol(), this.inTradeScope()) : [],
+  );
+  private readonly closedTradeMarkers = computed(() =>
+    this.showClosedTrades()
+      ? closedTradeMarkers(
+          this.closedPositions(),
+          this.symbol(),
+          this.inTradeScope(),
+          this.pipSize(),
+        )
+      : [],
+  );
 
   readonly overlays = computed(() => [...this.positionOverlays(), ...this.orderOverlays()]);
-  readonly markers = computed(() => [...this.signalMarkers(), ...this.rungMarkers()]);
+  readonly markers = computed(() => [
+    ...this.signalMarkers(),
+    ...this.rungMarkers(),
+    ...this.closedTradeMarkers(),
+  ]);
   /**
    * Engine state on the chart, each toggled on its own (all off until the operator asks):
    * open positions (entry/SL/TP), pending orders (working limit/stop orders and their O·SL/O·TP),
@@ -891,6 +941,13 @@ export class ChartAnalysisPageComponent {
   readonly showPositions = signal(false);
   readonly showOrders = signal(false);
   readonly showOverlays = signal(false);
+  /** Fill markers of the symbol's closed trades (entry and exit; paper apart). Off by default. */
+  readonly showClosedTrades = signal(false);
+  /**
+   * Whether the trade lines widen the price scale's fit (CC-10). On by default: a stop below the
+   * visible low stays in view. Off: a distant take-profit no longer squashes the candles.
+   */
+  readonly fitTradeLines = signal(true);
   /** Any of the three on — the assistant's single "trades" switch reads and drives all three. */
   readonly anyTradeOverlay = computed(
     () => this.showPositions() || this.showOrders() || this.showOverlays(),
@@ -1347,6 +1404,7 @@ export class ChartAnalysisPageComponent {
       this.showPositions();
       this.showOrders();
       this.showOverlays();
+      this.showClosedTrades();
       untracked(() => this.loadTradingOverlays());
     });
     effect(() => {
@@ -1362,7 +1420,10 @@ export class ChartAnalysisPageComponent {
     // A live price belongs to one symbol: a switch waits for the new symbol's first tick.
     effect(() => {
       this.symbol();
-      untracked(() => this.liveAt.set(null));
+      untracked(() => {
+        this.liveAt.set(null);
+        this.liveQuote.set(null);
+      });
     });
     // Leaving the page (route change) saves what is pending.
     this.destroyRef.onDestroy(() => void this.workspace.flush());
@@ -1735,6 +1796,23 @@ export class ChartAnalysisPageComponent {
         this.recordQuote(tick);
       });
 
+    // The trade layers follow the engine (CC-09): a fill, a position opening, changing or closing, a
+    // new working order or signal reloads them — they used to load once per symbol and never follow.
+    for (const event of [
+      'orderCreated',
+      'orderFilled',
+      'positionOpened',
+      'positionClosed',
+      'positionLifecycleEvent',
+      'tradeSignalCreated',
+    ] as const) {
+      this.realtime
+        .on<unknown>(event)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe((payload) => this.scheduleTradeRefresh(payload));
+    }
+    this.destroyRef.onDestroy(() => clearTimeout(this.tradeRefreshTimer));
+
     // Re-read the forming bar every minute — folded from M1 on 1m … 1h, the engine's newest bars on
     // the session grid. Ticks arrive throttled to ~1 Hz, so a spike between two of them never reaches
     // the live bar's high or low; and a bar that closed while the page was open was built entirely
@@ -1745,12 +1823,22 @@ export class ChartAnalysisPageComponent {
   }
 
   /**
-   * Load this symbol's open positions and recent signals onto the chart.
+   * Each trade layer's newest request: a reply for an older one — another symbol, another account
+   * scope, a toggle since switched off — is dropped (CC-09: a slow EURUSD reply painted EURUSD's
+   * stop and target on GBPUSD).
+   */
+  private readonly tradeLoads = { positions: 0, orders: 0, closed: 0, rungs: 0, signals: 0 };
+
+  /**
+   * Load this symbol's trade layers onto the chart: open positions, working orders, closed trades,
+   * martingale rungs and signals — each only when its toggle is on. Called on a symbol switch, an
+   * account switch, a toggle, and whenever the engine reports a fill, a position change or a new
+   * signal (realtime, {@link scheduleTradeRefresh}); before CC-09 they loaded once and never
+   * followed a fill.
    *
-   * Filtered by symbol server-side via the nested `filter` object — sent flat
-   * the criteria are discarded in silence and the handler answers with page 1
-   * of the whole table, which here would paint another symbol's stop loss onto
-   * this chart. That is a wrong chart, not an empty one.
+   * Filtered by symbol and account server-side via the nested `filter` object — sent flat the
+   * criteria are discarded in silence and the handler answers with page 1 of the whole table — and
+   * re-checked here (`positionLines` / `orderLines`).
    */
   private loadTradingOverlays(): void {
     const symbol = this.symbol();
@@ -1758,15 +1846,17 @@ export class ChartAnalysisPageComponent {
     // account's are drawn (an aggregate scope draws its accounts'). An empty scope means no live
     // account — draw none rather than falling back to the whole fleet.
     const accountIds = Array.from(this.accountScope.accountIds());
-    const inScope = (id: number | null | undefined) => id != null && accountIds.includes(id);
-    if (!this.showPositions()) this.positionOverlays.set([]);
-    if (!this.showOrders()) this.orderOverlays.set([]);
-    if (!this.showOverlays()) {
-      this.signalMarkers.set([]);
-      this.rungMarkers.set([]);
-    }
+    const accountKey = this.accountScope.accountIdsKey();
+    /** The chart still shows what this request was for. */
+    const current = () =>
+      symbol === this.symbol() && accountKey === this.accountScope.accountIdsKey();
+    const loads = this.tradeLoads;
 
-    if (this.showPositions())
+    if (!this.showPositions()) {
+      loads.positions++;
+      this.openPositions.set([]);
+    } else {
+      const seq = ++loads.positions;
       this.positions
         .list({
           currentPage: 1,
@@ -1775,38 +1865,20 @@ export class ChartAnalysisPageComponent {
         })
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe((res) => {
-          if (!res?.status || !res.data) return;
-          // Re-checked client-side too: an engine that drops a filter answers with the whole
-          // table, which would paint another account's stop loss onto this chart.
-          const rows = (res.data.data ?? []).filter(
-            (p) =>
-              (p.symbol ?? '').toUpperCase() === symbol.toUpperCase() &&
-              inScope(p.tradingAccountId),
-          );
-          const out: PriceOverlay[] = [];
-          for (const p of rows) {
-            const long = String(p.direction).toLowerCase().includes('buy');
-            const lots = p.openLots || p.tradedLots || 0;
-            out.push({
-              kind: 'entry',
-              price: p.averageEntryPrice,
-              label: `${long ? 'LONG' : 'SHORT'} ${lots.toFixed(2)}`,
-              color: long ? '#26A69A' : '#EF5350',
-            });
-            if (p.stopLoss)
-              out.push({ kind: 'stop', price: p.stopLoss, label: 'SL', color: '#EF5350' });
-            if (p.takeProfit)
-              out.push({ kind: 'target', price: p.takeProfit, label: 'TP', color: '#26A69A' });
-          }
-          this.positionOverlays.set(out);
+          if (seq !== loads.positions || !current() || !res?.status || !res.data) return;
+          this.openPositions.set((res.data.data ?? []) as ChartPosition[]);
         });
+    }
 
     // ── Working orders ────────────────────────────────────────────────────
     //
-    // Only orders that can still fill. A filled order is already a position and
-    // is drawn as one; a cancelled one is history. Drawing either would put
-    // lines on the chart at prices nothing is waiting at.
-    if (this.showOrders())
+    // Only orders that can still fill (orderLines). A filled order is already a
+    // position and is drawn as one; a cancelled one is history.
+    if (!this.showOrders()) {
+      loads.orders++;
+      this.workingOrders.set([]);
+    } else {
+      const seq = ++loads.orders;
       this.orders
         .list({
           currentPage: 1,
@@ -1817,100 +1889,130 @@ export class ChartAnalysisPageComponent {
         })
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe((res) => {
-          if (!res?.status || !res.data) return;
-          const working = (res.data.data ?? []).filter(
-            (o) =>
-              (o.symbol ?? '').toUpperCase() === symbol.toUpperCase() &&
-              inScope(o.tradingAccountId) &&
-              ['Pending', 'Submitted', 'PartialFill'].includes(String(o.status)),
-          );
-          const lines: PriceOverlay[] = [];
-          for (const o of working) {
-            const buy = String(o.orderType) === 'Buy';
-            lines.push({
-              kind: 'order',
-              price: o.price,
-              label: `${String(o.executionType).toUpperCase()} ${buy ? 'BUY' : 'SELL'} ${o.quantity}`,
-              color: buy ? '#26A69A' : '#EF5350',
-            });
-            if (o.stopLoss)
-              lines.push({ kind: 'stop', price: o.stopLoss, label: 'O·SL', color: '#EF5350' });
-            if (o.takeProfit)
-              lines.push({ kind: 'target', price: o.takeProfit, label: 'O·TP', color: '#26A69A' });
-          }
-          this.orderOverlays.set(lines);
+          if (seq !== loads.orders || !current() || !res?.status || !res.data) return;
+          this.workingOrders.set(res.data.data ?? []);
         });
+    }
+
+    // ── Closed trades ─────────────────────────────────────────────────────
+    //
+    // The most recent closed positions of the symbol in scope; their fills are pinned to the bars
+    // they happened in, and those before the loaded history drop off the chart (applyMarkers).
+    if (!this.showClosedTrades()) {
+      loads.closed++;
+      this.closedPositions.set([]);
+    } else {
+      const seq = ++loads.closed;
+      this.positions
+        .list({
+          currentPage: 1,
+          itemCountPerPage: 200,
+          filter: { symbol, status: 'Closed', tradingAccountIds: accountIds },
+          sortBy: 'openedAt',
+          sortDirection: 'desc',
+        })
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe((res) => {
+          if (seq !== loads.closed || !current() || !res?.status || !res.data) return;
+          this.closedPositions.set((res.data.data ?? []) as ChartPosition[]);
+        });
+    }
+
+    if (!this.showOverlays()) {
+      loads.rungs++;
+      loads.signals++;
+      this.signalMarkers.set([]);
+      this.rungMarkers.set([]);
+      return;
+    }
+    const inScope = this.inTradeScope();
 
     // ── Martingale rungs ──────────────────────────────────────────────────
     //
     // Each closed rung is pinned to the BAR it closed on, not to a price line:
     // a chain's rungs are events in sequence, and stacking six horizontal lines
     // on the price scale buries the candles the operator is reading.
-    if (this.showOverlays())
-      this.martingale
-        .getOverview({ maxChains: 40 })
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe({
-          next: (overview) => {
-            const chains = (overview?.chains ?? []).filter(
-              (c) =>
-                (c.symbol ?? '').toUpperCase() === symbol.toUpperCase() &&
-                inScope(c.tradingAccountId),
-            );
-            const marks: ChartMarker[] = [];
-            for (const chain of chains) {
-              for (const entry of chain.ledger ?? []) {
-                const at = Date.parse(entry.closedAtUtc ?? '');
-                if (Number.isNaN(at)) continue;
-                const loss = String(entry.outcome) === 'Loss';
-                marks.push({
-                  time: at,
-                  position: 'belowBar',
-                  shape: 'square',
-                  color: loss ? '#EF5350' : '#26A69A',
-                  text: `R${entry.depthAfter}`,
-                });
-              }
-            }
-            this.rungMarkers.set(marks);
-          },
-          // The ladder module can be off entirely; that is not an error worth a
-          // toast, it just means there are no rungs to draw.
-          error: () => this.rungMarkers.set([]),
-        });
-
-    if (this.showOverlays())
-      this.signals
-        .list({
-          currentPage: 1,
-          itemCountPerPage: 100,
-          filter: { symbol },
-          sortBy: 'id',
-          sortDirection: 'desc',
-        })
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe((res) => {
-          if (!res?.status || !res.data) return;
-          const rows = (res.data.data ?? []).filter(
-            (s) => (s.symbol ?? '').toUpperCase() === symbol.toUpperCase(),
+    const rungSeq = ++loads.rungs;
+    this.martingale
+      .getOverview({ maxChains: 40 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (overview) => {
+          if (rungSeq !== loads.rungs || !current()) return;
+          const chains = (overview?.chains ?? []).filter(
+            (c) =>
+              (c.symbol ?? '').toUpperCase() === symbol.toUpperCase() &&
+              inScope(c.tradingAccountId),
           );
           const marks: ChartMarker[] = [];
-          for (const s of rows) {
-            const at = Date.parse(s.generatedAt ?? '');
-            // A signal with no readable timestamp cannot be pinned to a bar; a
-            // NaN time makes the library drop the whole batch silently.
-            if (Number.isNaN(at)) continue;
-            const long = String(s.direction).toLowerCase().includes('buy');
-            marks.push({
-              time: at,
-              position: long ? 'belowBar' : 'aboveBar',
-              shape: long ? 'arrowUp' : 'arrowDown',
-              color: long ? '#26A69A' : '#EF5350',
-              text: `#${s.id}`,
-            });
+          for (const chain of chains) {
+            for (const entry of chain.ledger ?? []) {
+              const at = Date.parse(entry.closedAtUtc ?? '');
+              if (Number.isNaN(at)) continue;
+              const loss = String(entry.outcome) === 'Loss';
+              marks.push({
+                time: at,
+                position: 'belowBar',
+                shape: 'square',
+                color: loss ? '#EF5350' : '#26A69A',
+                text: `R${entry.depthAfter}`,
+              });
+            }
           }
-          this.signalMarkers.set(marks);
-        });
+          this.rungMarkers.set(marks);
+        },
+        // The ladder module can be off entirely; that is not an error worth a
+        // toast, it just means there are no rungs to draw.
+        error: () => {
+          if (rungSeq === loads.rungs) this.rungMarkers.set([]);
+        },
+      });
+
+    const signalSeq = ++loads.signals;
+    this.signals
+      .list({
+        currentPage: 1,
+        itemCountPerPage: 100,
+        filter: { symbol },
+        sortBy: 'id',
+        sortDirection: 'desc',
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((res) => {
+        if (signalSeq !== loads.signals || !current() || !res?.status || !res.data) return;
+        const rows = (res.data.data ?? []).filter(
+          (s) => (s.symbol ?? '').toUpperCase() === symbol.toUpperCase(),
+        );
+        const marks: ChartMarker[] = [];
+        for (const s of rows) {
+          const at = Date.parse(s.generatedAt ?? '');
+          // A signal with no readable timestamp cannot be pinned to a bar; a
+          // NaN time makes the library drop the whole batch silently.
+          if (Number.isNaN(at)) continue;
+          const long = String(s.direction).toLowerCase().includes('buy');
+          marks.push({
+            time: at,
+            position: long ? 'belowBar' : 'aboveBar',
+            shape: long ? 'arrowUp' : 'arrowDown',
+            color: long ? '#26A69A' : '#EF5350',
+            text: `#${s.id}`,
+          });
+        }
+        this.signalMarkers.set(marks);
+      });
+  }
+
+  /**
+   * The engine reported a fill, a position change or a new signal: reload the trade layers once the
+   * burst settles (a fill brings orderFilled, positionOpened and a lifecycle event together). Events
+   * that name another symbol are not this chart's.
+   */
+  private tradeRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+  private scheduleTradeRefresh(payload: unknown): void {
+    if (!this.anyTradeOverlay() && !this.showClosedTrades()) return;
+    if (!concernsSymbol(payload, this.symbol())) return;
+    clearTimeout(this.tradeRefreshTimer);
+    this.tradeRefreshTimer = setTimeout(() => this.loadTradingOverlays(), 400);
   }
 
   // ── Replay controls ──────────────────────────────────────────────────────
@@ -2422,6 +2524,9 @@ export class ChartAnalysisPageComponent {
     const price = tick.bid ?? tick.price ?? tick.ask;
     if (typeof price !== 'number' || !Number.isFinite(price)) return;
     this.liveAt.set(Date.now());
+    // The open positions' P&L reads both sides: a long exits at the bid, a short at the ask.
+    const ask = typeof tick.ask === 'number' && Number.isFinite(tick.ask) ? tick.ask : null;
+    this.liveQuote.set({ bid: price, ask });
 
     // Right after a switch the bars on screen are still the previous series': not this tick's.
     if (!sameSeries(this.barsFor(), { symbol: this.symbol(), resolution: this.resolution() }))
@@ -3166,6 +3271,8 @@ export class ChartAnalysisPageComponent {
         showEvents: this.showEvents(),
         minEventImpact: this.minEventImpact(),
         showBlackout: this.showBlackout(),
+        showClosedTrades: this.showClosedTrades(),
+        fitTradeLines: this.fitTradeLines(),
       },
       panel: {
         watchlistOpen: this.watchlistOpen(),
@@ -3265,6 +3372,8 @@ export class ChartAnalysisPageComponent {
       this.showEvents.set(o.showEvents ?? true);
       this.minEventImpact.set(o.minEventImpact ?? 'Medium');
       this.showBlackout.set(o.showBlackout ?? true);
+      this.showClosedTrades.set(o.showClosedTrades ?? false);
+      this.fitTradeLines.set(o.fitTradeLines ?? true);
       const p = s.panel ?? {};
       if (p.watchlistOpen !== undefined) this.watchlistOpen.set(p.watchlistOpen);
       if (p.width && p.width >= 240 && p.width <= 640) this.dockWidth.set(p.width);

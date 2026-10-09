@@ -504,6 +504,8 @@ export class ChartHostComponent implements OnDestroy {
   readonly scaleMode = input<'normal' | 'log' | 'percent'>('normal');
   /** Engine-derived price levels: position entry/SL/TP and pending orders. */
   readonly overlays = input<PriceOverlay[]>([]);
+  /** Whether those lines widen the price scale's fit (CC-10); off keeps the candles' own range. */
+  readonly fitTradeLines = input<boolean>(true);
   /** Bar markers for trade signals, fills and economic events. */
   readonly markers = input<ChartMarker[]>([]);
   /** IANA zone for the time axis; bar data itself stays UTC. */
@@ -1020,6 +1022,11 @@ export class ChartHostComponent implements OnDestroy {
     effect(() => {
       const overlays = this.overlays();
       untracked(() => this.overlayRenderer.setOverlays(overlays));
+    });
+
+    effect(() => {
+      const fit = this.fitTradeLines();
+      untracked(() => this.overlayRenderer.setFit(fit));
     });
 
     // Analytical overlays. Recomputed when the toggles change, after ticks (syncData, throttled) and

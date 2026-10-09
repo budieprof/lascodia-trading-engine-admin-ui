@@ -313,6 +313,26 @@
           >
             <app-chart-icon name="trades" [size]="28" /> Signals
           </button>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="showClosedTrades()"
+            (click)="showClosedTrades.set(!showClosedTrades())"
+            title="Entry and exit fills of this symbol's closed trades for the selected account (paper in purple)"
+          >
+            <app-chart-icon name="trades" [size]="28" /> Closed trades
+          </button>
+          @if (showPositions() || showOrders()) {
+            <button
+              type="button"
+              class="tb-menu-item tb-check"
+              [class.on]="fitTradeLines()"
+              (click)="fitTradeLines.set(!fitTradeLines())"
+              title="Keep every position and order line in view (off: a distant target no longer squashes the candles)"
+            >
+              <app-chart-icon name="trades" [size]="28" /> Fit trade lines
+            </button>
+          }
           <div class="tb-menu-row">
             <button
               type="button"
@@ -1061,6 +1081,7 @@
           [resolution]="resolution()"
           [session]="sessionSpec()"
           [overlays]="overlays()"
+          [fitTradeLines]="fitTradeLines()"
           [markers]="markers()"
           [compareBars]="compareBars()"
           [scriptResults]="scriptResults()"

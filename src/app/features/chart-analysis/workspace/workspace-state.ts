@@ -101,6 +101,10 @@ export interface ChartWorkspaceState {
     minEventImpact?: 'High' | 'Medium' | 'Low';
     /** Shade the news blackout around Tier-1 events (default on). */
     showBlackout?: boolean;
+    /** Fill markers of closed trades (default off). */
+    showClosedTrades?: boolean;
+    /** Whether the trade lines widen the price scale's fit (default on). */
+    fitTradeLines?: boolean;
   };
   panel?: {
     watchlistOpen?: boolean;
