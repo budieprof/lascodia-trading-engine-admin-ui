@@ -113,7 +113,18 @@ const result = {
       netProfit: -200.5, grossProfit: 900, grossLoss: -1100.5, commission: 0, swap: 0, executionCost: 0, trades: 70,
       winningTrades: 30, losingTrades: 40, winRate: 0.4286, profitFactor: 0.82, sumR: -3.1, rTrades: 70,
       expectancyR: -0.04, drawdownContribution: 318, drawdownSharePct: 72.27, refusedEntries: {}, marginCalls: 0,
-      timeInMarketPct: 31.5, costModel: 'Snapshot', notes: [], inputs: null, tradeList: [],
+      timeInMarketPct: 31.5, costModel: 'Snapshot', notes: [], inputs: null,
+      tradeList: [
+        {
+          direction: 'Sell', entryPrice: 1.1032, exitPrice: 1.1052, lotSize: 0.5, pnL: -100, commission: 3, swap: -0.5,
+          slippage: 1, entryTime: '2026-01-05T10:00:00Z', exitTime: '2026-01-05T14:00:00Z', exitReason: 'StopLoss',
+          rMultiple: -1,
+        },
+        {
+          direction: 'Buy', entryPrice: 1.1, exitPrice: 1.104, lotSize: 0.5, pnL: 200, commission: 3, swap: 0, slippage: 0,
+          entryTime: '2026-01-02T10:00:00Z', exitTime: '2026-01-02T18:00:00Z', exitReason: 'TakeProfit', rMultiple: 2,
+        },
+      ],
     },
     {
       index: 1, name: 'Mine', strategyId: null, symbol: 'GBPUSD', timeframe: 'H1', equitySharePct: 100,
@@ -217,6 +228,31 @@ describe('PortfolioBacktestDetailPageComponent (BT-I12)', () => {
     expect(standalone).toContain('Did not run alone: No bars in the window.');
     expect(standalone).toContain('Members alone, summed');
     expect(el.textContent).toContain('Member 2 ran with the engine cost overlay.');
+  });
+
+  it('lists each member’s own trades and switches between members', async () => {
+    get().flush(ok(run({ result })));
+    await settle();
+    fixture.detectChanges();
+    const rows = el.querySelectorAll('[data-testid="pf-trades"] tbody tr');
+    expect(rows.length).toBe(2);
+    // Closing order: the Jan 2 long first, then the Jan 5 short; the member's P&L summed up to each.
+    expect(rows[0].textContent).toContain('Long');
+    expect(rows[0].textContent).toContain('Take profit');
+    expect(rows[0].textContent).toContain('+200.00');
+    expect(rows[1].textContent).toContain('Short');
+    expect(rows[1].textContent).toContain('Stop loss');
+    expect(rows[1].textContent).toContain('+100.00');
+    expect(el.querySelector('[data-testid="pf-trades-summary"]')?.textContent).toContain(
+      '2 trade(s) held: 1 long, 1 short; 1 won, 1 lost; net +100.00 USD, average +0.50 R over 2 trade(s) with a stop.',
+    );
+
+    const select = el.querySelector('[data-testid="pf-trades-member"]') as HTMLSelectElement;
+    select.value = '1';
+    select.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+    expect(el.querySelector('[data-testid="pf-trades"]')).toBeNull();
+    expect(el.querySelector('[data-testid="pf-trades-empty"]')?.textContent).toContain('Mine held no trade on the account.');
   });
 
   it('shows why a run failed and which member failed it', async () => {

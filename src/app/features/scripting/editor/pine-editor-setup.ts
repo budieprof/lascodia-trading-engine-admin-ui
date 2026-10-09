@@ -29,6 +29,7 @@ import {
   rectangularSelection,
 } from '@codemirror/view';
 
+import type { PineProfileLine } from '@shared/pine-chart/model/pine-outputs.types';
 import type {
   PineCatalog,
   ScriptDiagnostic,
@@ -50,6 +51,7 @@ import { pineLanguageSupport, type PineTokenizerNames } from './pine-language';
 import { pineTheme } from './pine-theme';
 import { pineTooltips } from './pine-tooltips';
 import { pineSemantic, semanticState, setSemantic, type SemanticHost } from './pine-semantic-ext';
+import { pineProfileHeat, profileHeat, setProfileHeat } from './pine-profile-ext';
 
 /**
  * The CodeMirror 6 Pine editor. This module (and everything it imports) is loaded on demand by
@@ -93,6 +95,11 @@ export interface PineEditorHandle {
   applyFix(fix: ScriptDiagnosticFix): void;
   /** The engine's semantic model of `source` (null: none); used only while the editor shows that text. */
   setSemantic(model: ScriptSemantic | null, source: string | null): void;
+  /**
+   * Profiler heat in the gutter from a profiled run of `source` (an empty profile clears it). Shown
+   * only when the editor holds exactly that text; the marks then follow their lines through edits.
+   */
+  setProfile(profile: readonly PineProfileLine[], source: string | null): void;
   /**
    * Applies a rename's edits (planned on `source`) as one undoable edit; false — and nothing
    * changes — when the editor's text is no longer `source`.
@@ -172,6 +179,7 @@ export function createPineEditor(parent: HTMLElement, opts: PineEditorOptions): 
     lineNumbers(),
     foldGutter(),
     lintGutter(),
+    pineProfileHeat(),
     highlightActiveLineGutter(),
     highlightSpecialChars(),
     history(),
@@ -271,6 +279,9 @@ export function createPineEditor(parent: HTMLElement, opts: PineEditorOptions): 
     },
     setSemantic(model, source) {
       view.dispatch({ effects: setSemantic.of(semanticState(model, source)) });
+    },
+    setProfile(profile, source) {
+      view.dispatch({ effects: setProfileHeat.of(profileHeat(view.state.doc, profile, source)) });
     },
     applyEdits(source, edits) {
       if (view.state.readOnly || view.state.doc.toString() !== source) return false;

@@ -4,8 +4,15 @@ import { ApiService } from '@core/api/api.service';
 import { ApiError, type ResponseData } from '@core/api/api.types';
 import { ScriptingService } from '@core/services/scripting.service';
 import { ThemeService } from '@core/theme/theme.service';
-import { normalizeReplayFrame, normalizeReplayStart, normalizeRunResult } from '../model/normalize';
+import {
+  normalizeDebugResult,
+  normalizeReplayFrame,
+  normalizeReplayStart,
+  normalizeRunResult,
+} from '../model/normalize';
 import type {
+  PineDebugRequest,
+  PineDebugResult,
   PineReplayFrame,
   PineReplayStartRequest,
   PineReplayStartResponse,
@@ -50,6 +57,34 @@ export class ScriptingRunService {
         return run;
       }),
     );
+  }
+
+  /**
+   * §3e `POST scripting/run` with `debug` (PR-I11): the watches and the condition run with the script; the answer is the
+   * hits and the variables at a bar (no bars or outputs). A watch that does not compile rejects with the engine's
+   * message ("Watch 2: …").
+   */
+  debug(request: PineRunRequest, debug: PineDebugRequest): Observable<PineDebugResult> {
+    const { trace: _trace, profile: _profile, ...plain } = request;
+    return this.api
+      .postEnvelope<unknown>(
+        '/scripting/run',
+        { ...this.themed(plain), mode: 'preview', debug },
+        SILENT,
+      )
+      .pipe(
+        map((data) => {
+          const result = normalizeDebugResult(data);
+          if (!result)
+            throw new ApiError('UNKNOWN', 'The engine did not return the debugger’s findings.', {
+              data,
+              status: false,
+              message: null,
+              responseCode: null,
+            });
+          return result;
+        }),
+      );
   }
 
   /** `POST scripting/replay`: the §3 request plus `startBar`; the first frame carries every bar up to it. */

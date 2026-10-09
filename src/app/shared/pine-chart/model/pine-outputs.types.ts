@@ -552,6 +552,8 @@ export interface PineProfileLine {
   line: number;
   executions: number;
   totalMicros: number;
+  /** The imported library (`publisher/name/version`) the line is in; null for the script's own lines. */
+  unit?: string | null;
 }
 
 /** A user-function call a runtime error happened inside (innermost first). */
@@ -661,4 +663,46 @@ export interface PineReplayFrame {
 export interface PineReplayStartResponse {
   sessionId: string;
   frame: PineReplayFrame;
+}
+
+// ── §3e debugger (PR-I11) ────────────────────────────────────────────────────────────────────────
+
+/** `debug` of `POST scripting/run`: watches read after the script on every bar, a condition, a bar window. */
+export interface PineDebugRequest {
+  watches: string[];
+  /** The hits are the window's bars where it is true; none: every bar of the window. */
+  condition?: string | null;
+  fromBar?: number;
+  toBar?: number | null;
+  maxHits?: number;
+  /** The bar whose variables come back; null: the first hit's. */
+  stateAtBar?: number | null;
+}
+
+export interface PineDebugHit {
+  barIndex: number;
+  time: number;
+  watches: string[];
+}
+
+export interface PineDebugVariable {
+  /** "global" or "f(), call 2". */
+  scope: string;
+  name: string;
+  type: string;
+  kind: 'var' | 'varip' | 'value' | string;
+  value: string;
+}
+
+export interface PineDebugResult {
+  watches: string[];
+  condition: string | null;
+  hits: PineDebugHit[];
+  hitsTotal: number;
+  fromBar: number;
+  toBar: number;
+  stateBar: number | null;
+  stateTime: number | null;
+  state: PineDebugVariable[];
+  runtimeError: PineRuntimeError | null;
 }

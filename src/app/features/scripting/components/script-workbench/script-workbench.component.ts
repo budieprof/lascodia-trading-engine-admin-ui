@@ -26,6 +26,7 @@ import {
   normaliseCompile,
   toScriptingError,
 } from '@core/services/scripting.service';
+import type { PineProfileLine } from '@shared/pine-chart/model/pine-outputs.types';
 import { downloadTextFile, readTextFile } from '@shared/utils/download';
 import { PineEditorComponent } from '../pine-editor/pine-editor.component';
 import {
@@ -182,6 +183,8 @@ export const COMPILE_DEBOUNCE_MS = 700;
         (saveRequested)="onSaveShortcut()"
         [semantic]="result()?.semantic ?? null"
         [semanticSource]="resultSource()"
+        [profile]="profile().lines"
+        [profileSource]="profile().source"
         (renameRequested)="openRename($event)"
         (formatRequested)="format()"
         (libraryDefinition)="notice.set(libraryNotice($event))"
@@ -715,6 +718,11 @@ export class ScriptWorkbenchComponent {
   readonly outline = computed(() => flattenOutline(this.result()?.semantic?.outline ?? []));
   /** What a semantic command could not do, or where a library definition is. */
   readonly notice = signal<string | null>(null);
+  /** The latest profiled run of this script (PE-I5): heat in the editor's gutter. */
+  readonly profile = signal<{ lines: readonly PineProfileLine[]; source: string | null }>({
+    lines: [],
+    source: null,
+  });
   readonly renameTarget = signal<{ offset: number; name: string; source: string } | null>(null);
   readonly renameTo = signal('');
   readonly renaming = signal(false);
@@ -852,6 +860,11 @@ export class ScriptWorkbenchComponent {
     this.compileState.set('done');
     this.compileError.set(null);
     this.compiled.emit(r);
+  }
+
+  /** A profiled run's per-line times and the source it ran: heat bars beside the editor's lines. */
+  showProfile(lines: readonly PineProfileLine[], source: string | null): void {
+    this.profile.set({ lines, source });
   }
 
   reveal(line: number, column = 1): void {

@@ -9,6 +9,7 @@ import type {
   PortfolioRefusalKind,
   PortfolioResult,
   PortfolioRunStatus,
+  PortfolioTrade,
   QueuePortfolioBacktestRequest,
 } from './portfolio-backtest.types';
 
@@ -215,6 +216,87 @@ export function refusalCounts(refusals: readonly PortfolioRefusal[]): { kind: Po
   return [...counts.entries()]
     .map(([kind, count]) => ({ kind, label: refusalKindLabel(kind), count }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
+
+// ── member trades ────────────────────────────────────────────────────────────────────
+
+const EXIT_REASON_LABELS: Record<string, string> = {
+  StopLoss: 'Stop loss',
+  TakeProfit: 'Take profit',
+  EndOfData: 'End of the window',
+  TrailingStop: 'Trailing stop',
+  StrategyExit: 'The script’s exit',
+  MarginCall: 'Margin call',
+};
+
+/** The engine's exit reason in words (an unknown one is shown as sent). */
+export function exitReasonLabel(reason: string | null | undefined): string {
+  if (!reason) return '—';
+  return EXIT_REASON_LABELS[reason] ?? reason;
+}
+
+/** One row of a member's trade list: the engine's trade, its number in closing order and the P&L summed up to it. */
+export interface MemberTradeRow {
+  number: number;
+  trade: PortfolioTrade;
+  cumulativePnL: number;
+}
+
+/**
+ * A member's trades the account held, in the order they closed (then opened), each with the member's P&L summed up to
+ * and including it — how its contribution built up.
+ */
+export function memberTradeRows(trades: readonly PortfolioTrade[]): MemberTradeRow[] {
+  const sorted = [...trades].sort(
+    (a, b) => Date.parse(a.exitTime) - Date.parse(b.exitTime) || Date.parse(a.entryTime) - Date.parse(b.entryTime),
+  );
+  let sum = 0;
+  return sorted.map((trade, i) => {
+    sum += trade.pnL;
+    return { number: i + 1, trade, cumulativePnL: sum };
+  });
+}
+
+export interface MemberTradeSummary {
+  trades: number;
+  longs: number;
+  shorts: number;
+  winners: number;
+  losers: number;
+  netPnL: number;
+  /** Mean R over the trades with an R (null when none has one). */
+  averageR: number | null;
+  rTrades: number;
+}
+
+/** Counts and sums over a member's trade list (every figure from the engine's trades). */
+export function memberTradeSummary(trades: readonly PortfolioTrade[]): MemberTradeSummary {
+  let longs = 0;
+  let winners = 0;
+  let losers = 0;
+  let net = 0;
+  let sumR = 0;
+  let rTrades = 0;
+  for (const t of trades) {
+    if (t.direction === 'Buy') longs++;
+    if (t.pnL > 0) winners++;
+    else if (t.pnL < 0) losers++;
+    net += t.pnL;
+    if (t.rMultiple !== null && t.rMultiple !== undefined) {
+      sumR += t.rMultiple;
+      rTrades++;
+    }
+  }
+  return {
+    trades: trades.length,
+    longs,
+    shorts: trades.length - longs,
+    winners,
+    losers,
+    netPnL: net,
+    averageR: rTrades > 0 ? sumR / rTrades : null,
+    rTrades,
+  };
 }
 
 // ── correlation ──────────────────────────────────────────────────────────────────────

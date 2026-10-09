@@ -22,6 +22,8 @@ import type { PineChartData } from '@shared/pine-chart/model/chart-data';
 import { normalizeRunResult } from '@shared/pine-chart/model/normalize';
 import type {
   PineCallFrame,
+  PineDebugRequest,
+  PineDebugResult,
   PineRunRequest,
   PineRunResult,
 } from '@shared/pine-chart/model/pine-outputs.types';
@@ -30,12 +32,14 @@ import {
   PineLogsPaneComponent,
   type PineLineJump,
 } from '@shared/pine-chart/panes/pine-logs-pane.component';
+import { PineDebuggerPaneComponent } from '@shared/pine-chart/panes/pine-debugger-pane.component';
 import { PineProfilerPaneComponent } from '@shared/pine-chart/panes/pine-profiler-pane.component';
+import { traceWindowAround } from '@shared/pine-chart/panes/trace-model';
 import { PineTracePaneComponent } from '@shared/pine-chart/panes/pine-trace-pane.component';
 import { PineReplayComponent } from '@shared/pine-chart/replay/pine-replay.component';
 import type { ReplayApi } from '@shared/pine-chart/replay/replay-session';
 
-type DockTab = 'logs' | 'trace' | 'profiler';
+type DockTab = 'logs' | 'trace' | 'profiler' | 'debugger';
 
 /**
  * Pine preview: the chart of a run with its debugging dock (Pine Logs, "why didn't it fire?" trace,
@@ -59,6 +63,7 @@ type DockTab = 'logs' | 'trace' | 'profiler';
     PineLogsPaneComponent,
     PineTracePaneComponent,
     PineProfilerPaneComponent,
+    PineDebuggerPaneComponent,
     PineReplayComponent,
   ],
   template: `
@@ -193,6 +198,15 @@ type DockTab = 'logs' | 'trace' | 'profiler';
         >
           Profiler
         </button>
+        <button
+          type="button"
+          role="tab"
+          [attr.aria-selected]="tab() === 'debugger'"
+          [class.active]="tab() === 'debugger'"
+          (click)="selectTab('debugger')"
+        >
+          Debugger
+        </button>
         <span class="spacer"></span>
         @if (tab() === 'profiler' && effectiveRequest()) {
           <button type="button" class="action" (click)="runProfile()" [disabled]="running()">
@@ -237,6 +251,18 @@ type DockTab = 'logs' | 'trace' | 'profiler';
                 [source]="effectiveSource()"
                 [elapsedMs]="current()?.elapsedMs ?? null"
                 (lineJump)="jumpToLine.emit($event)"
+              />
+            }
+            @case ('debugger') {
+              <app-pine-debugger-pane
+                [result]="debugResult()"
+                [running]="debugRunning()"
+                [error]="debugError()"
+                [canRun]="!!effectiveRequest()"
+                [timezone]="timezone()"
+                (run)="runDebug($event)"
+                (barJump)="goToBar($event)"
+                (traceBar)="traceAt($event)"
               />
             }
           }
@@ -419,6 +445,11 @@ export class PinePreviewComponent {
   readonly traceBar = signal<number | null>(null);
   readonly highlight = signal<number | null>(null);
   private runSub: Subscription | null = null;
+  /** PR-I11: the debugger's last findings (its own requests; the chart's run is untouched). */
+  readonly debugResult = signal<PineDebugResult | null>(null);
+  readonly debugRunning = signal(false);
+  readonly debugError = signal<string | null>(null);
+  private debugSub: Subscription | null = null;
 
   readonly effectiveSource = computed(() => this.source() ?? this.request()?.source ?? null);
   readonly effectiveRequest = computed<PineRunRequest | null>(() => {
@@ -469,7 +500,10 @@ export class PinePreviewComponent {
         if (req && auto && this.result() === undefined) this.run(req);
       });
     });
-    this.destroyRef.onDestroy(() => this.runSub?.unsubscribe());
+    this.destroyRef.onDestroy(() => {
+      this.runSub?.unsubscribe();
+      this.debugSub?.unsubscribe();
+    });
   }
 
   run(request: PineRunRequest): void {
@@ -498,6 +532,32 @@ export class PinePreviewComponent {
       trace: window,
       profile: req.profile || (this.current()?.profile.length ?? 0) > 0,
     });
+  }
+
+  /** PR-I11: a debug run of the chart's request (watches, condition, window; the variables at a bar). */
+  runDebug(debug: PineDebugRequest): void {
+    const req = this.effectiveRequest();
+    if (!req) return;
+    this.debugSub?.unsubscribe();
+    this.debugRunning.set(true);
+    this.debugError.set(null);
+    this.debugSub = this.api.debug(req, debug).subscribe({
+      next: (res) => {
+        this.debugRunning.set(false);
+        this.debugResult.set(res);
+      },
+      error: (e: unknown) => {
+        this.debugRunning.set(false);
+        this.debugError.set(toScriptingError(e, 'The engine could not run the debugger.').message);
+      },
+    });
+  }
+
+  /** A debugger hit's "Trace": the expression trace around that bar, on the trace tab. */
+  traceAt(bar: number): void {
+    this.goToBar(bar);
+    this.selectTab('trace');
+    this.runTrace(traceWindowAround(bar));
   }
 
   runProfile(): void {
