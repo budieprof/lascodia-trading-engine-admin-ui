@@ -5,17 +5,20 @@ import {
   accountCurveOptions,
   buildRequest,
   correlationFill,
+  exitReasonLabel,
   exposedCurrencies,
   exposureOptions,
   isActive,
   marginOptions,
+  memberTradeRows,
+  memberTradeSummary,
   newDraft,
   newMember,
   refusalCounts,
   validateDraft,
   type PortfolioDraft,
 } from './portfolio-backtest.model';
-import type { PortfolioExposurePoint, PortfolioRefusal, PortfolioResult } from './portfolio-backtest.types';
+import type { PortfolioExposurePoint, PortfolioRefusal, PortfolioResult, PortfolioTrade } from './portfolio-backtest.types';
 
 const palette = reportPalette('light');
 
@@ -195,5 +198,50 @@ describe('portfolio backtest charts', () => {
       palette,
     ) as { series: { data: number[][] }[] };
     expect(options.series[0].data).toEqual([[Date.parse('2026-01-02T00:00:00Z'), 5]]);
+  });
+});
+
+describe('portfolio member trades', () => {
+  const trade = (over: Partial<PortfolioTrade>): PortfolioTrade => ({
+    direction: 'Buy',
+    entryPrice: 1.1,
+    exitPrice: 1.101,
+    lotSize: 1,
+    pnL: 10,
+    commission: 0,
+    swap: 0,
+    slippage: 0,
+    entryTime: '2026-01-02T10:00:00Z',
+    exitTime: '2026-01-02T12:00:00Z',
+    exitReason: 'TakeProfit',
+    ...over,
+  });
+
+  it('lists the trades in closing order with the P&L summed up to each', () => {
+    const rows = memberTradeRows([
+      trade({ pnL: -5, exitTime: '2026-01-03T00:00:00Z' }),
+      trade({ pnL: 10, exitTime: '2026-01-02T00:00:00Z' }),
+      trade({ pnL: 2.5, exitTime: '2026-01-03T00:00:00Z', entryTime: '2026-01-01T00:00:00Z' }),
+    ]);
+    expect(rows.map((r) => r.number)).toEqual([1, 2, 3]);
+    expect(rows.map((r) => r.trade.pnL)).toEqual([10, 2.5, -5]);
+    expect(rows.map((r) => r.cumulativePnL)).toEqual([10, 12.5, 7.5]);
+  });
+
+  it('sums the trades and averages R over the trades that have one', () => {
+    const s = memberTradeSummary([
+      trade({ pnL: 10, rMultiple: 1 }),
+      trade({ direction: 'Sell', pnL: -4, rMultiple: -0.5 }),
+      trade({ direction: 'Sell', pnL: 0, rMultiple: null }),
+    ]);
+    expect(s).toEqual({ trades: 3, longs: 1, shorts: 2, winners: 1, losers: 1, netPnL: 6, averageR: 0.25, rTrades: 2 });
+    expect(memberTradeSummary([]).averageR).toBeNull();
+  });
+
+  it('names the engine’s exit reasons in words', () => {
+    expect(exitReasonLabel('StopLoss')).toBe('Stop loss');
+    expect(exitReasonLabel('StrategyExit')).toBe('The script’s exit');
+    expect(exitReasonLabel('Something')).toBe('Something');
+    expect(exitReasonLabel('')).toBe('—');
   });
 });
