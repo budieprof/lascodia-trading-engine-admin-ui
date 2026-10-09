@@ -618,6 +618,14 @@ export class ChartAnalysisPageComponent {
     equal: (a, b) => a === b || sameSeries(a, b),
   });
   /**
+   * The series on screen, for the chart: it rebuilds every series when this changes, rather than
+   * diffing one instrument's bars against another's (CC-I1).
+   */
+  readonly dataKey = computed(() => {
+    const b = this.barsFor();
+    return b ? `${b.symbol}|${b.resolution}` : '';
+  });
+  /**
    * The symbol's session as the engine reports it with its chart bars: the trading days the chart's
    * day-based studies and the Details pane count in, and the calendar a live price opens the next
    * session-grid period by. Null until it is known — and for a symbol without one: UTC days.

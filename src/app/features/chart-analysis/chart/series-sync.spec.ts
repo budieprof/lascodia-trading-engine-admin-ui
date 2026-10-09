@@ -86,6 +86,12 @@ describe('planTail', () => {
     const next = prev.map((r) => ({ ...r, close: r.close + 1 }));
     expect(planTail(prev, next, sameOhlcRow, 32)).toBeNull();
   });
+
+  it('refuses more appended rows than are worth updating one by one (leaving replay)', () => {
+    const all = history(200);
+    expect(planTail(all.slice(0, 100), all, sameOhlcRow, 32)).toBeNull();
+    expect(planTail(all.slice(0, 190), all, sameOhlcRow, 32)?.writes.length).toBe(10);
+  });
 });
 
 describe('SeriesSync — what a live price costs (CC-I1 harness)', () => {

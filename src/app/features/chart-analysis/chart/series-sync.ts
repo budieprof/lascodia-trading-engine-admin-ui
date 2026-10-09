@@ -43,7 +43,8 @@ export interface TailPlan<T> {
 /**
  * How to turn `prev` (on the series) into `next` with `pop` and `update`, or null when only
  * `setData` can: a row inserted or removed before the tail, more than {@link MAX_TAIL_UPDATES} rows
- * changed in place, or rows that are not in ascending time.
+ * to write (changed in place or added — leaving replay adds hundreds at once), or rows that are not
+ * in ascending time.
  */
 export function planTail<T extends TimedRow>(
   prev: readonly T[],
@@ -55,10 +56,10 @@ export function planTail<T extends TimedRow>(
   let d = 0;
   while (d < common && same(prev[d], next[d])) d++;
   if (d === prev.length && d === next.length) return { pop: 0, writes: [] };
+  if (next.length - d > maxTail) return null;
   // Rows changed in place must keep their times: update() replaces the row AT a time, it cannot
   // move one. A changed time before the end means rows were inserted or removed in between.
   const inPlaceEnd = common;
-  if (inPlaceEnd - d > maxTail) return null;
   for (let i = d; i < inPlaceEnd; i++) if (prev[i].time !== next[i].time) return null;
   const pop = Math.max(0, prev.length - next.length);
   const lastKept = prev.length - pop - 1;
