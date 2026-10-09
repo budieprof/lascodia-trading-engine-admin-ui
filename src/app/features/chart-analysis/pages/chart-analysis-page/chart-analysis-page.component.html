@@ -254,6 +254,16 @@
     >
       <app-chart-icon name="indicators" [size]="28" /><span class="tb-label">Indicators</span>
     </button>
+    <button
+      type="button"
+      class="tb-btn tb-wide"
+      (click)="compareOpen.set(true)"
+      [class.active]="compareSeries().length > 0"
+      title="Compare: another symbol in %, a ratio, a spread or a basket"
+      data-testid="open-compare"
+    >
+      <app-chart-icon name="plus" [size]="28" />
+    </button>
     @if (indicatorMenuOpen()) {
       <app-indicators-dialog
         [items]="dialogItems()"
@@ -878,6 +888,14 @@
           >
             <app-chart-icon name="settings" [size]="28" /> Chart settings
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            class="tb-menu-item"
+            (click)="compareOpen.set(true); openMenu.set(null)"
+          >
+            <app-chart-icon name="plus" [size]="28" /> Compare
+          </button>
         </div>
       }
     </div>
@@ -1231,6 +1249,12 @@
               </div>
             }
           }
+          <!-- Compare overlays and synthetic series (CC-I12). -->
+          @for (c of compareSeries(); track c.id) {
+            <div class="legend-indicator">
+              <span [style.color]="c.color">● {{ compareTitleOf(c) }}</span>
+            </div>
+          }
           <!-- Overlay Pine scripts' status lines (PC-I2); pane scripts' sit over their panes. -->
           @for (row of legendScriptRows(); track row.key) {
             <app-script-status-line [row]="row" (action)="onScriptAction($event)" />
@@ -1292,7 +1316,7 @@
           [scriptResults]="scriptResults()"
           (scriptAction)="onScriptAction($event)"
           (scriptTradeClick)="onScriptTradeClick($event)"
-          [externalPanes]="externalPanes()"
+          [externalPanes]="chartExternalPanes()"
           (loadMore)="loadOlder()"
           (legend)="onLegend($event)"
           (toolComplete)="onToolComplete()"
@@ -2003,6 +2027,18 @@
       (exportPine)="openPineDraft($event)"
     />
   }
+  <!-- Compare overlays and synthetic series (CC-I12). -->
+  @if (compareOpen()) {
+    <app-compare-dialog
+      [series]="compareSeries()"
+      [symbols]="symbolNames()"
+      [chartSymbol]="symbol()"
+      (add)="addCompare($event)"
+      (remove)="removeCompare($event)"
+      (closed)="compareOpen.set(false)"
+    />
+  }
+
   <!-- The chart's command palette (CC-I11): ⌘⇧K, or the context menu. -->
   @if (paletteOpen()) {
     <app-chart-palette

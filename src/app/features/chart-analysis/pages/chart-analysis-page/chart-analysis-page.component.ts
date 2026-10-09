@@ -296,6 +296,14 @@ import { ReplayController } from '../../replay/replay-controller';
 import type { UiCommand } from '@core/assistant/ui-command.types';
 import { buildPaletteActions, type PaletteAction } from '../../palette/chart-palette';
 import { ChartPaletteComponent } from '../../palette/chart-palette.component';
+import {
+  comparePanes,
+  compareSymbolsOf,
+  compareTitle,
+  restoredCompare,
+  type CompareSeriesSpec,
+} from '../../compare/compare-series';
+import { CompareDialogComponent } from '../../compare/compare-dialog.component';
 import { MeasuredBottomDirective } from '../../chart/measured-bottom.directive';
 import { restoredAppearance, type ChartAppearance } from '../../chart/appearance';
 import {
@@ -624,6 +632,7 @@ const CHART_HOTKEYS: Readonly<Record<string, 'reset' | 'invert' | 'log' | 'perce
     ChartSettingsDialogComponent,
     ChartPaletteComponent,
     MeasuredBottomDirective,
+    CompareDialogComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -1379,6 +1388,8 @@ export class ChartAnalysisPageComponent {
       const sym = String(a.params['symbol'] ?? '').toUpperCase();
       if (sym && sym !== this.symbol().toUpperCase()) out.add(sym);
     }
+    // The compare overlays' and synthetic series' symbols (CC-I12) load the same way.
+    for (const sym of compareSymbolsOf(this.compareSeries(), this.symbol())) out.add(sym);
     return [...out].sort();
   });
   readonly symbolMenuOpen = signal(false);
@@ -5133,6 +5144,7 @@ export class ChartAnalysisPageComponent {
       sessionBreaks: this.sessionBreaks(),
       countdown: this.showCountdown(),
       ...(this.appearance() ? { appearance: { ...this.appearance()! } } : {}),
+      ...(this.compareSeries().length ? { compare: this.compareSeries().map((c) => ({ ...c })) } : {}),
       ...(this.rememberPerSymbol() || Object.keys(this.symbolMemory()).length
         ? { symbolMemory: { on: this.rememberPerSymbol(), symbols: this.symbolMemory() } }
         : {}),
@@ -5265,6 +5277,50 @@ export class ChartAnalysisPageComponent {
     this.showOverlays.set(s.showOverlays);
     this.showClosedTrades.set(s.showClosedTrades);
     this.fitTradeLines.set(s.fitTradeLines);
+  }
+
+  // ── Compare overlays and synthetic series (CC-I12) ───────────────────────
+
+  readonly compareSeries = signal<CompareSeriesSpec[]>([]);
+  readonly compareOpen = signal(false);
+  readonly compareTitleOf = compareTitle;
+  readonly symbolNames = computed(() =>
+    this.symbols()
+      .map((p) => p.symbol ?? '')
+      .filter((s) => !!s),
+  );
+  /** The compare lines, from the chart's bars and the other symbols' (live, extended on scroll-back). */
+  private readonly comparePaneList = computed(() => {
+    const specs = this.compareSeries();
+    if (!specs.length) return [];
+    const own = this.symbol().toUpperCase();
+    const bars = this.bars();
+    const others = this.compareBars();
+    const digits = new Map(this.symbols().map((p) => [p.symbol ?? '', Math.trunc(p.decimalPlaces) || 5]));
+    return comparePanes(
+      specs,
+      (sym) => (sym === own ? bars : others[sym]),
+      (sym) => digits.get(sym) ?? 5,
+    );
+  });
+  /** What the chart draws in panes of their own or over the price: the fundamentals and the compare series. */
+  readonly chartExternalPanes = computed(() => [...this.externalPanes(), ...this.comparePaneList()]);
+
+  /**
+   * Add a compare series. A compare symbol goes on the price's scale, so the scale turns to Percent (each line from
+   * 0 % at the first bar on screen) unless it already compares (percent or indexed to 100).
+   */
+  addCompare(spec: CompareSeriesSpec): void {
+    this.compareSeries.update((l) => [...l, spec]);
+    const mode = this.scaleMode();
+    if (spec.kind === 'compare' && mode !== 'percent' && mode !== 'indexed') {
+      this.scaleMode.set('percent');
+      this.notify.info('The price scale is now Percent: each symbol starts at 0 % on the first bar on screen.');
+    }
+  }
+
+  removeCompare(id: string): void {
+    this.compareSeries.update((l) => l.filter((c) => c.id !== id));
   }
 
   // ── Command palette (CC-I11) ─────────────────────────────────────────────
@@ -5527,6 +5583,7 @@ export class ChartAnalysisPageComponent {
     this.sessionBreaks.set(s.sessionBreaks === true);
     this.showCountdown.set(s.countdown ?? true);
     this.appearance.set(restoredAppearance(s.appearance));
+    this.compareSeries.set(restoredCompare(s.compare));
     this.timezone.set(s.timezone ?? 'UTC');
     const pb = restoredPriceBased(s.priceBased);
     this.boxMethod.set(pb.boxMethod);

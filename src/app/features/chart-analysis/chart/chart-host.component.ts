@@ -266,6 +266,13 @@ type PriceSeries = ISeriesApi<
 export interface ExternalPane {
   uid: string;
   lines: { title: string; color: string; points: PanePoint[]; precision?: number }[];
+  /**
+   * Where it draws: its own pane below (default), or on the price pane on the price's scale (`price`, CC-I12 compare
+   * overlays — the percent scale rebases each line at the first bar on screen).
+   */
+  target?: 'pane' | 'price';
+  /** Step lines (default: values hold until the next, as policy rates do); false for prices. */
+  stepped?: boolean;
 }
 
 /** An indicator the operator has added to this chart. */
@@ -355,6 +362,9 @@ interface IndicatorSeries {
 }
 
 /** An external pane's line on the chart, kept across ticks (CC-02). */
+/** Uids of the external lines drawn on the price pane, on the price's scale. */
+type PriceExternal = Set<string>;
+
 interface ExternalLineSeries {
   api: ISeriesApi<'Line'>;
   sync: SeriesSync<ValueRow>;
@@ -1330,6 +1340,9 @@ export class ChartHostComponent implements OnDestroy {
     this.price?.applyOptions({ priceScaleId: side });
     for (const s of this.indicatorSeries)
       if (s.overlay) for (const plot of s.series) plot.api.applyOptions({ priceScaleId: side });
+    // The compare overlays share the price's scale (CC-I12).
+    for (const uid of this.priceExternal)
+      for (const l of this.externalSeries.get(uid) ?? []) l.api.applyOptions({ priceScaleId: side });
     chart.priceScale(side).applyOptions({
       mode:
         mode === 'log'
@@ -1842,6 +1855,7 @@ export class ChartHostComponent implements OnDestroy {
     this.paneBreaks = [];
     this.indicatorSeries = [];
     this.externalSeries.clear();
+    this.priceExternal.clear();
     this.seriesStyle = null;
     this.seriesLook = '';
     this.priceSync.attach(null);
@@ -3170,6 +3184,7 @@ export class ChartHostComponent implements OnDestroy {
 
   /** External panes' lines by pane uid: made once, kept across ticks (CC-02). */
   private readonly externalSeries = new Map<string, ExternalLineSeries[]>();
+  private readonly priceExternal: PriceExternal = new Set();
 
   /**
    * The fundamentals panes. A pane is made when its study arrives and removed when it goes; its
@@ -3183,7 +3198,9 @@ export class ChartHostComponent implements OnDestroy {
     const byUid = new Map(panes.map((p) => [p.uid, p]));
     for (const [uid, lines] of [...this.externalSeries]) {
       const pane = byUid.get(uid);
-      if (pane && pane.lines.length === lines.length) continue;
+      if (pane && pane.lines.length === lines.length && (pane.target === 'price') === this.priceExternal.has(uid))
+        continue;
+      this.priceExternal.delete(uid);
       for (const l of lines) {
         try {
           chart.removeSeries(l.api);
@@ -3196,7 +3213,9 @@ export class ChartHostComponent implements OnDestroy {
     for (const pane of panes) {
       let lines = this.externalSeries.get(pane.uid);
       if (!lines) {
-        const paneIndex = chart.panes().length;
+        const onPrice = pane.target === 'price';
+        const paneIndex = onPrice ? 0 : chart.panes().length;
+        if (onPrice) this.priceExternal.add(pane.uid);
         lines = pane.lines.map((line) => {
           const api = chart.addSeries(
             LineSeries,
@@ -3204,9 +3223,10 @@ export class ChartHostComponent implements OnDestroy {
               color: line.color,
               lineWidth: 2,
               // Policy rates, swaps and roll-ups are step functions: a value holds until the next.
-              lineType: LineType.WithSteps,
+              lineType: pane.stepped === false ? LineType.Simple : LineType.WithSteps,
               priceLineVisible: false,
               title: line.title,
+              ...(onPrice ? { priceScaleId: this.scaleSide() } : {}),
               priceFormat: {
                 type: 'price',
                 precision: line.precision ?? 2,

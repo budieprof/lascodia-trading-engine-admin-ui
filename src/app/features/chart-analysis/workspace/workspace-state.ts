@@ -9,6 +9,7 @@ import type { ScriptInputValues } from '@core/api/scripting.types';
 import type { ScriptDisplaySettings } from '../scripts/script-display';
 import type { LegacyChartLayout } from './layout-store.service';
 import type { ChartAppearance } from '../chart/appearance';
+import type { CompareSeriesSpec } from '../compare/compare-series';
 
 /** A Pine script on the chart, as a layout restores it. */
 export interface WorkspaceScript {
@@ -88,6 +89,8 @@ export interface ChartWorkspaceState {
   countdown?: boolean;
   /** Candle colours, grid lines, background over the theme's (CC-I11 chart settings); absent: the theme's. */
   appearance?: ChartAppearance;
+  /** Compare overlays and synthetic series (CC-I12); absent: none. */
+  compare?: CompareSeriesSpec[];
   /**
    * Layout memory per symbol (CC-I11): `on` — a symbol switched to opens on the timeframe and zoom it was left on;
    * `symbols` — what each was left on (`workspace/symbol-memory.ts`). Absent: off.
