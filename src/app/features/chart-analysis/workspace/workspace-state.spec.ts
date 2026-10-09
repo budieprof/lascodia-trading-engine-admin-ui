@@ -182,6 +182,7 @@ describe('restoredPriceBased (CC-I10)', () => {
       boxPips: 10,
       renkoWicks: false,
       lineBreakLines: 3,
+      pnfReversal: 3,
     });
   });
 
@@ -194,6 +195,7 @@ describe('restoredPriceBased (CC-I10)', () => {
         boxPips: 15,
         renkoWicks: true,
         lineBreakLines: 2,
+        pnfReversal: 2,
       },
     };
     expect(restoredPriceBased(throughTheEngine(state).priceBased)).toEqual({
@@ -202,11 +204,12 @@ describe('restoredPriceBased (CC-I10)', () => {
       boxPips: 15,
       renkoWicks: true,
       lineBreakLines: 2,
+      pnfReversal: 2,
     });
   });
 
   it('falls back on values out of range', () => {
-    const pb = restoredPriceBased({ boxSizeAtr: -1, boxPips: 0, lineBreakLines: 40 });
-    expect(pb).toMatchObject({ boxSizeAtr: 1, boxPips: 10, lineBreakLines: 3 });
+    const pb = restoredPriceBased({ boxSizeAtr: -1, boxPips: 0, lineBreakLines: 40, pnfReversal: 0 });
+    expect(pb).toMatchObject({ boxSizeAtr: 1, boxPips: 10, lineBreakLines: 3, pnfReversal: 3 });
   });
 });

@@ -156,11 +156,37 @@ describe('toLineBreak', () => {
   });
 });
 
-describe('toPointAndFigure', () => {
+describe('toPointAndFigure (CC-I10: X/O columns on the box grid)', () => {
   it('builds columns and keeps times legal', () => {
     const cols = toPointAndFigure(series([100, 101, 102, 103, 100, 99, 103]), 1, 3);
     expect(cols.length).toBeGreaterThan(0);
     assertStrictlyIncreasing(cols);
+  });
+
+  it('quantises to box levels, reverses only after the reversal count, and starts the next column one box over', () => {
+    // Box 1, reversal 3. 100 → 103.4: X 100..103. 101.2 is only 2 boxes down: no reversal. 100.0 is 3: O 102..100.
+    // 104.0 is 4 boxes up from 100: X 101..104.
+    const cols = toPointAndFigure(series([100, 101.5, 103.4, 101.2, 100.0, 102.5, 104.0]), 1, 3);
+    expect(cols.map((c) => [c.pnf.up ? 'X' : 'O', c.low, c.high, c.pnf.boxes])).toEqual([
+      ['X', 100, 103, 4],
+      ['O', 100, 102, 3],
+      ['X', 101, 104, 4],
+    ]);
+    expect(cols[0]).toMatchObject({ open: 100, close: 103 });
+    expect(cols[1]).toMatchObject({ open: 102, close: 100 });
+    // Every price sits on the grid.
+    for (const c of cols) for (const v of [c.open, c.high, c.low, c.close]) expect(v % 1).toBe(0);
+  });
+
+  it('a larger reversal holds the column longer', () => {
+    const closes = [100, 103.4, 100.0, 104.0];
+    expect(toPointAndFigure(series(closes), 1, 3)).toHaveLength(3);
+    expect(toPointAndFigure(series(closes), 1, 5)).toHaveLength(1);
+  });
+
+  it('a close exactly on a level counts (no float drift)', () => {
+    const cols = toPointAndFigure(series([1.1, 1.103]), 0.001, 3);
+    expect(cols[0].pnf.boxes).toBe(4);
   });
 
   it('returns nothing for a non-positive box size', () => {
@@ -168,11 +194,29 @@ describe('toPointAndFigure', () => {
   });
 });
 
-describe('toKagi', () => {
+describe('toKagi (CC-I10: thick and thin lines)', () => {
   it('turns only on a move of at least the reversal', () => {
     const line = toKagi(series([100, 105, 104.5, 110, 100]), 3);
     expect(line.length).toBeGreaterThan(0);
     assertStrictlyIncreasing(line);
+  });
+
+  it('turns thick above the last shoulder and thin below the last waist, mid-segment', () => {
+    // Up 100→110 (thick), down to 104, up to 108 (below the 110 shoulder: still thick), down to 101 (below the
+    // 104 waist: thin from 104), up to 112 (above the 108 shoulder: thick from 108).
+    const line = toKagi(series([100, 110, 104, 108, 101, 112, 108.5]), 3);
+    expect(line.map((s) => [s.open, s.close, s.kagi.thickStart, s.kagi.switchAt])).toEqual([
+      [100, 110, true, null],
+      [110, 104, true, null],
+      [104, 108, true, null],
+      [108, 101, true, 104],
+      [101, 112, false, 108],
+      [112, 108.5, true, null],
+    ]);
+  });
+
+  it('starts thin when the first move is down', () => {
+    expect(toKagi(series([100, 95, 99]), 3)[0].kagi).toEqual({ thickStart: false, switchAt: null });
   });
 
   it('returns nothing for a non-positive reversal', () => {

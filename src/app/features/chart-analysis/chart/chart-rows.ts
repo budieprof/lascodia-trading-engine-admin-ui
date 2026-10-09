@@ -4,6 +4,7 @@ import type { Maybe } from '../indicators/math';
 import { withBarColor, type BarPaint } from '../scripts/run-on-host';
 import type { ChartStyle } from './chart-host.component';
 import type { OhlcvData } from './custom-series';
+import type { KagiSegment, PnfColumn } from './price-transforms';
 
 /**
  * The rows each chart series is given, built from the plotted bars (CC-I1). Pure — no chart, no
@@ -74,6 +75,12 @@ export type PriceRow = {
   color?: string;
   borderColor?: string;
   wickColor?: string;
+  /** Point & Figure: the box size and the column's direction (X up / O down). */
+  box?: number;
+  up?: boolean;
+  /** Kagi: thick where the segment starts, and where it changes thickness. */
+  thickStart?: boolean;
+  switchAt?: number | null;
 };
 
 /** Equality of price rows of any kind, script colours included. */
@@ -89,7 +96,11 @@ export function samePriceRow(a: PriceRow, b: PriceRow): boolean {
       a.value === b.value &&
       a.color === b.color &&
       a.borderColor === b.borderColor &&
-      a.wickColor === b.wickColor)
+      a.wickColor === b.wickColor &&
+      a.box === b.box &&
+      a.up === b.up &&
+      a.thickStart === b.thickStart &&
+      a.switchAt === b.switchAt)
   );
 }
 
@@ -102,7 +113,7 @@ export interface RowPalette {
 }
 
 /** Which kind of rows a style's price series takes. */
-export type PriceRowKind = 'value' | 'column' | 'ohlc' | 'ohlcv';
+export type PriceRowKind = 'value' | 'column' | 'ohlc' | 'ohlcv' | 'pnf' | 'kagi';
 
 export function priceRowKind(style: ChartStyle): PriceRowKind {
   switch (style) {
@@ -111,8 +122,11 @@ export function priceRowKind(style: ChartStyle): PriceRowKind {
     case 'baseline':
     case 'stepline':
     case 'line-markers':
-    case 'kagi':
       return 'value';
+    case 'pnf':
+      return 'pnf';
+    case 'kagi':
+      return 'kagi';
     case 'column':
       return 'column';
     case 'hilo':
@@ -159,6 +173,20 @@ export function priceRowsFrom(
       break;
     case 'ohlcv':
       built = ohlcvRows(tail, colorsFrom);
+      break;
+    case 'pnf':
+      // X / O columns (custom series): the box grid and the column's direction ride along.
+      built = tail.map((b) => {
+        const p = (b as Partial<PnfColumn>).pnf;
+        return { time: asTime(b.time), open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume, box: p?.box ?? 0, up: p?.up ?? b.close >= b.open };
+      });
+      break;
+    case 'kagi':
+      // The line's segments (custom series), thick or thin, and where they change.
+      built = tail.map((b) => {
+        const k = (b as Partial<KagiSegment>).kagi;
+        return { time: asTime(b.time), open: b.open, high: b.high, low: b.low, close: b.close, thickStart: k?.thickStart ?? b.close >= b.open, switchAt: k?.switchAt ?? null };
+      });
       break;
     default:
       built = ohlcRows(tail, colorsFrom, barPaint(style));

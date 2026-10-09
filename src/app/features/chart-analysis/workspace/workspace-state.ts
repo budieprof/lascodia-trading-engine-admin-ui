@@ -101,6 +101,8 @@ export interface ChartWorkspaceState {
     boxPips?: number;
     renkoWicks?: boolean;
     lineBreakLines?: number;
+    /** Point & Figure's reversal in boxes (CC-I10); absent: 3. */
+    pnfReversal?: number;
   };
   indicators?: ActiveIndicator[];
   scripts?: WorkspaceScript[];
@@ -160,6 +162,7 @@ export interface PriceBasedSettings {
   boxPips: number;
   renkoWicks: boolean;
   lineBreakLines: number;
+  pnfReversal: number;
 }
 
 /**
@@ -170,12 +173,14 @@ export function restoredPriceBased(pb: ChartWorkspaceState['priceBased']): Price
   const positive = (v: number | undefined, fallback: number) =>
     typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : fallback;
   const lines = pb?.lineBreakLines;
+  const rev = pb?.pnfReversal;
   return {
     boxMethod: pb?.boxMethod === 'pips' ? 'pips' : 'atr',
     boxSizeAtr: positive(pb?.boxSizeAtr, 1),
     boxPips: positive(pb?.boxPips, 10),
     renkoWicks: pb?.renkoWicks === true,
     lineBreakLines: typeof lines === 'number' && lines >= 1 && lines <= 10 ? Math.round(lines) : 3,
+    pnfReversal: typeof rev === 'number' && rev >= 1 && rev <= 10 ? Math.round(rev) : 3,
   };
 }
 

@@ -212,6 +212,19 @@
               </button>
             }
           }
+          @if (style() === 'pnf') {
+            <label class="tb-menu-field" title="Boxes a close must move against a column to start the next one">
+              Reversal
+              <input
+                type="number"
+                min="1"
+                max="10"
+                step="1"
+                [value]="pnfReversal()"
+                (change)="setPnfReversal($any($event.target).value)"
+              />
+            </label>
+          }
           @if (style() === 'line-break') {
             <div class="tb-menu-sep"></div>
             <label class="tb-menu-field" title="How many lines a reversal must break">
@@ -1264,6 +1277,7 @@
           [pipSize]="pipSize()"
           [renkoWicks]="renkoWicks()"
           [lineBreakLines]="lineBreakLines()"
+          [pnfReversal]="pnfReversal()"
           [showVolumeProfile]="showVolumeProfile()"
           [volumeProfileMode]="volumeProfileMode()"
           [showSupportResistance]="showSupportResistance()"

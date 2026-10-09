@@ -533,6 +533,14 @@ None outstanding.
   re-sizes the bricks) or a fixed number of pips (the engine's pip rule). The
   box control appears for Renko, Point & figure, Kagi and Range; Line break has
   its own line count; Renko wicks are a toggle. Saved per layout.
+- **Point & Figure / Kagi drawing (CC-I10)** — both read closes. P&F quantises
+  them to the box grid (k × box) and draws X / O columns as a custom series
+  (`custom-series.ts PnfSeries`), reversing after `pnfReversal` boxes (default
+  3, the style menu's Reversal); the next column starts one box over. Kagi is a
+  custom series too (`KagiSeries`): vertical segments joined by horizontal
+  shoulders / waists, thick (yang, up colour) above the last shoulder and thin
+  (yin, down colour) below the last waist, switching mid-segment. Builders:
+  `price-transforms.ts toPointAndFigure / toKagi` (pure, tested).
 
 ## Sources
 

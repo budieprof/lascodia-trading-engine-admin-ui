@@ -201,94 +201,149 @@ export function toLineBreak(bars: Bar[], lines = 3): Bar[] {
   return sequence(out);
 }
 
+/** A Point & Figure column: its boxes on the box grid, rising (X) or falling (O). */
+export interface PnfColumn extends Bar {
+  pnf: {
+    /** The box size, in price. */
+    box: number;
+    /** X column (rising) or O column (falling). */
+    up: boolean;
+    /** Boxes in the column (its levels, inclusive). */
+    boxes: number;
+  };
+}
+
+/** Float headroom for a close that sits on a box level (103 / 1 → 102.99999…). */
+const EPS = 1e-9;
+
 /**
- * Point & Figure columns, rendered as one bar per column.
- *
- * X columns rise, O columns fall, and a column only ends when price reverses
- * by `reversal` boxes. Each column is emitted as a single bar spanning the
- * boxes it filled — P&F has no time axis at all, so this is the closest
- * faithful rendering on a time-based canvas.
+ * Point & Figure (CC-I10), TradingView's "Close" source: prices quantised to a grid of `boxSize` levels
+ * (k × boxSize). An X column rises one level each time a close reaches the next level up; it turns into an
+ * O column only when a close falls `reversal` levels below its top — the O column then starts one level below
+ * the X top — and the other way round. The first column starts on the first close's level and goes the way the
+ * first one-box move goes. Each column is one bar, at the time of its first source bar: `low` / `high` are its
+ * lowest and highest levels, `open` → `close` its direction, `pnf` how to draw it. The last column is still
+ * forming.
  */
-export function toPointAndFigure(bars: Bar[], boxSize: number, reversal = 3): Bar[] {
-  if (bars.length === 0 || boxSize <= 0) return [];
-  const out: Bar[] = [];
+export function toPointAndFigure(bars: Bar[], boxSize: number, reversal = 3): PnfColumn[] {
+  if (bars.length === 0 || !(boxSize > 0)) return [];
+  const rev = Math.max(1, Math.round(reversal));
+  const up = (price: number) => Math.floor(price / boxSize + EPS);
+  const down = (price: number) => Math.ceil(price / boxSize - EPS);
+  const out: PnfColumn[] = [];
+  const start = Math.round(bars[0].close / boxSize);
   let direction: 1 | -1 | 0 = 0;
-  let top = bars[0].close;
-  let bottom = bars[0].close;
+  let hi = start;
+  let lo = start;
   let columnTime = bars[0].time;
   let volume = 0;
 
   const flush = () => {
     if (direction === 0) return;
+    const rising = direction === 1;
     out.push({
       time: columnTime,
-      open: direction === 1 ? bottom : top,
-      close: direction === 1 ? top : bottom,
-      high: top,
-      low: bottom,
+      open: (rising ? lo : hi) * boxSize,
+      close: (rising ? hi : lo) * boxSize,
+      high: hi * boxSize,
+      low: lo * boxSize,
       volume,
+      pnf: { box: boxSize, up: rising, boxes: hi - lo + 1 },
     });
     volume = 0;
   };
 
   for (const bar of bars) {
     volume += bar.volume;
+    const u = up(bar.close);
+    const d = down(bar.close);
     if (direction === 0) {
-      if (bar.close - bottom >= boxSize) {
+      if (u >= start + 1) {
         direction = 1;
-        top = bar.close;
+        lo = start;
+        hi = u;
         columnTime = bar.time;
-      } else if (top - bar.close >= boxSize) {
+      } else if (d <= start - 1) {
         direction = -1;
-        bottom = bar.close;
+        hi = start;
+        lo = d;
         columnTime = bar.time;
-      } else {
-        top = Math.max(top, bar.close);
-        bottom = Math.min(bottom, bar.close);
       }
       continue;
     }
-
     if (direction === 1) {
-      if (bar.high > top) {
-        top = bar.high;
-      } else if (top - bar.low >= boxSize * reversal) {
+      if (u > hi) hi = u;
+      else if (d <= hi - rev) {
+        volume -= bar.volume;
         flush();
+        volume = bar.volume;
         direction = -1;
-        bottom = bar.low;
+        hi = hi - 1;
+        lo = d;
         columnTime = bar.time;
-        top = top - boxSize;
       }
     } else {
-      if (bar.low < bottom) {
-        bottom = bar.low;
-      } else if (bar.high - bottom >= boxSize * reversal) {
+      if (d < lo) lo = d;
+      else if (u >= lo + rev) {
+        volume -= bar.volume;
         flush();
+        volume = bar.volume;
         direction = 1;
-        top = bar.high;
+        lo = lo + 1;
+        hi = u;
         columnTime = bar.time;
-        bottom = bottom + boxSize;
       }
     }
   }
   flush();
-  return sequence(out);
+  return sequence(out) as PnfColumn[];
+}
+
+/** A Kagi line segment: thick (yang) or thin (yin) where it starts, and the price it changes thickness at. */
+export interface KagiSegment extends Bar {
+  kagi: {
+    /** Thick (yang) at its start. */
+    thickStart: boolean;
+    /** Where it crosses the last shoulder (going up, thin → thick) or waist (going down, thick → thin); null: no change. */
+    switchAt: number | null;
+  };
 }
 
 /**
- * Kagi.
- *
- * Returned as bars whose open/close trace the line's turning points: the line
- * continues in its direction while price extends, and turns only on a move of
- * `reversal` against it. Thickness (yang/yin) is conveyed by direction here,
- * since a line series cannot vary its own width mid-stream.
+ * Kagi (CC-I10) on closes: the line keeps its direction while closes extend it and turns only on a move of
+ * `reversal` against it. Each segment is one bar from where it turned (`open`) to its extreme (`close`), at the time
+ * the next turn was confirmed; the last segment is still forming. Thickness is TradingView's: the line turns thick
+ * (yang) when it rises above the last shoulder (the top of the previous rising segment) and thin (yin) when it falls
+ * below the last waist (the bottom of the previous falling one) — mid-segment, at that price. The first segment is
+ * thick when it rises, thin when it falls.
  */
-export function toKagi(bars: Bar[], reversal: number): Bar[] {
+export function toKagi(bars: Bar[], reversal: number): KagiSegment[] {
   if (bars.length === 0 || reversal <= 0) return [];
-  const out: Bar[] = [];
+  const out: KagiSegment[] = [];
   let direction: 1 | -1 | 0 = 0;
   let extreme = bars[0].close;
   let start = bars[0].close;
+  let thick: boolean | null = null;
+  let shoulder: number | null = null;
+  let waist: number | null = null;
+
+  /** The segment start → end with its thickness, and the thickness / shoulder / waist after it. */
+  const push = (time: number, open: number, close: number, volume: number): void => {
+    const rising = close > open;
+    thick ??= rising;
+    const thickStart: boolean = thick;
+    let switchAt: number | null = null;
+    if (rising && !thick && shoulder !== null && close > shoulder) {
+      switchAt = shoulder;
+      thick = true;
+    } else if (!rising && thick && waist !== null && close < waist) {
+      switchAt = waist;
+      thick = false;
+    }
+    if (rising) shoulder = close;
+    else waist = close;
+    out.push({ ...segment(time, open, close, volume), kagi: { thickStart, switchAt } });
+  };
 
   for (const bar of bars) {
     if (direction === 0) {
@@ -303,7 +358,7 @@ export function toKagi(bars: Bar[], reversal: number): Bar[] {
       if (bar.close > extreme) {
         extreme = bar.close;
       } else if (extreme - bar.close >= reversal) {
-        out.push(segment(bar.time, start, extreme, bar.volume));
+        push(bar.time, start, extreme, bar.volume);
         start = extreme;
         extreme = bar.close;
         direction = -1;
@@ -312,15 +367,15 @@ export function toKagi(bars: Bar[], reversal: number): Bar[] {
       if (bar.close < extreme) {
         extreme = bar.close;
       } else if (bar.close - extreme >= reversal) {
-        out.push(segment(bar.time, start, extreme, bar.volume));
+        push(bar.time, start, extreme, bar.volume);
         start = extreme;
         extreme = bar.close;
         direction = 1;
       }
     }
   }
-  if (direction !== 0) out.push(segment(bars[bars.length - 1].time, start, extreme, 0));
-  return sequence(out);
+  if (direction !== 0) push(bars[bars.length - 1].time, start, extreme, 0);
+  return sequence(out) as KagiSegment[];
 }
 
 function segment(time: number, open: number, close: number, volume: number): Bar {

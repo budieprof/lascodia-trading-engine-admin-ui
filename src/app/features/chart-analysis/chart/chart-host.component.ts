@@ -88,7 +88,7 @@ import {
   scoredTrendlines,
   type AutoAnalysisSettings,
 } from '../overlays/auto-analysis';
-import { HiLoSeries, HlcAreaSeries, VolCandleSeries } from './custom-series';
+import { HiLoSeries, HlcAreaSeries, KagiSeries, PnfSeries, VolCandleSeries } from './custom-series';
 import {
   boxUnit,
   toKagi,
@@ -683,6 +683,8 @@ export class ChartHostComponent implements OnDestroy {
   readonly renkoWicks = input<boolean>(false);
   /** Line break: how many lines a reversal must break (TradingView's default 3). */
   readonly lineBreakLines = input<number>(3);
+  /** Point & Figure: boxes a close must move against a column to start the next one (CC-I10). */
+  readonly pnfReversal = input<number>(3);
   /** Which chart this panel is, so it renders only its own drawings. */
   readonly symbol = input<string>('');
   /** Bars of other symbols, keyed by symbol, for compare studies (correlation, spread…). */
@@ -1143,6 +1145,7 @@ export class ChartHostComponent implements OnDestroy {
       this.pipSize();
       this.renkoWicks();
       this.lineBreakLines();
+      this.pnfReversal();
       this.theme.theme();
       this.appearance();
       untracked(() => this.syncData());
@@ -2246,7 +2249,9 @@ export class ChartHostComponent implements OnDestroy {
         ? `wicks:${this.renkoWicks()}`
         : style === 'line-break'
           ? `lines:${this.lineBreakLines()}`
-          : '';
+          : style === 'pnf'
+            ? `reversal:${this.pnfReversal()}`
+            : '';
     const look = appearanceKey(this.appearance());
     const key = `${series}|${style}|${zone}|${dark ? 'dark' : 'light'}|${unit ?? ''}|${shape}|${look}`;
     // Another of the effect's inputs re-ran it with nothing changed.
@@ -2354,7 +2359,7 @@ export class ChartHostComponent implements OnDestroy {
       case 'renko':
         return toRenko(bars, unit, { wicks: this.renkoWicks() });
       case 'pnf':
-        return toPointAndFigure(bars, unit, 3);
+        return toPointAndFigure(bars, unit, this.pnfReversal());
       case 'kagi':
         // The reversal amount is the box: ATR(14) at the default multiplier, TradingView's default.
         return toKagi(bars, unit);
@@ -2434,10 +2439,18 @@ export class ChartHostComponent implements OnDestroy {
       priceLineWidth: 1 as const,
     };
     switch (style) {
-      case 'line':
+      case 'pnf':
       case 'kagi':
+        // X / O columns on the box grid, and Kagi's thick / thin line (custom-series.ts, CC-I10).
+        return chart.addCustomSeries(style === 'pnf' ? new PnfSeries() : new KagiSeries(), {
+          upColor: p.up,
+          downColor: p.down,
+          priceFormat,
+          ...lastPrice,
+        });
+      case 'line':
         return chart.addSeries(LineSeries, {
-          color: style === 'kagi' ? '#787B86' : p.line,
+          color: p.line,
           lineWidth: 2,
           priceFormat,
           ...lastPrice,

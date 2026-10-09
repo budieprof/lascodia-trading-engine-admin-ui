@@ -1862,6 +1862,8 @@ export class ChartAnalysisPageComponent {
   readonly renkoWicks = signal(false);
   /** Line break: lines a reversal must break. */
   readonly lineBreakLines = signal(3);
+  /** Point & Figure: the reversal, in boxes (CC-I10; TradingView's default 3). */
+  readonly pnfReversal = signal(3);
   /** One pip of this symbol, in price (the engine's rule: ten points on fractional FX quotes). */
   readonly pipSize = computed(() =>
     pipSizeFor(
@@ -2963,6 +2965,11 @@ export class ChartAnalysisPageComponent {
   setBoxPips(raw: string): void {
     const value = Number(raw);
     if (Number.isFinite(value) && value > 0) this.boxPips.set(value);
+  }
+
+  setPnfReversal(raw: string): void {
+    const value = Math.round(Number(raw));
+    if (Number.isFinite(value) && value >= 1 && value <= 10) this.pnfReversal.set(value);
   }
 
   setLineBreakLines(raw: string): void {
@@ -5136,6 +5143,7 @@ export class ChartAnalysisPageComponent {
         boxPips: this.boxPips(),
         renkoWicks: this.renkoWicks(),
         lineBreakLines: this.lineBreakLines(),
+        pnfReversal: this.pnfReversal(),
       },
       indicators: this.active().map((i) => ({ ...i, params: { ...i.params } })),
       scripts: this.savedScriptsState(),
@@ -5526,6 +5534,7 @@ export class ChartAnalysisPageComponent {
     this.boxPips.set(pb.boxPips);
     this.renkoWicks.set(pb.renkoWicks);
     this.lineBreakLines.set(pb.lineBreakLines);
+    this.pnfReversal.set(pb.pnfReversal);
     const o = s.overlays ?? {};
     // Layouts saved before the split had one "Trades & signals" switch: it drove all three.
     this.showPositions.set(o.showPositions ?? o.showOverlays ?? false);
