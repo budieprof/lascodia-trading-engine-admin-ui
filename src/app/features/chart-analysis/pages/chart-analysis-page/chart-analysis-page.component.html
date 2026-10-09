@@ -693,6 +693,30 @@
               <app-chart-icon [name]="'layout-' + l.id" [size]="28" />
             </button>
           }
+          @if (comparePanels().length) {
+            <!-- Linked charts (CC-I5): the main chart's group, and what linked charts follow. -->
+            <div class="tb-menu-sep"></div>
+            <label class="tb-menu-field" title="Charts in one link group follow each other">
+              Main chart link
+              <select [value]="mainLink()" (change)="setMainLink(+$any($event.target).value)">
+                <option value="0">None</option>
+                <option value="1">Group 1</option>
+                <option value="2">Group 2</option>
+                <option value="3">Group 3</option>
+              </select>
+            </label>
+            @for (k of syncKeys; track k.key) {
+              <button
+                type="button"
+                class="tb-menu-item tb-check"
+                [class.on]="chartSync()[k.key]"
+                (click)="setSync(k.key, !chartSync()[k.key])"
+                [title]="k.title"
+              >
+                Sync {{ k.label }}
+              </button>
+            }
+          }
         </div>
       }
     </div>
@@ -1271,6 +1295,8 @@
           [showCountdown]="showCountdown()"
           [appearance]="appearance()"
           [legendBottom]="legendBottom()"
+          (crosshairSync)="onChartCrosshair('main', $event)"
+          (rangeSync)="onChartRange('main', $event)"
           [liveAt]="liveAt()"
           [bars]="displayBars()"
           [dataKey]="dataKey()"
@@ -1744,6 +1770,19 @@
                 <option [value]="r">{{ resolutionLabel(r) }}</option>
               }
             </select>
+            <select
+              class="panel-select"
+              [ngModel]="panel.link"
+              (ngModelChange)="setPanelLink(panel.id, +$event)"
+              [ngModelOptions]="{ standalone: true }"
+              aria-label="Link group"
+              title="Charts in one link group follow each other (the layout menu says what they follow)"
+            >
+              <option [ngValue]="0">No link</option>
+              <option [ngValue]="1">Link 1</option>
+              <option [ngValue]="2">Link 2</option>
+              <option [ngValue]="3">Link 3</option>
+            </select>
             <!-- Its own studies and Pine indicators (CC-I5). -->
             <select
               class="panel-select"
@@ -1855,6 +1894,8 @@
             [style]="style()"
             [showVolume]="false"
             [indicators]="panel.indicators"
+            (crosshairSync)="onChartCrosshair(panel.id, $event)"
+            (rangeSync)="onChartRange(panel.id, $event)"
             [scriptResults]="panelLayerMap().get(panel.id) ?? noLayers"
             [precision]="panelPrecision(panel.symbol)"
             [scaleMode]="scaleMode()"

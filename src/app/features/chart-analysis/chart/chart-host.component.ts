@@ -790,6 +790,13 @@ export class ChartHostComponent implements OnDestroy {
   readonly drawingContextMenu = output<{ id: string; clientX: number; clientY: number }>();
   /** Zoom/scroll or a pane resize settled — the page auto-saves {@link viewState}. */
   readonly viewChanged = output<void>();
+  /**
+   * The operator moved the crosshair (CC-I5 linked charts): the open (UTC ms) of the bar under it, or null when the
+   * pointer left the chart. Crosshairs set from another chart ({@link syncCrosshair}) are not reported back.
+   */
+  readonly crosshairSync = output<number | null>();
+  /** The operator panned or zoomed (CC-I5 linked charts): the first and last bar on screen (UTC opens). */
+  readonly rangeSync = output<{ fromMs: number; toMs: number }>();
   /** An economic event's flag (or the next-event chip) was clicked: open its reading. */
   readonly eventOpen = output<UpcomingEconomicEvent>();
   /**
@@ -1310,6 +1317,7 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
+    cancelAnimationFrame(this.rangeSyncFrame);
     clearInterval(this.countdownTimer);
     clearTimeout(this.marginTimer);
     if (this.tailStudiesTimer !== null) clearTimeout(this.tailStudiesTimer);
@@ -1498,6 +1506,82 @@ export class ChartHostComponent implements OnDestroy {
    */
   visibleWindow(): Bar[] {
     return this.visibleBars(this.bars());
+  }
+
+  // ── Linked charts (CC-I5): crosshair and time range ────────────────────────
+
+  /** The UTC open of the plotted bar at `seconds` (the time scale's, zone-shifted); null when there is none. */
+  private utcAtPlottedSeconds(seconds: number): number | null {
+    const i = this.plottedIndexAtSeconds(seconds);
+    return i === null ? null : (this.plottedUtc[i]?.time ?? null);
+  }
+
+  /** The index of the last plotted bar at or before `seconds`; null before the first. */
+  private plottedIndexAtSeconds(seconds: number): number | null {
+    const bars = this.plotted;
+    let lo = 0;
+    let hi = bars.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (Math.floor(bars[mid].time / 1000) <= seconds) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo > 0 ? lo - 1 : null;
+  }
+
+  /**
+   * Put the crosshair on the bar containing `utcMs` (another chart's crosshair moved), or take it off (null). The
+   * legend follows it as it does the pointer.
+   */
+  syncCrosshair(utcMs: number | null): void {
+    const chart = this.chart;
+    const series = this.price;
+    if (!chart || !series) return;
+    if (utcMs === null) {
+      chart.clearCrosshairPosition();
+      return;
+    }
+    const utc = this.plottedUtc;
+    let lo = 0;
+    let hi = utc.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (utc[mid].time <= utcMs) lo = mid + 1;
+      else hi = mid;
+    }
+    const i = lo - 1;
+    if (i < 0 || !this.plotted[i]) {
+      chart.clearCrosshairPosition();
+      return;
+    }
+    const bar = this.plotted[i];
+    chart.setCrosshairPosition(bar.close, asTime(bar.time), series);
+  }
+
+  /** Set from another chart: the next range changes are that, not the operator's. */
+  private rangeFromSync = false;
+  private rangeSyncFrame = 0;
+
+  /** Report the range on screen to linked charts, once per frame of a pan — not one set from another chart. */
+  private scheduleRangeSync(): void {
+    if (this.rangeFromSync) return;
+    cancelAnimationFrame(this.rangeSyncFrame);
+    this.rangeSyncFrame = requestAnimationFrame(() => {
+      const range = this.chart?.timeScale().getVisibleLogicalRange();
+      const utc = this.plottedUtc;
+      if (!range || utc.length === 0) return;
+      const from = utc[Math.max(0, Math.min(utc.length - 1, Math.floor(range.from)))].time;
+      const to = utc[Math.max(0, Math.min(utc.length - 1, Math.ceil(range.to)))].time;
+      if (to > from) this.rangeSync.emit({ fromMs: from, toMs: to });
+    });
+  }
+
+  /** Show [fromMs, toMs] (UTC) because a linked chart moved there; not reported back. */
+  syncRange(fromMs: number, toMs: number): void {
+    this.rangeFromSync = true;
+    this.setVisibleRange(fromMs, toMs);
+    // The library reports the change on its next frame: the flag holds until the one after.
+    requestAnimationFrame(() => requestAnimationFrame(() => (this.rangeFromSync = false)));
   }
 
   /** The slice of `bars` currently on screen. */
@@ -1947,7 +2031,11 @@ export class ChartHostComponent implements OnDestroy {
           : null;
       this.emitLegend();
       this.updateEventTip(param.point, param.paneIndex);
+      // Only the operator's own moves go to linked charts (a set position has no source event).
+      if (param.sourceEvent && this.crosshairTime !== null)
+        this.crosshairSync.emit(this.utcAtPlottedSeconds(this.crosshairTime));
     });
+    el.addEventListener('mouseleave', () => this.crosshairSync.emit(null));
     // An event's flag (or the next-event chip) opens its reading; an armed drawing tool owns clicks.
     this.chart.subscribeClick((param) => {
       if (!param.point || this.tool() !== null || (param.paneIndex ?? 0) !== 0) return;
@@ -2002,6 +2090,7 @@ export class ChartHostComponent implements OnDestroy {
       this.scheduleMarginSync();
       // The last-value label moves to the last bar on screen, and takes that bar's colour.
       this.syncLastValueLabel();
+      this.scheduleRangeSync();
     });
     // Pane separators are dragged with the pointer; heights have no change event of their own.
     el.addEventListener('pointerup', () => this.scheduleViewChanged());

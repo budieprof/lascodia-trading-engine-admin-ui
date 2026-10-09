@@ -305,6 +305,7 @@ import {
 } from '../../compare/compare-series';
 import { CompareDialogComponent } from '../../compare/compare-dialog.component';
 import {
+  linkedCharts,
   panelLayers,
   panelStudyChoices,
   sharedRun,
@@ -3569,7 +3570,8 @@ export class ChartAnalysisPageComponent {
     window.addEventListener('pointerup', up);
   }
 
-  selectSymbol(symbol: string): void {
+  /** Switch the main chart's symbol — and, with symbol sync on, the charts linked to it (CC-I5). */
+  selectSymbol(symbol: string, propagate = true): void {
     this.symbolMenuOpen.set(false);
     this.symbolQuery.set('');
     if (symbol === this.symbol()) return;
@@ -3592,10 +3594,13 @@ export class ChartAnalysisPageComponent {
       replaceUrl: true,
     });
     void this.reload();
+    if (propagate) this.linkSymbol('main', symbol);
   }
 
-  selectResolution(r: TvResolution): void {
+  /** Switch the main chart's timeframe — and, with interval sync on, the charts linked to it (CC-I5). */
+  selectResolution(r: TvResolution, propagate = true): void {
     if (r === this.resolution()) return;
+    if (propagate) this.linkInterval('main', r);
     this.resolution.set(r);
     void this.router.navigate([], {
       relativeTo: this.route,
@@ -5099,7 +5104,8 @@ export class ChartAnalysisPageComponent {
     this.panelLegends.update((all) => ({ ...all, [id]: snapshot }));
   }
 
-  setPanelSymbol(id: string, symbol: string): void {
+  setPanelSymbol(id: string, symbol: string, propagate = true): void {
+    if (propagate) this.linkSymbol(id, symbol.toUpperCase());
     this.comparePanels.update((list) =>
       list.map((p) =>
         p.id === id ? { ...p, symbol: symbol.toUpperCase(), bars: [], scripts: freshRuns(p.scripts) } : p,
@@ -5108,7 +5114,8 @@ export class ChartAnalysisPageComponent {
     void this.loadPanel(id);
   }
 
-  setPanelResolution(id: string, resolution: string): void {
+  setPanelResolution(id: string, resolution: string, propagate = true): void {
+    if (propagate) this.linkInterval(id, resolution);
     this.comparePanels.update((list) =>
       list.map((p) =>
         p.id === id
@@ -5131,6 +5138,76 @@ export class ChartAnalysisPageComponent {
     this.resolution.set(panel.resolution);
     void this.reload();
     void this.loadPanel(id);
+  }
+
+  // ── Linked charts (CC-I5) ──────────────────────────────────────────────────
+
+  /** A chart's link group ('main' is the main chart). */
+  private linkOf(id: string): number {
+    return id === 'main' ? this.mainLink() : (this.comparePanels().find((p) => p.id === id)?.link ?? 0);
+  }
+
+  /** The charts in `id`'s link group besides it. */
+  private linkedTo(id: string): string[] {
+    return linkedCharts(id, this.linkOf(id), this.mainLink(), this.comparePanels());
+  }
+
+  private hostOf(id: string): ChartHostComponent | undefined {
+    if (id === 'main') return this.host();
+    return this.panelHosts()[this.comparePanels().findIndex((p) => p.id === id)];
+  }
+
+  /** The operator's crosshair on one chart: the linked charts put theirs on the same bar (crosshair sync). */
+  onChartCrosshair(id: string, utcMs: number | null): void {
+    if (!this.chartSync().crosshair) return;
+    for (const t of this.linkedTo(id)) this.hostOf(t)?.syncCrosshair(utcMs);
+  }
+
+  /** The operator panned or zoomed one chart: the linked charts show the same span (time sync). */
+  onChartRange(id: string, range: { fromMs: number; toMs: number }): void {
+    if (!this.chartSync().time) return;
+    for (const t of this.linkedTo(id)) this.hostOf(t)?.syncRange(range.fromMs, range.toMs);
+  }
+
+  /** A chart switched symbol: with symbol sync on, the charts linked to it follow. */
+  private linkSymbol(source: string, symbol: string): void {
+    if (!this.chartSync().symbol) return;
+    for (const t of this.linkedTo(source)) {
+      if (t === 'main') {
+        if (this.symbol() !== symbol) this.selectSymbol(symbol, false);
+      } else if (this.comparePanels().find((p) => p.id === t)?.symbol !== symbol) this.setPanelSymbol(t, symbol, false);
+    }
+  }
+
+  /** A chart switched timeframe: with interval sync on, the charts linked to it follow. */
+  private linkInterval(source: string, resolution: string): void {
+    if (!this.chartSync().interval) return;
+    for (const t of this.linkedTo(source)) {
+      if (t === 'main') {
+        if (this.resolution() !== resolution) this.selectResolution(resolution as TvResolution, false);
+      } else if (this.comparePanels().find((p) => p.id === t)?.resolution !== resolution)
+        this.setPanelResolution(t, resolution, false);
+    }
+  }
+
+  setPanelLink(id: string, link: number): void {
+    this.comparePanels.update((list) => list.map((p) => (p.id === id ? { ...p, link: linkGroupOf(link) } : p)));
+  }
+
+  setMainLink(link: number): void {
+    this.mainLink.set(linkGroupOf(link));
+  }
+
+  /** The sync switches the layout menu offers. */
+  readonly syncKeys: ReadonlyArray<{ key: keyof ChartSync; label: string; title: string }> = [
+    { key: 'symbol', label: 'symbol', title: 'A symbol switch on one linked chart switches the others' },
+    { key: 'interval', label: 'interval', title: 'A timeframe switch on one linked chart switches the others' },
+    { key: 'crosshair', label: 'crosshair', title: 'The crosshair moves on every linked chart' },
+    { key: 'time', label: 'time range', title: 'Panning or zooming one linked chart shows the same span on the others' },
+  ];
+
+  setSync(key: keyof ChartSync, on: boolean): void {
+    this.chartSync.update((s) => ({ ...s, [key]: on }));
   }
 
   // ── The other charts' studies and scripts (CC-I5) ─────────────────────────

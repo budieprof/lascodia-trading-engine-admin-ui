@@ -161,3 +161,66 @@ describe('chart page — the other charts’ studies and scripts (CC-I5)', () =>
     expect(s.ranTo).toBe(p.comparePanels()[0].bars.at(-1).time);
   });
 });
+
+describe('chart page — linked charts (CC-I5)', () => {
+  const panel = (id: string, link: number, symbol = 'GBPUSD') => ({
+    id,
+    symbol,
+    resolution: '60',
+    bars: hours(2, 3),
+    indicators: [],
+    link,
+    scripts: [],
+  });
+  function linked(sync: Partial<Record<'symbol' | 'interval' | 'crosshair' | 'time', boolean>>) {
+    const { p } = setup();
+    const hosts = [
+      { syncCrosshair: vi.fn(), syncRange: vi.fn() },
+      { syncCrosshair: vi.fn(), syncRange: vi.fn() },
+    ];
+    const main = { syncCrosshair: vi.fn(), syncRange: vi.fn() };
+    Object.assign(p, {
+      mainLink: signal(1),
+      chartSync: signal({ symbol: false, interval: false, crosshair: true, time: true, ...sync }),
+      panelHosts: () => hosts,
+      host: () => main,
+    });
+    p.comparePanels.set([panel('a', 1), panel('b', 2, 'USDJPY')]);
+    return { p, hosts, main };
+  }
+
+  it('the crosshair and the time range move on the charts of the same group only', () => {
+    const { p, hosts, main } = linked({});
+    p.onChartCrosshair('main', 1234);
+    expect(hosts[0].syncCrosshair).toHaveBeenCalledWith(1234);
+    expect(hosts[1].syncCrosshair).not.toHaveBeenCalled();
+    p.onChartRange('a', { fromMs: 1, toMs: 2 });
+    expect(main.syncRange).toHaveBeenCalledWith(1, 2);
+    expect(hosts[1].syncRange).not.toHaveBeenCalled();
+  });
+
+  it('with crosshair sync off nothing follows', () => {
+    const { p, hosts } = linked({ crosshair: false });
+    p.onChartCrosshair('main', 1234);
+    expect(hosts[0].syncCrosshair).not.toHaveBeenCalled();
+  });
+
+  it('symbol and interval sync carry a switch across the group, once', () => {
+    const { p } = linked({ symbol: true, interval: true });
+    const selectSymbol = vi.fn();
+    const selectResolution = vi.fn();
+    Object.assign(p, { selectSymbol, selectResolution });
+    p.setPanelSymbol('a', 'audusd');
+    expect(selectSymbol).toHaveBeenCalledWith('AUDUSD', false);
+    expect(p.comparePanels()[1].symbol).toBe('USDJPY'); // another group
+    p.setPanelResolution('a', '240');
+    expect(selectResolution).toHaveBeenCalledWith('240', false);
+  });
+
+  it('a chart without a link follows nothing', () => {
+    const { p, main } = linked({ symbol: true });
+    p.setPanelLink('a', 0);
+    p.onChartCrosshair('a', 5);
+    expect(main.syncCrosshair).not.toHaveBeenCalled();
+  });
+});
