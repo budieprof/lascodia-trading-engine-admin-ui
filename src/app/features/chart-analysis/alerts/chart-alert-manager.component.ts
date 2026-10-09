@@ -15,22 +15,24 @@ import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import type { Observable } from 'rxjs';
 
 import { ChartAlertFormComponent } from './chart-alert-form.component';
+import { ChartScriptAlertsTabComponent } from './chart-script-alerts-tab.component';
 import { describeAlert, statusLabel } from './chart-alert-rules';
 import { ChartAlertsService } from './chart-alerts.service';
 import type { ChartAlertDto, ChartAlertFireDto } from './chart-alerts.types';
 
 type Scope = 'symbol' | 'all';
-type Tab = 'alerts' | 'log';
+type Tab = 'alerts' | 'log' | 'scripts';
 
 /**
  * The alert manager (alerts v2, SP-I2): the operator's chart alerts for this symbol or all symbols — pause, resume,
- * edit, clone, delete — and the fire log with what happened on every channel (delivered, skipped and why, failed).
+ * edit, clone, delete — and the fire log with what happened on every channel (delivered, skipped and why, failed); and
+ * (SS-I1) the alerts on chart scripts, in their own tab.
  */
 @Component({
   selector: 'app-chart-alert-manager',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ChartAlertFormComponent, DatePipe, NgTemplateOutlet],
+  imports: [ChartAlertFormComponent, ChartScriptAlertsTabComponent, DatePipe, NgTemplateOutlet],
   template: `
     <section class="cam" aria-label="Alerts">
       <header class="cam-head">
@@ -46,6 +48,16 @@ type Tab = 'alerts' | 'log';
           </button>
           <button type="button" role="tab" [class.on]="tab() === 'log'" (click)="openLog()">
             Log
+          </button>
+          <button
+            type="button"
+            role="tab"
+            [class.on]="tab() === 'scripts'"
+            (click)="tab.set('scripts')"
+            data-testid="cam-scripts-tab"
+            title="Alerts on Pine scripts on the chart"
+          >
+            Script alerts
           </button>
         </div>
         <span class="cam-spacer"></span>
@@ -87,7 +99,13 @@ type Tab = 'alerts' | 'log';
         <p class="cam-error" role="alert">{{ e }}</p>
       }
 
-      @if (tab() === 'alerts') {
+      @if (tab() === 'scripts') {
+        <app-chart-script-alerts-tab
+          [symbol]="symbol()"
+          [allSymbols]="scope() === 'all'"
+          [focusId]="scriptAlertFocusId()"
+        />
+      } @else if (tab() === 'alerts') {
         <ul class="cam-list" data-testid="cam-list">
           @for (a of visible(); track a.id) {
             <li class="cam-row" [class.focus]="a.id === focusId()" [attr.data-alert-id]="a.id">
@@ -410,6 +428,8 @@ export class ChartAlertManagerComponent {
   readonly lastClose = input<number>(0);
   /** An alert to show (the bell's link): listed, highlighted and its log opened. */
   readonly focusId = input<number | null>(null);
+  /** An alert on a chart script to show (the bell's `scriptAlert` link): its tab opens on it (SS-I1). */
+  readonly scriptAlertFocusId = input<number | null>(null);
 
   readonly closed = output<void>();
 
@@ -433,6 +453,10 @@ export class ChartAlertManagerComponent {
 
   constructor() {
     this.alerts.ensureLoaded();
+    // The bell's link to an alert on a chart script opens its tab.
+    effect(() => {
+      if (this.scriptAlertFocusId() !== null) untracked(() => this.tab.set('scripts'));
+    });
     // The bell's link: show that alert — whatever the scope — with its log open. Waits for the list when it is still
     // loading; tracks only the focus id and the list, never the state it sets.
     effect(() => {

@@ -11,7 +11,12 @@ import type { AlertChannel, AlertSeverity } from '@core/api/api.types';
  * operator's, and a screen alert only after `GET scripting/screens/{alertId}` does.
  */
 export interface AlertFiredPayload {
-  source: 'price' | 'drawing' | 'script' | 'screen' | 'test';
+  /**
+   * …and (2026-10-09, SS-I1) `chart-script`: an alert on a chart script (`scripting/alerts`) — `alertId` and
+   * `subscriptionId` are the alert, `timeframe` its timeframe; shown only after `GET scripting/alerts/{alertId}`
+   * confirms it is this operator's.
+   */
+  source: 'price' | 'drawing' | 'script' | 'screen' | 'test' | 'chart-script';
   /** The chart alert, (script) the alert binding, or (screen) the saved screen. */
   alertId: number;
   /** Script alerts: the binding (its subscription). */

@@ -152,6 +152,33 @@ describe('AlertPopupsService', () => {
     expect(service.popups().map((p) => p.payload.title)).toEqual(['EURUSD entered RSI hot']);
   });
 
+  it('shows an alert on a chart script only once the engine confirms it is this operator’s (SS-I1)', () => {
+    realtime.emit(
+      'alertFired',
+      fired({
+        source: 'chart-script',
+        alertId: 41,
+        subscriptionId: 41,
+        timeframe: '240',
+        price: null,
+        title: 'Cross up: EMA pair · EURUSD 240',
+        message: 'Fast crossed above slow',
+      }),
+    );
+    expect(service.popups()).toEqual([]);
+    expect(api.calls.map((c) => [c.path, c.opts])).toEqual([['/scripting/alerts/41', { silent: true }]]);
+    api.answer(0, { data: { id: 41 }, status: true, message: 'ok', responseCode: '00' });
+    expect(service.popups()[0].link).toEqual({
+      route: ['/chart-analysis', 'EURUSD'],
+      params: { scriptAlert: '41', tf: '240' },
+    });
+
+    // Another operator's: -14, nothing pops up.
+    realtime.emit('alertFired', fired({ source: 'chart-script', alertId: 42, title: 'Not mine' }));
+    api.answer(1, { data: null, status: false, message: 'Script alert 42 not found.', responseCode: '-14' });
+    expect(service.popups().map((p) => p.payload.alertId)).toEqual([41]);
+  });
+
   it('ignores malformed pushes', () => {
     realtime.emit('alertFired', null);
     realtime.emit('alertFired', { source: 'script' });

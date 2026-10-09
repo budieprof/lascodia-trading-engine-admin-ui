@@ -25,9 +25,9 @@ const BROWSER_KEY = 'lascodia.alerts.browserNotifications';
 /**
  * In-app alert delivery on the page (contract C2): every `alertFired` push becomes a pop-up, with an optional sound and
  * an opt-in browser notification — both remembered per browser. The push is a broadcast with no operator identity, so a
- * chart alert is shown only after `GET chart-alert/{id}` (owner-scoped) confirms it is this operator's, and a saved
- * screen's alert only after `GET scripting/screens/{id}` (owner-scoped) does; script alerts and channel tests are
- * everyone's.
+ * chart alert is shown only after `GET chart-alert/{id}` (owner-scoped) confirms it is this operator's, a saved
+ * screen's alert only after `GET scripting/screens/{id}` (owner-scoped) does, and an alert on a chart script only after
+ * `GET scripting/alerts/{id}` (owner-scoped, SS-I1) does; strategy script alerts and channel tests are everyone's.
  */
 @Injectable({ providedIn: 'root' })
 export class AlertPopupsService {
@@ -114,6 +114,7 @@ export class AlertPopupsService {
   static ownerCheckPath(p: AlertFiredPayload): string | null {
     if (p.source === 'price' || p.source === 'drawing') return `/chart-alert/${p.alertId}`;
     if (p.source === 'screen') return `/scripting/screens/${p.alertId}`;
+    if (p.source === 'chart-script') return `/scripting/alerts/${p.alertId}`;
     return null;
   }
 
@@ -128,6 +129,11 @@ export class AlertPopupsService {
       return { route: ['/strategies', p.strategyId], params: {} };
     if (p.source === 'screen' && p.alertId)
       return { route: ['/pine-screener'], params: { screen: String(p.alertId) } };
+    if (p.source === 'chart-script' && p.symbol) {
+      const params: Record<string, string> = { scriptAlert: String(p.alertId) };
+      if (p.timeframe) params['tf'] = p.timeframe;
+      return { route: ['/chart-analysis', p.symbol], params };
+    }
     return null;
   }
 
