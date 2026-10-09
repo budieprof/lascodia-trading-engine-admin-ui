@@ -498,6 +498,7 @@
             [precision]="precision()"
             [lastClose]="bars().at(-1)?.close ?? 0"
             [presetPrice]="alertPreset()"
+            [draft]="alertDraft()"
             (saved)="onAlertSaved()"
             (cancelled)="openMenu.set(null)"
           />
@@ -1202,7 +1203,11 @@
 
         <!-- TradingView's floating drawing toolbar for the selected drawing. -->
         @if (drawings.selected(); as sel) {
-          <app-drawing-toolbar [drawing]="sel" (settings)="settingsFor.set($event)" />
+          <app-drawing-toolbar
+            [drawing]="sel"
+            (settings)="settingsFor.set($event)"
+            (addAlert)="addDrawingAlert($event)"
+          />
         }
 
         <!-- Right-click menu on a drawing. -->

@@ -18,8 +18,9 @@ import { ColorPopoverComponent } from './color-popover.component';
 import { TemplateMenuComponent } from './template-menu.component';
 import { hasFill, hasText, parseColor } from './colors';
 import { ChartPrefsService } from '../../workspace/chart-prefs.service';
+import { canAlertOn, fibAlertLevels } from '../drawing-alert';
 
-type Pop = 'templates' | 'line' | 'fill' | 'text' | 'width' | 'dash' | 'more' | null;
+type Pop = 'templates' | 'line' | 'fill' | 'text' | 'width' | 'dash' | 'more' | 'alert' | null;
 
 const POS_KEY = 'lascodia.chart.drawing-toolbar.pos.v1';
 
@@ -196,6 +197,31 @@ const POS_KEY = 'lascodia.chart.drawing-toolbar.pos.v1';
       </span>
 
       <span class="dt-sep"></span>
+
+      @if (alertable()) {
+        <!-- DR-I6: an alert on the line / channel / one Fib level, in the alert form pre-filled with its anchors. -->
+        <span class="dt-anchor">
+          <button
+            type="button"
+            class="dt-btn"
+            title="Add alert"
+            data-testid="dt-alert"
+            [class.open]="pop() === 'alert'"
+            (click)="alertClick()"
+          >
+            <app-chart-icon name="alert" [size]="24" />
+          </button>
+          @if (pop() === 'alert') {
+            <div class="dt-pop dt-menu" role="menu" aria-label="Alert on Fib level">
+              @for (lv of fibLevels(); track lv) {
+                <button type="button" class="dt-item" role="menuitem" (click)="alertOn(lv)">
+                  Level {{ lv }}
+                </button>
+              }
+            </div>
+          }
+        </span>
+      }
 
       <button
         type="button"
@@ -438,6 +464,8 @@ export class DrawingToolbarComponent {
 
   readonly drawing = input.required<Drawing>();
   readonly settings = output<string>();
+  /** Add an alert on the drawing (DR-I6); `level` for a Fib retracement. */
+  readonly addAlert = output<{ id: string; level?: number }>();
 
   readonly pop = signal<Pop>(null);
   readonly pos = signal<{ x: number; y: number } | null>(readPos());
@@ -451,6 +479,24 @@ export class DrawingToolbarComponent {
     typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl+';
 
   readonly fillable = computed(() => hasFill(this.drawing()));
+  /** A line, level, channel or Fib on the price pane: an alert can watch it. */
+  readonly alertable = computed(() => canAlertOn(this.drawing()));
+  readonly fibLevels = computed(() => fibAlertLevels(this.drawing()));
+
+  /** A Fib asks which level; every other shape has one line (or one channel) to watch. */
+  alertClick(): void {
+    if (this.drawing().kind === 'fib-retracement') {
+      this.toggle('alert');
+      return;
+    }
+    this.pop.set(null);
+    this.addAlert.emit({ id: this.drawing().id });
+  }
+
+  alertOn(level: number): void {
+    this.pop.set(null);
+    this.addAlert.emit({ id: this.drawing().id, level });
+  }
   readonly texty = computed(() => hasText(this.drawing()));
   /** Picking a colour for an unfilled shape starts from TV's 20% tint of the line. */
   readonly fillSeed = computed(() => {

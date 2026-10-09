@@ -13,7 +13,7 @@ import { ChartAlertsService } from './chart-alerts.service';
 import type { ChartAlertDto } from './chart-alerts.types';
 
 declareSignalIo(ChartAlertFormComponent, {
-  inputs: ['symbol', 'timeframe', 'precision', 'lastClose', 'presetPrice', 'edit', 'copy'],
+  inputs: ['symbol', 'timeframe', 'precision', 'lastClose', 'presetPrice', 'edit', 'copy', 'draft'],
   outputs: ['saved', 'cancelled'],
 });
 
@@ -226,5 +226,50 @@ describe('ChartAlertFormComponent', () => {
     expect(q('[data-testid="caf-problem"]').textContent).toContain(
       'The upper level must be above the lower level.',
     );
+  });
+
+  it('creates a drawing alert drafted from the drawing toolbar as a NEW alert with its geometry (DR-I6)', () => {
+    const geometry = {
+      shape: 'line' as const,
+      points: [
+        { timeMs: 1_760_000_000_000, price: 1.08 },
+        { timeMs: 1_760_018_000_000, price: 1.09 },
+      ],
+      extendLeft: false,
+      extendRight: true,
+    };
+    render({
+      draft: dto({
+        id: 0,
+        name: 'Ray',
+        kind: 'Drawing',
+        side: 'Bid',
+        condition: 'Crossing',
+        price: null,
+        geometry,
+        drawingId: 'd1',
+        drawingKind: 'ray',
+        frequency: 'once',
+        channels: ['InApp'],
+        severity: 'Medium',
+      }),
+    });
+    expect(el.textContent).toContain('Drawing alert · EURUSD');
+    expect(el.textContent).toContain('On the ray');
+    expect(q('[data-testid="caf-level"]')).toBeNull();
+    q<HTMLFormElement>('form').dispatchEvent(new Event('submit'));
+    const post = http.expectOne(`${BASE}/chart-alert`);
+    expect(post.request.method).toBe('POST');
+    expect(post.request.body).toMatchObject({
+      kind: 'Drawing',
+      condition: 'Crossing',
+      price: null,
+      upperPrice: null,
+      geometry,
+      drawingId: 'd1',
+      drawingKind: 'ray',
+      name: 'Ray',
+    });
+    post.flush(ok(dto({ id: 40, kind: 'Drawing', geometry })));
   });
 });

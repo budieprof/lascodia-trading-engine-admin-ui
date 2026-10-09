@@ -214,6 +214,8 @@ import {
   StudySettingsDialogComponent,
   type StudyPick,
 } from '../../indicators/study-settings-dialog.component';
+import { drawingAlertDraft } from '../../drawings/drawing-alert';
+import type { ChartAlertDto } from '../../alerts/chart-alerts.types';
 import {
   parseStudyInput,
   parseStudySource,
@@ -683,9 +685,36 @@ export class ChartAnalysisPageComponent {
 
   /** A level picked on the chart for the alert form (right-click "Add alert at …"); null = 10 points off the live price. */
   readonly alertPreset = signal<number | null>(null);
+  /** A drawing's alert the form starts from (DR-I6: "Add alert" on the drawing toolbar); null = a price alert. */
+  readonly alertDraft = signal<ChartAlertDto | null>(null);
   openAlertDraft(ev: Event): void {
     this.alertPreset.set(null);
+    this.alertDraft.set(null);
     this.toggleMenu('alert', ev);
+  }
+
+  /**
+   * "Add alert" on a selected line / channel / Fib level (DR-I6): the alert form opens pre-filled with the drawing's
+   * anchors (the engine follows the shape bar by bar on this timeframe); nothing is armed until the operator saves.
+   */
+  addDrawingAlert(e: { id: string; level?: number }): void {
+    const d = this.drawings.allDrawings().find((x) => x.id === e.id);
+    const draft = d
+      ? drawingAlertDraft(d, {
+          timeframe: this.resolution(),
+          level: e.level,
+          logScale: this.scaleMode() === 'log',
+        })
+      : null;
+    if (!draft) {
+      this.notify.error(
+        'An alert can watch a line, a channel or a Fib level drawn on the price, with two different times.',
+      );
+      return;
+    }
+    this.alertPreset.set(null);
+    this.alertDraft.set(draft);
+    this.openMenu.set('alert');
   }
 
   readonly rangePresets = RANGE_PRESETS;
@@ -4765,13 +4794,20 @@ export class ChartAnalysisPageComponent {
     const price = menu?.price;
     if (price === null || price === undefined || !Number.isFinite(price) || price <= 0) return;
     this.alertPreset.set(price);
+    this.alertDraft.set(null);
     this.openMenu.set('alert');
   }
 
   /** The form saved an alert. */
   onAlertSaved(): void {
     this.openMenu.set(null);
-    this.notify.success('Alert set — it fires when price crosses the level.');
+    const drawing = this.alertDraft() !== null;
+    this.alertDraft.set(null);
+    this.notify.success(
+      drawing
+        ? 'Alert set — it fires when price crosses the drawing.'
+        : 'Alert set — it fires when price crosses the level.',
+    );
   }
 
   /** The alert manager (right rail) and the alert a bell link asked to show. */
