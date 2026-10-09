@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { RAIL_LAYOUT, RAIL_STANDALONE, TOOLS } from './model';
+import { behaviorFor } from './tools/registry';
 
 describe('rail layout', () => {
   it('places every tool exactly once', () => {
@@ -11,5 +12,11 @@ describe('rail layout', () => {
 
   it('matches TradingView family order', () => {
     expect(RAIL_LAYOUT.map((g) => g.id)).toEqual(['trend', 'fib', 'patterns', 'forecast', 'shapes', 'text']);
+  });
+});
+
+describe('tool behaviours (DR-21)', () => {
+  it('every tool paints through a behaviour — the renderer has no fallback', () => {
+    expect(TOOLS.filter((t) => !behaviorFor(t.kind)).map((t) => t.kind)).toEqual([]);
   });
 });

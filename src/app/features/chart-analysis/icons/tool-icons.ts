@@ -329,6 +329,27 @@ export const TOOL_ICONS: Record<DrawingKind, string> = {
   'arrow-mark-down': solid('M14 23l7-8h-4V6h-6v9H7z'),
   'arrow-mark-left': solid('M5 14l8-7v4h9v6h-9v4z'),
   'arrow-mark-right': solid('M23 14l-8-7v4H6v6h9v4z'),
+  // ── DR-I12 ──────────────────────────────────────────────────────────────
+  'anchored-text':
+    `<rect x="4.5" y="4.5" width="19" height="19" rx="1"${DASH}${FAINT}/>` +
+    hl(8.5, 9, 19) +
+    vl(14, 8.5, 19.5) +
+    pt(4.5, 4.5),
+  note:
+    `<circle cx="14" cy="9" r="4.5"/>` +
+    vl(14, 13.5, 23.5) +
+    `<circle cx="14" cy="9" r="1" fill="currentColor"/>`,
+  'price-note':
+    `<rect x="11.5" y="4.5" width="12" height="8" rx="1"/>` +
+    seg(6.5, 18.5, 14, 12.5, true, false) +
+    hl(18.5, 6.5, 24, DASH) +
+    pt(6.5, 18.5),
+  image:
+    `<rect x="4.5" y="6.5" width="19" height="15" rx="1"/>` +
+    `<path d="M6 20l5.5-6 4 4 2.5-2.5 4 4.5"/>` +
+    `<circle cx="18" cy="10.5" r="1.5"/>`,
+  'arrow-marker': solid('M4 16.5v-5h12V7l8 7-8 7v-4.5z'),
+  icon: solid('M14 4.5l2.6 6.2 6.7.5-5.1 4.4 1.6 6.5L14 18.6l-5.8 3.5 1.6-6.5-5.1-4.4 6.7-.5z'),
 
   // ── Measure / projection ────────────────────────────────────────────
   measure:

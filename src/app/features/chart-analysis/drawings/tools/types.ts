@@ -1,4 +1,4 @@
-import type { PaintCtx } from '../advanced-painters';
+import type { PaintCtx } from '../paint-ctx';
 import type { Pt } from '../geometry';
 import type { Drawing, DrawingKind, DrawingPoint, DrawingStyle } from '../model';
 import type { Bar } from '../../datafeed/candle-feed.service';
@@ -29,6 +29,8 @@ export type ToolOption =
   | { key: string; label: string; type: 'color'; default: string; tab?: 'style' | 'text' }
   | { key: string; label: string; type: 'select'; default: string; choices: readonly string[]; tab?: 'style' | 'text' }
   | { key: string; label: string; type: 'text'; default: string; tab?: 'style' | 'text' }
+  /** A picture chosen from a file, kept as a data URL small enough for the engine's options column (DR-I12). */
+  | { key: string; label: string; type: 'image'; default: string; tab?: 'style' | 'text' }
   /** Fib-style level table: value, colour, visible. */
   | {
       key: string;
@@ -82,6 +84,12 @@ export interface ToolBehavior {
    * and are never synced to the engine.
    */
   transient?: boolean;
+  /**
+   * Fixed to the pane, not to a bar and a price (TradingView's Anchored Text / Anchored Note, DR-I12): placed and
+   * moved as fractions of the pane (`ax`, `ay` in the options), so it stays put while the chart scrolls and zooms.
+   * A drawing without them (made before) stays on its anchor.
+   */
+  screenAnchored?: boolean;
   /**
    * Called once when the drawing is completed, before it is stored. May
    * replace the anchors (e.g. derive a position's target/stop) or seed

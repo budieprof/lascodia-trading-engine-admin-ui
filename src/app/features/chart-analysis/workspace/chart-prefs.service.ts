@@ -19,6 +19,11 @@ export const SYNCED_PREF_KEYS = [
   'lascodia.chart.pref.favouriteIntervals',
   // Pine scripts' named input templates (PC-I12, `scripts/script-input-templates.ts`).
   'lascodia.chart.scriptInputTemplates.v1',
+  // Favourite drawing tools and their toolbar's place (DR-I12, `drawings/drawing-favorites.service.ts`).
+  'lascodia.chart.favoriteDrawingTools.v1',
+  'lascodia.chart.favoritesBar.pos.v1',
+  // Auto analysis layers (DR-I11).
+  'lascodia.chart.pref.autoAnalysis',
 ] as const;
 export type SyncedPrefKey = (typeof SYNCED_PREF_KEYS)[number];
 

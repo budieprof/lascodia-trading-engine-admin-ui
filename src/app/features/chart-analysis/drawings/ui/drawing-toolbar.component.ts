@@ -18,8 +18,10 @@ import { ColorPopoverComponent } from './color-popover.component';
 import { TemplateMenuComponent } from './template-menu.component';
 import { hasFill, hasText, parseColor } from './colors';
 import { ChartPrefsService } from '../../workspace/chart-prefs.service';
+import { canAlertOn, fibAlertLevels } from '../drawing-alert';
+import { isPositionTool } from '../position-link';
 
-type Pop = 'templates' | 'line' | 'fill' | 'text' | 'width' | 'dash' | 'more' | null;
+type Pop = 'templates' | 'line' | 'fill' | 'text' | 'width' | 'dash' | 'more' | 'alert' | null;
 
 const POS_KEY = 'lascodia.chart.drawing-toolbar.pos.v1';
 
@@ -197,6 +199,43 @@ const POS_KEY = 'lascodia.chart.drawing-toolbar.pos.v1';
 
       <span class="dt-sep"></span>
 
+      @if (stageable()) {
+        <!-- DR-I9: the position as a manual trade signal — the dialog is filled in; the chart sends nothing. -->
+        <button
+          type="button"
+          class="dt-btn dt-text-btn"
+          title="Stage as a manual signal (it enters the queue as Pending; approval and every risk check apply)"
+          data-testid="dt-stage"
+          (click)="pop.set(null); stageOrder.emit(d.id)"
+        >
+          Stage…
+        </button>
+      }
+      @if (alertable()) {
+        <!-- DR-I6: an alert on the line / channel / one Fib level, in the alert form pre-filled with its anchors. -->
+        <span class="dt-anchor">
+          <button
+            type="button"
+            class="dt-btn"
+            title="Add alert"
+            data-testid="dt-alert"
+            [class.open]="pop() === 'alert'"
+            (click)="alertClick()"
+          >
+            <app-chart-icon name="alert" [size]="24" />
+          </button>
+          @if (pop() === 'alert') {
+            <div class="dt-pop dt-menu" role="menu" aria-label="Alert on Fib level">
+              @for (lv of fibLevels(); track lv) {
+                <button type="button" class="dt-item" role="menuitem" (click)="alertOn(lv)">
+                  Level {{ lv }}
+                </button>
+              }
+            </div>
+          }
+        </span>
+      }
+
       <button
         type="button"
         class="dt-btn"
@@ -303,6 +342,11 @@ const POS_KEY = 'lascodia.chart.drawing-toolbar.pos.v1';
     .dt-anchor {
       position: relative;
       display: inline-flex;
+    }
+    .dt-text-btn {
+      padding: 0 8px;
+      font-size: 13px;
+      font-weight: 600;
     }
     .dt-btn {
       min-width: 34px;
@@ -438,6 +482,10 @@ export class DrawingToolbarComponent {
 
   readonly drawing = input.required<Drawing>();
   readonly settings = output<string>();
+  /** Add an alert on the drawing (DR-I6); `level` for a Fib retracement. */
+  readonly addAlert = output<{ id: string; level?: number }>();
+  /** Stage a position tool as a manual trade signal (DR-I9). */
+  readonly stageOrder = output<string>();
 
   readonly pop = signal<Pop>(null);
   readonly pos = signal<{ x: number; y: number } | null>(readPos());
@@ -451,6 +499,26 @@ export class DrawingToolbarComponent {
     typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl+';
 
   readonly fillable = computed(() => hasFill(this.drawing()));
+  /** A line, level, channel or Fib on the price pane: an alert can watch it. */
+  readonly alertable = computed(() => canAlertOn(this.drawing()));
+  readonly fibLevels = computed(() => fibAlertLevels(this.drawing()));
+  /** A Long / Short Position on the price pane can be staged as a manual signal. */
+  readonly stageable = computed(() => isPositionTool(this.drawing()) && !this.drawing().pane);
+
+  /** A Fib asks which level; every other shape has one line (or one channel) to watch. */
+  alertClick(): void {
+    if (this.drawing().kind === 'fib-retracement') {
+      this.toggle('alert');
+      return;
+    }
+    this.pop.set(null);
+    this.addAlert.emit({ id: this.drawing().id });
+  }
+
+  alertOn(level: number): void {
+    this.pop.set(null);
+    this.addAlert.emit({ id: this.drawing().id, level });
+  }
   readonly texty = computed(() => hasText(this.drawing()));
   /** Picking a colour for an unfilled shape starts from TV's 20% tint of the line. */
   readonly fillSeed = computed(() => {

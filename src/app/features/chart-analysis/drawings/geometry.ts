@@ -343,12 +343,15 @@ export function hitTestDrawing(
     case 'table':
     case 'idea':
     case 'anchored-note':
+    case 'note':
     case 'anchored-vwap':
       // Pinned markers draw a 26px stem with a label above it.
       return Math.abs(p.x - a.x) <= 30 && p.y <= a.y + tol && p.y >= a.y - 44;
 
     case 'text':
+    case 'anchored-text':
     case 'callout':
+    case 'price-note':
       // Approximate box around the anchor; the renderer keeps the same shape.
       return Math.abs(p.x - a.x) <= 60 && Math.abs(p.y - a.y) <= 14;
 
@@ -356,6 +359,7 @@ export function hitTestDrawing(
     case 'arrow-mark-down':
     case 'arrow-mark-left':
     case 'arrow-mark-right':
+    case 'icon':
       // Single-anchor glyphs. These MUST be listed explicitly: the default arm
       // below requires two points, so a one-point tool falling through it can
       // be drawn but never selected, moved or deleted.

@@ -1,4 +1,4 @@
-import type { PaintCtx } from '../advanced-painters';
+import type { PaintCtx } from '../paint-ctx';
 import { distanceToSegment, type Pt } from '../geometry';
 import type { Drawing, DrawingPoint } from '../model';
 import type { ToolBehavior, ToolBehaviorMap, ToolOption } from './types';
@@ -35,6 +35,7 @@ import {
   volumeBetween,
   volumeProfileRows,
   type OhlcvBar,
+  type PositionInputs,
   type VwapSource,
 } from './forecast-math';
 
@@ -93,6 +94,10 @@ const POSITION_OPTIONS: readonly ToolOption[] = [
   { key: 'riskUnit', label: 'Risk unit', type: 'select', default: '%', choices: ['%', 'money'] },
   { key: 'leverage', label: 'Leverage', type: 'number', default: 1, min: 0 },
   { key: 'qtyPrecision', label: 'Qty precision', type: 'number', default: 2, min: 0, max: 8, step: 1 },
+  // DR-I9: filled from the account and the symbol when the tool is placed (position-link.ts); 0 / '' = not linked.
+  { key: 'pipSize', label: 'Pip size', type: 'number', default: 0, min: 0, step: 0.00001 },
+  { key: 'quoteRate', label: 'Account units per quote unit', type: 'number', default: 1, min: 0 },
+  { key: 'accountCurrency', label: 'Account currency', type: 'text', default: '' },
   { key: 'lineColor', label: 'Lines', type: 'color', default: TV_GREY },
   { key: 'targetColor', label: 'Target color', type: 'color', default: TV_GREEN },
   { key: 'stopColor', label: 'Stop color', type: 'color', default: TV_RED },
@@ -123,6 +128,28 @@ export function positionLevels(d: Drawing, side: 'long' | 'short'): PositionLeve
   const interval = resolutionMs(d.resolution) ?? 3_600_000;
   const def = defaultPositionLevels(side, entry.price, entry.time, interval);
   return { entry, target: def.target, stop: def.stop, end: def.end };
+}
+
+/** The position maths' inputs from a drawing and its (resolved) options. */
+export function positionInputs(
+  d: Drawing,
+  side: 'long' | 'short',
+  o: Record<string, unknown>,
+): PositionInputs {
+  const levels = positionLevels(d, side);
+  return {
+    side,
+    entry: levels.entry.price,
+    target: levels.target,
+    stop: levels.stop,
+    accountSize: num(o, 'accountSize', 1000),
+    lotSize: num(o, 'lotSize', 1),
+    risk: num(o, 'risk', 25),
+    riskUnit: str(o, 'riskUnit', '%') === 'money' ? 'money' : '%',
+    leverage: num(o, 'leverage', 1),
+    qtyPrecision: num(o, 'qtyPrecision', 2),
+    quoteRate: num(o, 'quoteRate', 1),
+  };
 }
 
 /** The points a one-click position should be committed with (for a creation hook). */
@@ -178,18 +205,8 @@ function positionBehavior(side: 'long' | 'short'): ToolBehavior {
       ctx.fillStyle = rgba(stopColor, 0.2);
       ctx.fillRect(x0, Math.min(yEntry, yStop), w, Math.abs(yStop - yEntry));
 
-      const stats = positionStats({
-        side,
-        entry: levels.entry.price,
-        target: levels.target,
-        stop: levels.stop,
-        accountSize: num(o, 'accountSize', 1000),
-        lotSize: lot,
-        risk: num(o, 'risk', 25),
-        riskUnit: str(o, 'riskUnit', '%') === 'money' ? 'money' : '%',
-        leverage: num(o, 'leverage', 1),
-        qtyPrecision: num(o, 'qtyPrecision', 2),
-      });
+      const quoteRate = num(o, 'quoteRate', 1);
+      const stats = positionStats(positionInputs(p.drawing, side, o));
 
       // Trade path: from the entry to where it closed (or the last bar), shaded by result.
       const outcome = positionOutcome(
@@ -206,7 +223,7 @@ function positionBehavior(side: 'long' | 'short'): ToolBehavior {
       if (outcome.state !== 'pending') {
         const xo = Math.min(x1, g.axis.xOf(outcome.time));
         const yo = g.axis.yOf(outcome.price);
-        pnl = positionPnl(side, levels.entry.price, outcome.price, stats.qty, lot);
+        pnl = positionPnl(side, levels.entry.price, outcome.price, stats.qty, lot, quoteRate);
         closed = outcome.state === 'target' || outcome.state === 'stop';
         if (yo !== null && xo > x0) {
           ctx.fillStyle = rgba(pnl >= 0 ? targetColor : stopColor, 0.25);
@@ -235,20 +252,25 @@ function positionBehavior(side: 'long' | 'short'): ToolBehavior {
         const fg = str(o, 'textColor', '#FFFFFF');
         const cx = x0 + w / 2;
         const compact = bool(o, 'compactStats', false);
-        const tTicks = formatTicks(stats.targetDelta, precision);
-        const sTicks = formatTicks(stats.stopDelta, precision);
-        const tCore = `${stats.targetDelta.toFixed(precision)} (${stats.targetPct.toFixed(2)}%) ${tTicks}`;
-        const sCore = `${stats.stopDelta.toFixed(precision)} (${stats.stopPct.toFixed(2)}%) ${sTicks}`;
+        // Linked to the account (DR-I9): distances in pips, money in the account currency, size in lots.
+        const pip = num(o, 'pipSize', 0);
+        const ccy = str(o, 'accountCurrency', '');
+        const money = (v: number) => (ccy ? `${formatAmount(v)} ${ccy}` : formatAmount(v));
+        const dist = (delta: number) =>
+          pip > 0 ? `${(delta / pip).toFixed(1)} pips` : formatTicks(delta, precision);
+        const size = ccy ? 'Lots' : 'Qty';
+        const tCore = `${stats.targetDelta.toFixed(precision)} (${stats.targetPct.toFixed(2)}%) ${dist(stats.targetDelta)}`;
+        const sCore = `${stats.stopDelta.toFixed(precision)} (${stats.stopPct.toFixed(2)}%) ${dist(stats.stopDelta)}`;
         const tLine = compact
-          ? `${tCore}, ${formatAmount(stats.targetAmount)}`
-          : `Target: ${tCore}, Amount: ${formatAmount(stats.targetAmount)}`;
+          ? `${tCore}, ${money(stats.targetAmount)}`
+          : `Target: ${tCore}, Amount: ${money(stats.targetAmount)}`;
         const sLine = compact
-          ? `${sCore}, ${formatAmount(stats.stopAmount)}`
-          : `Stop: ${sCore}, Amount: ${formatAmount(stats.stopAmount)}`;
+          ? `${sCore}, ${money(stats.stopAmount)}`
+          : `Stop: ${sCore}, Amount: ${money(stats.stopAmount)}`;
         const centre = compact
-          ? [`${formatAmount(pnl)}, ${formatAmount(stats.qty)}`, stats.rr.toFixed(2)]
+          ? [`${money(pnl)}, ${formatAmount(stats.qty)}`, stats.rr.toFixed(2)]
           : [
-              `${closed ? 'Closed' : 'Open'} P&L: ${formatAmount(pnl)}, Qty: ${formatAmount(stats.qty)}`,
+              `${closed ? 'Closed' : 'Open'} P&L: ${money(pnl)}, ${size}: ${formatAmount(stats.qty)}`,
               `Risk/Reward Ratio: ${stats.rr.toFixed(2)}`,
             ];
         const tEdge = dir > 0 ? Math.min(yTarget, yEntry) - 4 : Math.max(yTarget, yEntry) + 4;
@@ -849,13 +871,29 @@ const PROFILE_OPTIONS: readonly ToolOption[] = [
   { key: 'extendPoc', label: 'Extend POC right', type: 'bool', default: false },
 ];
 
+/**
+ * The time span a volume-profile drawing covers, in MODEL time: fixed = between its two anchors, in either drag
+ * order; anchored = from its anchor to the newest bar, whatever that is (an unbounded end, never a screen x — the
+ * old painter asked the time scale for the pane's right edge, which is past the data, got null and drew nothing).
+ * A fixed profile still being placed (one anchor) previews as anchored. Null without an anchor.
+ */
+export function profileSpan(
+  mode: 'fixed' | 'anchored',
+  anchors: readonly { time: number }[],
+): { t0: number; t1: number; fixed: boolean } | null {
+  if (anchors.length === 0) return null;
+  const fixed = mode === 'fixed' && anchors.length >= 2;
+  return fixed
+    ? { t0: Math.min(anchors[0].time, anchors[1].time), t1: Math.max(anchors[0].time, anchors[1].time), fixed }
+    : { t0: anchors[0].time, t1: Infinity, fixed };
+}
+
 function profileGeo(p: Ctx, mode: 'fixed' | 'anchored') {
   const axis = axisOf(p);
   const m = anchorsOf(p, axis);
-  if (!axis || m.length === 0) return null;
-  const fixed = mode === 'fixed' && m.length >= 2;
-  const t0 = fixed ? Math.min(m[0].time, m[1].time) : m[0].time;
-  const t1 = fixed ? Math.max(m[0].time, m[1].time) : Infinity;
+  const span = profileSpan(mode, m);
+  if (!axis || !span) return null;
+  const { t0, t1, fixed } = span;
   const inRange = barsOf(p).filter((b) => b.time >= t0 && b.time <= t1);
   const rows = Math.max(1, Math.round(num(p.options, 'rows', 24)));
   const prof = volumeProfileRows(inRange, rows, num(p.options, 'valueArea', 70));

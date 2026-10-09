@@ -113,11 +113,31 @@ export function intervalOf(resolution: string): { unit: IntervalUnit; value: num
 
 export type IntervalVisibility = Record<IntervalUnit, { on: boolean; from: number; to: number }>;
 
+/**
+ * A drawing's `visibleOn` is a list of tokens (DR-I2): a UNIT RANGE as the Visibility tab sets it —
+ * `hours:1-4` = every timeframe from 1 to 4 hours, so a typed 3h shows it too — or a single resolution (`240`),
+ * which is how drawings from before kept per symbol read (their own timeframe). `none` = no timeframe at all.
+ * Absent or empty = every timeframe.
+ */
+const NONE = 'none';
+
+function rangeToken(token: string): { unit: IntervalUnit; from: number; to: number } | null {
+  const m = /^([a-z]+):(\d+)-(\d+)$/.exec(token);
+  if (!m || !INTERVAL_GROUPS.some((g) => g.unit === m[1])) return null;
+  return { unit: m[1] as IntervalUnit, from: Number(m[2]), to: Number(m[3]) };
+}
+
 /** Dialog state for a drawing's `visibleOn` (absent/empty = visible everywhere). */
 export function visibilityFromList(visibleOn: readonly string[] | undefined, resolutions: readonly string[]): IntervalVisibility {
   const all = !visibleOn || visibleOn.length === 0;
   const out = {} as IntervalVisibility;
   for (const g of INTERVAL_GROUPS) {
+    const range = all ? null : visibleOn!.map(rangeToken).find((r) => r?.unit === g.unit);
+    if (range) {
+      out[g.unit] = { on: true, from: range.from, to: range.to };
+      continue;
+    }
+    // Single resolutions (drawings saved before the ranges): the unit's span over the listed ones.
     const values = (all ? resolutions : visibleOn!)
       .map(intervalOf)
       .filter((i): i is { unit: IntervalUnit; value: number } => !!i && i.unit === g.unit)
@@ -131,22 +151,40 @@ export function visibilityFromList(visibleOn: readonly string[] | undefined, res
   return out;
 }
 
-/** Dialog state → `visibleOn`. `undefined` when every resolution is included. */
+/**
+ * Dialog state → `visibleOn`: a range per unit that is on, `undefined` when every unit is on over its whole range
+ * (every timeframe), `['none']` when every unit is off. `resolutions` is kept for the call sites' symmetry.
+ */
 export function visibilityToList(v: IntervalVisibility, resolutions: readonly string[]): string[] | undefined {
-  const list = resolutions.filter((r) => {
-    const i = intervalOf(r);
-    if (!i) return true;
-    const g = v[i.unit];
-    return !!g && g.on && i.value >= g.from && i.value <= g.to;
-  });
-  return list.length === resolutions.length ? undefined : list;
+  void resolutions;
+  const groups = INTERVAL_GROUPS.filter((g) => g.available);
+  const everything = groups.every((g) => v[g.unit]?.on && v[g.unit].from <= g.min && v[g.unit].to >= g.max);
+  if (everything) return undefined;
+  const list = groups.filter((g) => v[g.unit]?.on).map((g) => `${g.unit}:${v[g.unit].from}-${v[g.unit].to}`);
+  return list.length ? list : [NONE];
 }
 
-/** Whether a drawing shows on `resolution` — hidden drawings and excluded intervals do not. */
+/**
+ * Whether a drawing is ON the chart at `resolution` by its Visibility list (DR-I2: a drawing belongs to its symbol
+ * and shows on every timeframe its list allows; empty = all) — whether or not its eye hides it.
+ */
+export function isShownOn(d: Pick<Drawing, 'visibleOn'>, resolution: string): boolean {
+  const list = d.visibleOn;
+  if (!list || list.length === 0) return true;
+  const iv = intervalOf(resolution);
+  for (const token of list) {
+    if (token === resolution) return true;
+    const r = rangeToken(token);
+    if (r && iv && r.unit === iv.unit && iv.value >= r.from && iv.value <= r.to) return true;
+  }
+  // A timeframe the units cannot place (none today) is not hidden by a range it cannot be measured against.
+  return !iv && list.some((t) => rangeToken(t) !== null);
+}
+
+/** Whether a drawing is painted on `resolution` — hidden drawings and excluded intervals are not. */
 export function isVisibleOn(d: Pick<Drawing, 'hidden' | 'visibleOn'>, resolution: string): boolean {
   if (d.hidden) return false;
-  if (!d.visibleOn || d.visibleOn.length === 0) return true;
-  return d.visibleOn.includes(resolution);
+  return isShownOn(d, resolution);
 }
 
 // ── Visual order ───────────────────────────────────────────────────────────

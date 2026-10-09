@@ -209,6 +209,29 @@ import {
 import { ChartAlertsService } from '../../alerts/chart-alerts.service';
 import { ChartAlertFormComponent } from '../../alerts/chart-alert-form.component';
 import { ChartAlertManagerComponent } from '../../alerts/chart-alert-manager.component';
+import { ObjectTreeComponent } from '../../drawings/ui/object-tree.component';
+import {
+  StudySettingsDialogComponent,
+  type StudyPick,
+} from '../../indicators/study-settings-dialog.component';
+import { drawingAlertDraft } from '../../drawings/drawing-alert';
+import { DrawingFavorites } from '../../drawings/drawing-favorites.service';
+import { FavoritesBarComponent } from '../../drawings/ui/favorites-bar.component';
+import { PatternScorecardDialogComponent } from '../../patterns/scorecard-dialog.component';
+import type { CandleTrendFilter } from '../../patterns/candlestick-patterns';
+import type { AutoAnalysisSettings } from '../../overlays/auto-analysis';
+import { positionAccountFacts, positionOrderPrefill } from '../../drawings/position-link';
+import {
+  CreateSignalDialogComponent,
+  type SignalPrefill,
+} from '@features/trade-signals/components/create-signal-dialog/create-signal-dialog.component';
+import type { ChartAlertDto } from '../../alerts/chart-alerts.types';
+import {
+  parseStudyInput,
+  parseStudySource,
+  sourceGroups,
+  type SourceGroup,
+} from '../../indicators/study-settings';
 import { AlertLinesPrimitive, type AlertLineMove } from '../../alerts/alert-lines-primitive';
 import { alertLinesFor, movedBounds } from '../../alerts/alert-lines-geometry';
 import { inputOf } from '../../alerts/chart-alert-rules';
@@ -489,6 +512,16 @@ function loadWatchlistOpen(): boolean {
   }
 }
 
+/** TradingView's drawing hotkeys (Alt + key), by `KeyboardEvent.code` (DR-I12). */
+const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
+  KeyT: 'trend-line',
+  KeyH: 'horizontal-line',
+  KeyJ: 'horizontal-ray',
+  KeyV: 'vertical-line',
+  KeyC: 'cross-line',
+  KeyF: 'fib-retracement',
+};
+
 @Component({
   selector: 'app-chart-analysis-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -524,6 +557,11 @@ function loadWatchlistOpen(): boolean {
     ScriptStatusLineComponent,
     ChartAlertFormComponent,
     ChartAlertManagerComponent,
+    ObjectTreeComponent,
+    StudySettingsDialogComponent,
+    CreateSignalDialogComponent,
+    FavoritesBarComponent,
+    PatternScorecardDialogComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -660,9 +698,36 @@ export class ChartAnalysisPageComponent {
 
   /** A level picked on the chart for the alert form (right-click "Add alert at …"); null = 10 points off the live price. */
   readonly alertPreset = signal<number | null>(null);
+  /** A drawing's alert the form starts from (DR-I6: "Add alert" on the drawing toolbar); null = a price alert. */
+  readonly alertDraft = signal<ChartAlertDto | null>(null);
   openAlertDraft(ev: Event): void {
     this.alertPreset.set(null);
+    this.alertDraft.set(null);
     this.toggleMenu('alert', ev);
+  }
+
+  /**
+   * "Add alert" on a selected line / channel / Fib level (DR-I6): the alert form opens pre-filled with the drawing's
+   * anchors (the engine follows the shape bar by bar on this timeframe); nothing is armed until the operator saves.
+   */
+  addDrawingAlert(e: { id: string; level?: number }): void {
+    const d = this.drawings.allDrawings().find((x) => x.id === e.id);
+    const draft = d
+      ? drawingAlertDraft(d, {
+          timeframe: this.resolution(),
+          level: e.level,
+          logScale: this.scaleMode() === 'log',
+        })
+      : null;
+    if (!draft) {
+      this.notify.error(
+        'An alert can watch a line, a channel or a Fib level drawn on the price, with two different times.',
+      );
+      return;
+    }
+    this.alertPreset.set(null);
+    this.alertDraft.set(draft);
+    this.openMenu.set('alert');
   }
 
   readonly rangePresets = RANGE_PRESETS;
@@ -1552,6 +1617,55 @@ export class ChartAnalysisPageComponent {
   readonly stayInDrawing = signal<boolean>(readPref('stayInDrawing', false));
   /** Drawing whose Settings dialog is open. */
   readonly settingsFor = signal<string | null>(null);
+  /** Built-in study whose Settings dialog is open (DR-I4). */
+  readonly studySettingsFor = signal<string | null>(null);
+  readonly studySettingsStudy = computed(
+    () => this.active().find((i) => i.uid === this.studySettingsFor()) ?? null,
+  );
+  /**
+   * What a new Long / Short Position is placed with (DR-I9): the account in scope (one account, or the only live
+   * one), its equity and currency, and this symbol's contract size, pip and quote→account rate.
+   */
+  readonly positionFacts = computed(() => {
+    const selected = this.accountScope.selected();
+    const live = this.accountScope.liveAccounts();
+    const account =
+      typeof selected === 'number'
+        ? (this.accountScope.accounts().find((a) => a.id === selected) ?? null)
+        : live.length === 1
+          ? live[0]
+          : null;
+    const facts = positionAccountFacts({
+      account,
+      pair: this.currentPair() ?? null,
+      pipSize: this.pipSize(),
+      price: this.bars().at(-1)?.close ?? 0,
+    });
+    return facts ? { ...facts } : null;
+  });
+  /** A position tool staged as a manual signal: the dialog's starting values (DR-I9). */
+  readonly stagePrefill = signal<SignalPrefill | null>(null);
+
+  /** "Stage…" on a Long / Short Position: the manual-signal dialog, filled in. The chart sends nothing itself. */
+  stageOrder(id: string): void {
+    const d = this.drawings.allDrawings().find((x) => x.id === id);
+    const prefill = d ? positionOrderPrefill(d) : null;
+    if (prefill) this.stagePrefill.set(prefill);
+  }
+
+  /** The operator created the signal in the dialog: it waits as Pending for approval and the risk checks. */
+  onStagedSignal(id: number): void {
+    this.stagePrefill.set(null);
+    this.notify.success(
+      `Signal #${id} queued as Pending — approval and the risk checks decide whether it trades.`,
+    );
+  }
+
+  /** The studies' names by uid (the object tree names the pane a drawing is in, DR-I10). */
+  readonly studyLabels = computed(() =>
+    Object.fromEntries(this.active().map((i) => [i.uid, this.labelFor(i)])),
+  );
+  private readonly studyDialog = viewChild(StudySettingsDialogComponent);
   /** Right-click menu on a drawing (page-relative coordinates). */
   readonly drawingMenu = signal<{ id: string; x: number; y: number } | null>(null);
   readonly scaleMode = signal<ScaleMode>('normal');
@@ -1713,6 +1827,88 @@ export class ChartAnalysisPageComponent {
     this.railFlyout.set(name);
   }
 
+  // ── Auto analysis (DR-I11) ────────────────────────────────────────────────────
+  /** Which auto-analysis layers are on (a synced chart preference). */
+  readonly autoAnalysis = signal<AutoAnalysisSettings>({
+    trendlines: false,
+    htfLevels: false,
+    autoFib: false,
+    ...readPref<Partial<AutoAnalysisSettings>>('autoAnalysis', {}),
+  });
+  readonly autoAnalysisOn = computed(() => {
+    const a = this.autoAnalysis();
+    return a.trendlines || a.htfLevels || a.autoFib;
+  });
+  readonly autoAnalysisLayers: { id: keyof AutoAnalysisSettings; label: string; hint: string }[] = [
+    { id: 'trendlines', label: 'Trendlines', hint: 'Fitted trendlines, scored by touches, age and recency' },
+    { id: 'htfLevels', label: 'HTF levels', hint: "The next higher timeframe's support and resistance" },
+    { id: 'autoFib', label: 'Auto Fib', hint: 'Fibonacci retracement of the last zig-zag leg' },
+  ];
+
+  /** The menu's main switch: all layers on, or all off. */
+  toggleAutoAnalysis(): void {
+    const on = !this.autoAnalysisOn();
+    this.setAutoAnalysis({ trendlines: on, htfLevels: on, autoFib: on });
+  }
+
+  toggleAutoLayer(id: keyof AutoAnalysisSettings): void {
+    this.setAutoAnalysis({ ...this.autoAnalysis(), [id]: !this.autoAnalysis()[id] });
+  }
+
+  private setAutoAnalysis(next: AutoAnalysisSettings): void {
+    this.autoAnalysis.set(next);
+    writePref('autoAnalysis', next);
+  }
+
+  // ── Pattern & structure scorecard (DR-I8) ─────────────────────────────────────
+  readonly scorecardOpen = signal(false);
+  /** The live spread (ask − bid), for the scorecard's cost; null before a quote. */
+  readonly liveSpread = computed(() => {
+    const q = this.liveQuote();
+    return q && q.ask !== null && q.ask > q.bid ? q.ask - q.bid : null;
+  });
+  /** The candlestick studies' trend filter (the first one's), as the scorecard reads them. */
+  readonly scorecardTrend = computed<CandleTrendFilter>(() => {
+    const c = this.active().find((a) => studyKind(a.defId) === 'candle-pattern');
+    return c?.params['trend'] === 'none' ? 'none' : 'sma50';
+  });
+  /** The chart-pattern study's swing size (the first one's), else 5. */
+  readonly scorecardDepth = computed(() => {
+    const c = this.active().find((a) => studyKind(a.defId) === 'chart-pattern');
+    const d = Number(c?.params['pivotDepth'] ?? 5);
+    return Number.isFinite(d) && d >= 1 ? d : 5;
+  });
+
+  openScorecard(): void {
+    this.openMenu.set(null);
+    this.scorecardOpen.set(true);
+  }
+
+  /**
+   * A scorecard row exported as a Pine strategy (DR-I8): a NEW, unsaved script in the Pine Editor — nothing is saved,
+   * added to the chart or run until the operator does it.
+   */
+  openPineDraft(d: { name: string; source: string }): void {
+    this.scorecardOpen.set(false);
+    this.assistSource.set(null);
+    this.editorKey.set(null);
+    this.editorCleared.set(true);
+    this.editorDraft.set({ key: null, text: d.source });
+    this.assistSource.set({ text: d.source, seq: ++this.assistSeq });
+    this.editorOpen.set(true);
+    this.frontDock('editor');
+    this.notify.success(`${d.name} is in the Pine Editor as an unsaved draft.`);
+  }
+
+  /** The favourite drawing tools (DR-I12): starred in the flyouts, on the Favourites bar. */
+  readonly favoriteTools = inject(DrawingFavorites);
+
+  /** Star / unstar a tool in a rail flyout (the click does not arm it). */
+  toggleFavoriteTool(kind: DrawingKind, ev: Event): void {
+    ev.stopPropagation();
+    this.favoriteTools.toggle(kind);
+  }
+
   pickRailTool(group: string, kind: DrawingKind): void {
     this.railPick.update((m) => ({ ...m, [group]: kind }));
     this.railFlyout.set(null);
@@ -1792,6 +1988,7 @@ export class ChartAnalysisPageComponent {
     drawingTemplates.useStorage(this.prefs.storage);
     prefsRef = this.prefs;
     this.layoutStore.reload();
+    this.favoriteTools.reload();
     this.magnetStrength.set(readPref('magnetStrength', 'weak'));
     this.stayInDrawing.set(readPref('stayInDrawing', false));
     const deepLink = !!this.route.snapshot.paramMap.get('symbol');
@@ -4087,7 +4284,52 @@ export class ChartAnalysisPageComponent {
   }
 
   removeIndicator(uid: string): void {
-    this.active.update((list) => list.filter((i) => i.uid !== uid));
+    // Studies read from its plots go back to the close (DR-I5), rather than keeping a reference to nothing.
+    this.active.update((list) =>
+      list
+        .filter((i) => i.uid !== uid)
+        .map((i) =>
+          parseStudySource(i.params['source'])?.uid === uid
+            ? { ...i, params: { ...i.params, source: 'close' } }
+            : i,
+        ),
+    );
+    if (this.studySettingsFor() === uid) this.studySettingsFor.set(null);
+  }
+
+  /** A study as its Settings dialog left it (live preview; Cancel sends back the one it opened with). */
+  replaceStudy(next: ActiveIndicator): void {
+    this.active.update((list) => list.map((i) => (i.uid === next.uid ? next : i)));
+  }
+
+  /** The Settings dialog asks for a time on the chart (DR-22): the next click's bar. */
+  async onStudyPick(req: StudyPick): Promise<void> {
+    const host = this.host();
+    const point = host ? await host.pickPoint(req.kind) : null;
+    this.studyDialog()?.finishPick(point === null ? null : point.time);
+  }
+
+  /** A time input picked straight from the studies bar (DR-22: it was typed as UTC milliseconds). */
+  async pickStudyTime(uid: string, key: string): Promise<void> {
+    const host = this.host();
+    const point = host ? await host.pickPoint('time') : null;
+    if (point !== null) this.setParam(uid, key, String(point.time));
+  }
+
+  /** A time input's value on the studies bar: the picked bar (UTC), or what to do. */
+  studyTimeLabel(v: number | string | undefined): string {
+    const ms = Number(v);
+    return Number.isFinite(ms) && ms > 0
+      ? new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'
+      : 'Pick on chart';
+  }
+
+  /** The Source dropdown's choices for a study (DR-16 / DR-I5). */
+  sourceGroupsFor(item: ActiveIndicator): SourceGroup[] {
+    return sourceGroups(item, this.active(), (s) => {
+      const def = indicatorById(s.defId);
+      return def ? { label: indicatorLabel(def, s.params), plots: def.plots } : null;
+    });
   }
 
   toggleIndicator(uid: string): void {
@@ -4099,17 +4341,18 @@ export class ChartAnalysisPageComponent {
   setParam(uid: string, key: string, raw: string): void {
     const item = this.active().find((i) => i.uid === uid);
     const input = item ? studyMeta(item.defId)?.inputs.find((i) => i.key === key) : undefined;
-    // Select and symbol inputs are strings; everything else must parse as a number.
-    let value: number | string;
-    if (input && (input.type === 'select' || input.type === 'symbol')) {
-      value = input.type === 'symbol' ? raw.trim().toUpperCase() : raw;
-      if (!value) return;
-    } else {
-      value = Number(raw);
-      if (!Number.isFinite(value)) return;
-    }
+    // By the input's type (DR-16: a Source went through Number and became NaN, so 38 built-ins were stuck on close);
+    // a value the input does not take is ignored.
+    const value = parseStudyInput(input, raw);
+    if (value === null) return;
     this.active.update((list) =>
-      list.map((i) => (i.uid === uid ? { ...i, params: { ...i.params, [key]: value } } : i)),
+      list.map((i) => {
+        if (i.uid !== uid) return i;
+        const next: ActiveIndicator = { ...i, params: { ...i.params, [key]: value } };
+        // On another study's plot it is on that one's bars: no timeframe of its own.
+        if (key === 'source' && parseStudySource(value)) delete next.timeframe;
+        return next;
+      }),
     );
   }
 
@@ -4117,8 +4360,14 @@ export class ChartAnalysisPageComponent {
     return studyLabel(item.defId, item.params);
   }
 
+  /** A candlestick- or chart-pattern study (its row offers the scorecard, DR-I8). */
+  isPatternStudy(item: ActiveIndicator): boolean {
+    const k = studyKind(item.defId);
+    return k === 'candle-pattern' || k === 'chart-pattern';
+  }
+
   inputsFor(item: ActiveIndicator) {
-    return studyMeta(item.defId)?.inputs.filter((i) => i.type !== 'source') ?? [];
+    return studyMeta(item.defId)?.inputs ?? [];
   }
 
   onLegend(snapshot: LegendSnapshot): void {
@@ -4686,13 +4935,20 @@ export class ChartAnalysisPageComponent {
     const price = menu?.price;
     if (price === null || price === undefined || !Number.isFinite(price) || price <= 0) return;
     this.alertPreset.set(price);
+    this.alertDraft.set(null);
     this.openMenu.set('alert');
   }
 
   /** The form saved an alert. */
   onAlertSaved(): void {
     this.openMenu.set(null);
-    this.notify.success('Alert set — it fires when price crosses the level.');
+    const drawing = this.alertDraft() !== null;
+    this.alertDraft.set(null);
+    this.notify.success(
+      drawing
+        ? 'Alert set — it fires when price crosses the drawing.'
+        : 'Alert set — it fires when price crosses the level.',
+    );
   }
 
   /** The alert manager (right rail) and the alert a bell link asked to show. */
@@ -4985,12 +5241,23 @@ export class ChartAnalysisPageComponent {
       return;
     }
     if (ev.key === 'Delete' || ev.key === 'Backspace') {
-      const id = this.drawings.selectedId();
-      if (id) {
+      if (this.drawings.selectedIds().size) {
         ev.preventDefault();
-        this.drawings.remove(id);
+        // Locked drawings stay: the lock is what stops a stray key deleting one (DR-06). Every other
+        // selected drawing goes (a multi-selection, DR-I10).
+        this.drawings.removeSelectedUnlocked();
       }
       return;
+    }
+    // TradingView's drawing hotkeys (DR-I12), by physical key so Alt's characters on a Mac
+    // (Alt+T types "†") do not get in the way.
+    if (ev.altKey && !mod) {
+      const kind = DRAWING_HOTKEYS[ev.code];
+      if (kind) {
+        ev.preventDefault();
+        this.tool.set(kind);
+        return;
+      }
     }
     if (ev.key.startsWith('Arrow') && this.drawings.selectedId() && !mod) {
       // Nudge: one bar sideways / one pixel vertically; Shift ×10.

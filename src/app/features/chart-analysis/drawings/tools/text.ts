@@ -1,4 +1,4 @@
-import type { PaintCtx } from '../advanced-painters';
+import type { PaintCtx } from '../paint-ctx';
 import type { Pt } from '../geometry';
 import type { Drawing } from '../model';
 import type { ToolBehavior, ToolBehaviorMap, ToolOption } from './types';
@@ -39,6 +39,18 @@ type P = TextPaintCtx;
 const WHITE = '#FFFFFF';
 const DARK = '#131722';
 const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+
+/**
+ * Where a drawing sits on screen: its pane fractions (`ax`, `ay`) for a screen-anchored tool (DR-I12), else its
+ * first projected anchor — a drawing made before anchoring stays where it was.
+ */
+export function anchorPt(p: Pick<P, 'pts' | 'options' | 'width' | 'height'>): Pt {
+  const ax = p.options['ax'];
+  const ay = p.options['ay'];
+  if (typeof ax === 'number' && typeof ay === 'number' && Number.isFinite(ax) && Number.isFinite(ay))
+    return { x: ax * p.width, y: ay * p.height };
+  return p.pts[0];
+}
 
 /** Text with TV's placeholder when empty. */
 export function textOf(d: Drawing, fallback = DEFAULT_TEXT): string {
@@ -173,10 +185,10 @@ const TEXT = boxTool(
     ),
 );
 
-// ── Note (TV "Note": a pin whose text shows on hover; here when selected) ──
+// ── Note (TV "Note": a pin whose text shows on hover) / Anchored Note (fixed to the pane) ──
 const PIN_R = 9;
 function notePin(p: P): Shape {
-  const a = p.pts[0];
+  const a = anchorPt(p);
   const head = { x: a.x, y: a.y - 22 };
   const s = bubbleAbove(p, textOf(p.drawing), { x: head.x, y: head.y - PIN_R }, { x: 10, y: 8 }, 10);
   s.box.x = head.x - s.box.w / 2;
@@ -184,8 +196,10 @@ function notePin(p: P): Shape {
   s.segments = [[a, head]];
   return s;
 }
-const NOTE: ToolBehavior = {
+function makeNote(screen: boolean): ToolBehavior {
+  return {
   points: 1,
+  ...(screen ? { screenAnchored: true, handles: (p: P) => (p.pts.length ? [anchorPt(p)] : []) } : {}),
   defaultStyle: { text: DEFAULT_TEXT, fontSize: 14, color: TV_BLUE, textColor: WHITE },
   options: [
     opt.align('left'),
@@ -198,7 +212,7 @@ const NOTE: ToolBehavior = {
     if (!p.pts.length) return;
     const s = notePin(p);
     const { ctx } = p;
-    const a = p.pts[0];
+    const a = anchorPt(p);
     const head = s.circles![0].c;
     ctx.save();
     ctx.setLineDash([]);
@@ -217,7 +231,8 @@ const NOTE: ToolBehavior = {
     ctx.fillStyle = WHITE;
     ctx.fill();
     ctx.restore();
-    if (p.selected) {
+    // The text shows while the pin is hovered or selected, as on TradingView.
+    if (p.selected || p.hovered) {
       drawBox(p, s, str(p.options['backgroundColor'], 'rgba(41,98,255,0.7)'), str(p.options['borderColor'], TV_BLUE), 6, textColorOf(p, WHITE));
     }
   },
@@ -227,6 +242,90 @@ const NOTE: ToolBehavior = {
     const s = notePin(p);
     return hitShape({ ...s, box: { x: -1e9, y: -1e9, w: 0, h: 0 }, tip: undefined }, at, tol);
   },
+  };
+}
+const NOTE = makeNote(false);
+const ANCHORED_NOTE = makeNote(true);
+
+// ── Anchored Text (TV: text fixed to the pane, not to a bar) ──────────────
+const ANCHORED_TEXT: ToolBehavior = {
+  ...boxTool(
+    {
+      points: 1,
+      defaultStyle: { text: DEFAULT_TEXT, fontSize: 14, color: TV_BLUE, textColor: TV_BLUE, bold: false, italic: false },
+      options: [
+        opt.align('left'),
+        opt.background(false),
+        opt.backgroundColor('rgba(41,98,255,0.25)'),
+        opt.border(false),
+        opt.borderColor('#707070'),
+        opt.wordWrap(false),
+        opt.wordWrapWidth(200),
+      ],
+    },
+    (p) => plainBox(p, anchorPt(p)),
+    (p, s) =>
+      drawBox(
+        p,
+        s,
+        colorOpt(p, 'backgroundColor', 'background', 'rgba(41,98,255,0.25)', false),
+        colorOpt(p, 'borderColor', 'border', '#707070', false),
+        4,
+        textColorOf(p, TV_BLUE),
+      ),
+  ),
+  screenAnchored: true,
+  handles: (p) => (p.pts.length ? [anchorPt(p)] : []),
+};
+
+// ── Price Note (TV: a note on a price — the price, a dotted line to the scale, a box joined to it) ──
+const PRICE_NOTE_BG = 'rgba(41,98,255,0.85)';
+function priceNoteShape(p: P): Shape {
+  const a = p.pts[0];
+  const at = p.pts[1] ?? { x: a.x + 30, y: a.y - 48 };
+  const price = p.drawing.points[0]?.price ?? p.priceAt(a.y);
+  const priceText = price === null || price === undefined ? '' : formatPrice(price, p.precision);
+  const text = p.drawing.style.text ? `${p.drawing.style.text}\n${priceText}` : priceText;
+  const layout = measureLayout(p, text, { x: 8, y: 5 }, wrapWidthOf(p.options), 24);
+  return {
+    layout,
+    box: { x: at.x, y: at.y, w: layout.width, h: layout.height },
+    segments: [[a, { x: at.x + layout.width / 2, y: at.y + layout.height / 2 }]],
+    circles: [{ c: a, r: 3 }],
+  };
+}
+const PRICE_NOTE: ToolBehavior = {
+  points: 2,
+  defaultStyle: { text: '', fontSize: 12, color: TV_BLUE, textColor: WHITE },
+  options: [opt.backgroundColor(PRICE_NOTE_BG), opt.wordWrap(false), opt.wordWrapWidth(200)],
+  paint: (p) => {
+    if (!p.pts.length) return;
+    const s = priceNoteShape(p);
+    const { ctx } = p;
+    const a = p.pts[0];
+    ctx.save();
+    ctx.strokeStyle = p.drawing.style.color;
+    ctx.lineWidth = 1;
+    // The price's line to the scale.
+    ctx.setLineDash([2, 3]);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(p.width, a.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const [from, to] = s.segments![0];
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(a.x, a.y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = p.drawing.style.color;
+    ctx.fill();
+    ctx.restore();
+    drawBox(p, s, str(p.options['backgroundColor'], PRICE_NOTE_BG), p.drawing.style.color, 4, textColorOf(p, WHITE));
+  },
+  hitTest: (p, at, tol) => (p.pts.length ? hitShape(priceNoteShape(p), at, tol) : false),
 };
 
 // ── Comment (blue rounded bubble, white text, tail to the anchor) ──────────
@@ -474,7 +573,10 @@ const IDEA = boxTool(
 
 export const BEHAVIORS: ToolBehaviorMap = {
   text: TEXT,
-  'anchored-note': NOTE,
+  'anchored-text': ANCHORED_TEXT,
+  note: NOTE,
+  'price-note': PRICE_NOTE,
+  'anchored-note': ANCHORED_NOTE,
   comment: COMMENT,
   table: TABLE_BEHAVIOR,
   callout: CALLOUT,
@@ -496,8 +598,13 @@ export function textBoxRect(p: TextPaintCtx): Rect | null {
   switch (p.drawing.kind) {
     case 'text':
       return plainBox(p, p.pts[0]).box;
+    case 'anchored-text':
+      return plainBox(p, anchorPt(p)).box;
+    case 'note':
     case 'anchored-note':
       return notePin(p).box;
+    case 'price-note':
+      return priceNoteShape(p).box;
     case 'comment':
       return commentShape(p).box;
     case 'balloon':
@@ -516,7 +623,18 @@ export function textBoxRect(p: TextPaintCtx): Rect | null {
 }
 
 // Inline editing: double-click edits the text in place on every tool that has free text.
-for (const kind of ['text', 'anchored-note', 'comment', 'callout', 'price-label', 'signpost', 'balloon'] as const) {
+for (const kind of [
+  'text',
+  'anchored-text',
+  'note',
+  'price-note',
+  'anchored-note',
+  'comment',
+  'callout',
+  'price-label',
+  'signpost',
+  'balloon',
+] as const) {
   const b = BEHAVIORS[kind];
   if (b && !b.textRect) b.textRect = (p) => textBoxRect(p);
 }

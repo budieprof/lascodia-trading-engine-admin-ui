@@ -101,6 +101,12 @@ describe('indicator registry', () => {
     describe(def.id, () => {
       const result = def.compute(bars, defaultParams(def), { compareBars });
 
+      it('declares `ahead` exactly when it returns values past the last bar', () => {
+        // The flag keeps such studies off the higher-timeframe join (DR-I5), which has no bars ahead.
+        const hasAhead = Object.keys(result).some((k) => k.endsWith(':ahead'));
+        expect(!!def.ahead, `${def.id}.ahead`).toBe(hasAhead);
+      });
+
       it('returns a series for every declared plot', () => {
         // The trap: a plot whose key `compute` never returns draws nothing,
         // silently. The legend still lists it, so it looks configured.
@@ -158,4 +164,24 @@ describe('indicator registry', () => {
       }
     });
   }
+});
+
+describe('TradingView defaults', () => {
+  it('Stochastic %K is unsmoothed by default, as on TradingView (DR-15)', () => {
+    const def = indicatorById('stochastic')!;
+    expect(defaultParams(def)['smoothK']).toBe(1);
+    expect(defaultParams(def)['smoothD']).toBe(3);
+  });
+
+  it('SuperTrend draws its up and down trends as two plots that break at a flip (DR-08)', () => {
+    const def = indicatorById('supertrend')!;
+    expect(def.plots.map((p) => [p.key, p.gaps])).toEqual([
+      ['up', 'break'],
+      ['down', 'break'],
+    ]);
+  });
+
+  it('Parabolic SAR is drawn as points, never a joined line (DR-09)', () => {
+    expect(indicatorById('psar')!.plots[0].kind).toBe('points');
+  });
 });

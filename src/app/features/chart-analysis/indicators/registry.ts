@@ -78,6 +78,9 @@ import {
   autoPitchfork,
   autoTrendlines,
   averageDayRange,
+  barsPerYear,
+  cciOf,
+  inferBarInterval,
   bbTrend,
   chaikinVolatility,
   chandelierExit,
@@ -93,7 +96,6 @@ import {
   priceOscillator,
   rci,
   relativeStrength,
-  sessionHighLow,
   smi,
   spreadRatio,
   t3,
@@ -112,6 +114,14 @@ import {
   type Maybe,
   type Ohlc,
 } from './math';
+import type { ColorBy } from './study-settings';
+import {
+  SESSION_WINDOWS,
+  SESSION_ZONES,
+  parseSessionWindow,
+  sessionHighLow,
+  type SessionWindow,
+} from './sessions';
 
 /**
  * The indicator catalogue.
@@ -129,8 +139,16 @@ import {
 /**
  * `markers`: one shape per bar that has a value and nothing in between — a study whose values are
  * events, not a series (Williams fractals). Joined as a line they zig-zagged across every swing.
+ * `points`: a dot per value, never joined — a trailing stop that jumps sides (Parabolic SAR) drawn as a line
+ * painted a vertical stroke at every flip.
  */
-export type PlotKind = 'line' | 'histogram' | 'area' | 'markers';
+export type PlotKind = 'line' | 'histogram' | 'area' | 'markers' | 'points';
+
+/**
+ * The key under which `compute` returns a plot's values PAST the last bar — one per bar ahead (Ichimoku's leading
+ * spans, the Alligator's shifted lines). The chart draws them on the bars still to come.
+ */
+export const aheadKey = (plotKey: string): string => `${plotKey}:ahead`;
 
 export interface PlotSpec {
   key: string;
@@ -146,17 +164,30 @@ export interface PlotSpec {
   gaps?: 'join' | 'break';
   /** For `markers`: the shape, and whether it sits on top of or under the value. */
   marker?: { shape: 'arrowUp' | 'arrowDown' | 'circle' | 'square'; position: 'above' | 'below' };
+  /** Each bar coloured by its value (DR-I4): MACD's four histogram shades, AO's rising / falling, volume by bar. */
+  colorBy?: ColorBy;
+}
+
+/** A band or cloud filled between two plots (DR-I4); `colorBelow` while `a` is under `b` (Ichimoku). */
+export interface FillSpec {
+  a: string;
+  b: string;
+  color: string;
+  colorBelow?: string;
 }
 
 /**
  * `number` and `source` as before; `select` picks one of `options`; `symbol` is
  * an engine symbol for a compare series (the host fetches its bars and passes
- * them in `IndicatorContext.compareBars`).
+ * them in `IndicatorContext.compareBars`); `session` is a local `HHMM-HHMM`
+ * window (its zone is a separate `select`); `time` is an instant picked on the
+ * chart (UTC ms, 0 = not set) — shown as a date, never typed as milliseconds
+ * (DR-22).
  */
 export interface IndicatorInput {
   key: string;
   label: string;
-  type: 'number' | 'source' | 'select' | 'symbol';
+  type: 'number' | 'source' | 'select' | 'symbol' | 'session' | 'time';
   default: number | string;
   min?: number;
   max?: number;
@@ -188,6 +219,19 @@ export interface IndicatorContext {
    * at 17:00 New York. Absent: UTC days.
    */
   tradingDay?: DayOf;
+  /**
+   * The bars' real (UTC) open times, index for index. The chart hands the studies its PLOTTED bars, whose times are
+   * shifted into the display time zone; what reads the clock itself (the sessions) needs the instant. Absent: the
+   * bars' own times are UTC.
+   */
+  utcTimes?: readonly number[];
+  /** The chart's bar interval in ms, for what scales by it (Historical Volatility's annualisation). */
+  barIntervalMs?: number;
+  /**
+   * Trading days a year of the symbol (Historical Volatility): 260 for a market that trades five days a week (FX),
+   * 365 for one that never closes. Absent: 260.
+   */
+  tradingDaysPerYear?: number;
 }
 
 export type PriceSource = 'close' | 'open' | 'high' | 'low' | 'hl2' | 'hlc3' | 'ohlc4';
@@ -208,6 +252,8 @@ export interface IndicatorDef {
   keywords?: string[];
   /** True when compute needs `ctx.compareBars` (the host fetches the `symbol` input's bars). */
   needsCompare?: boolean;
+  /** True when compute also returns values past the last bar ({@link aheadKey}). */
+  ahead?: boolean;
   /** `overlay` draws on the price pane; `pane` gets its own pane below. */
   target: 'overlay' | 'pane';
   inputs: IndicatorInput[];
@@ -216,6 +262,8 @@ export interface IndicatorDef {
   levels?: IndicatorLevel[];
   /** Fixed pane scale, for bounded oscillators. */
   range?: { min: number; max: number };
+  /** Bands / clouds between plots, drawn under them (off with the Style tab's Fill). */
+  fills?: FillSpec[];
   compute: (
     bars: Ohlc[],
     params: Record<string, number | string>,
@@ -289,6 +337,13 @@ const SELECT = (
   options,
 });
 
+const SESSION_INPUT = (key: string, label: string, w: SessionWindow): IndicatorInput => ({
+  key,
+  label,
+  type: 'session',
+  default: `${w.start}-${w.end}`,
+});
+
 const SYMBOL: IndicatorInput = {
   key: 'symbol',
   label: 'Compare symbol',
@@ -300,6 +355,17 @@ const MA_TYPES = ['SMA', 'EMA'] as const;
 
 const maOf = (type: string, values: number[], len: number): Maybe[] =>
   type === 'EMA' ? ema(values, len) : sma(values, len);
+
+/**
+ * A picked instant (UTC ms) as the time of the bar it falls on in `bars`. The chart's bars carry the display zone's
+ * shifted times, while a pick is a real instant: matched through `utcTimes` when the chart passes them, so an anchor
+ * stays on its bar whatever zone the axis shows. 0 (not set) stays 0; past the last bar, beyond every bar.
+ */
+const plottedAnchor = (bars: Ohlc[], anchorUtc: number, utcTimes?: readonly number[]): number => {
+  if (anchorUtc <= 0 || !utcTimes || utcTimes.length !== bars.length) return anchorUtc;
+  const i = utcTimes.findIndex((t) => t >= anchorUtc);
+  return i < 0 ? Number.POSITIVE_INFINITY : bars[i].time;
+};
 
 /** Compare-symbol closes aligned to `bars` by time; all null when no compare bars were supplied. */
 const compareCloses = (bars: Ohlc[], ctx?: IndicatorContext): Maybe[] =>
@@ -368,6 +434,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { key: 'middle', title: 'Basis', kind: 'line', color: '#FF6D00' },
       { key: 'lower', title: 'Lower', kind: 'line', color: '#2962FF' },
     ],
+    fills: [{ a: 'upper', b: 'lower', color: 'rgba(41, 98, 255, 0.06)' }],
     compute: (bars, p) => {
       const r = bollinger(sourceValues(bars, src(p)), num(p, 'length', 20), num(p, 'mult', 2));
       return { upper: r.upper, middle: r.middle, lower: r.lower };
@@ -397,6 +464,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { key: 'middle', title: 'Mid', kind: 'line', color: '#787B86' },
       { key: 'lower', title: 'Lower', kind: 'line', color: '#EF5350' },
     ],
+    fills: [{ a: 'upper', b: 'lower', color: 'rgba(41, 98, 255, 0.06)' }],
     compute: (bars, p) => {
       const r = donchian(bars, num(p, 'length', 20));
       return { upper: r.upper, middle: r.middle, lower: r.lower };
@@ -432,7 +500,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
       SOURCE,
     ],
     plots: [
-      { key: 'histogram', title: 'Hist', kind: 'histogram', color: '#26A69A' },
+      { key: 'histogram', title: 'Hist', kind: 'histogram', color: '#26A69A', colorBy: 'macd' },
       { key: 'macd', title: 'MACD', kind: 'line', color: '#2962FF' },
       { key: 'signal', title: 'Signal', kind: 'line', color: '#FF6D00' },
     ],
@@ -456,7 +524,8 @@ export const INDICATORS: readonly IndicatorDef[] = [
     target: 'pane',
     inputs: [
       LENGTH(14, '%K Length'),
-      { key: 'smoothK', label: '%K Smooth', type: 'number', default: 3, min: 1, max: 50 },
+      // TradingView's default (DR-15): an unsmoothed %K.
+      { key: 'smoothK', label: '%K Smooth', type: 'number', default: 1, min: 1, max: 50 },
       { key: 'smoothD', label: '%D Smooth', type: 'number', default: 3, min: 1, max: 50 },
     ],
     plots: [
@@ -469,7 +538,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     ],
     range: { min: 0, max: 100 },
     compute: (bars, p) => {
-      const r = stochastic(bars, num(p, 'length', 14), num(p, 'smoothK', 3), num(p, 'smoothD', 3));
+      const r = stochastic(bars, num(p, 'length', 14), num(p, 'smoothK', 1), num(p, 'smoothD', 3));
       return { k: r.k, d: r.d };
     },
   },
@@ -524,6 +593,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     description: 'Tenkan, Kijun, the leading spans (cloud) and the lagging span.',
     keywords: ['cloud', 'kumo'],
     target: 'overlay',
+    ahead: true,
     inputs: [
       { key: 'conversion', label: 'Conversion', type: 'number', default: 9, min: 1, max: 200 },
       { key: 'base', label: 'Base', type: 'number', default: 26, min: 1, max: 200 },
@@ -536,6 +606,15 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { key: 'spanA', title: 'Span A', kind: 'line', color: '#26A69A' },
       { key: 'spanB', title: 'Span B', kind: 'line', color: '#FF6D00' },
       { key: 'lagging', title: 'Chikou', kind: 'line', color: '#787B86' },
+    ],
+    // TradingView's cloud: green while Span A is over Span B, red while under — ahead of price too.
+    fills: [
+      {
+        a: 'spanA',
+        b: 'spanB',
+        color: 'rgba(67, 160, 71, 0.18)',
+        colorBelow: 'rgba(244, 67, 54, 0.18)',
+      },
     ],
     compute: (bars, p) => {
       const r = ichimoku(
@@ -551,6 +630,8 @@ export const INDICATORS: readonly IndicatorDef[] = [
         spanA: r.spanA,
         spanB: r.spanB,
         lagging: r.lagging,
+        [aheadKey('spanA')]: r.spanAAhead,
+        [aheadKey('spanB')]: r.spanBAhead,
       };
     },
   },
@@ -561,12 +642,21 @@ export const INDICATORS: readonly IndicatorDef[] = [
     description: 'Parabolic stop-and-reverse points that trail price and flip on reversal.',
     keywords: ['sar', 'stop'],
     target: 'overlay',
+    // TradingView's three inputs; `step` keeps its key (the start) so saved layouts read the same.
     inputs: [
-      { key: 'step', label: 'Step', type: 'number', default: 0.02, min: 0.001, max: 1 },
-      { key: 'max', label: 'Max', type: 'number', default: 0.2, min: 0.01, max: 1 },
+      { key: 'step', label: 'Start', type: 'number', default: 0.02, min: 0.001, max: 1 },
+      { key: 'increment', label: 'Increment', type: 'number', default: 0.02, min: 0.001, max: 1 },
+      { key: 'max', label: 'Max value', type: 'number', default: 0.2, min: 0.01, max: 1 },
     ],
-    plots: [{ key: 'psar', title: 'PSAR', kind: 'line', color: '#AB47BC' }],
-    compute: (bars, p) => ({ psar: psar(bars, num(p, 'step', 0.02), num(p, 'max', 0.2)) }),
+    plots: [{ key: 'psar', title: 'PSAR', kind: 'points', color: '#AB47BC' }],
+    compute: (bars, p) => ({
+      psar: psar(
+        bars,
+        num(p, 'step', 0.02),
+        num(p, 'increment', num(p, 'step', 0.02)),
+        num(p, 'max', 0.2),
+      ),
+    }),
   },
   {
     id: 'supertrend',
@@ -579,8 +669,15 @@ export const INDICATORS: readonly IndicatorDef[] = [
       LENGTH(10),
       { key: 'mult', label: 'Factor', type: 'number', default: 3, min: 0.1, max: 20 },
     ],
-    plots: [{ key: 'st', title: 'SuperTrend', kind: 'line', color: '#26A69A' }],
-    compute: (bars, p) => ({ st: superTrend(bars, num(p, 'length', 10), num(p, 'mult', 3)) }),
+    // TradingView's two lines: green under price in an up trend, red over it in a down trend, never joined.
+    plots: [
+      { key: 'up', title: 'Up Trend', kind: 'line', color: '#26A69A', gaps: 'break' },
+      { key: 'down', title: 'Down Trend', kind: 'line', color: '#EF5350', gaps: 'break' },
+    ],
+    compute: (bars, p) => {
+      const r = superTrend(bars, num(p, 'length', 10), num(p, 'mult', 3));
+      return { up: r.up, down: r.down };
+    },
   },
   {
     id: 'keltner',
@@ -599,6 +696,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { key: 'middle', title: 'Basis', kind: 'line', color: '#FF6D00' },
       { key: 'lower', title: 'Lower', kind: 'line', color: '#2962FF' },
     ],
+    fills: [{ a: 'upper', b: 'lower', color: 'rgba(41, 98, 255, 0.06)' }],
     compute: (bars, p) => {
       const r = keltner(bars, num(p, 'length', 20), num(p, 'mult', 2), num(p, 'atrPeriod', 10));
       return { upper: r.upper, middle: r.middle, lower: r.lower };
@@ -708,7 +806,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { key: 'fast', label: 'Fast', type: 'number', default: 5, min: 1, max: 100 },
       { key: 'slow', label: 'Slow', type: 'number', default: 34, min: 1, max: 200 },
     ],
-    plots: [{ key: 'ao', title: 'AO', kind: 'histogram', color: '#26A69A' }],
+    plots: [{ key: 'ao', title: 'AO', kind: 'histogram', color: '#26A69A', colorBy: 'rising' }],
     levels: [{ value: 0, color: '#787B86' }],
     compute: (bars, p) => ({ ao: awesome(bars, num(p, 'fast', 5), num(p, 'slow', 34)) }),
   },
@@ -820,6 +918,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { key: 'middle', title: 'Basis', kind: 'line', color: '#787B86' },
       { key: 'lower', title: 'Lower', kind: 'line', color: '#2962FF' },
     ],
+    fills: [{ a: 'upper', b: 'lower', color: 'rgba(41, 98, 255, 0.06)' }],
     compute: (bars, p) => {
       const r = envelope(sourceValues(bars, src(p)), num(p, 'length', 20), num(p, 'percent', 2));
       return { upper: r.upper, middle: r.middle, lower: r.lower };
@@ -1055,7 +1154,14 @@ export const INDICATORS: readonly IndicatorDef[] = [
     target: 'pane',
     inputs: [LENGTH(20)],
     plots: [{ key: 'hv', title: 'HV%', kind: 'line', color: '#F4511E' }],
-    compute: (bars, p) => ({ hv: historicalVolatility(bars, num(p, 'length', 20)) }),
+    // Annualised by the chart's own interval (DR-12): bars a year at this timeframe, on the symbol's trading days.
+    compute: (bars, p, ctx) => ({
+      hv: historicalVolatility(
+        bars,
+        num(p, 'length', 20),
+        barsPerYear(ctx?.barIntervalMs ?? inferBarInterval(bars), ctx?.tradingDaysPerYear ?? 260),
+      ),
+    }),
   },
   {
     id: 'stoch-rsi',
@@ -1118,6 +1224,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     description: 'Three smoothed, forward-shifted MAs: jaw, teeth and lips.',
     keywords: ['williams'],
     target: 'overlay',
+    ahead: true,
     inputs: [],
     plots: [
       { key: 'jaw', title: 'Jaw', kind: 'line', color: '#2962FF' },
@@ -1126,7 +1233,14 @@ export const INDICATORS: readonly IndicatorDef[] = [
     ],
     compute: (bars) => {
       const r = alligator(bars);
-      return { jaw: r.jaw, teeth: r.teeth, lips: r.lips };
+      return {
+        jaw: r.jaw,
+        teeth: r.teeth,
+        lips: r.lips,
+        [aheadKey('jaw')]: r.jawAhead,
+        [aheadKey('teeth')]: r.teethAhead,
+        [aheadKey('lips')]: r.lipsAhead,
+      };
     },
   },
   {
@@ -1217,7 +1331,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
       SOURCE,
     ],
     plots: [
-      { key: 'histogram', title: 'Hist', kind: 'histogram', color: '#26A69A' },
+      { key: 'histogram', title: 'Hist', kind: 'histogram', color: '#26A69A', colorBy: 'macd' },
       { key: 'ppo', title: 'PPO', kind: 'line', color: '#2962FF' },
       { key: 'signal', title: 'Signal', kind: 'line', color: '#FF6D00' },
     ],
@@ -1479,9 +1593,10 @@ export const INDICATORS: readonly IndicatorDef[] = [
     description: 'RSI computed on standard deviation, showing volatility direction.',
     keywords: ['relative volatility'],
     target: 'pane',
+    // TradingView's: σ over 10 bars, smoothed by an EMA of 14.
     inputs: [
-      LENGTH(10),
-      { key: 'stdevLen', label: 'StdDev Length', type: 'number', default: 10, min: 2, max: 200 },
+      LENGTH(14, 'Smoothing'),
+      { key: 'stdevLen', label: 'StdDev Length', type: 'number', default: 10, min: 1, max: 200 },
     ],
     plots: [{ key: 'rvi', title: 'RVI', kind: 'line', color: '#2962FF' }],
     levels: [
@@ -1493,7 +1608,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     compute: (bars, p) => ({
       rvi: relativeVolatilityIndex(
         bars.map((b) => b.close),
-        num(p, 'length', 10),
+        num(p, 'length', 14),
         num(p, 'stdevLen', 10),
       ),
     }),
@@ -1546,7 +1661,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     keywords: ['delta', 'order flow', 'est'],
     target: 'pane',
     inputs: [],
-    plots: [{ key: 'delta', title: 'Δ est', kind: 'histogram', color: '#26A69A' }],
+    plots: [{ key: 'delta', title: 'Δ est', kind: 'histogram', color: '#26A69A', colorBy: 'sign' }],
     levels: [{ value: 0, color: '#787B86' }],
     // NOT order flow. There is no aggressor tape for FX here, so this is the standard
     // OHLCV proxy: a bar closing near its high is assumed bought, near its low sold. The
@@ -1575,7 +1690,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     keywords: ['net'],
     target: 'pane',
     inputs: [],
-    plots: [{ key: 'nv', title: 'Net Vol', kind: 'histogram', color: '#26A69A' }],
+    plots: [{ key: 'nv', title: 'Net Vol', kind: 'histogram', color: '#26A69A', colorBy: 'sign' }],
     levels: [{ value: 0, color: '#787B86' }],
     compute: (bars) => ({ nv: netVolume(bars) }),
   },
@@ -1747,7 +1862,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     keywords: ['bbtrend', 'bollinger'],
     target: 'pane',
     inputs: [NUM('short', 'Short', 20), NUM('long', 'Long', 50), NUM('mult', 'StdDev', 2, 0.1, 10)],
-    plots: [{ key: 'bbt', title: 'BBTrend', kind: 'histogram', color: '#26A69A' }],
+    plots: [{ key: 'bbt', title: 'BBTrend', kind: 'histogram', color: '#26A69A', colorBy: 'sign' }],
     levels: [{ value: 0, color: '#787B86' }],
     compute: (bars, p) => ({
       bbt: bbTrend(
@@ -1891,9 +2006,11 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { value: 0, color: '#787B86' },
       { value: -100, color: '#787B86' },
     ],
+    // TradingView's Woodies CCI runs on the close, not hlc3.
     compute: (bars, p) => {
-      const c = cci(bars, num(p, 'length', 14));
-      return { hist: c, cci: c, turbo: cci(bars, num(p, 'turbo', 6)) };
+      const closes = bars.map((b) => b.close);
+      const c = cciOf(closes, num(p, 'length', 14));
+      return { hist: c, cci: c, turbo: cciOf(closes, num(p, 'turbo', 6)) };
     },
   },
   {
@@ -1925,7 +2042,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     target: 'pane',
     inputs: [LENGTH(20, 'MA length')],
     plots: [
-      { key: 'volume', title: 'Volume', kind: 'histogram', color: '#26A69A' },
+      { key: 'volume', title: 'Volume', kind: 'histogram', color: '#26A69A', colorBy: 'candle' },
       { key: 'ma', title: 'Vol MA', kind: 'line', color: '#2962FF' },
     ],
     compute: (bars, p) => volumeWithMa(bars, num(p, 'length', 20)),
@@ -1958,21 +2075,22 @@ export const INDICATORS: readonly IndicatorDef[] = [
     id: 'anchored-vwap',
     name: 'Anchored VWAP',
     category: 'Volume',
-    description: 'VWAP from a chosen anchor (bars back, or a UTC timestamp) with deviation bands.',
+    description: 'VWAP from an anchor picked on the chart (or bars back) with deviation bands.',
     keywords: ['avwap', 'anchor'],
     target: 'overlay',
     inputs: [
       NUM('barsBack', 'Anchor bars back', 100, 1, 100000),
-      NUM('anchorTime', 'Anchor time (UTC ms, 0 = use bars back)', 0, 0, 1e14),
+      // Picked on the chart (DR-22: it was typed as UTC milliseconds); not set = use bars back.
+      { key: 'anchorTime', label: 'Anchor (pick on chart)', type: 'time', default: 0 },
       NUM('mult1', 'Band 1 ×', 1, 0.1, 10),
       NUM('mult2', 'Band 2 ×', 2, 0.1, 10),
     ],
     plots: VWAP_BAND_PLOTS,
-    compute: (bars, p) => ({
+    compute: (bars, p, ctx) => ({
       ...anchoredVwap(
         bars,
         num(p, 'barsBack', 100),
-        num(p, 'anchorTime', 0),
+        plottedAnchor(bars, num(p, 'anchorTime', 0), ctx?.utcTimes),
         num(p, 'mult1', 1),
         num(p, 'mult2', 2),
       ),
@@ -2148,16 +2266,19 @@ export const INDICATORS: readonly IndicatorDef[] = [
     id: 'sessions',
     name: 'Sessions',
     category: 'Sessions',
-    description: 'Running high and low of the Asia, London and New York sessions (UTC hours).',
+    description:
+      'Running high and low of the Tokyo, London and New York sessions, on their own clocks (DST included).',
     keywords: ['asia', 'london', 'new york', 'tokyo', 'session box'],
     target: 'overlay',
+    // Each session is a local window in its own zone (DR-18); the keys changed from the old fixed UTC hours
+    // (asiaStart…), so a saved layout's hours are not read as local times — it takes these defaults.
     inputs: [
-      NUM('asiaStart', 'Asia start (UTC h)', 0, 0, 23),
-      NUM('asiaEnd', 'Asia end (UTC h)', 9, 0, 24),
-      NUM('londonStart', 'London start (UTC h)', 7, 0, 23),
-      NUM('londonEnd', 'London end (UTC h)', 16, 0, 24),
-      NUM('nyStart', 'New York start (UTC h)', 12, 0, 23),
-      NUM('nyEnd', 'New York end (UTC h)', 21, 0, 24),
+      SESSION_INPUT('asiaSession', 'Asia session', SESSION_WINDOWS.asia),
+      SELECT('asiaZone', 'Asia zone', SESSION_ZONES, SESSION_WINDOWS.asia.zone),
+      SESSION_INPUT('londonSession', 'London session', SESSION_WINDOWS.london),
+      SELECT('londonZone', 'London zone', SESSION_ZONES, SESSION_WINDOWS.london.zone),
+      SESSION_INPUT('nySession', 'New York session', SESSION_WINDOWS.newyork),
+      SELECT('nyZone', 'New York zone', SESSION_ZONES, SESSION_WINDOWS.newyork.zone),
     ],
     // Each session's high and low end with the session: a gap overnight, never a line across it.
     plots: [
@@ -2168,10 +2289,13 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { key: 'nyHigh', title: 'NY H', kind: 'line', color: '#FF6D00', gaps: 'break' },
       { key: 'nyLow', title: 'NY L', kind: 'line', color: '#FF6D00', gaps: 'break' },
     ],
-    compute: (bars, p) => {
-      const a = sessionHighLow(bars, num(p, 'asiaStart', 0), num(p, 'asiaEnd', 9));
-      const l = sessionHighLow(bars, num(p, 'londonStart', 7), num(p, 'londonEnd', 16));
-      const n = sessionHighLow(bars, num(p, 'nyStart', 12), num(p, 'nyEnd', 21));
+    compute: (bars, p, ctx) => {
+      const w = (key: string, zoneKey: string, fallback: SessionWindow): SessionWindow =>
+        parseSessionWindow(str(p, key, ''), str(p, zoneKey, fallback.zone)) ?? fallback;
+      const t = ctx?.utcTimes;
+      const a = sessionHighLow(bars, w('asiaSession', 'asiaZone', SESSION_WINDOWS.asia), t);
+      const l = sessionHighLow(bars, w('londonSession', 'londonZone', SESSION_WINDOWS.london), t);
+      const n = sessionHighLow(bars, w('nySession', 'nyZone', SESSION_WINDOWS.newyork), t);
       return {
         asiaHigh: a.high,
         asiaLow: a.low,

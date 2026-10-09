@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Drawing } from '../model';
-import type { PaintCtx } from '../advanced-painters';
+import type { PaintCtx } from '../paint-ctx';
 import { optionsOf } from './types';
 import {
   BEHAVIORS,
