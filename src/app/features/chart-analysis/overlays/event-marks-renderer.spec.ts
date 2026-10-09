@@ -63,4 +63,16 @@ describe('EventMarksRenderer hit testing (CC-I2)', () => {
     expect(r.hit(795, 500 - 26 - 10)?.id).toBe(2);
     expect(r.hit(795, 250)).toBeNull();
   });
+
+  it('stacks badges of events at the same moment instead of drawing them on top of each other', () => {
+    // Three prints in the same hour (x 300, 300, 301) and one five hours later (x 350).
+    const r = frame([mark(1, NOW - 10 * H), mark(2, NOW - 10 * H), mark(3, NOW - 9.9 * H), mark(4, NOW - 5 * H)]);
+    const ys = r.placed().map((p) => Math.round(p.y));
+    expect(ys[0]).toBeGreaterThan(ys[1]);
+    expect(ys[1]).toBeGreaterThan(ys[2]);
+    expect(ys[3]).toBe(ys[0]);
+    // Each stacked badge is its own hit target.
+    expect(r.hit(300, r.placed()[1].y)?.id).toBe(2);
+    expect(r.hit(301, r.placed()[2].y)?.id).toBe(3);
+  });
 });

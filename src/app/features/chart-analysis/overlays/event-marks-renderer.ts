@@ -1,5 +1,6 @@
 import type { CanvasRenderingTarget2D } from 'fancy-canvas';
 import type { ISeriesPrimitive, Time } from 'lightweight-charts';
+import { CURRENCY_FLAG_SVG } from '../watchlist/pair-icon.component';
 import { eventCountdown, passesImpact, type EventImpact, type EventMark } from './chart-events';
 
 export type { EventImpact, EventMark } from './chart-events';
@@ -39,11 +40,39 @@ const IMPACT_COLOR: Record<EventImpact, string> = {
 
 /** The flag strip at the bottom of the pane, where marks are hovered and clicked. */
 const FLAG_STRIP = 26;
+/** An event badge: a circle with the currency's flag, ringed in the impact colour (TradingView's timescale mark). */
+const BADGE_R = 9;
+/** Badges closer than this stack upwards instead of overlapping (at most {@link MAX_STACK} high). */
+const BADGE_GAP = 2 * BADGE_R + 2;
+const MAX_STACK = 3;
 
-/** Where a mark was drawn on the last frame (media px). */
+/** Flag artwork as images for the canvas, loaded once per currency; `onReady` repaints when one arrives. */
+const flagImages = new Map<string, HTMLImageElement | null>();
+function flagImage(ccy: string, onReady: () => void): HTMLImageElement | null {
+  const code = ccy.toUpperCase();
+  if (flagImages.has(code)) {
+    const img = flagImages.get(code)!;
+    return img && img.complete && img.naturalWidth > 0 ? img : null;
+  }
+  const art = CURRENCY_FLAG_SVG[code];
+  if (!art || typeof Image === 'undefined') {
+    flagImages.set(code, null);
+    return null;
+  }
+  const img = new Image();
+  img.onload = onReady;
+  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="64" height="64">${art}</svg>`,
+  )}`;
+  flagImages.set(code, img);
+  return null;
+}
+
+/** Where a mark was drawn on the last frame (media px): its badge centre. */
 export interface PlacedMark {
   mark: EventMark;
   x: number;
+  y: number;
 }
 
 export class EventMarksRenderer implements ISeriesPrimitive<Time> {
@@ -97,14 +126,16 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
    * is reading the candle.
    */
   hit(x: number, y: number): EventMark | null {
-    if (this.paneHeight > 0 && y >= this.paneHeight - FLAG_STRIP) {
-      let best: PlacedMark | null = null;
-      for (const p of this.placedMarks) {
-        const d = Math.abs(p.x - x);
-        if (d <= 6 && (!best || d < Math.abs(best.x - x))) best = p;
+    let best: PlacedMark | null = null;
+    let bestD = Infinity;
+    for (const p of this.placedMarks) {
+      const d = Math.hypot(p.x - x, p.y - y);
+      if (d <= BADGE_R + 2 && d < bestD) {
+        best = p;
+        bestD = d;
       }
-      if (best) return best.mark;
     }
+    if (best) return best.mark;
     const chip = this.nextChip;
     if (chip && x >= chip.x && x <= chip.x + chip.w && y >= chip.y && y <= chip.y + chip.h)
       return chip.mark;
@@ -149,11 +180,11 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
         if (right > left) ctx.fillRect(left, 0, right - left, h);
       }
 
-      ctx.font = '10px -apple-system, system-ui, sans-serif';
-      ctx.textBaseline = 'bottom';
       const now = this.now();
       let next: EventMark | null = null;
-      let lastLabelX = -Infinity;
+      let prevX = -Infinity;
+      let stack = 0;
+      const badges: { mark: EventMark; x: number; y: number }[] = [];
       for (const mark of this.marks) {
         if (!passesImpact(mark.impact, this.minImpact)) continue;
         const x = this.xAt(mark.time);
@@ -164,38 +195,71 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
           continue;
         }
 
-        const color = IMPACT_COLOR[mark.impact];
-        ctx.strokeStyle = color;
-        ctx.globalAlpha = mark.impact === 'High' ? 0.5 : 0.28;
+        // The event's instant across the pane, faint: the badge at the bottom is what reads.
+        ctx.strokeStyle = IMPACT_COLOR[mark.impact];
+        ctx.globalAlpha = mark.impact === 'High' ? 0.35 : 0.2;
         ctx.lineWidth = 1;
         ctx.setLineDash([3, 3]);
         ctx.beginPath();
         ctx.moveTo(x, 0);
-        ctx.lineTo(x, h);
+        ctx.lineTo(x, h - 2 * BADGE_R - 4);
         ctx.stroke();
 
-        ctx.globalAlpha = 1;
-        ctx.setLineDash([]);
-        ctx.fillStyle = color;
-        // An upcoming event's flag is hollow: it has not printed yet.
-        if (mark.time > now) {
-          ctx.strokeRect(x - 1.5, h - 16, 3, 12);
-        } else {
-          ctx.fillRect(x - 1, h - 16, 2, 12);
-        }
-        this.placedMarks.push({ mark, x });
+        stack = x - prevX < BADGE_GAP ? Math.min(stack + 1, MAX_STACK - 1) : 0;
+        prevX = x;
+        const y = h - BADGE_R - 4 - stack * BADGE_GAP;
+        badges.push({ mark, x, y });
+      }
 
-        // Labels are suppressed when they would collide: a busy calendar day
-        // otherwise renders a solid strip of overlapping currency codes.
-        if (x - lastLabelX > 44) {
-          ctx.fillText(mark.currency, x + 3, h - 4);
-          lastLabelX = x;
-        }
+      // Badges after the lines, so a later event's line never crosses an earlier badge.
+      ctx.setLineDash([]);
+      for (const { mark, x, y } of badges) {
+        this.drawBadge(ctx, mark, x, y, mark.time > now);
+        this.placedMarks.push({ mark, x, y });
       }
 
       if (next) this.drawNextChip(ctx, next, w, h, now);
       ctx.restore();
     });
+  }
+
+  /**
+   * One event: a solid circle with the currency's flag (or its code on the impact colour when there is no flag), a
+   * white separator and a 2px ring in the impact colour — readable over candles and volume. An upcoming event (not
+   * printed yet) is drawn faded with a dashed ring.
+   */
+  private drawBadge(ctx: CanvasRenderingContext2D, mark: EventMark, x: number, y: number, upcoming: boolean): void {
+    const color = IMPACT_COLOR[mark.impact];
+    ctx.save();
+    ctx.globalAlpha = upcoming ? 0.6 : 1;
+    ctx.beginPath();
+    ctx.arc(x, y, BADGE_R, 0, Math.PI * 2);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fill();
+    const img = flagImage(mark.currency, () => this.requestUpdate?.());
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, BADGE_R - 2, 0, Math.PI * 2);
+    ctx.clip();
+    if (img) {
+      ctx.drawImage(img, x - BADGE_R + 2, y - BADGE_R + 2, 2 * BADGE_R - 4, 2 * BADGE_R - 4);
+    } else {
+      ctx.fillStyle = color;
+      ctx.fillRect(x - BADGE_R, y - BADGE_R, 2 * BADGE_R, 2 * BADGE_R);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '600 6.5px -apple-system, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(mark.currency.slice(0, 3), x, y + 0.5);
+    }
+    ctx.restore();
+    ctx.beginPath();
+    ctx.arc(x, y, BADGE_R - 1, 0, Math.PI * 2);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    if (upcoming) ctx.setLineDash([2.5, 2]);
+    ctx.stroke();
+    ctx.restore();
   }
 
   /** The next upcoming event beyond the right edge: "USD Non-Farm Payrolls · in 2d 4h ▸". */
