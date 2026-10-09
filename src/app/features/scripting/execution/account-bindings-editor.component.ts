@@ -27,6 +27,7 @@ import {
   diffBindings,
   formatMultiplier,
   isLiveMoney,
+  requiresRaiseConfirmation,
   requiresTypedConfirmation,
   toBindingInputs,
   toBindingRows,
@@ -43,6 +44,8 @@ import { TypedConfirmDialogComponent } from './typed-confirm-dialog.component';
 type Pending =
   | { kind: 'bind'; row: BindingRow }
   | { kind: 'enable'; row: BindingRow }
+  /** PE-10: a live-money multiplier raised past what was accepted. */
+  | { kind: 'raise'; row: BindingRow; to: number; input: HTMLInputElement | null }
   | { kind: 'widen' };
 
 interface AccountOption {
@@ -58,10 +61,14 @@ interface AccountOption {
  * Live-capital gates:
  * - binding a REAL (or unverifiable) account, and enabling one, opens a dialog where the operator
  *   types the account number (or name) — the change is not even staged without it;
- * - saving re-checks that every new / newly-enabled live-money binding was confirmed in this
- *   session and refuses otherwise;
+ * - raising a live-money account's lot multiplier past what was accepted for it (PE-10) opens the
+ *   same dialog — it multiplies the money at risk on every order; lowering it never asks;
+ * - saving re-checks that every new / newly-enabled / raised live-money binding was confirmed in
+ *   this session and refuses otherwise;
  * - removing the last binding of a non-script strategy (which widens it to the whole fleet)
  *   needs its own typed confirmation.
+ *
+ * Without operator access (PE-I13) the bindings are shown read-only.
  */
 @Component({
   selector: 'app-account-bindings-editor',
@@ -148,8 +155,11 @@ interface AccountOption {
                         inputmode="decimal"
                         [id]="'mult-' + row.tradingAccountId"
                         [value]="row.lotMultiplier"
+                        [disabled]="readOnly()"
                         [attr.aria-invalid]="!!multiplierError(row)"
-                        (change)="setMultiplier(row, $any($event.target).value)"
+                        (change)="
+                          setMultiplier(row, $any($event.target).value, $any($event.target))
+                        "
                       />
                       @if (multiplierError(row); as e) {
                         <span class="field-error">{{ e }}</span>
@@ -162,6 +172,7 @@ interface AccountOption {
                         class="switch"
                         [attr.aria-checked]="row.isEnabled"
                         [attr.aria-label]="'Deliver signals to ' + row.accountName"
+                        [disabled]="readOnly()"
                         (click)="toggleEnabled(row)"
                       >
                         <span class="knob" aria-hidden="true"></span>
@@ -169,14 +180,16 @@ interface AccountOption {
                       </button>
                     </td>
                     <td class="actions">
-                      <button
-                        type="button"
-                        class="btn ghost danger-text"
-                        [attr.aria-label]="'Remove ' + row.accountName"
-                        (click)="remove(row)"
-                      >
-                        Remove
-                      </button>
+                      @if (!readOnly()) {
+                        <button
+                          type="button"
+                          class="btn ghost danger-text"
+                          [attr.aria-label]="'Remove ' + row.accountName"
+                          (click)="remove(row)"
+                        >
+                          Remove
+                        </button>
+                      }
                     </td>
                   </tr>
                 }
@@ -185,65 +198,73 @@ interface AccountOption {
           </div>
         }
 
-        <!-- novalidate: the component validates (and explains) the multiplier itself; the
-             browser's step check would silently block the submit. -->
-        <form class="add" novalidate (submit)="$event.preventDefault(); addBinding()">
-          <label class="add-field grow">
-            <span>Add account</span>
-            <select
-              [value]="addAccountId() ?? ''"
-              (change)="onAddAccountChange($any($event.target).value)"
-              [disabled]="availableAccounts().length === 0"
-            >
-              <option value="">
-                {{ availableAccounts().length === 0 ? 'No unbound account' : 'Choose an account…' }}
-              </option>
-              @if (liveOptions().length > 0) {
-                <optgroup label="REAL accounts — real money">
-                  @for (o of liveOptions(); track o.id) {
-                    <option [value]="o.id">{{ o.label }}</option>
-                  }
-                </optgroup>
-              }
-              @if (otherOptions().length > 0) {
-                <optgroup label="Demo, contest and paper accounts">
-                  @for (o of otherOptions(); track o.id) {
-                    <option [value]="o.id">{{ o.label }}</option>
-                  }
-                </optgroup>
-              }
-            </select>
-          </label>
-          <label class="add-field">
-            <span>Lot multiplier</span>
-            <input
-              type="number"
-              min="0.01"
-              [attr.max]="maxMultiplier"
-              step="0.01"
-              inputmode="decimal"
-              [value]="addMultiplier()"
-              [attr.aria-invalid]="!!addMultiplierError()"
-              (input)="addMultiplier.set($any($event.target).value)"
-            />
-          </label>
-          <label class="add-check">
-            <input
-              type="checkbox"
-              [checked]="addEnabled()"
-              (change)="addEnabled.set($any($event.target).checked)"
-            />
-            <span>Enabled</span>
-          </label>
-          <button type="submit" class="btn" [disabled]="!canAdd()">Add</button>
-        </form>
-        @if (addMultiplierError(); as e) {
-          <p class="field-error">{{ e }}</p>
-        }
-        @if (selectedAddIsLive()) {
-          <p class="warn">
-            This is a real-money account. Adding it asks you to type its account number.
+        @if (readOnly()) {
+          <p class="muted">
+            Viewing only: changing where this strategy trades needs operator access.
           </p>
+        } @else {
+          <!-- novalidate: the component validates (and explains) the multiplier itself; the
+             browser's step check would silently block the submit. -->
+          <form class="add" novalidate (submit)="$event.preventDefault(); addBinding()">
+            <label class="add-field grow">
+              <span>Add account</span>
+              <select
+                [value]="addAccountId() ?? ''"
+                (change)="onAddAccountChange($any($event.target).value)"
+                [disabled]="availableAccounts().length === 0"
+              >
+                <option value="">
+                  {{
+                    availableAccounts().length === 0 ? 'No unbound account' : 'Choose an account…'
+                  }}
+                </option>
+                @if (liveOptions().length > 0) {
+                  <optgroup label="REAL accounts — real money">
+                    @for (o of liveOptions(); track o.id) {
+                      <option [value]="o.id">{{ o.label }}</option>
+                    }
+                  </optgroup>
+                }
+                @if (otherOptions().length > 0) {
+                  <optgroup label="Demo, contest and paper accounts">
+                    @for (o of otherOptions(); track o.id) {
+                      <option [value]="o.id">{{ o.label }}</option>
+                    }
+                  </optgroup>
+                }
+              </select>
+            </label>
+            <label class="add-field">
+              <span>Lot multiplier</span>
+              <input
+                type="number"
+                min="0.01"
+                [attr.max]="maxMultiplier"
+                step="0.01"
+                inputmode="decimal"
+                [value]="addMultiplier()"
+                [attr.aria-invalid]="!!addMultiplierError()"
+                (input)="addMultiplier.set($any($event.target).value)"
+              />
+            </label>
+            <label class="add-check">
+              <input
+                type="checkbox"
+                [checked]="addEnabled()"
+                (change)="addEnabled.set($any($event.target).checked)"
+              />
+              <span>Enabled</span>
+            </label>
+            <button type="submit" class="btn" [disabled]="!canAdd()">Add</button>
+          </form>
+          @if (addMultiplierError(); as e) {
+            <p class="field-error">{{ e }}</p>
+          }
+          @if (selectedAddIsLive()) {
+            <p class="warn">
+              This is a real-money account. Adding it asks you to type its account number.
+            </p>
+          }
         }
 
         <div class="effect" [attr.data-real]="effect().touchesRealMoney" aria-live="polite">
@@ -266,24 +287,26 @@ interface AccountOption {
           <p class="error" role="alert">{{ saveError() }}</p>
         }
 
-        <div class="save-row">
-          <button
-            type="button"
-            class="btn ghost"
-            [disabled]="!dirty() || saving()"
-            (click)="discard()"
-          >
-            Discard
-          </button>
-          <button
-            type="button"
-            class="btn primary"
-            [disabled]="!dirty() || saving() || hasErrors()"
-            (click)="save()"
-          >
-            {{ saving() ? 'Saving…' : 'Save bindings' }}
-          </button>
-        </div>
+        @if (!readOnly()) {
+          <div class="save-row">
+            <button
+              type="button"
+              class="btn ghost"
+              [disabled]="!dirty() || saving()"
+              (click)="discard()"
+            >
+              Discard
+            </button>
+            <button
+              type="button"
+              class="btn primary"
+              [disabled]="!dirty() || saving() || hasErrors()"
+              (click)="save()"
+            >
+              {{ saving() ? 'Saving…' : 'Save bindings' }}
+            </button>
+          </div>
+        }
       }
     </section>
 
@@ -298,7 +321,7 @@ interface AccountOption {
       [busy]="saving()"
       tone="danger"
       (confirmed)="onConfirmed()"
-      (cancelled)="pending.set(null)"
+      (cancelled)="cancelPending()"
     />
   `,
   styles: [
@@ -618,6 +641,8 @@ export class AccountBindingsEditorComponent {
   readonly isScript = input(false);
   readonly symbol = input<string | null>(null);
   readonly strategyName = input<string | null>(null);
+  /** Without operator access the bindings are shown, not changed (PE-I13). */
+  readonly readOnly = input(false);
 
   /** After a successful save (the host may refresh the strategy). */
   readonly saved = output<void>();
@@ -632,6 +657,8 @@ export class AccountBindingsEditorComponent {
   readonly rows = signal<BindingRow[]>([]);
   /** Live-money accounts the operator confirmed by typing, in this edit session. */
   readonly confirmedIds = signal<ReadonlySet<number>>(new Set());
+  /** PE-10: the largest lot multiplier typed-confirmed per live-money account in this session. */
+  readonly confirmedMultipliers = signal<ReadonlyMap<number, number>>(new Map());
   readonly saving = signal(false);
   readonly saveError = signal<string | null>(null);
   readonly pending = signal<Pending | null>(null);
@@ -685,6 +712,7 @@ export class AccountBindingsEditorComponent {
     const p = this.pending();
     if (!p) return '';
     if (p.kind === 'widen') return 'Let this strategy trade on every account?';
+    if (p.kind === 'raise') return 'Raise the lots on a REAL-money account';
     return p.kind === 'bind' ? 'Bind a REAL-money account' : 'Enable a REAL-money account';
   });
 
@@ -699,7 +727,11 @@ export class AccountBindingsEditorComponent {
       p.row.environment === 'UNKNOWN'
         ? 'an account the console cannot verify'
         : 'a REAL-money account';
-    return `"${name}" will be able to place live orders on ${acct}: ${p.row.accountName}${p.row.accountNumber ? ` (#${p.row.accountNumber})` : ''}.`;
+    const who = `${p.row.accountName}${p.row.accountNumber ? ` (#${p.row.accountNumber})` : ''}`;
+    if (p.kind === 'raise') {
+      return `"${name}" will trade ${formatMultiplier(p.to)} times its lots on ${acct}, ${who} — up from ×${formatMultiplier(p.row.lotMultiplier)}. Every order risks that much more money.`;
+    }
+    return `"${name}" will be able to place live orders on ${acct}: ${who}.`;
   });
 
   readonly dialogDetails = computed<string[]>(() => {
@@ -709,6 +741,13 @@ export class AccountBindingsEditorComponent {
       return [
         'Bound strategies trade only on their enabled bound accounts; unbound non-script strategies trade everywhere.',
         'To stop it trading live instead, keep a binding and pause it.',
+      ];
+    }
+    if (p.kind === 'raise') {
+      return [
+        `Lots on this account are multiplied by ${formatMultiplier(p.to)}, then clamped by the account's RiskProfile (max risk per trade, max lot size).`,
+        'It applies from the next signal once you save; open positions keep their size.',
+        'Lowering a multiplier never asks.',
       ];
     }
     return [
@@ -743,6 +782,7 @@ export class AccountBindingsEditorComponent {
     const p = this.pending();
     if (!p) return 'Confirm';
     if (p.kind === 'widen') return 'Remove binding and save';
+    if (p.kind === 'raise') return `Raise to ×${formatMultiplier(p.to)}`;
     return p.kind === 'bind' ? 'Bind REAL account' : 'Enable REAL account';
   });
 
@@ -790,6 +830,7 @@ export class AccountBindingsEditorComponent {
         this.savedRows.set(rows);
         this.rows.set(rows.map((r) => ({ ...r })));
         this.confirmedIds.set(new Set());
+        this.confirmedMultipliers.set(new Map());
         this.loading.set(false);
       },
       error: (err: unknown) => {
@@ -839,9 +880,21 @@ export class AccountBindingsEditorComponent {
     this.updateRow(row.tradingAccountId, { isEnabled: enabling });
   }
 
-  setMultiplier(row: BindingRow, value: string): void {
+  /**
+   * A typed multiplier. Raising a live-money account's past what was accepted for it waits for the
+   * typed confirmation (PE-10); cancelling it puts the field back.
+   */
+  setMultiplier(row: BindingRow, value: string, input: HTMLInputElement | null = null): void {
     const n = Number(value);
-    this.updateRow(row.tradingAccountId, { lotMultiplier: Number.isFinite(n) ? n : NaN });
+    const next = Number.isFinite(n) ? n : NaN;
+    if (
+      !validateMultiplier(next) &&
+      requiresRaiseConfirmation(row, next, this.confirmedMultipliers())
+    ) {
+      this.pending.set({ kind: 'raise', row, to: next, input });
+      return;
+    }
+    this.updateRow(row.tradingAccountId, { lotMultiplier: next });
   }
 
   remove(row: BindingRow): void {
@@ -850,13 +903,33 @@ export class AccountBindingsEditorComponent {
       const next = new Set(this.confirmedIds());
       next.delete(row.tradingAccountId);
       this.confirmedIds.set(next);
+      const multipliers = new Map(this.confirmedMultipliers());
+      multipliers.delete(row.tradingAccountId);
+      this.confirmedMultipliers.set(multipliers);
     }
   }
 
   discard(): void {
     this.rows.set(this.savedRows().map((r) => ({ ...r })));
     this.confirmedIds.set(new Set());
+    this.confirmedMultipliers.set(new Map());
     this.saveError.set(null);
+  }
+
+  /** The dialog was cancelled: nothing changes — a raised multiplier field shows its value again. */
+  cancelPending(): void {
+    const p = this.pending();
+    if (p?.kind === 'raise' && p.input) {
+      const current = this.rows().find((r) => r.tradingAccountId === p.row.tradingAccountId);
+      p.input.value = String(current?.lotMultiplier ?? p.row.lotMultiplier);
+    }
+    this.pending.set(null);
+  }
+
+  private recordConfirmedMultiplier(accountId: number, multiplier: number): void {
+    const next = new Map(this.confirmedMultipliers());
+    next.set(accountId, Math.max(multiplier, next.get(accountId) ?? 0));
+    this.confirmedMultipliers.set(next);
   }
 
   save(): void {
@@ -867,10 +940,14 @@ export class AccountBindingsEditorComponent {
       this.saveError.set(errors.join(' '));
       return;
     }
-    const unconfirmed = unconfirmedLiveChanges(rows, this.confirmedIds());
+    const unconfirmed = unconfirmedLiveChanges(
+      rows,
+      this.confirmedIds(),
+      this.confirmedMultipliers(),
+    );
     if (unconfirmed.length > 0) {
       this.saveError.set(
-        `Confirm ${unconfirmed.map((r) => r.accountName).join(', ')} before saving: binding or enabling a REAL account needs its account number typed.`,
+        `Confirm ${unconfirmed.map((r) => r.accountName).join(', ')} before saving: binding, enabling or raising the lots of a REAL account needs its account number typed.`,
       );
       return;
     }
@@ -888,9 +965,21 @@ export class AccountBindingsEditorComponent {
       this.persist();
       return;
     }
+    if (p.kind === 'raise') {
+      this.recordConfirmedMultiplier(p.row.tradingAccountId, p.to);
+      this.updateRow(p.row.tradingAccountId, { lotMultiplier: p.to });
+      this.pending.set(null);
+      return;
+    }
     const next = new Set(this.confirmedIds());
     next.add(p.row.tradingAccountId);
     this.confirmedIds.set(next);
+    // The confirmation named the multiplier the row had: that one is accepted, not more.
+    const current = this.rows().find((r) => r.tradingAccountId === p.row.tradingAccountId);
+    this.recordConfirmedMultiplier(
+      p.row.tradingAccountId,
+      Number((current ?? p.row).lotMultiplier),
+    );
     if (p.kind === 'bind') this.stageNewRow(p.row);
     else this.updateRow(p.row.tradingAccountId, { isEnabled: true });
     this.pending.set(null);

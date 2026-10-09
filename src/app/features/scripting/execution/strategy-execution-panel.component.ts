@@ -1,6 +1,16 @@
-import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  input,
+  output,
+  viewChild,
+} from '@angular/core';
 
 import type { StrategyDto } from '@core/api/api.types';
+import { AuthService } from '@core/auth/auth.service';
+import { OPERATOR_PERMISSION } from '../shared/permissions';
 
 import type { ExecutionPolicy, ScriptStrategyFields } from '../api/scripting-api.types';
 import { executionPolicyOf, isScriptStrategy } from '../shared/script-strategy';
@@ -54,6 +64,7 @@ import { isNewsBlackoutExempt } from './news-blackout-exemption.model';
           [isScript]="isScript()"
           [symbol]="s.symbol"
           [strategyName]="s.name"
+          [readOnly]="!canOperate()"
           (saved)="changed.emit()"
         />
 
@@ -61,6 +72,7 @@ import { isNewsBlackoutExempt } from './news-blackout-exemption.model';
           [strategyId]="s.id"
           [policy]="policy()"
           [isScript]="isScript()"
+          [readOnly]="!canOperate()"
           (policyChanged)="onPolicyChanged($event)"
         />
 
@@ -71,6 +83,7 @@ import { isNewsBlackoutExempt } from './news-blackout-exemption.model';
             [strategyId]="s.id"
             [strategyName]="s.name"
             [exempt]="newsBlackoutExempt()"
+            [readOnly]="!canOperate()"
             (changed)="changed.emit()"
           />
         }
@@ -106,6 +119,10 @@ import { isNewsBlackoutExempt } from './news-blackout-exemption.model';
   ],
 })
 export class StrategyExecutionPanelComponent {
+  private readonly auth = inject(AuthService);
+  private readonly bindingsEditor = viewChild(AccountBindingsEditorComponent);
+  private readonly exemptionCard = viewChild(NewsBlackoutExemptionCardComponent);
+
   readonly strategy = input<(StrategyDto & ScriptStrategyFields) | null>(null);
 
   /** Bindings or policy changed — the host may re-read the strategy. */
@@ -114,6 +131,16 @@ export class StrategyExecutionPanelComponent {
   readonly isScript = computed(() => isScriptStrategy(this.strategy()));
   readonly policy = computed(() => executionPolicyOf(this.strategy()));
   readonly newsBlackoutExempt = computed(() => isNewsBlackoutExempt(this.strategy()));
+  /** PE-I13: the engine requires operator access for every change made here. */
+  readonly canOperate = computed(() => this.auth.hasPermission(OPERATOR_PERMISSION));
+
+  /**
+   * PE-14: binding changes or an exemption change not saved yet — the detail page asks before a
+   * tab switch or a navigation throws them away.
+   */
+  hasUnsavedChanges(): boolean {
+    return !!this.bindingsEditor()?.dirty() || this.exemptionCard()?.draft() != null;
+  }
 
   onPolicyChanged(_policy: ExecutionPolicy): void {
     this.changed.emit();

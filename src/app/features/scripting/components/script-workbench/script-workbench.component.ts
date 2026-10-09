@@ -80,7 +80,11 @@ export const COMPILE_DEBOUNCE_MS = 700;
             class="btn btn-sm"
             (click)="compileNow(true)"
             [disabled]="compileState() === 'compiling' || !source().trim()"
-            title="Compile now (⌘S / Ctrl-S in the editor)"
+            [title]="
+              saveShortcut() === 'save'
+                ? 'Compile now (⌘S / Ctrl-S in the editor saves)'
+                : 'Compile now (⌘S / Ctrl-S in the editor)'
+            "
           >
             @if (compileState() === 'compiling') {
               <span class="spinner"></span>
@@ -98,7 +102,7 @@ export const COMPILE_DEBOUNCE_MS = 700;
         [ariaLabel]="label()"
         [placeholder]="placeholder()"
         (cursorChange)="cursor.set($event)"
-        (saveRequested)="compileNow(true)"
+        (saveRequested)="onSaveShortcut()"
       />
 
       <app-script-status-bar
@@ -170,9 +174,17 @@ export class ScriptWorkbenchComponent {
   /** Shown while the editor is empty. */
   readonly placeholder = input<string | null>(null);
   readonly showProblems = input(true);
+  /**
+   * What ⌘S / Ctrl-S does in the editor (PE-14): `save` asks the host to save (the host's Save
+   * button path — it compiles first), `validate` compiles now. Hosts with a Save use `save`, so the
+   * shortcut means the same in every Pine editor of the console.
+   */
+  readonly saveShortcut = input<'save' | 'validate'>('validate');
 
   /** Every compile result applied to the current source. */
   readonly compiled = output<ScriptCompileResult>();
+  /** ⌘S / Ctrl-S with `saveShortcut = save`. */
+  readonly saveRequested = output<void>();
 
   readonly result = signal<ScriptCompileResult | null>(null);
   /** The source the result was computed for. */
@@ -297,20 +309,23 @@ export class ScriptWorkbenchComponent {
     this.editor?.focus();
   }
 
+  onSaveShortcut(): void {
+    if (this.saveShortcut() === 'save') this.saveRequested.emit();
+    else void this.compileNow(true);
+  }
+
+  /**
+   * Loads a `.pine` file into the editor as an edit (PE-14): Ctrl/Cmd-Z brings back what was
+   * there, so it needs no confirmation.
+   */
   async openFile(event: Event): Promise<void> {
     const inputEl = event.target as HTMLInputElement;
     const file = inputEl.files?.[0];
     inputEl.value = '';
     if (!file) return;
-    const text = await readTextFile(file);
-    if (
-      this.source().trim() &&
-      this.source() !== text &&
-      !window.confirm(`Replace the editor's contents with ${file.name}?`)
-    ) {
-      return;
-    }
-    this.source.set(text.replace(/\r\n?/g, '\n'));
+    const text = (await readTextFile(file)).replace(/\r\n?/g, '\n');
+    if (text === this.source()) return;
+    this.replaceSource(text);
   }
 
   download(): void {

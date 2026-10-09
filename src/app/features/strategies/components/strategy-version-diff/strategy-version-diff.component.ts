@@ -2,19 +2,33 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
 import { DatePipe } from '@angular/common';
 
 import type { StrategyVersionDto } from '@core/api/api.types';
+import type {
+  ScriptInputDto,
+  ScriptInputValues,
+  StrategyVersionScriptFields,
+} from '@core/api/scripting.types';
+import { effectiveOverrides } from '@features/scripting/pine/pine-inputs';
+import { ScriptDiffComponent } from '@features/scripting/shared/script-diff.component';
 import { DiffKind, formatDiffValue } from '../../util/json-diff';
-import { StrategyVersionFields, diffStrategyVersion } from '../../util/version-diff';
+import {
+  StrategyVersionFields,
+  diffScriptVersion,
+  diffStrategyVersion,
+  versionScriptFields,
+} from '../../util/version-diff';
 
 /**
  * What changed between a captured strategy version and the current form
  * values — one row per changed path, full values, grouped by field. Replaces
  * the old two-column view that cut every field at 80 characters, which made a
- * DSL edit unreadable (both sides showed the same first 80 characters).
+ * DSL edit unreadable (both sides showed the same first 80 characters). A
+ * script strategy's Pine source and input overrides are compared side by side
+ * (PE-02): "Roll back" swaps the script, so the diff must show it.
  */
 @Component({
   selector: 'app-strategy-version-diff',
   standalone: true,
-  imports: [DatePipe],
+  imports: [DatePipe, ScriptDiffComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="vd">
@@ -37,7 +51,31 @@ import { StrategyVersionFields, diffStrategyVersion } from '../../util/version-d
         <button type="button" class="vd-close" (click)="closed.emit()">close</button>
       </div>
 
-      @if (groups().length === 0) {
+      @if (script(); as sc) {
+        <section class="vd-group">
+          <div class="vd-field">
+            Pine script
+            @if (sc.sourceChanged) {
+              <span class="vd-counts">
+                <span class="vd-removed">−{{ sc.removed }}</span>
+                <span class="vd-added">+{{ sc.added }}</span>
+                lines
+              </span>
+            }
+          </div>
+          <app-script-diff
+            [before]="sc.before"
+            [after]="sc.after"
+            [beforeLabel]="'v' + version().versionNumber"
+            afterLabel="Current"
+            [beforeInputs]="normalizedVersionInputs()"
+            [afterInputs]="normalizedCurrentInputs()"
+            maxHeight="360px"
+          />
+        </section>
+      }
+
+      @if (groups().length === 0 && !script()) {
         <p class="muted">
           No differences — the current values match v{{ version().versionNumber }}.
         </p>
@@ -199,10 +237,29 @@ import { StrategyVersionFields, diffStrategyVersion } from '../../util/version-d
   ],
 })
 export class StrategyVersionDiffComponent {
-  version = input.required<StrategyVersionDto>();
+  version = input.required<StrategyVersionDto & StrategyVersionScriptFields>();
   /** The values the version is compared with — the edit form's current state. */
   current = input.required<StrategyVersionFields>();
+  /**
+   * The inputs the current script declares, when known: both sides' overrides are compared as
+   * they run (an override equal to its default and none are the same).
+   */
+  inputDefs = input<readonly ScriptInputDto[] | null>(null);
   closed = output<void>();
+
+  private readonly normalize = (v: Readonly<Record<string, unknown>>) =>
+    this.inputDefs() ? effectiveOverrides(this.inputDefs(), v as ScriptInputValues) : v;
+
+  /** PE-02: the script and its inputs — a script-only change is a difference too. */
+  readonly script = computed(() =>
+    diffScriptVersion(versionScriptFields(this.version()), this.current(), this.normalize),
+  );
+  readonly normalizedVersionInputs = computed(() =>
+    this.normalize(versionScriptFields(this.version()).scriptInputs ?? {}),
+  );
+  readonly normalizedCurrentInputs = computed(() =>
+    this.normalize(this.current().scriptInputs ?? {}),
+  );
 
   readonly groups = computed(() => {
     const v = this.version();

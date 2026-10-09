@@ -3,6 +3,7 @@ import { StrategiesPageComponent } from './pages/strategies-page/strategies-page
 import { StrategyDetailPageComponent } from './pages/strategy-detail-page/strategy-detail-page.component';
 import { StrategyAnalyticsPageComponent } from './pages/strategy-analytics-page/strategy-analytics-page.component';
 import { StrategiesComparePageComponent } from './pages/strategies-compare-page/strategies-compare-page.component';
+import { unsavedChangesGuard } from '@features/scripting/shared/unsaved-changes';
 
 export const STRATEGIES_ROUTES: Routes = [
   { path: '', component: StrategiesPageComponent, data: { breadcrumb: 'Strategies' } },
@@ -52,6 +53,8 @@ export const STRATEGIES_ROUTES: Routes = [
     // Pine script libraries (ADR-0027 §7). Declared before ':id' so it is never read as an id.
     path: 'libraries',
     data: { breadcrumb: 'Pine Libraries' },
+    // PE-14: an unpublished library draft asks before the page is left.
+    canDeactivate: [unsavedChangesGuard],
     loadComponent: () =>
       import('@features/scripting/pages/libraries-page/libraries-page.component').then(
         (m) => m.LibrariesPageComponent,
@@ -65,10 +68,18 @@ export const STRATEGIES_ROUTES: Routes = [
   {
     path: ':id/edit',
     data: { breadcrumb: 'Edit' },
+    // PE-06: leaving with an unsaved script or settings edit asks first.
+    canDeactivate: [unsavedChangesGuard],
     loadComponent: () =>
       import('./pages/strategy-edit-page/strategy-edit-page.component').then(
         (m) => m.StrategyEditPageComponent,
       ),
   },
-  { path: ':id', component: StrategyDetailPageComponent, data: { breadcrumb: 'Detail' } },
+  {
+    path: ':id',
+    component: StrategyDetailPageComponent,
+    data: { breadcrumb: 'Detail' },
+    // PE-14: an unsaved edit (the edit dialog, the Execution or Alerts tab) asks before leaving.
+    canDeactivate: [unsavedChangesGuard],
+  },
 ];

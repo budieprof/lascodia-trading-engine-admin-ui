@@ -4,10 +4,12 @@ import type { TradingAccountDto } from '@core/api/api.types';
 import {
   accountEnvironment,
   confirmationTargets,
+  confirmedMultiplierCeiling,
   deliveryEffect,
   diffBindings,
   isLiveMoney,
   matchesConfirmation,
+  requiresRaiseConfirmation,
   requiresTypedConfirmation,
   toBindingInputs,
   toBindingRows,
@@ -157,6 +159,47 @@ describe('unconfirmedLiveChanges (the save backstop)', () => {
     expect(unconfirmedLiveChanges([row({ environment: 'DEMO', saved: null })], new Set())).toEqual(
       [],
     );
+  });
+
+  it('PE-10: flags a REAL multiplier raised past what was accepted — paused or not', () => {
+    const raised = row({ lotMultiplier: 3, saved });
+    expect(unconfirmedLiveChanges([raised], new Set())).toEqual([raised]);
+    // Pausing does not get around it: re-enabling restores the saved state without asking.
+    expect(unconfirmedLiveChanges([{ ...raised, isEnabled: false }], new Set())).toHaveLength(1);
+    // Typed-confirmed at 3 (or higher): fine; at 2: still flagged.
+    expect(unconfirmedLiveChanges([raised], new Set(), new Map([[27, 3]]))).toEqual([]);
+    expect(unconfirmedLiveChanges([raised], new Set(), new Map([[27, 2]]))).toHaveLength(1);
+    // Lowering never needs a confirmation; a demo account never does.
+    expect(unconfirmedLiveChanges([row({ lotMultiplier: 0.5, saved })], new Set())).toEqual([]);
+    expect(
+      unconfirmedLiveChanges([row({ environment: 'DEMO', lotMultiplier: 9, saved })], new Set()),
+    ).toEqual([]);
+  });
+
+  it('PE-10: a new REAL binding is accepted at the multiplier it was confirmed with, not above', () => {
+    const fresh = row({ saved: null, lotMultiplier: 2 });
+    expect(unconfirmedLiveChanges([fresh], new Set([27]), new Map([[27, 2]]))).toEqual([]);
+    expect(
+      unconfirmedLiveChanges([{ ...fresh, lotMultiplier: 4 }], new Set([27]), new Map([[27, 2]])),
+    ).toHaveLength(1);
+  });
+});
+
+describe('requiresRaiseConfirmation — PE-10', () => {
+  const saved = { lotMultiplier: 1, isEnabled: true };
+
+  it('asks only when a live-money multiplier goes above the largest one accepted', () => {
+    expect(requiresRaiseConfirmation(row({ saved }), 1.5, new Map())).toBe(true);
+    expect(requiresRaiseConfirmation(row({ saved }), 1, new Map())).toBe(false);
+    expect(requiresRaiseConfirmation(row({ saved }), 0.5, new Map())).toBe(false);
+    expect(requiresRaiseConfirmation(row({ saved }), 1.5, new Map([[27, 2]]))).toBe(false);
+    expect(requiresRaiseConfirmation(row({ environment: 'UNKNOWN', saved }), 2, new Map())).toBe(
+      true,
+    );
+    expect(requiresRaiseConfirmation(row({ environment: 'DEMO', saved }), 9, new Map())).toBe(
+      false,
+    );
+    expect(confirmedMultiplierCeiling(row({ saved }), new Map([[27, 0.5]]))).toBe(1);
   });
 });
 

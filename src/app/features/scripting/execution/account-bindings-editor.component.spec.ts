@@ -12,7 +12,7 @@ import type { StrategyAccountBinding } from '../api/scripting-api.types';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
 declareSignalIo(AccountBindingsEditorComponent, {
-  inputs: ['strategyId', 'isScript', 'symbol', 'strategyName'],
+  inputs: ['strategyId', 'isScript', 'symbol', 'strategyName', 'readOnly'],
   outputs: ['saved'],
 });
 declareSignalIo(TypedConfirmDialogComponent, {
@@ -95,10 +95,14 @@ describe('AccountBindingsEditorComponent', () => {
   let http: HttpTestingController;
   let el: HTMLElement;
 
-  function render(bindings: StrategyAccountBinding[], opts: { isScript?: boolean } = {}): void {
+  function render(
+    bindings: StrategyAccountBinding[],
+    opts: { isScript?: boolean; readOnly?: boolean } = {},
+  ): void {
     fixture = TestBed.createComponent(AccountBindingsEditorComponent);
     fixture.componentRef.setInput('strategyId', 41);
     fixture.componentRef.setInput('isScript', opts.isScript ?? true);
+    fixture.componentRef.setInput('readOnly', opts.readOnly ?? false);
     fixture.componentRef.setInput('symbol', 'EURUSD');
     fixture.componentRef.setInput('strategyName', 'Pine breakout');
     fixture.detectChanges();
@@ -368,6 +372,135 @@ describe('AccountBindingsEditorComponent', () => {
     fixture.detectChanges();
     http.expectNone((r) => r.method === 'PUT');
     expect(el.querySelector('[role="alert"]')!.textContent).toContain('Confirm Exness Real 27');
+  });
+
+  describe('PE-10: raising a live-money lot multiplier', () => {
+    function setMultiplier(rowIndex: number, value: string): HTMLInputElement {
+      const input = rows()[rowIndex].querySelector<HTMLInputElement>('input.mult')!;
+      input.value = value;
+      input.dispatchEvent(new Event('change'));
+      fixture.detectChanges();
+      return input;
+    }
+
+    it('asks for the account number before a REAL multiplier goes up, then saves it', () => {
+      render([
+        { tradingAccountId: 27, accountName: 'Exness Real 27', lotMultiplier: 1, isEnabled: true },
+      ]);
+      setMultiplier(0, '3');
+      expect(dialog()!.textContent).toContain('Raise the lots on a REAL-money account');
+      expect(dialog()!.textContent).toContain('up from ×1');
+      expect(fixture.componentInstance.rows()[0].lotMultiplier).toBe(1);
+      expect(saveBtn().disabled).toBe(true);
+
+      type('99887766');
+      confirmBtn().click();
+      fixture.detectChanges();
+      expect(dialog()).toBeNull();
+      expect(fixture.componentInstance.rows()[0].lotMultiplier).toBe(3);
+
+      saveBtn().click();
+      fixture.detectChanges();
+      expect(flushSave()).toEqual([{ tradingAccountId: 27, lotMultiplier: 3, isEnabled: true }]);
+      flushLoad([
+        { tradingAccountId: 27, accountName: 'Exness Real 27', lotMultiplier: 3, isEnabled: true },
+      ]);
+    });
+
+    it('puts the field back when the raise is cancelled', () => {
+      render([
+        { tradingAccountId: 27, accountName: 'Exness Real 27', lotMultiplier: 2, isEnabled: true },
+      ]);
+      const input = setMultiplier(0, '5');
+      dialog()!.querySelector<HTMLButtonElement>('.btn.secondary')!.click();
+      fixture.detectChanges();
+      expect(dialog()).toBeNull();
+      expect(input.value).toBe('2');
+      expect(fixture.componentInstance.rows()[0].lotMultiplier).toBe(2);
+      expect(saveBtn().disabled).toBe(true);
+    });
+
+    it('does not ask again up to the multiplier already confirmed, but does above it', () => {
+      render([
+        { tradingAccountId: 27, accountName: 'Exness Real 27', lotMultiplier: 1, isEnabled: true },
+      ]);
+      setMultiplier(0, '3');
+      type('99887766');
+      confirmBtn().click();
+      fixture.detectChanges();
+      setMultiplier(0, '2');
+      expect(dialog()).toBeNull();
+      setMultiplier(0, '3');
+      expect(dialog()).toBeNull();
+      setMultiplier(0, '4');
+      expect(dialog()!.textContent).toContain('Raise the lots');
+    });
+
+    it('never asks to lower a REAL multiplier', () => {
+      render([
+        { tradingAccountId: 27, accountName: 'Exness Real 27', lotMultiplier: 2, isEnabled: true },
+      ]);
+      setMultiplier(0, '0.5');
+      expect(dialog()).toBeNull();
+      saveBtn().click();
+      fixture.detectChanges();
+      expect(flushSave()).toEqual([{ tradingAccountId: 27, lotMultiplier: 0.5, isEnabled: true }]);
+      flushLoad([
+        {
+          tradingAccountId: 27,
+          accountName: 'Exness Real 27',
+          lotMultiplier: 0.5,
+          isEnabled: true,
+        },
+      ]);
+    });
+
+    it('never asks to raise a demo multiplier', () => {
+      render([
+        { tradingAccountId: 17, accountName: 'Exness Demo 17', lotMultiplier: 1, isEnabled: true },
+      ]);
+      setMultiplier(0, '4');
+      expect(dialog()).toBeNull();
+      expect(fixture.componentInstance.rows()[0].lotMultiplier).toBe(4);
+    });
+
+    it('asks above the multiplier a new REAL binding was confirmed with', () => {
+      render([]);
+      chooseAccount(27);
+      clickAdd();
+      type('99887766');
+      confirmBtn().click();
+      fixture.detectChanges();
+      expect(rows()).toHaveLength(1);
+      setMultiplier(0, '2');
+      expect(dialog()!.textContent).toContain('Raise the lots');
+    });
+
+    it('refuses to save a raise that skipped the dialog (backstop)', () => {
+      render([
+        { tradingAccountId: 27, accountName: 'Exness Real 27', lotMultiplier: 1, isEnabled: true },
+      ]);
+      const cmp = fixture.componentInstance;
+      cmp.rows.set(cmp.rows().map((r) => ({ ...r, lotMultiplier: 6 })));
+      cmp.save();
+      fixture.detectChanges();
+      http.expectNone((r) => r.method === 'PUT');
+      expect(el.querySelector('[role="alert"]')!.textContent).toContain('raising the lots');
+    });
+  });
+
+  it('PE-I13: shows the bindings read-only without operator access', () => {
+    render(
+      [{ tradingAccountId: 27, accountName: 'Exness Real 27', lotMultiplier: 1, isEnabled: true }],
+      { readOnly: true },
+    );
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0].querySelector<HTMLInputElement>('input.mult')!.disabled).toBe(true);
+    expect(rows()[0].querySelector<HTMLButtonElement>('[role="switch"]')!.disabled).toBe(true);
+    expect(rows()[0].querySelector('.danger-text')).toBeNull();
+    expect(el.querySelector('form.add')).toBeNull();
+    expect(el.querySelector('.save-row')).toBeNull();
+    expect(el.textContent).toContain('needs operator access');
   });
 
   it('shows the engine’s refusal and keeps the edit', () => {

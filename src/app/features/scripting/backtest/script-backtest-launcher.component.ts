@@ -10,7 +10,7 @@ import {
   untracked,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { catchError, of } from 'rxjs';
+import { catchError, firstValueFrom, of } from 'rxjs';
 
 import type { StrategyDto } from '@core/api/api.types';
 import { NotificationService } from '@core/notifications/notification.service';
@@ -33,6 +33,8 @@ import {
 } from '../shared/script-capital';
 import { scriptInputsOf, scriptSourceOf } from '../shared/script-strategy';
 import { InputOverridesEditorComponent } from '../shared/input-overrides-editor.component';
+import { BasketMatrixComponent } from './basket-matrix.component';
+import { MAJOR_PAIRS, parseBasket } from './run-compare.model';
 
 export const ENGINE_TIMEFRAMES = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] as const;
 
@@ -69,7 +71,7 @@ export function validateBacktestForm(f: {
 @Component({
   selector: 'app-script-backtest-launcher',
   standalone: true,
-  imports: [InputOverridesEditorComponent, RouterLink],
+  imports: [InputOverridesEditorComponent, RouterLink, BasketMatrixComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" [attr.aria-labelledby]="uid + '-title'">
@@ -91,7 +93,13 @@ export function validateBacktestForm(f: {
         </button>
       </header>
 
-      @if (lastRunId(); as runId) {
+      @if (basketRunIds(); as ids) {
+        <p class="queued" role="status">
+          Basket of {{ ids.length }} run{{ ids.length === 1 ? '' : 's' }} queued — the matrix fills
+          in as each finishes.
+        </p>
+        <app-basket-matrix [runIds]="ids" />
+      } @else if (lastRunId(); as runId) {
         <p class="queued" role="status">
           Backtest #{{ runId }} queued.
           <a [routerLink]="['/backtests', runId]">Open the run</a>
@@ -175,6 +183,30 @@ export function validateBacktestForm(f: {
             </p>
           </div>
 
+          <!-- PE-I7: the same run on other markets, through the symbol override. -->
+          <div class="basket">
+            <label class="field">
+              <span>Basket — also run on (other markets)</span>
+              <input
+                type="text"
+                spellcheck="false"
+                autocomplete="off"
+                placeholder="e.g. GBPUSD, USDJPY, AUDUSD"
+                [value]="basketText()"
+                (input)="basketText.set($any($event.target).value.toUpperCase())"
+                data-testid="basket-input"
+              />
+            </label>
+            <button type="button" class="btn ghost" (click)="fillMajors()">Majors</button>
+          </div>
+          @if (basketSymbols().length > 0) {
+            <p class="note">
+              {{ basketSymbols().length + 1 }} runs: {{ strategy().symbol }} and
+              {{ basketSymbols().join(', ') }}, each with the same window, inputs and modes. Runs on
+              other markets are exploratory evidence, never validation of the deployed strategy.
+            </p>
+          }
+
           <label class="check">
             <input
               type="checkbox"
@@ -210,7 +242,13 @@ export function validateBacktestForm(f: {
           }
           <div class="actions">
             <button type="submit" class="btn primary" [disabled]="submitting() || compiling()">
-              {{ submitting() ? 'Queuing…' : 'Queue backtest' }}
+              {{
+                submitting()
+                  ? 'Queuing…'
+                  : basketSymbols().length > 0
+                    ? 'Queue ' + (basketSymbols().length + 1) + ' backtests'
+                    : 'Queue backtest'
+              }}
             </button>
           </div>
         </form>
@@ -302,6 +340,14 @@ export function validateBacktestForm(f: {
         align-items: center;
         gap: var(--space-2);
         font-size: var(--text-sm);
+      }
+      .basket {
+        display: flex;
+        align-items: flex-end;
+        gap: var(--space-2);
+      }
+      .basket .field {
+        flex: 1;
       }
       .inputs-title {
         margin: 0 0 var(--space-2);
@@ -411,6 +457,15 @@ export class ScriptBacktestLauncherComponent {
   readonly formError = signal<string | null>(null);
   readonly lastRunId = signal<number | null>(null);
 
+  /** PE-I7: the basket's other markets, as typed. */
+  readonly basketText = signal('');
+  private readonly basket = computed(() =>
+    parseBasket(this.basketText(), this.strategy().symbol ?? ''),
+  );
+  readonly basketSymbols = computed(() => this.basket().symbols);
+  /** The last basket's runs, its own market first; null when the last queue was a single run. */
+  readonly basketRunIds = signal<number[] | null>(null);
+
   readonly savedInputs = computed(() => scriptInputsOf(this.strategy()));
 
   readonly overrideNote = computed(() => {
@@ -517,6 +572,12 @@ export class ScriptBacktestLauncherComponent {
     return req;
   }
 
+  /** The liquid majors, the strategy's own market left out. */
+  fillMajors(): void {
+    const own = (this.strategy().symbol ?? '').toUpperCase();
+    this.basketText.set(MAJOR_PAIRS.filter((s) => s !== own).join(', '));
+  }
+
   submit(): void {
     if (this.submitting()) return;
     const req = this.buildRequest();
@@ -524,7 +585,23 @@ export class ScriptBacktestLauncherComponent {
       this.formError.set(req);
       return;
     }
+    const basket = this.basket();
+    if (basket.error) {
+      this.formError.set(basket.error);
+      return;
+    }
+    if (basket.symbols.length > 0) {
+      if (req.symbolOverride) {
+        this.formError.set(
+          'Clear the symbol override to run a basket: the basket runs the strategy’s own market and the listed ones.',
+        );
+        return;
+      }
+      void this.submitBasket(req, basket.symbols);
+      return;
+    }
     this.formError.set(null);
+    this.basketRunIds.set(null);
     this.submitting.set(true);
     this.api.queueBacktest(req).subscribe({
       next: (res) => {
@@ -542,5 +619,39 @@ export class ScriptBacktestLauncherComponent {
         this.formError.set(describeFailure(err, 'Queuing the backtest failed.'));
       },
     });
+  }
+
+  /**
+   * PE-I7: queues the strategy's own market, then one override run per basket market, one after
+   * another. A market the engine refuses is named; the others still run.
+   */
+  private async submitBasket(
+    base: ScriptBacktestRequest,
+    symbols: readonly string[],
+  ): Promise<void> {
+    this.formError.set(null);
+    this.submitting.set(true);
+    const ids: number[] = [];
+    const refused: string[] = [];
+    for (const symbolOverride of [null, ...symbols]) {
+      const req: ScriptBacktestRequest = symbolOverride ? { ...base, symbolOverride } : base;
+      const label = symbolOverride ?? base.symbol;
+      try {
+        const res = await firstValueFrom(this.api.queueBacktest(req));
+        if (isOk(res) && res.data) ids.push(res.data);
+        else refused.push(`${label}: ${describeFailure(res, 'not queued')}`);
+      } catch (err) {
+        refused.push(`${label}: ${describeFailure(err, 'not queued')}`);
+      }
+    }
+    this.submitting.set(false);
+    if (refused.length > 0) this.formError.set(`Not queued — ${refused.join('; ')}`);
+    if (ids.length === 0) return;
+    this.basketRunIds.set(ids);
+    this.lastRunId.set(ids[0]);
+    this.notifications.success(
+      `Basket of ${ids.length} backtest${ids.length === 1 ? '' : 's'} queued`,
+    );
+    this.queued.emit(ids[0]);
   }
 }

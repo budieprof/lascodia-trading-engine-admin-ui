@@ -11,7 +11,7 @@ import { TypedConfirmDialogComponent } from './typed-confirm-dialog.component';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
 declareSignalIo(NewsBlackoutExemptionCardComponent, {
-  inputs: ['strategyId', 'strategyName', 'exempt'],
+  inputs: ['strategyId', 'strategyName', 'exempt', 'readOnly'],
   outputs: ['changed'],
 });
 declareSignalIo(TypedConfirmDialogComponent, {
@@ -239,5 +239,17 @@ describe('NewsBlackoutExemptionCardComponent', () => {
     expect(dialog()).toBeNull();
     expect(q('exemption-pending')).toBeTruthy();
     http.expectNone(STRATEGY_URL);
+  });
+
+  it('PE-I13: shows the exemption without letting it be changed when read-only', () => {
+    fixture = TestBed.createComponent(NewsBlackoutExemptionCardComponent);
+    fixture.componentRef.setInput('strategyId', 41);
+    fixture.componentRef.setInput('exempt', true);
+    fixture.componentRef.setInput('readOnly', true);
+    fixture.detectChanges();
+    el = fixture.nativeElement as HTMLElement;
+    expect(switchBtn().getAttribute('aria-checked')).toBe('true');
+    expect(switchBtn().disabled).toBe(true);
+    expect(switchBtn().title).toContain('operator access');
   });
 });

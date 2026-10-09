@@ -62,9 +62,44 @@ export interface ReportMeta {
   /** Closed trades trimmed beyond the trade limit (`strategy.closedtrades.first_index`). */
   trimmedTrades: Num;
   useBarMagnifier: boolean;
+  /**
+   * Bar magnifier bookkeeping (C6; null on an older engine): bars filled along lower-timeframe
+   * bars, bars that fell back to the chart bar, and bars whose lower-timeframe data was missing
+   * or incomplete.
+   */
+  magnifiedBars: Num;
+  magnifierFallbackBars: Num;
+  magnifierMissingBars: Num;
+  magnifierIncompleteBars: Num;
   riskHalted: boolean;
   riskHaltReason: string;
   properties: ReportStrategyProperties | null;
+}
+
+/**
+ * What the run's execution costs came to (the report's `costs`): the script's own `strategy()`
+ * costs, or the engine's cost overlay. Money in the account currency. Null on an older engine.
+ */
+export interface ReportCosts {
+  /** `Pine` (the script's own commission / slippage) or the overlay's label. */
+  model: string;
+  commission: Num;
+  /** Spread paid inside the fill prices (overlay only). */
+  spread: Num;
+  slippage: Num;
+  /** Swap at rollovers, positive = paid (overlay only). */
+  swap: Num;
+  shockFills: Num;
+  shockSlippage: Num;
+  limitFillsAsMarket: Num;
+  /** C1: `Bid` or `Mid`; '' for a pure Pine run. */
+  priceBasis: string;
+  recordedSpreadBars: Num;
+  recordedSpreadWiderBars: Num;
+  slippageModelFills: Num;
+  slippageModelRaisedFills: Num;
+  latencyFills: Num;
+  latencyMissingFills: Num;
 }
 
 /** Returns / trades analysis for one side (all, long or short trades). */
@@ -195,6 +230,13 @@ export interface ReportTrade {
   drawdownPercent: Num;
   barsHeld: Num;
   commission: Num;
+  /**
+   * The stop the trade opened with (C6) — what its R is measured against; null when it had none
+   * on its entry bar, or on an older engine.
+   */
+  initialStopPrice: Num;
+  /** Profit in units of the money at risk at the initial stop (C6); null without a stop. */
+  rMultiple: Num;
 }
 
 export interface ReportEquityPoint {
@@ -233,6 +275,8 @@ export interface StrategyReport {
   equityCurve: ReportEquityPoint[];
   monthlyReturns: ReportMonthlyReturn[];
   warnings: string[];
+  /** Null when the engine sent no costs section. */
+  costs: ReportCosts | null;
 }
 
 // ── Normalisation ─────────────────────────────────────────────────────────────
@@ -256,6 +300,8 @@ const TEXT_KEYS = new Set([
   'exitId',
   'exitSignal',
   'exitLeg',
+  'model',
+  'priceBasis',
 ]);
 
 const NAMED_FLOAT_LITERALS = new Set(['NaN', 'Infinity', '-Infinity']);
@@ -453,7 +499,25 @@ const TRADE_NUMBER_KEYS = [
   'drawdownPercent',
   'barsHeld',
   'commission',
+  'initialStopPrice',
+  'rMultiple',
 ] as const satisfies readonly (keyof ReportTrade)[];
+
+const COST_KEYS = [
+  'commission',
+  'spread',
+  'slippage',
+  'swap',
+  'shockFills',
+  'shockSlippage',
+  'limitFillsAsMarket',
+  'recordedSpreadBars',
+  'recordedSpreadWiderBars',
+  'slippageModelFills',
+  'slippageModelRaisedFills',
+  'latencyFills',
+  'latencyMissingFills',
+] as const satisfies readonly (keyof ReportCosts)[];
 
 const EQUITY_POINT_KEYS = [
   'time',
@@ -514,6 +578,10 @@ function normalizeMeta(v: unknown): ReportMeta {
     bars: num(m['bars']),
     trimmedTrades: num(m['trimmedTrades']),
     useBarMagnifier: m['useBarMagnifier'] === true,
+    magnifiedBars: num(m['magnifiedBars']),
+    magnifierFallbackBars: num(m['magnifierFallbackBars']),
+    magnifierMissingBars: num(m['magnifierMissingBars']),
+    magnifierIncompleteBars: num(m['magnifierIncompleteBars']),
     riskHalted: m['riskHalted'] === true,
     riskHaltReason: str(m['riskHaltReason']),
     properties: normalizeProperties(m['properties']),
@@ -583,6 +651,13 @@ export function normalizeStrategyReport(raw: unknown): StrategyReport | null {
     warnings: Array.isArray(o['warnings'])
       ? o['warnings'].filter((w): w is string => typeof w === 'string' && w.trim().length > 0)
       : [],
+    costs: isObject(o['costs'])
+      ? {
+          ...numbers(o['costs'], COST_KEYS),
+          model: str(o['costs']['model']),
+          priceBasis: str(o['costs']['priceBasis']),
+        }
+      : null,
   };
 }
 
