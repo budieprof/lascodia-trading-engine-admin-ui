@@ -541,6 +541,18 @@
       }
     </div>
 
+    <!-- SP-I4 (trading): the order ticket — a manual signal for one account, paper by default. -->
+    <button
+      type="button"
+      class="tb-btn tb-text"
+      [class.active]="ticketOpen()"
+      (click)="ticketOpen.set(!ticketOpen())"
+      title="Order ticket: a paper or live manual trade on this symbol, checked by the engine before it is sent"
+      data-testid="open-ticket"
+    >
+      <app-chart-icon name="trades" [size]="28" /><span class="tb-label">Trade</span>
+    </button>
+
     <button
       type="button"
       class="tb-btn tb-text"
@@ -1240,6 +1252,18 @@
           (toolComplete)="onToolComplete()"
           (drawingSettings)="settingsFor.set($event)"
           (drawingContextMenu)="openDrawingMenu($event, chartArea)"
+        />
+
+        <!-- SP-I3/SP-I4 (trading): the order ticket and the draggable trading lines on the price pane. -->
+        <app-chart-trading
+          [host]="host"
+          [symbol]="symbol()"
+          [precision]="precision()"
+          [pipSize]="pipSize()"
+          [quote]="liveQuote()"
+          [(open)]="ticketOpen"
+          [prefill]="ticketPrefill()"
+          (submitted)="onTicketSubmitted()"
         />
 
         <!-- A strategy the operator added replaced the one on the chart: say so, with Undo. -->

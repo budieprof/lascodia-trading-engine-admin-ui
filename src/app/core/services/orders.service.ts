@@ -6,10 +6,8 @@ import {
   PagedData,
   PagerRequest,
   OrderDto,
-  CreateOrderRequest,
   UpdateOrderRequest,
   ModifyOrderRequest,
-  SubmitOrderResult,
   BatchCancelOrdersRequest,
   BatchCancelOrdersResult,
 } from '@core/api/api.types';
@@ -46,16 +44,12 @@ export class OrdersService {
     return this.api.post(`/order/list`, params);
   }
 
-  create(data: CreateOrderRequest): Observable<ResponseData<OrderDto>> {
-    return this.api.post(`/order`, data);
-  }
+  // SP-I4: no `create` / `submit` here any more. An order typed in is never placed (no EA command places an order;
+  // the EA executes signals) — a manual trade is a manual signal: the chart's order ticket (trade-signal/manual) or the
+  // Signals page's "New manual signal".
 
   update(id: number, data: UpdateOrderRequest): Observable<ResponseData<OrderDto>> {
     return this.api.put(`/order/${id}`, data);
-  }
-
-  submit(id: number): Observable<ResponseData<SubmitOrderResult>> {
-    return this.api.post(`/order/${id}/submit`);
   }
 
   cancel(id: number): Observable<ResponseData<OrderDto>> {

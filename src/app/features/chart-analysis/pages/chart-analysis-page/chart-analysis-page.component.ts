@@ -303,6 +303,8 @@ import type {
   UpcomingEconomicEvent,
 } from '@core/services/economic-calendar.service';
 import { ChartPrefsService } from '../../workspace/chart-prefs.service';
+import { ChartTradingComponent } from '../../trading/chart-trading.component';
+import type { TicketPrefill } from '../../trading/ticket-model';
 import {
   dockStateOf,
   restoredDock,
@@ -547,6 +549,7 @@ const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
     FormsModule,
     DecimalPipe,
     ChartHostComponent,
+    ChartTradingComponent,
     DataWindowComponent,
     IndicatorsDialogComponent,
     ChartIconComponent,
@@ -1359,7 +1362,7 @@ export class ChartAnalysisPageComponent {
   private readonly signalMarkers = signal<ChartMarker[]>([]);
   private readonly rungMarkers = signal<ChartMarker[]>([]);
   /** The chart symbol's live quote (bid and ask), for the open positions' P&L at the exit side. */
-  private readonly liveQuote = signal<LiveQuote | null>(null);
+  protected readonly liveQuote = signal<LiveQuote | null>(null);
 
   /** The account scope, as a filter: only the selected account's positions and orders are drawn. */
   private inTradeScope(): (accountId: number | null | undefined) => boolean {
@@ -1669,6 +1672,15 @@ export class ChartAnalysisPageComponent {
     });
     return facts ? { ...facts } : null;
   });
+  /** SP-I4 (trading): the order ticket is open, and the values a "Stage…" opens it with. */
+  readonly ticketOpen = signal(false);
+  readonly ticketPrefill = signal<TicketPrefill | null>(null);
+
+  /** A ticket went through: the trade layers show the new position / order once the engine reports it. */
+  onTicketSubmitted(): void {
+    this.scheduleTradeRefresh({ symbol: this.symbol() });
+  }
+
   /** A position tool staged as a manual signal: the dialog's starting values (DR-I9). */
   readonly stagePrefill = signal<SignalPrefill | null>(null);
 
