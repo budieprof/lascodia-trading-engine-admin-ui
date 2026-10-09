@@ -1,20 +1,33 @@
 import { describe, expect, it } from 'vitest';
 
+import type { AlertChannelStatusDto } from '@core/api/api.types';
+
 import {
+  ALERT_CHANNELS,
+  MAX_TEST_MESSAGE_LENGTH,
   alertRowsDiffer,
   buildAlertRows,
+  channelChip,
+  channelWarnings,
   checkWebhookUrl,
+  deliveryAlertTitle,
+  deliveryStatusLabel,
   extractAlertConditions,
   extractPlots,
   insertAt,
+  normaliseFrequency,
   placeholderGroupsFor,
+  renderSampleMessage,
   scanCalls,
   scriptKind,
+  stormGuardText,
+  strategyConditionWarning,
   stringLiteral,
   toAlertBindings,
   unknownPlaceholders,
   validateRow,
   type AlertRow,
+  type ScriptAlertBindingView,
 } from './alerts.model';
 import { BREAKOUT_SOURCE } from '../testing/pine-sources';
 
@@ -213,7 +226,172 @@ describe('rows', () => {
       channels: ['Email'],
       messageTemplate: null,
       webhookUrl: null,
+      frequency: 'once_per_bar',
     });
     expect(alertRowsDiffer(rows, buildAlertRows([], scan.conditions, true))).toBe(true);
+  });
+
+  it('keeps each binding’s trigger, In app channel and the engine’s reason for switching it off', () => {
+    const rows = buildAlertRows(
+      [
+        {
+          alertKey: 'Long breakout',
+          enabled: false,
+          channels: ['InApp', 'Email'],
+          frequency: 'ONCE_PER_BAR_CLOSE',
+          disabledReason: 'Storm guard: 16 fires in 3 minutes.',
+          disabledAt: '2026-10-09T08:15:00Z',
+          lastDeliveryError: 'SMTP timeout',
+        },
+        {
+          alertKey: 'Short breakout',
+          enabled: true,
+          channels: ['Telegram'],
+          frequency: 'bogus',
+          disabledReason: 'stale — it is on again',
+        },
+      ] as ScriptAlertBindingView[],
+      scan.conditions,
+      true,
+    );
+    expect(rows[0]).toMatchObject({
+      channels: ['InApp', 'Email'],
+      frequency: 'once_per_bar_close',
+      disabledReason: 'Storm guard: 16 fires in 3 minutes.',
+      lastDeliveryError: 'SMTP timeout',
+    });
+    // An unknown frequency reads as the engine's default; a reason never shows on an enabled binding.
+    expect(rows[1]).toMatchObject({ frequency: 'once_per_bar', disabledReason: null });
+    // Changing only the trigger is a change to save.
+    const changed = rows.map((r, i) => (i === 0 ? { ...r, frequency: 'all' as const } : r));
+    expect(alertRowsDiffer(rows, changed)).toBe(true);
+    expect(toAlertBindings(changed)[0].frequency).toBe('all');
+  });
+
+  it('flags alertcondition rows of a strategy, which the engine does not send', () => {
+    const [row] = buildAlertRows([], scan.conditions, true);
+    expect(strategyConditionWarning({ ...row, enabled: true }, true)).toMatch(/does not send/);
+    expect(strategyConditionWarning({ ...row, enabled: true }, false)).toBeNull();
+    expect(strategyConditionWarning(row, true)).toBeNull();
+  });
+});
+
+describe('channels', () => {
+  const statuses: AlertChannelStatusDto[] = [
+    {
+      channel: 'InApp',
+      isConfigured: true,
+      isEnabled: true,
+      destinationPreview: 'Admin UI',
+      timeoutSeconds: 0,
+    },
+    {
+      channel: 'Email',
+      isConfigured: true,
+      isEnabled: false,
+      destinationPreview: 'a•••@x.com',
+      timeoutSeconds: 30,
+    },
+    {
+      channel: 'Webhook',
+      isConfigured: false,
+      isEnabled: true,
+      destinationPreview: null,
+      timeoutSeconds: 10,
+    },
+  ];
+
+  it('describes each channel’s state', () => {
+    expect(ALERT_CHANNELS).toEqual(['InApp', 'Email', 'Webhook', 'Telegram']);
+    expect(ALERT_CHANNELS.map((c) => channelChip(c, statuses).state)).toEqual([
+      'ready',
+      'off',
+      'unset',
+      'unknown',
+    ]);
+    expect(channelChip('InApp', statuses).label).toBe('In app: ready');
+    expect(channelChip('Email', null).state).toBe('unknown');
+  });
+
+  it('warns about chosen channels that will not deliver — not about a binding’s own webhook', () => {
+    const scan = extractAlertConditions(BREAKOUT_SOURCE);
+    const row = { ...buildAlertRows([], scan.conditions, true)[0], enabled: true };
+    expect(channelWarnings({ ...row, channels: ['Email', 'InApp'] }, statuses)).toEqual([
+      'Email is switched off — its deliveries will be recorded as not sent.',
+    ]);
+    expect(
+      channelWarnings({ ...row, channels: ['Webhook'], webhookUrl: 'https://x.io/h' }, statuses),
+    ).toEqual([]);
+    expect(channelWarnings({ ...row, channels: ['Webhook'], webhookUrl: null }, statuses)).toEqual([
+      'Webhook is not set up — its deliveries will be recorded as not sent.',
+    ]);
+    // A disabled row, or unknown statuses, warn about nothing.
+    expect(channelWarnings({ ...row, enabled: false, channels: ['Email'] }, statuses)).toEqual([]);
+    expect(channelWarnings({ ...row, channels: ['Email'] }, null)).toEqual([]);
+  });
+
+  it('describes the storm guard', () => {
+    expect(stormGuardText({ maxFires: 15, windowMinutes: 3 })).toContain(
+      'more than 15 times in 3 minutes',
+    );
+    expect(stormGuardText({ maxFires: 15, windowMinutes: 1 })).toContain('in 1 minute is');
+    expect(stormGuardText({ maxFires: 0, windowMinutes: 3 })).toMatch(/off/);
+    expect(normaliseFrequency(' Once ')).toBe('once');
+    expect(normaliseFrequency(null)).toBe('once_per_bar');
+  });
+});
+
+describe('test messages', () => {
+  const scan = extractAlertConditions(BREAKOUT_SOURCE);
+  const rows = buildAlertRows([], scan.conditions, true);
+  const ctx = {
+    symbol: 'gbpjpy',
+    timeframe: 'H1',
+    now: new Date('2026-10-09T08:42:17Z'),
+    plots: extractPlots(BREAKOUT_SOURCE),
+  };
+
+  it('fills the placeholders with sample values, marked as a test', () => {
+    // No template: the alertcondition's own message.
+    expect(renderSampleMessage(rows[0], ctx)).toBe('[TEST] Price broke above 1.08500');
+    const custom = {
+      ...rows[1],
+      messageTemplate:
+        '{{ ticker }} {{interval}} {{syminfo.basecurrency}}/{{syminfo.currency}} c={{close}} t={{time}} now={{timenow}} {{plot("Lower")}} {{nope}}',
+    };
+    expect(renderSampleMessage(custom, ctx)).toBe(
+      '[TEST] GBPJPY H1 GBP/JPY c=1.08542 t=2026-10-09T08:00:00Z now=2026-10-09T08:42:17Z 1.08500 {{nope}}',
+    );
+  });
+
+  it('uses the engine’s order-fill text when the binding sets none, and the script’s text for alert() calls', () => {
+    const fills = rows.find((r) => r.kind === 'order-fills')!;
+    expect(renderSampleMessage(fills, ctx)).toBe(
+      '[TEST] Order buy @ 1 filled on GBPJPY. New strategy position is 1',
+    );
+    const calls = rows.find((r) => r.kind === 'alert-calls')!;
+    expect(renderSampleMessage({ ...calls, messageTemplate: 'ignored {{close}}' }, ctx)).toBe(
+      '[TEST] Text the script passes to alert() on GBPJPY',
+    );
+  });
+
+  it('stays within what the test endpoint accepts', () => {
+    const long = { ...rows[0], messageTemplate: 'x'.repeat(2000) };
+    const text = renderSampleMessage(long, ctx);
+    expect(text).toHaveLength(MAX_TEST_MESSAGE_LENGTH);
+    expect(text.endsWith('…')).toBe(true);
+  });
+});
+
+describe('delivery log', () => {
+  it('names outcomes and alert keys as the tab does', () => {
+    expect(deliveryStatusLabel({ status: 'Delivered', attempts: 1 })).toBe('sent');
+    expect(deliveryStatusLabel({ status: 'Skipped', attempts: 1 })).toBe('not sent');
+    expect(deliveryStatusLabel({ status: 'Pending', attempts: 0 })).toBe('sending');
+    expect(deliveryStatusLabel({ status: 'Pending', attempts: 2 })).toBe('retrying (attempt 3)');
+    expect(deliveryStatusLabel({ status: 'Expired', attempts: 8 })).toBe('expired');
+    expect(deliveryAlertTitle('order-fills')).toBe('Order fills');
+    expect(deliveryAlertTitle('alert()')).toBe('alert() calls');
+    expect(deliveryAlertTitle('Long breakout')).toBe('Long breakout');
   });
 });

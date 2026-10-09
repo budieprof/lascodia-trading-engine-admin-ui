@@ -340,25 +340,21 @@
         <app-chart-icon name="alert" [size]="28" /><span class="tb-label">Alert</span>
       </button>
       @if (openMenu() === 'alert') {
-        <div class="tb-menu tb-alert-menu" (click)="$event.stopPropagation()">
-          <div class="tb-menu-heading">Price alert · {{ symbol() }}</div>
-          <label class="tb-menu-field">
-            Price
-            <input
-              type="number"
-              [step]="1 / 10 ** precision()"
-              [value]="alertPrice()"
-              (input)="alertPrice.set($any($event.target).valueAsNumber)"
-              (keydown.enter)="createAlertAt(alertPrice()); openMenu.set(null)"
-            />
-          </label>
-          <button
-            type="button"
-            class="tb-primary"
-            (click)="createAlertAt(alertPrice()); openMenu.set(null)"
-          >
-            Create
-          </button>
+        <!-- Alerts v2 (SP-02/SP-03): the full alert form — direction, side, frequency, channels, expiry, message. -->
+        <div
+          class="tb-menu tb-alert-menu"
+          (click)="$event.stopPropagation()"
+          data-testid="chart-alert-popover"
+        >
+          <app-chart-alert-form
+            [symbol]="symbol()"
+            [timeframe]="resolution()"
+            [precision]="precision()"
+            [lastClose]="bars().at(-1)?.close ?? 0"
+            [presetPrice]="alertPreset()"
+            (saved)="onAlertSaved()"
+            (cancelled)="openMenu.set(null)"
+          />
         </div>
       }
     </div>
@@ -857,7 +853,14 @@
       >
         <app-chart-icon name="object-tree" [size]="28" />
       </button>
-      <button type="button" class="strip-btn" (click)="openAlertDraft($event)" title="Create alert">
+      <button
+        type="button"
+        class="strip-btn"
+        [class.active]="alertManagerOpen()"
+        (click)="toggleAlertManager()"
+        [title]="'Alerts (' + chartAlerts.activeCount() + ' active)'"
+        data-testid="alert-manager-button"
+      >
         <app-chart-icon name="alert" [size]="28" />
       </button>
     </nav>
@@ -1281,6 +1284,18 @@
             </ul>
           </div>
         }
+
+        <!-- Alert manager (alerts v2, SP-I2). -->
+        @if (alertManagerOpen()) {
+          <app-chart-alert-manager
+            [symbol]="symbol()"
+            [timeframe]="resolution()"
+            [precision]="precision()"
+            [lastClose]="bars().at(-1)?.close ?? 0"
+            [focusId]="alertFocusId()"
+            (closed)="closeAlertManager()"
+          />
+        }
       </div>
 
       @for (panel of comparePanels(); track panel.id) {
@@ -1574,6 +1589,7 @@
           [onChart]="!!editorTarget()"
           [loading]="!!editorTarget()?.loading"
           [strategyId]="editorTarget()?.strategyId ?? null"
+          [scriptKey]="editorTarget()?.key ?? null"
           [externalSource]="assistSource()"
           (sourceChange)="onEditorSource($event)"
           (add)="onEditorAdd($event)"
@@ -1628,3 +1644,32 @@
 @if (newsAnalysis(); as a) {
   <app-news-analysis-modal [article]="a" [symbol]="symbol()" (closed)="newsAnalysis.set(null)" />
 }
+
+<!-- Alerts v2: dragging an alert line asks before the live alert moves. -->
+<dialog
+  #alertMoveDialog
+  class="alert-move-dialog"
+  (close)="pendingAlertMove.set(null)"
+  data-testid="alert-move-dialog"
+>
+  @if (pendingAlertMove(); as mv) {
+    <form method="dialog">
+      <p>
+        Move the alert “{{ mv.label }}” from
+        {{ mv.from | number: '1.' + precision() + '-' + precision() }} to
+        <strong>{{ mv.to | number: '1.' + precision() + '-' + precision() }}</strong
+        >? It is re-armed at the new level.
+      </p>
+      <div class="alert-move-actions">
+        <button value="cancel">Cancel</button>
+        <button
+          value="move"
+          class="tb-primary"
+          (click)="$event.preventDefault(); confirmAlertMove()"
+        >
+          Move
+        </button>
+      </div>
+    </form>
+  }
+</dialog>

@@ -24,6 +24,7 @@ import { AssistantDockService } from '@core/assistant/assistant-dock.service';
 import { PageContextService } from '@core/assistant/page-context.service';
 import { UiCommandService } from '@core/assistant/ui-command.service';
 import { pineAssistCommands, pineEditorFacts } from '@shared/pine-assist/pine-assist';
+import type { HasUnsavedChanges } from '@features/scripting/shared/unsaved-changes';
 import { createStrategyPineAdapter } from '../../pine-assist/strategy-pine-adapter';
 
 /**
@@ -65,7 +66,7 @@ import { createStrategyPineAdapter } from '../../pine-assist/strategy-pine-adapt
     </div>
   `,
 })
-export class StrategyEditPageComponent implements OnInit {
+export class StrategyEditPageComponent implements OnInit, HasUnsavedChanges {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
@@ -153,6 +154,18 @@ export class StrategyEditPageComponent implements OnInit {
     return s ? `${s.symbol} · ${s.timeframe} · ${s.strategyType}` : '';
   }
 
+  /** Set once an update was accepted: the page leaves with nothing unsaved. */
+  private saved = false;
+
+  /** PE-06: leaving this page (a link, Back, the detail button) asks while the form holds an edit. */
+  hasUnsavedChanges(): boolean {
+    return !this.saved && (this.form()?.hasUnsavedChanges() ?? false);
+  }
+
+  unsavedChangesNote(): string {
+    return this.form()?.unsavedChangesNote() ?? 'The strategy has unsaved changes';
+  }
+
   ngOnInit(): void {
     this.route.paramMap
       .pipe(
@@ -190,6 +203,7 @@ export class StrategyEditPageComponent implements OnInit {
             return;
           }
           this.notifications.success('Strategy updated');
+          this.saved = true;
           this.backToDetail();
         },
         error: (err) => {

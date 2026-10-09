@@ -1,4 +1,6 @@
 import { DiffRow, diffTextField } from './json-diff';
+import { parseSavedInputs } from '@features/scripting/pine/pine-saved-inputs';
+import { diffInputValues, diffLines, type InputChange } from '@features/scripting/shared/text-diff';
 
 /** The strategy fields a captured version records (and the edit form can change). */
 export interface StrategyVersionFields {
@@ -11,9 +13,17 @@ export interface StrategyVersionFields {
   sessionFilterJson: string | null;
   regimeGateJson: string | null;
   multiTimeframeGateJson: string | null;
+  /** Pine script at this version (script strategies, ADR-0027 §3.7); null for other types. */
+  scriptSource?: string | null;
+  /** Its input overrides. */
+  scriptInputs?: Readonly<Record<string, unknown>> | null;
 }
 
-const FIELDS: ReadonlyArray<{ key: keyof StrategyVersionFields; label: string; json: boolean }> = [
+const FIELDS: ReadonlyArray<{
+  key: Exclude<keyof StrategyVersionFields, 'scriptSource' | 'scriptInputs'>;
+  label: string;
+  json: boolean;
+}> = [
   { key: 'name', label: 'Name', json: false },
   { key: 'description', label: 'Description', json: false },
   { key: 'parametersJson', label: 'Parameters / rules', json: true },
@@ -36,7 +46,7 @@ export interface VersionDiffGroup {
   rows: VersionDiffRow[];
 }
 
-/** Every change between a captured version and the current values, grouped by field. */
+/** Every settings change between a captured version and the current values, grouped by field. */
 export function diffStrategyVersion(
   before: StrategyVersionFields,
   after: StrategyVersionFields,
@@ -50,4 +60,57 @@ export function diffStrategyVersion(
     if (rows.length > 0) groups.push({ field: f.key, label: f.label, rows });
   }
   return groups;
+}
+
+/** What a version changed in the Pine script (PE-02). */
+export interface ScriptVersionChange {
+  before: string;
+  after: string;
+  sourceChanged: boolean;
+  added: number;
+  removed: number;
+  inputChanges: InputChange[];
+}
+
+/**
+ * The script side of a version comparison: source lines and input overrides. Null when neither
+ * side is a script — or when both carry the same script and inputs.
+ */
+export function diffScriptVersion(
+  before: Pick<StrategyVersionFields, 'scriptSource' | 'scriptInputs'>,
+  after: Pick<StrategyVersionFields, 'scriptSource' | 'scriptInputs'>,
+  /** Puts both input sets in the form they run in (defaults dropped), when the inputs are known. */
+  normalizeInputs: (v: Readonly<Record<string, unknown>>) => Readonly<Record<string, unknown>> = (
+    v,
+  ) => v,
+): ScriptVersionChange | null {
+  const b = before.scriptSource ?? null;
+  const a = after.scriptSource ?? null;
+  if (b === null && a === null) return null;
+  const sourceChanged = (b ?? '') !== (a ?? '');
+  const inputChanges = diffInputValues(
+    normalizeInputs(before.scriptInputs ?? {}),
+    normalizeInputs(after.scriptInputs ?? {}),
+  );
+  if (!sourceChanged && inputChanges.length === 0) return null;
+  const lines = sourceChanged ? diffLines(b ?? '', a ?? '') : null;
+  return {
+    before: b ?? '',
+    after: a ?? '',
+    sourceChanged,
+    added: lines?.added ?? 0,
+    removed: lines?.removed ?? 0,
+    inputChanges,
+  };
+}
+
+/** A captured version's script fields as the diff reads them (inputs parsed from their JSON). */
+export function versionScriptFields(v: {
+  scriptSource?: string | null;
+  scriptInputsJson?: string | null;
+}): Pick<StrategyVersionFields, 'scriptSource' | 'scriptInputs'> {
+  return {
+    scriptSource: v.scriptSource ?? null,
+    scriptInputs: v.scriptInputsJson ? parseSavedInputs(v.scriptInputsJson) : null,
+  };
 }

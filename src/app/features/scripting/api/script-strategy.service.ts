@@ -4,7 +4,8 @@ import { Observable, catchError, from, switchMap, throwError } from 'rxjs';
 
 import { ApiService, SUPPRESS_ERROR_TOAST } from '@core/api/api.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
-import type { ResponseData } from '@core/api/api.types';
+import type { BacktestRunDto, PagedData, ResponseData } from '@core/api/api.types';
+import type { BacktestRunCompareFields } from '@core/api/scripting.types';
 
 import type {
   ScreenerRequest,
@@ -63,6 +64,32 @@ export class ScriptStrategyService {
   /** §4 — queues a backtest of a script strategy; `data` is the new run id. */
   queueBacktest(req: ScriptBacktestRequest): Observable<ResponseData<number>> {
     return this.api.post('/backtest', req, { silent: true });
+  }
+
+  /**
+   * `GET backtest/{id}` — one run with its result and equity curve (PE-I7's matrix and comparison
+   * poll it, so a refusal never toasts).
+   */
+  getBacktestRun(id: number): Observable<ResponseData<BacktestRunDto & BacktestRunCompareFields>> {
+    return this.api.get(`/backtest/${id}`, { silent: true });
+  }
+
+  /** `POST backtest/list` — a strategy's newest runs (no result payloads), for picking two to compare. */
+  listStrategyBacktests(
+    strategyId: number,
+    count = 50,
+  ): Observable<ResponseData<PagedData<BacktestRunDto & BacktestRunCompareFields>>> {
+    return this.api.post(
+      '/backtest/list',
+      {
+        currentPage: 1,
+        itemCountPerPage: count,
+        filter: { strategyId },
+        sortBy: 'id',
+        sortDirection: 'desc',
+      },
+      { silent: true },
+    );
   }
 
   /**

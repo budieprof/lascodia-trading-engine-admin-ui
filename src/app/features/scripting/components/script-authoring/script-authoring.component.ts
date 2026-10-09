@@ -1,13 +1,17 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   ViewChild,
   computed,
+  effect,
   inject,
   input,
+  linkedSignal,
   model,
   output,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
@@ -17,24 +21,45 @@ import type {
   ScriptCompileResult,
   ScriptExecutionPolicy,
   ScriptInputValues,
+  StrategyScriptRevisionField,
 } from '@core/api/scripting.types';
 import { ScriptingService, toScriptingError } from '@core/services/scripting.service';
+import { StrategiesService } from '@core/services/strategies.service';
+import { StrategyExecutionService } from '../../api/strategy-execution.service';
 import { EXITS_NEVER_BLOCKED, POLICY_DESCRIPTIONS } from '../../execution/execution.model';
-import { inputOverrides, resolveInputValues } from '../../pine/pine-inputs';
+import {
+  effectiveOverrides,
+  inputOverrides,
+  resolveInputValues,
+  sameEffectiveInputs,
+  sameInputValues,
+} from '../../pine/pine-inputs';
+import { isOk } from '../../shared/api-error';
+import {
+  DraftAutosaver,
+  clearDraft,
+  draftAge,
+  draftKey,
+  readDraft,
+  type ScriptDraftRecord,
+} from '../../shared/draft-store';
+import { ScriptDialogService } from '../../shared/script-dialog.service';
 import { DeclarationSummaryComponent } from '../declaration-summary/declaration-summary.component';
 import { InputsFormComponent } from '../inputs-form/inputs-form.component';
 import { ScriptPreviewComponent } from '../script-preview/script-preview.component';
 import { ScriptWorkbenchComponent } from '../script-workbench/script-workbench.component';
 import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
-import { draftFor, type ScriptDraft } from './authoring-mode';
+import {
+  DEFAULT_STRATEGY_SCRIPT,
+  baseFor,
+  draftFor,
+  type ScriptBase,
+  type ScriptDraft,
+} from './authoring-mode';
+import { ExampleGalleryComponent } from '../../onboarding/example-gallery.component';
+import type { StrategyExample } from '../../onboarding/strategy-examples';
 
 type SideTab = 'inputs' | 'properties';
-
-function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
-  const ka = Object.keys(a);
-  const kb = Object.keys(b);
-  return ka.length === kb.length && ka.every((k) => a[k] === b[k]);
-}
 
 /**
  * "Script (Pine v6)" authoring for a RuleBased strategy, inside the strategy form: the editor
@@ -59,10 +84,48 @@ function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
     InputsFormComponent,
     DeclarationSummaryComponent,
     ScriptPreviewComponent,
+    ExampleGalleryComponent,
   ],
   template: `
+    @if (restorable(); as r) {
+      <div class="restore-banner" role="status">
+        <span>
+          An unsaved edit of this script from {{ draftAgeText(r.savedAt) }} is kept in this browser.
+          @if (restoreOverNewer()) {
+            The saved script has changed since that edit started — compare before saving.
+          }
+        </span>
+        <span class="restore-actions">
+          <button type="button" class="btn btn-sm" (click)="restoreLocalDraft()">Restore it</button>
+          <button type="button" class="btn btn-ghost btn-sm" (click)="discardLocalDraft()">
+            Discard
+          </button>
+        </span>
+      </div>
+    }
     <div class="authoring-grid">
       <div class="col-editor">
+        <!-- PE-I9: complete example strategies to start from. -->
+        <div class="examples-bar">
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            data-testid="examples-toggle"
+            [attr.aria-expanded]="galleryOpen()"
+            (click)="galleryOpen.set(!galleryOpen())"
+          >
+            Examples
+          </button>
+          @if (!strategy()) {
+            <span class="muted small"
+              >Start from a complete strategy with a stop: reversions, breakouts, a trend
+              follower.</span
+            >
+          }
+        </div>
+        @if (galleryOpen()) {
+          <app-example-gallery (picked)="useExample($event)" (closed)="galleryOpen.set(false)" />
+        }
         <app-script-workbench
           [source]="draft().source"
           (sourceChange)="setSource($event)"
@@ -70,6 +133,8 @@ function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
           [timeframe]="timeframe()"
           [fileName]="fileName()"
           [editorHeight]="spacious() ? 'max(620px, calc(100vh - 300px))' : '470px'"
+          saveShortcut="save"
+          (saveRequested)="saveRequested.emit()"
           (compiled)="onCompiled($event)"
         />
       </div>
@@ -175,7 +240,7 @@ function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
       @defer (on idle) {
         <app-script-preview
           [source]="draft().source"
-          [inputs]="draft().inputs"
+          [inputs]="effectiveInputs()"
           [symbol]="symbol()"
           [timeframe]="timeframe()"
           [kind]="shown()?.declaration?.kind ?? null"
@@ -196,6 +261,29 @@ function sameInputs(a: ScriptInputValues, b: ScriptInputValues): boolean {
       :host {
         display: block;
         margin-bottom: var(--space-4, 16px);
+      }
+      .restore-banner {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 10px;
+        padding: 8px 12px;
+        border: 1px solid rgba(0, 113, 227, 0.35);
+        border-radius: 8px;
+        background: rgba(0, 113, 227, 0.07);
+        font-size: 12.5px;
+      }
+      .restore-actions {
+        display: inline-flex;
+        gap: 6px;
+      }
+      .examples-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
       }
       .authoring-grid {
         display: grid;
@@ -305,7 +393,7 @@ export class ScriptAuthoringComponent {
   /** The script being written (owned by the form, two-way). */
   readonly draft = model<ScriptDraft>(draftFor(null));
   /** The strategy being edited; null when creating. */
-  readonly strategy = input<StrategyDto | null>(null);
+  readonly strategy = input<(StrategyDto & StrategyScriptRevisionField) | null>(null);
   /** The strategy's symbol and timeframe — used to refine warnings and to run previews. */
   readonly symbol = input<string | null>(null);
   readonly timeframe = input<string | null>(null);
@@ -313,12 +401,80 @@ export class ScriptAuthoringComponent {
   readonly spacious = input(false);
   /** Edit mode: the operator wants to change the policy (on the detail page's Execution tab). */
   readonly executionRequested = output<void>();
+  /** Ctrl/Cmd-S in the editor: the host saves the strategy (the same path as its Save button). */
+  readonly saveRequested = output<void>();
+  /** The saved script was re-read from the engine (a conflict resolved by loading it). */
+  readonly scriptReloaded = output<void>();
 
   @ViewChild(ScriptWorkbenchComponent) workbench?: ScriptWorkbenchComponent;
   /** The Preview, once its deferred chunk has loaded. */
   readonly preview = viewChild(ScriptPreviewComponent);
 
   private readonly scripting = inject(ScriptingService);
+  private readonly strategies = inject(StrategiesService);
+  private readonly execution = inject(StrategyExecutionService);
+  private readonly dialogs = inject(ScriptDialogService);
+  private readonly autosaver = new DraftAutosaver();
+
+  /**
+   * The saved script this edit started from (PE-01 / PE-05): what "unsaved" compares with, and
+   * the revision a save sends so it never overwrites a newer script. Re-read with the strategy;
+   * moved forward by every save of this panel.
+   */
+  readonly base = linkedSignal<(StrategyDto & StrategyScriptRevisionField) | null, ScriptBase>({
+    source: () => this.strategy(),
+    computation: (s) => baseFor(s),
+  });
+
+  /** A local draft of an earlier, unsaved edit of this script (PE-I3), offered for restore. */
+  readonly restorable = signal<ScriptDraftRecord | null>(null);
+  /** The restorable draft was edited from an older saved script than the one loaded now. */
+  readonly restoreOverNewer = computed(() => {
+    const r = this.restorable();
+    const rev = this.base().revision;
+    return !!r?.baseRevision && !!rev && r.baseRevision !== rev;
+  });
+
+  /**
+   * The overrides the Preview runs with: the draft's, coerced to the inputs the script declares
+   * now, defaults dropped. The draft itself keeps every override until the script is saved (PE-04).
+   */
+  readonly effectiveInputs = computed(() =>
+    effectiveOverrides(this.lastGood()?.inputs ?? null, this.draft().inputs),
+  );
+
+  /** The compile of the last {@link prepareSubmit}, for the save's checks (PS9002). */
+  private submitCompile: ScriptCompileResult | null = null;
+
+  constructor() {
+    // A strategy (or a new one) opened: offer a local draft of an earlier unsaved edit.
+    effect(() => {
+      const key = this.draftKey();
+      untracked(() => this.offerLocalDraft(key));
+    });
+    // Autosave the edit while it differs from the saved script; forget the draft once it does not.
+    effect(() => {
+      const d = this.draft();
+      const key = this.draftKey();
+      untracked(() => {
+        // A draft on offer stays restorable from memory while newer edits are autosaved.
+        if (this.isDirty()) {
+          this.autosaver.schedule(key, {
+            source: d.source,
+            inputs: d.inputs,
+            baseRevision: this.base().revision,
+            savedAt: Date.now(),
+          });
+        } else {
+          this.autosaver.cancel();
+          // A kept draft on offer stays stored until the operator restores or discards it.
+          if (!this.restorable()) clearDraft(key);
+        }
+      });
+    });
+    inject(DestroyRef).onDestroy(() => this.autosaver.flush());
+  }
+
   readonly tab = signal<SideTab>('inputs');
   readonly phase = signal<'idle' | 'validating' | 'saving'>('idle');
   readonly message = signal<string | null>(null);
@@ -357,6 +513,31 @@ export class ScriptAuthoringComponent {
     this.draft.update((d) => ({ ...d, inputs }));
   }
 
+  /** PE-I9: the example gallery is open above the editor. */
+  readonly galleryOpen = signal(false);
+
+  /**
+   * Puts an example in the editor as an undoable edit. A script the operator has written (not the
+   * starting script, not this example already) is only replaced after asking.
+   */
+  async useExample(example: StrategyExample): Promise<void> {
+    const current = this.currentSource();
+    const untouched =
+      !current.trim() || current === DEFAULT_STRATEGY_SCRIPT || current === example.source;
+    if (!untouched) {
+      const ok = await this.dialogs.confirm({
+        title: `Replace the script with “${example.title}”?`,
+        message:
+          "The editor's script is replaced by the example. Undo in the editor (Ctrl-Z / Cmd-Z) brings it back.",
+        confirmLabel: 'Replace the script',
+        tone: 'danger',
+      });
+      if (!ok) return;
+    }
+    this.replaceSource(example.source);
+    this.galleryOpen.set(false);
+  }
+
   readonly exitsNote = EXITS_NEVER_BLOCKED;
 
   policyText(policy: ScriptExecutionPolicy): string {
@@ -370,23 +551,27 @@ export class ScriptAuthoringComponent {
     }));
   }
 
+  /**
+   * A background compile only updates what the panels show. It never rewrites the overrides
+   * (PE-04): a compile of half-typed code — a group renamed mid-word changes every input id in it
+   * — would otherwise drop or clamp tuned values. They are cleaned once, when the script is saved.
+   */
   onCompiled(result: ScriptCompileResult): void {
     this.compile.set(result);
     if (!result.declaration) return;
     this.lastGood.set(result);
-    // Keep only overrides the compiled script still declares, coerced to its current ranges.
-    const normalised = inputOverrides(
-      result.inputs,
-      resolveInputValues(result.inputs, this.draft().inputs),
-    );
-    if (!sameInputs(normalised, this.draft().inputs)) this.setInputs(normalised);
   }
 
-  /** The script or its inputs differ from what the strategy has saved. */
+  /**
+   * The script or its inputs differ from the saved script (PE-05): the source as text, the inputs
+   * by what they run — an override equal to its default and none are the same, so a stored set the
+   * optimizer wrote in full does not look edited.
+   */
   isDirty(): boolean {
-    const saved = draftFor(this.strategy());
+    const b = this.base();
     const d = this.draft();
-    return d.source !== saved.source || !sameInputs(d.inputs, saved.inputs);
+    if (d.source !== b.source) return true;
+    return !sameEffectiveInputs(this.lastGood()?.inputs ?? null, d.inputs, b.inputs);
   }
 
   /**
@@ -422,6 +607,8 @@ export class ScriptAuthoringComponent {
         );
         return null;
       }
+      this.submitCompile = result;
+      // Overrides are cleaned here, at save time only (PE-04).
       const inputs = inputOverrides(
         result.inputs,
         resolveInputValues(result.inputs, this.draft().inputs),
@@ -435,25 +622,57 @@ export class ScriptAuthoringComponent {
   /**
    * `PUT strategy/{id}/script` — the engine compiles, captures a version and restarts the live
    * session at the next bar. A compile refusal marks every diagnostic in the editor.
+   *
+   * The save carries the revision the edit started from (PE-01): when the saved script changed
+   * since — another tab, a rollback, an approved optimization — the engine refuses it (`-409`) and
+   * the operator compares the two and decides. A script without a protective stop (PS9002) on a
+   * strategy with enabled account bindings is saved only after a confirmation (PE-09).
    */
   async saveScript(
     strategyId: number,
     draft: ScriptDraft = this.draft(),
     changeReason?: string | null,
   ): Promise<boolean> {
-    this.phase.set('saving');
     this.message.set(null);
+    if (!(await this.confirmNoStop(strategyId))) {
+      this.message.set(
+        'Not saved. Add a protective stop (strategy.exit with stop / loss / trail).',
+      );
+      return false;
+    }
+    return this.putScript(strategyId, draft, changeReason, this.base().revision, true);
+  }
+
+  private async putScript(
+    strategyId: number,
+    draft: ScriptDraft,
+    changeReason: string | null | undefined,
+    expectedRevision: string | null,
+    resolveConflicts: boolean,
+  ): Promise<boolean> {
+    this.phase.set('saving');
     try {
-      await firstValueFrom(
+      const saved = await firstValueFrom(
         this.scripting.updateStrategyScript(strategyId, {
           source: draft.source,
           inputs: draft.inputs,
           ...(changeReason?.trim() ? { changeReason: changeReason.trim() } : {}),
+          ...(expectedRevision ? { expectedScriptRevision: expectedRevision } : {}),
         }),
       );
+      this.base.set({
+        source: draft.source,
+        inputs: draft.inputs,
+        revision: saved.scriptRevision ?? expectedRevision,
+      });
+      this.forgetLocalDraft();
       return true;
     } catch (err) {
       const e = toScriptingError(err, 'Saving the script failed.');
+      if (e.isConflict && resolveConflicts) {
+        this.phase.set('idle');
+        return this.resolveConflict(strategyId, draft, changeReason, e.message);
+      }
       if (e.compile) this.workbench?.showResult(e.compile);
       this.message.set(
         e.code || e.compile ? `The engine refused the script: ${e.message}` : e.message,
@@ -462,6 +681,146 @@ export class ScriptAuthoringComponent {
     } finally {
       this.phase.set('idle');
     }
+  }
+
+  /**
+   * The saved script changed after this edit started: show both side by side and let the
+   * operator keep theirs (save over it), take the saved one (discard the edit), or keep editing.
+   */
+  private async resolveConflict(
+    strategyId: number,
+    mine: ScriptDraft,
+    changeReason: string | null | undefined,
+    reason: string,
+  ): Promise<boolean> {
+    let theirs: (StrategyDto & StrategyScriptRevisionField) | null = null;
+    try {
+      const res = await firstValueFrom(this.strategies.getById(strategyId));
+      theirs = (res?.data as (StrategyDto & StrategyScriptRevisionField) | null) ?? null;
+    } catch {
+      theirs = null;
+    }
+    if (!theirs) {
+      this.message.set(
+        `${reason} The saved script could not be read to compare — reload the page.`,
+      );
+      return false;
+    }
+    const saved = baseFor(theirs);
+    const r = await this.dialogs.ask({
+      title: 'The script changed since you opened it',
+      message:
+        'The engine has a newer saved script than the one this edit started from — another tab, ' +
+        'a rollback or an approved optimization saved it. Saving now would replace that change.',
+      compare: {
+        before: saved.source,
+        after: mine.source,
+        beforeLabel: 'Saved now',
+        afterLabel: 'Your edit',
+        beforeInputs: saved.inputs,
+        afterInputs: mine.inputs,
+      },
+      choices: [
+        { id: 'reload', label: 'Discard my edit and load the saved script' },
+        { id: 'overwrite', label: 'Save my edit over it', tone: 'danger' },
+      ],
+      cancelLabel: 'Keep editing',
+      tone: 'danger',
+    });
+    if (r.choice === 'overwrite') {
+      return this.putScript(strategyId, mine, changeReason, saved.revision, false);
+    }
+    if (r.choice === 'reload') {
+      this.applySaved(theirs);
+      this.message.set('Loaded the saved script. Your edit was discarded.');
+      this.scriptReloaded.emit();
+      return false;
+    }
+    this.message.set(
+      'Not saved: the script changed since you opened it. Compare, then save again.',
+    );
+    return false;
+  }
+
+  /** PE-09: a stopless script on live bindings asks first. True = go ahead. */
+  private async confirmNoStop(strategyId: number): Promise<boolean> {
+    const compiled = this.submitCompile ?? this.compile();
+    const ps9002 = compiled?.diagnostics.find((d) => d.code === 'PS9002');
+    if (!ps9002) return true;
+    let enabled: string[] = [];
+    try {
+      const res = await firstValueFrom(this.execution.getAccountBindings(strategyId));
+      enabled = isOk(res)
+        ? (res.data ?? [])
+            .filter((b) => b.isEnabled)
+            .map((b) => b.accountName || `#${b.tradingAccountId}`)
+        : [];
+    } catch {
+      enabled = [];
+    }
+    if (enabled.length === 0) return true;
+    return this.dialogs.confirm({
+      title: 'This script sets no stop-loss',
+      message:
+        `Live accounts reject an entry without a protective stop, and this strategy is bound to ` +
+        `${enabled.length} enabled account${enabled.length === 1 ? '' : 's'} (${enabled.join(', ')}). ` +
+        'Once it is active, every entry it signals will be refused there.',
+      details: [`PS9002 at line ${ps9002.line}: ${ps9002.message}`],
+      confirmLabel: 'Save without a stop',
+      cancelLabel: 'Keep editing',
+      tone: 'danger',
+    });
+  }
+
+  /**
+   * Makes `strategy`'s saved script the panel's draft and base — after a rollback (PE-03) or
+   * when a conflict is resolved by loading the saved script. Replaced through the editor, so the
+   * operator can still undo back to what they had.
+   */
+  applySaved(strategy: (StrategyDto & StrategyScriptRevisionField) | null): void {
+    const saved = baseFor(strategy);
+    this.base.set(saved);
+    if (this.currentSource() !== saved.source) this.replaceSource(saved.source);
+    this.draft.update((d) => ({ ...d, source: saved.source, inputs: saved.inputs }));
+    this.forgetLocalDraft();
+  }
+
+  // ── Local draft (PE-I3) ─────────────────────────────────────────────────────────────────
+
+  private draftKey(): string {
+    return draftKey('strategy', this.strategy()?.id ?? null);
+  }
+
+  private offerLocalDraft(key: string): void {
+    const d = readDraft(key);
+    const b = this.base();
+    const differs = !!d && (d.source !== b.source || !sameInputValues(d.inputs ?? {}, b.inputs));
+    this.restorable.set(differs ? d : null);
+    if (d && !differs) clearDraft(key);
+  }
+
+  /** Puts the kept draft into the editor (undoable) with its inputs. */
+  restoreLocalDraft(): void {
+    const d = this.restorable();
+    if (!d) return;
+    this.restorable.set(null);
+    this.replaceSource(d.source);
+    this.draft.update((x) => ({ ...x, source: d.source, inputs: d.inputs ?? x.inputs }));
+  }
+
+  /** Throws the kept draft away (the operator chose the saved script). */
+  discardLocalDraft(): void {
+    this.restorable.set(null);
+    this.forgetLocalDraft();
+  }
+
+  private forgetLocalDraft(): void {
+    this.autosaver.cancel();
+    clearDraft(this.draftKey());
+  }
+
+  draftAgeText(savedAt: number): string {
+    return draftAge(savedAt);
   }
 
   /** Shows why the form's own save failed (for refusals the form hears about first). */

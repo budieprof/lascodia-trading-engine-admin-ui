@@ -34,8 +34,27 @@ import {
 } from '@features/backtests/backtest-trade-chart';
 import type { ReportTrade } from '../../report/strategy-report.model';
 import { engineTimeframe } from '../../backtest/run-chart.model';
+import type { ReportTestCount } from '../../report/report-r-analysis.component';
+import { scriptSourceHash } from '../../shared/sha256';
+import { markPreviewed } from '../../onboarding/previewed-scripts';
 
 const BAR_CHOICES = [500, 1000, 2000, 5000, 10000] as const;
+
+/** Input values compared by content, whatever order their keys were written in. */
+function inputsKey(values: ScriptInputValues | null | undefined): string {
+  const v = values ?? {};
+  return JSON.stringify(
+    Object.keys(v)
+      .sort()
+      .map((k) => [k, v[k]]),
+  );
+}
+
+/** "a", "a and b", "a, b and c". */
+function listText(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? '';
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
 
 /** What the result area shows: the chart, or (strategy scripts) the Strategy report. */
 export type PreviewView = 'chart' | 'report';
@@ -78,6 +97,10 @@ export type PreviewView = 'chart' | 'report';
               · {{ r.elapsedMs | number }} ms
             }
           </span>
+          @if (stale()) {
+            <!-- PE-12: the result on show is not the editor's script any more. -->
+            <span class="stale-badge" [title]="staleText()">Out of date</span>
+          }
         }
         <span class="spacer"></span>
         <button
@@ -97,6 +120,12 @@ export type PreviewView = 'chart' | 'report';
 
       @if (error(); as e) {
         <div class="error-box" role="alert">{{ e }}</div>
+      }
+
+      @if (stale()) {
+        <p class="stale-note" role="status">
+          {{ staleText() }} Run again to see what the current script does.
+        </p>
       }
 
       @if (compileErrors().length) {
@@ -171,6 +200,7 @@ export type PreviewView = 'chart' | 'report';
         <div class="report-slot" role="tabpanel">
           <app-strategy-report
             [report]="chartRun()!.report"
+            [testCount]="testCount()"
             [tradesClickable]="!!symbol()"
             (tradeClick)="openReportTrade($event)"
           />
@@ -213,6 +243,22 @@ export type PreviewView = 'chart' | 'report';
       }
       .hint {
         margin: 0;
+      }
+      .stale-badge {
+        padding: 1px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 149, 0, 0.45);
+        background: rgba(255, 149, 0, 0.12);
+        color: var(--text-primary);
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .stale-note {
+        margin: 0;
+        padding: 6px 10px;
+        border-radius: 6px;
+        background: rgba(255, 149, 0, 0.08);
+        font-size: 12px;
       }
       .section-title {
         margin: 0 0 4px;
@@ -372,6 +418,46 @@ export class ScriptPreviewComponent {
     return Array.isArray(alerts) ? alerts.length : 0;
   });
 
+  /**
+   * PE-12: what changed in the editor since the run on show (the script, its inputs, the symbol or
+   * timeframe, the bar count) — empty while it still matches, or while a new run is going.
+   */
+  readonly staleReasons = computed<string[]>(() => {
+    const req = this.lastRequest();
+    if (!req || !this.lastResult() || this.running()) return [];
+    const reasons: string[] = [];
+    if (req.source !== this.source()) reasons.push('the script');
+    if (inputsKey(req.inputs) !== inputsKey(this.inputs())) reasons.push('the inputs');
+    if (req.symbol !== this.symbol() || req.timeframe !== this.timeframe()) {
+      reasons.push('the symbol or timeframe');
+    }
+    if (req.lastBars !== this.bars()) reasons.push('the bar count');
+    return reasons;
+  });
+  readonly stale = computed(() => this.staleReasons().length > 0);
+
+  /**
+   * PE-I1: the distinct variants (source, inputs, symbol, timeframe) previewed in this editor
+   * session — each look at a result is a test, and the report's deflated Sharpe counts them.
+   */
+  private readonly variants = new Set<string>();
+  private readonly variantCount = signal(0);
+  readonly testCount = computed<ReportTestCount | null>(() => {
+    const n = this.variantCount();
+    return n > 0
+      ? {
+          count: n,
+          label: `variant${n === 1 ? '' : 's'} of this script previewed in this editor session — every look is a test`,
+        }
+      : null;
+  });
+  readonly staleText = computed(() => {
+    const reasons = this.staleReasons();
+    if (!reasons.length) return '';
+    const what = listText(reasons);
+    return `This run is out of date: ${what} ${reasons.length === 1 && reasons[0] !== 'the inputs' ? 'has' : 'have'} changed since it ran.`;
+  });
+
   async run(): Promise<void> {
     if (!this.canRun() || this.running()) return;
     const request: ScriptRunRequest = {
@@ -390,6 +476,17 @@ export class ScriptPreviewComponent {
       const r = await firstValueFrom(this.scripting.run(request));
       this.lastRequest.set(request);
       this.lastResult.set(r);
+      this.variants.add(
+        [
+          scriptSourceHash(request.source),
+          inputsKey(request.inputs),
+          request.symbol,
+          request.timeframe,
+        ].join('|'),
+      );
+      this.variantCount.set(this.variants.size);
+      // PE-I9: the first-strategy checklist ticks "preview it" for the script that ran.
+      if (r.compile?.success !== false) markPreviewed(request.source);
     } catch (err) {
       this.error.set(toScriptingError(err, 'The preview failed.').message);
     } finally {

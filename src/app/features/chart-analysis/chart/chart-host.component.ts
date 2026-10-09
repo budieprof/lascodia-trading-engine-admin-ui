@@ -37,6 +37,7 @@ import {
   type IChartApi,
   type ISeriesApi,
   type ISeriesMarkersPluginApi,
+  type ISeriesPrimitive,
   type MouseEventParams,
   type SeriesDataItemTypeMap,
   type TickMarkType,
@@ -1409,6 +1410,26 @@ export class ChartHostComponent implements OnDestroy {
     return this.price?.coordinateToPrice(y) ?? null;
   }
 
+  /**
+   * Primitives other features hang on the price series (the chart alert lines). Kept here so they are re-attached
+   * every time the series is rebuilt (style change, new bars) — primitives live on the series, not the chart.
+   */
+  private readonly extraPricePrimitives = new Set<ISeriesPrimitive<Time>>();
+
+  /** Attach `primitive` to the price series, now and after every rebuild. Returns the detach function. */
+  attachPricePrimitive(primitive: ISeriesPrimitive<Time>): () => void {
+    this.extraPricePrimitives.add(primitive);
+    this.price?.attachPrimitive(primitive);
+    return () => {
+      this.extraPricePrimitives.delete(primitive);
+      try {
+        this.price?.detachPrimitive(primitive);
+      } catch {
+        /* the series it was on has been replaced */
+      }
+    };
+  }
+
   /** Reset both scales to fit the data, as double-clicking the axis does. */
   /** Fit the price axis to the visible data, leaving the time window alone (TradingView's "auto"). */
   autoScalePrice(): void {
@@ -1630,6 +1651,7 @@ export class ChartHostComponent implements OnDestroy {
       this.price.attachPrimitive(this.eventRenderer);
       this.price.attachPrimitive(this.patternRenderer);
       this.price.attachPrimitive(this.countdown);
+      for (const primitive of this.extraPricePrimitives) this.price.attachPrimitive(primitive);
       this.tickCountdown();
       this.lastValueColor = ''; // a new series starts on the library's own colouring
       this.syncLastValueLabel();
