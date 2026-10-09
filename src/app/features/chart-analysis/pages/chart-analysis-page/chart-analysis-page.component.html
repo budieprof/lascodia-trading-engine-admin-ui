@@ -19,6 +19,8 @@
             placeholder="Search symbol…"
             [ngModel]="symbolQuery()"
             (ngModelChange)="symbolQuery.set($event)"
+            (keydown.enter)="pickFirstSymbol()"
+            (keydown.escape)="symbolMenuOpen.set(false)"
             autocomplete="off"
           />
           <ul class="menu-list">
@@ -53,23 +55,63 @@
       </button>
       @if (openMenu() === 'interval') {
         <div class="tb-menu" role="menu" (click)="$event.stopPropagation()">
+          <!-- TradingView's "change interval": any interval the engine can lay out (45, 3h, 2D…). -->
+          <label class="tb-menu-field">
+            <input
+              #intervalInput
+              type="text"
+              placeholder="Type an interval: 45, 3h, 2D"
+              aria-label="Interval"
+              autocomplete="off"
+              [value]="intervalDraft()"
+              (input)="intervalDraft.set($any($event.target).value); intervalError.set(null)"
+              (keydown.enter)="submitInterval()"
+              (keydown.escape)="openMenu.set(null)"
+            />
+          </label>
+          @if (intervalError(); as err) {
+            <div class="tb-menu-empty" role="alert">{{ err }}</div>
+          }
           @for (g of resolutionGroups; track g.label) {
             <div class="tb-menu-heading">{{ g.label }}</div>
             @for (r of g.items; track r.id) {
-              <button
-                type="button"
-                role="menuitemradio"
-                class="tb-menu-item"
-                [class.selected]="resolution() === r.id"
-                (click)="selectResolution(r.id); openMenu.set(null)"
-              >
-                {{ r.name }}
-              </button>
+              <div class="tb-menu-row">
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  class="tb-menu-item"
+                  [class.selected]="resolution() === r.id"
+                  (click)="selectResolution(r.id); openMenu.set(null)"
+                >
+                  {{ r.name }}
+                </button>
+                <button
+                  type="button"
+                  class="tb-menu-x"
+                  [attr.aria-pressed]="isFavourite(r.id)"
+                  [title]="isFavourite(r.id) ? 'Remove from favourites' : 'Add to favourites'"
+                  (click)="toggleFavourite(r.id, $event)"
+                >
+                  {{ isFavourite(r.id) ? '★' : '☆' }}
+                </button>
+              </div>
             }
           }
         </div>
       }
     </div>
+    <!-- Starred intervals, one click away (CC-I8). -->
+    @for (r of favouriteIntervals(); track r) {
+      <button
+        type="button"
+        class="tb-btn tb-text"
+        [class.active]="resolution() === r"
+        (click)="selectResolution(r)"
+        [title]="'Switch to ' + resolutionLabel(r)"
+      >
+        {{ resolutionLabel(r) }}
+      </button>
+    }
 
     <div class="tb-sep"></div>
 

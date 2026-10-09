@@ -78,7 +78,7 @@ describe('normaliseRows', () => {
   });
 
   it('returns nothing for an unsupported resolution', () => {
-    expect(normaliseRows(descendingPage, '3')).toEqual([]);
+    expect(normaliseRows(descendingPage, '30S')).toEqual([]);
   });
 });
 

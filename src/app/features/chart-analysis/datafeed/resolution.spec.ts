@@ -2,14 +2,16 @@ import { describe, expect, it } from 'vitest';
 import {
   RESOLUTION_SOURCES,
   SUPPORTED_RESOLUTIONS,
+  formatResolution,
   isSessionResolution,
+  parseInterval,
   isSupportedResolution,
   resolutionMs,
   resolutionSource,
   sourceBarsNeeded,
   type EngineTimeframe,
 } from './resolution';
-import { pipSizeFor, priceScaleFor, toSymbolInfo } from './symbol-info';
+import { pipSizeFor, priceScaleFor, rankSymbols, toSymbolInfo } from './symbol-info';
 
 /** The only timeframes the engine's `Timeframe` enum stores. */
 const STORED: EngineTimeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
@@ -48,8 +50,11 @@ describe('resolution mapping', () => {
   });
 
   it('rejects an unknown resolution', () => {
-    expect(resolutionSource('3')).toBeNull();
-    expect(isSupportedResolution('3')).toBe(false);
+    // Seconds need tick history; 2000 minutes is past Pine's 1440.
+    for (const r of ['30S', '2000', 'abc']) {
+      expect(resolutionSource(r), r).toBeNull();
+      expect(isSupportedResolution(r), r).toBe(false);
+    }
   });
 
   it('reports bar widths in ms — nominal ones on the session grid', () => {
@@ -60,7 +65,7 @@ describe('resolution mapping', () => {
     expect(resolutionMs('1D')).toBe(86_400_000);
     expect(resolutionMs('1W')).toBe(7 * 86_400_000);
     expect(resolutionMs('1M')).toBe(31 * 86_400_000);
-    expect(resolutionMs('3')).toBeNull();
+    expect(resolutionMs('30S')).toBeNull();
   });
 
   it('over-fetches source rows for aggregated resolutions; session bars come built, one per bar', () => {
@@ -121,5 +126,80 @@ describe("pipSizeFor — the engine's pip (InstrumentMath.ResolvePipSize)", () =
     expect(pipSizeFor(2, 'Commodity')).toBeCloseTo(0.01, 12);
     expect(pipSizeFor(1, 'Index')).toBeCloseTo(0.1, 12);
     expect(pipSizeFor(3, 'Crypto')).toBeCloseTo(0.001, 12);
+  });
+});
+
+describe('more timeframes (CC-I8)', () => {
+  it('folds 2, 3 and 10 minutes from the stored grid, where the engine’s session-anchored bars coincide', () => {
+    expect(resolutionSource('2')).toEqual({ kind: 'stored', timeframe: 'M1', aggregate: 2 });
+    expect(resolutionSource('3')).toEqual({ kind: 'stored', timeframe: 'M1', aggregate: 3 });
+    expect(resolutionSource('10')).toEqual({ kind: 'stored', timeframe: 'M5', aggregate: 2 });
+    // 17:00 New York is 21:00 or 22:00 UTC: whole multiples of 2, 3 and 10 minutes …
+    for (const m of [2, 3, 10]) expect([(21 * 60) % m, (22 * 60) % m]).toEqual([0, 0]);
+    // … but not of 45: the winter open is 15 minutes off a 45-minute epoch grid.
+    expect((22 * 60) % 45).not.toBe(0);
+  });
+
+  it('takes 45 minutes and 3h / 6h / 8h / 12h from the engine’s session grid', () => {
+    for (const r of ['45', '180', '360', '480', '720'])
+      expect(isSessionResolution(r), r).toBe(true);
+    expect(resolutionMs('180')).toBe(3 * 3_600_000);
+  });
+
+  it('parses typed intervals into Pine timeframes', () => {
+    expect(parseInterval('45')).toBe('45');
+    expect(parseInterval('45m')).toBe('45');
+    expect(parseInterval('20min')).toBe('20');
+    expect(parseInterval('3h')).toBe('180');
+    expect(parseInterval('4H')).toBe('240');
+    expect(parseInterval('2d')).toBe('2D');
+    expect(parseInterval('1W')).toBe('1W');
+    expect(parseInterval('3M')).toBe('3M');
+    expect(parseInterval('0')).toBeNull();
+    expect(parseInterval('2000')).toBeNull(); // past Pine's 1440 minutes
+    expect(parseInterval('13M')).toBeNull();
+    expect(parseInterval('abc')).toBeNull();
+    expect(parseInterval('30s')).toMatchObject({ error: expect.stringMatching(/tick history/) });
+  });
+
+  it('serves a typed interval from the session grid', () => {
+    expect(resolutionSource('20')).toEqual({ kind: 'session', nominalMs: 20 * 60_000 });
+    expect(isSupportedResolution('2D')).toBe(true);
+    expect(isSupportedResolution('2000')).toBe(false);
+  });
+
+  it('prints intervals as the toolbar shows them', () => {
+    expect(['1', '45', '60', '180', '1D', '2W', '3M'].map(formatResolution)).toEqual([
+      '1m',
+      '45m',
+      '1h',
+      '3h',
+      '1D',
+      '2W',
+      '3M',
+    ]);
+  });
+});
+
+describe('rankSymbols — Enter takes the best match (CC-I13)', () => {
+  const pairs = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USD'].map((symbol) => ({
+    symbol,
+  }));
+
+  it('puts the symbol itself first, then prefixes, then the rest', () => {
+    expect(rankSymbols(pairs, 'usd').map((p) => p.symbol)).toEqual([
+      'USD',
+      'USDJPY',
+      'USDCHF',
+      'EURUSD',
+      'GBPUSD',
+      'AUDUSD',
+    ]);
+    expect(rankSymbols(pairs, 'eurusd')[0].symbol).toBe('EURUSD');
+  });
+
+  it('lists everything for an empty query and nothing for no match', () => {
+    expect(rankSymbols(pairs, ' ')).toHaveLength(6);
+    expect(rankSymbols(pairs, 'XAU')).toEqual([]);
   });
 });

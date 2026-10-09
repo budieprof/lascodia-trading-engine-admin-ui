@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  ElementRef,
   computed,
   effect,
   inject,
@@ -39,7 +40,10 @@ type RunOutcome = ChartScriptResult | { error: string };
 const SUPERSEDED = 'A newer run of this script replaced this one.';
 import {
   SUPPORTED_RESOLUTIONS,
+  formatResolution,
   isSessionResolution,
+  isSupportedResolution,
+  parseInterval,
   resolutionMs,
   type TvResolution,
 } from '../../datafeed/resolution';
@@ -60,7 +64,7 @@ import { TradingCalendar, nextSessionPeriod } from '../../datafeed/session-calen
 import { liveTick } from '../../datafeed/live-tick';
 import { ServerClock } from '@core/time/server-clock';
 import { tradingDateLabel } from '../../chart/trading-date';
-import { pipSizeFor, priceScaleFor } from '../../datafeed/symbol-info';
+import { pipSizeFor, priceScaleFor, rankSymbols } from '../../datafeed/symbol-info';
 import { changeText, formatVolume } from '../../chart/legend-format';
 import { DataWindowComponent } from '../../chart/data-window.component';
 import { toCsv } from '../../chart/snapshot';
@@ -254,20 +258,6 @@ export interface ComparePanel {
   historyComplete?: boolean;
 }
 
-/** Labels for the timeframe bar, in TradingView's shorthand. */
-const RESOLUTION_LABELS: Record<TvResolution, string> = {
-  '1': '1m',
-  '5': '5m',
-  '15': '15m',
-  '30': '30m',
-  '60': '1h',
-  '120': '2h',
-  '240': '4h',
-  '1D': '1D',
-  '1W': '1W',
-  '1M': '1M',
-};
-
 const RESOLUTION_GROUPS: Array<{
   label: string;
   items: Array<{ id: TvResolution; name: string }>;
@@ -276,9 +266,13 @@ const RESOLUTION_GROUPS: Array<{
     label: 'Minutes',
     items: [
       { id: '1', name: '1 minute' },
+      { id: '2', name: '2 minutes' },
+      { id: '3', name: '3 minutes' },
       { id: '5', name: '5 minutes' },
+      { id: '10', name: '10 minutes' },
       { id: '15', name: '15 minutes' },
       { id: '30', name: '30 minutes' },
+      { id: '45', name: '45 minutes' },
     ],
   },
   {
@@ -286,7 +280,11 @@ const RESOLUTION_GROUPS: Array<{
     items: [
       { id: '60', name: '1 hour' },
       { id: '120', name: '2 hours' },
+      { id: '180', name: '3 hours' },
       { id: '240', name: '4 hours' },
+      { id: '360', name: '6 hours' },
+      { id: '480', name: '8 hours' },
+      { id: '720', name: '12 hours' },
     ],
   },
   {
@@ -486,13 +484,62 @@ export class ChartAnalysisPageComponent {
   private readonly host = viewChild<ChartHostComponent>('host');
 
   readonly resolutions = SUPPORTED_RESOLUTIONS;
-  readonly resolutionLabel = (r: TvResolution) => RESOLUTION_LABELS[r] ?? r;
+  readonly resolutionLabel = (r: TvResolution) => formatResolution(r);
   readonly chartStyles = CHART_STYLES;
   readonly chartStyleGroups = STYLE_GROUPS;
   readonly resolutionGroups = RESOLUTION_GROUPS;
 
   /** One open toolbar menu at a time, as in TradingView. */
   readonly openMenu = signal<ToolbarMenu | null>(null);
+
+  // ── Intervals (CC-I8) ────────────────────────────────────────────────────
+
+  /** Starred intervals, shown as buttons beside the interval menu (synced chart preference). */
+  readonly favouriteIntervals = signal<TvResolution[]>(
+    readPref<TvResolution[]>('favouriteIntervals', []),
+  );
+  isFavourite(r: TvResolution): boolean {
+    return this.favouriteIntervals().includes(r);
+  }
+  toggleFavourite(r: TvResolution, ev: Event): void {
+    ev.stopPropagation();
+    const order = (x: TvResolution) => resolutionMs(x) ?? Number.MAX_SAFE_INTEGER;
+    const next = this.isFavourite(r)
+      ? this.favouriteIntervals().filter((x) => x !== r)
+      : [...this.favouriteIntervals(), r].sort((a, b) => order(a) - order(b));
+    this.favouriteIntervals.set(next);
+    writePref('favouriteIntervals', next);
+  }
+
+  /** The interval being typed (TradingView's "change interval": type 45, 3h, 2D on the chart). */
+  readonly intervalDraft = signal('');
+  readonly intervalError = signal<string | null>(null);
+  private readonly intervalInput = viewChild<ElementRef<HTMLInputElement>>('intervalInput');
+
+  /** Apply the typed interval: any the engine can lay out, not only the menu's. */
+  submitInterval(): void {
+    const parsed = parseInterval(this.intervalDraft());
+    if (typeof parsed === 'string') {
+      this.intervalDraft.set('');
+      this.intervalError.set(null);
+      this.openMenu.set(null);
+      this.selectResolution(parsed);
+      return;
+    }
+    this.intervalError.set(parsed?.error ?? 'Not an interval: try 45, 3h, 2D or 1W.');
+  }
+
+  /** A digit typed on the chart opens the interval box with it, as on TradingView. */
+  private openIntervalBox(first: string): void {
+    this.intervalDraft.set(first);
+    this.intervalError.set(null);
+    this.openMenu.set('interval');
+    setTimeout(() => {
+      const el = this.intervalInput()?.nativeElement;
+      el?.focus();
+      el?.setSelectionRange(first.length, first.length);
+    });
+  }
   toggleMenu(menu: ToolbarMenu, ev: Event): void {
     ev.stopPropagation();
     this.layoutMenuOpen.set(false);
@@ -1412,11 +1459,13 @@ export class ChartAnalysisPageComponent {
     return this.host()?.visibleWindow() ?? this.bars();
   }
 
-  readonly filteredSymbols = computed(() => {
-    const q = this.symbolQuery().trim().toUpperCase();
-    const all = this.symbols();
-    return q ? all.filter((p) => (p.symbol ?? '').toUpperCase().includes(q)) : all;
-  });
+  readonly filteredSymbols = computed(() => rankSymbols(this.symbols(), this.symbolQuery()));
+
+  /** Enter in the symbol search: the first (best) match, as on TradingView (CC-I13). */
+  pickFirstSymbol(): void {
+    const first = this.filteredSymbols()[0]?.symbol;
+    if (first) this.selectSymbol(first);
+  }
 
   /** Legend colour follows the bar's direction, as on TradingView. */
   readonly legendUp = computed(() => {
@@ -2393,10 +2442,7 @@ export class ChartAnalysisPageComponent {
   private followRoute(params: ParamMap): void {
     const symbol = params.get('symbol')?.toUpperCase() || this.symbol();
     const tf = this.route.snapshot.queryParamMap.get('tf');
-    const resolution =
-      tf && (SUPPORTED_RESOLUTIONS as readonly string[]).includes(tf)
-        ? (tf as TvResolution)
-        : this.resolution();
+    const resolution = tf && isSupportedResolution(tf) ? (tf as TvResolution) : this.resolution();
     if (sameSeries(this.requested, { symbol, resolution })) return;
     this.symbol.set(symbol);
     this.resolution.set(resolution);
@@ -3499,7 +3545,7 @@ export class ChartAnalysisPageComponent {
     const saved: ComparePanel[] = (split?.panels ?? []).slice(0, wanted).map((p, i) => ({
       id: `p${Date.now().toString(36)}${i}`,
       symbol: p.symbol.toUpperCase(),
-      resolution: (SUPPORTED_RESOLUTIONS as readonly string[]).includes(p.resolution)
+      resolution: isSupportedResolution(p.resolution)
         ? (p.resolution as TvResolution)
         : this.resolution(),
       bars: [],
@@ -3619,8 +3665,7 @@ export class ChartAnalysisPageComponent {
       const resBefore = this.resolution();
       if (!keepSymbol) {
         this.symbol.set(s.symbol ?? 'EURUSD');
-        if (s.resolution && (SUPPORTED_RESOLUTIONS as readonly string[]).includes(s.resolution))
-          this.resolution.set(s.resolution);
+        if (s.resolution && isSupportedResolution(s.resolution)) this.resolution.set(s.resolution);
         else this.resolution.set('60');
       }
       this.style.set(s.style ?? 'candles');
@@ -4148,6 +4193,11 @@ export class ChartAnalysisPageComponent {
     }
     if (ev.key.toLowerCase() === 'm' && !mod) {
       this.magnet.set(!this.magnet());
+      return;
+    }
+    if (/^[0-9]$/.test(ev.key) && !mod && !ev.altKey) {
+      ev.preventDefault();
+      this.openIntervalBox(ev.key);
     }
   }
 

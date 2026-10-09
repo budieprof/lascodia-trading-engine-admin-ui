@@ -72,6 +72,29 @@ export function pipSizeFor(decimalPlaces: number, assetClass?: string | null): n
   return fx && digits >= 3 && digits % 2 === 1 ? point * 10 : point;
 }
 
+/**
+ * The symbol search's matches, best first (CC-I13): the symbol itself, then symbols that start with
+ * the query, then any that contain it — each group in its list order. Typing "usd" lists USDJPY and
+ * USDCHF before EURUSD, and Enter takes the first.
+ */
+export function rankSymbols<T extends { symbol: string | null }>(
+  all: readonly T[],
+  query: string,
+): T[] {
+  const q = query.trim().toUpperCase();
+  if (!q) return [...all];
+  const exact: T[] = [];
+  const prefix: T[] = [];
+  const contains: T[] = [];
+  for (const p of all) {
+    const s = (p.symbol ?? '').toUpperCase();
+    if (s === q) exact.push(p);
+    else if (s.startsWith(q)) prefix.push(p);
+    else if (s.includes(q)) contains.push(p);
+  }
+  return [...exact, ...prefix, ...contains];
+}
+
 export function toSymbolInfo(pair: CurrencyPairDto): LascodiaSymbolInfo {
   const symbol = pair.symbol ?? '';
   const description =
