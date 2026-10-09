@@ -21,12 +21,17 @@ import { ThemeService } from '@core/theme/theme.service';
 import { ScriptingApiError, ScriptingService } from '@core/services/scripting.service';
 import { StrategiesService } from '@core/services/strategies.service';
 import type {
-  ChartIndicatorScriptDto,
-  SaveChartIndicatorScriptRequest,
+  ChartIndicatorScriptDetailDto,
+  ChartScriptVersionDetailDto,
+  ChartScriptVersionDto,
+  CreateChartScriptRequest,
   ScriptCompileResult,
   ScriptInputValues,
+  ScriptLibraryVisibility,
   ScriptRunBar,
   ScriptRunRequest,
+  TradingViewScriptImportDto,
+  UpdateChartScriptRequest,
 } from '@core/api/scripting.types';
 import type { StrategyDto } from '@core/api/api.types';
 import { parseSavedInputs } from '@features/scripting/pine/pine-saved-inputs';
@@ -83,6 +88,43 @@ export interface SavedChartScript {
    * chart starts with. Only scripts in the engine have them.
    */
   inputs?: ScriptInputValues;
+  /** C4: the saved state's revision (send it back with the next save); null on an older engine. */
+  revision?: string | null;
+  /** `Private` (its owner only) or `Shared` (every operator can see and run it). */
+  visibility?: ScriptLibraryVisibility;
+  /** The caller owns it; another operator's shared script is read-only here (save a copy). */
+  ownedByMe?: boolean;
+  /** Who saved it. */
+  createdBy?: string | null;
+  /** Newest version number (0: saved before version history and not changed since). */
+  latestVersion?: number;
+  /** An import from TradingView: where it came from, its licence and author. */
+  sourceUrl?: string | null;
+  licence?: string | null;
+  author?: string | null;
+}
+
+/** The saved script an editor buffer is bound to: what a save updates, and from which revision. */
+export interface ChartScriptTarget {
+  id: string;
+  /** The revision the edit started from; a newer saved state is refused (`-409`). */
+  revision: string | null;
+  /** The inputs saved with the script — re-sent unchanged (a save replaces them). */
+  inputs?: ScriptInputValues;
+}
+
+/** What {@link ChartScriptService.saveScript} saves. */
+export interface ChartScriptSaveRequest {
+  name: string;
+  source: string;
+  /** Update this saved script; absent creates a new one. */
+  target?: ChartScriptTarget | null;
+  /** Recorded on the version this save writes. */
+  note?: string | null;
+  /** A new script's visibility (Private when absent). */
+  visibility?: ScriptLibraryVisibility | null;
+  /** An import from TradingView being saved for the first time. */
+  origin?: { sourceUrl: string; licence?: string | null; author?: string | null } | null;
 }
 
 /** Pre-engine storage of "My scripts"; read once to migrate, then cleared. */
@@ -192,8 +234,8 @@ export class ChartScriptService {
    * 5xx) keep the key so the next load retries them. Each outcome toasts once, here.
    */
   private migrateLegacy(
-    remote: ChartIndicatorScriptDto[],
-  ): Observable<{ remote: ChartIndicatorScriptDto[]; leftovers: SavedChartScript[] }> {
+    remote: ChartIndicatorScriptDetailDto[],
+  ): Observable<{ remote: ChartIndicatorScriptDetailDto[]; leftovers: SavedChartScript[] }> {
     const legacy = readLegacy();
     if (!legacy.length) return of({ remote, leftovers: [] });
     // A previous partial migration already uploaded some: same name + source is the same script.
@@ -343,57 +385,145 @@ export class ChartScriptService {
   }
 
   /**
-   * Saves (or overwrites by name) a script in "My scripts" on the engine. Rejects with
-   * `ScriptingApiError` (compile errors carry the compile response) and leaves the list unchanged.
-   * An overwrite keeps the inputs saved with the script — the engine replaces them on every
-   * update — as the engine has them now, not as this page last read them.
+   * Saves a script to "My scripts" (PE-07, contract C4). With a `target` it updates that saved
+   * script — sending the revision the edit started from, so a newer saved state is refused with
+   * `-409` (`ScriptingApiError.isConflict`) instead of being overwritten — and re-sends the inputs
+   * saved with it (an update replaces them). Without one it creates a new script: never an
+   * overwrite of another script that happens to share the name (the editor asks about that first,
+   * see {@link findOwnByName}). Rejects with `ScriptingApiError` (compile errors carry the compile
+   * response) and leaves the list unchanged.
    */
-  saveScript(
-    name: string,
-    source: string,
-    _kind?: 'indicator' | 'strategy',
-  ): Observable<SavedChartScript> {
-    const trimmed = name.trim() || 'Untitled script';
-    const existing = this.savedScripts().find(
-      (s) => s.name === trimmed && !s.id.startsWith('local-') && !s.id.startsWith('draft-'),
-    );
-    const req: SaveChartIndicatorScriptRequest = { name: trimmed, pineSource: source };
-    const call$ = existing
-      ? this.scripting.getChartScript(Number(existing.id)).pipe(
-          map((latest) => parseSavedInputs(latest.inputs)),
-          catchError(() => of(existing.inputs ?? {})),
-          switchMap((inputs) =>
-            this.scripting.updateChartScript(
-              Number(existing.id),
-              Object.keys(inputs).length ? { ...req, inputs } : req,
-            ),
-          ),
-        )
-      : this.scripting.createChartScript(req);
+  saveScript(req: ChartScriptSaveRequest): Observable<SavedChartScript> {
+    const name = req.name.trim() || 'Untitled script';
+    const note = req.note?.trim() || null;
+    let call$: Observable<ChartIndicatorScriptDetailDto>;
+    if (req.target) {
+      if (!/^\d+$/.test(req.target.id)) {
+        return throwError(
+          () => new ScriptingApiError('Only a script saved in the engine can be updated.'),
+        );
+      }
+      const inputs =
+        req.target.inputs && Object.keys(req.target.inputs).length ? req.target.inputs : null;
+      const body: UpdateChartScriptRequest = {
+        name,
+        pineSource: req.source,
+        inputs,
+        ...(req.target.revision ? { expectedRevision: req.target.revision } : {}),
+        ...(note ? { note } : {}),
+      };
+      call$ = this.scripting.updateChartScript(Number(req.target.id), body);
+    } else {
+      const body: CreateChartScriptRequest = {
+        name,
+        pineSource: req.source,
+        ...(req.visibility ? { visibility: req.visibility } : {}),
+        ...(note ? { note } : {}),
+        ...(req.origin
+          ? {
+              sourceUrl: req.origin.sourceUrl,
+              licence: req.origin.licence ?? null,
+              author: req.origin.author ?? null,
+            }
+          : {}),
+      };
+      call$ = this.scripting.createChartScript(body);
+    }
     return call$.pipe(
       map(fromDto),
       tap(() => {
         // Saving a draft's name for real retires the draft.
         const drafts = readDrafts();
-        const rest = drafts.filter((d) => d.name.trim() !== trimmed);
+        const rest = drafts.filter((d) => d.name.trim() !== name);
         if (rest.length !== drafts.length) {
           writeDrafts(rest);
           this.savedScripts.update((list) =>
-            list.filter((s) => !(s.id.startsWith('draft-') && s.name.trim() === trimmed)),
+            list.filter((s) => !(s.id.startsWith('draft-') && s.name.trim() === name)),
           );
         }
       }),
-      tap((saved) =>
-        this.savedScripts.update((list) => [saved, ...list.filter((s) => s.id !== saved.id)]),
-      ),
+      tap((saved) => this.remember(saved)),
     );
+  }
+
+  /** The operator's own engine script called `name` (trimmed), other than `exceptId`; else null. */
+  findOwnByName(name: string, exceptId: string | null = null): SavedChartScript | null {
+    const trimmed = name.trim();
+    return (
+      this.savedScripts().find(
+        (s) =>
+          s.name.trim() === trimmed &&
+          s.id !== exceptId &&
+          /^\d+$/.test(s.id) &&
+          s.ownedByMe !== false,
+      ) ?? null
+    );
+  }
+
+  /** `name`, else the first free `name (2)`, `name (3)`… among the operator's own scripts. */
+  freeName(name: string): string {
+    const base = name.trim() || 'Untitled script';
+    if (!this.findOwnByName(base)) return base;
+    for (let n = 2; n < 1000; n++) {
+      const candidate = `${base} (${n})`;
+      if (!this.findOwnByName(candidate)) return candidate;
+    }
+    return `${base} (${Date.now()})`;
+  }
+
+  /** A saved script as the engine has it now (and remembered in the list). */
+  latest(id: string): Observable<SavedChartScript> {
+    return this.scripting.getChartScript(Number(id)).pipe(
+      map(fromDto),
+      tap((s) => this.remember(s)),
+    );
+  }
+
+  /** A saved script's versions, newest first, without sources. */
+  versions(id: string): Observable<ChartScriptVersionDto[]> {
+    return this.scripting.listChartScriptVersions(Number(id));
+  }
+
+  /** One version with its source. */
+  version(id: string, versionId: number): Observable<ChartScriptVersionDetailDto> {
+    return this.scripting.getChartScriptVersion(Number(id), versionId);
+  }
+
+  /** Makes an older version current (saved as the next version). `-409` when stale. */
+  restore(
+    id: string,
+    versionId: number,
+    expectedRevision: string | null,
+  ): Observable<SavedChartScript> {
+    return this.scripting.restoreChartScriptVersion(Number(id), versionId, expectedRevision).pipe(
+      map(fromDto),
+      tap((s) => this.remember(s)),
+    );
+  }
+
+  /** Shares a script with every operator, or makes it private again (owner only). */
+  setVisibility(id: string, visibility: ScriptLibraryVisibility): Observable<SavedChartScript> {
+    return this.scripting.setChartScriptVisibility(Number(id), visibility).pipe(
+      map(fromDto),
+      tap((s) => this.remember(s)),
+    );
+  }
+
+  /** Fetches an open-source TradingView script to open as an unsaved draft (nothing is stored). */
+  importFromTradingView(url: string): Observable<TradingViewScriptImportDto> {
+    return this.scripting.importTradingViewScript(url.trim());
+  }
+
+  private remember(saved: SavedChartScript): void {
+    this.savedScripts.update((list) => [saved, ...list.filter((s) => s.id !== saved.id)]);
   }
 
   /**
    * "Save as default": stores `inputs` (overrides only; none clears them) with a script in "My
    * scripts" — what a copy added to a chart starts with. The update replaces name, source and
-   * inputs, so it re-sends the name and source the engine has NOW: this page's copy may predate an
-   * edit saved from another tab. Rejects with `ScriptingApiError`; only engine scripts have inputs.
+   * inputs, so it re-sends the name and source the engine has NOW — with that state's revision, so
+   * an edit saved from another tab in between is never overwritten (C4): a stale read is retried
+   * once on a fresh one. Rejects with `ScriptingApiError`; only engine scripts have inputs.
    */
   saveDefaultInputs(id: string, inputs: ScriptInputValues): Observable<SavedChartScript> {
     if (!/^\d+$/.test(id)) {
@@ -401,14 +531,23 @@ export class ChartScriptService {
         () => new ScriptingApiError('Only a script saved in the engine can keep default inputs.'),
       );
     }
-    return this.scripting.getChartScript(Number(id)).pipe(
-      switchMap((latest) =>
-        this.scripting.updateChartScript(Number(id), {
-          name: latest.name,
-          pineSource: latest.pineSource,
-          inputs: Object.keys(inputs).length ? inputs : null,
-        }),
-      ),
+    const attempt = (retry: boolean): Observable<ChartIndicatorScriptDetailDto> =>
+      this.scripting.getChartScript(Number(id)).pipe(
+        switchMap((latest) =>
+          this.scripting.updateChartScript(Number(id), {
+            name: latest.name,
+            pineSource: latest.pineSource,
+            inputs: Object.keys(inputs).length ? inputs : null,
+            ...(latest.revision ? { expectedRevision: latest.revision } : {}),
+          }),
+        ),
+        catchError((err: unknown) =>
+          retry && err instanceof ScriptingApiError && err.isConflict
+            ? attempt(false)
+            : throwError(() => err),
+        ),
+      );
+    return attempt(true).pipe(
       map(fromDto),
       tap((saved) =>
         this.savedScripts.update((list) => list.map((s) => (s.id === saved.id ? saved : s))),
@@ -472,21 +611,24 @@ function strategyItem(s: StrategyDto): ChartScriptItem {
 }
 
 function savedItem(s: SavedChartScript): ChartScriptItem {
+  const kind = s.kind === 'strategy' ? 'Strategy' : 'Indicator';
   return {
     key: `mine:${s.id}`,
     source: 'mine',
     name: s.name,
     description: s.id.startsWith('draft-')
       ? 'Unsaved draft (compile error)'
-      : s.kind === 'strategy'
-        ? 'Strategy'
-        : 'Indicator',
+      : s.ownedByMe === false
+        ? `${kind} · shared by ${s.createdBy || 'another operator'}`
+        : s.visibility === 'Shared'
+          ? `${kind} · shared`
+          : kind,
     kind: s.kind,
     pineSource: s.source,
   };
 }
 
-function fromDto(d: ChartIndicatorScriptDto): SavedChartScript {
+function fromDto(d: ChartIndicatorScriptDetailDto): SavedChartScript {
   return {
     id: String(d.id),
     name: d.name,
@@ -494,6 +636,15 @@ function fromDto(d: ChartIndicatorScriptDto): SavedChartScript {
     kind: d.kind === 'strategy' ? 'strategy' : 'indicator',
     updatedAt: Date.parse(d.updatedAt) || Date.now(),
     inputs: parseSavedInputs(d.inputs),
+    revision: d.revision ?? null,
+    visibility: d.visibility === 'Shared' ? 'Shared' : 'Private',
+    // An engine from before C4 lists only the caller's own scripts.
+    ownedByMe: d.ownedByMe !== false,
+    createdBy: d.createdBy ?? null,
+    latestVersion: d.latestVersion ?? 0,
+    sourceUrl: d.sourceUrl ?? null,
+    licence: d.licence ?? null,
+    author: d.author ?? null,
   };
 }
 

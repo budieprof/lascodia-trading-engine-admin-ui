@@ -1,4 +1,5 @@
-import type { AlertChannel } from '@core/api/api.types';
+import type { AlertChannel, AlertChannelStatusDto } from '@core/api/api.types';
+import type { ScriptAlertDeliveryDto } from '@core/api/alerts.types';
 
 import {
   ALERT_KEY_ALERT_CALLS,
@@ -14,7 +15,141 @@ import {
  * validation — so the tab component stays thin and every rule is unit-tested.
  */
 
-export const ALERT_CHANNELS: readonly AlertChannel[] = ['Email', 'Webhook', 'Telegram'];
+/** In app (contract C2: the pop-up and the bell) first — it needs no set-up. */
+export const ALERT_CHANNELS: readonly AlertChannel[] = ['InApp', 'Email', 'Webhook', 'Telegram'];
+
+export function channelLabel(channel: AlertChannel | string): string {
+  return channel === 'InApp' ? 'In app' : channel;
+}
+
+// ── Binding fields beyond the base contract (PE-I10, 2026-10-09) ──────────────
+
+/** alertcondition() trigger options (TradingView's), as the engine stores them. */
+export type ScriptAlertFrequency = 'once_per_bar' | 'once_per_bar_close' | 'all' | 'once';
+
+export const DEFAULT_FREQUENCY: ScriptAlertFrequency = 'once_per_bar';
+
+export const FREQUENCY_OPTIONS: readonly {
+  id: ScriptAlertFrequency;
+  label: string;
+  hint: string;
+}[] = [
+  {
+    id: 'once_per_bar',
+    label: 'Once per bar',
+    hint: 'The first time the condition is true in a bar — possibly before the bar closes.',
+  },
+  {
+    id: 'once_per_bar_close',
+    label: 'Once per bar close',
+    hint: 'Only when a bar closes with the condition true.',
+  },
+  {
+    id: 'all',
+    label: 'Every time',
+    hint: 'Every time the condition is true. The storm guard still applies.',
+  },
+  { id: 'once', label: 'Only once', hint: 'Fires once, then the engine switches this alert off.' },
+];
+
+export function normaliseFrequency(value: string | null | undefined): ScriptAlertFrequency {
+  const v = (value ?? '').trim().toLowerCase();
+  return FREQUENCY_OPTIONS.some((f) => f.id === v)
+    ? (v as ScriptAlertFrequency)
+    : DEFAULT_FREQUENCY;
+}
+
+/** A binding as `GET strategy/{id}/script/alerts` returns it — with the engine's own bookkeeping. */
+export interface ScriptAlertBindingView extends ScriptAlertBinding {
+  id?: number;
+  frequency?: string | null;
+  lastFiredAt?: string | null;
+  lastDeliveryError?: string | null;
+  /** Why the ENGINE switched it off (the alert storm guard); null when the operator did, or it is on. */
+  disabledReason?: string | null;
+  disabledAt?: string | null;
+}
+
+/**
+ * A binding as the PUT sends it. The frequency goes with it: a body without one is stored as "once per bar", so saving
+ * from a tab that did not know the field reset every alertcondition binding's frequency.
+ */
+export interface ScriptAlertBindingInput extends ScriptAlertBinding {
+  frequency: ScriptAlertFrequency;
+}
+
+/** The storm guard's limits (`ScriptAlerts:StormMaxFires` / `ScriptAlerts:StormWindowMinutes`). */
+export interface StormGuard {
+  maxFires: number;
+  windowMinutes: number;
+}
+
+export const DEFAULT_STORM_GUARD: StormGuard = { maxFires: 15, windowMinutes: 3 };
+
+export function stormGuardText(guard: StormGuard): string {
+  if (guard.maxFires <= 0) return 'The alert storm guard is off (ScriptAlerts:StormMaxFires = 0).';
+  return (
+    `Storm guard: an alert that fires more than ${guard.maxFires} times in ${guard.windowMinutes} ` +
+    `minute${guard.windowMinutes === 1 ? '' : 's'} is switched off by the engine, with the reason shown on it ` +
+    '(ScriptAlerts:StormMaxFires / ScriptAlerts:StormWindowMinutes).'
+  );
+}
+
+// ── Channel status ───────────────────────────────────────────────────────────
+
+export type ChannelChipState = 'ready' | 'off' | 'unset' | 'unknown';
+
+/** One channel's state as the engine reports it (`GET alert/channel/status`). */
+export function channelChip(
+  channel: AlertChannel,
+  statuses: readonly AlertChannelStatusDto[] | null,
+): { channel: AlertChannel; state: ChannelChipState; label: string; title: string } {
+  const s = statuses?.find((x) => x.channel === channel);
+  const name = channelLabel(channel);
+  if (!statuses || !s)
+    return { channel, state: 'unknown', label: `${name}: ?`, title: 'Status not known' };
+  if (!s.isConfigured)
+    return {
+      channel,
+      state: 'unset',
+      label: `${name}: not set up`,
+      title: 'Set it up under Alerts → Channels',
+    };
+  if (s.isEnabled === false)
+    return {
+      channel,
+      state: 'off',
+      label: `${name}: off`,
+      title: 'Switched off under Alerts → Channels',
+    };
+  return {
+    channel,
+    state: 'ready',
+    label: `${name}: ready`,
+    title: s.destinationPreview ?? 'Ready',
+  };
+}
+
+/**
+ * Warnings for a row's channels that will not deliver (recorded as "not sent", never retried). A binding with its own
+ * webhook URL posts there directly, so the engine-wide Webhook channel's state does not apply to it.
+ */
+export function channelWarnings(
+  row: AlertRow,
+  statuses: readonly AlertChannelStatusDto[] | null,
+): string[] {
+  if (!row.enabled || !statuses) return [];
+  const out: string[] = [];
+  for (const c of row.channels) {
+    if (c === 'Webhook' && row.webhookUrl?.trim()) continue;
+    const chip = channelChip(c, statuses);
+    if (chip.state === 'off')
+      out.push(`${channelLabel(c)} is switched off — its deliveries will be recorded as not sent.`);
+    else if (chip.state === 'unset')
+      out.push(`${channelLabel(c)} is not set up — its deliveries will be recorded as not sent.`);
+  }
+  return out;
+}
 
 // ── Source scanning ───────────────────────────────────────────────────────────
 
@@ -344,6 +479,108 @@ export function unknownPlaceholders(
   return unknown;
 }
 
+// ── Test messages ─────────────────────────────────────────────────────────────
+
+/** Most characters `POST alert/channel/test` accepts. */
+export const MAX_TEST_MESSAGE_LENGTH = 500;
+
+/** The engine's order-fill text when neither the binding nor the script sets one (`OrderFillAlert.DefaultMessage`). */
+export const DEFAULT_ORDER_FILL_MESSAGE =
+  'Order {{strategy.order.action}} @ {{strategy.order.contracts}} filled on {{ticker}}. New strategy position is {{strategy.position_size}}';
+
+export interface SampleContext {
+  symbol: string | null | undefined;
+  timeframe: string | null | undefined;
+  now: Date;
+  plots: readonly PlotInfo[];
+}
+
+/** The text a row's alert would carry, before its placeholders are filled. */
+export function messageSource(row: AlertRow): string {
+  const template = row.messageTemplate?.trim() ? row.messageTemplate : null;
+  switch (row.kind) {
+    case 'alert-calls':
+      // The engine sends the alert() call's own text; a template is not used.
+      return 'Text the script passes to alert() on {{ticker}}';
+    case 'order-fills':
+      return template ?? DEFAULT_ORDER_FILL_MESSAGE;
+    default:
+      return template ?? row.defaultMessage ?? `${row.alertKey} on {{ticker}} {{interval}}`;
+  }
+}
+
+/**
+ * The row's message with SAMPLE values in its placeholders, as "Send test" sends it (marked [TEST], cut to
+ * {@link MAX_TEST_MESSAGE_LENGTH}): the real alert fills them from the bar — and the fill — that fires. Unknown
+ * placeholders stay as written, as the engine leaves them.
+ */
+export function renderSampleMessage(row: AlertRow, ctx: SampleContext): string {
+  const text = messageSource(row).replace(/\{\{\s*([^{}]*?)\s*\}\}/g, (whole, name: string) => {
+    const value = sampleValue(name, ctx);
+    return value ?? whole;
+  });
+  const full = `[TEST] ${text}`;
+  return full.length > MAX_TEST_MESSAGE_LENGTH
+    ? `${full.slice(0, MAX_TEST_MESSAGE_LENGTH - 1)}…`
+    : full;
+}
+
+function sampleValue(name: string, ctx: SampleContext): string | null {
+  const symbol = (ctx.symbol ?? '').trim().toUpperCase() || 'EURUSD';
+  const fx = /^[A-Z]{6}$/.test(symbol);
+  const close = 1.08542;
+  const iso = (d: Date) => `${d.toISOString().slice(0, 19)}Z`;
+  const barTime = new Date(Math.floor(ctx.now.getTime() / 3_600_000) * 3_600_000);
+  switch (name) {
+    case 'ticker':
+      return symbol;
+    case 'exchange':
+      return 'LASCODIA';
+    case 'interval':
+      return (ctx.timeframe ?? '').trim() || '60';
+    case 'open':
+      return '1.08410';
+    case 'high':
+      return '1.08611';
+    case 'low':
+      return '1.08377';
+    case 'close':
+      return String(close);
+    case 'volume':
+      return '1250';
+    case 'time':
+      return iso(barTime);
+    case 'timenow':
+      return iso(ctx.now);
+    case 'syminfo.currency':
+      return fx ? symbol.slice(3) : 'USD';
+    case 'syminfo.basecurrency':
+      return fx ? symbol.slice(0, 3) : symbol;
+    case 'strategy.order.action':
+      return 'buy';
+    case 'strategy.order.contracts':
+    case 'strategy.market_position_size':
+    case 'strategy.position_size':
+      return '1';
+    case 'strategy.order.price':
+      return String(close);
+    case 'strategy.order.id':
+      return 'Long';
+    case 'strategy.order.comment':
+      return 'Long entry';
+    case 'strategy.order.alert_message':
+      return '';
+    case 'strategy.market_position':
+      return 'long';
+    case 'strategy.prev_market_position':
+      return 'flat';
+    case 'strategy.prev_market_position_size':
+      return '0';
+  }
+  if (/^plot_\d+$/.test(name) || /^plot\(\s*(["']).*\1\s*\)$/.test(name)) return '1.08500';
+  return null;
+}
+
 /** Inserts `token` over the selection; returns the new text and where the caret goes. */
 export function insertAt(
   text: string,
@@ -401,6 +638,13 @@ export interface AlertRow extends ScriptAlertBinding {
   defaultMessage: string | null;
   /** Saved binding whose alert is no longer in the script. */
   orphan: boolean;
+  /** alertcondition rows: when it fires (alert() calls carry their own; every order fill is sent). */
+  frequency: ScriptAlertFrequency;
+  /** The engine's bookkeeping — shown, never sent. */
+  lastFiredAt: string | null;
+  lastDeliveryError: string | null;
+  disabledReason: string | null;
+  disabledAt: string | null;
 }
 
 export interface RowIssues {
@@ -441,11 +685,16 @@ function blank(alertKey: string, kind: AlertRowKind, defaultMessage: string | nu
     kind,
     defaultMessage,
     orphan: false,
+    frequency: DEFAULT_FREQUENCY,
+    lastFiredAt: null,
+    lastDeliveryError: null,
+    disabledReason: null,
+    disabledAt: null,
   };
 }
 
 function fromSaved(
-  b: ScriptAlertBinding,
+  b: ScriptAlertBindingView,
   kind: AlertRowKind,
   defaultMessage: string | null,
   orphan: boolean,
@@ -459,6 +708,11 @@ function fromSaved(
     kind,
     defaultMessage,
     orphan,
+    frequency: normaliseFrequency(b.frequency),
+    lastFiredAt: b.lastFiredAt ?? null,
+    lastDeliveryError: b.lastDeliveryError ?? null,
+    disabledReason: b.enabled === true ? null : (b.disabledReason ?? null),
+    disabledAt: b.enabled === true ? null : (b.disabledAt ?? null),
   };
 }
 
@@ -468,7 +722,7 @@ function fromSaved(
  * left the script are kept at the end, flagged, so nothing is dropped silently.
  */
 export function buildAlertRows(
-  saved: readonly ScriptAlertBinding[],
+  saved: readonly ScriptAlertBindingView[],
   conditions: readonly AlertConditionInfo[],
   isStrategy: boolean,
 ): AlertRow[] {
@@ -498,15 +752,54 @@ export function buildAlertRows(
   return rows;
 }
 
-/** The PUT body: every row, as the contract's binding shape (empty strings sent as null). */
-export function toAlertBindings(rows: readonly AlertRow[]): ScriptAlertBinding[] {
+/** The PUT body: every row, as the contract's binding shape (empty strings sent as null), frequency included. */
+export function toAlertBindings(rows: readonly AlertRow[]): ScriptAlertBindingInput[] {
   return rows.map((r) => ({
     alertKey: r.alertKey,
     enabled: r.enabled,
     channels: [...r.channels],
     messageTemplate: r.messageTemplate?.trim() ? r.messageTemplate : null,
     webhookUrl: r.channels.includes('Webhook') && r.webhookUrl?.trim() ? r.webhookUrl.trim() : null,
+    frequency: r.frequency,
   }));
+}
+
+/**
+ * The engine does not deliver alertcondition() alerts of a STRATEGY (TradingView's rule: alerts cannot be created from
+ * a strategy's alertconditions); its alert() calls and order fills are delivered.
+ */
+export function strategyConditionWarning(row: AlertRow, isStrategy: boolean): string | null {
+  return isStrategy && row.kind === 'condition' && row.enabled
+    ? 'This script is a strategy: the engine does not send its alertcondition() alerts (as on TradingView). Use alert() calls or order fills.'
+    : null;
+}
+
+// ── Delivery log ──────────────────────────────────────────────────────────────
+
+export function deliveryStatusLabel(
+  d: Pick<ScriptAlertDeliveryDto, 'status' | 'attempts'>,
+): string {
+  switch (d.status) {
+    case 'Delivered':
+      return 'sent';
+    case 'Skipped':
+      return 'not sent';
+    case 'Pending':
+      return d.attempts > 0 ? `retrying (attempt ${d.attempts + 1})` : 'sending';
+    case 'Failed':
+      return 'failed';
+    case 'Expired':
+      return 'expired';
+    default:
+      return String(d.status).toLowerCase();
+  }
+}
+
+/** The log's name for a delivery's alert key (alert() calls and order fills by their row titles). */
+export function deliveryAlertTitle(alertKey: string): string {
+  if (alertKey === ALERT_KEY_ALERT_CALLS) return 'alert() calls';
+  if (alertKey === ALERT_KEY_ORDER_FILLS) return 'Order fills';
+  return alertKey;
 }
 
 /** Rows whose sent shape differs (the save button's dirty state). */

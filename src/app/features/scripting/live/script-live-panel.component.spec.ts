@@ -225,6 +225,54 @@ describe('ScriptLivePanelComponent', () => {
     expect(el.querySelector('.fact-value.loss')!.textContent!.trim()).toBe('2');
   });
 
+  it('PE-08: shows the mode, the reason, the heartbeat and the compile findings — PS9301 first', () => {
+    load({
+      ...liveSession(),
+      mode: 'live',
+      reason: 'Trading on 1 enabled bound account.',
+      lastHeartbeatUtc: new Date(Date.now() - 5 * 60_000).toISOString(),
+      warnings: [
+        {
+          code: 'PS6202',
+          severity: 'info',
+          message: 'Lower timeframe request',
+          line: 12,
+          column: 3,
+        },
+        {
+          code: 'PS9301',
+          severity: 'warning',
+          message: 'Input "Length" = 0 was not applied',
+          line: 0,
+          column: 0,
+        },
+      ],
+    });
+    expect(el.querySelector('.mode')!.textContent!.trim()).toBe('Live');
+    expect(el.querySelector('.mode')!.getAttribute('data-sends')).toBe('true');
+    expect(text()).toContain('Trading on 1 enabled bound account.');
+    expect(text()).toContain('5 min ago');
+    const items = [...el.querySelectorAll('.warning-list li')];
+    expect(items.map((li) => li.getAttribute('data-code'))).toEqual(['PS9301', 'PS6202']);
+    expect(items[0].textContent).toContain('runs that input’s default');
+    expect(items[1].textContent).toContain('(line 12)');
+  });
+
+  it('PE-I2 (part): paper and live statistics without the warm-up replay, and a CSV of the trades', () => {
+    load(taggedSession());
+    const section = el.querySelector('#live-real-trades')!.closest('section')!;
+    const headers = [...section.querySelectorAll('thead th')].map((th) => th.textContent!.trim());
+    expect(headers).toEqual(['', 'Paper', 'Live']);
+    expect(section.textContent).toContain('+5.00 R per trade');
+    expect(section.textContent).toContain('Download closed trades (CSV)');
+  });
+
+  it('says so when no paper or live trade has closed yet', () => {
+    load(liveSession());
+    const section = el.querySelector('#live-real-trades')!.closest('section')!;
+    expect(section.textContent).toContain('No paper or live trade has closed yet.');
+  });
+
   it('explains a strategy without a live session', () => {
     render();
     http.expectOne(LIVE_URL).flush({

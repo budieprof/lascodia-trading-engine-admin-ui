@@ -11,7 +11,7 @@ import {
   viewChild,
   viewChildren,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, type ParamMap } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { DatePipe, DecimalPipe } from '@angular/common';
@@ -163,7 +163,12 @@ import {
   missingOnTheLeft,
   type BlackoutWindow,
 } from '../../overlays/chart-events';
-import { AlertsService } from '@core/services/alerts.service';
+import { ChartAlertsService } from '../../alerts/chart-alerts.service';
+import { ChartAlertFormComponent } from '../../alerts/chart-alert-form.component';
+import { ChartAlertManagerComponent } from '../../alerts/chart-alert-manager.component';
+import { AlertLinesPrimitive, type AlertLineMove } from '../../alerts/alert-lines-primitive';
+import { alertLinesFor, movedBounds } from '../../alerts/alert-lines-geometry';
+import { inputOf } from '../../alerts/chart-alert-rules';
 import { OrdersService } from '@core/services/orders.service';
 import { MartingaleService } from '@core/services/martingale.service';
 import { NewsIntelService } from '@core/services/news-intel.service';
@@ -447,6 +452,8 @@ function loadWatchlistOpen(): boolean {
     EconomicEventModalComponent,
     LongPressDirective,
     UndoNoticeComponent,
+    ChartAlertFormComponent,
+    ChartAlertManagerComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -581,9 +588,10 @@ export class ChartAnalysisPageComponent {
       ].filter(Boolean).length,
   );
 
-  readonly alertPrice = signal<number>(0);
+  /** A level picked on the chart for the alert form (right-click "Add alert at …"); null = 10 points off the live price. */
+  readonly alertPreset = signal<number | null>(null);
   openAlertDraft(ev: Event): void {
-    this.alertPrice.set(Number((this.bars().at(-1)?.close ?? 0).toFixed(this.precision())));
+    this.alertPreset.set(null);
     this.toggleMenu('alert', ev);
   }
 
@@ -1279,7 +1287,7 @@ export class ChartAnalysisPageComponent {
   readonly timezone = signal<string>('UTC');
   readonly layoutMenuOpen = signal(false);
   readonly contextMenu = signal<{ x: number; y: number; price: number | null } | null>(null);
-  private readonly alerts = inject(AlertsService);
+  protected readonly chartAlerts = inject(ChartAlertsService);
   private readonly notify = inject(NotificationService);
   /**
    * Whether the page is fullscreen, as the browser says (CC-20): leaving with Esc fires only
@@ -3930,51 +3938,120 @@ export class ChartAnalysisPageComponent {
     this.contextMenu.set({ x: ev.clientX - host.left, y, price: this.host()?.priceAtY(y) ?? null });
   }
 
+  // ── Chart alerts (alerts v2) ─────────────────────────────────────────────
+  //
+  // ChartAlert rows evaluated by the engine on every tick (a CROSSING of the price on the alert's side, bid by
+  // default), not the old polled PriceLevel rule that compared the mid price every 30 s and fired at once when set at
+  // the last close (SP-02/SP-03).
+
   /**
-   * Create a price alert at the point that was right-clicked.
-   *
-   * Uses the engine's existing `PriceLevel` alert type, so an alert raised
-   * from the chart is the same object as one raised anywhere else — it routes
-   * through the same channels and shows up in the same list, rather than being
-   * a chart-only notion that quietly does nothing.
+   * Add an alert at the right-clicked price: opens the alert form at that level. The operator still sees the direction
+   * (pre-set to the way price must travel to reach it), the side and the rest before anything is armed.
    */
   createAlertHere(): void {
     const menu = this.contextMenu();
     this.contextMenu.set(null);
     const price = menu?.price;
-    if (price === null || price === undefined) return;
-    this.createAlertAt(price);
+    if (price === null || price === undefined || !Number.isFinite(price) || price <= 0) return;
+    this.alertPreset.set(price);
+    this.openMenu.set('alert');
   }
 
-  /** Create a PriceLevel alert at `price`, above or below the last close. */
-  createAlertAt(price: number): void {
-    if (!Number.isFinite(price) || price <= 0) return;
+  /** The form saved an alert. */
+  onAlertSaved(): void {
+    this.openMenu.set(null);
+    this.notify.success('Alert set — it fires when price crosses the level.');
+  }
 
-    const digits = this.precision();
-    const symbol = this.symbol();
-    const last = this.bars().at(-1)?.close ?? price;
-    const direction = price >= last ? 'Above' : 'Below';
+  /** The alert manager (right rail) and the alert a bell link asked to show. */
+  readonly alertManagerOpen = signal(false);
+  readonly alertFocusId = signal<number | null>(null);
 
-    this.alerts
-      .create({
-        alertType: 'PriceLevel',
-        symbol,
-        conditionJson: JSON.stringify({ symbol, price, direction }),
-        isActive: true,
-        deduplicationKey: `chart:${symbol}:${price.toFixed(digits)}`,
-      })
+  toggleAlertManager(): void {
+    if (this.alertManagerOpen()) this.closeAlertManager();
+    else this.alertManagerOpen.set(true);
+  }
+
+  closeAlertManager(): void {
+    this.alertManagerOpen.set(false);
+    this.alertFocusId.set(null);
+  }
+
+  /** `?alert=12` (the bell's link to a fired chart alert): open the manager on it. */
+  private readonly alertQuery = toSignal(
+    this.route.queryParamMap.pipe(map((q) => q.get('alert'))),
+    {
+      initialValue: null,
+    },
+  );
+  private readonly followAlertQuery = effect(() => {
+    const id = Number(this.alertQuery());
+    if (!Number.isFinite(id) || id <= 0) return;
+    untracked(() => {
+      this.alertFocusId.set(id);
+      this.alertManagerOpen.set(true);
+    });
+  });
+
+  /** The price alerts of this symbol as dashed lines; dragging one asks before moving the alert. */
+  private readonly alertLines = new AlertLinesPrimitive(
+    () => this.precision(),
+    (move) => this.askMoveAlert(move),
+  );
+  private readonly attachAlertLines = effect((onCleanup) => {
+    const host = this.host();
+    if (!host) return;
+    untracked(() => this.chartAlerts.ensureLoaded());
+    onCleanup(host.attachPricePrimitive(this.alertLines));
+  });
+  private readonly drawAlertLines = effect(() =>
+    this.alertLines.setLines(
+      alertLinesFor(this.chartAlerts.alerts(), this.symbol(), this.precision()),
+    ),
+  );
+
+  readonly pendingAlertMove = signal<{
+    alertId: number;
+    label: string;
+    from: number;
+    to: number;
+    move: AlertLineMove;
+  } | null>(null);
+  private readonly alertMoveDialog = viewChild<ElementRef<HTMLDialogElement>>('alertMoveDialog');
+
+  private askMoveAlert(move: AlertLineMove): void {
+    const alert = this.chartAlerts.alerts().find((a) => a.id === move.line.alertId);
+    if (!alert) return;
+    if (!movedBounds(alert, move.line.bound, move.price)) {
+      this.notify.warning('The upper level of a channel must stay above its lower level.');
+      return;
+    }
+    this.pendingAlertMove.set({
+      alertId: alert.id,
+      label: alert.name || alert.symbol,
+      from: move.line.price,
+      to: move.price,
+      move,
+    });
+    this.alertMoveDialog()?.nativeElement.showModal();
+  }
+
+  confirmAlertMove(): void {
+    const pending = this.pendingAlertMove();
+    this.alertMoveDialog()?.nativeElement.close();
+    const alert = pending ? this.chartAlerts.alerts().find((a) => a.id === pending.alertId) : null;
+    if (!pending || !alert) return;
+    const bounds = movedBounds(alert, pending.move.line.bound, pending.to);
+    if (!bounds) return;
+    this.chartAlerts
+      .update(alert.id, { ...inputOf(alert), price: bounds.price, upperPrice: bounds.upperPrice })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (res) => {
-          if (res?.status) {
-            this.notify.success(
-              `Alert set: ${symbol} ${direction.toLowerCase()} ${price.toFixed(digits)}`,
-            );
-          } else {
-            this.notify.error(res?.message ?? 'Could not create the alert.');
-          }
-        },
-        error: () => this.notify.error('Could not create the alert.'),
+        next: (res) =>
+          res?.status
+            ? this.notify.success('Alert moved.')
+            : this.notify.error(res?.message || 'The alert could not be moved.'),
+        error: () => this.notify.error('The alert could not be moved — the engine did not answer.'),
       });
   }
 

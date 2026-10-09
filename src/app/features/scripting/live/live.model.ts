@@ -13,9 +13,12 @@ import { parseTradeOrigin } from '../report/trade-origin';
 import type {
   ScriptDivergence,
   ScriptLiveClosedTrade,
+  ScriptLiveMode,
   ScriptLiveStatus,
+  ScriptLiveWarning,
   ScriptOrphanedPosition,
 } from '../api/scripting-api.types';
+import type { TradeOrigin } from '../report/trade-origin';
 
 /**
  * View model for `GET strategy/{id}/script/live`. The contract fixes the top-level fields; the
@@ -88,6 +91,25 @@ function closedTrade(t: Json): ScriptLiveClosedTrade {
   };
 }
 
+/** An ISO time (or unix ms) as unix ms; null when absent or unreadable. */
+function timeMs(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v !== 'string' || !v.trim()) return null;
+  // The engine's DateTimes are UTC; a value without a zone designator is read as UTC too.
+  const t = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(v) ? v : `${v}Z`);
+  return Number.isFinite(t) ? t : null;
+}
+
+function warning(w: Json): ScriptLiveWarning {
+  return {
+    code: text(w['code']),
+    severity: text(w['severity']).toLowerCase() || 'warning',
+    message: text(w['message']),
+    line: num(w['line']) ?? 0,
+    column: num(w['column']) ?? 0,
+  };
+}
+
 /** Normalises the live payload's casing and container types. Null when it is not an object. */
 export function normalizeLiveStatus(raw: unknown): ScriptLiveStatus | null {
   if (!isObject(raw)) return null;
@@ -96,6 +118,12 @@ export function normalizeLiveStatus(raw: unknown): ScriptLiveStatus | null {
     Array.isArray(v) ? v.filter(isObject).map(camelShallow) : [];
   return {
     status: typeof o['status'] === 'string' ? (o['status'] as string) : '',
+    reason: text(o['reason']),
+    mode: text(o['mode']) || 'none',
+    lastHeartbeatMs: timeMs(o['lastHeartbeatUtc']),
+    startedAtMs: timeMs(o['startedAtUtc']),
+    stateAtMs: timeMs(o['stateAtUtc']),
+    warnings: rows(o['warnings']).map(warning),
     lastBarTimeMs: num(o['lastBarTimeMs']),
     position: isObject(o['position']) ? camelShallow(o['position']) : null,
     openTrades: rows(o['openTrades']),
@@ -305,4 +333,234 @@ export function formatAge(minutes: number | null): string {
   const h = Math.floor(minutes / 60);
   if (h < 48) return `${h} h ago`;
   return `${Math.floor(h / 24)} d ago`;
+}
+
+// ── Mode, heartbeat, warnings (PE-08) ────────────────────────────────────────
+
+export interface LiveModeInfo {
+  label: string;
+  /** What the mode means for orders, in a sentence. */
+  explanation: string;
+  /** Real orders can reach a broker account. */
+  sendsOrders: boolean;
+}
+
+const MODES: Record<string, LiveModeInfo> = {
+  live: {
+    label: 'Live',
+    explanation:
+      'The strategy is Active: the emulator’s fills are sent as real orders to its enabled bound accounts (lots × each binding’s multiplier) — to no account when none is bound; the reason says which.',
+    sendsOrders: true,
+  },
+  paper: {
+    label: 'Paper',
+    explanation:
+      'The strategy is paused in a paper stage (Paper trading or Approved): fills are recorded as paper executions and nothing reaches a broker.',
+    sendsOrders: false,
+  },
+  exitsOnly: {
+    label: 'Exits only',
+    explanation:
+      'The strategy is not active but still holds positions it opened: exits and stop / target changes keep reaching the accounts; new entries are not sent.',
+    sendsOrders: true,
+  },
+  alertsOnly: {
+    label: 'Alerts only',
+    explanation:
+      'An indicator script with enabled alert bindings: it runs for its outputs and alerts, and sends no orders.',
+    sendsOrders: false,
+  },
+  none: {
+    label: 'Not trading',
+    explanation: 'The session is not running in a mode that trades.',
+    sendsOrders: false,
+  },
+};
+
+/** Plain words for a session's mode. */
+export function liveModeInfo(mode: ScriptLiveMode | null | undefined): LiveModeInfo {
+  const key = String(mode ?? '');
+  const exact = MODES[key] ?? MODES[key.charAt(0).toLowerCase() + key.slice(1)];
+  return exact ?? { label: key || 'Unknown', explanation: '', sendsOrders: false };
+}
+
+/** Minutes in an engine timeframe (`M1`…`D1`); 60 when unknown. */
+export function timeframeMinutes(tf: string | null | undefined): number {
+  switch ((tf ?? '').toUpperCase()) {
+    case 'M1':
+      return 1;
+    case 'M5':
+      return 5;
+    case 'M15':
+      return 15;
+    case 'M30':
+      return 30;
+    case 'H1':
+      return 60;
+    case 'H4':
+      return 240;
+    case 'D1':
+      return 1440;
+    default:
+      return 60;
+  }
+}
+
+/**
+ * The live worker advances a session on each closed bar of its timeframe; a heartbeat older than
+ * two bars (at least 15 minutes) on a running session means it is not being advanced.
+ */
+export function heartbeatLate(
+  heartbeatMs: number | null,
+  timeframe: string | null | undefined,
+  nowMs = Date.now(),
+): boolean {
+  if (heartbeatMs === null) return false;
+  const limit = Math.max(15, 2 * timeframeMinutes(timeframe)) * 60_000;
+  return nowMs - heartbeatMs > limit;
+}
+
+/**
+ * What each finding means for the money (kept in one place so a renumbered code is one edit).
+ * PS9301 matters most: the saved input was NOT applied, so the live session runs the input's
+ * default — not what was backtested.
+ */
+export const LIVE_WARNING_HINTS: Readonly<Record<string, string>> = {
+  PS9301:
+    'A saved input value was not applied: the live session runs that input’s default, not the value you saved (and backtested). Fix the value on the script’s Inputs and save.',
+  PS9302:
+    'A saved input belongs to no input of the script (renamed or removed): it is ignored. Save the script again to clear it.',
+  PS6202:
+    'A request.security of a LOWER timeframe than the chart: live, it reads only the bars that closed, unlike a backtest with the bar magnifier.',
+  PS6204:
+    'A request of the chart’s own symbol and timeframe: it repeats data the script already has.',
+};
+
+/** The hint for a live finding, or null when it needs none beyond its message. */
+export function liveWarningHint(code: string): string | null {
+  return LIVE_WARNING_HINTS[code.toUpperCase()] ?? null;
+}
+
+/** Findings that change what the session trades come first. */
+export function sortLiveWarnings(warnings: readonly ScriptLiveWarning[]): ScriptLiveWarning[] {
+  const rank = (w: ScriptLiveWarning) => (w.code === 'PS9301' ? 0 : w.code === 'PS9302' ? 1 : 2);
+  return [...warnings].sort((a, b) => rank(a) - rank(b) || a.line - b.line);
+}
+
+// ── Paper / live statistics (PE-I2, part) ────────────────────────────────────
+
+export interface OriginStats {
+  origin: TradeOrigin;
+  trades: number;
+  wins: number;
+  losses: number;
+  breakeven: number;
+  /** Sum of the trades' profit (account currency); null when no trade carries one. */
+  netProfit: number | null;
+  /** Gross profit ÷ gross loss; null without a loss. */
+  profitFactor: number | null;
+  /** Wins ÷ trades (0–1). */
+  winRate: number | null;
+  avgTrade: number | null;
+  /** Mean R over the trades with a stop at entry (price-based R). */
+  expectancyR: number | null;
+  rTrades: number;
+  /** Largest peak-to-trough fall of the cumulative profit, in money (positive). */
+  maxDrawdown: number | null;
+  firstEntryMs: number | null;
+  lastExitMs: number | null;
+}
+
+/** A closed trade's result in R: (exit − entry) ÷ (entry − stop), signed by side; null without a stop. */
+export function tradeR(t: ScriptLiveClosedTrade): number | null {
+  if (t.entryPrice === null || t.exitPrice === null || t.stopLoss === null) return null;
+  const risk = Math.abs(t.entryPrice - t.stopLoss);
+  if (!(risk > 0)) return null;
+  const side = t.direction === 'short' ? -1 : 1;
+  return (side * (t.exitPrice - t.entryPrice)) / risk;
+}
+
+/**
+ * The statistics of the trades a session took for real — paper or live, each on its own. Warm-up
+ * trades (a replay of history before the session went live) are never part of them: the report's
+ * own statistics include them, these do not.
+ */
+export function originStats(
+  trades: readonly ScriptLiveClosedTrade[],
+  origin: TradeOrigin,
+): OriginStats {
+  const mine = trades
+    .filter((t) => t.origin === origin)
+    .sort((a, b) => (a.exitTimeMs ?? 0) - (b.exitTimeMs ?? 0));
+  let wins = 0;
+  let losses = 0;
+  let even = 0;
+  let gross = 0;
+  let grossLoss = 0;
+  let money = 0;
+  let withMoney = 0;
+  let peak = 0;
+  let cum = 0;
+  let dd = 0;
+  const rs: number[] = [];
+  for (const t of mine) {
+    const p = t.profit;
+    if (p !== null) {
+      withMoney++;
+      money += p;
+      if (p > 0) {
+        wins++;
+        gross += p;
+      } else if (p < 0) {
+        losses++;
+        grossLoss -= p;
+      } else even++;
+      cum += p;
+      peak = Math.max(peak, cum);
+      dd = Math.max(dd, peak - cum);
+    } else {
+      const r = tradeR(t);
+      if (r !== null) {
+        if (r > 0) wins++;
+        else if (r < 0) losses++;
+        else even++;
+      }
+    }
+    const r = tradeR(t);
+    if (r !== null) rs.push(r);
+  }
+  const n = mine.length;
+  return {
+    origin,
+    trades: n,
+    wins,
+    losses,
+    breakeven: even,
+    netProfit: withMoney ? money : null,
+    profitFactor: withMoney && grossLoss > 0 ? gross / grossLoss : null,
+    winRate: n ? wins / n : null,
+    avgTrade: withMoney ? money / withMoney : null,
+    expectancyR: rs.length ? rs.reduce((s, r) => s + r, 0) / rs.length : null,
+    rTrades: rs.length,
+    maxDrawdown: withMoney ? dd : null,
+    firstEntryMs: mine.reduce<number | null>(
+      (m, t) =>
+        t.entryTimeMs === null ? m : m === null ? t.entryTimeMs : Math.min(m, t.entryTimeMs),
+      null,
+    ),
+    lastExitMs: mine.reduce<number | null>(
+      (m, t) => (t.exitTimeMs === null ? m : m === null ? t.exitTimeMs : Math.max(m, t.exitTimeMs)),
+      null,
+    ),
+  };
+}
+
+/** How many closed trades came from each origin. */
+export function originCounts(trades: readonly ScriptLiveClosedTrade[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const t of trades) {
+    const k = t.origin ?? 'unknown';
+    out[k] = (out[k] ?? 0) + 1;
+  }
+  return out;
 }

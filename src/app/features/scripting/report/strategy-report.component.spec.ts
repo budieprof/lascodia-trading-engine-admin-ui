@@ -14,6 +14,9 @@ import { ReportMetricListComponent } from './report-metric-list.component';
 import { ReportTradesGridComponent } from './report-trades-grid.component';
 import { ReportMonthlyHeatmapComponent } from './report-monthly-heatmap.component';
 import { ReportPropertiesComponent } from './report-properties.component';
+import { ReportRAnalysisComponent } from './report-r-analysis.component';
+import { RunProvenanceComponent } from './run-provenance.component';
+import { scriptSourceHash } from '../shared/sha256';
 import { MINUS } from './report-format';
 import { normalizeStrategyReport, type ReportTrade } from './strategy-report.model';
 import { strategyReportFixture, toPascalCaseKeys } from '../testing/strategy-report.fixture';
@@ -21,9 +24,22 @@ import { declareSignalIo } from '@shared/testing/jit-signal-io';
 import { AgGridStubComponent, ChartCardStubComponent } from '../testing/stubs';
 
 declareSignalIo(StrategyReportComponent, {
-  inputs: ['report', 'backtestRunId', 'heading', 'headingNote', 'tradesClickable', 'tradeOrigin'],
+  inputs: [
+    'report',
+    'backtestRunId',
+    'heading',
+    'headingNote',
+    'tradesClickable',
+    'tradeOrigin',
+    'run',
+    'testCount',
+  ],
   outputs: ['tradeClick'],
 });
+declareSignalIo(ReportRAnalysisComponent, {
+  inputs: ['report', 'engine', 'strategyId', 'testCount', 'currency'],
+});
+declareSignalIo(RunProvenanceComponent, { inputs: ['provenance', 'strategyId'] });
 declareSignalIo(ReportOverviewComponent, { inputs: ['report', 'currency', 'palette'] });
 declareSignalIo(ReportSplitTableComponent, { inputs: ['groups', 'splits', 'currency', 'caption'] });
 declareSignalIo(ReportMetricListComponent, { inputs: ['groups', 'report', 'currency'] });
@@ -43,10 +59,16 @@ describe('StrategyReportComponent', () => {
   let http: HttpTestingController;
   let el: HTMLElement;
 
-  function render(report: unknown, runId: number | null = null): void {
+  function render(
+    report: unknown,
+    runId: number | null = null,
+    extra: { run?: unknown; testCount?: unknown } = {},
+  ): void {
     fixture = TestBed.createComponent(StrategyReportComponent);
     fixture.componentRef.setInput('report', report);
     fixture.componentRef.setInput('backtestRunId', runId);
+    if (extra.run !== undefined) fixture.componentRef.setInput('run', extra.run);
+    if (extra.testCount !== undefined) fixture.componentRef.setInput('testCount', extra.testCount);
     fixture.detectChanges();
     el = fixture.nativeElement as HTMLElement;
   }
@@ -300,5 +322,110 @@ describe('StrategyReportComponent', () => {
     render(JSON.stringify({ TotalReturn: 1, Trades: [] }));
     expect(el.querySelector('.unreadable')).not.toBeNull();
     expect(el.querySelector('.report')).toBeNull();
+  });
+  describe('R analysis (PE-I1, PE-I8)', () => {
+    const ok = <T>(data: T) => ({ data, status: true, message: 'Successful', responseCode: '00' });
+    const BASE = 'http://test/api/v1/lascodia-trading-engine';
+
+    /** The fixture's six closed trades with an R each (C6); the seventh is still open. */
+    function withR(): ReturnType<typeof strategyReportFixture> {
+      const raw = strategyReportFixture();
+      const rs = [1.3, -1, 2.9, -1, 4.8, 0.1];
+      raw['trades'].forEach((t: Record<string, unknown>, i: number) => {
+        if (i < rs.length) t['rMultiple'] = rs[i];
+      });
+      return raw;
+    }
+
+    it('explains why there is no R when no trade carries the stop it opened with', () => {
+      render(strategyReportFixture());
+      openTab('R analysis');
+      expect(el.querySelector('[data-testid="r-empty"]')!.textContent).toContain(
+        'cannot be measured',
+      );
+      expect(el.querySelector('[data-testid="r-monte-carlo"]')).toBeNull();
+    });
+
+    it('shows the expectancy with its interval, the tests counted, the distribution and a Monte Carlo', () => {
+      render(withR(), null, {
+        testCount: { count: 5, label: 'variants previewed in this editor session' },
+      });
+      openTab('R analysis');
+      const expectancy = el.querySelector('[data-testid="r-expectancy"]')!.textContent!;
+      expect(expectancy).toContain('+1.18R');
+      expect(expectancy).toContain('95% interval');
+      expect(el.querySelector('[data-testid="r-tests"]')!.textContent).toContain(
+        'variants previewed',
+      );
+      expect(el.querySelector('[data-testid="r-dsr"]')!.textContent).toContain('best of 5');
+      expect(el.textContent).toContain('Fewer than 30 trades');
+      expect(el.querySelectorAll('.hist-col').length).toBeGreaterThan(3);
+      expect(el.querySelector('[data-testid="r-monte-carlo"]')).not.toBeNull();
+      expect(el.querySelector('[data-testid="r-ruin"]')!.textContent).toContain('Risk of ruin');
+    });
+
+    it('reads a stored run: its provenance, the engine trades’ R, its costs and the ledger’s test count', () => {
+      const source = '//@version=6\nstrategy("Breakout")\n';
+      const resultJson = JSON.stringify({
+        TotalCommission: 18.5,
+        TotalSwap: 2.25,
+        TotalSlippage: 31,
+        CostModel: 'Snapshot',
+        Trades: [{ RMultiple: 2 }, { RMultiple: -1 }, { RMultiple: -1 }, { RMultiple: 1.5 }],
+        script: {
+          sourceHash: scriptSourceHash(source),
+          inputs: { len: 20 },
+          ignoredInputs: [],
+          compileWarnings: ['PS9002 (2:1) No stop'],
+          operatorAdHoc: true,
+          chartTimeframe: 'H1',
+          chartSource: 'Candles',
+        },
+      });
+      render(strategyReportFixture(), 812, { run: { strategyId: 41, resultJson } });
+
+      http
+        .expectOne(`${BASE}/strategy/41`)
+        .flush(ok({ id: 41, scriptSource: source, scriptInputs: '{"len":30}' }));
+      fixture.detectChanges();
+      const strip = el.querySelector('[data-testid="run-provenance"]')!;
+      expect(strip.querySelector('[data-testid="prov-script"]')!.textContent).toContain(
+        "the strategy's script now",
+      );
+      expect(strip.querySelector('[data-testid="prov-inputs"]')!.textContent).toContain(
+        '1 differ from now',
+      );
+      expect(strip.querySelector('[data-testid="prov-warnings"]')!.textContent).toContain(
+        '1 compile warning',
+      );
+      expect(strip.querySelector('[data-testid="prov-adhoc"]')).not.toBeNull();
+
+      openTab('R analysis');
+      http
+        .expectOne(`${BASE}/strategy-feedback/41/trials`)
+        .flush(ok({ effectiveTrials: 12, ledgerTrials: 9, peerStrategies: 12 }));
+      fixture.detectChanges();
+      // The engine's own trade list (costs included) wins over the report's trades.
+      expect(el.textContent).toContain("from the engine's trade list");
+      expect(el.querySelector('[data-testid="r-expectancy"]')!.textContent).toContain('+0.38R');
+      expect(el.querySelector('[data-testid="r-tests"]')!.textContent).toContain('12');
+      const costs = el.querySelector('[data-testid="r-costs"]')!.textContent!;
+      expect(costs).toContain('Commission');
+      expect(costs).toContain('18.50 USD');
+      expect(costs).toContain('Spread and slippage');
+    });
+
+    it('notices when the strategy’s script changed since the run', () => {
+      const resultJson = JSON.stringify({
+        Trades: [],
+        script: { sourceHash: scriptSourceHash('old source'), inputs: {} },
+      });
+      render(strategyReportFixture(), 812, { run: { strategyId: 41, resultJson } });
+      http.expectOne(`${BASE}/strategy/41`).flush(ok({ id: 41, scriptSource: 'new source' }));
+      fixture.detectChanges();
+      expect(el.querySelector('[data-testid="prov-script"]')!.textContent).toContain(
+        'changed since this run',
+      );
+    });
   });
 });

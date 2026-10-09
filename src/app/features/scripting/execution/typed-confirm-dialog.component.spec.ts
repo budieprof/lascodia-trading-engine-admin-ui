@@ -30,8 +30,8 @@ describe('TypedConfirmDialogComponent', () => {
     for (const [k, v] of Object.entries(inputs)) fixture.componentRef.setInput(k, v);
     confirmed = vi.fn();
     cancelled = vi.fn();
-    fixture.componentInstance.confirmed.subscribe(confirmed);
-    fixture.componentInstance.cancelled.subscribe(cancelled);
+    fixture.componentInstance.confirmed.subscribe(() => confirmed());
+    fixture.componentInstance.cancelled.subscribe(() => cancelled());
     fixture.detectChanges();
     el = fixture.nativeElement as HTMLElement;
   }

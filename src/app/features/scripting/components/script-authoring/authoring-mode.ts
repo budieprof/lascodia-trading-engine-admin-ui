@@ -1,7 +1,11 @@
 import { linkedSignal, type WritableSignal } from '@angular/core';
 
 import type { StrategyDto } from '@core/api/api.types';
-import type { ScriptExecutionPolicy, ScriptInputValues } from '@core/api/scripting.types';
+import type {
+  ScriptExecutionPolicy,
+  ScriptInputValues,
+  StrategyScriptRevisionField,
+} from '@core/api/scripting.types';
 import { parseSavedInputs } from '../../pine/pine-saved-inputs';
 
 /**
@@ -41,22 +45,39 @@ export interface ScriptDraft {
   executionPolicy: ScriptExecutionPolicy;
 }
 
-/** A new strategy's starting point — a complete, compiling Pine v6 strategy. */
+/**
+ * A new strategy's starting point — a complete, compiling Pine v6 strategy. Every entry carries a
+ * protective stop sized to the market's noise (ATR) and a target: live accounts reject an entry
+ * without a stop (PS9002), so a script started from here can go live as written (PE-09).
+ *
+ * Sized at 100% of equity: at the old 10% of 10,000 every EURUSD order (≈ 900 units) fell below the
+ * engine's 1,000-unit minimum and was rejected, so the starting script never traded (PE-I9).
+ */
 export const DEFAULT_STRATEGY_SCRIPT = `//@version=6
-strategy("My strategy", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+strategy("My strategy", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 100)
+// Each trade's size: 100% of equity as notional (no leverage), in units as on TradingView. The engine
+// rounds every order down to the symbol's lot step (0.01 lot = 1,000 EURUSD units): a smaller share
+// of this capital rounds to nothing and the strategy never trades.
 
 //#region Inputs
 fastLength = input.int(9, "Fast length", minval = 1, group = "Moving averages")
 slowLength = input.int(21, "Slow length", minval = 1, group = "Moving averages")
+atrLength = input.int(14, "ATR length", minval = 1, group = "Risk")
+stopAtr = input.float(1.5, "Stop (x ATR)", minval = 0.1, step = 0.1, group = "Risk")
+targetAtr = input.float(2.0, "Target (x ATR)", minval = 0.1, step = 0.1, group = "Risk")
 //#endregion
 
 fast = ta.ema(close, fastLength)
 slow = ta.ema(close, slowLength)
+atr = ta.atr(atrLength)
 
+// The stop and target are fixed when the trade opens, from the ATR of that bar.
 if ta.crossover(fast, slow)
     strategy.entry("Long", strategy.long)
+    strategy.exit("Long exit", "Long", stop = close - atr * stopAtr, limit = close + atr * targetAtr)
 if ta.crossunder(fast, slow)
     strategy.entry("Short", strategy.short)
+    strategy.exit("Short exit", "Short", stop = close + atr * stopAtr, limit = close - atr * targetAtr)
 
 plot(fast, "Fast", color.teal)
 plot(slow, "Slow", color.orange)
@@ -68,6 +89,29 @@ export function draftFor(strategy: StrategyDto | null | undefined): ScriptDraft 
     source: strategy?.scriptSource ?? DEFAULT_STRATEGY_SCRIPT,
     inputs: parseSavedInputs(strategy?.scriptInputs),
     executionPolicy: strategy?.executionPolicy ?? 'Direct',
+  };
+}
+
+/**
+ * The saved script an edit started from (PE-01 / PE-05): what "unsaved changes" compares with,
+ * and the revision a save sends as `expectedScriptRevision` so it never overwrites a newer script
+ * (another tab, a rollback, an approved optimization).
+ */
+export interface ScriptBase {
+  source: string;
+  inputs: ScriptInputValues;
+  /** `scriptRevision` of the saved script; null for a new strategy or an older engine. */
+  revision: string | null;
+}
+
+export function baseFor(
+  strategy: (StrategyDto & StrategyScriptRevisionField) | null | undefined,
+): ScriptBase {
+  const d = draftFor(strategy);
+  return {
+    source: d.source,
+    inputs: d.inputs,
+    revision: strategy?.scriptRevision ?? null,
   };
 }
 

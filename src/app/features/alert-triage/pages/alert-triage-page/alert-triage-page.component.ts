@@ -5,16 +5,20 @@ import {
   effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { catchError, map, of } from 'rxjs';
 
 import { AlertsService } from '@core/services/alerts.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 import type { AlertDto, AlertSeverity } from '@core/api/api.types';
+import type { AlertDispatchLogDto } from '@core/api/alerts.types';
+import { focusedAlertStatus, parseFocusParam } from './triage-focus';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
@@ -148,6 +152,94 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
           Refresh
         </button>
       </app-page-header>
+
+      <!-- The alert a notification links to (?focus=), pinned whatever the filters (SP-04). -->
+      @if (focusId() !== null) {
+        <section
+          class="focus-card"
+          data-testid="triage-focus"
+          [attr.data-sev]="focusedAlert()?.severity ?? null"
+          aria-label="Linked alert"
+        >
+          <header class="focus-head">
+            <strong>Linked alert #{{ focusId() }}</strong>
+            @if (focusedStatus(); as st) {
+              <span class="focus-status" [attr.data-status]="st.key">{{ st.label }}</span>
+            }
+            <span class="muted small">shown whatever the filters below</span>
+            <span class="focus-spacer"></span>
+            @if (focusedAlert() && !focusInQueue()) {
+              <button type="button" class="btn btn-ghost btn-xs" (click)="showFocusInQueue()">
+                Show in the queue
+              </button>
+            }
+            <button
+              type="button"
+              class="btn btn-ghost btn-xs"
+              (click)="clearFocus()"
+              title="Remove the pin"
+            >
+              Clear
+            </button>
+          </header>
+          @if (focusedAlert(); as a) {
+            <div class="focus-body">
+              <span class="sev-pill" [attr.data-sev]="a.severity">{{ a.severity }}</span>
+              <span class="mono small">{{ a.alertType }}</span>
+              <span class="mono" [class.muted]="!a.symbol">{{ a.symbol ?? systemWide }}</span>
+              <span class="reason small">{{ a.parsedReason }}</span>
+            </div>
+            <div class="focus-meta small muted">
+              @if (a.lastTriggeredAt) {
+                Triggered {{ a.lastTriggeredAt | date: 'MMM d, HH:mm:ss' }} ({{
+                  a.lastTriggeredAt | relativeTime
+                }})
+              } @else {
+                Trigger time not recorded
+              }
+              @if (a.autoResolvedAt) {
+                · auto-resolved {{ a.autoResolvedAt | date: 'MMM d, HH:mm:ss' }}
+              }
+              · cooldown {{ fmtDuration(a.cooldownSeconds) }}
+            </div>
+            @if (focusDispatches().length) {
+              <ul class="focus-dispatches" aria-label="Deliveries">
+                @for (d of focusDispatches(); track d.id) {
+                  <li [attr.data-status]="d.status" [title]="d.errorMessage ?? d.message">
+                    <span class="mono">{{ d.channel === 'InApp' ? 'In app' : d.channel }}</span>
+                    {{ dispatchStatusLabel(d.status) }}
+                    <span class="muted">{{ d.dispatchedAt | date: 'MMM d, HH:mm:ss' }}</span>
+                    @if (d.errorMessage) {
+                      <span class="muted">— {{ d.errorMessage }}</span>
+                    }
+                  </li>
+                }
+              </ul>
+            }
+            <div class="focus-actions">
+              @if (isSnoozed(a.id); as until) {
+                <span class="snooze-tag small muted">snoozed → {{ until | date: 'HH:mm' }}</span>
+              } @else {
+                <button type="button" class="btn btn-ghost btn-xs" (click)="snooze(a.id, 15)">
+                  15m
+                </button>
+                <button type="button" class="btn btn-ghost btn-xs" (click)="snooze(a.id, 60)">
+                  1h
+                </button>
+                <button type="button" class="btn btn-accent btn-xs" (click)="acknowledge(a)">
+                  Ack
+                </button>
+              }
+            </div>
+          } @else if (focusLoading()) {
+            <p class="small muted focus-note">Loading…</p>
+          } @else if (focusMissing()) {
+            <p class="small muted focus-note">
+              Alert #{{ focusId() }} was not found — it may have been deleted.
+            </p>
+          }
+        </section>
+      }
 
       <section class="filter-bar">
         <div class="fb-field">
@@ -615,7 +707,10 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                             </thead>
                             <tbody>
                               @for (row of g.rows; track row.key) {
-                                <tr [class.snoozed]="row.snoozedCount === row.count">
+                                <tr
+                                  [class.snoozed]="row.snoozedCount === row.count"
+                                  [class.focused]="rowHasFocus(row)"
+                                >
                                   <td class="mono" [class.muted]="!row.symbol">
                                     {{ row.symbol ?? systemWide }}
                                   </td>
@@ -709,7 +804,10 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                       </tr>
                     } @else {
                       @for (a of flatPageRows(); track a.id) {
-                        <tr [class.snoozed]="isSnoozed(a.id) !== null">
+                        <tr
+                          [class.snoozed]="isSnoozed(a.id) !== null"
+                          [class.focused]="a.id === focusId()"
+                        >
                           <td>
                             <span class="sev-pill" [attr.data-sev]="a.severity">{{
                               a.severity
@@ -1470,6 +1568,69 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
       .symbol-clickable:hover {
         background: var(--bg-tertiary);
       }
+
+      /* ── Linked alert (?focus=) pinned above everything ─ */
+      .focus-card {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2, 8px);
+        padding: var(--space-3, 12px) var(--space-4, 16px);
+        border: 1px solid var(--border);
+        border-left: 4px solid var(--accent, #2962ff);
+        border-radius: var(--radius-md, 8px);
+        background: var(--bg-primary);
+      }
+      .focus-card[data-sev='Critical'] {
+        border-left-color: #ff3b30;
+      }
+      .focus-card[data-sev='High'] {
+        border-left-color: #ff9500;
+      }
+      .focus-card[data-sev='Medium'] {
+        border-left-color: #2962ff;
+      }
+      .focus-card[data-sev='Info'] {
+        border-left-color: #8e8e93;
+      }
+      .focus-head,
+      .focus-body,
+      .focus-actions {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-2, 8px);
+      }
+      .focus-spacer {
+        flex: 1;
+      }
+      .focus-status {
+        padding: 1px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        background: var(--bg-tertiary);
+      }
+      .focus-status[data-status='active'] {
+        color: #ff9500;
+      }
+      .focus-note {
+        margin: 0;
+      }
+      .focus-dispatches {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        font-size: 12px;
+      }
+      .focus-dispatches li[data-status='Failed'] {
+        color: var(--danger, #ff3b30);
+      }
+      tr.focused td {
+        background: color-mix(in srgb, var(--accent, #2962ff) 12%, transparent);
+      }
     `,
   ],
 })
@@ -1524,7 +1685,65 @@ export class AlertTriagePageComponent {
     { intervalMs: 60_000 },
   );
 
+  // ── Linked alert (`?focus=`, SP-04) ──────────────────────────────────
+
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
+
+  /** The alert the notification bell linked to, from `?focus=<alertId>`. */
+  protected readonly focusId = toSignal(
+    this.route.queryParamMap.pipe(map((q) => parseFocusParam(q.get('focus')))),
+    { initialValue: null },
+  );
+  /** The linked alert as `GET alert/{id}` returned it (the list's copy wins once it has the row). */
+  private readonly focusFetched = signal<AlertDto | null>(null);
+  protected readonly focusLoading = signal(false);
+  protected readonly focusMissing = signal(false);
+  /** What happened on each channel the last times it was sent (SP-05's dispatch log). */
+  protected readonly focusDispatches = signal<AlertDispatchLogDto[]>([]);
+
+  /** The linked alert, pinned above the queue whatever the filters. */
+  protected readonly focusedAlert = computed<ParsedAlert | null>(() => {
+    const id = this.focusId();
+    if (id === null) return null;
+    const row = this.resource.value()?.find((a) => a.id === id) ?? this.focusFetched();
+    if (!row || row.id !== id) return null;
+    return {
+      ...row,
+      parsedReason: this.parseReason(row),
+      age: row.lastTriggeredAt ?? row.autoResolvedAt ?? '',
+    };
+  });
+  protected readonly focusedStatus = computed(() => {
+    const a = this.focusedAlert();
+    return a ? focusedAlertStatus(a, this.snoozedUntil()[a.id], Date.now()) : null;
+  });
+  /** Whether the queue below shows the linked alert under the current filters. */
+  protected readonly focusInQueue = computed(() => {
+    const id = this.focusId();
+    return id !== null && this.triageQueue().some((a) => a.id === id);
+  });
+
   constructor() {
+    // Fetch the linked alert and its dispatch log on every new `focus`.
+    effect(() => {
+      const id = this.focusId();
+      untracked(() => this.loadFocus(id));
+    });
+    // Open the incident that holds the linked alert, once per link.
+    let opened: number | null = null;
+    effect(() => {
+      const id = this.focusId();
+      if (id === null || id === opened) return;
+      const group = this.incidentGroups().find((g) => g.alerts.some((a) => a.id === id));
+      if (!group) return;
+      opened = id;
+      untracked(() => {
+        const next = new Set(this.openGroups());
+        next.add(group.key);
+        this.openGroups.set(next);
+      });
+    });
     effect(() => {
       this.windowHours();
       this.resource.refresh();
@@ -1965,6 +2184,78 @@ export class AlertTriagePageComponent {
     // proper call and the local snooze becomes a redundant safety net.
     this.snooze(alert.id, 60 * 24);
     this.notify.info('Acknowledged locally (snoozed 24h). Engine-side ack pending.');
+  }
+
+  // ── Linked alert actions ────────────────────────────────────────────
+
+  private loadFocus(id: number | null): void {
+    this.focusFetched.set(null);
+    this.focusMissing.set(false);
+    this.focusDispatches.set([]);
+    if (id === null) {
+      this.focusLoading.set(false);
+      return;
+    }
+    this.focusLoading.set(true);
+    this.service.getById(id, { silent: true }).subscribe({
+      next: (res) => {
+        if (this.focusId() !== id) return;
+        this.focusLoading.set(false);
+        if (res?.status && res.data) this.focusFetched.set(res.data);
+        else this.focusMissing.set(true);
+      },
+      error: () => {
+        if (this.focusId() !== id) return;
+        this.focusLoading.set(false);
+        this.focusMissing.set(true);
+      },
+    });
+    this.service.dispatchLog(id, 10).subscribe({
+      next: (res) => {
+        if (this.focusId() === id)
+          this.focusDispatches.set(res?.status && res.data ? res.data : []);
+      },
+      error: () => undefined,
+    });
+  }
+
+  /**
+   * Widens every filter so the queue shows the linked alert among its peers (the incident holding it opens by itself;
+   * an alert older than the widest window stays only in the pinned card).
+   */
+  showFocusInQueue(): void {
+    this.severityFilter.set('');
+    this.typeFilter.set('');
+    this.symbolFilter.set('');
+    this.statusFilter.set('all');
+    this.windowHours.set(168);
+  }
+
+  protected rowHasFocus(row: IncidentRow): boolean {
+    const id = this.focusId();
+    return id !== null && row.alerts.some((a) => a.id === id);
+  }
+
+  clearFocus(): void {
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { focus: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+  }
+
+  protected dispatchStatusLabel(status: AlertDispatchLogDto['status']): string {
+    switch (status) {
+      case 'Sent':
+        return 'sent';
+      case 'Skipped':
+        return 'not sent';
+      case 'Retrying':
+        return 'retrying';
+      default:
+        return 'failed';
+    }
   }
 
   // ── Group-level actions (grouped view) ──────────────────────────────

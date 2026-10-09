@@ -43,6 +43,12 @@ import {
   linkedAuthoringMode,
   linkedScriptDraft,
 } from '@features/scripting/components/script-authoring/authoring-mode';
+import { parseSavedInputs } from '@features/scripting/pine/pine-saved-inputs';
+import {
+  ScriptDialogService,
+  confirmDiscard,
+} from '@features/scripting/shared/script-dialog.service';
+import { warnBeforeUnload } from '@features/scripting/shared/unsaved-changes';
 import { StrategiesService } from '@core/services/strategies.service';
 import { RiskProfilesService } from '@core/services/risk-profiles.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
@@ -125,8 +131,8 @@ const TIMEFRAME_LABELS: Record<string, string> = {
         [class.as-page]="isPage()"
         role="presentation"
         tabindex="-1"
-        (click)="isPage() || onCancel()"
-        (keydown.escape)="isPage() || onCancel()"
+        (click)="isPage() || requestClose()"
+        (keydown.escape)="isPage() || requestClose()"
       >
         <div
           class="dialog"
@@ -166,7 +172,12 @@ const TIMEFRAME_LABELS: Record<string, string> = {
               </button>
             }
             @if (!isPage()) {
-              <button type="button" class="dialog-close" (click)="onCancel()" aria-label="Close">
+              <button
+                type="button"
+                class="dialog-close"
+                (click)="requestClose()"
+                aria-label="Close"
+              >
                 ×
               </button>
             }
@@ -382,6 +393,8 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                   [timeframe]="scriptTimeframe()"
                   [spacious]="isPage()"
                   (executionRequested)="onExecutionRequested()"
+                  (saveRequested)="onSaveShortcut()"
+                  (scriptReloaded)="strategyChanged.emit()"
                 />
               }
 
@@ -976,6 +989,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                       <app-strategy-version-diff
                         [version]="dv"
                         [current]="currentVersionFields()"
+                        [inputDefs]="scriptPanel()?.lastGood()?.inputs ?? null"
                         (closed)="diffVersion.set(null)"
                       />
                     }
@@ -1067,7 +1081,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                 <button
                   type="button"
                   class="btn btn-secondary"
-                  (click)="onCancel()"
+                  (click)="requestClose()"
                   [disabled]="busy()"
                 >
                   Cancel
@@ -2074,6 +2088,9 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   readonly currentVersionFields = computed<StrategyVersionFields>(() => {
     const v = this.formValue();
     const text = (x: unknown) => (typeof x === 'string' ? x : null);
+    // PE-02: the script and its inputs as the editor holds them (inputs as they run: coerced to
+    // what the script declares, defaults left out), so a script-only edit is a difference too.
+    const script = this.isScriptAuthoring() ? this.scriptDraft() : null;
     return {
       name: text(v['name']),
       description: text(v['description']),
@@ -2084,6 +2101,10 @@ export class StrategyFormComponent implements OnInit, OnChanges {
       sessionFilterJson: text(v['sessionFilterJson']),
       regimeGateJson: text(v['regimeGateJson']),
       multiTimeframeGateJson: text(v['multiTimeframeGateJson']),
+      scriptSource: script?.source ?? this.strategy()?.scriptSource ?? null,
+      scriptInputs: script
+        ? (this.scriptPanel()?.effectiveInputs() ?? script.inputs)
+        : (parseSavedInputs(this.strategy()?.scriptInputs) ?? null),
     };
   });
 
@@ -2468,15 +2489,20 @@ export class StrategyFormComponent implements OnInit, OnChanges {
    * form fields in place so the operator sees the restored values without
    * having to close and reopen the modal.
    */
-  rollbackToVersion(v: StrategyVersionDto): void {
+  async rollbackToVersion(v: StrategyVersionDto): Promise<void> {
     const s = this.strategy();
     if (!s || this.rollingBack()) return;
-    if (
-      !confirm(
-        `Roll strategy "${s.name}" back to v${v.versionNumber}? Current state will be snapshotted first so this is reversible.`,
-      )
-    )
-      return;
+    const scriptEdited = this.isScriptAuthoring() && (this.scriptAuthoring?.isDirty() ?? false);
+    const ok = await this.dialogs.confirm({
+      title: `Roll back to v${v.versionNumber}?`,
+      message: `Strategy "${s.name}" returns to v${v.versionNumber}. Its current state is captured as a version first, so the rollback can be undone.`,
+      details: scriptEdited
+        ? ['Your unsaved script edit is replaced by the script of that version.']
+        : [],
+      confirmLabel: 'Roll back',
+      tone: scriptEdited ? 'danger' : 'primary',
+    });
+    if (!ok) return;
 
     this.rollingBack.set(true);
     this.strategiesService.rollbackVersion(s.id, v.id).subscribe({
@@ -2501,17 +2527,24 @@ export class StrategyFormComponent implements OnInit, OnChanges {
                   regimeGateJson: restored.regimeGateJson ?? '',
                   multiTimeframeGateJson: restored.multiTimeframeGateJson ?? '',
                 });
+                // PE-03: the editor shows the restored script and saves from its revision — the
+                // next save must not quietly put the rolled-back script back.
+                this.scriptAuthoring?.applySaved(restored);
               }
               this.notifications.success(res.message ?? `Rolled back to v${v.versionNumber}`);
               this.refreshVersionHistory();
+              this.strategyChanged.emit();
             },
             error: () => {
               this.rollingBack.set(false);
-              // Even if the refetch fails, the rollback itself succeeded.
+              // Even if the refetch fails, the rollback itself succeeded. The editor still holds
+              // the old script, but a save from it is refused as stale (PE-01) instead of undoing
+              // the rollback.
               this.notifications.success(
                 `Rolled back to v${v.versionNumber} (form will refresh on next open)`,
               );
               this.refreshVersionHistory();
+              this.strategyChanged.emit();
             },
           });
         } else {
@@ -2632,6 +2665,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     this.showVersionHistory.set(false);
     this.versions.set([]);
     this.diffVersion.set(null);
+    this.leaving = false;
     this.templateNameDraft.set(null);
     this.templateError.set(null);
     this.updateChangeReason.set('');
@@ -2939,16 +2973,79 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     this.cancelled.emit();
   }
 
-  /** Switching to the full page re-opens the strategy there; unsaved edits do not travel. */
-  requestPage(): void {
-    const dirty = this.formDirty() || (this.scriptAuthoring?.isDirty() ?? false);
-    if (
-      dirty &&
-      !confirm('Unsaved changes in this dialog will be discarded. Open the full page?')
-    ) {
-      return;
+  /**
+   * Switching to the full page re-opens the strategy there. An unsaved script edit travels — it
+   * is kept in this browser and the full page offers to restore it; changes to the settings in
+   * this dialog do not, so they are confirmed first.
+   */
+  async requestPage(): Promise<void> {
+    if (this.formDirty()) {
+      const scriptEdited = this.scriptAuthoring?.isDirty() ?? false;
+      const ok = await this.dialogs.confirm({
+        title: 'Open the full page?',
+        message:
+          'Changes to the strategy settings in this dialog are not carried over to the full page.' +
+          (scriptEdited ? ' Your script edit is: the full page offers to restore it.' : ''),
+        confirmLabel: 'Open the full page',
+        cancelLabel: 'Stay here',
+        tone: 'danger',
+      });
+      if (!ok) return;
     }
+    this.leaving = true;
     this.pageRequested.emit();
+  }
+
+  // ── Unsaved changes (PE-06) ─────────────────────────────────────────────
+  // Closing the dialog (×, Cancel, Escape, a click outside), leaving the edit page and closing the
+  // browser tab all ask before an unsaved edit is thrown away. The script edit is also kept in this
+  // browser while it is unsaved (the script panel's local draft), so even a crash loses nothing.
+
+  /** The form closes on its own (after a save, or a confirmed discard): nothing left to ask. */
+  private leaving = false;
+
+  private readonly dialogs = inject(ScriptDialogService);
+
+  // Closing or reloading the tab while the form holds an unsaved edit asks the browser's question.
+  private readonly unloadGuard = warnBeforeUnload(() => this.hasUnsavedChanges());
+
+  /** The form holds an edit not saved yet (settings or script). */
+  hasUnsavedChanges(): boolean {
+    if (!this.open() || this.leaving || !this.form) return false;
+    return this.settingsEdited() || this.scriptEdited();
+  }
+
+  /** What is unsaved, in the operator's words. */
+  unsavedChangesNote(): string {
+    const settings = this.settingsEdited();
+    const script = this.scriptEdited();
+    if (settings && script) return 'The script and the strategy settings have unsaved changes';
+    return script ? 'The script has unsaved changes' : 'The strategy settings have unsaved changes';
+  }
+
+  private settingsEdited(): boolean {
+    return this.strategy() ? this.formDirty() : !!this.form?.dirty;
+  }
+
+  private scriptEdited(): boolean {
+    return this.isScriptAuthoring() && (this.scriptAuthoring?.isDirty() ?? false);
+  }
+
+  /** ×, Cancel, Escape or a click outside the dialog: asks first when something is unsaved. */
+  async requestClose(): Promise<void> {
+    if (this.busy()) return;
+    if (this.hasUnsavedChanges()) {
+      if (!(await confirmDiscard(this.dialogs, this.unsavedChangesNote()))) return;
+      this.scriptAuthoring?.discardLocalDraft();
+    }
+    this.leaving = true;
+    this.onCancel();
+  }
+
+  /** ⌘S / Ctrl-S in the script editor: the same save as the Update / Create button. */
+  onSaveShortcut(): void {
+    if (this.busy() || !this.form || this.form.invalid || this.saveBlocked()) return;
+    if (this.isScriptAuthoring()) void this.submitScript();
   }
 
   onCancel(): void {
@@ -3065,7 +3162,11 @@ export class StrategyFormComponent implements OnInit, OnChanges {
         return;
       }
       const scriptChanged = panel.isDirty();
-      if (scriptChanged && !(await panel.saveScript(existing.id, script, this.updateChangeReason()))) return;
+      if (
+        scriptChanged &&
+        !(await panel.saveScript(existing.id, script, this.updateChangeReason()))
+      )
+        return;
       if (this.form.dirty) {
         // Metadata only: the script went through its own endpoint, and
         // parametersJson is left out so the (empty) rules stay untouched. The
@@ -3077,6 +3178,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
           this.notifications.success('Script saved — live sessions pick it up at the next bar');
           this.strategyChanged.emit();
         }
+        this.leaving = true;
         this.cancelled.emit();
       }
     } finally {
@@ -3091,10 +3193,14 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   async saveScriptForAssistant(reason: string): Promise<{ ok: boolean; message: string }> {
     this.updateChangeReason.set(reason);
     const panel = this.scriptAuthoring;
-    if (!panel || !this.isScriptAuthoring()) return { ok: false, message: 'The script editor is not open.' };
+    if (!panel || !this.isScriptAuthoring())
+      return { ok: false, message: 'The script editor is not open.' };
     if (this.scriptSubmitting) return { ok: false, message: 'A save is already in progress.' };
     if (this.form.invalid) {
-      return { ok: false, message: 'The strategy form has invalid fields; fix them before saving.' };
+      return {
+        ok: false,
+        message: 'The strategy form has invalid fields; fix them before saving.',
+      };
     }
     const scriptChanged = panel.isDirty();
     if (!scriptChanged && !this.form.dirty) {

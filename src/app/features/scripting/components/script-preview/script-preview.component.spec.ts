@@ -16,6 +16,7 @@ import {
   type TradeChartSelection,
 } from '@features/ea-instances/components/ea-trade-chart-modal/ea-trade-chart-modal.component';
 import type { ReportTrade } from '../../report/strategy-report.model';
+import { wasPreviewed } from '../../onboarding/previewed-scripts';
 
 // The editor's Preview: it runs the script, hosts the Pine chart (app-pine-preview) in its chart
 // slot fed by the run, routes the chart's source-line jumps to the editor and, for a strategy,
@@ -45,6 +46,7 @@ class PinePreviewStubComponent {
 })
 class StrategyReportStubComponent {
   @Input() report: unknown;
+  @Input() testCount: unknown;
   @Input() tradesClickable = false;
   @Output() tradeClick = new EventEmitter<ReportTrade>();
 }
@@ -289,5 +291,90 @@ describe('ScriptPreviewComponent', () => {
     fixture.detectChanges();
     expect(el.querySelector('[role="alert"]')!.textContent).toContain('could not be reached');
     expect(chart()).toBeUndefined();
+  });
+  describe('PE-12: a run the editor has moved past', () => {
+    const badge = () => el.querySelector('.stale-badge');
+    const note = () => el.querySelector('.stale-note')?.textContent?.replace(/\s+/g, ' ').trim();
+
+    it('is current right after it ran', async () => {
+      render();
+      await preview();
+      expect(badge()).toBeNull();
+      expect(note()).toBeUndefined();
+    });
+
+    it('says so once the script is edited, and a new run clears it', async () => {
+      render();
+      await preview();
+      fixture.componentRef.setInput('source', SOURCE + 'plot(open)\n');
+      fixture.detectChanges();
+      expect(badge()!.textContent).toContain('Out of date');
+      expect(note()).toContain('the script has changed since it ran');
+      await preview();
+      expect(badge()).toBeNull();
+    });
+
+    it('names every change: inputs, symbol or timeframe, bar count', async () => {
+      render();
+      await preview();
+      fixture.componentRef.setInput('inputs', { in_len: 30 });
+      fixture.componentRef.setInput('timeframe', 'M15');
+      fixture.componentInstance.bars.set(5000);
+      fixture.detectChanges();
+      expect(note()).toContain(
+        'the inputs, the symbol or timeframe and the bar count have changed since it ran',
+      );
+    });
+
+    it('reads the same input values in another key order as unchanged', async () => {
+      run.mockReturnValue(of({ ...RUN }));
+      render();
+      fixture.componentRef.setInput('inputs', { a: 1, b: 2 });
+      fixture.detectChanges();
+      await preview();
+      fixture.componentRef.setInput('inputs', { b: 2, a: 1 });
+      fixture.detectChanges();
+      expect(badge()).toBeNull();
+    });
+
+    it('keeps flagging the result on show when a later run fails', async () => {
+      render();
+      await preview();
+      fixture.componentRef.setInput('source', SOURCE + '// edit\n');
+      run.mockReturnValue(
+        timer(0).pipe(switchMap(() => throwError(() => new ScriptingApiError('Engine down')))),
+      );
+      (el.querySelector('.controls .btn-primary') as HTMLButtonElement).click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+      fixture.detectChanges();
+      expect(el.querySelector('[role="alert"]')!.textContent).toContain('Engine down');
+      expect(badge()).not.toBeNull();
+    });
+  });
+
+  it('PE-I1: counts the distinct variants previewed, for the report’s test count', async () => {
+    render();
+    await preview();
+    await preview();
+    const report = () =>
+      fixture.debugElement.query((d) => d.componentInstance instanceof StrategyReportStubComponent)
+        ?.componentInstance as StrategyReportStubComponent | undefined;
+    el.querySelectorAll<HTMLButtonElement>('.result-tab')[1].click();
+    fixture.detectChanges();
+    expect(report()!.testCount).toMatchObject({ count: 1 });
+    fixture.componentRef.setInput('inputs', { in_len: 30 });
+    fixture.detectChanges();
+    await preview();
+    expect(report()!.testCount).toMatchObject({ count: 2 });
+    expect((report()!.testCount as { label: string }).label).toContain('every look is a test');
+  });
+  it('PE-I9: remembers that this exact script was previewed (the first-strategy checklist)', async () => {
+    localStorage.clear();
+    render();
+    expect(wasPreviewed(SOURCE)).toBe(false);
+    await preview();
+    expect(wasPreviewed(SOURCE)).toBe(true);
+    expect(wasPreviewed(SOURCE + ' ')).toBe(false);
   });
 });

@@ -14,8 +14,43 @@ declareSignalIo(ScriptAlertsTabComponent, { inputs: ['strategy'] });
 const BASE = 'http://test/api/v1/lascodia-trading-engine';
 const ALERTS_URL = `${BASE}/strategy/41/script/alerts`;
 const COMPILE_URL = `${BASE}/scripting/compile`;
+const STATUS_URL = `${BASE}/alert/channel/status`;
+const TEST_URL = `${BASE}/alert/channel/test`;
+const DELIVERIES_URL = `${BASE}/alert/script-deliveries?strategyId=41&limit=50`;
+const configUrl = (key: string) => `${BASE}/config/${key}`;
 
 const ok = <T>(data: T) => ({ data, status: true, message: 'Successful', responseCode: '00' });
+
+const STATUSES = [
+  {
+    channel: 'InApp',
+    isConfigured: true,
+    isEnabled: true,
+    destinationPreview: 'Admin UI',
+    timeoutSeconds: 0,
+  },
+  {
+    channel: 'Email',
+    isConfigured: true,
+    isEnabled: true,
+    destinationPreview: 'al•••@x.com',
+    timeoutSeconds: 30,
+  },
+  {
+    channel: 'Webhook',
+    isConfigured: false,
+    isEnabled: true,
+    destinationPreview: null,
+    timeoutSeconds: 10,
+  },
+  {
+    channel: 'Telegram',
+    isConfigured: true,
+    isEnabled: false,
+    destinationPreview: 'chat 42',
+    timeoutSeconds: 10,
+  },
+];
 
 function compiled(kind: 'strategy' | 'indicator') {
   return ok({
@@ -46,7 +81,26 @@ describe('ScriptAlertsTabComponent', () => {
     el = fixture.nativeElement as HTMLElement;
   }
 
-  function load(saved: unknown[] = [], compile: unknown = compiled('strategy')): void {
+  /** The channels' state and the storm guard's limits, read once per tab. */
+  function context(
+    statuses: unknown[] = STATUSES,
+    storm = { maxFires: '15', windowMinutes: '3' },
+  ): void {
+    http.expectOne(STATUS_URL).flush(ok(statuses));
+    http
+      .expectOne(configUrl('ScriptAlerts:StormMaxFires'))
+      .flush(ok({ key: 'ScriptAlerts:StormMaxFires', value: storm.maxFires }));
+    http
+      .expectOne(configUrl('ScriptAlerts:StormWindowMinutes'))
+      .flush(ok({ key: 'ScriptAlerts:StormWindowMinutes', value: storm.windowMinutes }));
+  }
+
+  function load(
+    saved: unknown[] = [],
+    compile: unknown = compiled('strategy'),
+    withContext = true,
+  ): void {
+    if (withContext) context();
     http.expectOne(ALERTS_URL).flush(ok(saved));
     const req = http.expectOne(COMPILE_URL);
     expect(req.request.body).toEqual({
@@ -159,6 +213,7 @@ describe('ScriptAlertsTabComponent', () => {
       channels: ['Webhook'],
       messageTemplate: null,
       webhookUrl: 'https://hooks.example.com/pine',
+      frequency: 'once_per_bar',
     });
     expect(put.request.body.map((b: { alertKey: string }) => b.alertKey)).toEqual([
       'Long breakout',
@@ -167,15 +222,19 @@ describe('ScriptAlertsTabComponent', () => {
       'order-fills',
     ]);
     put.flush(ok(true));
-    // Re-read after saving.
-    load([
-      {
-        alertKey: 'Long breakout',
-        enabled: true,
-        channels: ['Webhook'],
-        webhookUrl: 'https://hooks.example.com/pine',
-      },
-    ]);
+    // Re-read after saving (the channels' state is read once per tab, not per reload).
+    load(
+      [
+        {
+          alertKey: 'Long breakout',
+          enabled: true,
+          channels: ['Webhook'],
+          webhookUrl: 'https://hooks.example.com/pine',
+        },
+      ],
+      compiled('strategy'),
+      false,
+    );
     expect(saveBtn().disabled).toBe(true);
   });
 
@@ -193,6 +252,7 @@ describe('ScriptAlertsTabComponent', () => {
 
   it('falls back to the source when the compile fails, and has no order fills for an indicator', () => {
     render(RSI_INDICATOR_SOURCE);
+    context();
     http.expectOne(ALERTS_URL).flush(ok([]));
     http.expectOne(COMPILE_URL).flush('down', { status: 503, statusText: 'Unavailable' });
     fixture.detectChanges();
@@ -227,5 +287,196 @@ describe('ScriptAlertsTabComponent', () => {
       });
     fixture.detectChanges();
     expect(el.querySelector('[role="alert"]')!.textContent).toContain('Telegram is not configured');
+  });
+
+  // ── PE-I10 ──────────────────────────────────────────────────────────────────
+
+  it('shows each channel’s state and the storm guard’s live limits', () => {
+    render();
+    context(STATUSES, { maxFires: '20', windowMinutes: '5' });
+    load([], compiled('strategy'), false);
+    const chips = [...el.querySelectorAll('[data-testid="channel-chips"] .chip')].map((c) =>
+      c.textContent!.trim(),
+    );
+    expect(chips).toEqual([
+      'In app: ready',
+      'Email: ready',
+      'Webhook: not set up',
+      'Telegram: off',
+    ]);
+    expect(el.textContent).toContain('more than 20 times in 5 minutes is switched off');
+    // In app is a channel a binding can use.
+    const labels = [...rows()[0].querySelectorAll('.check')].map((l) => l.textContent!.trim());
+    expect(labels).toEqual(['In app', 'Email', 'Webhook', 'Telegram']);
+  });
+
+  it('shows why the engine switched an alert off, and keeps and sends each trigger', () => {
+    render(RSI_INDICATOR_SOURCE);
+    load(
+      [
+        {
+          alertKey: 'Overbought',
+          enabled: false,
+          channels: ['InApp'],
+          frequency: 'once_per_bar_close',
+          disabledReason: 'It fired 16 times in 3 minutes (storm guard).',
+          disabledAt: '2026-10-09T08:15:00Z',
+          lastFiredAt: '2026-10-09T08:14:59Z',
+        },
+      ],
+      compiled('indicator'),
+    );
+    const reason = el.querySelector('[data-testid="disabled-reason"]')!.textContent!;
+    expect(reason).toContain('Switched off by the engine on');
+    expect(reason).toContain('It fired 16 times in 3 minutes (storm guard).');
+    const trigger = rows()[0].querySelector<HTMLSelectElement>('[data-testid="frequency"]')!;
+    expect(trigger.value).toBe('once_per_bar_close');
+    // alert() calls carry their own frequency: no trigger there.
+    expect(rows()[1].querySelector('[data-testid="frequency"]')).toBeNull();
+
+    // Re-enable it and make it fire every time.
+    rows()[0].querySelector<HTMLButtonElement>('[role="switch"]')!.click();
+    fixture.detectChanges();
+    trigger.value = 'all';
+    trigger.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+    saveBtn().click();
+    const put = http.expectOne((r) => r.method === 'PUT' && r.url === ALERTS_URL);
+    expect(put.request.body).toEqual([
+      {
+        alertKey: 'Overbought',
+        enabled: true,
+        channels: ['InApp'],
+        messageTemplate: null,
+        webhookUrl: null,
+        frequency: 'all',
+      },
+      {
+        alertKey: 'alert()',
+        enabled: false,
+        channels: [],
+        messageTemplate: null,
+        webhookUrl: null,
+        frequency: 'once_per_bar',
+      },
+    ]);
+    put.flush(ok(true));
+    load([], compiled('indicator'), false);
+  });
+
+  it('sends a test of the rendered message through each chosen channel and shows what each did', () => {
+    render();
+    load();
+    check(rows()[0], 'Email');
+    check(rows()[0], 'In app');
+    rows()[0].querySelector<HTMLButtonElement>('[data-testid="send-test"]')!.click();
+    fixture.detectChanges();
+
+    const sent = http.match((r) => r.method === 'POST' && r.url === TEST_URL);
+    expect(sent.map((r) => r.request.body.channel)).toEqual(['InApp', 'Email']);
+    for (const r of sent) expect(r.request.body.message).toBe('[TEST] Price broke above 1.08500');
+    expect(el.querySelector('[data-testid="test-result"]')!.textContent).toContain('sending');
+
+    sent[0].flush(
+      ok({
+        channel: 'InApp',
+        delivered: true,
+        destination: 'Admin UI (notification bell and pop-up)',
+        message: 'x',
+        attemptedAt: '2026-10-09T08:00:00Z',
+      }),
+    );
+    sent[1].flush({
+      data: {
+        channel: 'Email',
+        delivered: false,
+        destination: 'al•••@x.com',
+        message: 'x',
+        attemptedAt: '2026-10-09T08:00:00Z',
+        reason: 'Email is switched off (EmailAlertOptions:IsEnabled = false).',
+      },
+      status: false,
+      message: 'Not sent: Email is switched off (EmailAlertOptions:IsEnabled = false).',
+      responseCode: '-11',
+    });
+    fixture.detectChanges();
+    const outcomes = [...el.querySelectorAll('[data-testid="test-result"] .chip')].map((c) =>
+      c.textContent!.trim(),
+    );
+    expect(outcomes).toEqual([
+      'In app: sent to Admin UI (notification bell and pop-up)',
+      'Email: not sent — Email is switched off (EmailAlertOptions:IsEnabled = false).',
+    ]);
+  });
+
+  it('warns when a chosen channel will not deliver, and about alertconditions of a strategy', () => {
+    render();
+    load();
+    check(rows()[0], 'Telegram');
+    rows()[0].querySelector<HTMLButtonElement>('[role="switch"]')!.click();
+    fixture.detectChanges();
+    const warnings = [...rows()[0].querySelectorAll('.row-warn')].map((w) => w.textContent!.trim());
+    expect(warnings).toEqual([
+      'Telegram is switched off — its deliveries will be recorded as not sent.',
+      expect.stringContaining('the engine does not send its alertcondition() alerts'),
+    ]);
+    // Warnings never block the save.
+    expect(saveBtn().disabled).toBe(false);
+  });
+
+  it('shows the script’s recent deliveries on demand', () => {
+    render();
+    load();
+    expect(el.querySelector('[data-testid="delivery-log"]')).toBeNull();
+    el.querySelector<HTMLButtonElement>('[data-testid="toggle-log"]')!.click();
+    fixture.detectChanges();
+    http.expectOne(DELIVERIES_URL).flush(
+      ok([
+        {
+          id: 9,
+          strategyId: 41,
+          bindingId: 3,
+          alertKey: 'order-fills',
+          channel: 'Telegram',
+          status: 'Skipped',
+          attempts: 1,
+          symbol: 'EURUSD',
+          message: 'Order buy @ 1 filled on EURUSD.',
+          lastError: 'Telegram is switched off (TelegramAlertOptions:IsEnabled = false).',
+          createdAt: '2026-10-09T08:00:00Z',
+          deliveredAt: null,
+          nextAttemptAt: '2026-10-09T08:00:00Z',
+        },
+        {
+          id: 8,
+          strategyId: 41,
+          bindingId: 4,
+          alertKey: 'alert()',
+          channel: 'InApp',
+          status: 'Delivered',
+          attempts: 1,
+          symbol: 'EURUSD',
+          message: 'Breakout',
+          lastError: null,
+          createdAt: '2026-10-09T07:59:00Z',
+          deliveredAt: '2026-10-09T07:59:01Z',
+          nextAttemptAt: '2026-10-09T07:59:00Z',
+        },
+      ]),
+    );
+    fixture.detectChanges();
+    const cells = [...el.querySelectorAll('[data-testid="delivery-log"] tbody tr')].map((tr) =>
+      [...tr.querySelectorAll('td')]
+        .slice(1, 4)
+        .map((td) => td.textContent!.replace(/\s+/g, ' ').trim()),
+    );
+    expect(cells).toEqual([
+      [
+        'Order fills',
+        'Telegram',
+        'not sent — Telegram is switched off (TelegramAlertOptions:IsEnabled = false).',
+      ],
+      ['alert() calls', 'In app', 'sent'],
+    ]);
   });
 });
