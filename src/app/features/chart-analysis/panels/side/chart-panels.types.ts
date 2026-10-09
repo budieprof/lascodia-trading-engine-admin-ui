@@ -129,7 +129,9 @@ export interface StripPaperTrade {
 }
 
 export interface AccountStrip {
-  tradingAccountId: number | null;
+  /** The accounts in scope; empty = every account. */
+  tradingAccountIds: number[];
+  /** Name, currency, kind, balance and equity — only when the scope is one account. */
   accountName: string | null;
   accountCurrency: string | null;
   isPaperAccount: boolean | null;

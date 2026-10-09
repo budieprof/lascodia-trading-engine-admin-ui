@@ -32,12 +32,17 @@ interface TimelineStep {
 
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
+import {
+  CreateSignalDialogComponent,
+  type SignalPrefill,
+} from '@features/trade-signals/components/create-signal-dialog/create-signal-dialog.component';
 
 @Component({
   selector: 'app-order-detail-page',
   standalone: true,
   imports: [
     ConfirmDialogComponent,
+    CreateSignalDialogComponent,
     TabsComponent,
     ReactiveFormsModule,
     RouterLink,
@@ -80,9 +85,6 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
           </div>
           <div class="title-actions">
             @if (order()!.status === 'Pending' || statusNumeric() === 0) {
-              <button class="btn btn-primary" (click)="onSubmit()" [disabled]="actionLoading()">
-                Submit to Broker
-              </button>
               <button
                 class="btn btn-secondary"
                 (click)="openModifyPanel()"
@@ -130,6 +132,34 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
             }
           </div>
         </div>
+
+        <!-- SP-12: nothing here sends an order to the broker — the EA places trade signals. Say what will happen. -->
+        @if (order()!.status === 'Pending' || statusNumeric() === 0) {
+          @if (handEntered()) {
+            <div class="exec-note warn" role="status" data-testid="order-hand-entered">
+              <span>
+                This order was entered by hand: it has no trade signal and no broker ticket, so no EA will place it.
+                The EA trades approved signals only. Cancel or delete it, and create a manual signal instead.
+              </span>
+              <button type="button" class="btn btn-primary" (click)="manualSignalOpen.set(true)">
+                New manual signal from this order
+              </button>
+            </div>
+          } @else if (order()!.tradeSignalId) {
+            <div class="exec-note" role="status">
+              Waiting for the EA: it places this order from
+              <a [routerLink]="['/trade-signals', order()!.tradeSignalId]">signal #{{ order()!.tradeSignalId }}</a>
+              and reports the fill.
+            </div>
+          }
+        }
+        @if (manualSignalOpen()) {
+          <app-create-signal-dialog
+            [prefill]="signalPrefill()"
+            (closed)="manualSignalOpen.set(false)"
+            (created)="manualSignalOpen.set(false)"
+          />
+        }
 
         <!-- Modify SL/TP Inline Panel -->
         @if (showModifyPanel()) {
@@ -591,6 +621,28 @@ export class OrderDetailPageComponent implements OnInit {
   showCancelDialog = signal(false);
   showDeleteDialog = signal(false);
   showModifyPanel = signal(false);
+  /** "New manual signal from this order" (SP-12). */
+  readonly manualSignalOpen = signal(false);
+
+  /** No trade signal and no broker ticket: nothing will ever place this order (the engine refuses to submit it). */
+  readonly handEntered = computed(() => {
+    const o = this.order();
+    return !!o && !o.tradeSignalId && !o.brokerOrderId;
+  });
+
+  /** The hand-entered order's values, to start the manual signal from. */
+  readonly signalPrefill = computed<SignalPrefill | null>(() => {
+    const o = this.order();
+    if (!o) return null;
+    return {
+      symbol: o.symbol,
+      direction: this.isBuy() ? 'Buy' : 'Sell',
+      entryPrice: o.price > 0 ? o.price : null,
+      stopLoss: o.stopLoss,
+      takeProfit: o.takeProfit,
+      lotSize: o.quantity,
+    };
+  });
 
   skeletonItems = Array(12);
 
@@ -835,27 +887,6 @@ export class OrderDetailPageComponent implements OnInit {
           failed: false,
         };
     }
-  }
-
-  onSubmit(): void {
-    const o = this.order();
-    if (!o) return;
-    this.actionLoading.set(true);
-    this.ordersService.submit(o.id).subscribe({
-      next: (response) => {
-        this.actionLoading.set(false);
-        if (response.status) {
-          this.notifications.success(response.data?.message ?? 'Order submitted successfully');
-          this.loadOrder(o.id);
-        } else {
-          this.notifications.error(response.message ?? 'Failed to submit order');
-        }
-      },
-      error: () => {
-        this.actionLoading.set(false);
-        this.notifications.error('Failed to submit order');
-      },
-    });
   }
 
   onCancel(): void {
