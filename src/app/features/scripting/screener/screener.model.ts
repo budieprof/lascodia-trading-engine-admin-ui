@@ -11,12 +11,15 @@ import { toCsv } from '../shared/download';
 export const MAX_SCREENER_SYMBOLS = 200;
 export const MAX_SCREENER_BARS = 500;
 
-export type ScreenerSourceMode = 'saved' | 'library' | 'source';
+/** `saved` = a script strategy, `chart` = one of the operator's chart scripts ("My scripts"). */
+export type ScreenerSourceMode = 'saved' | 'chart' | 'library' | 'source';
 
 export interface ScreenerForm {
   mode: ScreenerSourceMode;
   source: string | null;
   libraryId: number | null;
+  /** `chart` mode: the chart script run by id (a saved screen's copy of it travels as `source`). */
+  chartScriptId?: number | null;
   symbols: readonly string[];
   timeframe: string;
   lastBars: number | string;
@@ -26,6 +29,9 @@ export interface ScreenerForm {
 export function validateScreenerForm(f: ScreenerForm): string | null {
   if (f.mode === 'library') {
     if (f.libraryId === null) return 'Choose a library.';
+  } else if (f.mode === 'chart') {
+    if ((f.chartScriptId ?? null) === null && !f.source?.trim())
+      return 'Choose one of your scripts.';
   } else if (!f.source || !f.source.trim()) {
     return f.mode === 'saved' ? 'Choose a saved script.' : 'Paste a script to run.';
   }

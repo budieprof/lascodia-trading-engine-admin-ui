@@ -300,3 +300,259 @@ export interface StrategyAccountBindingInput {
 
 /** Upper bound the engine validates (`StrategyAccountRouting.MaxLotMultiplier`). */
 export const MAX_LOT_MULTIPLIER = 10;
+
+// ── §8f Live vs backtest parity (BT-I3 / PE-I2 / BX-1) ─────────────────────────
+//
+// `strategy/{id}/parity/*`. Slippage is SIGNED for the strategy (positive = worse: a buy filled
+// higher, a sell lower) and in pips; R is price R against each trade's stop at entry (before
+// commission and swap). Times are ISO UTC strings.
+
+/** A sample's summary; `n` 0 = no sample (every statistic null). */
+export interface ParityDistribution {
+  n: number;
+  mean: number | null;
+  median: number | null;
+  p10: number | null;
+  p90: number | null;
+  min: number | null;
+  max: number | null;
+  /** Share (0–1) of the values above zero. */
+  positiveShare: number | null;
+}
+
+export interface ParityTradeCounts {
+  total: number;
+  closed: number;
+  live: number;
+  paper: number;
+  exitsOnly: number;
+  catchUp: number;
+  signalSent: number;
+  notSent: number;
+  paperBlocked: number;
+  failed: number;
+}
+
+export interface ParityLiveSummary {
+  emulatorTrades: number;
+  tradesSent: number;
+  tradesFilled: number;
+  tradesMissed: number;
+  accountFills: number;
+  closedRoundTrips: number;
+  expectedR: ParityDistribution;
+  realisedR: ParityDistribution;
+  /** Realised − expected R per closed round trip (negative = the account did worse). */
+  rGap: ParityDistribution;
+  entrySlippagePips: ParityDistribution;
+  entrySlippagePipsLong: ParityDistribution;
+  entrySlippagePipsShort: ParityDistribution;
+  exitSlippagePips: ParityDistribution;
+  exitSlippagePipsLong: ParityDistribution;
+  exitSlippagePipsShort: ParityDistribution;
+  entryLatencyMs: ParityDistribution;
+  exitLatencyMs: ParityDistribution;
+}
+
+export type ParityDriftStatus = 'ok' | 'drifting' | 'insufficient' | 'noLiveTrades' | string;
+
+export interface ParityDrift {
+  status: ParityDriftStatus;
+  reasons: string[];
+  minTrades: number;
+  maxRGapPerTrade: number;
+  maxSlippagePips: number;
+  alertActive: boolean;
+  alertLastTriggeredAtUtc: string | null;
+}
+
+/** `GET strategy/{id}/parity/summary?days=`. */
+export interface ScriptParitySummary {
+  strategyId: number;
+  symbol: string;
+  timeframe: string;
+  fromUtc: string;
+  toUtc: string;
+  windowDays: number;
+  pipSize: number;
+  currentScriptRevision: string | null;
+  sessions: number;
+  trades: ParityTradeCounts;
+  live: ParityLiveSummary;
+  paper: { trades: number; closed: number; expectedR: ParityDistribution };
+  drift: ParityDrift;
+}
+
+/** `GET strategy/{id}/parity/sessions` — one emulator lineage of the live session. */
+export interface ScriptParitySession {
+  id: number;
+  scriptRevision: string;
+  isCurrentRevision: boolean;
+  symbol: string;
+  timeframe: string;
+  warmupFromUtc: string | null;
+  liveFromUtc: string;
+  startedAtUtc: string;
+  lastStartedAtUtc: string;
+  restarts: number;
+  stoppedAtUtc: string | null;
+  endedAtUtc: string | null;
+  endReason: string | null;
+  trades: number;
+  liveTrades: number;
+  paperTrades: number;
+  lastReconcileRunId: number | null;
+}
+
+/** `POST strategy/{id}/parity/reconcile` → the reconcile backtest to poll. */
+export interface ScriptParityReconcileQueued {
+  backtestRunId: number;
+  sessionId: number;
+  status: 'queued' | 'running' | string;
+  alreadyQueued: boolean;
+  fromUtc: string;
+  toUtc: string;
+  compareFromUtc: string;
+  deep: boolean;
+  notes: string[];
+}
+
+export type ParityReconcileStatus = 'queued' | 'running' | 'completed' | 'failed' | string;
+
+export interface ParityReconcileSide {
+  entryTimeUtc: string;
+  entryPrice: number;
+  exitTimeUtc: string | null;
+  exitPrice: number | null;
+  lots: number;
+  initialStopPrice: number | null;
+  r: number | null;
+  /** Session side: `live` | `paper` | `exitsOnly`. */
+  mode?: string | null;
+  /** Session side: what the mirror did with the entry (SignalSent, NotSent, Paper, …). */
+  outcome?: string | null;
+  tradeKey?: number | null;
+  signalId?: number | null;
+  exitKind?: string | null;
+}
+
+export interface ParityReconcileAccount {
+  accountId: number;
+  orderId: number;
+  positionId: number | null;
+  orderStatus: string;
+  lots: number;
+  entryPrice: number | null;
+  entryTimeUtc: string | null;
+  exitPrice: number | null;
+  exitTimeUtc: string | null;
+  entrySlippagePips: number | null;
+  exitSlippagePips: number | null;
+  rDifference: number | null;
+}
+
+export interface ParityReconcilePair {
+  /** `matched` | `missing` (the backtest took it, the session did not) | `extra` (the session only). */
+  status: 'matched' | 'missing' | 'extra' | string;
+  direction: string;
+  entryId: string;
+  backtest: ParityReconcileSide | null;
+  session: ParityReconcileSide | null;
+  accounts: ParityReconcileAccount[];
+  entrySlippagePips: number | null;
+  exitSlippagePips: number | null;
+  rDifference: number | null;
+  note: string | null;
+}
+
+export interface ParityReconcileSummary {
+  backtestTrades: number;
+  sessionTrades: number;
+  matched: number;
+  missing: number;
+  extra: number;
+  matchedWithAccounts: number;
+  entrySlippagePips: ParityDistribution;
+  exitSlippagePips: ParityDistribution;
+  rDifference: ParityDistribution;
+  accountEntrySlippagePips: ParityDistribution;
+  accountExitSlippagePips: ParityDistribution;
+  accountRDifference: ParityDistribution;
+}
+
+/** `GET strategy/{id}/parity/reconcile/{runId}`. */
+export interface ScriptParityReconcile {
+  backtestRunId: number;
+  sessionId: number;
+  status: ParityReconcileStatus;
+  error: string | null;
+  queuedAtUtc: string | null;
+  completedAtUtc: string | null;
+  session: {
+    scriptRevision: string;
+    isCurrentRevision: boolean;
+    warmupFromUtc: string | null;
+    liveFromUtc: string;
+    endedAtUtc: string | null;
+    stoppedAtUtc: string | null;
+    restarts: number;
+  };
+  fromUtc: string;
+  toUtc: string;
+  compareFromUtc: string;
+  compareToUtc: string;
+  pipSize: number;
+  matchToleranceBars: number;
+  summary: ParityReconcileSummary | null;
+  pairs: ParityReconcilePair[];
+  notes: string[];
+}
+
+/** `GET strategy/{id}/parity/timeline` (BX-1) — the chart's trade timeline. */
+export interface ScriptParityTimeline {
+  strategyId: number;
+  symbol: string;
+  timeframe: string;
+  fromUtc: string;
+  toUtc: string;
+  pipSize: number;
+  backtestRunId: number | null;
+  fills: ParityTimelineFill[];
+  pairs: ParityTimelinePair[];
+  truncated: boolean;
+  notes: string[];
+}
+
+export interface ParityTimelineFill {
+  id: string;
+  /** `backtest` | `paper` | `emulator` | `broker`. */
+  source: string;
+  /** `entry` | `exit`. */
+  kind: string;
+  side: string;
+  direction: string;
+  timeUtc: string;
+  barTimeUtc: string | null;
+  price: number;
+  lots: number;
+  tradeRef: string;
+  entryId: string;
+  orderKind: string | null;
+  sessionId: number | null;
+  accountId: number | null;
+  orderId: number | null;
+  positionId: number | null;
+  signalId: number | null;
+  paperExecutionId: number | null;
+  outcome: string | null;
+}
+
+export interface ParityTimelinePair {
+  kind: string;
+  fromFillId: string;
+  toFillId: string;
+  /** Price units, signed: positive = the second fill is worse. */
+  slippage: number;
+  slippagePips: number | null;
+  latencyMs: number | null;
+}

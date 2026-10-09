@@ -11,6 +11,7 @@ import {
 } from '@features/ea-instances/components/ea-trade-chart-modal/ea-trade-chart-modal.component';
 
 import { ScriptLivePanelComponent } from './script-live-panel.component';
+import { ScriptParityPanelComponent } from './script-parity-panel.component';
 import { StrategyReportComponent } from '../report/strategy-report.component';
 import { normalizeStrategyReport, type ReportTrade } from '../report/strategy-report.model';
 import type { TradeOriginOf } from '../report/report-trades-columns';
@@ -46,6 +47,18 @@ class TradeChartModalStubComponent {
   @Input() selection: TradeChartSelection | null = null;
   @Input() open = false;
   @Output() readonly openChange = new EventEmitter<boolean>();
+}
+
+/** The parity panel fetches on its own (its spec covers it); here only its wiring is checked. */
+@Component({
+  selector: 'app-script-parity-panel',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: '',
+})
+class ParityPanelStubComponent {
+  @Input() strategyId: number | null = null;
+  @Input() accountNames: ReadonlyMap<string, string> = new Map();
 }
 
 /** The report's List-of-trades rows, as the real report would emit them on a click. */
@@ -167,8 +180,12 @@ describe('ScriptLivePanelComponent', () => {
       ],
     });
     TestBed.overrideComponent(ScriptLivePanelComponent, {
-      remove: { imports: [StrategyReportComponent, EATradeChartModalComponent] },
-      add: { imports: [ReportStubComponent, TradeChartModalStubComponent] },
+      remove: {
+        imports: [StrategyReportComponent, EATradeChartModalComponent, ScriptParityPanelComponent],
+      },
+      add: {
+        imports: [ReportStubComponent, TradeChartModalStubComponent, ParityPanelStubComponent],
+      },
     });
     http = TestBed.inject(HttpTestingController);
   });
@@ -285,6 +302,33 @@ describe('ScriptLivePanelComponent', () => {
     fixture.detectChanges();
     expect(text()).toContain('No live session');
     expect(text()).toContain('No live session for strategy 41');
+  });
+
+  it('BT-I3 / PE-I2: shows the parity panel with the bound account names, with or without a session', () => {
+    const parity = () => fixture.debugElement.queryAll((d) => d.name === 'app-script-parity-panel');
+
+    load(liveSession());
+    expect(parity()).toHaveLength(1);
+    const panel = parity()[0].componentInstance as ParityPanelStubComponent;
+    expect(panel.strategyId).toBe(41);
+    expect(panel.accountNames.get('27')).toBe('Exness Real 27');
+    // Between the paper / live statistics and the long live report.
+    const section = el.querySelector('#live-real-trades')!.closest('section')!;
+    expect(section.nextElementSibling?.tagName.toLowerCase()).toBe('app-script-parity-panel');
+    fixture.destroy();
+
+    // A stopped strategy's recorded sessions can still be reconciled.
+    render();
+    http.expectOne(LIVE_URL).flush({
+      data: null,
+      status: false,
+      message: 'No live session for strategy 41',
+      responseCode: '-14',
+    });
+    flushBindings();
+    fixture.detectChanges();
+    expect(parity()).toHaveLength(1);
+    expect((parity()[0].componentInstance as ParityPanelStubComponent).strategyId).toBe(41);
   });
 
   it('offers a retry when the first load fails, and keeps the last state on a later failure', () => {
