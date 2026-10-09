@@ -127,8 +127,10 @@ import { ScriptChipComponent, type ScriptChip } from '../../scripts/script-chip.
 import {
   displayOverrides,
   resolveDisplay,
+  styleOutputsOf,
   type ScriptDisplaySettings,
 } from '../../scripts/script-display';
+import { scriptRenderModel } from '../../scripts/script-model-cache';
 import { ScriptSettingsDialogComponent } from '../../scripts/script-settings-dialog.component';
 import { ChartBottomBarComponent, type BottomBarMenu } from './chart-bottom-bar.component';
 import type { ChartScriptResult, ChartTrade } from '../../scripts/chart-script.model';
@@ -154,7 +156,11 @@ import { ScriptSettings } from '../../scripts/script-settings';
 import { StrategyTesterPanelComponent } from '../../scripts/strategy-tester-panel.component';
 import { UndoNoticeComponent } from '../../scripts/undo-notice.component';
 import { placeRun } from '../../scripts/run-on-host';
-import { chartScriptLayers, type ChartScriptLayer } from '../../scripts/script-layers';
+import {
+  chartScriptLayers,
+  hiddenOnTimeframe,
+  type ChartScriptLayer,
+} from '../../scripts/script-layers';
 import {
   ScriptEditorPanelComponent,
   type ScriptEditorSubmit,
@@ -924,7 +930,9 @@ export class ChartAnalysisPageComponent {
       waitingUntil: waiting.get(key) ?? null,
       failure: failures.get(key) ?? null,
       lastGoodMs: run?.landedAt ?? null,
-      unavailable,
+      unavailable:
+        unavailable ??
+        (run ? hiddenOnTimeframe(resolveDisplay(run.display), this.resolution()) : null),
     });
     const runs = this.scriptRuns();
     const out = runs.map((r) =>
@@ -3739,6 +3747,28 @@ export class ChartAnalysisPageComponent {
     this.editorDraft.set({ key: this.editorKey(), text: source });
     this.runScript(item, values, false, done, undefined, { replaces: target?.key ?? null });
   }
+
+  /** The open Settings dialog's display settings (its Style and Visibility tabs). */
+  readonly settingsDisplay = computed(
+    () => {
+      const run = this.settings.run();
+      return run ? resolveDisplay(run.display) : null;
+    },
+    { equal: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
+  );
+  /** The outputs its Style tab lists, as the run draws them before any style (their own colours). */
+  readonly settingsOutputs = computed(
+    () => {
+      const run = this.settings.run();
+      const model = run ? scriptRenderModel(run.result, this.precision()) : null;
+      return model ? styleOutputsOf(model) : [];
+    },
+    { equal: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
+  );
+  readonly settingsHasTables = computed(() => {
+    const model = this.settings.run()?.result.run?.outputs;
+    return (model?.tables.length ?? 0) > 0;
+  });
 
   /** A Pine script's Settings dialog (TradingView's study Settings): its inputs, applied live. */
   readonly settings = new ScriptSettings(this.scriptRuns, {

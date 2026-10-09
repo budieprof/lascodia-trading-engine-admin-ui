@@ -1792,7 +1792,13 @@
       [values]="run.values"
       [canSaveDefault]="settings.canSaveDefault(run.item)"
       [savingDefault]="settings.saving()"
+      [display]="settingsDisplay()"
+      [styleOutputs]="settingsOutputs()"
+      [scriptKind]="run.result.kind"
+      [overlay]="run.result.overlay"
+      [hasTables]="settingsHasTables()"
       (changed)="settings.apply(run.item.key, $event)"
+      (displayChange)="setScriptDisplay(run.item.key, $event)"
       (saveDefault)="settings.saveDefault(run.item.key, $event)"
       (closed)="settings.close()"
     />

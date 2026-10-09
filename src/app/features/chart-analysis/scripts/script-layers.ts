@@ -3,7 +3,12 @@ import type { IChartApi, ISeriesApi, SeriesType, Time } from 'lightweight-charts
 import type { PineRenderModel } from '@shared/pine-chart/render/render-model';
 import type { ChartScriptResult, ScriptBasis } from './chart-script.model';
 import { runMatchesChart, type SeriesId } from './live-bar';
-import { DEFAULT_DISPLAY, resolveDisplay, type ScriptDisplaySettings } from './script-display';
+import {
+  DEFAULT_DISPLAY,
+  resolveDisplay,
+  visibleOnTimeframe,
+  type ScriptDisplaySettings,
+} from './script-display';
 import { ScriptRenderer, type ScriptHost } from './script-renderer';
 
 /** One Pine script on the chart, as chart-host draws it (its `scriptResults` input). */
@@ -45,14 +50,28 @@ export function chartScriptLayers(
 ): ChartScriptLayer[] {
   return runs
     .filter((r) => runMatchesChart(r, chart, bars))
-    .map((r) => ({
-      key: r.item.key,
-      result: r.result,
-      display: resolveDisplay(r.display),
-      suspended:
-        unavailable ??
-        ((r.chartType ?? 'standard') !== basis ? 'Running on the new chart type…' : null),
-    }));
+    .map((r) => {
+      const display = resolveDisplay(r.display);
+      return {
+        key: r.item.key,
+        result: r.result,
+        display,
+        suspended:
+          unavailable ??
+          hiddenOnTimeframe(display, chart.resolution) ??
+          ((r.chartType ?? 'standard') !== basis ? 'Running on the new chart type…' : null),
+      };
+    });
+}
+
+/** Why a script is not shown on this timeframe (its Visibility tab), or null. */
+export function hiddenOnTimeframe(
+  display: Pick<ScriptDisplaySettings, 'timeframes'>,
+  resolution: string,
+): string | null {
+  return visibleOnTimeframe(display.timeframes, resolution)
+    ? null
+    : 'Hidden on this timeframe (its Visibility settings)';
 }
 
 /** The render model a layer draws: its run's, with its display settings applied. */
@@ -76,6 +95,7 @@ export class ScriptLayers {
   private readonly given = new Map<string, { display: string; suspended: boolean }>();
   private chart: IChartApi | null = null;
   private price: ISeriesApi<SeriesType, Time> | null = null;
+  private modelKey = '';
   private readonly onPriceData = () => {
     for (const r of this.renderers.values()) r.syncAnchors();
   };
@@ -103,8 +123,12 @@ export class ScriptLayers {
     return this.renderers.size;
   }
 
-  /** Draw exactly `layers`, by the least change (see the class comment). */
-  sync(layers: readonly ChartScriptLayer[]): void {
+  /**
+   * Draw exactly `layers`, by the least change (see the class comment). `modelKey` names what the
+   * render models are built with besides each layer's own (the symbol's precision, the theme): a
+   * change restyles every layer.
+   */
+  sync(layers: readonly ChartScriptLayer[], modelKey = ''): void {
     const chart = this.host.chart();
     if (chart !== this.chart) {
       // A new chart: everything drawn went with the old one.
@@ -115,6 +139,10 @@ export class ScriptLayers {
       this.chart = chart;
     }
     if (!chart) return;
+    if (modelKey !== this.modelKey) {
+      this.modelKey = modelKey;
+      this.given.clear();
+    }
 
     const wanted = new Set(layers.map((l) => l.key));
     for (const [key, r] of [...this.renderers]) {

@@ -133,6 +133,7 @@ import {
 import { detectChartPatterns } from '../patterns/chart-patterns';
 import { ScriptLayers, type ChartScriptLayer } from '../scripts/script-layers';
 import { scriptRenderModel } from '../scripts/script-model-cache';
+import { styleRenderModel } from '../scripts/script-display';
 import {
   placeTooltip,
   topHit,
@@ -2726,7 +2727,11 @@ export class ChartHostComponent implements OnDestroy {
       },
       priceSide: () => this.scaleSide(),
     },
-    (result) => scriptRenderModel(result, this.precision()),
+    // The run's render model, with its Style settings applied on the client (PC-01, PC-I4).
+    (result, display) => {
+      const model = scriptRenderModel(result, this.precision());
+      return model ? styleRenderModel(model, display, result.run?.outputs ?? null) : null;
+    },
   );
   /** Pine tables of the runs on the chart, one entry per pane, placed over that pane's plot area. */
   readonly scriptTables = signal<
@@ -2799,7 +2804,8 @@ export class ChartHostComponent implements OnDestroy {
     if (!this.chart || !this.price) return;
     this.watchScriptEvents();
     // In the order the scripts were added: a later script's barcolor() wins (mergeBarColors).
-    this.scriptLayers.sync(layers);
+    // Their models print at the symbol's precision: a change of it restyles them all.
+    this.scriptLayers.sync(layers, String(this.precision()));
     this.syncScriptAxes();
     this.refreshBarColors();
     this.syncScriptMargin();

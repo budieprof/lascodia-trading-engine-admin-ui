@@ -9,6 +9,7 @@ import {
   SCRIPT_SETTINGS_APPLY_MS,
   ScriptSettingsDialogComponent,
 } from './script-settings-dialog.component';
+import { DEFAULT_DISPLAY, type ScriptDisplaySettings, type StyleOutput } from './script-display';
 
 // Signal inputs cannot be set under the JIT harness before the first render, so the spec swaps the
 // component's input signals for writable ones before detectChanges (as the inputs-form spec does).
@@ -81,10 +82,14 @@ describe('ScriptSettingsDialogComponent', () => {
     fixture.detectChanges();
   };
 
-  function render(start: ScriptInputValues = {}, opts: { saveable?: boolean } = {}): void {
+  function render(
+    start: ScriptInputValues = {},
+    opts: { saveable?: boolean; before?: (cmp: ScriptSettingsDialogComponent) => void } = {},
+  ): void {
     TestBed.configureTestingModule({ imports: [ScriptSettingsDialogComponent] });
     fixture = TestBed.createComponent(ScriptSettingsDialogComponent);
     cmp = fixture.componentInstance;
+    opts.before?.(cmp);
     values = signal(start);
     inputs = signal<readonly ScriptInputDto[] | null>(INPUTS);
     canSaveDefault = signal(!!opts.saveable);
@@ -259,5 +264,97 @@ describe('ScriptSettingsDialogComponent', () => {
     fixture.detectChanges();
     expect(host.querySelector('app-inputs-form')).toBeNull();
     expect(host.querySelector('.sd-hint')?.textContent).toContain('Loading');
+  });
+
+  describe('Style and Visibility tabs (PC-01, PC-I4)', () => {
+    const OUTPUTS: StyleOutput[] = [
+      { key: 'plot:0', title: 'Basis', kind: 'plot', colors: ['rgb(41, 98, 255)'], lineWidth: 1, plotStyle: 'line' },
+      { key: 'hline:0', title: 'Mid', kind: 'hline', colors: ['rgb(120, 123, 134)'], lineWidth: 1, plotStyle: null },
+    ];
+    let displayChange: Mock<(d: ScriptDisplaySettings) => void>;
+    let shown: WritableSignal<ScriptDisplaySettings | null>;
+
+    function renderStyled(start: ScriptDisplaySettings = DEFAULT_DISPLAY): void {
+      shown = signal<ScriptDisplaySettings | null>(start);
+      displayChange = vi.fn<(d: ScriptDisplaySettings) => void>();
+      // Swapped before the first render: the tabs read them from it on.
+      render({}, {
+        before: (c) => {
+          (c as any).display = shown;
+          (c as any).styleOutputs = signal(OUTPUTS);
+          (c as any).scriptKind = signal('strategy');
+          (c as any).overlay = signal(true);
+          (c as any).hasTables = signal(true);
+          c.displayChange.subscribe(displayChange);
+        },
+      });
+    }
+
+    const tab = (name: string) => {
+      button(name).click();
+      fixture.detectChanges();
+    };
+
+    it('shows Inputs, Style and Visibility only when the page gives display settings', () => {
+      renderStyled();
+      const names = () => [...host.querySelectorAll('.sd-tab')].map((t) => t.textContent?.trim());
+      expect(names()).toEqual(['Inputs', 'Style', 'Visibility']);
+      shown.set(null);
+      fixture.detectChanges();
+      expect(names()).toEqual(['Inputs']);
+    });
+
+    it('hides an output, sets its width and the precision — applied at once, no re-run', () => {
+      renderStyled();
+      tab('Style');
+      const style = host.querySelector('[data-testid="script-style-tab"]')!;
+      const first = style.querySelector('.sd-out input[type=checkbox]') as HTMLInputElement;
+      first.checked = false;
+      first.dispatchEvent(new Event('change'));
+      expect(displayChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ outputs: { 'plot:0': { visible: false } } }),
+      );
+      cmp.setOutput('plot:0', { lineWidth: 3 });
+      cmp.setPrecision('2');
+      expect(displayChange.mock.lastCall![0]).toMatchObject({
+        precision: 2,
+        outputs: { 'plot:0': { visible: false, lineWidth: 3 } },
+      });
+      // Checking it again needs no entry for it.
+      cmp.setOutput('plot:0', { visible: true });
+      expect(displayChange.mock.lastCall![0].outputs).toEqual({ 'plot:0': { lineWidth: 3 } });
+      // Inputs were never re-run for any of it.
+      expect(changed).not.toHaveBeenCalled();
+    });
+
+    it('recolours by the script’s own colour, keeping it as the key', () => {
+      renderStyled();
+      cmp.setColor('plot:0', 'rgb(41, 98, 255)', '#FF000080');
+      expect(displayChange.mock.lastCall![0].outputs).toEqual({
+        'plot:0': { colors: { 'rgb(41, 98, 255)': 'rgba(255, 0, 0, 0.502)' } },
+      });
+    });
+
+    it('Visibility: a row off or narrowed hides the script there; a full row is no setting', () => {
+      renderStyled();
+      tab('Visibility');
+      cmp.setRow('minutes', 59, { on: false });
+      expect(displayChange.mock.lastCall![0].timeframes).toEqual({
+        minutes: { on: false, from: 1, to: 59 },
+      });
+      cmp.setRow('minutes', 59, { on: true });
+      expect(displayChange.mock.lastCall![0].timeframes).toBeNull();
+      cmp.setRow('hours', 24, { from: 5, to: 2 });
+      // "to" never before "from".
+      expect(displayChange.mock.lastCall![0].timeframes).toEqual({ hours: { on: true, from: 5, to: 5 } });
+    });
+
+    it('Cancel puts back the display settings the dialog opened with', () => {
+      renderStyled({ ...DEFAULT_DISPLAY, labelsOnScale: false });
+      cmp.setDisplay({ labelsOnScale: true, showTrades: false });
+      cmp.cancel();
+      expect(displayChange).toHaveBeenLastCalledWith({ ...DEFAULT_DISPLAY, labelsOnScale: false });
+      expect(closed).toHaveBeenCalled();
+    });
   });
 });
