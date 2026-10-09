@@ -486,6 +486,7 @@ export class SidebarComponent {
         { label: 'Optimizations', route: '/optimizations', icon: '🧪', policy: 'Analyst' },
         { label: 'Backtesting', route: '/backtests', icon: '📈', policy: 'Analyst' },
         { label: 'Walk-Forward', route: '/walk-forward', icon: '🔄', policy: 'Analyst' },
+        { label: 'Portfolio Backtests', route: '/portfolio-backtests', icon: '🧺', policy: 'Analyst' },
       ],
     },
     {

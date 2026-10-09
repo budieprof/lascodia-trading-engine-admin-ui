@@ -249,6 +249,15 @@ export const routes: Routes = [
           import('@features/walk-forward/walk-forward.routes').then((m) => m.WALK_FORWARD_ROUTES),
       },
       {
+        // Portfolio backtests (BT-I12 / BX-5): several script strategies on one account and one bar clock.
+        path: 'portfolio-backtests',
+        data: { breadcrumb: 'Portfolio Backtests' },
+        loadChildren: () =>
+          import('@features/scripting/backtest/portfolio/portfolio-backtest.routes').then(
+            (m) => m.PORTFOLIO_BACKTEST_ROUTES,
+          ),
+      },
+      {
         // Pine screener (ADR-0027 §6): runs a script over many symbols' recent bars.
         path: 'pine-screener',
         data: { breadcrumb: 'Pine Screener' },
