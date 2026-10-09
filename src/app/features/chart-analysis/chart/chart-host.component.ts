@@ -140,6 +140,9 @@ import {
   type ScriptHit,
   type ScriptTooltip,
 } from '../scripts/script-hover';
+import { ScriptStatusLineComponent } from '../scripts/script-status-line.component';
+import type { ScriptAction, ScriptStatusRow } from '../scripts/script-status';
+import { outputRowsAt } from '@shared/pine-chart/render/legend';
 import {
   DEFAULT_RIGHT_OFFSET,
   marginCap,
@@ -332,7 +335,7 @@ interface ExternalLineSeries {
 @Component({
   selector: 'app-chart-host',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PineTableOverlayComponent],
+  imports: [PineTableOverlayComponent, ScriptStatusLineComponent],
   template: `<div class="chart-host" #container></div>
     @for (o of scriptTables(); track o.key) {
       <div
@@ -343,6 +346,11 @@ interface ExternalLineSeries {
         [style.height.px]="o.height"
       >
         <app-pine-table-overlay [tables]="o.tables" [paneWidth]="o.width" [paneHeight]="o.height" />
+      </div>
+    }
+    @for (row of scriptPaneRows(); track row.key) {
+      <div class="script-status" [style.top.px]="(row.top ?? 0) + 4" [style.left.px]="scriptRowLeft()">
+        <app-script-status-line [row]="row" (action)="scriptAction.emit($event)" />
       </div>
     }
     @if (scriptTip(); as t) {
@@ -442,6 +450,12 @@ interface ExternalLineSeries {
       .script-tables {
         position: absolute;
         z-index: 5;
+        pointer-events: none;
+      }
+      .script-status {
+        position: absolute;
+        z-index: 6;
+        max-width: calc(100% - 120px);
         pointer-events: none;
       }
       .script-tip {
@@ -700,6 +714,8 @@ export class ChartHostComponent implements OnDestroy {
    * for (one, or several merged into one order) — the Strategy Tester selects that row (PC-I5).
    */
   readonly scriptTradeClick = output<{ key: string; trades: readonly number[] }>();
+  /** A script's status line asked for something: hide/show, Settings, source, remove, a line. */
+  readonly scriptAction = output<ScriptAction>();
 
   private chart: IChartApi | null = null;
   private price: PriceSeries | null = null;
@@ -1009,6 +1025,8 @@ export class ChartHostComponent implements OnDestroy {
     // The data window's own sections go through the registry like any other provider's.
     this.registerValueProvider('bar', this.barValues);
     this.registerValueProvider('studies', this.studyValues);
+    // The Pine scripts' values at the bar (PC-I2): in the data window and the CSV export.
+    this.registerValueProvider('scripts', this.scriptValues);
 
     // Opening the data window fills it at once, for the bar the legend shows.
     effect(() => {
@@ -2747,17 +2765,25 @@ export class ChartHostComponent implements OnDestroy {
   private paneObserver: ResizeObserver | null = null;
   private tablesFrame = 0;
 
-  /** Re-place the script tables (after a render, a resize, or a pane being dragged taller). */
+  /**
+   * Re-place what sits over the script panes — their tables and their status lines — after a
+   * render, a resize, or a pane being dragged taller.
+   */
   private layoutScriptTables(): void {
     cancelAnimationFrame(this.tablesFrame);
     this.tablesFrame = requestAnimationFrame(() => {
       const chart = this.chart;
       const byPane = new Map<number, TableLayout[]>();
-      for (const h of this.scriptLayers.list())
+      const scriptPanes = new Set<number>();
+      for (const h of this.scriptLayers.list()) {
         for (const p of h.tables())
           byPane.set(p.paneIndex, [...(byPane.get(p.paneIndex) ?? []), ...p.tables]);
-      if (!chart || byPane.size === 0) {
+        const own = h.scriptPaneIndex();
+        if (own > 0) scriptPanes.add(own);
+      }
+      if (!chart || (byPane.size === 0 && scriptPanes.size === 0)) {
         if (this.scriptTables().length) this.scriptTables.set([]);
+        if (this.scriptPaneTops().size) this.scriptPaneTops.set(new Map());
         return;
       }
       const host = this.container().nativeElement.getBoundingClientRect();
@@ -2768,15 +2794,17 @@ export class ChartHostComponent implements OnDestroy {
         left = 0;
       }
       const panes = chart.panes();
+      const topOf = (index: number): number => {
+        const r = panes[index]?.getHTMLElement()?.getBoundingClientRect();
+        return r ? r.top - host.top : 0;
+      };
       const out: ReturnType<typeof this.scriptTables> = [];
       for (const [index, tables] of byPane) {
-        const pane = panes[index];
-        if (!pane) continue;
-        const r = pane.getHTMLElement()?.getBoundingClientRect();
+        if (!panes[index]) continue;
         const size = chart.paneSize(index);
         out.push({
           key: `pane-${index}`,
-          top: r ? r.top - host.top : 0,
+          top: topOf(index),
           left,
           width: size.width,
           height: size.height,
@@ -2784,6 +2812,13 @@ export class ChartHostComponent implements OnDestroy {
         });
       }
       this.scriptTables.set(out);
+      // Each script pane's status line sits at its top-left (PC-I2).
+      const tops = new Map<number, number>();
+      for (const index of scriptPanes) if (panes[index]) tops.set(index, topOf(index));
+      const before = this.scriptPaneTops();
+      if (tops.size !== before.size || [...tops].some(([i, t]) => before.get(i) !== t))
+        this.scriptPaneTops.set(tops);
+      if (this.scriptRowLeft() !== left + 8) this.scriptRowLeft.set(left + 8);
       // Pane separators can be dragged with no chart event; watch the pane rows themselves.
       this.paneObserver?.disconnect();
       this.paneObserver ??= new ResizeObserver(() => this.layoutScriptTables());
@@ -2806,11 +2841,103 @@ export class ChartHostComponent implements OnDestroy {
     // In the order the scripts were added: a later script's barcolor() wins (mergeBarColors).
     // Their models print at the symbol's precision: a change of it restyles them all.
     this.scriptLayers.sync(layers, String(this.precision()));
+    this.scriptsVersion.update((v) => v + 1);
     this.syncScriptAxes();
     this.refreshBarColors();
     this.syncScriptMargin();
     this.layoutScriptTables();
   }
+
+  // ── Status lines and the data window (PC-I2) ──────────────────────────────
+
+  /** The host bar under the crosshair, for the scripts' values; null at rest (their last bar). */
+  private readonly scriptCrosshair = signal<number | null>(null);
+  /** Bumped by every sync: the status lines read the renderers again. */
+  private readonly scriptsVersion = signal(0);
+  /** Each script pane's top in the host's px, by pane index (its status line's place). */
+  private readonly scriptPaneTops = signal<ReadonlyMap<number, number>>(new Map());
+  /** The status lines' left edge: past a left price scale. */
+  readonly scriptRowLeft = signal(8);
+
+  /**
+   * Every script's status line at the crosshair (its last bar at rest): title, inputs and failure
+   * from the page (its layer's label), values from its render model at the bar. Overlay scripts'
+   * rows are for the page's legend (`pane: 'main'`); a pane script's sits over its own pane.
+   */
+  readonly scriptStatus = computed<ScriptStatusRow[]>(() => {
+    this.scriptsVersion();
+    const logical = this.scriptCrosshair();
+    const tops = this.scriptPaneTops();
+    const out: ScriptStatusRow[] = [];
+    for (const layer of this.scriptResults()) {
+      const r = this.scriptLayers.get(layer.key);
+      if (!r) continue;
+      const status = r.drawn() ? r.statusAt(logical) : null;
+      const paneIndex = r.scriptPaneIndex();
+      const row = {
+        key: layer.key,
+        title: layer.label?.title ?? r.renderModel?.title ?? 'Script',
+        inputs: layer.label?.inputs ?? '',
+        visible: layer.display?.visible !== false,
+        failure: layer.label?.failure ?? null,
+        note: layer.suspended ?? null,
+      };
+      out.push(
+        paneIndex > 0
+          ? {
+              ...row,
+              pane: 'script',
+              paneIndex,
+              values: status?.script ?? [],
+              top: tops.get(paneIndex) ?? null,
+            }
+          : { ...row, pane: 'main', paneIndex: 0, values: status?.main ?? [], top: null },
+      );
+    }
+    return out;
+  });
+  /** The rows chart-host draws itself: over their own panes, once laid out. */
+  readonly scriptPaneRows = computed(() =>
+    this.scriptStatus().filter((r) => r.pane === 'script' && r.top !== null),
+  );
+
+  /**
+   * The scripts' status lines at a host bar (null: at rest) — for the chart's data window and
+   * anything else that reads a bar the crosshair is not on.
+   */
+  scriptStatusAt(
+    hostLogical: number | null,
+  ): { key: string; title: string; values: ScriptStatusRow['values'] }[] {
+    return this.scriptLayers.list().flatMap((r) => {
+      const s = r.drawn() ? r.statusAt(hostLogical) : null;
+      if (!s) return [];
+      const title = r.renderModel?.title ?? 'Script';
+      return [{ key: r.key, title, values: [...s.main, ...(s.script ?? [])] }];
+    });
+  }
+
+  /** The scripts' outputs at the data window's bar: one section per script, raw numbers kept for CSV. */
+  private readonly scriptValues: ValueProvider = ({ index }) => {
+    const out: DataWindowSection[] = [];
+    for (const r of this.scriptLayers.list()) {
+      const model = r.renderModel;
+      const logical = r.drawn() ? r.runLogical(index) : null;
+      if (!model || logical === null) continue;
+      const rows = outputRowsAt(model, logical);
+      if (!rows.length) continue;
+      out.push({
+        id: `script:${r.key}`,
+        title: model.title,
+        rows: rows.map((row) => ({
+          label: row.label,
+          value: row.value,
+          ...(row.color ? { color: row.color } : {}),
+          raw: row.raw,
+        })),
+      });
+    }
+    return out;
+  };
 
   /** The tooltip of the script drawing under the pointer (PC-10): a label's `tooltip`, a fill's. */
   readonly scriptTip = signal<ScriptTooltip | null>(null);
@@ -2835,6 +2962,12 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   private onScriptPointer(param: MouseEventParams<Time>): void {
+    // The bar the scripts' status lines read (their last bar once the pointer leaves the chart).
+    const logical =
+      param.point && param.logical !== undefined && this.scriptLayers.size
+        ? Math.round(param.logical as number)
+        : null;
+    if (logical !== this.scriptCrosshair()) this.scriptCrosshair.set(logical);
     const found = this.scriptHitAt(param);
     let tip: ScriptTooltip | null = null;
     if (found && param.point && param.paneIndex !== undefined) {

@@ -159,8 +159,11 @@ import { placeRun } from '../../scripts/run-on-host';
 import {
   chartScriptLayers,
   hiddenOnTimeframe,
+  sameLayers,
   type ChartScriptLayer,
 } from '../../scripts/script-layers';
+import { inputsSummary, type ScriptAction } from '../../scripts/script-status';
+import { ScriptStatusLineComponent } from '../../scripts/script-status-line.component';
 import {
   ScriptEditorPanelComponent,
   type ScriptEditorSubmit,
@@ -498,6 +501,7 @@ function loadWatchlistOpen(): boolean {
     LongPressDirective,
     UndoNoticeComponent,
     ScriptChipComponent,
+    ScriptStatusLineComponent,
     ChartAlertFormComponent,
     ChartAlertManagerComponent,
   ],
@@ -846,26 +850,49 @@ export class ChartAnalysisPageComponent {
    * new runs wait for the new bars — "Running script…" shows meanwhile.
    */
   readonly scriptResults = computed<ChartScriptLayer[]>(
-    () =>
-      chartScriptLayers(
+    () => {
+      const failures = this.scriptFailures();
+      return chartScriptLayers(
         this.scriptRuns(),
         { symbol: this.symbol(), resolution: this.resolution() },
         this.barsFor(),
         this.chartBasis(),
         this.scriptsUnavailable(),
-      ),
-    {
-      equal: (a, b) =>
-        a.length === b.length &&
-        a.every(
-          (l, i) =>
-            l.key === b[i].key &&
-            l.result === b[i].result &&
-            l.suspended === b[i].suspended &&
-            JSON.stringify(l.display) === JSON.stringify(b[i].display),
-        ),
+        // What each status line prints besides its values (PC-I2).
+        (run) => ({
+          title: run.result.title || run.item.name,
+          inputs: inputsSummary(run.result.inputs, run.values),
+          failure: failures.get(run.item.key) ?? null,
+        }),
+      );
     },
+    { equal: sameLayers },
   );
+  /** The overlay scripts' status lines, for the price pane's legend (PC-I2). */
+  readonly legendScriptRows = computed(
+    () => this.host()?.scriptStatus().filter((r) => r.pane === 'main') ?? [],
+  );
+
+  /** A status line (or chip) asked for something of a script. */
+  onScriptAction(a: ScriptAction): void {
+    switch (a.kind) {
+      case 'visibility':
+        this.toggleScriptVisible(a.key);
+        break;
+      case 'settings':
+        this.settings.open(a.key);
+        break;
+      case 'source':
+        this.openScriptSource(a.key);
+        break;
+      case 'remove':
+        this.removeScriptFromChart(a.key);
+        break;
+      case 'openAt':
+        this.openScriptAt(a.key, a.where);
+        break;
+    }
+  }
   /**
    * The bars runs are computed on for the chart's style (PC-09, PC-I8): Heikin-Ashi or standard;
    * null on a price-based style, which runs cannot be placed on.

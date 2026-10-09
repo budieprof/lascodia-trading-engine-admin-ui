@@ -10,6 +10,7 @@ import {
   type ScriptDisplaySettings,
 } from './script-display';
 import { ScriptRenderer, type ScriptHost } from './script-renderer';
+import type { ScriptLabel } from './script-status';
 
 /** One Pine script on the chart, as chart-host draws it (its `scriptResults` input). */
 export interface ChartScriptLayer {
@@ -23,6 +24,8 @@ export interface ChartScriptLayer {
    * still on the way; null or absent: drawn. Its pane stays meanwhile.
    */
   suspended?: string | null;
+  /** What its status line prints besides its values: title, inputs, failure (PC-I2). */
+  label?: ScriptLabel;
 }
 
 /** A run on the page, as far as the chart's layers read it. */
@@ -41,12 +44,13 @@ export interface LayerRun extends SeriesId {
  * nothing drawn — on a chart type runs cannot sit on (`unavailable`), and while its run for the
  * chart's bars is on its way (Heikin-Ashi ↔ standard, PC-09).
  */
-export function chartScriptLayers(
-  runs: readonly LayerRun[],
+export function chartScriptLayers<R extends LayerRun>(
+  runs: readonly R[],
   chart: SeriesId,
   bars: SeriesId | null,
   basis: ScriptBasis | null,
   unavailable: string | null,
+  labelOf?: (run: R) => ScriptLabel,
 ): ChartScriptLayer[] {
   return runs
     .filter((r) => runMatchesChart(r, chart, bars))
@@ -60,8 +64,24 @@ export function chartScriptLayers(
           unavailable ??
           hiddenOnTimeframe(display, chart.resolution) ??
           ((r.chartType ?? 'standard') !== basis ? 'Running on the new chart type…' : null),
+        ...(labelOf ? { label: labelOf(r) } : {}),
       };
     });
+}
+
+/** Two lists of layers draw and label the same: what the page's computed compares by. */
+export function sameLayers(a: readonly ChartScriptLayer[], b: readonly ChartScriptLayer[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (l, i) =>
+        l.key === b[i].key &&
+        l.result === b[i].result &&
+        l.suspended === b[i].suspended &&
+        JSON.stringify(l.display) === JSON.stringify(b[i].display) &&
+        JSON.stringify(l.label) === JSON.stringify(b[i].label),
+    )
+  );
 }
 
 /** Why a script is not shown on this timeframe (its Visibility tab), or null. */

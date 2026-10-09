@@ -10,7 +10,7 @@ import {
   plot,
 } from '../testing/pine-fixtures';
 import { buildRenderModel, buildTableLayout } from './build-render-model';
-import { dataWindowAt, legendLogical, statusLines } from './legend';
+import { dataWindowAt, legendLogical, outputRowsAt, statusLines } from './legend';
 import { tableView } from './table-view';
 
 const bars: PineBar[] = Array.from({ length: 6 }, (_, i) => ({
@@ -109,6 +109,15 @@ describe('data window', () => {
     expect(bar.rows.find((r) => r.label === 'Volume')?.value).toBe('1.5K');
     expect(script.title).toBe('Test');
     expect(script.rows.map((r) => r.label)).toEqual(['Fast', 'Hidden', 'Sig', 'Pct']);
+  });
+
+  it('keeps the number behind each value for a data export (outputRowsAt)', () => {
+    const rows = outputRowsAt(model(), 1);
+    expect(rows.map((r) => r.label)).toEqual(['Fast', 'Hidden', 'Sig', 'Pct']);
+    for (const r of rows) {
+      if (r.value === '∅') expect(r.raw).toBeNull();
+      else expect(Number.isFinite(r.raw)).toBe(true);
+    }
   });
 
   it('shows plotbar/plotcandle as four rows', () => {
