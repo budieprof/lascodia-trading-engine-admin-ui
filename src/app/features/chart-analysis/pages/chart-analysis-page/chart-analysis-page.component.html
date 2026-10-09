@@ -1429,6 +1429,9 @@
             <button type="button" (click)="chartSettingsOpen.set(true); closeContextMenu()">
               Settings…
             </button>
+            <button type="button" (click)="paletteOpen.set(true); closeContextMenu()" title="⌘⇧K">
+              Commands…
+            </button>
             <button type="button" (click)="takeSnapshot()">Save image…</button>
             <button type="button" (click)="copySnapshot()">Copy image</button>
             <button type="button" (click)="exportChartData()">Export chart data (CSV)</button>
@@ -1985,6 +1988,16 @@
       (exportPine)="openPineDraft($event)"
     />
   }
+  <!-- The chart's command palette (CC-I11): ⌘⇧K, or the context menu. -->
+  @if (paletteOpen()) {
+    <app-chart-palette
+      [actions]="paletteActions()"
+      [recent]="paletteRecent()"
+      (run)="runPaletteAction($event)"
+      (closed)="paletteOpen.set(false)"
+    />
+  }
+
   <!-- The chart's Settings (CC-I11): applied as they are edited; Cancel puts them back. -->
   @if (chartSettingsOpen()) {
     <app-chart-settings-dialog

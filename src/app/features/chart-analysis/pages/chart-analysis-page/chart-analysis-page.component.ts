@@ -293,6 +293,9 @@ import {
 } from '../../panels/news-pane';
 import { ChartPanelsDockComponent } from '../../panels/side/chart-panels-dock.component';
 import { ReplayController } from '../../replay/replay-controller';
+import type { UiCommand } from '@core/assistant/ui-command.types';
+import { buildPaletteActions, type PaletteAction } from '../../palette/chart-palette';
+import { ChartPaletteComponent } from '../../palette/chart-palette.component';
 import { restoredAppearance, type ChartAppearance } from '../../chart/appearance';
 import {
   recalled,
@@ -566,6 +569,15 @@ const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
   KeyF: 'fib-retracement',
 };
 
+/** TradingView's chart hotkeys (Alt + key), by `KeyboardEvent.code` (CC-I11). */
+const CHART_HOTKEYS: Readonly<Record<string, 'reset' | 'invert' | 'log' | 'percent' | 'snapshot'>> = {
+  KeyR: 'reset',
+  KeyI: 'invert',
+  KeyL: 'log',
+  KeyP: 'percent',
+  KeyS: 'snapshot',
+};
+
 @Component({
   selector: 'app-chart-analysis-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -609,6 +621,7 @@ const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
     ChartScriptAlertFormComponent,
     ReplayPanelComponent,
     ChartSettingsDialogComponent,
+    ChartPaletteComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -2387,8 +2400,7 @@ export class ChartAnalysisPageComponent {
 
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const host = this;
-    this.uiCommands.register(
-      chartCommands({
+    this.chartCommandList = chartCommands({
         symbol: this.symbol,
         resolution: this.resolution,
         style: this.style,
@@ -2521,9 +2533,9 @@ export class ChartAnalysisPageComponent {
             ? { poc: p.poc, valueAreaLow: p.valueAreaLow, valueAreaHigh: p.valueAreaHigh }
             : null;
         },
-      }),
-      this.destroyRef,
-    );
+      });
+    // The same commands drive the operator's command palette (CC-I11).
+    this.uiCommands.register(this.chartCommandList, this.destroyRef);
 
     // Keep the live-price subscriptions in step with what is on screen: the
     // primary chart, every comparison panel, and — only while it is open —
@@ -5243,6 +5255,53 @@ export class ChartAnalysisPageComponent {
     this.fitTradeLines.set(s.fitTradeLines);
   }
 
+  // ── Command palette (CC-I11) ─────────────────────────────────────────────
+
+  /** The chart's commands (the assistant's), which the palette offers too. */
+  private chartCommandList: UiCommand[] = [];
+  readonly paletteOpen = signal(false);
+  /** Palette entries run lately, newest first (this page's session). */
+  readonly paletteRecent = signal<string[]>([]);
+  readonly paletteActions = computed(() =>
+    this.paletteOpen()
+      ? buildPaletteActions(this.chartCommandList, {
+          symbols: this.symbols()
+            .map((p) => p.symbol ?? '')
+            .filter((s) => !!s),
+          indicators: INDICATORS.map((d) => ({ id: d.id, name: d.name })),
+          active: this.active().map((i) => ({ uid: i.uid, label: this.labelFor(i) })),
+          tools: TOOLS.map((t) => ({ label: t.label })),
+          timezones: this.timezones,
+          styleLabel: (id) => CHART_STYLES.find((s) => s.id === id)?.label ?? id,
+        })
+      : [],
+  );
+
+  /** Run a palette entry through its chart command — asking first for one that destroys work — and say what happened. */
+  async runPaletteAction(a: PaletteAction): Promise<void> {
+    this.paletteOpen.set(false);
+    const cmd = this.chartCommandList.find((c) => c.id === a.commandId);
+    if (!cmd) return;
+    if (
+      a.confirm &&
+      !(await this.dialogs.confirm({
+        title: `${a.title}?`,
+        message: cmd.description,
+        confirmLabel: 'Go ahead',
+        tone: 'danger',
+      }))
+    )
+      return;
+    this.paletteRecent.update((l) => [a.id, ...l.filter((id) => id !== a.id)].slice(0, 8));
+    try {
+      const r = await cmd.run(a.args);
+      if (r.ok) this.notify.success(r.message);
+      else this.notify.error(r.message);
+    } catch (e) {
+      this.notify.error(e instanceof Error && e.message ? e.message : `${a.title} failed.`);
+    }
+  }
+
   // ── One undo history (CC-I11) ────────────────────────────────────────────
 
   readonly undoHistory = new UndoHistory();
@@ -5992,6 +6051,14 @@ export class ChartAnalysisPageComponent {
     }
 
     const mod = ev.metaKey || ev.ctrlKey;
+    // The chart's command palette (CC-I11): ⌘⇧K / Ctrl+Shift+K (⌘K alone is the console's page search).
+    if (mod && ev.shiftKey && ev.key.toLowerCase() === 'k') {
+      ev.preventDefault();
+      // The console's palette listens on the document for ⌘K with or without Shift: not this one.
+      ev.stopPropagation();
+      this.paletteOpen.set(true);
+      return;
+    }
     if (mod && ev.key.toLowerCase() === 'z') {
       ev.preventDefault();
       if (ev.shiftKey) this.redo();
@@ -6045,6 +6112,18 @@ export class ChartAnalysisPageComponent {
     // TradingView's drawing hotkeys (DR-I12), by physical key so Alt's characters on a Mac
     // (Alt+T types "†") do not get in the way.
     if (ev.altKey && !mod) {
+      // TradingView's chart keys (CC-I11): reset the view, invert / log / percent scale, snapshot.
+      const action = CHART_HOTKEYS[ev.code];
+      if (action) {
+        ev.preventDefault();
+        if (action === 'reset') this.resetScales();
+        else if (action === 'invert') this.invertScale.set(!this.invertScale());
+        else if (action === 'log') this.scaleMode.set(this.scaleMode() === 'log' ? 'normal' : 'log');
+        else if (action === 'percent')
+          this.scaleMode.set(this.scaleMode() === 'percent' ? 'normal' : 'percent');
+        else this.takeSnapshot();
+        return;
+      }
       const kind = DRAWING_HOTKEYS[ev.code];
       if (kind) {
         ev.preventDefault();
@@ -6071,6 +6150,12 @@ export class ChartAnalysisPageComponent {
       const bars = ev.key === 'ArrowLeft' ? -k : ev.key === 'ArrowRight' ? k : 0;
       const px = ev.key === 'ArrowUp' ? -k : ev.key === 'ArrowDown' ? k : 0;
       if (this.host()?.nudgeSelectedDrawing(bars, px)) ev.preventDefault();
+      return;
+    }
+    // TradingView: "/" opens the indicators.
+    if (ev.key === '/' && !mod && !ev.altKey) {
+      ev.preventDefault();
+      this.openStudiesDialog();
       return;
     }
     if (ev.key.toLowerCase() === 'm' && !mod) {
