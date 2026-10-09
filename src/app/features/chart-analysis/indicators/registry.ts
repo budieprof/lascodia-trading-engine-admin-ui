@@ -78,6 +78,9 @@ import {
   autoPitchfork,
   autoTrendlines,
   averageDayRange,
+  barsPerYear,
+  cciOf,
+  inferBarInterval,
   bbTrend,
   chaikinVolatility,
   chandelierExit,
@@ -129,8 +132,16 @@ import {
 /**
  * `markers`: one shape per bar that has a value and nothing in between — a study whose values are
  * events, not a series (Williams fractals). Joined as a line they zig-zagged across every swing.
+ * `points`: a dot per value, never joined — a trailing stop that jumps sides (Parabolic SAR) drawn as a line
+ * painted a vertical stroke at every flip.
  */
-export type PlotKind = 'line' | 'histogram' | 'area' | 'markers';
+export type PlotKind = 'line' | 'histogram' | 'area' | 'markers' | 'points';
+
+/**
+ * The key under which `compute` returns a plot's values PAST the last bar — one per bar ahead (Ichimoku's leading
+ * spans, the Alligator's shifted lines). The chart draws them on the bars still to come.
+ */
+export const aheadKey = (plotKey: string): string => `${plotKey}:ahead`;
 
 export interface PlotSpec {
   key: string;
@@ -188,6 +199,19 @@ export interface IndicatorContext {
    * at 17:00 New York. Absent: UTC days.
    */
   tradingDay?: DayOf;
+  /**
+   * The bars' real (UTC) open times, index for index. The chart hands the studies its PLOTTED bars, whose times are
+   * shifted into the display time zone; what reads the clock itself (the sessions) needs the instant. Absent: the
+   * bars' own times are UTC.
+   */
+  utcTimes?: readonly number[];
+  /** The chart's bar interval in ms, for what scales by it (Historical Volatility's annualisation). */
+  barIntervalMs?: number;
+  /**
+   * Trading days a year of the symbol (Historical Volatility): 260 for a market that trades five days a week (FX),
+   * 365 for one that never closes. Absent: 260.
+   */
+  tradingDaysPerYear?: number;
 }
 
 export type PriceSource = 'close' | 'open' | 'high' | 'low' | 'hl2' | 'hlc3' | 'ohlc4';
@@ -456,7 +480,8 @@ export const INDICATORS: readonly IndicatorDef[] = [
     target: 'pane',
     inputs: [
       LENGTH(14, '%K Length'),
-      { key: 'smoothK', label: '%K Smooth', type: 'number', default: 3, min: 1, max: 50 },
+      // TradingView's default (DR-15): an unsmoothed %K.
+      { key: 'smoothK', label: '%K Smooth', type: 'number', default: 1, min: 1, max: 50 },
       { key: 'smoothD', label: '%D Smooth', type: 'number', default: 3, min: 1, max: 50 },
     ],
     plots: [
@@ -469,7 +494,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     ],
     range: { min: 0, max: 100 },
     compute: (bars, p) => {
-      const r = stochastic(bars, num(p, 'length', 14), num(p, 'smoothK', 3), num(p, 'smoothD', 3));
+      const r = stochastic(bars, num(p, 'length', 14), num(p, 'smoothK', 1), num(p, 'smoothD', 3));
       return { k: r.k, d: r.d };
     },
   },
@@ -551,6 +576,8 @@ export const INDICATORS: readonly IndicatorDef[] = [
         spanA: r.spanA,
         spanB: r.spanB,
         lagging: r.lagging,
+        [aheadKey('spanA')]: r.spanAAhead,
+        [aheadKey('spanB')]: r.spanBAhead,
       };
     },
   },
@@ -561,12 +588,21 @@ export const INDICATORS: readonly IndicatorDef[] = [
     description: 'Parabolic stop-and-reverse points that trail price and flip on reversal.',
     keywords: ['sar', 'stop'],
     target: 'overlay',
+    // TradingView's three inputs; `step` keeps its key (the start) so saved layouts read the same.
     inputs: [
-      { key: 'step', label: 'Step', type: 'number', default: 0.02, min: 0.001, max: 1 },
-      { key: 'max', label: 'Max', type: 'number', default: 0.2, min: 0.01, max: 1 },
+      { key: 'step', label: 'Start', type: 'number', default: 0.02, min: 0.001, max: 1 },
+      { key: 'increment', label: 'Increment', type: 'number', default: 0.02, min: 0.001, max: 1 },
+      { key: 'max', label: 'Max value', type: 'number', default: 0.2, min: 0.01, max: 1 },
     ],
-    plots: [{ key: 'psar', title: 'PSAR', kind: 'line', color: '#AB47BC' }],
-    compute: (bars, p) => ({ psar: psar(bars, num(p, 'step', 0.02), num(p, 'max', 0.2)) }),
+    plots: [{ key: 'psar', title: 'PSAR', kind: 'points', color: '#AB47BC' }],
+    compute: (bars, p) => ({
+      psar: psar(
+        bars,
+        num(p, 'step', 0.02),
+        num(p, 'increment', num(p, 'step', 0.02)),
+        num(p, 'max', 0.2),
+      ),
+    }),
   },
   {
     id: 'supertrend',
@@ -579,8 +615,15 @@ export const INDICATORS: readonly IndicatorDef[] = [
       LENGTH(10),
       { key: 'mult', label: 'Factor', type: 'number', default: 3, min: 0.1, max: 20 },
     ],
-    plots: [{ key: 'st', title: 'SuperTrend', kind: 'line', color: '#26A69A' }],
-    compute: (bars, p) => ({ st: superTrend(bars, num(p, 'length', 10), num(p, 'mult', 3)) }),
+    // TradingView's two lines: green under price in an up trend, red over it in a down trend, never joined.
+    plots: [
+      { key: 'up', title: 'Up Trend', kind: 'line', color: '#26A69A', gaps: 'break' },
+      { key: 'down', title: 'Down Trend', kind: 'line', color: '#EF5350', gaps: 'break' },
+    ],
+    compute: (bars, p) => {
+      const r = superTrend(bars, num(p, 'length', 10), num(p, 'mult', 3));
+      return { up: r.up, down: r.down };
+    },
   },
   {
     id: 'keltner',
@@ -1055,7 +1098,14 @@ export const INDICATORS: readonly IndicatorDef[] = [
     target: 'pane',
     inputs: [LENGTH(20)],
     plots: [{ key: 'hv', title: 'HV%', kind: 'line', color: '#F4511E' }],
-    compute: (bars, p) => ({ hv: historicalVolatility(bars, num(p, 'length', 20)) }),
+    // Annualised by the chart's own interval (DR-12): bars a year at this timeframe, on the symbol's trading days.
+    compute: (bars, p, ctx) => ({
+      hv: historicalVolatility(
+        bars,
+        num(p, 'length', 20),
+        barsPerYear(ctx?.barIntervalMs ?? inferBarInterval(bars), ctx?.tradingDaysPerYear ?? 260),
+      ),
+    }),
   },
   {
     id: 'stoch-rsi',
@@ -1126,7 +1176,14 @@ export const INDICATORS: readonly IndicatorDef[] = [
     ],
     compute: (bars) => {
       const r = alligator(bars);
-      return { jaw: r.jaw, teeth: r.teeth, lips: r.lips };
+      return {
+        jaw: r.jaw,
+        teeth: r.teeth,
+        lips: r.lips,
+        [aheadKey('jaw')]: r.jawAhead,
+        [aheadKey('teeth')]: r.teethAhead,
+        [aheadKey('lips')]: r.lipsAhead,
+      };
     },
   },
   {
@@ -1479,9 +1536,10 @@ export const INDICATORS: readonly IndicatorDef[] = [
     description: 'RSI computed on standard deviation, showing volatility direction.',
     keywords: ['relative volatility'],
     target: 'pane',
+    // TradingView's: σ over 10 bars, smoothed by an EMA of 14.
     inputs: [
-      LENGTH(10),
-      { key: 'stdevLen', label: 'StdDev Length', type: 'number', default: 10, min: 2, max: 200 },
+      LENGTH(14, 'Smoothing'),
+      { key: 'stdevLen', label: 'StdDev Length', type: 'number', default: 10, min: 1, max: 200 },
     ],
     plots: [{ key: 'rvi', title: 'RVI', kind: 'line', color: '#2962FF' }],
     levels: [
@@ -1493,7 +1551,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     compute: (bars, p) => ({
       rvi: relativeVolatilityIndex(
         bars.map((b) => b.close),
-        num(p, 'length', 10),
+        num(p, 'length', 14),
         num(p, 'stdevLen', 10),
       ),
     }),
@@ -1891,9 +1949,11 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { value: 0, color: '#787B86' },
       { value: -100, color: '#787B86' },
     ],
+    // TradingView's Woodies CCI runs on the close, not hlc3.
     compute: (bars, p) => {
-      const c = cci(bars, num(p, 'length', 14));
-      return { hist: c, cci: c, turbo: cci(bars, num(p, 'turbo', 6)) };
+      const closes = bars.map((b) => b.close);
+      const c = cciOf(closes, num(p, 'length', 14));
+      return { hist: c, cci: c, turbo: cciOf(closes, num(p, 'turbo', 6)) };
     },
   },
   {

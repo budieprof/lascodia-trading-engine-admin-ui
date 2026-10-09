@@ -13,6 +13,8 @@
  * reading. Callers drop the nulls when converting to chart points.
  */
 
+import { pivotLevels as verifiedPivotLevels, type PivotMethod } from '../panels/pivots';
+
 export type Maybe = number | null;
 
 export interface Ohlc {
@@ -38,6 +40,121 @@ export type DayOf = (time: number) => number;
 export const utcDay: DayOf = (time) => Math.floor(time / DAY_MS) * DAY_MS;
 
 const nulls = (n: number): Maybe[] => new Array<Maybe>(Math.max(0, n)).fill(null);
+
+// ── Pine semantics (DR-I1) ──────────────────────────────────────────────────
+//
+// The engine's Pine runtime is the reference these studies are held to (`reference-parity.spec.ts`). Where a
+// TradingView built-in's result is decided by a comparison or by how `na` flows, the port below follows the
+// runtime's rules exactly rather than approximately, or a flip lands on a different bar.
+
+/**
+ * Pine's float comparison rule (the engine's `PineOps`): both sides rounded to nine decimals, half away from
+ * zero, before comparing — so `a > b` is false for values a hair apart. Any comparison with NaN is false.
+ */
+const round9 = (x: number): number => (Math.sign(x) * Math.round(Math.abs(x) * 1e9)) / 1e9;
+const gt = (a: number, b: number): boolean => round9(a) > round9(b);
+const lt = (a: number, b: number): boolean => round9(a) < round9(b);
+const ge = (a: number, b: number): boolean => round9(a) >= round9(b);
+const le = (a: number, b: number): boolean => round9(a) <= round9(b);
+const eq = (a: number, b: number): boolean => round9(a) === round9(b);
+const toNum = (v: Maybe | undefined): number => (v === null || v === undefined ? NaN : v);
+const maybe = (v: number): Maybe => (Number.isFinite(v) ? v : null);
+
+/**
+ * `ta.ema` / `ta.rma` over a series with gaps, as the runtime does it: na values are skipped, the average is seeded
+ * with the SMA of the first `period` values that are not na, and it holds its value across a na.
+ */
+function smoothNa(series: readonly Maybe[], period: number, wilderAlpha: boolean): Maybe[] {
+  const out: Maybe[] = nulls(series.length);
+  if (period <= 0) return out;
+  const alpha = wilderAlpha ? 1 / period : 2 / (period + 1);
+  let value = NaN;
+  let seedSum = 0;
+  let seedCount = 0;
+  for (let i = 0; i < series.length; i++) {
+    const x = series[i];
+    if (x !== null && x !== undefined && !Number.isNaN(x)) {
+      if (seedCount < period) {
+        seedSum += x;
+        seedCount++;
+        if (seedCount === period) value = seedSum / period;
+      } else {
+        value = alpha * x + (1 - alpha) * value;
+      }
+    }
+    out[i] = maybe(value);
+  }
+  return out;
+}
+
+/** `ta.ema` with the runtime's na handling ({@link smoothNa}). */
+export function emaNa(series: readonly Maybe[], period: number): Maybe[] {
+  return smoothNa(series, period, false);
+}
+
+/**
+ * `math.sum` / `ta.sma` with the runtime's na handling: the sum (or mean) of the last `period` values that are not
+ * na — na until there are that many — holding across a na.
+ */
+function windowNa(series: readonly Maybe[], period: number, mean: boolean): Maybe[] {
+  const out: Maybe[] = nulls(series.length);
+  if (period <= 0) return out;
+  const window: number[] = [];
+  for (let i = 0; i < series.length; i++) {
+    const x = series[i];
+    if (x !== null && x !== undefined && !Number.isNaN(x)) {
+      window.push(x);
+      if (window.length > period) window.shift();
+    }
+    if (window.length === period) {
+      let s = 0;
+      for (const v of window) s += v;
+      out[i] = mean ? s / period : s;
+    }
+  }
+  return out;
+}
+
+/** `ta.sma` with the runtime's na handling ({@link windowNa}). */
+export function smaNa(series: readonly Maybe[], period: number): Maybe[] {
+  return windowNa(series, period, true);
+}
+
+/** `math.sum` with the runtime's na handling ({@link windowNa}). */
+export function sumNa(series: readonly Maybe[], period: number): Maybe[] {
+  return windowNa(series, period, false);
+}
+
+/** `ta.swma`: weights 1-2-2-1 over the last four values; na while any of them is na. */
+function swma(series: readonly Maybe[]): Maybe[] {
+  const out: Maybe[] = nulls(series.length);
+  for (let i = 3; i < series.length; i++) {
+    const a3 = series[i - 3];
+    const a2 = series[i - 2];
+    const a1 = series[i - 1];
+    const a0 = series[i];
+    if (a3 === null || a2 === null || a1 === null || a0 === null) continue;
+    // The runtime's operation order, so the values are the same to the last bit.
+    out[i] = (a3 * 1) / 6 + (a2 * 2) / 6 + (a1 * 2) / 6 + (a0 * 1) / 6;
+  }
+  return out;
+}
+
+/** `ta.highest` / `ta.lowest` over the last `period` values that are not na (na until there are that many). */
+function extremeNa(series: readonly Maybe[], period: number, max: boolean): Maybe[] {
+  const out: Maybe[] = nulls(series.length);
+  if (period <= 0) return out;
+  const window: number[] = [];
+  for (let i = 0; i < series.length; i++) {
+    const x = series[i];
+    if (x !== null && x !== undefined && !Number.isNaN(x)) {
+      window.push(x);
+      if (window.length > period) window.shift();
+    }
+    if (window.length === period) out[i] = max ? Math.max(...window) : Math.min(...window);
+  }
+  return out;
+}
 
 /** Simple moving average. */
 export function sma(values: number[], period: number): Maybe[] {
@@ -291,14 +408,18 @@ export function donchian(bars: Ohlc[], period = 20): BandsResult {
   return { upper, middle, lower };
 }
 
-/** On-balance volume. */
+/**
+ * On-balance volume (`ta.obv`): the running sum of volume signed by the close's change. The first bar has no
+ * change, so it is na, as on TradingView; the sum starts on the second.
+ */
 export function obv(bars: Ohlc[]): Maybe[] {
-  if (bars.length === 0) return [];
-  const out: Maybe[] = [0];
+  const out: Maybe[] = nulls(bars.length);
+  let running = 0;
   for (let i = 1; i < bars.length; i++) {
-    const prev = out[i - 1] as number;
-    const d = bars[i].close - bars[i - 1].close;
-    out[i] = d > 0 ? prev + bars[i].volume : d < 0 ? prev - bars[i].volume : prev;
+    const c = bars[i].close;
+    const p = bars[i - 1].close;
+    running += gt(c, p) ? bars[i].volume : lt(c, p) ? -bars[i].volume : 0;
+    out[i] = running;
   }
   return out;
 }
@@ -394,35 +515,53 @@ export function williamsR(bars: Ohlc[], period = 14): Maybe[] {
  * overbought/oversold reading.
  */
 export function cci(bars: Ohlc[], period = 20): Maybe[] {
-  const typical = bars.map((b) => (b.high + b.low + b.close) / 3);
-  const avg = sma(typical, period);
-  const out: Maybe[] = nulls(bars.length);
-  for (let i = period - 1; i < bars.length; i++) {
+  return cciOf(
+    bars.map((b) => (b.high + b.low + b.close) / 3),
+    period,
+  );
+}
+
+/** CCI of any source series (`ta.cci(source, length)`): Woodies CCI runs on the close. */
+export function cciOf(source: number[], period = 20): Maybe[] {
+  const avg = sma(source, period);
+  const out: Maybe[] = nulls(source.length);
+  for (let i = period - 1; i < source.length; i++) {
     const mean = avg[i];
     if (mean === null) continue;
     let deviation = 0;
-    for (let j = i - period + 1; j <= i; j++) deviation += Math.abs(typical[j] - mean);
+    for (let j = i - period + 1; j <= i; j++) deviation += Math.abs(source[j] - mean);
     const meanDeviation = deviation / period;
-    out[i] = meanDeviation === 0 ? 0 : (typical[i] - mean) / (0.015 * meanDeviation);
+    out[i] = meanDeviation === 0 ? 0 : (source[i] - mean) / (0.015 * meanDeviation);
   }
   return out;
 }
 
-/** Money Flow Index — RSI weighted by volume. */
+/**
+ * Money Flow Index (`ta.mfi(hlc3, length)`) — RSI weighted by volume: the volume-weighted typical price of rising
+ * bars against that of falling ones over `period` bars.
+ *
+ * Pine's definition decides a bar's side with `ta.change(src) <= 0` / `>= 0`, and on the first bar the change is
+ * na, so neither test holds and that bar's flow counts on BOTH sides. That is what TradingView shows on bar
+ * `period - 1`, and what this does.
+ */
 export function mfi(bars: Ohlc[], period = 14): Maybe[] {
-  const out: Maybe[] = nulls(bars.length);
   const typical = bars.map((b) => (b.high + b.low + b.close) / 3);
-  for (let i = period; i < bars.length; i++) {
-    let positive = 0;
-    let negative = 0;
-    for (let j = i - period + 1; j <= i; j++) {
-      const flow = typical[j] * bars[j].volume;
-      if (typical[j] > typical[j - 1]) positive += flow;
-      else if (typical[j] < typical[j - 1]) negative += flow;
-    }
-    out[i] = negative === 0 ? 100 : 100 - 100 / (1 + positive / negative);
-  }
-  return out;
+  const up: Maybe[] = typical.map(
+    (t, i) => bars[i].volume * (i > 0 && le(t - typical[i - 1], 0) ? 0 : t),
+  );
+  const down: Maybe[] = typical.map(
+    (t, i) => bars[i].volume * (i > 0 && ge(t - typical[i - 1], 0) ? 0 : t),
+  );
+  const upper = sumNa(up, period);
+  const lower = sumNa(down, period);
+  return bars.map((_, i) => {
+    const u = upper[i];
+    const l = lower[i];
+    if (u === null || l === null) return null;
+    // Pine divides with `upper / lower`: na for a zero lower sum would make the result na; TradingView's
+    // reading of "no falling flow" is 100, which is what 100 - 100 / (1 + ∞) gives.
+    return l === 0 ? 100 : 100 - 100 / (1 + u / l);
+  });
 }
 
 /** Awesome Oscillator — SMA(5) minus SMA(34) of the median price. */
@@ -455,102 +594,159 @@ export function keltner(bars: Ohlc[], period = 20, mult = 2, atrPeriod = 10): Ba
 }
 
 /**
- * Parabolic SAR.
+ * Parabolic SAR — `ta.sar(start, increment, maximum)`, ported from the engine's runtime (DR-09).
  *
- * Genuinely stateful: the acceleration factor ratchets up on each new extreme
- * and resets on every flip, so it cannot be computed for one bar in isolation.
+ * Genuinely stateful: the acceleration factor ratchets up on each new extreme and resets on every flip. The order
+ * of the steps is the definition: the SAR is advanced, THEN tested for a reversal against this bar's range (a
+ * reversal puts it at the extreme of the trend that ended), and only then clamped to the prior two bars' lows
+ * (highs). Clamping first — as this used to — moved the reversal to another bar. The trend is seeded on bar 1
+ * from the first two closes, so bar 0 has no value.
  */
-export function psar(bars: Ohlc[], step = 0.02, max = 0.2): Maybe[] {
+export function psar(bars: Ohlc[], start = 0.02, increment = 0.02, maximum = 0.2): Maybe[] {
   const out: Maybe[] = nulls(bars.length);
-  if (bars.length < 2) return out;
-  let rising = bars[1].close >= bars[0].close;
-  let sar = rising ? bars[0].low : bars[0].high;
-  let extreme = rising ? bars[0].high : bars[0].low;
-  let af = step;
-  out[0] = sar;
-
-  for (let i = 1; i < bars.length; i++) {
-    sar = sar + af * (extreme - sar);
-    if (rising) {
-      // SAR may never move above the last two lows while rising.
-      sar = Math.min(sar, bars[i - 1].low, bars[Math.max(0, i - 2)].low);
-      if (bars[i].low < sar) {
-        rising = false;
-        sar = extreme;
-        extreme = bars[i].low;
-        af = step;
-      } else if (bars[i].high > extreme) {
-        extreme = bars[i].high;
-        af = Math.min(max, af + step);
+  let isBelow = false;
+  let maxMin = NaN;
+  let result = NaN;
+  let acceleration = NaN;
+  for (let i = 0; i < bars.length; i++) {
+    const b = bars[i];
+    const b1 = i >= 1 ? bars[i - 1] : null;
+    const b2 = i >= 2 ? bars[i - 2] : null;
+    let firstTrendBar = false;
+    if (i === 1 && b1) {
+      if (gt(b.close, b1.close)) {
+        isBelow = true;
+        maxMin = b.high;
+        result = b1.low;
+      } else {
+        isBelow = false;
+        maxMin = b.low;
+        result = b1.high;
       }
-    } else {
-      sar = Math.max(sar, bars[i - 1].high, bars[Math.max(0, i - 2)].high);
-      if (bars[i].high > sar) {
-        rising = true;
-        sar = extreme;
-        extreme = bars[i].high;
-        af = step;
-      } else if (bars[i].low < extreme) {
-        extreme = bars[i].low;
-        af = Math.min(max, af + step);
+      firstTrendBar = true;
+      acceleration = start;
+    }
+
+    result = result + acceleration * (maxMin - result);
+
+    if (isBelow) {
+      if (gt(result, b.low)) {
+        firstTrendBar = true;
+        isBelow = false;
+        result = Math.max(b.high, maxMin);
+        maxMin = b.low;
+        acceleration = start;
+      }
+    } else if (lt(result, b.high)) {
+      firstTrendBar = true;
+      isBelow = true;
+      result = Math.min(b.low, maxMin);
+      maxMin = b.high;
+      acceleration = start;
+    }
+
+    if (!firstTrendBar) {
+      if (isBelow) {
+        if (gt(b.high, maxMin)) {
+          maxMin = b.high;
+          acceleration = Math.min(acceleration + increment, maximum);
+        }
+      } else if (lt(b.low, maxMin)) {
+        maxMin = b.low;
+        acceleration = Math.min(acceleration + increment, maximum);
       }
     }
-    out[i] = sar;
+
+    // Never inside the prior two bars' range: under the lows while below price, over the highs while above.
+    if (isBelow) {
+      result = Math.min(result, b1?.low ?? NaN);
+      if (i > 1) result = Math.min(result, b2?.low ?? NaN);
+    } else {
+      result = Math.max(result, b1?.high ?? NaN);
+      if (i > 1) result = Math.max(result, b2?.high ?? NaN);
+    }
+    out[i] = maybe(result);
   }
   return out;
 }
 
-/** SuperTrend — ATR bands that flip side when price closes through them. */
-export function superTrend(bars: Ohlc[], period = 10, mult = 3): Maybe[] {
-  const range = atr(bars, period);
-  const out: Maybe[] = nulls(bars.length);
-  let trendUp = true;
-  let previous: number | null = null;
+export interface SuperTrendResult {
+  /** The line while the trend is up (direction −1): the ratcheted lower band, under price. */
+  up: Maybe[];
+  /** The line while the trend is down (direction +1): the ratcheted upper band, over price. */
+  down: Maybe[];
+  /** Both together. */
+  line: Maybe[];
+  /** Pine's direction: −1 up, +1 down. */
+  direction: Maybe[];
+}
 
-  for (let i = 0; i < bars.length; i++) {
-    const r = range[i];
-    if (r === null) continue;
-    const mid = (bars[i].high + bars[i].low) / 2;
-    const upper = mid + mult * r;
-    const lower = mid - mult * r;
-    if (previous === null) {
-      previous = lower;
-      out[i] = lower;
-      continue;
-    }
-    if (trendUp) {
-      previous = Math.max(lower, previous);
-      if (bars[i].close < previous) {
-        trendUp = false;
-        previous = upper;
-      }
-    } else {
-      previous = Math.min(upper, previous);
-      if (bars[i].close > previous) {
-        trendUp = true;
-        previous = lower;
-      }
-    }
-    out[i] = previous;
+/**
+ * SuperTrend — `ta.supertrend(factor, atrPeriod)`, ported from the engine's runtime (DR-08).
+ *
+ * Each band RATCHETS: the lower band only rises (unless the previous close fell through it) and the upper band
+ * only falls, so on a flip the line moves to the band carried from the bars before — not to that bar's raw
+ * opposite band, which made the old line jump. The trend starts DOWN on the first bar with an ATR, as Pine's does.
+ * Up and down are separate series so they draw in two colours and never join across a flip; the warm-up bars are
+ * na (Pine's own reference implementation leaves its nz() seed, 0, on bar 0).
+ */
+export function superTrend(bars: Ohlc[], period = 10, factor = 3): SuperTrendResult {
+  const n = bars.length;
+  const range = atr(bars, period);
+  const r: SuperTrendResult = { up: nulls(n), down: nulls(n), line: nulls(n), direction: nulls(n) };
+  let prevLower = NaN;
+  let prevUpper = NaN;
+  let prevSt = NaN;
+  let prevAtr = NaN;
+  for (let i = 0; i < n; i++) {
+    const b = bars[i];
+    const a = toNum(range[i]);
+    const src = (b.high + b.low) / 2;
+    let upper = src + factor * a;
+    let lower = src - factor * a;
+    const pLower = Number.isNaN(prevLower) ? 0 : prevLower; // nz(lowerBand[1])
+    const pUpper = Number.isNaN(prevUpper) ? 0 : prevUpper; // nz(upperBand[1])
+    const prevClose = i > 0 ? bars[i - 1].close : NaN;
+    lower = gt(lower, pLower) || lt(prevClose, pLower) ? lower : pLower;
+    upper = lt(upper, pUpper) || gt(prevClose, pUpper) ? upper : pUpper;
+    let dir: number;
+    if (Number.isNaN(prevAtr)) dir = 1;
+    else if (eq(prevSt, pUpper)) dir = gt(b.close, upper) ? -1 : 1;
+    else dir = lt(b.close, lower) ? 1 : -1;
+    const st = dir === -1 ? lower : upper;
+    prevLower = lower;
+    prevUpper = upper;
+    prevSt = st;
+    prevAtr = a;
+    if (range[i] === null) continue;
+    r.line[i] = st;
+    r.direction[i] = dir;
+    if (dir < 0) r.up[i] = st;
+    else r.down[i] = st;
   }
-  return out;
+  return r;
 }
 
 export interface IchimokuResult {
   conversion: Maybe[];
   base: Maybe[];
+  /** The leading spans on the chart's bars: the cloud under each bar. */
   spanA: Maybe[];
   spanB: Maybe[];
   lagging: Maybe[];
+  /** The leading spans past the last bar, one per bar ahead (`displacement - 1` of them): the cloud to come. */
+  spanAAhead: Maybe[];
+  spanBAhead: Maybe[];
 }
 
 /**
- * Ichimoku Cloud.
+ * Ichimoku Cloud, as TradingView plots it (DR-11).
  *
- * Spans are plotted FORWARD by `displacement` bars and the lagging span
- * BACKWARD by the same — that shift is the indicator, not a presentation
- * detail. Values shifted past the end of the series are dropped rather than
- * clamped, since the cloud legitimately extends beyond the last bar.
+ * The leading spans are plotted FORWARD and the lagging span BACKWARD — that shift is the indicator, not a
+ * presentation detail — by `displacement - 1` bars: TradingView's built-in plots with `offset = displacement - 1`
+ * (25 for the default 26), so the cloud under a bar is the one computed 25 bars earlier. The spans' values that
+ * land past the last bar are the cloud ahead of price, returned in `spanAAhead` / `spanBAhead` rather than
+ * dropped.
  */
 export function ichimoku(
   bars: Ohlc[],
@@ -591,15 +787,25 @@ export function ichimoku(
     return out;
   };
 
+  const by = Math.max(0, displacement - 1);
+  // A leading span's value of bar i lands on bar i + by; those past the last bar are the cloud ahead.
+  const n = bars.length;
+  const ahead = (series: Maybe[]): Maybe[] => {
+    const out = nulls(by);
+    for (let i = Math.max(0, n - by); i < n; i++) out[i + by - n] = series[i];
+    return out;
+  };
   return {
     conversion,
     base,
-    spanA: shift(rawSpanA, displacement),
-    spanB: shift(rawSpanB, displacement),
+    spanA: shift(rawSpanA, by),
+    spanB: shift(rawSpanB, by),
     lagging: shift(
       bars.map((b) => b.close as Maybe),
-      -displacement,
+      -by,
     ),
+    spanAAhead: by > 0 ? ahead(rawSpanA) : [],
+    spanBAhead: by > 0 ? ahead(rawSpanB) : [],
   };
 }
 
@@ -662,10 +868,14 @@ export function smma(values: number[], period: number): Maybe[] {
   return wilder(values, period);
 }
 
-/** Hull moving average — WMA of (2·WMA(n/2) − WMA(n)), smoothed over √n. */
+/**
+ * Hull moving average — `ta.hma`: WMA of (2·WMA(n/2) − WMA(n)) over √n, with the lengths TRUNCATED as Pine's
+ * integer division and floor do (DR-10): HMA(9) is WMA(4) and WMA(9), smoothed by WMA(3). Rounding n/2 made it
+ * WMA(5) — a different average, and the Technicals HMA vote inherited it.
+ */
 export function hma(values: number[], period = 9): Maybe[] {
-  const half = Math.max(1, Math.round(period / 2));
-  const sqrt = Math.max(1, Math.round(Math.sqrt(period)));
+  const half = Math.max(1, Math.floor(period / 2));
+  const sqrt = Math.max(1, Math.floor(Math.sqrt(period)));
   const a = wma(values, half);
   const b = wma(values, period);
   const raw: Maybe[] = values.map((_, i) =>
@@ -810,29 +1020,40 @@ export function aroon(bars: Ohlc[], period = 14): { up: Maybe[]; down: Maybe[] }
   return { up, down };
 }
 
-/** TRIX — rate of change of a triple-smoothed EMA, in percent. */
+/**
+ * TRIX, as TradingView's built-in computes it: 10000 × the one-bar change of the triple EMA of ln(source). (The
+ * rate of change of a triple EMA of the price itself, in percent, is the same idea 100 times smaller — which is
+ * what this plotted before.)
+ */
 export function trix(values: number[], period = 18): Maybe[] {
-  const e1 = ema(values, period);
+  const e1 = ema(
+    values.map((v) => Math.log(v)),
+    period,
+  );
   const e2 = denseMap(e1, (d) => ema(d, period));
   const e3 = denseMap(e2, (d) => ema(d, period));
   const out: Maybe[] = nulls(values.length);
   for (let i = 1; i < values.length; i++) {
     const now = e3[i];
     const prev = e3[i - 1];
-    if (now === null || prev === null || prev === 0) continue;
-    out[i] = ((now - prev) / prev) * 100;
+    if (now === null || prev === null) continue;
+    out[i] = 10000 * (now - prev);
   }
   return out;
 }
 
-/** Detrended Price Oscillator. */
+/**
+ * Detrended Price Oscillator, as TradingView plots it by default (not centred): the source minus its SMA of
+ * `period` bars, taken `period / 2 + 1` bars back. It used to read the average from TEN BARS AHEAD (and fall back
+ * to the current one at the right edge) — a look-ahead that put tomorrow's average into today's value.
+ */
 export function dpo(values: number[], period = 21): Maybe[] {
   const shift = Math.floor(period / 2) + 1;
   const avg = sma(values, period);
   const out: Maybe[] = nulls(values.length);
-  for (let i = 0; i < values.length; i++) {
-    const a = avg[i - shift + period] ?? avg[i];
-    if (a === null || a === undefined) continue;
+  for (let i = shift; i < values.length; i++) {
+    const a = avg[i - shift];
+    if (a === null) continue;
     out[i] = values[i] - a;
   }
   return out;
@@ -908,13 +1129,15 @@ export function chaikinOscillator(bars: Ohlc[], fast = 3, slow = 10): Maybe[] {
   );
 }
 
-/** Force Index — price change times volume, smoothed. */
+/**
+ * Elder's Force Index (TradingView): EMA of the close's change × volume. The first bar has no change and is not
+ * part of the average (it used to enter as a 0 and pull the seed toward zero).
+ */
 export function forceIndex(bars: Ohlc[], period = 13): Maybe[] {
-  const raw: number[] = [0];
-  for (let i = 1; i < bars.length; i++) {
-    raw.push((bars[i].close - bars[i - 1].close) * bars[i].volume);
-  }
-  return ema(raw, period);
+  const raw: Maybe[] = bars.map((b, i) =>
+    i === 0 ? null : (b.close - bars[i - 1].close) * b.volume,
+  );
+  return emaNa(raw, period);
 }
 
 /** Elder Ray bull and bear power, relative to an EMA. */
@@ -938,27 +1161,28 @@ export function balanceOfPower(bars: Ohlc[], period = 14): Maybe[] {
   return sma(raw, period);
 }
 
-/** Ease of Movement. */
-export function easeOfMovement(bars: Ohlc[], period = 14): Maybe[] {
-  const raw: number[] = [0];
-  for (let i = 1; i < bars.length; i++) {
-    const midMove = (bars[i].high + bars[i].low) / 2 - (bars[i - 1].high + bars[i - 1].low) / 2;
-    const span = bars[i].high - bars[i].low;
-    const boxRatio = span === 0 || bars[i].volume === 0 ? 0 : bars[i].volume / 100000000 / span;
-    raw.push(boxRatio === 0 ? 0 : midMove / boxRatio);
-  }
-  return sma(raw, period);
+/**
+ * Ease of Movement, as TradingView's built-in: the SMA of 10000 × change(hl2) × (high − low) / volume. A bar
+ * without volume (or the first bar, without a change) has no value and is skipped, not counted as 0. (This used a
+ * divisor of 1e8 — values 10,000 times TradingView's.)
+ */
+export function easeOfMovement(bars: Ohlc[], period = 14, divisor = 10000): Maybe[] {
+  const raw: Maybe[] = bars.map((b, i) => {
+    if (i === 0 || b.volume === 0) return null;
+    const change = (b.high + b.low) / 2 - (bars[i - 1].high + bars[i - 1].low) / 2;
+    return (divisor * change * (b.high - b.low)) / b.volume;
+  });
+  return smaNa(raw, period);
 }
 
-/** Price Volume Trend. */
+/** Price Volume Trend (`ta.pvt`): volume × the close's relative change, summed. The first bar (no change) is na. */
 export function pvt(bars: Ohlc[]): Maybe[] {
-  const out: Maybe[] = [0];
+  const out: Maybe[] = nulls(bars.length);
+  let running = 0;
   for (let i = 1; i < bars.length; i++) {
-    const prev = (out[i - 1] ?? 0) as number;
     const prevClose = bars[i - 1].close;
-    out.push(
-      prevClose === 0 ? prev : prev + ((bars[i].close - prevClose) / prevClose) * bars[i].volume,
-    );
+    if (prevClose !== 0) running += ((bars[i].close - prevClose) / prevClose) * bars[i].volume;
+    out[i] = running;
   }
   return out;
 }
@@ -1031,23 +1255,71 @@ export function vortex(bars: Ohlc[], period = 14): { plus: Maybe[]; minus: Maybe
   return { plus, minus };
 }
 
-/** Historical volatility — annualised stdev of log returns, in percent. */
-export function historicalVolatility(bars: Ohlc[], period = 20, barsPerYear = 6240): Maybe[] {
-  const returns: number[] = [0];
-  for (let i = 1; i < bars.length; i++) {
-    const prev = bars[i - 1].close;
-    returns.push(prev > 0 ? Math.log(bars[i].close / prev) : 0);
-  }
-  const out: Maybe[] = nulls(bars.length);
-  for (let i = period; i < bars.length; i++) {
-    let mean = 0;
-    for (let j = i - period + 1; j <= i; j++) mean += returns[j];
-    mean /= period;
-    let variance = 0;
-    for (let j = i - period + 1; j <= i; j++) variance += (returns[j] - mean) ** 2;
-    out[i] = Math.sqrt(variance / (period - 1)) * Math.sqrt(barsPerYear) * 100;
+/**
+ * Historical volatility — the annualised standard deviation of log returns, in percent (DR-12).
+ *
+ * Annualised by the bars a year holds AT THIS INTERVAL ({@link barsPerYear}): it used to assume 6,240 bars a year
+ * on every timeframe (right for H1 only — ~4.9× too high on D1, ~3.5× too low on M5). The deviation is the
+ * population one, as `ta.stdev` (TradingView's own HV multiplies by √365 on every intraday chart; the chart's
+ * scaling is the honest annualisation).
+ */
+export function historicalVolatility(bars: Ohlc[], period = 20, barsPerYearCount = 6240): Maybe[] {
+  const returns: Maybe[] = bars.map((b, i) =>
+    i === 0 || bars[i - 1].close <= 0 ? null : Math.log(b.close / bars[i - 1].close),
+  );
+  const sd = stdevNa(returns, period);
+  const scale = Math.sqrt(barsPerYearCount);
+  return sd.map((v) => (v === null ? null : 100 * v * scale));
+}
+
+/** Population deviation of the last `period` values that are not na (`ta.stdev` with gaps). */
+function stdevNa(series: readonly Maybe[], period: number): Maybe[] {
+  const out: Maybe[] = nulls(series.length);
+  if (period < 1) return out;
+  const window: number[] = [];
+  for (let i = 0; i < series.length; i++) {
+    const x = series[i];
+    if (x !== null && x !== undefined && !Number.isNaN(x)) {
+      window.push(x);
+      if (window.length > period) window.shift();
+    }
+    if (window.length < period) continue;
+    let sum = 0;
+    for (const v of window) sum += v;
+    const mean = sum / period;
+    let sq = 0;
+    for (const v of window) sq += (v - mean) ** 2;
+    out[i] = Math.sqrt(Math.max(0, sq) / period);
   }
   return out;
+}
+
+/**
+ * Bars a year holds at `intervalMs` (Historical Volatility's annualisation): `tradingDaysPerYear` trading days
+ * (260 for a market that trades five days a week — FX; 365 for one that never closes) of 24-hour sessions below a
+ * day, that many daily bars, 52 weekly and 12 monthly. H1 FX: 260 × 24 = 6,240.
+ */
+export function barsPerYear(intervalMs: number, tradingDaysPerYear = 260): number {
+  const day = 86_400_000;
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) return tradingDaysPerYear * 24;
+  if (intervalMs >= 28 * day) return 12;
+  if (intervalMs >= 7 * day) return (52 * 7 * day) / intervalMs;
+  return (tradingDaysPerYear * day) / intervalMs;
+}
+
+/**
+ * The interval of `bars` in ms when the caller does not say: the median gap between consecutive bars, so a weekend
+ * or a holiday gap does not count.
+ */
+export function inferBarInterval(bars: readonly Ohlc[]): number {
+  const gaps: number[] = [];
+  for (let i = 1; i < bars.length && gaps.length < 500; i++) {
+    const g = bars[i].time - bars[i - 1].time;
+    if (g > 0) gaps.push(g);
+  }
+  if (!gaps.length) return 3_600_000;
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)];
 }
 
 /** Stochastic RSI — the stochastic oscillator applied to RSI. */
@@ -1098,30 +1370,32 @@ export function stochRsi(
   return { k, d };
 }
 
-/** Fisher Transform — maps price into a near-Gaussian distribution. */
+/**
+ * Fisher Transform, as TradingView's built-in: the bar's median (hl2) placed within the highest and lowest hl2 of
+ * `period` bars, smoothed (0.66 × (x − 0.5) + 0.67 × previous, pinned to ±0.999 beyond ±0.99 — and the pinned
+ * value is what the next bar smooths from), then 0.5·ln((1 + v) / (1 − v)) plus half the previous Fisher. The
+ * trigger is the previous bar's Fisher (na on the first). This used the bars' high/low range, a different
+ * normalisation (2x − 1), and clamped without feeding the clamp back.
+ */
 export function fisher(bars: Ohlc[], period = 9): { fisher: Maybe[]; trigger: Maybe[] } {
+  const hl2 = bars.map((b) => (b.high + b.low) / 2);
+  const hi = extremeNa(hl2, period, true);
+  const lo = extremeNa(hl2, period, false);
   const out: Maybe[] = nulls(bars.length);
-  let value = 0;
-  let prevFisher = 0;
   const trigger: Maybe[] = nulls(bars.length);
-
-  for (let i = period - 1; i < bars.length; i++) {
-    let hh = -Infinity;
-    let ll = Infinity;
-    for (let j = i - period + 1; j <= i; j++) {
-      hh = Math.max(hh, bars[j].high);
-      ll = Math.min(ll, bars[j].low);
-    }
-    const median = (bars[i].high + bars[i].low) / 2;
-    const span = hh - ll;
-    const raw = span === 0 ? 0 : 2 * ((median - ll) / span) - 1;
-    value = 0.66 * raw + 0.67 * value;
-    // The transform blows up at ±1, so the input is clamped just inside.
-    const clamped = Math.max(-0.999, Math.min(0.999, value));
-    const f = 0.5 * Math.log((1 + clamped) / (1 - clamped)) + 0.5 * prevFisher;
-    trigger[i] = prevFisher;
-    prevFisher = f;
-    out[i] = f;
+  const pin = (v: number): number => (gt(v, 0.99) ? 0.999 : lt(v, -0.99) ? -0.999 : v);
+  let value = NaN;
+  let fish = NaN;
+  for (let i = 0; i < bars.length; i++) {
+    const h = toNum(hi[i]);
+    const l = toNum(lo[i]);
+    const ratio = h === l ? NaN : (hl2[i] - l) / (h - l);
+    const prevFish = fish;
+    value = pin(0.66 * (ratio - 0.5) + 0.67 * (Number.isNaN(value) ? 0 : value));
+    fish =
+      0.5 * Math.log((1 + value) / (1 - value)) + 0.5 * (Number.isNaN(prevFish) ? 0 : prevFish);
+    out[i] = maybe(fish);
+    trigger[i] = maybe(prevFish);
   }
   return { fisher: out, trigger };
 }
@@ -1219,22 +1493,20 @@ export function coppock(closes: number[], roc1 = 14, roc2 = 11, wmaLen = 10): Ma
   return denseMap(summed, (d) => wma(d, wmaLen));
 }
 
-/** Relative Vigor Index — close-open over range, smoothed, with a signal. */
+/**
+ * Relative Vigor Index, as TradingView's built-in: the sum over `period` bars of the symmetrically weighted
+ * (1-2-2-1) close − open, over the same of high − low, with the SWMA of that as the signal. (This used unweighted
+ * averages and a 4-bar SMA signal.)
+ */
 export function rvi(bars: Ohlc[], period = 10): { rvi: Maybe[]; signal: Maybe[] } {
-  const numerator: number[] = [];
-  const denominator: number[] = [];
-  for (let i = 0; i < bars.length; i++) {
-    numerator.push(bars[i].close - bars[i].open);
-    denominator.push(bars[i].high - bars[i].low);
-  }
-  const num = sma(numerator, period);
-  const den = sma(denominator, period);
-  const line: Maybe[] = bars.map((_, i) =>
-    num[i] !== null && den[i] !== null && (den[i] as number) !== 0
-      ? (num[i] as number) / (den[i] as number)
-      : null,
-  );
-  return { rvi: line, signal: denseMap(line, (d) => sma(d, 4)) };
+  const numerator = sumNa(swma(bars.map((b) => b.close - b.open)), period);
+  const denominator = sumNa(swma(bars.map((b) => b.high - b.low)), period);
+  const line: Maybe[] = bars.map((_, i) => {
+    const n = numerator[i];
+    const d = denominator[i];
+    return n === null || d === null || d === 0 ? null : n / d;
+  });
+  return { rvi: line, signal: swma(line) };
 }
 
 /** Percentage Price Oscillator — MACD expressed as a percentage. */
@@ -1365,21 +1637,40 @@ export function schaff(closes: number[], fast = 23, slow = 50, cycle = 10): Mayb
   return clampSeries(stochOf(stochOf(macdLine)), 0, 100);
 }
 
-/** Williams Alligator — three displaced smoothed averages. */
-export function alligator(bars: Ohlc[]): { jaw: Maybe[]; teeth: Maybe[]; lips: Maybe[] } {
+export interface AlligatorResult {
+  jaw: Maybe[];
+  teeth: Maybe[];
+  lips: Maybe[];
+  /** Each line's values past the last bar (8, 5 and 3 of them): the forward shift is the indicator. */
+  jawAhead: Maybe[];
+  teethAhead: Maybe[];
+  lipsAhead: Maybe[];
+}
+
+/** Williams Alligator — three smoothed averages of hl2, shifted forward 8, 5 and 3 bars (TradingView's). */
+export function alligator(bars: Ohlc[]): AlligatorResult {
+  const n = bars.length;
   const median = bars.map((b) => (b.high + b.low) / 2);
-  const shift = (series: Maybe[], by: number): Maybe[] => {
-    const out: Maybe[] = nulls(series.length);
-    for (let i = 0; i < series.length; i++) {
+  const shift = (series: Maybe[], by: number): { on: Maybe[]; ahead: Maybe[] } => {
+    const on: Maybe[] = nulls(n);
+    const ahead: Maybe[] = nulls(by);
+    for (let i = 0; i < n; i++) {
       const target = i + by;
-      if (target < series.length) out[target] = series[i];
+      if (target < n) on[target] = series[i];
+      else ahead[target - n] = series[i];
     }
-    return out;
+    return { on, ahead };
   };
+  const jaw = shift(smma(median, 13), 8);
+  const teeth = shift(smma(median, 8), 5);
+  const lips = shift(smma(median, 5), 3);
   return {
-    jaw: shift(smma(median, 13), 8),
-    teeth: shift(smma(median, 8), 5),
-    lips: shift(smma(median, 5), 3),
+    jaw: jaw.on,
+    teeth: teeth.on,
+    lips: lips.on,
+    jawAhead: jaw.ahead,
+    teethAhead: teeth.ahead,
+    lipsAhead: lips.ahead,
   };
 }
 
@@ -1394,7 +1685,7 @@ export function percentB(closes: number[], period = 20, mult = 2): Maybe[] {
   });
 }
 
-/** Bollinger bandwidth — band span as a fraction of the basis. */
+/** Bollinger BandWidth (`ta.bbw`): the band span as a PERCENTAGE of the basis, as TradingView plots it. */
 export function bandwidth(closes: number[], period = 20, mult = 2): Maybe[] {
   const { upper, middle, lower } = bollinger(closes, period, mult);
   return closes.map((_, i) => {
@@ -1402,7 +1693,7 @@ export function bandwidth(closes: number[], period = 20, mult = 2): Maybe[] {
     const m = middle[i];
     const l = lower[i];
     if (u === null || m === null || l === null || m === 0) return null;
-    return (u - l) / m;
+    return ((u - l) / m) * 100;
   });
 }
 
@@ -1442,30 +1733,42 @@ export function connorsRsi(closes: number[], rsiLen = 3, streakLen = 2, rankLen 
   const n = closes.length;
   const priceRsi = rsi(closes, rsiLen);
 
-  // Signed run length: +3 means three consecutive up closes.
+  // Signed run length (TradingView's `updown`): +3 means three consecutive up closes. The first bar has no
+  // previous close, so Pine's tests (`s == s[1]`, `s > s[1]`) are both false and it starts at −1.
   const streaks: number[] = new Array<number>(n).fill(0);
-  for (let i = 1; i < n; i++) {
-    const d = closes[i] - closes[i - 1];
-    if (d > 0) streaks[i] = streaks[i - 1] > 0 ? streaks[i - 1] + 1 : 1;
-    else if (d < 0) streaks[i] = streaks[i - 1] < 0 ? streaks[i - 1] - 1 : -1;
-    else streaks[i] = 0;
+  for (let i = 0; i < n; i++) {
+    const prev = i > 0 ? streaks[i - 1] : 0;
+    const c = closes[i];
+    const p = i > 0 ? closes[i - 1] : NaN;
+    if (eq(c, p)) streaks[i] = 0;
+    else if (gt(c, p)) streaks[i] = prev <= 0 ? 1 : prev + 1;
+    else streaks[i] = prev >= 0 ? -1 : prev - 1;
   }
   const streakRsi = rsi(streaks, streakLen);
 
+  // ta.percentrank(ta.roc(close, 1), rankLen): the share of the previous `rankLen` one-bar returns at or below
+  // this one, needing all `rankLen + 1` of them (the first bar has none).
+  const roc1: Maybe[] = closes.map((c, i) =>
+    i === 0 || closes[i - 1] === 0 ? null : (100 * (c - closes[i - 1])) / closes[i - 1],
+  );
   const out: Maybe[] = nulls(n);
-  for (let i = 0; i < n; i++) {
+  for (let i = rankLen; i < n; i++) {
     const a = priceRsi[i];
     const b = streakRsi[i];
-    if (a === null || b === null || i < 1) continue;
-    const window = Math.min(rankLen, i);
-    if (window < 2) continue;
-    const today = (closes[i] - closes[i - 1]) / (closes[i - 1] || 1);
-    let below = 0;
-    for (let k = i - window + 1; k <= i - 1; k++) {
-      const prior = (closes[k] - closes[k - 1]) / (closes[k - 1] || 1);
-      if (prior < today) below++;
+    const today = roc1[i];
+    if (a === null || b === null || today === null) continue;
+    let atOrBelow = 0;
+    let complete = true;
+    for (let k = 1; k <= rankLen; k++) {
+      const prior = roc1[i - k];
+      if (prior === null) {
+        complete = false;
+        break;
+      }
+      if (le(prior, today)) atOrBelow++;
     }
-    const rank = (below / (window - 1)) * 100;
+    if (!complete) continue;
+    const rank = (100 * atOrBelow) / rankLen;
     out[i] = (a + b + rank) / 3;
   }
   return out;
@@ -1484,41 +1787,30 @@ export function chandeKrollStop(
   atrMult = 1,
   stopLength = 9,
 ): { long: Maybe[]; short: Maybe[] } {
+  // TradingView's Chande Kroll Stop: the first stops hang an ATR off the `atrLength` extremes; the stop LONG is the
+  // lowest of the first LOW stops over `stopLength` bars, the stop SHORT the highest of the first HIGH stops. This
+  // had the two names the other way round, and let a window start before it had `stopLength` values.
   const a = atr(bars, atrLength);
-  const n = bars.length;
-  const preHigh: Maybe[] = nulls(n);
-  const preLow: Maybe[] = nulls(n);
-  for (let i = 0; i < n; i++) {
-    const av = a[i];
-    if (av === null) continue;
-    let hi = -Infinity;
-    let lo = Infinity;
-    for (let k = Math.max(0, i - atrLength + 1); k <= i; k++) {
-      hi = Math.max(hi, bars[k].high);
-      lo = Math.min(lo, bars[k].low);
-    }
-    preHigh[i] = hi - atrMult * av;
-    preLow[i] = lo + atrMult * av;
-  }
-  const long: Maybe[] = nulls(n);
-  const short: Maybe[] = nulls(n);
-  for (let i = 0; i < n; i++) {
-    let hi = -Infinity;
-    let lo = Infinity;
-    let seen = 0;
-    for (let k = Math.max(0, i - stopLength + 1); k <= i; k++) {
-      const ph = preHigh[k];
-      const pl = preLow[k];
-      if (ph === null || pl === null) continue;
-      hi = Math.max(hi, ph);
-      lo = Math.min(lo, pl);
-      seen++;
-    }
-    if (seen === 0) continue;
-    long[i] = hi;
-    short[i] = lo;
-  }
-  return { long, short };
+  const highs = extremeNa(
+    bars.map((b) => b.high),
+    atrLength,
+    true,
+  );
+  const lows = extremeNa(
+    bars.map((b) => b.low),
+    atrLength,
+    false,
+  );
+  const firstHigh: Maybe[] = bars.map((_, i) =>
+    highs[i] === null || a[i] === null ? null : (highs[i] as number) - atrMult * (a[i] as number),
+  );
+  const firstLow: Maybe[] = bars.map((_, i) =>
+    lows[i] === null || a[i] === null ? null : (lows[i] as number) + atrMult * (a[i] as number),
+  );
+  return {
+    long: extremeNa(firstLow, stopLength, false),
+    short: extremeNa(firstHigh, stopLength, true),
+  };
 }
 
 /**
@@ -1529,25 +1821,31 @@ export function chandeKrollStop(
  * way a fixed-period EMA does through a gap.
  */
 export function mcginley(closes: number[], period = 14): Maybe[] {
+  // Seeded as TradingView's built-in is: with the EMA of the first `period` closes, on the bar it appears (it
+  // used to start from the first close, and took hundreds of bars to forget it).
+  const seed = ema(closes, period);
   const out: Maybe[] = nulls(closes.length);
-  if (closes.length === 0) return out;
-  let md = closes[0];
-  out[0] = md;
-  for (let i = 1; i < closes.length; i++) {
-    const ratio = md === 0 ? 1 : closes[i] / md;
-    // ratio**4 is the defining term. Guard a zero ratio so a bad tick cannot
-    // divide by zero and poison every later value.
-    const denom = period * Math.pow(ratio || 1, 4);
-    md = md + (closes[i] - md) / (denom || 1);
-    out[i] = md;
+  let md = NaN;
+  for (let i = 0; i < closes.length; i++) {
+    if (Number.isNaN(md)) {
+      md = toNum(seed[i]);
+    } else {
+      // ratio**4 is the defining term; a zero line would divide by zero, so it is held instead.
+      const denom = period * Math.pow(closes[i] / md, 4);
+      if (denom !== 0 && Number.isFinite(denom)) md = md + (closes[i] - md) / denom;
+    }
+    out[i] = maybe(md);
   }
   return out;
 }
 
-/** Rolling sample standard deviation. */
+/**
+ * Rolling standard deviation — `ta.stdev`: the POPULATION deviation (÷ n), as TradingView's built-in, Bollinger
+ * Bands and the engine use (DR-13; this divided by n − 1). Two passes around the window mean.
+ */
 export function stdev(values: number[], period = 20): Maybe[] {
   const out: Maybe[] = nulls(values.length);
-  if (period <= 1) return out;
+  if (period < 1) return out;
   for (let i = period - 1; i < values.length; i++) {
     let sum = 0;
     for (let k = i - period + 1; k <= i; k++) sum += values[k];
@@ -1556,7 +1854,7 @@ export function stdev(values: number[], period = 20): Maybe[] {
     for (let k = i - period + 1; k <= i; k++) sq += (values[k] - mean) ** 2;
     // Clamp: accumulated float error can leave sq at -1e-17 on a flat series,
     // and Math.sqrt of that is NaN, which blanks the pane.
-    out[i] = Math.sqrt(Math.max(0, sq) / (period - 1));
+    out[i] = Math.sqrt(Math.max(0, sq) / period);
   }
   return out;
 }
@@ -1574,61 +1872,63 @@ export function tsi(
   tsi: Maybe[];
   signal: Maybe[];
 } {
-  const n = closes.length;
-  const mom: number[] = new Array<number>(n).fill(0);
-  const absMom: number[] = new Array<number>(n).fill(0);
-  for (let i = 1; i < n; i++) {
-    mom[i] = closes[i] - closes[i - 1];
-    absMom[i] = Math.abs(mom[i]);
-  }
-  const smooth = (v: number[]) => denseMap(ema(v, long), (d) => ema(d, short));
-  const num = smooth(mom);
-  const den = smooth(absMom);
-  const out: Maybe[] = nulls(n);
-  for (let i = 0; i < n; i++) {
-    const a = num[i];
-    const b = den[i];
-    if (a === null || b === null || b === 0) continue;
-    out[i] = (a / b) * 100;
-  }
+  const ratio = tsiRatio(closes, long, short);
+  const out = ratio.map((v) => (v === null ? null : 100 * v));
   return { tsi: out, signal: denseMap(out, (d) => ema(d, signalLen)) };
 }
 
 /**
- * SMI Ergodic — the TSI line with its signal, under Blau's naming.
- *
- * Identical maths to `tsi` with different default lengths; kept as its own
- * entry because operators look for it by this name and expect these defaults.
+ * `ta.tsi(source, short, long)`: the double-smoothed one-bar change (EMA `long`, then EMA `short`) over the same of
+ * its absolute value — a ratio in [−1, 1]. The first bar has no change and is not averaged (it used to enter as 0).
  */
-export function smiErgodic(closes: number[], long = 20, short = 5, signalLen = 5) {
-  return tsi(closes, long, short, signalLen);
+function tsiRatio(closes: number[], long: number, short: number): Maybe[] {
+  const mom: Maybe[] = closes.map((c, i) => (i === 0 ? null : c - closes[i - 1]));
+  const smooth = (v: Maybe[]) => emaNa(emaNa(v, long), short);
+  const num = smooth(mom);
+  const den = smooth(mom.map((m) => (m === null ? null : Math.abs(m))));
+  return closes.map((_, i) => {
+    const a = num[i];
+    const b = den[i];
+    return a === null || b === null || b === 0 ? null : a / b;
+  });
+}
+
+/**
+ * SMI Ergodic — TradingView's SMI Ergodic Indicator: `ta.tsi(close, short, long)` — the TSI as a RATIO in
+ * [−1, 1], not a percentage — and its EMA signal, under Blau's naming and default lengths.
+ */
+export function smiErgodic(
+  closes: number[],
+  long = 20,
+  short = 5,
+  signalLen = 5,
+): { tsi: Maybe[]; signal: Maybe[] } {
+  const line = tsiRatio(closes, long, short);
+  return { tsi: line, signal: denseMap(line, (d) => ema(d, signalLen)) };
 }
 
 /**
  * Relative Volatility Index — RSI applied to standard deviation instead of
  * price, so it measures whether VOLATILITY is rising or falling.
  */
-export function relativeVolatilityIndex(closes: number[], period = 10, stdevLen = 10): Maybe[] {
+export function relativeVolatilityIndex(closes: number[], period = 14, stdevLen = 10): Maybe[] {
+  // TradingView's built-in: EMA (not Wilder) smoothing of the population σ on rising closes against falling ones.
+  // Pine's tests on the change make a bar's "up" input 0 when the close fell or held, else σ — and σ is na in the
+  // warm-up, while the 0s are not: the averages start from those, as on TradingView.
   const sd = stdev(closes, stdevLen);
-  const n = closes.length;
-  const up: number[] = new Array<number>(n).fill(0);
-  const down: number[] = new Array<number>(n).fill(0);
-  for (let i = 1; i < n; i++) {
-    const s = sd[i];
-    if (s === null) continue;
-    if (closes[i] > closes[i - 1]) up[i] = s;
-    else if (closes[i] < closes[i - 1]) down[i] = s;
-  }
-  const au = wilder(up, period);
-  const ad = wilder(down, period);
-  const out: Maybe[] = nulls(n);
-  for (let i = 0; i < n; i++) {
+  const up: Maybe[] = closes.map((c, i) =>
+    i > 0 && le(c - closes[i - 1], 0) ? 0 : (sd[i] ?? null),
+  );
+  const down: Maybe[] = closes.map((c, i) =>
+    i > 0 && gt(c - closes[i - 1], 0) ? 0 : (sd[i] ?? null),
+  );
+  const au = emaNa(up, period);
+  const ad = emaNa(down, period);
+  return closes.map((_, i) => {
     const u = au[i];
     const d = ad[i];
-    if (u === null || d === null) continue;
-    out[i] = u + d === 0 ? 50 : (u / (u + d)) * 100;
-  }
-  return out;
+    return u === null || d === null || u + d === 0 ? null : (u / (u + d)) * 100;
+  });
 }
 
 /**
@@ -1967,11 +2267,13 @@ export function klinger(
   slow = 55,
   signalLen = 13,
 ): { kvo: Maybe[]; signal: Maybe[] } {
+  // `ta.change(hlc3) >= 0 ? volume : -volume`: on the first bar the change is na, the test is false, and the
+  // volume counts as falling — as on TradingView (it used to enter as 0).
   const sv = bars.map((b, i) => {
-    if (i === 0) return 0;
+    if (i === 0) return -b.volume;
     const p = bars[i - 1];
     const ch = (b.high + b.low + b.close) / 3 - (p.high + p.low + p.close) / 3;
-    return ch >= 0 ? b.volume : -b.volume;
+    return ge(ch, 0) ? b.volume : -b.volume;
   });
   const f = ema(sv, fast);
   const s = ema(sv, slow);
@@ -2117,7 +2419,9 @@ function vwapCore(
     const v = b.volume > 0 ? b.volume : 1;
     sv += v;
     spv += p * v;
-    sp2v += p * p * v;
+    // `ta.vwap`'s operation order: the variance of a single bar is a difference of two equal sums, and only the
+    // same rounding makes it the same (zero, after the clamp) in both runtimes.
+    sp2v += v * p * p;
     const vw = spv / sv;
     const sd = Math.sqrt(Math.max(0, sp2v / sv - vw * vw));
     r.vwap[i] = vw;
@@ -2375,6 +2679,15 @@ export function autoTrendlines(
 }
 
 export type PivotType = 'Traditional' | 'Fibonacci' | 'Woodie' | 'Classic' | 'DM' | 'Camarilla';
+
+/** The chart's pivot types that `panels/pivots.ts` computes (TradingView-verified); Traditional is computed here. */
+const PIVOT_METHOD_OF: Partial<Record<PivotType, PivotMethod>> = {
+  Classic: 'classic',
+  Fibonacci: 'fibonacci',
+  Woodie: 'woodie',
+  DM: 'dm',
+  Camarilla: 'camarilla',
+};
 export const PIVOT_TYPES: readonly PivotType[] = [
   'Traditional',
   'Fibonacci',
@@ -2394,68 +2707,29 @@ export interface PivotLevels {
   s3: number | null;
 }
 
-/** Pivot levels for one prior period's OHLC. */
+/**
+ * Pivot levels from one prior period's OHLC. Classic, Fibonacci, Camarilla, Woodie and DM are the Technicals
+ * page's TradingView-verified formulas (`panels/pivots.ts`, DR-14): Woodie's pivot is (H + L + 2·open) / 4 with the
+ * CURRENT period's open (`currentOpen`), not the previous close; it falls back to the close only when the current
+ * period has not opened. Traditional is TradingView's Pivot Points Standard default.
+ */
 export function pivotLevels(
   type: PivotType,
   o: number,
   h: number,
   l: number,
   c: number,
+  currentOpen: number | null = null,
 ): PivotLevels {
   const range = h - l;
+  const method = PIVOT_METHOD_OF[type];
+  if (method) {
+    const lv = verifiedPivotLevels({ start: 0, open: o, high: h, low: l, close: c }, currentOpen)[
+      method
+    ];
+    return { p: lv.P!, r1: lv.R1!, s1: lv.S1!, r2: lv.R2, s2: lv.S2, r3: lv.R3, s3: lv.S3 };
+  }
   switch (type) {
-    case 'Fibonacci': {
-      const p = (h + l + c) / 3;
-      return {
-        p,
-        r1: p + 0.382 * range,
-        s1: p - 0.382 * range,
-        r2: p + 0.618 * range,
-        s2: p - 0.618 * range,
-        r3: p + range,
-        s3: p - range,
-      };
-    }
-    case 'Woodie': {
-      const p = (h + l + 2 * c) / 4;
-      return {
-        p,
-        r1: 2 * p - l,
-        s1: 2 * p - h,
-        r2: p + range,
-        s2: p - range,
-        r3: h + 2 * (p - l),
-        s3: l - 2 * (h - p),
-      };
-    }
-    case 'Classic': {
-      const p = (h + l + c) / 3;
-      return {
-        p,
-        r1: 2 * p - l,
-        s1: 2 * p - h,
-        r2: p + range,
-        s2: p - range,
-        r3: p + 2 * range,
-        s3: p - 2 * range,
-      };
-    }
-    case 'DM': {
-      const x = c < o ? h + 2 * l + c : c > o ? 2 * h + l + c : h + l + 2 * c;
-      return { p: x / 4, r1: x / 2 - l, s1: x / 2 - h, r2: null, s2: null, r3: null, s3: null };
-    }
-    case 'Camarilla': {
-      const p = (h + l + c) / 3;
-      return {
-        p,
-        r1: c + (range * 1.1) / 12,
-        s1: c - (range * 1.1) / 12,
-        r2: c + (range * 1.1) / 6,
-        s2: c - (range * 1.1) / 6,
-        r3: c + (range * 1.1) / 4,
-        s3: c - (range * 1.1) / 4,
-      };
-    }
     default: {
       const p = (h + l + c) / 3;
       return {
@@ -2495,7 +2769,8 @@ export function pivotPointsStandard(
     const b = bars[i];
     const k = periodKey(b.time, period, dayOf);
     if (k !== key) {
-      if (cur) lv = pivotLevels(type, cur.o, cur.h, cur.l, cur.c);
+      // The period that just ended sets this one's levels; Woodie also reads this period's open.
+      if (cur) lv = pivotLevels(type, cur.o, cur.h, cur.l, cur.c, b.open);
       cur = { o: b.open, h: b.high, l: b.low, c: b.close };
       key = k;
       continue; // the break bar stays null
@@ -2583,16 +2858,16 @@ export function sessionHighLow(
   return { high, low };
 }
 
-/** Rolling Pearson correlation of two aligned series. */
+/**
+ * Rolling Pearson correlation of two aligned series (`ta.correlation`), in two passes around the window means: the
+ * one-pass sums lose the digits that matter when prices sit far from zero (EURUSD near 1.16 moving 1e-4).
+ */
 export function correlation(a: Maybe[], b: Maybe[], period = 20): Maybe[] {
   const n = a.length;
   const out: Maybe[] = nulls(n);
   for (let i = period - 1; i < n; i++) {
     let sa = 0;
     let sb = 0;
-    let saa = 0;
-    let sbb = 0;
-    let sab = 0;
     let ok = true;
     for (let j = i - period + 1; j <= i; j++) {
       const x = a[j];
@@ -2603,16 +2878,22 @@ export function correlation(a: Maybe[], b: Maybe[], period = 20): Maybe[] {
       }
       sa += x;
       sb += y;
-      saa += x * x;
-      sbb += y * y;
-      sab += x * y;
     }
     if (!ok) continue;
-    const cov = sab - (sa * sb) / period;
-    const va = saa - (sa * sa) / period;
-    const vb = sbb - (sb * sb) / period;
-    if (va <= 0 || vb <= 0) continue;
-    out[i] = Math.max(-1, Math.min(1, cov / Math.sqrt(va * vb)));
+    const ma = sa / period;
+    const mb = sb / period;
+    let sab = 0;
+    let saa = 0;
+    let sbb = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      const da = (a[j] as number) - ma;
+      const db = (b[j] as number) - mb;
+      sab += da * db;
+      saa += da * da;
+      sbb += db * db;
+    }
+    if (saa <= 0 || sbb <= 0) continue;
+    out[i] = Math.max(-1, Math.min(1, sab / Math.sqrt(saa * sbb)));
   }
   return out;
 }

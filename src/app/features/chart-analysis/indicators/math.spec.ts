@@ -289,7 +289,8 @@ describe('obv', () => {
         [11, 11, 11, 9, 20],
       ]),
     );
-    expect(out).toEqual([0, 30, 10]);
+    // The first bar has no change: na, as ta.obv and TradingView have it.
+    expect(out).toEqual([null, 30, 10]);
   });
 
   it('leaves the line unchanged on an unchanged close', () => {
@@ -450,6 +451,36 @@ describe('keltner', () => {
   });
 });
 
+describe('psar (DR-09: ta.sar)', () => {
+  it('has no value on bar 0: the trend is seeded on bar 1 from the first two closes', () => {
+    const r = psar(
+      bars([
+        [10, 11, 9, 10],
+        [10, 12, 9.5, 11.5],
+        [11.5, 13, 11, 12.5],
+      ]),
+    );
+    expect(r[0]).toBeNull();
+    // Rising close: SAR starts at bar 0's low and advances toward bar 1's high, then is held under bar 0's low.
+    expect(r[1]).toBeCloseTo(9, 10);
+  });
+
+  it('tests the reversal BEFORE clamping to the prior lows, and reverses to the extreme of the old trend', () => {
+    // An up trend, then a bar whose low pierces the advanced SAR: on the reversal bar the SAR goes to the higher of
+    // that bar's high and the trend's extreme (12.5), as ta.sar does. Clamping first put it at the old extreme (12.4).
+    const series = bars([
+      [10, 10.5, 9.5, 10],
+      [10, 11, 9.8, 10.8],
+      [10.8, 11.6, 10.6, 11.5],
+      [11.5, 12.4, 11.4, 12.3],
+      [12.3, 12.5, 9.0, 9.2],
+    ]);
+    const r = psar(series);
+    expect(r.slice(1, 4)).toEqual([9.5, 9.5, expect.closeTo(9.584, 10)]);
+    expect(r[4]).toBeCloseTo(12.5, 10);
+  });
+});
+
 describe('psar', () => {
   it('stays below price in an uptrend', () => {
     const up = bars(
@@ -487,17 +518,30 @@ describe('ichimoku', () => {
     ),
   );
 
-  it('shifts the spans FORWARD by the displacement', () => {
-    // The forward shift is the indicator, not a presentation detail: span A at
-    // bar i must equal the raw value computed at bar i-26.
+  it('shifts the spans FORWARD by displacement − 1, as TradingView plots them (DR-11)', () => {
+    // The forward shift is the indicator, not a presentation detail. TradingView's built-in plots the leading
+    // spans with offset = displacement − 1: span A at bar i is the raw value of bar i − 25 (it was i − 26).
     const r = ichimoku(series, 9, 26, 52, 26);
-    const raw = ichimoku(series, 9, 26, 52, 0);
-    expect(r.spanA[80]).toBeCloseTo(raw.spanA[54] as number, 8);
+    const raw = ichimoku(series, 9, 26, 52, 1); // displacement 1 = no shift
+    expect(r.spanA[80]).toBeCloseTo(raw.spanA[55] as number, 8);
+    expect(r.spanB[80]).toBeCloseTo(raw.spanB[55] as number, 8);
   });
 
-  it('shifts the lagging span BACKWARD by the displacement', () => {
+  it('shifts the lagging span BACKWARD by displacement − 1 (DR-11)', () => {
     const r = ichimoku(series, 9, 26, 52, 26);
-    expect(r.lagging[50]).toBeCloseTo(series[76].close, 8);
+    expect(r.lagging[50]).toBeCloseTo(series[75].close, 8);
+    expect(r.lagging[series.length - 25]).toBeNull();
+  });
+
+  it('keeps the cloud past the last bar instead of dropping it (DR-11)', () => {
+    const r = ichimoku(series, 9, 26, 52, 26);
+    const raw = ichimoku(series, 9, 26, 52, 1);
+    expect(r.spanAAhead).toHaveLength(25);
+    // Bar n + k carries the value of bar n − 25 + k.
+    for (let k = 0; k < 25; k++) {
+      expect(r.spanAAhead[k]).toBeCloseTo(raw.spanA[series.length - 25 + k] as number, 8);
+      expect(r.spanBAhead[k]).toBeCloseTo(raw.spanB[series.length - 25 + k] as number, 8);
+    }
   });
 
   it('keeps every plot aligned to the bar count', () => {
@@ -516,7 +560,52 @@ describe('superTrend', () => {
         (_, i) => [100 + i, 101 + i, 99 + i, 100.7 + i] as [number, number, number, number],
       ),
     );
-    expect(superTrend(up, 10, 3)[59] as number).toBeLessThan(up[59].close);
+    expect(superTrend(up, 10, 3).up[59] as number).toBeLessThan(up[59].close);
+  });
+
+  // DR-08: ta.supertrend semantics.
+  const zigzagSeries = bars(
+    Array.from({ length: 120 }, (_, i) => {
+      const c = 100 + 8 * Math.sin(i / 9);
+      return [c - 0.2, c + 0.6, c - 0.6, c] as [number, number, number, number];
+    }),
+  );
+
+  it('starts in a downtrend on the first bar with an ATR, as Pine does (DR-08)', () => {
+    const r = superTrend(zigzagSeries, 10, 3);
+    const first = r.line.findIndex((v) => v !== null);
+    expect(first).toBe(9);
+    expect(r.direction[first]).toBe(1);
+    expect(r.down[first]).toBe(r.line[first]);
+    expect(r.up[first]).toBeNull();
+  });
+
+  it('draws the up and down trends as separate series that never overlap (DR-08)', () => {
+    const r = superTrend(zigzagSeries, 10, 3);
+    let flips = 0;
+    for (let i = 0; i < zigzagSeries.length; i++) {
+      expect(r.up[i] !== null && r.down[i] !== null).toBe(false);
+      if (
+        i > 0 &&
+        r.direction[i] !== null &&
+        r.direction[i - 1] !== null &&
+        r.direction[i] !== r.direction[i - 1]
+      )
+        flips++;
+    }
+    expect(flips).toBeGreaterThan(1);
+  });
+
+  it('ratchets: the up line never falls while the trend holds (DR-08)', () => {
+    const r = superTrend(zigzagSeries, 10, 3);
+    for (let i = 1; i < zigzagSeries.length; i++) {
+      if (r.up[i] !== null && r.up[i - 1] !== null) {
+        expect(r.up[i] as number).toBeGreaterThanOrEqual(r.up[i - 1] as number);
+      }
+      if (r.down[i] !== null && r.down[i - 1] !== null) {
+        expect(r.down[i] as number).toBeLessThanOrEqual(r.down[i - 1] as number);
+      }
+    }
   });
 });
 
@@ -1274,5 +1363,179 @@ describe('day-based studies on FX trading days', () => {
     // Every bar closes at its high: delta = +volume.
     const b = hourly('2026-10-06T20:00:00Z', [1, 1, 1]).map((x) => ({ ...x, high: 2, close: 2 }));
     expect(M5.cumulativeDeltaByPeriod(b, 'Day', FX.dayOf)).toEqual([100, 100, 200]);
+  });
+});
+
+// ── DR-08..DR-15 and the parity fixes the engine reference (DR-I1) exposed ─────────────────────────
+// `reference-parity.spec.ts` pins every value; these name the defects so a regression reads as one.
+describe('maths fixes against the engine reference', () => {
+  const wave = bars(
+    Array.from({ length: 160 }, (_, i) => {
+      const c = 1.1 + 0.01 * Math.sin(i / 7) + 0.004 * Math.cos(i / 3);
+      return [c - 0.0005, c + 0.0012, c - 0.0013, c, 1000 + (i % 7) * 150] as [
+        number,
+        number,
+        number,
+        number,
+        number,
+      ];
+    }),
+  );
+  const cl = wave.map((b) => b.close);
+
+  it('HMA truncates n/2 and √n (DR-10): HMA(9) = WMA3(2·WMA4 − WMA9)', () => {
+    const w4 = wma(cl, 4);
+    const w9 = wma(cl, 9);
+    const diff = cl.map((_, i) =>
+      w4[i] === null || w9[i] === null ? null : 2 * (w4[i] as number) - (w9[i] as number),
+    );
+    const first = diff.findIndex((v) => v !== null);
+    const smoothed = wma(diff.slice(first) as number[], 3);
+    const h = hma(cl, 9);
+    for (let i = first + 2; i < cl.length; i++)
+      expect(h[i]).toBeCloseTo(smoothed[i - first] as number, 12);
+  });
+
+  it('annualises HV by the bars a year holds at the interval (DR-12)', () => {
+    expect(M5.barsPerYear(3_600_000)).toBe(6240);
+    expect(M5.barsPerYear(86_400_000)).toBe(260);
+    expect(M5.barsPerYear(300_000)).toBe(74_880);
+    expect(M5.barsPerYear(7 * 86_400_000)).toBe(52);
+    expect(M5.barsPerYear(30 * 86_400_000)).toBe(12);
+    expect(M5.barsPerYear(86_400_000, 365)).toBe(365);
+    // D1 bars: √260 per bar, not √6240 — the old fixed constant read √24 ≈ 4.9× too high.
+    const d1 = historicalVolatility(wave, 20, M5.barsPerYear(86_400_000));
+    const h1 = historicalVolatility(wave, 20, 6240);
+    expect((h1[60] as number) / (d1[60] as number)).toBeCloseTo(Math.sqrt(24), 10);
+  });
+
+  it('HV uses the population deviation of log returns (DR-12)', () => {
+    const r = cl.map((c, i) => (i === 0 ? 0 : Math.log(c / cl[i - 1])));
+    const w = r.slice(41, 61);
+    const mean = w.reduce((a, b) => a + b, 0) / 20;
+    const sd = Math.sqrt(w.reduce((a, b) => a + (b - mean) ** 2, 0) / 20);
+    expect(historicalVolatility(wave, 20, 6240)[60]).toBeCloseTo(100 * sd * Math.sqrt(6240), 10);
+  });
+
+  it('Standard Deviation is the population σ, like Bollinger and ta.stdev (DR-13)', () => {
+    expect(M5.stdev([1, 2, 3, 4], 4)[3]).toBeCloseTo(Math.sqrt(1.25), 12);
+    expect(M5.stdev([5], 1)[0]).toBe(0);
+  });
+
+  it("Woodie pivots use the CURRENT period's open (DR-14)", () => {
+    const d1 = Date.parse('2026-09-17T00:00:00Z');
+    const d2 = Date.parse('2026-09-18T00:00:00Z');
+    const series: Ohlc[] = [
+      { time: d1, open: 10, high: 12, low: 8, close: 11, volume: 1 },
+      { time: d1 + 3_600_000, open: 11, high: 13, low: 9, close: 10, volume: 1 },
+      { time: d2, open: 10.4, high: 10.5, low: 9.5, close: 10, volume: 1 },
+      { time: d2 + 3_600_000, open: 10, high: 10.2, low: 9.8, close: 10, volume: 1 },
+    ];
+    const r = M5.pivotPointsStandard(series, 'Woodie', 'Day');
+    // Day 1: H 13, L 8; day 2 opens at 10.4 → P = (13 + 8 + 2·10.4) / 4 (the close-based one read 10.25).
+    expect(r.p[3]).toBeCloseTo((13 + 8 + 2 * 10.4) / 4, 12);
+    expect(r.r1[3]).toBeCloseTo(2 * ((13 + 8 + 2 * 10.4) / 4) - 8, 12);
+    // The other methods are unchanged by it.
+    expect(M5.pivotPointsStandard(series, 'Classic', 'Day').p[3]).toBeCloseTo(31 / 3, 12);
+  });
+
+  it('TRIX is 10000 × the change of the triple EMA of ln(close), as TradingView', () => {
+    const tripleOf = (xs: number[]) => {
+      const e1 = ema(xs, 18) as number[];
+      const e2 = ema(e1.slice(17), 18) as number[];
+      return ema(e2.slice(17), 18) as number[]; // index k ↔ bar k + 34
+    };
+    const e3 = tripleOf(cl.map(Math.log));
+    const t = trix(cl, 18);
+    expect(t.findIndex((v) => v !== null)).toBe(3 * 17 + 1);
+    for (let i = 60; i < 70; i++) expect(t[i]).toBeCloseTo(10000 * (e3[i - 34] - e3[i - 35]), 12);
+    // The old reading (percent change of the triple EMA of the price) is ~100× smaller.
+    const p3 = tripleOf(cl);
+    expect(Math.abs(t[65] as number)).toBeGreaterThan(
+      50 * Math.abs(((p3[31] - p3[30]) / p3[30]) * 100),
+    );
+  });
+
+  it('DPO reads the average from the past, never ahead of the bar', () => {
+    const avg = sma(cl, 21);
+    const d = dpo(cl, 21);
+    for (let i = 31; i < cl.length; i++)
+      expect(d[i]).toBeCloseTo(cl[i] - (avg[i - 11] as number), 12);
+    expect(d[30]).toBeNull();
+    // Changing a future bar must not change a past value (it read the SMA ten bars ahead).
+    const shifted = [...cl];
+    shifted[cl.length - 1] += 0.05;
+    expect(dpo(shifted, 21)[cl.length - 5]).toBeCloseTo(d[cl.length - 5] as number, 12);
+  });
+
+  it("Fisher's trigger is na on the first bar and the previous Fisher after", () => {
+    const f = fisher(wave, 9);
+    expect(f.fisher[8]).not.toBeNull();
+    expect(f.trigger[8]).toBeNull();
+    expect(f.trigger[9]).toBe(f.fisher[8]);
+  });
+
+  it("RVI's signal is the 1-2-2-1 weighted average of the RVI", () => {
+    const r = rvi(wave, 10);
+    const v = r.rvi as number[];
+    const i = 40;
+    expect(r.signal[i]).toBeCloseTo((v[i - 3] + 2 * v[i - 2] + 2 * v[i - 1] + v[i]) / 6, 12);
+  });
+
+  it('McGinley starts from the EMA of the first `length` closes, on the bar it appears', () => {
+    const md = M5.mcginley(cl, 14);
+    expect(md[12]).toBeNull();
+    expect(md[13]).toBeCloseTo(ema(cl, 14)[13] as number, 12);
+  });
+
+  it('Chande Kroll: the long stop is the lowest of the low stops, the short the highest of the high stops', () => {
+    const r = M5.chandeKrollStop(wave, 10, 1, 9);
+    const i = r.long.findIndex((v) => v !== null);
+    expect(i).toBe(17);
+    // On a calm wave the long stop sits above the short one (low + ATR vs high − ATR).
+    expect(r.long[80] as number).toBeGreaterThan(wave[80].low);
+  });
+
+  it('SMI Ergodic is a ratio in [−1, 1] (ta.tsi), TSI a percentage', () => {
+    const e = M5.smiErgodic(cl).tsi.filter((v): v is number => v !== null);
+    expect(Math.max(...e.map(Math.abs))).toBeLessThanOrEqual(1);
+    const t = M5.tsi(cl).tsi;
+    const i = t.findIndex((v) => v !== null);
+    expect(i).toBe(25 + 12); // the first bar (no change) is not averaged
+  });
+
+  it('Ease of Movement uses TradingView’s divisor of 10000 and skips bars without volume', () => {
+    const e = M5.easeOfMovement(wave, 14);
+    const raw = (i: number) =>
+      (10000 *
+        ((wave[i].high + wave[i].low) / 2 - (wave[i - 1].high + wave[i - 1].low) / 2) *
+        (wave[i].high - wave[i].low)) /
+      wave[i].volume;
+    let s = 0;
+    for (let i = 1; i <= 14; i++) s += raw(i);
+    expect(e[14]).toBeCloseTo(s / 14, 12);
+    expect(e[13]).toBeNull();
+    const gap = wave.map((b, i) => (i === 30 ? { ...b, volume: 0 } : b));
+    expect(M5.easeOfMovement(gap, 14)[30]).toBe(M5.easeOfMovement(gap, 14)[29]); // held, not a 0 averaged in
+  });
+
+  it('Force Index does not average a 0 for the first bar', () => {
+    const f = forceIndex(wave, 13);
+    expect(f[12]).toBeNull();
+    expect(f[13]).not.toBeNull();
+  });
+
+  it('Bandwidth is a percentage of the basis (ta.bbw)', () => {
+    const b = bollinger(cl, 20, 2);
+    expect(bandwidth(cl, 20, 2)[40]).toBeCloseTo(
+      (((b.upper[40] as number) - (b.lower[40] as number)) / (b.middle[40] as number)) * 100,
+      12,
+    );
+  });
+
+  it('OBV and PVT are na on the first bar', () => {
+    expect(obv(wave)[0]).toBeNull();
+    expect(pvt(wave)[0]).toBeNull();
+    expect(pvt(wave)[1]).not.toBeNull();
   });
 });

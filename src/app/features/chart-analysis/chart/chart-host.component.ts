@@ -56,12 +56,14 @@ import { ThemeService } from '@core/theme/theme.service';
 import type { Bar } from '../datafeed/candle-feed.service';
 import { TradingCalendar, tradingMsBetween, type SessionSpec } from '../datafeed/session-calendar';
 import {
+  aheadKey,
   indicatorById,
   indicatorLabel,
   type IndicatorDef,
   type PlotSpec,
 } from '../indicators/registry';
 import type { DayOf, Maybe, Ohlc } from '../indicators/math';
+import { aheadTimes } from '../indicators/ahead-times';
 import { HiLoSeries, HlcAreaSeries, VolCandleSeries } from './custom-series';
 import {
   boxUnit,
@@ -2510,12 +2512,42 @@ export class ChartHostComponent implements OnDestroy {
         const values = computed[s.key] ?? [];
         const from = Math.min(timesFrom, firstChangedValue(s.values, values));
         s.values = values;
-        s.sync.apply(valueRowsFrom(this.plotted, values, s.gaps, from, s.sync.rows()));
+        const rows = valueRowsFrom(this.plotted, values, s.gaps, from, s.sync.rows());
+        // Values past the last bar (the cloud ahead, the shifted Alligator) on the bars still to come.
+        const ahead = computed[aheadKey(s.key)];
+        s.sync.apply(ahead?.length ? rows.concat(this.aheadRows(ahead, s.gaps)) : rows);
         if (s.markers) this.writePlotMarkers(s, values);
       }
     }
 
     this.emitLegend();
+  }
+
+  /**
+   * Rows for a study's values past the last bar, at the open times of the bars still to come on the symbol's
+   * trading time ({@link aheadTimes} — what `logicalAtMs` counts upcoming events by), shifted into the display
+   * zone like the bars.
+   */
+  private aheadRows(values: readonly Maybe[], gaps: GapPolicy): ValueRow[] {
+    const last = this.plottedUtc[this.plottedUtc.length - 1];
+    const lastPlotted = this.plotted[this.plotted.length - 1];
+    const step = resolutionMs(this.resolution());
+    if (!last || !lastPlotted || !step) return [];
+    const calendar =
+      this.resolution() === '1W' || this.resolution() === '1M' ? null : this.calendar();
+    const times = aheadTimes(last, step, values.length, calendar);
+    const rows: ValueRow[] = [];
+    let prev = asTime(lastPlotted.time) as number;
+    times.forEach((utc, k) => {
+      let time = asTime(utc + this.timezoneShiftMs(utc)) as number;
+      if (time <= prev) time = prev + 1; // strictly after the row before, as the library requires
+      prev = time;
+      const v = values[k];
+      if (v === null || v === undefined || !Number.isFinite(v)) {
+        if (gaps === 'break') rows.push({ time: time as Time });
+      } else rows.push({ time: time as Time, value: v });
+    });
+    return rows;
   }
 
   /** A `markers` plot's shapes: one per bar with a value, at that value. */
@@ -2572,9 +2604,32 @@ export class ChartHostComponent implements OnDestroy {
       // Same zone shift as the plotted bars, or alignByTime would pair the wrong bars.
       ...(compare ? { compareBars: this.shiftForTimezone(compare, this.timezone()) } : {}),
       tradingDay: this.plottedDayOf(),
+      // What reads the clock itself (the sessions) needs the bars' real instants, not the display zone's.
+      utcTimes: this.studyUtcTimes(),
+      barIntervalMs: resolutionMs(this.resolution()) ?? undefined,
+      tradingDaysPerYear: this.tradingDaysPerYear(),
     });
     this.computedCache.set(cacheKey, computed);
     return computed;
+  }
+
+  /** {@link plottedUtc}'s times, made once per change of the bars (the studies' cache key). */
+  private studyUtcCache: { version: number; times: number[] } | null = null;
+  private studyUtcTimes(): number[] {
+    if (this.studyUtcCache?.version !== this.dataVersion) {
+      this.studyUtcCache = { version: this.dataVersion, times: this.plottedUtc.map((b) => b.time) };
+    }
+    return this.studyUtcCache.times;
+  }
+
+  /** The symbol's trading days a year (Historical Volatility): 5 a week → 260, every day → 365. */
+  private tradingDaysPerYear(): number {
+    const calendar = this.calendar();
+    if (!calendar) return 365;
+    const monday = Date.UTC(2026, 0, 5);
+    let days = 0;
+    for (let d = 0; d < 7; d++) if (calendar.isTradingDay(monday + d * 86_400_000)) days++;
+    return days >= 7 ? 365 : days * 52;
   }
 
   /** External panes' lines by pane uid: made once, kept across ticks (CC-02). */
@@ -2944,6 +2999,8 @@ export class ChartHostComponent implements OnDestroy {
 
     const series = def.plots.map((plot): IndicatorPlotSeries => {
       const markers = plot.kind === 'markers';
+      // A dot per value, never a line (Parabolic SAR — a joined line drew a vertical stroke at each flip).
+      const points = plot.kind === 'points';
       const api =
         plot.kind === 'histogram'
           ? chart.addSeries(
@@ -2961,6 +3018,9 @@ export class ChartHostComponent implements OnDestroy {
                 // A markers plot draws only its shapes: the series carries the values (for the
                 // legend and the autoscale) with no line of its own (DR-17).
                 ...(markers ? { lineVisible: false, crosshairMarkerVisible: false } : {}),
+                ...(points
+                  ? { lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 2 }
+                  : {}),
                 ...overlayFormat,
                 // On the price's own scale, whichever side it sits on.
                 ...(overlay ? { priceScaleId: this.scaleSide() } : {}),
@@ -2972,7 +3032,7 @@ export class ChartHostComponent implements OnDestroy {
         api: api as ISeriesApi<'Line' | 'Histogram'>,
         color: plot.color,
         title: plot.title,
-        gaps: markers ? 'break' : (plot.gaps ?? 'join'),
+        gaps: markers || points ? 'break' : (plot.gaps ?? 'join'),
         markers:
           markers && plot.marker
             ? {
