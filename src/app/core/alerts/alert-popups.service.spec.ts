@@ -118,6 +118,40 @@ describe('AlertPopupsService', () => {
     ]);
   });
 
+  it('shows a saved screen’s alert only once the engine confirms the screen is this operator’s (SS-I6)', () => {
+    realtime.emit(
+      'alertFired',
+      fired({
+        source: 'screen',
+        alertId: 5,
+        fireId: 901,
+        price: null,
+        title: 'EURUSD entered RSI hot',
+        message: 'EURUSD now matches RSI hot on 60',
+      }),
+    );
+    expect(service.popups()).toEqual([]);
+    expect(api.calls.map((c) => [c.path, c.opts])).toEqual([
+      ['/scripting/screens/5', { silent: true }],
+    ]);
+    api.answer(0, { data: { id: 5 }, status: true, message: 'ok', responseCode: '00' });
+    expect(service.popups()[0].payload.title).toBe('EURUSD entered RSI hot');
+    expect(service.popups()[0].link).toEqual({
+      route: ['/pine-screener'],
+      params: { screen: '5' },
+    });
+
+    // Another operator's screen: the owner-scoped read answers -14 and nothing pops up.
+    realtime.emit('alertFired', fired({ source: 'screen', alertId: 6, title: 'Not mine' }));
+    api.answer(1, {
+      data: null,
+      status: false,
+      message: 'Screen 6 not found.',
+      responseCode: '-14',
+    });
+    expect(service.popups().map((p) => p.payload.title)).toEqual(['EURUSD entered RSI hot']);
+  });
+
   it('ignores malformed pushes', () => {
     realtime.emit('alertFired', null);
     realtime.emit('alertFired', { source: 'script' });

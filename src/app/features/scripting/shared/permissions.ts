@@ -6,3 +6,9 @@
  * anyone without it instead of offering them and failing with 403.
  */
 export const OPERATOR_PERMISSION = 'access.operator';
+
+/**
+ * The engine permission that queues backtests (`POST backtest`, engine `PermissionCatalog.AccessAnalyst`) —
+ * and so a parity reconcile (`POST strategy/{id}/parity/reconcile`, BT-I3 / PE-I2), which is one.
+ */
+export const ANALYST_PERMISSION = 'access.analyst';

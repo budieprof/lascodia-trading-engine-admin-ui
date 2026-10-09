@@ -6,12 +6,13 @@ import type { AlertChannel, AlertSeverity } from '@core/api/api.types';
 
 /**
  * SignalR `alertFired` (contract C2): an alert delivered in-app — a chart alert (`price`/`drawing`), a script alert
- * binding (`script`) or a channel test (`test`). A broadcast with no operator identity: a chart alert is shown only after
- * `GET chart-alert/{alertId}` confirms it is this operator's.
+ * binding (`script`), a saved screen's enter/leave alert (`screen`, scripting API §6a) or a channel test (`test`). A
+ * broadcast with no operator identity: a chart alert is shown only after `GET chart-alert/{alertId}` confirms it is this
+ * operator's, and a screen alert only after `GET scripting/screens/{alertId}` does.
  */
 export interface AlertFiredPayload {
-  source: 'price' | 'drawing' | 'script' | 'test';
-  /** The chart alert, or (script) the alert binding. */
+  source: 'price' | 'drawing' | 'script' | 'screen' | 'test';
+  /** The chart alert, (script) the alert binding, or (screen) the saved screen. */
   alertId: number;
   /** Script alerts: the binding (its subscription). */
   subscriptionId: number | null;
@@ -22,7 +23,7 @@ export interface AlertFiredPayload {
   price: number | null;
   firedAtUtc: string;
   severity: AlertSeverity;
-  /** Chart alerts: the fire record. */
+  /** Chart alerts: the fire record; screen alerts: the screen alert row. */
   fireId?: number | null;
   /** Script alerts: the strategy. */
   strategyId?: number | null;

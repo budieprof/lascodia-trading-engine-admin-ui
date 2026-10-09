@@ -123,6 +123,8 @@ export class AlertPopupsComponent {
     switch (p.payload.source) {
       case 'script':
         return 'Script alert';
+      case 'screen':
+        return 'Screen alert';
       case 'test':
         return 'Test alert';
       case 'drawing':

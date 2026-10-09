@@ -25,8 +25,9 @@ const BROWSER_KEY = 'lascodia.alerts.browserNotifications';
 /**
  * In-app alert delivery on the page (contract C2): every `alertFired` push becomes a pop-up, with an optional sound and
  * an opt-in browser notification — both remembered per browser. The push is a broadcast with no operator identity, so a
- * chart alert is shown only after `GET chart-alert/{id}` (owner-scoped) confirms it is this operator's; script alerts
- * and channel tests are everyone's.
+ * chart alert is shown only after `GET chart-alert/{id}` (owner-scoped) confirms it is this operator's, and a saved
+ * screen's alert only after `GET scripting/screens/{id}` (owner-scoped) does; script alerts and channel tests are
+ * everyone's.
  */
 @Injectable({ providedIn: 'root' })
 export class AlertPopupsService {
@@ -51,18 +52,17 @@ export class AlertPopupsService {
     this.realtime.on<AlertFiredPayload>('alertFired').subscribe((p) => this.receive(p));
   }
 
-  /** Handles one push: chart alerts only when they are this operator's. */
+  /** Handles one push: chart and screen alerts only when they are this operator's. */
   receive(payload: AlertFiredPayload | null | undefined): void {
     if (!payload || typeof payload.title !== 'string') return;
-    if (payload.source === 'price' || payload.source === 'drawing') {
-      this.api
-        .get<ResponseData<unknown>>(`/chart-alert/${payload.alertId}`, { silent: true })
-        .subscribe({
-          next: (res) => {
-            if (res?.status) this.show(payload);
-          },
-          error: () => undefined,
-        });
+    const ownerCheck = AlertPopupsService.ownerCheckPath(payload);
+    if (ownerCheck) {
+      this.api.get<ResponseData<unknown>>(ownerCheck, { silent: true }).subscribe({
+        next: (res) => {
+          if (res?.status) this.show(payload);
+        },
+        error: () => undefined,
+      });
       return;
     }
     this.show(payload);
@@ -110,6 +110,13 @@ export class AlertPopupsService {
     writeFlag(BROWSER_KEY, true);
   }
 
+  /** The owner-scoped read that confirms an alert is this operator's; null when it is everyone's. */
+  static ownerCheckPath(p: AlertFiredPayload): string | null {
+    if (p.source === 'price' || p.source === 'drawing') return `/chart-alert/${p.alertId}`;
+    if (p.source === 'screen') return `/scripting/screens/${p.alertId}`;
+    return null;
+  }
+
   /** Where a fired alert's "Open" goes. */
   static linkFor(p: AlertFiredPayload): AlertPopup['link'] {
     if (p.source === 'price' || p.source === 'drawing') {
@@ -119,6 +126,8 @@ export class AlertPopupsService {
     }
     if (p.source === 'script' && p.strategyId)
       return { route: ['/strategies', p.strategyId], params: {} };
+    if (p.source === 'screen' && p.alertId)
+      return { route: ['/pine-screener'], params: { screen: String(p.alertId) } };
     return null;
   }
 
