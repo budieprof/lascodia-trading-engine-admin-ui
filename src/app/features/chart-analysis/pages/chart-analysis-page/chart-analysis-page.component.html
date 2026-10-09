@@ -1796,37 +1796,17 @@
   />
 
   @if (replayActive()) {
-    <div class="replay-bar">
-      <button type="button" (click)="stepReplay(-1)" title="Back one bar">
-        <app-chart-icon name="step-back" [size]="18" />
-      </button>
-      <button type="button" (click)="toggleReplayPlay()" title="Play / pause">
-        <app-chart-icon [name]="replayPlaying() ? 'pause' : 'play'" [size]="18" />
-      </button>
-      <button type="button" (click)="stepReplay(1)" title="Forward one bar">
-        <app-chart-icon name="step-forward" [size]="18" />
-      </button>
-      <input
-        type="range"
-        class="replay-scrub"
-        min="1"
-        [max]="bars().length"
-        [value]="replayIndex()"
-        (input)="setReplayIndex($any($event.target).value)"
-      />
-      <span class="muted">{{ replayIndex() }} / {{ bars().length }}</span>
-      <span class="muted">{{ replayTime() }}</span>
-      <label class="replay-speed">
-        Speed
-        <select [value]="replaySpeed()" (change)="setReplaySpeed($any($event.target).value)">
-          <option value="1">1×</option>
-          <option value="4">4×</option>
-          <option value="10">10×</option>
-          <option value="30">30×</option>
-        </select>
-      </label>
-      <button type="button" (click)="exitReplay()">Exit</button>
-    </div>
+    <app-replay-panel
+      [replay]="replay"
+      [total]="bars().length"
+      [headLabel]="replayTime()"
+      [digits]="precision()"
+      [pipSize]="pipSize()"
+      [currency]="currentPair()?.quoteCurrency ?? ''"
+      (pickStart)="pickReplayStart()"
+      (startAt)="startReplayAt($event)"
+      (exit)="exitReplay()"
+    />
   }
 
   <!-- Active studies: rename-free, TradingView-style list with inline inputs. -->

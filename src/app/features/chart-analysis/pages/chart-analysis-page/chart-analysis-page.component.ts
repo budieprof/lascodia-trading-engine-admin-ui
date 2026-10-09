@@ -292,6 +292,8 @@ import {
   type NewsArticleIngestedPayload,
 } from '../../panels/news-pane';
 import { ChartPanelsDockComponent } from '../../panels/side/chart-panels-dock.component';
+import { ReplayController } from '../../replay/replay-controller';
+import { ReplayPanelComponent } from '../../replay/replay-panel.component';
 import { ChartPanelsState } from '../../panels/side/chart-panels-state.service';
 import type { SidePanel } from '../../panels/side/chart-panels.types';
 import type {
@@ -581,6 +583,7 @@ const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
     FavoritesBarComponent,
     PatternScorecardDialogComponent,
     ChartScriptAlertFormComponent,
+    ReplayPanelComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -1399,6 +1402,7 @@ export class ChartAnalysisPageComponent {
     ...this.rungMarkers(),
     ...this.closedTradeMarkers(),
     ...this.timelineMarkers(),
+    ...this.replay.markers(),
   ]);
 
   // ── BX-1 (trading): the chart strategy's trade timeline — backtest, live session, paper and broker fills ──
@@ -1649,33 +1653,39 @@ export class ChartAnalysisPageComponent {
   });
   readonly prices = signal<Record<string, { bid: number; prev: number }>>({});
 
-  // ── Bar replay ───────────────────────────────────────────────────────────
+  // ── Bar replay (CC-I4) ───────────────────────────────────────────────────
   //
-  // Replay is a pure VIEW over the loaded bars: it truncates the series rather
-  // than refetching. Everything downstream — indicators, the legend, drawings —
-  // already follows the plotted bars, so they rewind for free and, critically,
-  // an indicator cannot accidentally see bars from the future.
-  readonly replayActive = signal(false);
-  readonly replayIndex = signal(0);
-  readonly replayPlaying = signal(false);
-  readonly replaySpeed = signal(4);
-  private replayTimer: ReturnType<typeof setInterval> | null = null;
-
-  /** What the chart actually plots — the full series, or a replay prefix. */
-  readonly displayBars = computed(() => {
-    const all = this.bars();
-    if (!this.replayActive()) return all;
-    return all.slice(0, Math.max(1, Math.min(this.replayIndex(), all.length)));
+  // Replay is a VIEW over the loaded bars: it shows a prefix of them, and with intrabar steps the
+  // next bar forming from its 1m (1h above a day) bars. Everything downstream — indicators, the
+  // legend, drawings — follows the plotted bars, so they rewind for free and an indicator cannot
+  // see bars from the future. Its paper trades stay in this tab (`replay/paper-broker.ts`).
+  readonly replay = new ReplayController({
+    bars: () => this.bars(),
+    resolution: () => this.resolution(),
+    digits: () => this.precision(),
+    symbolFacts: () => ({
+      pipSize: this.pipSize(),
+      contractSize: this.currentPair()?.contractSize || 100_000,
+    }),
+    fetchIntrabar: (resolution, fromMs, toMs, count) =>
+      this.feed.getBars(this.symbol(), resolution, fromMs, toMs, count).then((r) => r.bars),
   });
+  readonly replayActive = this.replay.active;
+  readonly replayIndex = this.replay.index;
+  readonly replayPlaying = this.replay.playing;
+  readonly replaySpeed = this.replay.speed;
 
-  readonly replayAtEnd = computed(() => this.replayIndex() >= this.bars().length);
+  /** What the chart actually plots — the full series, or the replay's bars. */
+  readonly displayBars = this.replay.view;
+
+  readonly replayAtEnd = this.replay.atEnd;
+  /** The last closed bar at the replay head (a bar forming from intrabar steps is not closed); null outside replay. */
+  readonly replayClosedHead = this.replay.closedHead;
   /**
-   * Bar Replay's head: the open (Unix ms) of the last bar the chart shows; null outside replay. The
-   * scripts run to it (PC-08, PC-I8) — never a bar past it.
+   * Bar Replay's head: the open (Unix ms) of the last closed bar the chart shows; null outside replay. The
+   * scripts run to it (PC-08, PC-I8) — never a bar past it, nor the bar forming from intrabar steps.
    */
-  readonly replayHead = computed(() =>
-    this.replayActive() ? (this.displayBars().at(-1)?.time ?? null) : null,
-  );
+  readonly replayHead = computed(() => this.replayClosedHead()?.time ?? null);
   readonly tools = TOOLS;
   readonly tool = signal<DrawingKind | null>(null);
   readonly magnet = signal(false);
@@ -2554,7 +2564,7 @@ export class ChartAnalysisPageComponent {
     });
     // A running replay interval would outlive the page and keep stepping a
     // chart nobody is looking at.
-    this.destroyRef.onDestroy(() => this.pauseReplay());
+    this.destroyRef.onDestroy(() => this.replay.pause());
 
     // Deep link: /chart-analysis/EURUSD?tf=60 so a chart can be linked to from
     // a position or a signal without the operator re-selecting anything.
@@ -2795,52 +2805,92 @@ export class ChartAnalysisPageComponent {
 
   // ── Replay controls ──────────────────────────────────────────────────────
 
+  /**
+   * Bar Replay on: the whole chart shows and the next click on it picks the bar replay starts at
+   * (TradingView's "Select bar"); the replay bar also takes a date and time.
+   */
   startReplay(): void {
     const total = this.bars().length;
     if (total === 0) return;
-    // Start two thirds in, so there is visible history to reason from and
-    // enough ahead to be worth stepping through.
-    this.replayIndex.set(Math.max(1, Math.floor(total * 0.66)));
-    this.replayActive.set(true);
+    this.replay.start(total);
+    void this.pickReplayStart();
+  }
+
+  /** The next click on the chart picks the bar replay starts at; Esc keeps where it is. */
+  async pickReplayStart(): Promise<void> {
+    const host = this.host();
+    if (!host || !this.replayActive()) return;
+    this.replay.pause();
+    this.replay.selecting.set(true);
+    const pick = await host.pickPoint('time');
+    this.replay.selecting.set(false);
+    if (pick && this.replayActive()) this.replay.startAt(pick.time);
+  }
+
+  /**
+   * Start replay at a date and time on the chart's clock (`yyyy-mm-ddThh:mm`), loading history back to
+   * it first — as go-to-date does, at most {@link GO_TO_DATE_PAGES} pages — and showing it.
+   */
+  async startReplayAt(value: string): Promise<void> {
+    const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/.exec(value);
+    if (!m) return;
+    const t =
+      midnightOnClock(Number(m[1]), Number(m[2]) - 1, Number(m[3]), this.timezone()) +
+      Number(m[4] ?? 0) * 3_600_000 +
+      Number(m[5] ?? 0) * 60_000;
+    this.host()?.cancelPick();
+    await this.loadBackTo(t);
+    const oldest = this.bars()[0];
+    if (!oldest) return;
+    if (oldest.time > t && !this.historyComplete())
+      this.notify.warning(
+        `History before ${this.barTimeLabel(oldest)} is not loaded: replay starts at the oldest bar.`,
+      );
+    if (!this.replayActive()) this.replay.start(this.bars().length);
+    this.replay.startAt(t);
+    const span = Math.max((resolutionMs(this.resolution()) ?? DAY) * 120, DAY);
+    this.pendingRange = { fromMs: t - span * 0.8, toMs: t + span * 0.2 };
+    this.flushPendingRange();
+  }
+
+  /** Load history pages until the bars reach back to `t` (at most {@link GO_TO_DATE_PAGES} pages). */
+  private async loadBackTo(t: number): Promise<void> {
+    for (let page = 0; page < GO_TO_DATE_PAGES; page++) {
+      const held = this.bars();
+      if (!held.length || held[0].time <= t || this.historyComplete()) break;
+      await this.loadOlder();
+      if (this.bars()[0]?.time === held[0].time) break; // nothing older came back
+    }
+  }
+
+  /** The series changed in replay: history back to the head's instant, and the head on its bar there. */
+  private async reanchorReplay(anchor: number): Promise<void> {
+    this.replay.reanchor(anchor);
+    if ((this.bars()[0]?.time ?? anchor) > anchor) {
+      await this.loadBackTo(anchor);
+      if (this.replayActive()) this.replay.reanchor(anchor);
+    }
   }
 
   exitReplay(): void {
-    this.pauseReplay();
-    this.replayActive.set(false);
+    this.host()?.cancelPick();
+    this.replay.exit();
   }
 
   stepReplay(delta: number): void {
-    const total = this.bars().length;
-    this.replayIndex.update((i) => Math.max(1, Math.min(total, i + delta)));
-    if (this.replayAtEnd()) this.pauseReplay();
+    const dir = delta < 0 ? -1 : 1;
+    const n = Math.max(1, Math.abs(Math.trunc(delta)) || 1);
+    if (n === 1) {
+      void this.replay.step(dir);
+      return;
+    }
+    // Many at once (the assistant): whole bars.
+    const c = this.replay.cursor();
+    this.replay.moveTo({ index: c.index + dir * n, sub: null });
   }
 
   toggleReplayPlay(): void {
-    if (this.replayPlaying()) this.pauseReplay();
-    else this.playReplay();
-  }
-
-  private playReplay(): void {
-    if (this.replayAtEnd()) return;
-    this.pauseReplay();
-    this.replayPlaying.set(true);
-    // Speed is bars per second; the interval is derived so changing speed
-    // mid-playback takes effect on the next tick rather than needing a restart.
-    this.replayTimer = setInterval(
-      () => {
-        this.stepReplay(1);
-        if (this.replayAtEnd()) this.pauseReplay();
-      },
-      1000 / Math.max(1, this.replaySpeed()),
-    );
-  }
-
-  private pauseReplay(): void {
-    if (this.replayTimer !== null) {
-      clearInterval(this.replayTimer);
-      this.replayTimer = null;
-    }
-    this.replayPlaying.set(false);
+    this.replay.togglePlay();
   }
 
   setBoxSize(raw: string): void {
@@ -2870,21 +2920,23 @@ export class ChartAnalysisPageComponent {
   );
 
   setReplaySpeed(raw: string): void {
-    const speed = Number(raw);
-    if (!Number.isFinite(speed)) return;
-    this.replaySpeed.set(speed);
-    if (this.replayPlaying()) this.playReplay();
+    this.replay.setSpeed(Number(raw));
   }
 
   setReplayIndex(raw: string): void {
-    const index = Number(raw);
-    if (Number.isFinite(index)) this.replayIndex.set(index);
+    this.replay.setIndex(Number(raw));
   }
 
-  /** The time at the replay head, for the toolbar readout. */
+  /**
+   * The time at the replay head, for the replay bar: the bar's, or — while a bar forms from intrabar
+   * steps — the last intrabar bar's open on the chart's clock.
+   */
   replayTime(): string {
-    const bars = this.displayBars();
-    return bars.length ? this.barTimeLabel(bars[bars.length - 1]) : '';
+    const head = this.replay.headBar();
+    if (!head) return '';
+    if (this.replay.cursor().sub === null) return this.barTimeLabel(head);
+    const zone = this.timezone();
+    return this.formatTime(head.time + (zone === 'UTC' ? 0 : timezoneOffsetMinutes(zone, head.time) * 60_000));
   }
 
   /** What the events on the chart were fetched for, and the window they cover (UTC ms). */
@@ -3124,6 +3176,8 @@ export class ChartAnalysisPageComponent {
     const symbol = this.symbol();
     const resolution = this.resolution();
     this.requested = { symbol, resolution };
+    // Bar Replay stays at its instant across a symbol or timeframe switch (CC-I4).
+    const replayAnchor = this.replayHead();
     /** Still the chart's series? A switch made while this loads has a reload of its own. */
     const current = () => symbol === this.symbol() && resolution === this.resolution();
     this.loading.set(true);
@@ -3145,6 +3199,7 @@ export class ChartAnalysisPageComponent {
       this.historyStart.set(null);
       this.bars.set(bars);
       this.barsFor.set({ symbol, resolution });
+      if (this.replayActive() && replayAnchor !== null) void this.reanchorReplay(replayAnchor);
       this.tailMergedAt = this.ticksApplied;
       this.lastStored = lastCompleteBarTime(bars, resolution);
       // The stored history ends at the last CLOSED bar; build the one still forming from real data
@@ -3217,7 +3272,7 @@ export class ChartAnalysisPageComponent {
           this.bars.set(next);
           // Replay counts bars from the left: the head stays on its bar (CC-11 — it jumped ~1,500
           // bars into the future with every page of history).
-          if (this.replayActive() && added > 0) this.replayIndex.update((i) => i + added);
+          this.replay.shift(added);
           // The events of the history just loaded (the layer covered the first window only), and the
           // compare studies' other symbols over it.
           this.loadEvents(true);
@@ -3792,7 +3847,7 @@ export class ChartAnalysisPageComponent {
       // the engine's clock (the session grid's periods open and close at the engine's instants).
       // Both taken again for a retry after a busy refusal: it runs to the head, or on the bar
       // forming, then.
-      const head = this.replayActive() ? (this.displayBars().at(-1) ?? null) : null;
+      const head = this.replayActive() ? this.replayClosedHead() : null;
       until = head?.time ?? null;
       const liveBar = head
         ? null
@@ -5625,6 +5680,19 @@ export class ChartAnalysisPageComponent {
       if (kind) {
         ev.preventDefault();
         this.tool.set(kind);
+        return;
+      }
+    }
+    // Bar Replay, TradingView's keys: Shift+→ forward, Shift+← back, Shift+↓ play / pause (CC-I4).
+    if (this.replayActive() && ev.shiftKey && !mod && !ev.altKey) {
+      const replayKey =
+        ev.key === 'ArrowRight' ? () => void this.replay.step(1)
+        : ev.key === 'ArrowLeft' ? () => void this.replay.step(-1)
+        : ev.key === 'ArrowDown' ? () => this.replay.togglePlay()
+        : null;
+      if (replayKey) {
+        ev.preventDefault();
+        replayKey();
         return;
       }
     }

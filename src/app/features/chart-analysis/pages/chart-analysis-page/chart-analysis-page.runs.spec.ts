@@ -121,6 +121,7 @@ function page(runs: ChartScriptRun[] = [], saved: Partial<SavedChartScript>[] = 
     logsFront: signal(false),
     replayActive,
     displayBars,
+    replayClosedHead: computed(() => (replayActive() ? (displayBars().at(-1) ?? null) : null)),
     replayHead: computed(() => (replayActive() ? (displayBars().at(-1)?.time ?? null) : null)),
     scriptRuns,
     restoringScripts: signal([]),

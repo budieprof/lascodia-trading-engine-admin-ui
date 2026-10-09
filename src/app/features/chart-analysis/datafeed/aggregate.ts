@@ -75,6 +75,9 @@ export function aggregateCandles(candles: CandleDto[], resolution: TvResolution)
       bar.low = Math.min(bar.low, c.low);
       bar.close = c.close;
       bar.volume += c.volume;
+      // The bucket's recorded spread is its widest component's (CC-I4: what a paper fill in it pays at most).
+      if (typeof c.spreadPoints === 'number')
+        bar.spreadPoints = Math.max(bar.spreadPoints ?? 0, c.spreadPoints);
     }
     if (!c.isClosed) allClosed = false;
   }

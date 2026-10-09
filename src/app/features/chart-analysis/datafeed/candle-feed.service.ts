@@ -28,6 +28,11 @@ export interface Bar {
    * bars are fixed widths on the UTC epoch grid.
    */
   closeTime?: number;
+  /**
+   * The bid/ask spread the broker recorded for the bar, in MT5 points (10^-digits of the price), when the engine has
+   * it (`Candle.SpreadPoints`, EA v8.47.249+). Bar Replay's paper orders pay it (CC-I4).
+   */
+  spreadPoints?: number;
 }
 
 /** A session-grid bar as `scripting/chart-bars` sent it: with its close, and whether it is the period still forming. */
@@ -423,7 +428,7 @@ export function normaliseRows(rows: CandleDto[], resolution: TvResolution): Bar[
 }
 
 export function toBar(c: CandleDto): Bar {
-  return {
+  const bar: Bar = {
     time: Date.parse(c.timestamp),
     open: c.open,
     high: c.high,
@@ -431,6 +436,9 @@ export function toBar(c: CandleDto): Bar {
     close: c.close,
     volume: c.volume,
   };
+  if (typeof c.spreadPoints === 'number' && Number.isFinite(c.spreadPoints) && c.spreadPoints >= 0)
+    bar.spreadPoints = c.spreadPoints;
+  return bar;
 }
 
 /** A `scripting/chart-bars` bar in the chart's shape; `closeTime` only when the engine sent a real one. */
