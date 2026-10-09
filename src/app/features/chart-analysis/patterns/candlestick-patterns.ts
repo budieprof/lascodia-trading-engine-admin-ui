@@ -55,6 +55,19 @@ interface Shape {
   doji: boolean;
 }
 
+/**
+ * Pine's float comparison rule (the engine's `PineOps`, as TradingView compares): both sides rounded half away from
+ * zero to nine decimals first, so a shadow that is exactly 5% of the range in decimal terms counts as 5% whatever the
+ * binary noise — the chart marks what a Pine script of the same rule marks (the scorecard's Pine export, DR-I8).
+ */
+export function round9(x: number): number {
+  return Math.sign(x) * (Math.round(Math.abs(x) * 1e9) / 1e9);
+}
+const lt = (x: number, y: number) => round9(x) < round9(y);
+const le = (x: number, y: number) => round9(x) <= round9(y);
+const gt = (x: number, y: number) => round9(x) > round9(y);
+const ge = (x: number, y: number) => round9(x) >= round9(y);
+
 function shape(b: Ohlc): Shape {
   const top = Math.max(b.open, b.close);
   const bot = Math.min(b.open, b.close);
@@ -71,9 +84,9 @@ function shape(b: Ohlc): Shape {
     lower: bot - b.low,
     top,
     bot,
-    white: b.close > b.open,
-    black: b.close < b.open,
-    doji: range > 0 && body <= 0.05 * range,
+    white: gt(b.close, b.open),
+    black: lt(b.close, b.open),
+    doji: gt(range, 0) && le(body, 0.05 * range),
   };
 }
 
@@ -90,19 +103,20 @@ interface Def extends CandlestickPatternMeta {
   test: Test;
 }
 
-const marubozuShape = (a: Shape) => a.range > 0 && a.upper <= 0.05 * a.range && a.lower <= 0.05 * a.range && !a.doji;
-const long = (x: Ctx, i: number, start: number) => x.s(i).body > x.avgBody(start);
-const isDragonfly = (a: Shape) => a.doji && a.upper <= 0.1 * a.range;
-const isGravestone = (a: Shape) => a.doji && a.lower <= 0.1 * a.range;
+const marubozuShape = (a: Shape) =>
+  gt(a.range, 0) && le(a.upper, 0.05 * a.range) && le(a.lower, 0.05 * a.range) && !a.doji;
+const long = (x: Ctx, i: number, start: number) => gt(x.s(i).body, x.avgBody(start));
+const isDragonfly = (a: Shape) => a.doji && le(a.upper, 0.1 * a.range);
+const isGravestone = (a: Shape) => a.doji && le(a.lower, 0.1 * a.range);
 const hammerShape = (x: Ctx, i: number) => {
   const a = x.s(i);
-  return !a.doji && a.range > 0 && a.body < x.avgBody(i) && a.lower >= 2 * a.body && a.upper <= 0.1 * a.range;
+  return !a.doji && gt(a.range, 0) && lt(a.body, x.avgBody(i)) && ge(a.lower, 2 * a.body) && le(a.upper, 0.1 * a.range);
 };
 const invHammerShape = (x: Ctx, i: number) => {
   const a = x.s(i);
-  return !a.doji && a.range > 0 && a.body < x.avgBody(i) && a.upper >= 2 * a.body && a.lower <= 0.1 * a.range;
+  return !a.doji && gt(a.range, 0) && lt(a.body, x.avgBody(i)) && ge(a.upper, 2 * a.body) && le(a.lower, 0.1 * a.range);
 };
-const inside = (inner: Shape, outer: Shape) => inner.top <= outer.top && inner.bot >= outer.bot;
+const inside = (inner: Shape, outer: Shape) => le(inner.top, outer.top) && ge(inner.bot, outer.bot);
 const mid = (a: Shape) => a.bot + a.body / 2;
 
 const DEFS: Def[] = [
@@ -115,7 +129,7 @@ const DEFS: Def[] = [
   { id: 'gravestone-doji', name: 'Gravestone Doji', abbr: 'GD', direction: 'bearish', bars: 1, test: (x, i) => isGravestone(x.s(i)) },
   {
     id: 'long-legged-doji', name: 'Long-Legged Doji', abbr: 'LLD', direction: 'neutral', bars: 1,
-    test: (x, i) => { const a = x.s(i); return a.doji && a.upper >= 0.3 * a.range && a.lower >= 0.3 * a.range; },
+    test: (x, i) => { const a = x.s(i); return a.doji && ge(a.upper, 0.3 * a.range) && ge(a.lower, 0.3 * a.range); },
   },
   { id: 'hammer', name: 'Hammer', abbr: 'H', direction: 'bullish', bars: 1, trend: 'down', test: hammerShape },
   { id: 'inverted-hammer', name: 'Inverted Hammer', abbr: 'IH', direction: 'bullish', bars: 1, trend: 'down', test: invHammerShape },
@@ -133,34 +147,34 @@ const DEFS: Def[] = [
     id: 'spinning-top', name: 'Spinning Top', abbr: 'ST', direction: 'neutral', bars: 1,
     test: (x, i) => {
       const a = x.s(i);
-      return !a.doji && a.range > 0 && a.body <= 0.35 * a.range && a.upper >= a.body && a.lower >= a.body;
+      return !a.doji && gt(a.range, 0) && le(a.body, 0.35 * a.range) && ge(a.upper, a.body) && ge(a.lower, a.body);
     },
   },
   {
     id: 'long-lower-shadow', name: 'Long Lower Shadow', abbr: 'LLS', direction: 'bullish', bars: 1,
-    test: (x, i) => { const a = x.s(i); return a.range > 0 && a.lower >= 0.7 * a.range; },
+    test: (x, i) => { const a = x.s(i); return gt(a.range, 0) && ge(a.lower, 0.7 * a.range); },
   },
   {
     id: 'long-upper-shadow', name: 'Long Upper Shadow', abbr: 'LUS', direction: 'bearish', bars: 1,
-    test: (x, i) => { const a = x.s(i); return a.range > 0 && a.upper >= 0.7 * a.range; },
+    test: (x, i) => { const a = x.s(i); return gt(a.range, 0) && ge(a.upper, 0.7 * a.range); },
   },
 
   // ── two bars ─────────────────────────────────────────────────────────────
   {
     id: 'bullish-engulfing', name: 'Bullish Engulfing', abbr: 'BE', direction: 'bullish', bars: 2, trend: 'down',
-    test: (x, i) => { const p = x.s(i - 1), c = x.s(i); return p.black && c.white && c.c >= p.o && c.o <= p.c && c.body > p.body; },
+    test: (x, i) => { const p = x.s(i - 1), c = x.s(i); return p.black && c.white && ge(c.c, p.o) && le(c.o, p.c) && gt(c.body, p.body); },
   },
   {
     id: 'bearish-engulfing', name: 'Bearish Engulfing', abbr: 'BE', direction: 'bearish', bars: 2, trend: 'up',
-    test: (x, i) => { const p = x.s(i - 1), c = x.s(i); return p.white && c.black && c.o >= p.c && c.c <= p.o && c.body > p.body; },
+    test: (x, i) => { const p = x.s(i - 1), c = x.s(i); return p.white && c.black && ge(c.o, p.c) && le(c.c, p.o) && gt(c.body, p.body); },
   },
   {
     id: 'bullish-harami', name: 'Bullish Harami', abbr: 'BH', direction: 'bullish', bars: 2, trend: 'down',
-    test: (x, i) => { const p = x.s(i - 1), c = x.s(i); return p.black && long(x, i - 1, i - 1) && c.white && !c.doji && inside(c, p) && c.body < p.body; },
+    test: (x, i) => { const p = x.s(i - 1), c = x.s(i); return p.black && long(x, i - 1, i - 1) && c.white && !c.doji && inside(c, p) && lt(c.body, p.body); },
   },
   {
     id: 'bearish-harami', name: 'Bearish Harami', abbr: 'BH', direction: 'bearish', bars: 2, trend: 'up',
-    test: (x, i) => { const p = x.s(i - 1), c = x.s(i); return p.white && long(x, i - 1, i - 1) && c.black && !c.doji && inside(c, p) && c.body < p.body; },
+    test: (x, i) => { const p = x.s(i - 1), c = x.s(i); return p.white && long(x, i - 1, i - 1) && c.black && !c.doji && inside(c, p) && lt(c.body, p.body); },
   },
   {
     id: 'bullish-harami-cross', name: 'Bullish Harami Cross', abbr: 'BHC', direction: 'bullish', bars: 2, trend: 'down',
@@ -172,33 +186,33 @@ const DEFS: Def[] = [
   },
   {
     id: 'piercing', name: 'Piercing', abbr: 'P', direction: 'bullish', bars: 2, trend: 'down',
-    test: (x, i) => { const p = x.s(i - 1), c = x.s(i); return p.black && long(x, i - 1, i - 1) && c.white && c.o < p.c && c.c > mid(p) && c.c < p.o; },
+    test: (x, i) => { const p = x.s(i - 1), c = x.s(i); return p.black && long(x, i - 1, i - 1) && c.white && lt(c.o, p.c) && gt(c.c, mid(p)) && lt(c.c, p.o); },
   },
   {
     id: 'dark-cloud-cover', name: 'Dark Cloud Cover', abbr: 'DCC', direction: 'bearish', bars: 2, trend: 'up',
-    test: (x, i) => { const p = x.s(i - 1), c = x.s(i); return p.white && long(x, i - 1, i - 1) && c.black && c.o > p.c && c.c < mid(p) && c.c > p.o; },
+    test: (x, i) => { const p = x.s(i - 1), c = x.s(i); return p.white && long(x, i - 1, i - 1) && c.black && gt(c.o, p.c) && lt(c.c, mid(p)) && gt(c.c, p.o); },
   },
   {
     id: 'tweezer-top', name: 'Tweezer Top', abbr: 'TT', direction: 'bearish', bars: 2, trend: 'up',
     test: (x, i) => {
       const p = x.s(i - 1), c = x.s(i);
-      return p.white && c.black && !p.doji && !c.doji && Math.abs(p.h - c.h) <= 0.05 * Math.max(p.range, c.range);
+      return p.white && c.black && !p.doji && !c.doji && le(Math.abs(p.h - c.h), 0.05 * Math.max(p.range, c.range));
     },
   },
   {
     id: 'tweezer-bottom', name: 'Tweezer Bottom', abbr: 'TB', direction: 'bullish', bars: 2, trend: 'down',
     test: (x, i) => {
       const p = x.s(i - 1), c = x.s(i);
-      return p.black && c.white && !p.doji && !c.doji && Math.abs(p.l - c.l) <= 0.05 * Math.max(p.range, c.range);
+      return p.black && c.white && !p.doji && !c.doji && le(Math.abs(p.l - c.l), 0.05 * Math.max(p.range, c.range));
     },
   },
   {
     id: 'kicking-bull', name: 'Kicking Bull', abbr: 'K', direction: 'bullish', bars: 2,
-    test: (x, i) => { const p = x.s(i - 1), c = x.s(i); return p.black && marubozuShape(p) && c.white && marubozuShape(c) && c.l > p.h; },
+    test: (x, i) => { const p = x.s(i - 1), c = x.s(i); return p.black && marubozuShape(p) && c.white && marubozuShape(c) && gt(c.l, p.h); },
   },
   {
     id: 'kicking-bear', name: 'Kicking Bear', abbr: 'K', direction: 'bearish', bars: 2,
-    test: (x, i) => { const p = x.s(i - 1), c = x.s(i); return p.white && marubozuShape(p) && c.black && marubozuShape(c) && c.h < p.l; },
+    test: (x, i) => { const p = x.s(i - 1), c = x.s(i); return p.white && marubozuShape(p) && c.black && marubozuShape(c) && lt(c.h, p.l); },
   },
 
   // ── three bars ───────────────────────────────────────────────────────────
@@ -206,28 +220,28 @@ const DEFS: Def[] = [
     id: 'morning-star', name: 'Morning Star', abbr: 'MS', direction: 'bullish', bars: 3, trend: 'down',
     test: (x, i) => {
       const a = x.s(i - 2), m = x.s(i - 1), c = x.s(i);
-      return a.black && long(x, i - 2, i - 2) && !m.doji && m.body < 0.5 * a.body && m.top < a.c && c.white && c.c > mid(a);
+      return a.black && long(x, i - 2, i - 2) && !m.doji && lt(m.body, 0.5 * a.body) && lt(m.top, a.c) && c.white && gt(c.c, mid(a));
     },
   },
   {
     id: 'evening-star', name: 'Evening Star', abbr: 'ES', direction: 'bearish', bars: 3, trend: 'up',
     test: (x, i) => {
       const a = x.s(i - 2), m = x.s(i - 1), c = x.s(i);
-      return a.white && long(x, i - 2, i - 2) && !m.doji && m.body < 0.5 * a.body && m.bot > a.c && c.black && c.c < mid(a);
+      return a.white && long(x, i - 2, i - 2) && !m.doji && lt(m.body, 0.5 * a.body) && gt(m.bot, a.c) && c.black && lt(c.c, mid(a));
     },
   },
   {
     id: 'morning-doji-star', name: 'Morning Doji Star', abbr: 'MDS', direction: 'bullish', bars: 3, trend: 'down',
     test: (x, i) => {
       const a = x.s(i - 2), m = x.s(i - 1), c = x.s(i);
-      return a.black && long(x, i - 2, i - 2) && m.doji && m.top < a.c && c.white && c.c > mid(a);
+      return a.black && long(x, i - 2, i - 2) && m.doji && lt(m.top, a.c) && c.white && gt(c.c, mid(a));
     },
   },
   {
     id: 'evening-doji-star', name: 'Evening Doji Star', abbr: 'EDS', direction: 'bearish', bars: 3, trend: 'up',
     test: (x, i) => {
       const a = x.s(i - 2), m = x.s(i - 1), c = x.s(i);
-      return a.white && long(x, i - 2, i - 2) && m.doji && m.bot > a.c && c.black && c.c < mid(a);
+      return a.white && long(x, i - 2, i - 2) && m.doji && gt(m.bot, a.c) && c.black && lt(c.c, mid(a));
     },
   },
   {
@@ -235,10 +249,10 @@ const DEFS: Def[] = [
     test: (x, i) => {
       for (let k = i - 2; k <= i; k++) {
         const a = x.s(k);
-        if (!a.white || a.body <= x.avgBody(i - 2) || a.upper > 0.3 * a.body) return false;
+        if (!a.white || le(a.body, x.avgBody(i - 2)) || gt(a.upper, 0.3 * a.body)) return false;
         if (k > i - 2) {
           const p = x.s(k - 1);
-          if (a.c <= p.c || a.o < p.o || a.o > p.c) return false;
+          if (le(a.c, p.c) || lt(a.o, p.o) || gt(a.o, p.c)) return false;
         }
       }
       return true;
@@ -249,10 +263,10 @@ const DEFS: Def[] = [
     test: (x, i) => {
       for (let k = i - 2; k <= i; k++) {
         const a = x.s(k);
-        if (!a.black || a.body <= x.avgBody(i - 2) || a.lower > 0.3 * a.body) return false;
+        if (!a.black || le(a.body, x.avgBody(i - 2)) || gt(a.lower, 0.3 * a.body)) return false;
         if (k > i - 2) {
           const p = x.s(k - 1);
-          if (a.c >= p.c || a.o > p.o || a.o < p.c) return false;
+          if (ge(a.c, p.c) || gt(a.o, p.o) || lt(a.o, p.c)) return false;
         }
       }
       return true;
@@ -260,32 +274,32 @@ const DEFS: Def[] = [
   },
   {
     id: 'abandoned-baby-bull', name: 'Abandoned Baby Bull', abbr: 'AB', direction: 'bullish', bars: 3, trend: 'down',
-    test: (x, i) => { const a = x.s(i - 2), m = x.s(i - 1), c = x.s(i); return a.black && m.doji && m.h < a.l && c.white && c.l > m.h; },
+    test: (x, i) => { const a = x.s(i - 2), m = x.s(i - 1), c = x.s(i); return a.black && m.doji && lt(m.h, a.l) && c.white && gt(c.l, m.h); },
   },
   {
     id: 'abandoned-baby-bear', name: 'Abandoned Baby Bear', abbr: 'AB', direction: 'bearish', bars: 3, trend: 'up',
-    test: (x, i) => { const a = x.s(i - 2), m = x.s(i - 1), c = x.s(i); return a.white && m.doji && m.l > a.h && c.black && c.h < m.l; },
+    test: (x, i) => { const a = x.s(i - 2), m = x.s(i - 1), c = x.s(i); return a.white && m.doji && gt(m.l, a.h) && c.black && lt(c.h, m.l); },
   },
   {
     id: 'tri-star-bull', name: 'Tri-Star Bull', abbr: '3S', direction: 'bullish', bars: 3, trend: 'down',
-    test: (x, i) => { const a = x.s(i - 2), m = x.s(i - 1), c = x.s(i); return a.doji && m.doji && c.doji && m.top < a.bot && m.top < c.bot; },
+    test: (x, i) => { const a = x.s(i - 2), m = x.s(i - 1), c = x.s(i); return a.doji && m.doji && c.doji && lt(m.top, a.bot) && lt(m.top, c.bot); },
   },
   {
     id: 'tri-star-bear', name: 'Tri-Star Bear', abbr: '3S', direction: 'bearish', bars: 3, trend: 'up',
-    test: (x, i) => { const a = x.s(i - 2), m = x.s(i - 1), c = x.s(i); return a.doji && m.doji && c.doji && m.bot > a.top && m.bot > c.top; },
+    test: (x, i) => { const a = x.s(i - 2), m = x.s(i - 1), c = x.s(i); return a.doji && m.doji && c.doji && gt(m.bot, a.top) && gt(m.bot, c.top); },
   },
   {
     id: 'upside-tasuki-gap', name: 'Upside Tasuki Gap', abbr: 'UTG', direction: 'bullish', bars: 3, trend: 'up',
     test: (x, i) => {
       const a = x.s(i - 2), b = x.s(i - 1), c = x.s(i);
-      return a.white && long(x, i - 2, i - 2) && b.white && b.l > a.h && c.black && c.o > b.o && c.o < b.c && c.c > a.h && c.c < b.l;
+      return a.white && long(x, i - 2, i - 2) && b.white && gt(b.l, a.h) && c.black && gt(c.o, b.o) && lt(c.o, b.c) && gt(c.c, a.h) && lt(c.c, b.l);
     },
   },
   {
     id: 'downside-tasuki-gap', name: 'Downside Tasuki Gap', abbr: 'DTG', direction: 'bearish', bars: 3, trend: 'down',
     test: (x, i) => {
       const a = x.s(i - 2), b = x.s(i - 1), c = x.s(i);
-      return a.black && long(x, i - 2, i - 2) && b.black && b.h < a.l && c.white && c.o < b.o && c.o > b.c && c.c < a.l && c.c > b.h;
+      return a.black && long(x, i - 2, i - 2) && b.black && lt(b.h, a.l) && c.white && lt(c.o, b.o) && gt(c.o, b.c) && lt(c.c, a.l) && gt(c.c, b.h);
     },
   },
 
@@ -294,10 +308,10 @@ const DEFS: Def[] = [
     id: 'rising-three-methods', name: 'Rising Three Methods', abbr: 'R3M', direction: 'bullish', bars: 5, trend: 'up',
     test: (x, i) => {
       const a = x.s(i - 4), c = x.s(i);
-      if (!a.white || !long(x, i - 4, i - 4) || !c.white || !long(x, i, i - 4) || c.c <= a.c) return false;
+      if (!a.white || !long(x, i - 4, i - 4) || !c.white || !long(x, i, i - 4) || le(c.c, a.c)) return false;
       for (let k = i - 3; k <= i - 1; k++) {
         const m = x.s(k);
-        if (m.body >= a.body || m.h > a.h || m.l < a.l) return false;
+        if (ge(m.body, a.body) || gt(m.h, a.h) || lt(m.l, a.l)) return false;
       }
       return true;
     },
@@ -306,10 +320,10 @@ const DEFS: Def[] = [
     id: 'falling-three-methods', name: 'Falling Three Methods', abbr: 'F3M', direction: 'bearish', bars: 5, trend: 'down',
     test: (x, i) => {
       const a = x.s(i - 4), c = x.s(i);
-      if (!a.black || !long(x, i - 4, i - 4) || !c.black || !long(x, i, i - 4) || c.c >= a.c) return false;
+      if (!a.black || !long(x, i - 4, i - 4) || !c.black || !long(x, i, i - 4) || ge(c.c, a.c)) return false;
       for (let k = i - 3; k <= i - 1; k++) {
         const m = x.s(k);
-        if (m.body >= a.body || m.h > a.h || m.l < a.l) return false;
+        if (ge(m.body, a.body) || gt(m.h, a.h) || lt(m.l, a.l)) return false;
       }
       return true;
     },
@@ -349,7 +363,7 @@ export function detectCandlestickPatterns(bars: readonly Ohlc[], options: Candle
     if (before < 0) return false;
     const m = ma[before];
     if (m === null) return false;
-    return need === 'up' ? bars[before].close > m : bars[before].close < m;
+    return need === 'up' ? gt(bars[before].close, m) : lt(bars[before].close, m);
   };
 
   const out: CandlestickHit[] = [];

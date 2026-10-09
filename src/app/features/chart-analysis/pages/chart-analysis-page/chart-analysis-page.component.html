@@ -459,6 +459,15 @@
           >
             <app-chart-icon name="structure" [size]="28" /> Market structure
           </button>
+          <!-- DR-I8: how the patterns and structure events have behaved on these bars. -->
+          <button
+            type="button"
+            class="tb-menu-item"
+            (click)="openScorecard()"
+            title="Sample size, hit rate, mean R, MFE/MAE net of spread — and export as Pine"
+          >
+            <app-chart-icon name="structure" [size]="28" /> Pattern scorecard…
+          </button>
           <button
             type="button"
             class="tb-menu-item tb-check"
@@ -1842,6 +1851,18 @@
               }
             </label>
           }
+          @if (isPatternStudy(item)) {
+            <!-- DR-I8: the scorecard of the patterns this study marks. -->
+            <button
+              type="button"
+              class="study-settings"
+              (click)="openScorecard()"
+              title="Pattern scorecard"
+              aria-label="Pattern scorecard"
+            >
+              <app-chart-icon name="structure" [size]="14" />
+            </button>
+          }
           <button
             type="button"
             class="study-settings"
@@ -1862,6 +1883,20 @@
         </div>
       }
     </aside>
+  }
+  <!-- DR-I8: the pattern & structure scorecard; a row can open as a Pine strategy draft. -->
+  @if (scorecardOpen()) {
+    <app-pattern-scorecard-dialog
+      [bars]="bars()"
+      [symbol]="symbol()"
+      [resolution]="resolution()"
+      [pipSize]="pipSize()"
+      [spread]="liveSpread()"
+      [trend]="scorecardTrend()"
+      [pivotDepth]="scorecardDepth()"
+      (closed)="scorecardOpen.set(false)"
+      (exportPine)="openPineDraft($event)"
+    />
   }
   <!-- A position tool staged as a manual signal (DR-I9): the existing dialog, filled in; nothing is sent until Create. -->
   @if (stagePrefill(); as pf) {

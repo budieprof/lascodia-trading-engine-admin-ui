@@ -217,6 +217,8 @@ import {
 import { drawingAlertDraft } from '../../drawings/drawing-alert';
 import { DrawingFavorites } from '../../drawings/drawing-favorites.service';
 import { FavoritesBarComponent } from '../../drawings/ui/favorites-bar.component';
+import { PatternScorecardDialogComponent } from '../../patterns/scorecard-dialog.component';
+import type { CandleTrendFilter } from '../../patterns/candlestick-patterns';
 import { positionAccountFacts, positionOrderPrefill } from '../../drawings/position-link';
 import {
   CreateSignalDialogComponent,
@@ -558,6 +560,7 @@ const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
     StudySettingsDialogComponent,
     CreateSignalDialogComponent,
     FavoritesBarComponent,
+    PatternScorecardDialogComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -1821,6 +1824,46 @@ export class ChartAnalysisPageComponent {
       this.railFlyoutTop.set(btn.getBoundingClientRect().top - rail.getBoundingClientRect().top);
     }
     this.railFlyout.set(name);
+  }
+
+  // ── Pattern & structure scorecard (DR-I8) ─────────────────────────────────────
+  readonly scorecardOpen = signal(false);
+  /** The live spread (ask − bid), for the scorecard's cost; null before a quote. */
+  readonly liveSpread = computed(() => {
+    const q = this.liveQuote();
+    return q && q.ask !== null && q.ask > q.bid ? q.ask - q.bid : null;
+  });
+  /** The candlestick studies' trend filter (the first one's), as the scorecard reads them. */
+  readonly scorecardTrend = computed<CandleTrendFilter>(() => {
+    const c = this.active().find((a) => studyKind(a.defId) === 'candle-pattern');
+    return c?.params['trend'] === 'none' ? 'none' : 'sma50';
+  });
+  /** The chart-pattern study's swing size (the first one's), else 5. */
+  readonly scorecardDepth = computed(() => {
+    const c = this.active().find((a) => studyKind(a.defId) === 'chart-pattern');
+    const d = Number(c?.params['pivotDepth'] ?? 5);
+    return Number.isFinite(d) && d >= 1 ? d : 5;
+  });
+
+  openScorecard(): void {
+    this.openMenu.set(null);
+    this.scorecardOpen.set(true);
+  }
+
+  /**
+   * A scorecard row exported as a Pine strategy (DR-I8): a NEW, unsaved script in the Pine Editor — nothing is saved,
+   * added to the chart or run until the operator does it.
+   */
+  openPineDraft(d: { name: string; source: string }): void {
+    this.scorecardOpen.set(false);
+    this.assistSource.set(null);
+    this.editorKey.set(null);
+    this.editorCleared.set(true);
+    this.editorDraft.set({ key: null, text: d.source });
+    this.assistSource.set({ text: d.source, seq: ++this.assistSeq });
+    this.editorOpen.set(true);
+    this.frontDock('editor');
+    this.notify.success(`${d.name} is in the Pine Editor as an unsaved draft.`);
   }
 
   /** The favourite drawing tools (DR-I12): starred in the flyouts, on the Favourites bar. */
@@ -4281,6 +4324,12 @@ export class ChartAnalysisPageComponent {
 
   labelFor(item: ActiveIndicator): string {
     return studyLabel(item.defId, item.params);
+  }
+
+  /** A candlestick- or chart-pattern study (its row offers the scorecard, DR-I8). */
+  isPatternStudy(item: ActiveIndicator): boolean {
+    const k = studyKind(item.defId);
+    return k === 'candle-pattern' || k === 'chart-pattern';
   }
 
   inputsFor(item: ActiveIndicator) {
