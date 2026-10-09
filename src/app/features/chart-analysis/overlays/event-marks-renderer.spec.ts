@@ -75,4 +75,11 @@ describe('EventMarksRenderer hit testing (CC-I2)', () => {
     expect(r.hit(300, r.placed()[1].y)?.id).toBe(2);
     expect(r.hit(301, r.placed()[2].y)?.id).toBe(3);
   });
+
+  it('puts each badge on the lowest level with room, so a run of nearby events does not climb', () => {
+    // Events every 1.5 h (15 px apart, closer than a badge): they alternate between two levels.
+    const r = frame([0, 1, 2, 3, 4, 5].map((i) => mark(i + 1, NOW - 20 * H + i * 1.5 * H)));
+    const levels = new Set(r.placed().map((p) => Math.round(p.y)));
+    expect(levels.size).toBe(2);
+  });
 });
