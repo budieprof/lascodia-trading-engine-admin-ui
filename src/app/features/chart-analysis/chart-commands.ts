@@ -895,8 +895,8 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
         const name = str(a, 'name');
         if (!name) return fail(`"name" is required to ${action} a layout.`);
         if (action === 'save') {
-          // The toolbar's own Save asks for the name through prompt(), which nothing here
-          // can answer — hence a name-taking path rather than reusing that handler.
+          // The toolbar's own Save asks for the name in a dialog, which nothing here can
+          // answer — hence a name-taking path rather than reusing that handler.
           host.saveLayout(name);
           return ok(`Saved layout "${name}".`);
         }

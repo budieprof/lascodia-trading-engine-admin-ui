@@ -293,6 +293,8 @@ import {
 } from '../../panels/news-pane';
 import { ChartPanelsDockComponent } from '../../panels/side/chart-panels-dock.component';
 import { ReplayController } from '../../replay/replay-controller';
+import { ScriptDialogService } from '@features/scripting/shared/script-dialog.service';
+import { askName, confirmDelete } from '../../dialog/chart-dialogs';
 import { ReplayScriptSessions } from '../../replay/replay-script-sessions';
 import { ScriptingRunService } from '@shared/pine-chart/api/scripting-run.service';
 import type { PineRunRequest } from '@shared/pine-chart/model/pine-outputs.types';
@@ -1793,6 +1795,8 @@ export class ChartAnalysisPageComponent {
   readonly contextMenu = signal<{ x: number; y: number; price: number | null } | null>(null);
   protected readonly chartAlerts = inject(ChartAlertsService);
   private readonly notify = inject(NotificationService);
+  /** The page's questions (names, deletions) in the console's dialog, not the browser's (CC-I11). */
+  private readonly dialogs = inject(ScriptDialogService);
   /**
    * Whether the page is fullscreen, as the browser says (CC-20): leaving with Esc fires only
    * `fullscreenchange`, so the button stayed lit and the assistant read the wrong state.
@@ -2412,8 +2416,8 @@ export class ChartAnalysisPageComponent {
             symbol: l.isActive ? this.symbol() : '',
             resolution: l.isActive ? this.resolution() : '',
           })),
-        // The toolbar asks for names through prompt(), which nothing outside the browser can
-        // answer — so the workspace is called directly with the given name.
+        // The toolbar asks for names in a dialog, which nothing outside the browser can answer —
+        // so the workspace is called directly with the given name.
         saveLayout: (name) => {
           void this.workspace.duplicate(name);
           return '';
@@ -5262,25 +5266,38 @@ export class ChartAnalysisPageComponent {
 
   // ── Layout menu (server-backed) ──────────────────────────────────────────
 
-  newLayout(): void {
-    const name = prompt('New layout name', 'Unnamed');
-    if (name === null) return;
+  async newLayout(): Promise<void> {
     this.layoutMenuOpen.set(false);
-    void this.workspace.newLayout(name);
+    const name = await askName(this.dialogs, {
+      title: 'New layout',
+      label: 'Layout name',
+      value: 'Unnamed',
+      confirmLabel: 'Create',
+    });
+    if (name !== null) void this.workspace.newLayout(name);
   }
 
-  renameLayout(): void {
-    const name = prompt('Rename layout', this.workspace.active().name);
-    if (name === null || !name.trim()) return;
+  async renameLayout(): Promise<void> {
     this.layoutMenuOpen.set(false);
-    void this.workspace.rename(name);
+    const name = await askName(this.dialogs, {
+      title: 'Rename layout',
+      label: 'Layout name',
+      value: this.workspace.active().name,
+      confirmLabel: 'Rename',
+    });
+    if (name !== null) void this.workspace.rename(name);
   }
 
-  duplicateLayout(): void {
-    const name = prompt('Copy layout as', `${this.workspace.active().name} copy`);
-    if (name === null) return;
+  async duplicateLayout(): Promise<void> {
     this.layoutMenuOpen.set(false);
-    void this.workspace.duplicate(name);
+    const name = await askName(this.dialogs, {
+      title: 'Copy layout',
+      message: 'The copy keeps this layout’s symbol, studies, scripts and drawings settings.',
+      label: 'Name of the copy',
+      value: `${this.workspace.active().name} copy`,
+      confirmLabel: 'Copy',
+    });
+    if (name !== null) void this.workspace.duplicate(name);
   }
 
   switchLayout(id: number): void {
@@ -5291,16 +5308,22 @@ export class ChartAnalysisPageComponent {
   removeLayout(id: number, ev: Event): void {
     ev.stopPropagation();
     const l = this.workspace.layouts().find((x) => x.id === id);
-    if (!confirm(`Delete layout “${l?.name ?? id}”? This cannot be undone.`)) return;
-    void this.workspace.remove(id);
+    void confirmDelete(this.dialogs, `layout “${l?.name ?? id}”`).then((yes) => {
+      if (yes) void this.workspace.remove(id);
+    });
   }
 
-  saveTemplate(): void {
+  async saveTemplate(): Promise<void> {
     if (this.active().length === 0) return;
-    const name = prompt('Template name', 'My studies');
-    if (name === null) return;
-    this.layoutStore.saveTemplate(name, this.active());
     this.layoutMenuOpen.set(false);
+    const name = await askName(this.dialogs, {
+      title: 'Save indicator template',
+      message: 'The studies on this chart, with their inputs and styles.',
+      label: 'Template name',
+      value: 'My studies',
+      confirmLabel: 'Save',
+    });
+    if (name !== null) this.layoutStore.saveTemplate(name, this.active());
   }
 
   applyTemplate(template: StudyTemplate): void {
