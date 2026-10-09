@@ -54,4 +54,13 @@ describe('ChartPrefsService', () => {
     await vi.advanceTimersByTimeAsync(900);
     expect(setPreference.mock.calls).toEqual([['lascodia.chart.favouriteStudies', '["a","b"]']]);
   });
+
+  it('favourite intervals follow the operator to other machines (CC-I8)', async () => {
+    const { prefs, setPreference } = make([]);
+    prefs.setItem('lascodia.chart.pref.favouriteIntervals', '["45","180"]');
+    await vi.advanceTimersByTimeAsync(900);
+    expect(setPreference.mock.calls).toEqual([
+      ['lascodia.chart.pref.favouriteIntervals', '["45","180"]'],
+    ]);
+  });
 });
