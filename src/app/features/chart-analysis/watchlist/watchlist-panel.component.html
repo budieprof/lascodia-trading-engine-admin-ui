@@ -291,14 +291,12 @@
             @for (c of columns(); track c.key) {
               @switch (c.key) {
                 @case ('last') {
-                  @let parts = split(r.last, r.digits);
-                  <span
-                    class="col-num wl-last"
-                    [class.flash-up]="flash()[r.symbol] === 'up'"
-                    [class.flash-down]="flash()[r.symbol] === 'down'"
+                  @let t = tick()[r.symbol];
+                  @let parts = tickParts(r.last, r.digits, t?.prev ?? null);
+                  <span class="col-num wl-last" [class.up]="t?.dir === 'up'" [class.down]="t?.dir === 'down'"
+                    >{{ parts.head }}<span class="wl-chg">{{ parts.changed }}</span
+                    ><sup [class.wl-chg]="parts.pipChanged">{{ parts.pip }}</sup></span
                   >
-                    {{ parts[0] }}<sup>{{ parts[1] }}</sup>
-                  </span>
                 }
                 @case ('change') {
                   <span class="col-num" [class.up]="(r.change ?? 0) > 0" [class.down]="(r.change ?? 0) < 0">

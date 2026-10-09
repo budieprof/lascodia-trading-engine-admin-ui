@@ -514,15 +514,13 @@ button {
     margin-left: 0.5px;
   }
 
-  // TradingView flashes the digits, not the cell.
-  &.flash-up {
+  // TradingView colours the digits the last tick changed (and keeps them coloured until the next tick).
+  &.up .wl-chg {
     color: var(--wl-up);
-    transition: none;
   }
 
-  &.flash-down {
+  &.down .wl-chg {
     color: var(--wl-down);
-    transition: none;
   }
 }
 

@@ -464,6 +464,37 @@ export function splitPrice(value: number | null, digits: number): [string, strin
   return digits === 3 || digits === 5 ? [s.slice(0, -1), s.slice(-1)] : [s, ''];
 }
 
+/** A last price split as TradingView's watchlist shows a tick: unchanged digits, changed digits, the small last digit. */
+export interface TickParts {
+  /** Digits that did not change on the last tick (default text colour). */
+  head: string;
+  /** Digits from the first one that changed (coloured by the tick's direction). */
+  changed: string;
+  /** The fractional pip, rendered small ('' when the quote has none). */
+  pip: string;
+  /** The small last digit changed too (it takes the tick colour). */
+  pipChanged: boolean;
+}
+
+/**
+ * TradingView colours only the digits a tick changed — from the first differing digit to the end, the small
+ * fractional pip included — and keeps that colour until the next tick. `previous` is the price before the last
+ * change (null: no tick seen yet, nothing coloured). `1.11973` after `1.11981` → head "1.11", changed "97", pip "3".
+ */
+export function tickParts(value: number | null, digits: number, previous: number | null): TickParts {
+  const [main, pip] = splitPrice(value, digits);
+  if (value === null || !Number.isFinite(value) || previous === null || !Number.isFinite(previous)) {
+    return { head: main, changed: '', pip, pipChanged: false };
+  }
+  const s = value.toFixed(digits);
+  const p = previous.toFixed(digits);
+  let i = 0;
+  while (i < s.length && i < p.length && s[i] === p[i]) i++;
+  if (i >= s.length && s.length === p.length) return { head: main, changed: '', pip, pipChanged: false };
+  const cut = Math.min(i, main.length);
+  return { head: main.slice(0, cut), changed: main.slice(cut), pip, pipChanged: pip !== '' && i <= s.length - 1 };
+}
+
 /** The symbol after/before `current` in visible order, for ↑/↓ navigation. */
 export function neighbour(order: string[], current: string, step: 1 | -1): string | null {
   if (!order.length) return null;

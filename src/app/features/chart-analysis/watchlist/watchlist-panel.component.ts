@@ -55,6 +55,7 @@ import {
   sortFromSettings,
   sortRows,
   splitPrice,
+  tickParts,
   toggleSection,
   type ChartWatchlist,
   type RemovedItem,
@@ -93,7 +94,6 @@ const POSITIONS_REFRESH_MS = 30_000;
 const HOTLIST_REFRESH_MS = 60_000;
 const CLOCK_MS = 15_000;
 const UNDO_MS = 8_000;
-const FLASH_MS = 700;
 const SPLIT_KEY = 'lascodia.chart.watchlist.split';
 
 export interface WatchHeadline {
@@ -118,7 +118,7 @@ type PairMeta = CurrencyPairDto & { assetClass?: string | null };
 /**
  * TradingView-style watchlist dock: named lists, collapsible sections, a column picker (bid/ask, spread, day range,
  * ADR, ATR %, next high-impact event, news pressure, open P&L, session, 24h sparkline) and the sort saved with each
- * list, flagged lists and server-side hotlists, live ticks with an up/down flash, colour flags, drag-to-reorder, ↑/↓ to
+ * list, flagged lists and server-side hotlists, live ticks with the changed digits coloured up/down, colour flags, drag-to-reorder, ↑/↓ to
  * walk the chart through the list, Delete with Undo, an alert from any row, and the selected symbol's details beneath.
  */
 @Component({
@@ -175,6 +175,7 @@ export class WatchlistPanelComponent {
 
   readonly flags = FLAGS;
   readonly split = splitPrice;
+  readonly tickParts = tickParts;
   readonly allColumns = WATCH_COLUMNS;
   readonly hotlists = HOTLISTS;
   readonly countdown = formatCountdown;
@@ -186,7 +187,11 @@ export class WatchlistPanelComponent {
   readonly view = signal<WatchView>({ kind: 'list' });
   readonly hotlist = signal<Hotlist | null>(null);
   readonly hotlistError = signal<string | null>(null);
-  readonly flash = signal<Record<string, 'up' | 'down'>>({});
+  /**
+   * Each symbol's last tick: its direction and the price before it. TradingView colours the digits that tick changed
+   * and keeps them coloured until the next tick (no timed flash).
+   */
+  readonly tick = signal<Record<string, { dir: 'up' | 'down'; prev: number }>>({});
   readonly listMenuOpen = signal(false);
   readonly moreMenuOpen = signal(false);
   readonly columnsMenuOpen = signal(false);
@@ -213,7 +218,6 @@ export class WatchlistPanelComponent {
   private readonly addInput = viewChild<ElementRef<HTMLInputElement>>('addInput');
   private readonly alertDialog = viewChild<ElementRef<HTMLDialogElement>>('alertDialog');
   private lastBids: Record<string, number> = {};
-  private flashTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private undoTimer: ReturnType<typeof setTimeout> | null = null;
   private quoteSeq = 0;
 
@@ -378,7 +382,6 @@ export class WatchlistPanelComponent {
     this.alerts.ensureLoaded();
     this.destroyRef.onDestroy(() => {
       this.store.flush();
-      for (const t of this.flashTimers.values()) clearTimeout(t);
       if (this.undoTimer) clearTimeout(this.undoTimer);
     });
 
@@ -470,32 +473,17 @@ export class WatchlistPanelComponent {
       });
     });
 
-    // Up/down flash on every tick, like TradingView's cell highlight.
+    // Each tick records its direction and the price before it; the Last cell colours the digits that changed.
     effect(() => {
       const bids = this.liveBids();
       untracked(() => {
-        const next: Record<string, 'up' | 'down'> = {};
+        const next: Record<string, { dir: 'up' | 'down'; prev: number }> = {};
         for (const [sym, bid] of Object.entries(bids)) {
           const prev = this.lastBids[sym];
-          if (prev !== undefined && bid !== prev) next[sym] = bid > prev ? 'up' : 'down';
+          if (prev !== undefined && bid !== prev) next[sym] = { dir: bid > prev ? 'up' : 'down', prev };
         }
         this.lastBids = { ...bids };
-        if (!Object.keys(next).length) return;
-        this.flash.update((f) => ({ ...f, ...next }));
-        for (const sym of Object.keys(next)) {
-          const t = this.flashTimers.get(sym);
-          if (t) clearTimeout(t);
-          this.flashTimers.set(
-            sym,
-            setTimeout(() => {
-              this.flashTimers.delete(sym);
-              this.flash.update((f) => {
-                const { [sym]: _, ...rest } = f;
-                return rest;
-              });
-            }, FLASH_MS),
-          );
-        }
+        if (Object.keys(next).length) this.tick.update((t) => ({ ...t, ...next }));
       });
     });
 
